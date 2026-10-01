@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -165,4 +166,37 @@ test('home and course pages carry both languages, the switch and the language sc
   } finally {
     rmSync(dirname(out), { recursive: true, force: true });
   }
+});
+
+test('licences (AGPL §13): every page links the licence and the source; the licence texts and page are built', () => {
+  const out = join(mkdtempSync(join(tmpdir(), 'simdeck-licence-')), 'site');
+  try {
+    const r = build({ root: ROOT, out, drafts: true, log: () => {} });
+    assert.ok(r.ok, r.errors.join());
+    assert.equal(readFileSync(join(out, 'licences', 'AGPL-3.0.txt'), 'utf8'), readFileSync(join(ROOT, 'LICENSE'), 'utf8'));
+    assert.match(readFileSync(join(out, 'licences', 'OFL-1.1.txt'), 'utf8'), /SIL OPEN FONT LICENSE Version 1\.1/);
+    const index = readFileSync(join(out, 'index.html'), 'utf8');
+    assert.match(index, /<footer><p class="h-licence">simdeck · <a href="licences\/AGPL-3\.0\.txt">AGPL-3\.0-or-later<\/a> · <a href="source\.tar\.gz">/);
+    assert.match(index, /href="licences\/index\.html"/);
+    const course = readFileSync(join(out, 'courses', 'linux-essentials', 'index.html'), 'utf8');
+    assert.match(course, /href="\.\.\/\.\.\/source\.tar\.gz"/);
+    const lic = readFileSync(join(out, 'licences', 'index.html'), 'utf8');
+    assert.doesNotMatch(lic, /\{\{\w+\}\}/);
+    assert.match(lic, /href="\.\.\/index\.html"/, 'back to the home page');
+    assert.match(lic, /Atkinson Hyperlegible/);
+    for (const e of r.entries) {
+      const html = readFileSync(join(out, 'sims', e.id, 'index.html'), 'utf8');
+      const m = /<script type="application\/json" id="simdeck-site">(.*?)<\/script>/.exec(html);
+      assert.ok(m, `${e.id}: the kit's help gets the links`);
+      assert.deepEqual(JSON.parse(m[1]), { licence: '../../licences/AGPL-3.0.txt', source: '../../source.tar.gz', licences: '../../licences/index.html' });
+    }
+  } finally {
+    rmSync(dirname(out), { recursive: true, force: true });
+  }
+});
+
+test('a public repo in site.json "source" becomes the sims\' source link as is', () => {
+  const d = simDir({});
+  const r = buildNative(page(), entry, { simDir: d, site: { source: 'https://git.example/simdeck' } });
+  assert.match(r.html, /"source":"https:\/\/git\.example\/simdeck"/);
 });

@@ -105,7 +105,7 @@ Fields and rules: `docs/site-structure.md` §2.1. Required: `id` (= folder name)
 (≤ 60 chars), `concept` (≤ 80), `summary` (≤ 160), `topic`, `tags`, `level`, and `steps` for steppers.
 `title`, `concept` and `summary` are `{ "hr": "…", "en": "…" }`, both non-empty and each within the limit.
 Optional: `aliases` (`{ "hr": [...], "en": [...] }`), `languages` (only the single-language exception, §4),
-`related`, `origin` (set it for adopted pages), `asset_review`. `lang` no longer exists. Unknown fields are errors.
+`related`, `origin` (set it for adopted pages), `asset_review`, `credits` (third-party material, §9). `lang` no longer exists. Unknown fields are errors.
 `kit/new-sim.sh <id> sims/<id>` copies the template and writes a `wip` `sim.json` stub that passes the check; the
 admin's + Novi simulator does the same. Fill in the real title, concept, summary, topic and tags. Use the topic
 and tags your task file names; if `tags.json` lacks one, the wave-0 `vocabulary` task adds it. Never edit
@@ -180,7 +180,8 @@ see the test fail.
 - Commit on your thread branch with English messages; the coordinator rebases, runs the gate and merges.
 - Licence: every new source file starts with `SPDX-License-Identifier: AGPL-3.0-or-later` in a comment.
   Vendored libraries keep their own header. Adopted CC BY 4.0 material (50ohm) keeps its attribution visible
-  on the page in both languages.
+  on the page in both languages. List every third-party part (vendored library, CC BY text or figure) in `sim.json`
+  `credits` (`docs/site-structure.md` §2.1); the site's licences page is generated from it.
 
 ## 10. Report
 

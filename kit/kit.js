@@ -1,4 +1,5 @@
-/* simdeck kit 0.2.0: step controller, controls, transport, header tools and shortcuts for native simulators.
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   simdeck kit 0.2.0: step controller, controls, transport, header tools and shortcuts for native simulators.
    A classic script (not a module) so a page opens straight from file:// with no build. Load it in <head>: it sets the
    theme before first paint, then the page calls Simdeck.mount(def) at the end of <body>.
    The pure part (rng, stateAt, defaultsOf, stepsOf) touches no DOM, so node tests can require() this file.
@@ -169,7 +170,8 @@
       help: 'Prečaci', panel: 'Sakrij / prikaži ploču', blank: 'Zatamni zaslon', on: 'uključeno', off: 'isključeno',
       close: 'Zatvori', atEnd: 'Kraj.', keys: 'Tipke', page: 'Ova stranica', preset: 'Primjer',
       legend: 'Legenda', panelLabel: 'Postavke i primjeri', steps: 'Koraci', idea: 'Ideja',
-      langName: 'Hrvatski', langSwitch: 'Prebaci na engleski'
+      langName: 'Hrvatski', langSwitch: 'Prebaci na engleski',
+      licence: 'AGPL-3.0-or-later', source: 'Izvorni kod', licences: 'Licence'
     },
     en: {
       back: 'Index', backTitle: 'Back to the simulator index', play: 'Play', pause: 'Pause', next: 'Next',
@@ -178,7 +180,8 @@
       help: 'Shortcuts', panel: 'Hide / show panel', blank: 'Blank screen', on: 'on', off: 'off',
       close: 'Close', atEnd: 'End.', keys: 'Keys', page: 'This page', preset: 'Example',
       legend: 'Legend', panelLabel: 'Settings and examples', steps: 'Steps', idea: 'Idea',
-      langName: 'English', langSwitch: 'Switch to Croatian'
+      langName: 'English', langSwitch: 'Switch to Croatian',
+      licence: 'AGPL-3.0-or-later', source: 'Source code', licences: 'Licences'
     }
   };
   var docEl = document.documentElement;
@@ -814,6 +817,16 @@
       if (bilingual) rows.push([['L'], S.langSwitch]);
       return rows;
     }
+    // AGPL §13: every served page offers its source. The build writes the links (#simdeck-site, from site.json
+    // "source"); unbuilt, they point where the published site keeps them (sims/<id>/ is two folders down).
+    function licenceLine() {
+      var site = readJson('simdeck-site') || {};
+      var up = '../../';
+      return h('p', { class: 'sd-help-foot' }, 'simdeck · ',
+        h('a', { href: site.licence || up + 'licences/AGPL-3.0.txt' }, S.licence), ' · ',
+        h('a', { href: site.source || up + 'source.tar.gz' }, S.source), ' · ',
+        h('a', { href: site.licences || up + 'licences/index.html' }, S.licences));
+    }
     function openHelp() {
       if (!help) {
         help = h('dialog', { class: 'sd-help', 'aria-labelledby': 'sd-help-title' });
@@ -823,8 +836,8 @@
       keyRows().forEach(function (r) {
         tbody.append(h('tr', null, h('td', null, r[0].map(function (k, i) { return k === '…' ? ' … ' : [i && r[0][i - 1] !== '…' ? ' ' : '', h('kbd', null, k)]; })), h('td', null, r[1])));
       });
-      help.replaceChildren(h('h2', { id: 'sd-help-title' }, S.keys), h('table', null, tbody),
-        h('button', { type: 'button', class: 'sd-btn', onclick: function () { help.close(); } }, S.close));
+      help.replaceChildren(h('h2', { id: 'sd-help-title' }, S.keys), h('table', null, tbody), licenceLine(),
+        h('button', { type: 'button', class: 'sd-btn', autofocus: true, onclick: function () { help.close(); } }, S.close));
       if (typeof help.showModal === 'function') help.showModal(); else help.setAttribute('open', '');
     }
 

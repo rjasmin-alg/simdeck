@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Publishes the main branch of simdeck to https://materijali.online/simdeck/ (docs/deploy.md).
 # Login: user deck, password *** (realm "simdeck"; see scripts/server-setup.sh, which must have run once).
 #
@@ -10,6 +11,8 @@
 #     build uses Node's standard library only, so no npm ci: Playwright is a dev tool for checks, not for the build);
 #   - otherwise the export itself, minus what is not for students (docs/, scripts/, tests, kit tooling, package files).
 #   If the result has no index.html yet (the site frame is not built), a minimal list of the native sims is generated.
+#   - source.tar.gz: the same main commit as a git archive (AGPL-3.0-or-later §13: every page links it while the
+#     site sits behind basic auth; site.json "source" points elsewhere once there is a public repo).
 #   - the nginx rules for short course addresses (materijali.online/<short>, set per course in the admin) go to
 #     /etc/nginx/snippets/simdeck-short.conf, included by the vhost (scripts/server-setup.sh). Uploaded only when they
 #     change, then nginx -t and reload; the previous file is restored if the test fails.
@@ -86,6 +89,8 @@ print(f'{len(items)} sim(s) listed')
 PY
 fi
 echo "$COMMIT" > "$WORK/stage/VERSION"
+echo "── source archive (source.tar.gz, main @ ${COMMIT:0:7})"
+git archive --format=tar.gz --prefix="simdeck-${COMMIT:0:7}/" "$COMMIT" > "$WORK/stage/source.tar.gz"
 
 echo "── upload ${DRY:+(dry run) }→ ${SERVER}:${TARGET}"
 # Owner and modes set explicitly: -a alone copies the local uid and the 700 mode of mktemp, and nginx answers 404.
@@ -125,7 +130,9 @@ echo "── check ${URL}"
 anon="$(curl -s -o /dev/null -w '%{http_code}' "${URL}index.html")"
 auth="$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" "${URL}index.html")"
 ver="$(curl -s -u "$AUTH" "${URL}VERSION")"
+src="$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" "${URL}source.tar.gz")"
 [[ "$anon" == "401" ]] || { echo "expected 401 without login, got $anon" >&2; exit 1; }
 [[ "$auth" == "200" ]] || { echo "expected 200 with login, got $auth" >&2; exit 1; }
 [[ "$ver" == "$COMMIT" ]] || { echo "server VERSION is '$ver', expected $COMMIT" >&2; exit 1; }
-echo "ok: 401 without login, 200 with ${AUTH%%:*}, serving main @ ${COMMIT:0:7}"
+[[ "$src" == "200" ]] || { echo "expected 200 for source.tar.gz, got $src" >&2; exit 1; }
+echo "ok: 401 without login, 200 with ${AUTH%%:*}, serving main @ ${COMMIT:0:7} and its source.tar.gz"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Every manifest rule gets a sample that must fail, so a check that silently passes is caught.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -170,4 +171,17 @@ test('warns, not fails: wip sim on a course', () => {
   const r = validate(repo({ natives: [nativeJson({ status: 'wip' })], courses: [course()] }));
   assert.deepEqual(r.errors, []);
   assert.match(r.warnings.join('\n'), /not ready/);
+});
+
+test('credits: { what (both languages), by, licence, url?, changes? }; anything else is an error', () => {
+  const ok = { what: two('Slika', 'Figure'), by: 'DARC e.V.', licence: 'CC BY 4.0', url: 'https://50ohm.de/', changes: two('Prevedeno.', 'Translated.') };
+  assert.equal(errorsOf(repo({ natives: [nativeJson({ credits: [ok] })] })), '');
+  const bad = (credits, re) => assert.match(errorsOf(repo({ natives: [nativeJson({ credits })] })), re);
+  bad([], /"credits" must be a non-empty array/);
+  bad([{ ...ok, what: 'Slika' }], /credits\[0\]: "what" must be/);
+  bad([{ ...ok, by: '' }], /credits\[0\]: "by" must be a non-empty string/);
+  bad([{ ...ok, licence: undefined }], /"licence" must be a non-empty string/);
+  bad([{ ...ok, url: 'ftp://x' }], /"url" must be an http\(s\) address/);
+  bad([{ ...ok, changes: two('', 'x') }], /"changes\.hr" must be a non-empty string/);
+  bad([{ ...ok, licence_url: 'x' }], /unknown field "licence_url"/);
 });

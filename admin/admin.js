@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // simdeck admin: edit simulators, courses, topics and tags; preview; publish. Every save goes to the
 // local server, which validates before writing, so a refused save shows the reason and changes nothing.
 import { search, escapeHtml as h, STR as SITE_STR, shortLinkRules, shortUrl, loc, LANGS } from './core.js';

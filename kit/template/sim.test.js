@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Tests for the proto-simulator's model. Run: node --test kit/
 // Copying the template? Keep the generic block at the bottom; replace the rule tests with your model's rules.
 'use strict';

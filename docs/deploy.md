@@ -10,7 +10,7 @@ Same VPS (`root@materijali.online`, vhost `materijali-online`) and pattern as os
 |---|---|
 | `npm run server:setup -- --dry-run` / `npm run server:setup` | one-time, idempotent: nginx `location /simdeck/` (after `/ossim/`, vhost backed up first, `nginx -t` before reload, backup restored on failure), the login file, the web folder, and an `include` of the short-address rules after `/simdeck/`; then checks 401/200 |
 | `npm run deploy:dry` | builds from main and shows what would change on the server |
-| `npm run deploy` | publishes main and its short course addresses, then checks: 401 without login, 200 with it, and that `/simdeck/VERSION` is main's commit |
+| `npm run deploy` | publishes main, its source archive and its short course addresses, then checks: 401 without login, 200 with it, that `/simdeck/VERSION` is main's commit and that `/simdeck/source.tar.gz` is served |
 
 Rules the script enforces:
 - **Only main is published.** It exports the committed `main` with `git archive`, so uncommitted files and other
@@ -20,6 +20,10 @@ Rules the script enforces:
   There is no `npm ci`: the build uses Node's standard library only, and Playwright is needed for checks, not
   for publishing. (Without a build script it would publish the static tree, and generate a stop-gap list if there
   were no `index.html`; both are fallbacks from before the frame.)
+- **Source archive (AGPL-3.0 §13).** Every page links "Izvorni kod / Source code" (`docs/site-structure.md`
+  §3.3). While the site sits behind basic auth, the deploy writes `/simdeck/source.tar.gz` with `git archive` from
+  the same `main` commit it publishes, so the source offered is always the source served. Once there is a public
+  repo, set `site.json` `source` to its URL; the archive is still written.
 - **Short course addresses** (`materijali.online/linux`, set per course in the admin): the script generates one nginx
   rule per course (`scripts/short-links.mjs`) and keeps `/etc/nginx/snippets/simdeck-short.conf` in step. It
   uploads only when the rules changed, runs `nginx -t` before reloading, and restores the previous rules (and

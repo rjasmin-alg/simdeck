@@ -140,7 +140,7 @@ Keys are handled by the kit; a page may add its own letters through `def.keys` o
 | `F` | full screen | |
 | `C` | hide / show the panel | |
 | `B` `.` | blank the screen (what a clicker's "black screen" button sends) | any other key is ignored while blank; `B`, `.` or `Esc` brings it back |
-| `?` `H` | shortcuts overlay | lists the page's presets and own keys too |
+| `?` `H` | shortcuts overlay | lists the page's presets and own keys too; its foot names the licence (AGPL-3.0-or-later) and links the source code and the licences page (`docs/site-structure.md` §3.3) |
 | `L` | switch language (Croatian ↔ English) | same as the header's language button; the page reloads at the same step (§9) |
 
 Reserved for the kit: the keys above. Free for pages: other letters (the template uses `N` for a random start).

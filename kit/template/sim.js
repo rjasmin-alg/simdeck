@@ -1,4 +1,5 @@
-/* Model for the proto-simulator: counting in binary with a fixed number of bits.
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   Model for the proto-simulator: counting in binary with a fixed number of bits.
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON (numbers and arrays).
    The page loads this as a classic script (window.SimLogic); node tests require() it.
    Copying the template? Replace the model below and keep the shape: defaults, steps, initial, step. */

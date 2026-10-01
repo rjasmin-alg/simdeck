@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The only script on the published site: filter the list as you type; Enter opens the first match.
 // Each item carries its search words in data-s (lower case, no diacritics), written by the build.
 const q = document.getElementById('q');

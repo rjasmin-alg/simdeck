@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The editorial side: a small local web app for editing simulators, tags and courses, previewing,
 // and publishing the static site. It writes the same files you could edit by hand (sim.json,
 // courses/*.json, tags.json); git tracks the changes. It is never published.

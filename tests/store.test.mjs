@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The admin's write side: valid changes reach disk in the hand-edit format; invalid ones change nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

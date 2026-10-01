@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Prints the nginx rules for courses with a short address (materijali.online/<short>), one per course.
 // scripts/deploy.sh uploads the output as /etc/nginx/snippets/simdeck-short.conf; the admin shows the same text.
 // Usage: node scripts/short-links.mjs [--root <dir>]

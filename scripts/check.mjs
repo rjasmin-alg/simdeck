@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Validates the manifest sources without building: node scripts/check.mjs [--root <dir>]
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

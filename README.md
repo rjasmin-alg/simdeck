@@ -28,4 +28,5 @@ npm run gate -- <id>                      # every contract rule on one sim (need
 - `docs/tasks/`: one self-contained task per simulator, in waves (`docs/tasks/README.md`), with the rules in `docs/tasks/COMMON.md`
 - `docs/playbook.md`: method distilled from `ossimulator` (contract, rules as tests, waves, DoD, lessons), to adapt for simdeck
 
-License: AGPL-3.0-or-later (owner decision, 2026-10-01; the LICENSE file comes with docs/tasks/w0/licence.md).
+License: AGPL-3.0-or-later (owner decision, 2026-10-01), see `LICENSE`. Every published page links its source and
+the licences page (`docs/site-structure.md` §3.3); the deploy publishes `source.tar.gz` from the same `main` commit.

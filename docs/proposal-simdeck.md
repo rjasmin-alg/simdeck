@@ -34,7 +34,7 @@ Every simulator lives in the repo: new ones are built there, and existing ones f
 
 The riskiest assumption is that a template plus a contract makes new simulators both fast and uniform. The first batch tests it directly: five new simulators, each built in one session from the template.
 
-**Alternatives considered.** *Packet Tracer / GNS3* are heavyweight and cover networking only, so they can't show dedup or LVM. *Slides* are as static as the blackboard. *Extending `single-page-labs` as it is* gives no cross-collection index, no course pages and no standard; it's the status quo that caused the scattering. *One-off web tools per topic* (e.g. messwithdns.net) are inconsistent, online-only, and exist for only a handful of topics.
+**Alternatives considered.** *Packet Tracer / GNS3* are heavyweight and cover networking only, so they can't show dedup or LVM. *Slides* are as static as the blackboard. *Extending `single-page-labs` as it is* is the status quo that caused the scattering. *One-off web tools per topic* are inconsistent, online-only and rare.
 
 # Scope
 
@@ -46,7 +46,7 @@ The riskiest assumption is that a template plus a contract makes new simulators 
 - multi-master replication with a conflict
 - the WPA2/WPA3 handshake and what an attacker sees
 
-**Out of scope:** simulators after the first batch (ongoing content under the contract, not project milestones); rewriting ossimulator or the larger apps (they are copied in from their existing builds); LMS integration, student accounts or progress tracking.
+**Out of scope:** simulators after the first batch (ongoing content, not milestones); rewriting ossimulator or the larger apps (copied in from their builds); LMS integration, student accounts or progress tracking.
 
 # Timeline & milestones
 
@@ -63,15 +63,15 @@ No hard deadline; this is a test run ahead of a larger topic list.
 
 # Resources & cost
 
-My time, in agent-assisted sessions; for scale, ossimulator's 16 pages were built and deployed in two days. Money: €0, on the existing `materijali.online` VPS with the same deploy pattern as `/ossim` and `/ceph`.
+My time, in agent-assisted sessions; for scale, ossimulator's 16 pages were built and deployed in two days. Money: €0, on the existing `materijali.online` VPS, deployed like `/ossim`.
 
 # Risks & mitigations
 
 - **Copies drift from their originals.** **Mitigation:** the copy in simdeck is canonical; each original collection is frozen, with a note pointing to its new home.
-- **AGPL and third-party assets.** Some copied pages carry generated images or material derived from textbooks. **Mitigation:** audit assets before the first public release; replace or credit anything unclear.
-- **Student access.** `materijali.online` is behind basic auth, so course pages need credentials for students. **Mitigation:** one realm for `/simdeck` (docs/deploy.md); because every simulator is copied in, a course page never sends students to a second login.
+- **AGPL and third-party assets.** Some copied pages carry generated images or textbook-derived material. **Mitigation:** audit them before a public release; credit or replace them.
+- **Student access.** `materijali.online` is behind basic auth, so course pages need credentials for students. **Mitigation:** one realm for `/simdeck`; every simulator is copied in, so there is no second login.
 - **The contract is too rigid for some topics.** **Mitigation:** allow documented, per-page exceptions, and treat a rising exception count as a signal to revise the contract.
 
 # Next step
 
-Create the `simdeck` repository, write the contract and the kit (M1), then import `single-page-labs` (M2).
+Write the contract and the kit (M1), then import `single-page-labs` (M2).

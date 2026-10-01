@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Tests for the kit's pure core and its stylesheet. Run: node --test 'kit/**/*.test.js'
 'use strict';
 const test = require('node:test');

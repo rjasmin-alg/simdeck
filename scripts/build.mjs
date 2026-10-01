@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Builds the published site from the manifest sources. No dependencies: Node's standard library only.
 // The output is plain static files with relative links, so the folder works on any web server, at
 // any path, or straight from a USB stick (file://).
 //
 //   index.html                  home: course links, then every finished simulator by topic, one search box
 //   courses/<id>/index.html     one page per course file (the "playlist" students get)
+//   licences/index.html         simdeck's licence and source, and every third-party part (kit, sims' "credits")
+//   licences/*.txt              the licence texts (LICENSE, the kit fonts' OFL)
 //   (both in Croatian and English: every text is written in both, site/lang.js shows one)
 //   sims/<id>/index.html        each native sim as one self-contained file
 //
@@ -12,15 +15,20 @@
 // (scripts/admin.mjs), never on the published site.
 //
 // Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts]
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, copyFileSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, metaFor } from '../lib/manifest.mjs';
-import { renderCourse, renderIndexList, isPublic, escapeHtml, bi, biStr, loc, STR, LANGS } from '../site/core.mjs';
+import {
+  renderCourse, renderIndexList, renderLicences, licenceLine, sourceHref, isPublic, escapeHtml, bi, biStr, loc, STR, LANGS,
+  LICENCE_TEXT, LICENCES_PAGE,
+} from '../site/core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SITE = join(HERE, '..', 'site');
 export const META_ID = 'simdeck-meta';
+/** The kit's help dialog reads the licence and source links from this block (AGPL §13). */
+export const SITE_ID = 'simdeck-site';
 
 const read = (p) => readFileSync(p, 'utf8');
 
@@ -50,10 +58,11 @@ const META_RE = new RegExp(`<script\\b[^>]*\\bid=["']${META_ID}["'][^>]*>[\\s\\S
  *  - local <link rel="stylesheet"> and <script src> are inlined: files in the sim's folder, and the kit
  *    (the template links ../../kit/kit.css and kit.js, so a page also runs unbuilt from file://);
  *  - relative url(...) in inlined CSS (the kit's fonts) become data: URIs;
- *  - the page's #simdeck-meta placeholder is replaced by one generated from sim.json (added if absent).
+ *  - the page's #simdeck-meta placeholder is replaced by one generated from sim.json (added if absent);
+ *  - a #simdeck-site block gives the kit the licence, source and licences links, as seen from sims/<id>/.
  * Returns { html, errors }.
  */
-export function buildNative(html, entry, { simDir, kitDir }) {
+export function buildNative(html, entry, { simDir, kitDir, site = {} }) {
   const errors = [];
   const where = `sims/${entry.id}/index.html`;
   const inside = (p, dir) => {
@@ -94,7 +103,9 @@ export function buildNative(html, entry, { simDir, kitDir }) {
   });
   out = out.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (m, a, css) => `<style${a}>${inlineUrls(css, simDir)}</style>`);
 
-  const block = `<script type="application/json" id="${META_ID}">${scriptJson(metaFor(entry))}</script>`;
+  const links = { licence: `../../${LICENCE_TEXT}`, source: sourceHref(site, 2), licences: `../../${LICENCES_PAGE}` };
+  const block = `<script type="application/json" id="${META_ID}">${scriptJson(metaFor(entry))}</script>\n`
+    + `<script type="application/json" id="${SITE_ID}">${scriptJson(links)}</script>`;
   if (META_RE.test(out)) out = out.replace(META_RE, () => block);
   else if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, () => `${block}\n</head>`);
   else errors.push(`${where}: no </head>`);
@@ -130,10 +141,12 @@ export function build({ root, out, log = console.log, drafts = false }) {
     const simDir = join(root, 'sims', e.id);
     const src = repo.natives.find((n) => n.dir === e.id)?.html;
     if (src == null) continue;
-    const r = buildNative(src, e, { simDir, kitDir });
+    const r = buildNative(src, e, { simDir, kitDir, site });
     errors.push(...r.errors);
     pages.push({ e, html: r.html });
   }
+  // The published site carries simdeck's licence text (AGPL-3.0-or-later) and the kit fonts' OFL.
+  for (const f of [join(root, 'LICENSE'), join(kitDir, 'fonts', 'OFL.txt')]) if (!existsSync(f)) errors.push(`${f} is missing`);
   if (errors.length) return { ok: false, errors, warnings };
   const outErr = prepareOut(out);
   if (outErr) return { ok: false, errors: [outErr], warnings };
@@ -171,6 +184,7 @@ export function build({ root, out, log = console.log, drafts = false }) {
     CSS: read(join(SITE, 'index.css')),
     LIST: renderIndexList(ctx, drafts),
     SCRIPT: read(join(SITE, 'index.js')),
+    FOOTER: licenceLine(site, 0),
   }));
 
   // Course pages are static HTML (only a print button): students' browsers just follow links.
@@ -189,6 +203,20 @@ export function build({ root, out, log = console.log, drafts = false }) {
       BODY: html,
     }));
   }
+
+  // AGPL §13 and the third-party notices: the licence texts and one page that lists every licence.
+  mkdirSync(join(out, 'licences'), { recursive: true });
+  copyFileSync(join(root, 'LICENSE'), join(out, LICENCE_TEXT));
+  copyFileSync(join(kitDir, 'fonts', 'OFL.txt'), join(out, 'licences', 'OFL-1.1.txt'));
+  write(LICENCES_PAGE, fill(read(join(SITE, 'licences.html')), {
+    LANG: site.lang,
+    TITLE: escapeHtml(`${STR[site.lang]?.licences ?? STR.hr.licences} · ${site.title}`),
+    LANGJS: langJs,
+    SWITCH: langSwitch,
+    ALL: biStr('allSims'),
+    CSS: courseCss,
+    BODY: renderLicences(ctx, 1),
+  }));
 
   log(`built ${pages.length} sims, ${courses.length} course pages → ${relative(process.cwd(), out) || out}`);
   return { ok: true, errors, warnings, entries, courses };

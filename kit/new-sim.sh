@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Start a new native sim by copying the proto-simulator template.
 #   kit/new-sim.sh <id> <dest-dir>      e.g. kit/new-sim.sh dedup sims/dedup
 # Copies index.html, strings.js, sim.js and sim.test.js, rewrites the mechanical parts (the sim id, the paths to the

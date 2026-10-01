@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Shared by the build (Node) and the admin app (served to the browser as a module). Pure functions
 // only: no DOM, no Node APIs, no fetch. The published site gets HTML rendered from here, not this code.
 
@@ -17,6 +18,14 @@ export const STR = {
     print: 'Ispiši',
     langName: 'Hrvatski',
     onlyIn: 'samo na jeziku',
+    source: 'Izvorni kod',
+    licences: 'Licence',
+    licencesIntro: 'simdeck je slobodan softver: smijete ga koristiti, proučavati, dijeliti i mijenjati pod uvjetima licence GNU Affero General Public License, verzija 3 ili novija. Tko ga posluži na mreži, mora ponuditi i njegov izvorni kod.',
+    licenceText: 'tekst licence',
+    licencesKit: 'U svim simulatorima',
+    licencesSims: 'U pojedinim simulatorima',
+    licencesNone: 'Simulatori zasad ne sadrže materijale trećih strana.',
+    changes: 'Izmjene',
   },
   en: {
     classes: { stepper: 'step by step', explorer: 'explorer', reference: 'reference', tool: 'tool' },
@@ -30,8 +39,29 @@ export const STR = {
     print: 'Print',
     langName: 'English',
     onlyIn: 'only in',
+    source: 'Source code',
+    licences: 'Licences',
+    licencesIntro: 'simdeck is free software: you may use, study, share and change it under the GNU Affero General Public License, version 3 or later. Whoever serves it over a network must offer its source code too.',
+    licenceText: 'licence text',
+    licencesKit: 'In every simulator',
+    licencesSims: 'In single simulators',
+    licencesNone: 'The simulators contain no third-party material yet.',
+    changes: 'Changes',
   },
 };
+
+/** simdeck's own licence (LICENSE), and the published copies of the licence texts the site ships. */
+export const LICENCE = 'AGPL-3.0-or-later';
+export const LICENCE_TEXT = 'licences/AGPL-3.0.txt';
+export const LICENCES_PAGE = 'licences/index.html';
+
+/** Third-party parts of the kit, inlined into every sim page. Sims list their own in sim.json "credits". */
+export const KIT_CREDITS = [{
+  what: { hr: 'Font Atkinson Hyperlegible', en: 'Atkinson Hyperlegible font' },
+  by: 'Braille Institute of America, Inc.',
+  licence: 'OFL-1.1',
+  text: 'licences/OFL-1.1.txt',
+}];
 
 export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -110,6 +140,51 @@ export function shortLinkRules(courses, site) {
     .filter((c) => c.short)
     .map((c) => `location ~ ^/${c.short}/?$ { return 302 ${base}courses/${c.id}/; }  # ${loc(c.title, c.lang ?? site.lang ?? 'hr').replace(/\n/g, ' ')}`)
     .join('\n');
+}
+
+const isUrl = (s) => /^[a-z][a-z0-9+.-]*:/i.test(s);
+
+/**
+ * Where the source of the published site is (AGPL §13), seen from a page `depth` folders below the site root:
+ * site.json "source", an address relative to the site root (default: the archive the deploy writes next to the
+ * site) or an absolute URL (a public repo).
+ */
+export function sourceHref(site, depth = 0) {
+  const src = site?.source ?? 'source.tar.gz';
+  return isUrl(src) ? src : `${'../'.repeat(depth)}${src}`;
+}
+
+/** The licence line every published page carries: licence name, source code, the licences page. `lead` is plain text. */
+export function licenceLine(site, depth = 0, lead = site?.title ?? 'simdeck') {
+  const up = '../'.repeat(depth);
+  return `<p class="h-licence">${escapeHtml(lead)} · <a href="${up}${LICENCE_TEXT}">${LICENCE}</a> · <a href="${escapeHtml(sourceHref(site, depth))}">${biStr('source')}</a> · <a data-lang-link href="${up}${LICENCES_PAGE}">${biStr('licences')}</a></p>`;
+}
+
+function creditItem(c, depth) {
+  const text = c.text ? ` (<a href="${'../'.repeat(depth)}${escapeHtml(c.text)}">${biStr('licenceText')}</a>)` : '';
+  const what = c.url ? `<a href="${escapeHtml(c.url)}">${bi(c.what)}</a>` : bi(c.what);
+  const changes = c.changes ? `<span class="h-summary">${biStr('changes')}: ${bi(c.changes)}</span>` : '';
+  return `<li>${what} · ${escapeHtml(c.by)} · ${escapeHtml(c.licence)}${text}${changes}</li>`;
+}
+
+/**
+ * The body of the licences page (licences/index.html): simdeck's own licence and source, the kit's third-party
+ * parts, then every listed sim's sim.json "credits".
+ */
+export function renderLicences(ctx, depth = 1) {
+  const up = '../'.repeat(depth);
+  const sims = search(ctx.entries, ctx.vocab, '', {}, ctx.site?.lang ?? 'hr').filter((e) => e.credits?.length);
+  const simList = sims.length
+    ? sims.map((e) => `<section><h3><a data-lang-link href="${escapeHtml(entryHref(e, depth))}">${bi(e.title)}</a></h3><ul>${e.credits.map((c) => creditItem(c, depth)).join('\n')}</ul></section>`).join('\n')
+    : `<p class="h-empty">${biStr('licencesNone')}</p>`;
+  return `<header><h1>${biStr('licences')}</h1></header>
+<main>
+<section><h2>${escapeHtml(ctx.site?.title ?? 'simdeck')}</h2>
+<p class="h-intro">${biStr('licencesIntro')}</p>
+<ul><li><a href="${up}${LICENCE_TEXT}">${LICENCE}</a> · <a href="${escapeHtml(sourceHref(ctx.site, depth))}">${biStr('source')}</a></li></ul></section>
+<section><h2>${biStr('licencesKit')}</h2><ul>${KIT_CREDITS.map((c) => creditItem(c, depth)).join('\n')}</ul></section>
+<section><h2>${biStr('licencesSims')}</h2>${simList}</section>
+</main>`;
 }
 
 const both = (v) => LANGS.map((l) => loc(v, l)).filter((x, i, a) => a.indexOf(x) === i).join(' ');
@@ -229,7 +304,7 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
   const short = shortUrl(course, ctx.site);
   const html = `<header><h1>${bi(course.title)}</h1>${course.term ? `<p class="h-term">${bi(course.term)}</p>` : ''}${short ? `<p class="h-short">${escapeHtml(short.replace(/^https?:\/\//, ''))}</p>` : ''}${course.intro ? `<p class="h-intro">${bi(course.intro)}</p>` : ''}</header>
 <main>${n ? sections.join('\n') : `<p class="h-empty">${biStr('courseEmpty')}</p>`}</main>
-<footer><p>${escapeHtml(ctx.site.title)} · ${escapeHtml(short ?? ctx.site.siteUrl ?? '')}</p></footer>`;
+<footer>${licenceLine(ctx.site, depth, [ctx.site.title, short ?? ctx.site.siteUrl].filter(Boolean).join(' · '))}</footer>`;
   return { html, skipped };
 }
 

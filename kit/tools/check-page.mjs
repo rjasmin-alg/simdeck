@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Browser check for one native sim page, opened from file:// with every network request blocked.
 // Usage: node kit/tools/check-page.mjs <page.html> [--shots <dir>] [--json <file>]
 // Needs the repo's dev dependency (npm install; npx playwright install chromium if the browser is missing).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Contrast report for the kit palette (WCAG 2.x relative luminance). Run: node kit/tools/contrast.mjs
 // Reads the token blocks from kit.css, so the report always describes the shipped values.
 // Exits 1 if any required pair is under its threshold.

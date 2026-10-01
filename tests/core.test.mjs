@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic, bi, loc } from '../site/core.mjs';
+import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic, bi, loc,
+  sourceHref, licenceLine, renderLicences, LICENCE } from '../site/core.mjs';
 
 const two = (hr, en = hr) => ({ hr, en });
 const vocab = {
@@ -151,4 +153,35 @@ test('empty states: no finished sims on the home page, none on a course page', (
   assert.doesNotMatch(r.html, /<h2>/, 'no empty section headings');
   assert.match(renderCourse(course, { site, entries: wip }, 2, true).html, /sims\/dns\/index.html/, 'drafts preview shows them');
   assert.match(renderIndexList({ site, vocab, entries: wip }, true), /sims\/dns\/index.html/, 'on the home page too');
+});
+
+test('source link (AGPL §13): the archive next to the site by default, relative to the page; a public repo as is', () => {
+  assert.equal(sourceHref({}, 0), 'source.tar.gz');
+  assert.equal(sourceHref({ source: 'source.tar.gz' }, 2), '../../source.tar.gz');
+  assert.equal(sourceHref({ source: 'https://git.example/simdeck' }, 2), 'https://git.example/simdeck');
+  const line = licenceLine(site, 2);
+  assert.match(line, /href="\.\.\/\.\.\/licences\/AGPL-3\.0\.txt">AGPL-3\.0-or-later</);
+  assert.match(line, /href="\.\.\/\.\.\/source\.tar\.gz"><span data-l="hr" lang="hr">Izvorni kod<\/span><span data-l="en" lang="en">Source code<\/span>/);
+  assert.match(line, /data-lang-link href="\.\.\/\.\.\/licences\/index\.html"/);
+  assert.equal(LICENCE, 'AGPL-3.0-or-later');
+});
+
+test('every course page carries the licence line', () => {
+  const { html } = renderCourse({ title: 'L', sections: [{ sims: ['dns'] }] }, { site, vocab, entries }, 2);
+  assert.match(html, /<footer>[\s\S]*class="h-licence"[\s\S]*\.\.\/\.\.\/source\.tar\.gz/);
+});
+
+test('licences page: simdeck, the kit fonts, then each sim\'s credits in both languages', () => {
+  const credited = e('cc', {
+    title: two('Antene', 'Antennas'),
+    credits: [{ what: two('Slika dipola', 'Dipole figure'), by: 'DARC e.V.', licence: 'CC BY 4.0', url: 'https://50ohm.de/', changes: two('Prevedeno.', 'Translated.') }],
+  });
+  const html = renderLicences({ site, vocab, entries: [...entries, credited] }, 1);
+  assert.match(html, /href="\.\.\/licences\/AGPL-3\.0\.txt">AGPL-3\.0-or-later/);
+  assert.match(html, /href="\.\.\/source\.tar\.gz"/);
+  assert.match(html, /Atkinson Hyperlegible[\s\S]*OFL-1\.1 \(<a href="\.\.\/licences\/OFL-1\.1\.txt">/);
+  assert.match(html, /href="\.\.\/sims\/cc\/index\.html"><span data-l="hr" lang="hr">Antene/);
+  assert.match(html, /<a href="https:\/\/50ohm\.de\/"><span data-l="hr" lang="hr">Slika dipola<\/span><span data-l="en" lang="en">Dipole figure<\/span><\/a> · DARC e\.V\. · CC BY 4\.0/);
+  assert.match(html, /Translated\./);
+  assert.match(renderLicences({ site, vocab, entries }, 1), /class="h-empty"/, 'no credits: says so');
 });
