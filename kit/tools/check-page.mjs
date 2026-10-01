@@ -1,8 +1,8 @@
 // Browser check for one native sim page, opened from file:// with every network request blocked.
 // Usage: node kit/tools/check-page.mjs <page.html> [--shots <dir>]
-// Needs Playwright with Chromium. If it is not installed here, point PLAYWRIGHT_FROM at a project that has it,
-// e.g. PLAYWRIGHT_FROM=~/projects/ossimulator/package.json. This is a seed for the contract check, not the check itself.
-import { createRequire } from 'node:module';
+// Needs the repo's dev dependency (npm install; npx playwright install chromium if the browser is missing).
+// This is a seed for the contract check, not the check itself.
+import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,8 +13,6 @@ const shotsIdx = args.indexOf('--shots');
 const shots = shotsIdx >= 0 ? args[shotsIdx + 1] : null;
 if (!page) { console.error('usage: check-page.mjs <page.html> [--shots <dir>]'); process.exit(2); }
 
-const req = createRequire(process.env.PLAYWRIGHT_FROM ? path.resolve(process.env.PLAYWRIGHT_FROM) : import.meta.url);
-const { chromium } = req('playwright');
 const url = pathToFileURL(path.resolve(page)).href;
 const name = path.basename(path.dirname(path.resolve(page)));
 if (shots) mkdirSync(shots, { recursive: true });
@@ -57,28 +55,27 @@ const fits = (p) => p.evaluate(() => ({
   h: document.documentElement.scrollHeight, ih: innerHeight, w: document.documentElement.scrollWidth, iw: innerWidth,
 }));
 
-// ── projector sizes: fit one screen, text floors ──
-for (const [w, hgt] of [[1920, 1080], [1280, 720], [1280, 800]]) {
+// ── projector size (the contract target): fit one screen, text floors ──
+for (const [w, hgt] of [[1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
     const { ctx, p, errors } = await open({ width: w, height: hgt }, `?theme=${theme}`);
     const f = await fits(p);
     check(`${w}×${hgt} ${theme}: no scroll`, f.h <= f.ih && f.w <= f.iw, `${f.w}×${f.h}`);
     const panel = await p.evaluate(() => { const e = document.querySelector('.sd-panel'); return e ? { sh: e.scrollHeight, ch: e.clientHeight } : { sh: 0, ch: 0 }; });
-    if (w === 1920) check(`${w}×${hgt} ${theme}: panel fits without its own scroll`, panel.sh <= panel.ch + 1, `${panel.sh} > ${panel.ch}`);
-    else if (panel.sh > panel.ch + 1) console.log(`note ${w}×${hgt} ${theme}: panel scrolls (${panel.sh} > ${panel.ch})`);
+    check(`${w}×${hgt} ${theme}: panel fits without its own scroll`, panel.sh <= panel.ch + 1, `${panel.sh} > ${panel.ch}`);
     const root = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
-    if (w === 1920) check(`${w}×${hgt}: body text >= 20 px`, root >= 20, `${root}px`);
+    check(`${w}×${hgt}: body text >= 20 px`, root >= 20, `${root}px`);
     const t = await p.evaluate(textProbe, 16);
     check(`${w}×${hgt} ${theme}: no text under 16 px`, t.below.length === 0, `min ${t.min}px ${t.below.slice(0, 3).join('; ')}`);
     check(`${w}×${hgt} ${theme}: no console errors or warnings`, errors.length === 0, errors.join(' | '));
     if (theme === 'light') check(`${w}×${hgt}: kit marker`, (await p.evaluate(() => document.documentElement.dataset.kit)) === '0.1.0');
-    if (shots && hgt !== 800) {
+    if (shots) {
       await p.keyboard.press('2'); // second preset, then two steps: a mid-demo state with changes highlighted
       await p.keyboard.press('ArrowRight');
       await p.keyboard.press('ArrowRight');
       await p.waitForTimeout(450);
       await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-${theme}.png`) });
-      if (w === 1920 && theme === 'light') {
+      if (theme === 'light') {
         await p.evaluate(() => { document.documentElement.style.filter = 'grayscale(1)'; });
         await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-grayscale.png`) });
         await p.evaluate(() => { document.documentElement.style.filter = ''; });
@@ -135,9 +132,6 @@ for (const [w, hgt] of [[1920, 1080], [1280, 720], [1280, 800]]) {
   check('after clicking a preset button, Space plays (button did not keep focus)', await p.evaluate(() => window.simdeck.playing));
   await p.keyboard.press('Space');
 
-  await p.keyboard.press('t');
-  check('T toggles the theme', (await p.evaluate(() => document.documentElement.dataset.theme)) === 'dark');
-  await p.keyboard.press('t');
   await p.keyboard.press('b');
   check('B blanks the screen', await p.evaluate(() => !document.querySelector('.sd-blank').hidden));
   await p.keyboard.press('ArrowRight');
@@ -149,6 +143,15 @@ for (const [w, hgt] of [[1920, 1080], [1280, 720], [1280, 800]]) {
   await p.goto(url + '?preset=overflow&step=3');
   await p.waitForFunction(() => window.simdeck);
   check('?preset=overflow&step=3 opens there, paused', (await n()) === 3 && !(await p.evaluate(() => window.simdeck.playing)));
+  await ctx.close();
+}
+
+// ── theme follows the OS ──
+for (const scheme of ['light', 'dark']) {
+  const { ctx, p } = await open({ width: 1920, height: 1080 }, '', { colorScheme: scheme });
+  check(`OS ${scheme} -> data-theme ${scheme}`, (await p.evaluate(() => document.documentElement.dataset.theme)) === scheme);
+  await p.keyboard.press('t');
+  check(`T does not override the OS (${scheme})`, (await p.evaluate(() => document.documentElement.dataset.theme)) === scheme);
   await ctx.close();
 }
 

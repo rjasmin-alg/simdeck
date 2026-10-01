@@ -18,10 +18,13 @@ kit/
 Run the checks:
 
 ```sh
-node --test 'kit/**/*.test.js'                       # kit + template model, incl. contrast and undefined tokens
-PLAYWRIGHT_FROM=~/projects/ossimulator/package.json \
-  node kit/tools/check-page.mjs kit/template/index.html --shots /tmp/shots
+npm install                                    # once: Playwright, the only dev dependency
+npm test                                       # kit + template model, incl. contrast and undefined tokens
+npm run check:template -- --shots /tmp/shots   # browser check of the template
+npm run check:page -- sims/<id>/index.html     # browser check of any page
 ```
+
+If the browser is missing, run `npx playwright install chromium` once. simdeck depends on no other project.
 
 No framework and no build step are needed to work on a sim: `kit.js` is a classic script (not an ES module), so a
 page opens straight from `file://` and runs. The build that inlines the kit into one self-contained file per sim
@@ -35,7 +38,7 @@ One screen, three rows, no page scroll at projector sizes:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│ [← Popis]  Title                               legend: ■ a  ▢ b  ▣ changed   [▯][◐][⛶][?] │  header
+│ [← Popis]  Title                               legend: ■ a  ▢ b  ▣ changed      [▯][⛶][?] │  header
 │            one-line subtitle                                                              │
 ├───────────────────────────────────────────────────────────────┬──────────────────────────┤
 │                                                               │ PRIMJERI (presets) 1…9   │
@@ -58,7 +61,7 @@ One screen, three rows, no page scroll at projector sizes:
   the explanation, collapsed by default. `C` hides the panel so the stage gets the full width.
 - **Transport** (`.sd-bar`): step controls, a scrubber that doubles as the progress bar, and speed. An *explorer*
   (no steps) gets only the reset button.
-- **Header**: back to the index, title and subtitle, legend, tools (panel, theme, full screen, help).
+- **Header**: back to the index, title and subtitle, legend, tools (panel, full screen, help).
 
 The fixed order and the `data-sd-*` hooks are what the contract check can test, as ossimulator tested its section
 ids (playbook §4.5).
@@ -111,14 +114,14 @@ Rules:
 | Size | Behaviour | Checked by `check-page.mjs` |
 |---|---|---|
 | 1920×1080 (contract) | one screen, no page scroll, panel fits without its own scroll, body ≥ 20 px | yes |
-| 1280×720, 1280×800 (older projectors) | one screen, no page scroll; outer transport buttons drop their words; the panel may scroll internally (presets stay on top) | yes (panel scroll is reported, not failed) |
+| below 1920×1080 on a projector | not a target. The layout still holds (outer transport buttons drop their words under 1500 px, the panel may scroll internally) but nothing is checked | no |
 | ≤ 900 px wide or portrait (phone, tablet) | stacked: stage, caption, panel; page scrolls; transport sticks to the bottom and shows icons only; speed hidden under 520 px | no horizontal scroll at 375×812, text ≥ 14 px |
 
 ### Light and dark
 
-Theme order: `?theme=light|dark`, then the stored choice, then the OS. The stored choice is shared by every sim on
-the origin, so pressing `T` once sets it for the whole lecture. `kit.js` loads in `<head>` and sets `data-theme`
-before first paint, so there is no flash.
+The theme **always follows the OS** (`prefers-color-scheme`), and changes live when the OS setting changes. There
+is no theme button, no key and no stored choice. `?theme=light|dark` overrides it only for checks and
+screenshots. `kit.js` loads in `<head>` and sets `data-theme` before first paint, so there is no flash.
 
 ## 3. Keyboard and live use
 
@@ -128,11 +131,10 @@ Keys are handled by the kit; a page may add its own letters through `def.keys` o
 |---|---|---|
 | `→` `PgDn` | next step | what presentation clickers send. `PgDn` always steps, even on a focused slider |
 | `←` `PgUp` | previous step | |
-| `Space` | play / pause | at the end, play restarts from step 0 |
+| `Space` | play / pause | deliberately not "next": Space stays play/pause, the clicker's next is `→`/`PgDn` |
 | `Home` / `End` | first / last step | |
-| `R` | reset: step 0 with the active preset's params (or the defaults) | the explorer's main key |
+| `R` | reset: step 0 with the active preset's params (or the defaults) | restores settings too; `Home` keeps them |
 | `1` … `9` | load preset 1…9 | |
-| `T` | light / dark | |
 | `F` | full screen | |
 | `C` | hide / show the panel | |
 | `B` `.` | blank the screen (what a clicker's "black screen" button sends) | any other key is ignored while blank; `B`, `.` or `Esc` brings it back |
@@ -275,7 +277,7 @@ after every render; returns an unsubscribe function).
 | `Simdeck.stateAt(def, params, n)` | the replay the controller uses; for tests |
 | `Simdeck.defaultsOf(def)`, `Simdeck.stepsOf(def, params)` | for tests |
 | `Simdeck.cssVar('--c1')` | current token value, for canvas drawing |
-| `Simdeck.onTheme(fn)` | called on theme change (the controller re-renders by itself) |
+| `Simdeck.onTheme(fn)` | called when the OS theme changes (the controller re-renders by itself) |
 | `Simdeck.reducedMotion()` | true under the OS setting or `?motion=reduce` |
 | `Simdeck.icon(name)` | the kit's SVG icons |
 
@@ -302,8 +304,8 @@ the same replay as the page.
 | back to index | `data-sd-back` |
 | tests: the model's rules, then the generic block every sim keeps | `sim.test.js` |
 
-Screenshots of the template at 1920×1080 (light, dark, grayscale, help, panel hidden), 1280×720 and 375×812 are
-produced by `check-page.mjs --shots`.
+Screenshots of the template at 1920×1080 (light, dark, grayscale, help, panel hidden) and 375×812 are produced
+by `check-page.mjs --shots`.
 
 ### Starting a new sim
 
@@ -315,8 +317,7 @@ produced by `check-page.mjs --shots`.
    once to see each test fail). Keep the generic block at the bottom. Run `node --test <dest>/sim.test.js`.
 4. **`index.html`**: title, subtitle, legend, params, presets, `render`, `caption`, explanation, and the
    `#simdeck-meta` fields. Keep page CSS scoped to `[data-sim="<id>"]` and on kit tokens only.
-5. Run `node kit/tools/check-page.mjs <dest>/index.html --shots <dir>` and look at the screenshots, including
-   grayscale.
+5. Run `npm run check:page -- <dest>/index.html --shots <dir>` and look at the screenshots, including grayscale.
 6. An explorer: drop `step` and `steps` (or set `steps: 0`); the transport becomes a reset button, and the
    params drive `render` live. A reference page: no params, no presets; it keeps the header, legend and stage.
 

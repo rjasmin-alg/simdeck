@@ -58,14 +58,14 @@
     hr: {
       back: 'Popis', backTitle: 'Natrag na popis simulatora', play: 'Pokreni', pause: 'Pauza', next: 'Naprijed',
       prev: 'Natrag', first: 'Na početak', last: 'Na kraj', reset: 'Vrati postavke', step: 'Korak', speed: 'Brzina',
-      params: 'Postavke', presets: 'Primjeri', theme: 'Svijetla / tamna tema', fullscreen: 'Cijeli zaslon',
+      params: 'Postavke', presets: 'Primjeri', fullscreen: 'Cijeli zaslon',
       help: 'Prečaci', panel: 'Sakrij / prikaži ploču', blank: 'Zatamni zaslon', on: 'uključeno', off: 'isključeno',
       close: 'Zatvori', atEnd: 'Kraj.', keys: 'Tipke', page: 'Ova stranica', preset: 'Primjer'
     },
     en: {
       back: 'Index', backTitle: 'Back to the simulator index', play: 'Play', pause: 'Pause', next: 'Next',
       prev: 'Back', first: 'To start', last: 'To end', reset: 'Reset settings', step: 'Step', speed: 'Speed',
-      params: 'Settings', presets: 'Examples', theme: 'Light / dark theme', fullscreen: 'Full screen',
+      params: 'Settings', presets: 'Examples', fullscreen: 'Full screen',
       help: 'Shortcuts', panel: 'Hide / show panel', blank: 'Blank screen', on: 'on', off: 'off',
       close: 'Close', atEnd: 'End.', keys: 'Keys', page: 'This page', preset: 'Example'
     }
@@ -73,18 +73,14 @@
   var docEl = document.documentElement;
   function T() { return /^hr\b/i.test(docEl.lang || '') ? STRINGS.hr : STRINGS.en; }
 
-  // ── storage, url, theme (runs at load, before first paint) ──
-  function load(k) { try { return window.localStorage.getItem('simdeck:' + k); } catch (e) { return null; } }
-  function save(k, v) { try { if (v == null) window.localStorage.removeItem('simdeck:' + k); else window.localStorage.setItem('simdeck:' + k, v); } catch (e) { /* private mode */ } }
+  // ── url, theme (runs at load, before first paint) ──
   var query = new URLSearchParams(window.location.search);
   var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-  /** Theme order: ?theme=, then the stored choice (shared by every sim on the origin), then the OS. */
+  /** The theme always follows the OS. ?theme=light|dark overrides it for checks and screenshots only. */
   function resolveTheme() {
     var q = query.get('theme');
     if (q === 'light' || q === 'dark') return q;
-    var s = load('theme');
-    if (s === 'light' || s === 'dark') return s;
     return darkMq && darkMq.matches ? 'dark' : 'light';
   }
   var themeListeners = [];
@@ -92,7 +88,6 @@
     docEl.dataset.theme = t;
     themeListeners.forEach(function (fn) { fn(t); });
   }
-  function setTheme(t) { save('theme', t); applyTheme(t); }
   function onTheme(fn) { themeListeners.push(fn); return function () { themeListeners.splice(themeListeners.indexOf(fn), 1); }; }
   applyTheme(resolveTheme());
   if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', function () { applyTheme(resolveTheme()); });
@@ -139,7 +134,6 @@
     first: 'M20 5v14l-7-7zM13 5v14l-7-7zM4 5h2v14H4z',
     last: 'M4 5v14l7-7zM11 5v14l7-7zM18 5h2v14h-2z',
     back: 'M11 5l-7 7 7 7v-4.5h9v-5h-9z',
-    theme: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2.2v13.6a6.8 6.8 0 0 1 0-13.6z',
     fullscreen: 'M4 4h6v2.2H6.2V10H4zM14 4h6v6h-2.2V6.2H14zM4 14h2.2v3.8H10V20H4zM17.8 14H20v6h-6v-2.2h3.8z',
     panel: 'M3 4h18v16H3zm2 2v12h10V6zm12 0v12h2V6z',
     reset: 'M12 4a8 8 0 1 1-7.75 6h2.1A6 6 0 1 0 12 6v3L7.5 5 12 1z'
@@ -390,7 +384,6 @@
       b.append(name === 'help' ? h('span', { 'aria-hidden': 'true' }, '?') : icon(name));
       return b;
     }
-    function toggleTheme() { setTheme(docEl.dataset.theme === 'dark' ? 'light' : 'dark'); }
     function toggleFull() {
       try {
         if (document.fullscreenElement) document.exitFullscreen();
@@ -406,7 +399,6 @@
     if (el.tools) {
       el.tools.append(
         toolBtn('panel', S.panel, 'C', togglePanel),
-        toolBtn('theme', S.theme, 'T', toggleTheme),
         toolBtn('fullscreen', S.fullscreen, 'F', toggleFull),
         toolBtn('help', S.help, '?', function () { openHelp(); })
       );
@@ -582,7 +574,7 @@
       if (presets.length) rows.push([['1', '…', String(Math.min(9, presets.length))], S.presets]);
       buttons.forEach(function (b) { if (b.key) rows.push([[keyLabel(b.key)], b.label]); });
       (def.keys || []).forEach(function (k) { rows.push([[keyLabel(k.key)], k.label]); });
-      rows.push([['T'], S.theme], [['F'], S.fullscreen], [['C'], S.panel], [['B', '.'], S.blank], [['?'], S.help]);
+      rows.push([['F'], S.fullscreen], [['C'], S.panel], [['B', '.'], S.blank], [['?'], S.help]);
       return rows;
     }
     function openHelp() {
@@ -631,7 +623,6 @@
       var lower = k.length === 1 ? k.toLowerCase() : k;
       if (lower === 'r') return hit(reset);
       if (/^[1-9]$/.test(k) && presets[Number(k) - 1]) return hit(function () { loadPreset(presets[Number(k) - 1].id); });
-      if (lower === 't') return hit(toggleTheme);
       if (lower === 'f') return hit(toggleFull);
       if (lower === 'c') return hit(togglePanel);
       if (lower === 'b' || k === '.') return hit(toggleBlank);
@@ -669,7 +660,7 @@
   }
 
   var Simdeck = Object.assign({}, core, {
-    mount: mount, h: h, icon: icon, cssVar: cssVar, reducedMotion: reducedMotion, onTheme: onTheme, setTheme: setTheme,
+    mount: mount, h: h, icon: icon, cssVar: cssVar, reducedMotion: reducedMotion, onTheme: onTheme,
     strings: STRINGS
   });
   root.Simdeck = Simdeck;
