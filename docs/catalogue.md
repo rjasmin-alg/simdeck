@@ -1,0 +1,807 @@
+# simdeck: simulator catalogue
+
+What simdeck should contain: what already exists and needs adopting, what to build next and in which
+order, and the full pool of ideas behind both. Research and writing only; no simulator code.
+
+Written 2026-10-01 from a survey of `~/projects` (sources cited per entry) and from the course material
+found there. Sections:
+
+1. [How to read and rank this catalogue](#1-how-to-read-and-rank-this-catalogue)
+2. [Adoption list: what exists and needs adopting](#2-adoption-list-what-exists-and-needs-adopting)
+3. [Build list: what we work on, in order](#3-build-list-what-we-work-on-in-order)
+4. [The full catalogue of new simulators](#4-the-full-catalogue-of-new-simulators)
+5. [Duplicates, overlaps and shared simulators](#5-duplicates-overlaps-and-shared-simulators)
+6. [External material and licences](#6-external-material-and-licences)
+7. [What this implies for the site frame and the UI kit](#7-what-this-implies-for-the-site-frame-and-the-ui-kit)
+
+---
+
+## 1. How to read and rank this catalogue
+
+Every entry has a stable `id` (kebab-case, usable as the manifest id later). Each table row is one entry.
+
+**Interest (`Int`) is yours to fill in.** It is blank everywhere. Use:
+
+| Int | Meaning |
+|---|---|
+| `3` | I want this soon |
+| `2` | Interested |
+| `1` | Maybe, later |
+| `0` | Drop it |
+| blank | Not rated yet |
+
+The ranking rule is **Int first, then Pri, then Size**: rated 3 before 2 before 1 before unrated, and
+within a level, B1 before P1 before P2 before P3, and S before M before L. Entries rated `0` drop out of
+the build list. You can edit the column here by hand, or use the ranking page
+(`.herdr-project/simdeck-t-0002/library/catalogue-ranker.html`), which lets you click a level per entry,
+group by interest, area or course, and export the ratings to merge back into this file.
+
+**Pri** is my proposal, to be overridden by Int:
+
+| Pri | Meaning |
+|---|---|
+| `B1` | First batch, fixed by the proposal |
+| `P1` | Batch 2: must-have, build right after the first batch (about 20, the "next two weeks" list) |
+| `P2` | Must-have this semester |
+| `P3` | Nice to have |
+
+**Size:** `S` fits one working session from the template (the proposal's target); `M` needs one to two
+sessions or a non-trivial model; `L` needs several sessions or is a capstone.
+
+**Class** is the playbook's page class (§10.4): `step` (stepper, clicker-driven), `expl` (explorer,
+live parameters), `ref` (reference poster, no controls), `tool` (lecturer only, never on a course page).
+
+**Course codes** (the courses found in the material; see the report for what is assumed):
+
+| Code | Course | Evidence |
+|---|---|---|
+| `URM` | Uvod u računalne mreže (intro to computer networks, 1st year) | `uvod-u-racunalne-mreze/`, `urm-sveucilisni-udzbenik/` |
+| `UL` | Uvod u Linux | `uvod-u-linux/` (syllabus outcomes in `inputs/outcomes.md`) |
+| `NLA` | Napredna Linux administracija | `napredna-linux-administracija/meta/toc.md` (topics T01–T60, no chapters yet) |
+| `WIN` | Windows / Active Directory administration | **assumed**: no Windows course material was found; see report |
+| `OS` | Operacijski sustavi | `ossimulator/` |
+| `DR` | Optimisation and disaster recovery | `dr-lecture-estate/` |
+| `SEC` | Security topics (URM ch18, NLA §8, radio security) | spread over several courses, not a course of its own |
+| `ARH` | Computer architecture and memory | `single-page-labs/` index group, lab exercise "LV13" |
+| `AUT` | Automata and computability | `single-page-labs/` index group |
+| `HAM` | Ham radio licence course (classes A and P) | `50ohm-contents-hr/` |
+| `KK` | Crisis communications KK1/KK2 | `KAKA/` |
+
+**Seed** names where an entry comes from: a book chapter (`UL ch19`), a planned URM card
+(`URM card ch08-arp`), an NLA topic (`NLA T20`), a DR scenario (`DR S6`) or an existing simulator
+(`ossim:processes`, `spl:lvm-topology-lab-v2`, `cephsim`). `→` points to the overlap note in §5.
+
+**Language.** Every simulator and the whole site support **English and Croatian** (owner decision,
+2026-10-01). Titles here are in English; the Croatian title and summary come with each manifest entry.
+Sizes in §4 include writing both languages. For adopted material, the language column in §2 says what
+exists today and what has to be translated.
+
+---
+
+## 2. Adoption list: what exists and needs adopting
+
+Verdicts:
+
+- **import**: copy into simdeck as a native page and adapt to the kit (the proposal's plan for
+  `single-page-labs`).
+- **port**: as import, but the page needs real rework first (it is a fragment, depends on another
+  project's components, or loads libraries from the network).
+- **link**: a linked entry; it stays where it is and appears through the manifest only.
+- **idea**: nothing to copy; the concept goes into the build list (§4).
+
+**Both languages on adoption.** Every native import and port must reach English and Croatian, so each
+adopted page carries a translation task on top of the kit adaptation. Today's state:
+
+| Source | Language today | Translation work |
+|---|---|---|
+| single-page-labs | of the 20 imported: 9 en, 9 hr, the Marp deck in hr (`lang="POSIX"`), 1 with an hr/en toggle (`radio-cybersecurity.html`) | 19 pages need the other language; the toggle page shows the pattern |
+| URM interactive pages | hr only | all 14 need English |
+| 50ohm applets | hr (translated from de) | all need English; the German original helps, as English 50ohm text doesn't exist |
+| ossimulator (linked) | hr only, English terms in italics | linked entries are exempt from the contract, but a Croatian-only page breaks "the entire site". Either ossimulator gains an English UI (its glossary `docs/POJMOVNIK.md` already pairs every term) or the index marks it hr-only → report |
+| cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate (linked) | en | same question: Croatian UI, or marked en-only → report |
+
+**Licences of own work.** None of your own repos has a LICENSE file: ossimulator (`"private": true`),
+single-page-labs, cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate, the books. Linking needs
+no licence. Copying into simdeck relicenses that code under the GPL, which only you can do; the report asks
+you to confirm it once for all of your own repos.
+
+### 2.1 single-page-labs → import (23 labs)
+
+`~/projects/single-page-labs/`. 24 HTML files: 23 labs plus `index.html`. The index lists 22 of them
+(`lora-mesh-usporedba-v3.html` is published but unlisted). Not a git repo; all files dated 2026-09-08
+except the LoRa page (09-11). Deployed at `materijali.online/singles/`. Only `radio-sigurnost-2026.html`
+handles arrow keys (Marp); no hand-written lab has keyboard stepping yet.
+
+| ID | Item | Where | What it shows | State | Verdict | Licence / assets | Pri | Int |
+|---|---|---|---|---|---|---|---|---|
+| `spl-amdahl` | Amdahl's law simulator (en) | `amdahl-simulator.html` | Amdahl bottleneck, Gustafson, real examples; 2 sliders | polished, 43 KB | import as `expl` | own; Google Fonts | P1 | |
+| `spl-webserver-amdahl` | Web server Amdahl (en) | `webserver-amdahl.html` | Amdahl applied to a web request (net/app/DB) | polished | import; later a preset of `spl-amdahl` → §5 | own; Google Fonts | P2 | |
+| `spl-multicore-mesi` | Homogeneous multicore, LV13 (hr) | `homogeni-multicore-simulator.html` | Amdahl + MESI coherence per core + false sharing | polished | import; split MESI out as a `step` page later | own; **Chart.js 4.4.1 from cdnjs (MIT)**: vendor it | P2 | |
+| `spl-sram-dram` | SRAM vs DRAM cell (en) | `sram-dram.html` | 6T SRAM vs 1T1C DRAM read/write/refresh/leak | polished | import as `step` | own; Google Fonts | P2 | |
+| `spl-rowhammer` | Rowhammer (en) | `rowhammer.html` | DRAM disturbance, double-sided hammer, mitigations | polished, animated | import as `expl` | own; Google Fonts | P2 | |
+| `spl-spectre-meltdown` | Spectre & Meltdown (en) | `spectre-meltdown.html` | speculative execution, branch predictor, Flush+Reload | polished, has STEP | import as `step` | own; Google Fonts | P2 | |
+| `spl-l2l3-protocols` | L2/L3 protocol deep dive (en) | `l2l3-protocols.html` | Ethernet, VLAN/QinQ, IPv4/6, VXLAN/GENEVE, GRE/MPLS/IPsec, MACsec, PMTUD | polished, 102 KB, mostly reading | import as `ref`; the fragmentation calculator seeds `net-fragmentation-pmtud` | own; Google Fonts; cites RFCs | P2 | |
+| `spl-automata` | DFA, NFA, PDA, Turing machine (hr) | `automati-dijagrami-demo.html` | automata running on an input word | polished, has Korak (step) | import as `step` | own; no deps | P2 | |
+| `spl-dfa-game` | DFA classroom game (hr) | `dfa-classroom-game.html` | presenter/player rounds building a DFA | polished; multi-device sync unverified | import as `tool` | own; no deps | P3 | |
+| `spl-lvm-lab` | LVM topology lab (en) | `lvm-topology-lab-v2.html` | PE map, PV/VG/LV stack, presets (striped, RAID, LUKS, thin), commands | polished; **v2 is canonical** | import as `expl`; drop v1 (`lvm-topology-lab.html`) | own; no deps | P1 | |
+| `spl-stratis-lab` | Stratis topology lab (en) | `stratis-topology-lab.html` | pools, filesystems, snapshots, iSCSI/MPIO/NVMe-TCP, cache tier | polished | import as `expl` | own; no deps | P2 | |
+| `spl-zfs-btrfs-lab` | ZFS & Btrfs topology lab (en) | `zfs-btrfs-topology-lab.html` | vdevs/RAIDZ2/special/SLOG/dRAID vs Btrfs profiles, failure and rebuild | polished, 65 KB | import as `expl` | own; no deps | P2 | |
+| `spl-radio-security-slides` | Radio and cybersecurity 2026, slides (hr) | `radio-sigurnost-2026.html` | 22-slide Marp deck: TETRA, EMCOMM, LoRa, GNSS jamming, AIS, 5G MCX, PQC | generated output, Marp source missing; `lang="POSIX"` bug | import as `ref`, or link; ask for the Marp source | own text; Marp runtime (MIT); **Twemoji from jsDelivr (CC BY 4.0, needs attribution)** | P3 | |
+| `spl-radio-security-page` | Radio and cybersecurity, web page (hr/en) | `radio-cybersecurity.html` | same material as the slides as a long page | polished; JS linked as a stylesheet (line 14) | import as `ref`; pick this **or** the slides → §5 | own; **4 `assets/*.png` (really JPEG), likely AI-generated, provenance unknown**; Lucide `@latest` from unpkg (ISC, unpinned) | P3 | |
+| `spl-rf-bandplan` | RF spectrum EU/HR bandplan (hr) | `rf-spektar-eu-hr-bandplan.html` | zoomable spectrum with EU/HR allocations | polished; letter hotkeys | import as `expl` | own; HAKOM-derived data (public regulation) | P2 | |
+| `spl-comms-poster` | Communication technologies poster (hr) | `komunikacijske-tehnologije-poster.html` | log-scale poster of technologies by frequency | polished | import as `ref` | own; Google Fonts | P3 | |
+| `spl-radio-networks` | Radio network demos (hr) | `radio-network-demos.html` | conventional repeater vs trunking/TETRA vs mesh under load | polished | import as `expl` | own; no deps | P2 | |
+| `spl-lora-mesh` | LoRa / mesh comparison (hr) | `lora-mesh-usporedba-v3.html` | propagation in LoRaWAN vs Meshtastic vs MeshCore vs MANET | polished; not in the index | import as `expl` | own; no deps | P2 | |
+| `spl-ham-modes` | Ham radio modes reference (hr) | `ham-radio-modes-reference-v2.html` | 27 analog/digital modes, ITU emission classes, filters | polished; **v2 is canonical** | import as `ref`; drop `ham-radio-modes.html` and `ham-radio-modes-reference.html` | own; no deps | P3 | |
+| `spl-student-picker` | Random student picker (hr) | `random-student-picker.html` | pick names without repeats | polished | import as `tool` | own; no deps | P2 | |
+
+Not adopted: `index.html` (replaced by the simdeck index), `lvm-topology-lab.html` and the two older ham
+pages (superseded variants). Google Fonts (OFL) are fetched at runtime by 11 pages; the kit's local fonts
+replace them on import.
+
+### 2.2 URM book interactive pages → port (14 pages)
+
+`~/projects/uvod-u-racunalne-mreze/output/interaktivno/ugradbeno/` (identical copy in
+`urm-sveucilisni-udzbenik/`). Croatian "Razina A" interactive term pages embedded in the networking book's
+web edition (`materijali.online/urm`). Each is a 7–15 KB HTML **fragment**, not a standalone page: it
+depends on the book site's `static/komponente.js` (`IA.Klizac` slider, `IA.Koraci` steps, 428 lines) and
+CSS, and follows the book's "§7a" layout checked by `scripts/check-web.py`. Every page takes its numbers
+verbatim from a worked example in the book, which is exactly the "numbers stated up front, already checked"
+rule from the playbook. **These were missing from the proposal** and are the strongest networking material
+that exists.
+
+Verdict for all: **port**. Wrap each fragment as a standalone page, map `IA.Klizac`/`IA.Koraci` onto the
+kit's controls, and keep the book's example numbers. One decision is open: which copy is canonical, the
+book's or simdeck's (→ report).
+
+| ID | Item | Where (`ugradbeno/…`) | What it shows | Seed | Pri | Int |
+|---|---|---|---|---|---|---|
+| `urm-subnet-mask` | Subnet mask | `podmrezna-maska.html` | mask bits, network/broadcast, host count; the normative §7a example | URM ch08/09 | P1 | |
+| `urm-vlsm` | VLSM | `vlsm.html` | carving subnets of different sizes | URM ch09 | P1 | |
+| `urm-ipv6-shorten` | Shortening IPv6 addresses | `skracivanje-zapisa-ipv6-adrese.html` | zero compression rules, `::` once | URM ch10 | P2 | |
+| `urm-mac-table` | MAC address table | `tablica-mac-adresa.html` | switch learning, flooding, forwarding | URM ch07 | P1 | |
+| `urm-vlan` | VLAN | `vlan.html` | VLAN membership and tagging | URM ch07 | P1 | |
+| `urm-routing-table` | Routing table, longest prefix | `tablica-usmjeravanja.html` | longest-prefix match on router R2 (Example 2) | URM ch11 | P1 | |
+| `urm-nat` | NAT | `nat.html` | address translation table | URM ch11 | P1 | |
+| `urm-pat` | PAT | `pat.html` | port translation, many hosts behind one address | URM ch11 | P1 | |
+| `urm-tcp-handshake` | TCP three-way handshake | `trostruko-rukovanje.html` | SYN/SYN-ACK/ACK, why ACK = seq + 1 (X=4000, Y=9500) | URM ch13 | P1 | |
+| `urm-flow-control` | Flow control | `kontrola-toka.html` | receiver window limiting the sender | URM ch13 | P2 | |
+| `urm-window` | Sliding window | `prozor.html` | window size vs throughput | URM ch13 | P2 | |
+| `urm-hidden-node` | Hidden node | `skriveni-cvor.html` | two stations out of range of each other collide at the AP | URM ch17 | P2 | |
+| `urm-firewall` | Firewall, stateful filtering and DMZ | `vatrozid.html` | stateless vs stateful filter for a client to port 443, DMZ (Example 5) | URM ch18 | P1 | |
+| `urm-layered-diagnosis` | Layer-by-layer troubleshooting | `dijagnostika-po-slojevima.html` | bottom-up, top-down, divide-and-conquer | URM ch15 | P2 | |
+
+The same book also plans about 40 interactive cards in `meta/plan-interaktivne-stranice.md` §6, most
+unbuilt. They overlap the networking build list in §4.1 almost completely; the seeds there say which card
+each entry corresponds to.
+
+### 2.3 ossimulator → link (16 pages and the map)
+
+`~/projects/ossimulator/`, `materijali.online/ossim/` (own login realm `sim/os`). All 16 pages are built,
+`status: 'ready'`, about 900 tests, deployed 2026-09-30; teacher review (DoD C18) still open. Croatian UI,
+Stallings 9th ed. Every page loads any of its scenarios paused through `?scenario=<id>` (not only the
+`PUBLIC_SCENARIOS`), so one page can back several single-concept index entries. Licence: none (private).
+
+Verdict for all: **link**, as the proposal says. The *Index entries* column proposes the separate
+single-concept entries (each a `?scenario=` deep link); that is about 60 entries from 16 pages.
+
+| ID | Page | Concept | Index entries (scenario ids) | Pri | Int |
+|---|---|---|---|---|---|
+| `ossim-interrupts` | Interrupts (S ch. 1) | nested interrupts, IPL, kernel stack | sequential vs nested (`stallings-sequential`, `stallings`), stack overflow, re-entrant ISR, interrupt vs exception vs syscall (`sync`) | P1 | |
+| `ossim-processes` | Processes (S ch. 3) | 2/5/7-state models, PCB, switching | 5-state trace (`stallings-trace`), suspend (`suspend-memory`), zombie (`fork-zombie`), orphan (`orphan`), mini shell (`mini-shell`) | P1 | |
+| `ossim-scheduling` | CPU scheduling (S ch. 9) | FCFS…Feedback on one process set | FCFS vs RR (`compare-fcfs-rr4-srt`), quantum (`rr-quantum`), SPN/SRT/HRRN, MLFQ (`stallings-fb1`), starvation and aging (`starvation`, `aging`) | P1 | |
+| `ossim-memory-allocation` | Memory allocation (S ch. 7) | partitions, placement, buddy | internal fragmentation (`fixed-equal`), first/best/next fit (`placement-differs`), compaction, buddy (`buddy-stallings`) | P2 | |
+| `ossim-address-translation` | Address translation (S ch. 7–8) | paging, segmentation, TLB | paging split (`stallings-paging`), TLB locality (`tlb-locality`), two-level walk, inverted table, protection fault | P1 | |
+| `ossim-page-replacement` | Page replacement (S ch. 8) | OPT/LRU/FIFO/Clock | four algorithms (`stallings-four-algorithms`), Clock (`clock-walkthrough`), Belady (`belady-anomaly`), working set, thrashing | P1 | |
+| `ossim-threads` | Threads (S ch. 4) | ULT vs KLT | blocking call (`ult-blocking`, `klt-blocking`), jacketing, multicore | P2 | |
+| `ossim-sync` | Synchronization (S ch. 5) | races, Peterson, semaphores, monitors | lost update (`race-counter-lost-update`), attempts 2–4, producer–consumer deadlock (`pc-bounded-deadlock`), readers–writers | P1 | |
+| `ossim-deadlock` | Deadlock (S ch. 6) | RAG, banker, detection, philosophers | RAG cycle (`rag-classic`), banker safe/unsafe, detection (`detect-fig610`), dining philosophers (`dining-naive`) | P1 | |
+| `ossim-io-techniques` | I/O techniques (S ch. 1, 11) | PIO vs interrupt vs DMA, buffering | three techniques (`three-techniques`), double/circular buffering (`buffering-compare`) | P2 | |
+| `ossim-disk-scheduling` | Disk scheduling (S ch. 11) | FIFO…FSCAN, HDD vs SSD | Table 11.2 (`stallings-table-11-2`), SCAN vs C-SCAN, HDD vs SSD (`hdd-vs-ssd`) | P2 | |
+| `ossim-raid-cache` | RAID and disk cache (S ch. 11) | RAID 0–6, XOR, small write, cache policies | RAID 5 layout, XOR reconstruct (`raid5-reconstruct`), small write, RAID 6 double failure, LRU vs LFU vs FBR | P1 | |
+| `ossim-drivers` | Device drivers (S ch. 11) | I/O layers, top/bottom half | top/bottom half (`top-bottom-half`), blocking vs non-blocking | P3 | |
+| `ossim-filesystem` | File system (S ch. 12) | allocation methods, inodes | allocation compare (`allocation-compare`), defrag, inode levels (`inode-levels`) | P2 | |
+| `ossim-syscalls` | System calls (S ch. 2–3) | user/kernel mode, TRAP | 11 steps of `read()` (`read-11-steps`), blocking read, privileged trap | P1 | |
+| `ossim-journey` | Journey of one call (capstone) | `read()` and page fault through every layer | `read-miss`, `page-fault` | P2 | |
+| `ossim-map` | OS map (index) | layered OS overview | `?m=<id>` focuses a module | P2 | |
+
+Not adopted: `legacy/ugnijezdeni-prekidi.html` (superseded by `interrupts`).
+
+### 2.4 Larger apps → link
+
+| ID | Item | Where | What it shows | State | Deep links today | Verdict | Licence | Pri | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `link-topologydrafter` | topologydrafter | `~/projects/topologydrafter`, `materijali.online/topologija/` | network topology drawing with step reveal (AD multi-site, DMZ, campus) | built, in classroom use | **yes**: `?sample=<two-sites\|dmz\|campus>&present=1&step=<n>&theme=` | link, one entry per sample | none | P1 | |
+| `link-cephsim` | cephsim | `~/projects/cephsim`, `materijali.online/ceph/` | Ceph cluster: CRUSH, PGs, replication vs EC, quorum, recovery | 7 phases done, 148/148 checks pass; **never opened in a real browser** | no (samples `hyperconverged`, `threeRacks`, `brokenRule`, `unbalanced`); `?sample=` is about 20 lines | link; single concepts extracted as native pages (§4.7) | none | P1 | |
+| `link-faultline` | faultline | `~/projects/faultline`, `materijali.online/faultline/` | fault-domain tree + dependency gates, minimal cut sets | phase 0b of 7 (spike), 47/47 checks pass | no (samples `threeZone`, `onePdu`, `sizeTwo`, `usEast1`, `frontDoor`) | link, one entry per sample once `?sample=` exists | none | P2 | |
+| `link-dc-sim` | dc-sim | `~/projects/dc-sim` | datacenter as queues + teams: tail latency, retry collapse, Goodhart | 86 pytest tests, Streamlit GUI, not deployed | no | **idea** for native pages (§4.8); the Python repo stays a lab, not an index entry (no server) | none | P3 | |
+| `link-dr-estate` | dr-lecture-estate | `~/projects/dr-lecture-estate` | fictional estate, 15 DR scenarios, 25 projects | v1 complete, not deployed | `instructor/map.html#CV-nn` | link the **student** handout only; `map.html` is the answer key and must stay instructor-only | none | P3 | |
+
+### 2.5 50ohm applets → port or link (32 applets, CC BY 4.0)
+
+`~/projects/50ohm-contents-hr/contents/html/` (Croatian translation of DARC's 50ohm.de; German original in
+`50ohm-contents-dl/`). The content licence is **CC BY 4.0** (`LICENSE`, identical in both repos), which the
+FSF lists as compatible with GPLv3. Attribution is required: "50ohm.de-Autorenteam, AJW-Referat des
+DARC e.V.", plus a note of changes. Before copying, check that every applet's code is covered by the repo
+licence, as no applet carries its own notice. Ten applets load libraries from `50ohm.de` (jQuery 3.7.1 MIT,
+Chart.js 4.4.1 MIT, three.js MIT, Leaflet BSD-2, Leaflet.Maidenhead by HA8TKS, licence unchecked); port
+means vendoring these. Three are maps of live external services and can only be linked.
+
+Verdict: **port** the signal and circuit applets (most double as networking physical-layer material),
+**link** the maps. All `HAM`, some also `URM` ch06.
+
+| ID | Applet (`contents/html/…`) | Shows | Verdict | Pri | Int |
+|---|---|---|---|---|---|
+| `50ohm-nyquist` | `applet_nyquist.html` | sampling theorem, aliasing | port | P2 | |
+| `50ohm-quantisation` | `quantisierung_und_sampling.html` | quantisation and sampling | port | P2 | |
+| `50ohm-fourier` | `fourier.html` | Fourier synthesis of a waveform | port | P2 | |
+| `50ohm-rectangle` | `applet_rectangle.html` | spectrum of a rectangular pulse | port | P3 | |
+| `50ohm-sine` | `applet_sinus_amplitude_und_periode.html` | sine amplitude and period | port | P3 | |
+| `50ohm-lambda-f` | `applet_lambda_und_f.html` | wavelength vs frequency | port | P2 | |
+| `50ohm-am` | `applet_am_modulator.html` | AM modulation | port | P2 | |
+| `50ohm-pm` | `applet_pm.html` | phase modulation | port | P3 | |
+| `50ohm-qpsk` | `applet_qpsk.html` | QPSK constellation | port | P2 | |
+| `50ohm-iq` | `applet_iq.html` | I/Q signals | port | P3 | |
+| `50ohm-iq-phasor` | `applet_iq_zeiger.html` | I/Q phasor | port | P3 | |
+| `50ohm-ring-modulator` | `applet_ringmodulator.html` | ring modulator / mixer | port | P3 | |
+| `50ohm-speech-spectrum` | `spektrum_sprachsignale.html` | spectrum of speech signals | port | P3 | |
+| `50ohm-dsp` | `applet_dsp.html` | DSP basics | port | P3 | |
+| `50ohm-dsp-filter` | `applet_dsp_filter.html` | digital filter | port | P3 | |
+| `50ohm-chirp-1` | `applet_chirp_1.html` | chirp signal (311 KB) | port | P3 | |
+| `50ohm-chirp-2` | `applet_chirp_2.html` | chirp signal (581 KB) | port | P3 | |
+| `50ohm-lc-resonance` | `applet_schwingkreis.html` | LC resonant circuit | port | P3 | |
+| `50ohm-lc-antenna` | `applet_schwingkreis_antenne.html` | resonant circuit and antenna | port | P3 | |
+| `50ohm-traps` | `applet_traps.html` | trap antenna | port | P3 | |
+| `50ohm-attenuator` | `applet_daempfungsglied.html` | attenuator pad | port | P3 | |
+| `50ohm-rectifier-1` | `applet_gleichrichter_1.html` | half-wave rectifier | port | P3 | |
+| `50ohm-rectifier-2` | `applet_gleichrichter_2.html` | full-wave rectifier | port | P3 | |
+| `50ohm-ripple` | `applet_brumm.html` | mains hum / ripple | port | P3 | |
+| `50ohm-interference` | `applet_interferenz.html` | interference, multipath | port | P2 | |
+| `50ohm-fading` | `fading_applet.html` | fading | port | P3 | |
+| `50ohm-skip-distance` | `sprungdistanz_applet.html` | ionospheric skip distance | port | P3 | |
+| `50ohm-greyline` | `greyline.html` | grey line propagation | port | P3 | |
+| `50ohm-aurora` | `applet_aurora.html` | aurora propagation (790 KB, embedded data) | port | P3 | |
+| `50ohm-maidenhead` | `maidenhead.html` | Maidenhead locator map (Leaflet, online tiles) | link | P3 | |
+| `50ohm-aprs-map` | `aprs_map.html` | live APRS map (aprs.fi iframe) | link | P3 | |
+| `50ohm-hamnet-map` | `hamnet_map.html` | HAMNET map (hamnetdb.net iframe) | link | P3 | |
+
+`test.html` is a stub and is not adopted. The German repo has one more (`applet_iq_169`).
+
+### 2.6 Idea sources (nothing to copy)
+
+| Source | Where | Concept it seeds | Entry in §4 | Licence note |
+|---|---|---|---|---|
+| filesearcher | `~/projects/filesearcher/idea.md` | file dedup funnel: size → partial hash → full hash | `sto-dedup-file-funnel` | own, none |
+| agentvsagent | `~/projects/agentvsagent/engine.py`, `spectator.html` | authoritative tick server, grid raycast line of sight | `perf-game-tick-server` | own, none; needs a JS rewrite (server-bound today) |
+| HamMonitor | `~/projects/HamMonitor/DESIGN.md` | FFT/waterfall, NFM demod, CTCSS detection, sample rate vs span | `ham-fft-waterfall`, `ham-ctcss` | own, none |
+| cluster-design scoping note | `~/projects/cluster-design-sim-scoping.md` §5 | six design-failure exercises (rule without device class, one small disk caps a tier, size=2/min_size=2, phantom OSD, no write cache, consumer SSDs) | §4.7 | own |
+| dr-lecture-estate caveats | `instructor/caveats.md` | split-brain primaries (CV-01), DNS secondary expiry (CV-02), backup that lies (S8), cert expiry (S4), AD mass deletion (S15) | §4.3, §4.6, §4.7 | own; answer key, don't publish |
+| Lora-Wideband-Decoder | `~/projects/Lora-Wideband-Decoder` | LoRa chirp spread spectrum | `ham-lora-css` | **PolyForm Noncommercial 1.0.0**: no code reuse |
+| intercept | `~/projects/intercept` | ADS-B decoding, waterfall UI | `ham-adsb-frame` | Apache-2.0 fork; ideas only |
+| SigDigger | `~/projects/SigDigger` | FSK/PSK/ASK demodulation | `ham-fsk-psk-ask` | LICENSE file is LGPL-3 text; ideas only |
+| GNS3 sample | `~/GNS3/projects/…/primjer-mreza.gns3` | a reference topology for networking scenarios | presets in §4.1 | own |
+| KAKA course slides | `~/projects/KAKA/*.pptx` | directed nets, NCS, priority traffic | §4.10 | own |
+
+Not teachable (checked and skipped): desk, linkyard/lnux, SentinelMap, scanner, NetScout, hrs-remotion,
+hrs-web, wall-clock, esp32clock (MIT Wokwi example, at most an NTP idea), DeDECTive (MIT), DroneMonitor,
+geneologija, starenovine, deepdig, cityfps (AGPL mapgen lab), shellpath (no code yet), upute.online.
+
+---
+
+## 3. Build list: what we work on, in order
+
+New native simulators only (adoption is §2). Ordered by Pri, then by a dependency or teaching order
+within the batch. Re-rank by filling in Int; the ranking page does the sorting.
+
+### 3.1 Batch 1, fixed by the proposal (M3)
+
+| # | ID | Title | Size | Why first |
+|---|---|---|---|---|
+| 1 | `sto-dedup-chunking` | Deduplication: fixed vs content-defined chunks | M | the playbook's suggested wave-1 page: a clear stepper with a clean rule set, shapes the kit |
+| 2 | `sto-backup-diff-incr` | Differential vs incremental backup | S | reuses the block-grid view from #1 |
+| 3 | `sto-backing-chains` | Differential disks / snapshot backing chains | M | the same block grid, plus chains and merge |
+| 4 | `ha-multimaster-conflict` | Multi-master replication with a conflict | M | first sequence-over-time page |
+| 5 | `net-wpa-handshake` | WPA2/WPA3 handshake and what an attacker sees | M | first message-sequence page; the kit's sequence chart is born here |
+
+### 3.2 Batch 2 (P1): the proposed "next two weeks" list
+
+Weighted towards the areas you named (networking, Linux, Windows, internet, basic protocols). Each is S
+or M and reuses one of the kit's shared views (§7.2). 22 entries:
+
+| # | ID | Title | Size | Shared view |
+|---|---|---|---|---|
+| 1 | `net-encapsulation` | Encapsulation and decapsulation through the stack | S | layer stack |
+| 2 | `net-arp-local-remote` | Local or remote? The mask decision, then ARP | S | topology + table |
+| 3 | `net-hop-rewrite` | What changes at each hop | S | topology + header strip |
+| 4 | `net-stp` | Spanning tree: root election and the blocked port | M | topology |
+| 5 | `net-dhcp-dora` | DHCP DORA, lease and renewal | S | sequence chart |
+| 6 | `net-syn-outcomes` | Open, closed, filtered: three answers to a SYN | S | sequence chart |
+| 7 | `net-tcp-congestion` | TCP congestion control: slow start, AIMD, loss | M | chart |
+| 8 | `net-rule-first-match` | First match wins: ACL, firewall and pg_hba rule lists | S | rule table |
+| 9 | `inet-dns-resolution` | Recursive and iterative DNS resolution | M | sequence chart + topology |
+| 10 | `inet-dns-ttl-cache` | TTL caching and the DNS cutover | S | timeline |
+| 11 | `inet-tls-handshake` | TLS 1.2 vs 1.3 handshake | M | sequence chart |
+| 12 | `inet-cert-chain` | Certificate chain of trust and expiry | S | chain view |
+| 13 | `inet-email-auth` | SPF, DKIM and DMARC deciding one message | M | decision path |
+| 14 | `lnx-pipes-redirection` | Pipes and the three streams | S | stream diagram |
+| 15 | `lnx-permissions-rwx` | Permission bits, octal and umask | S | bit strip |
+| 16 | `lnx-selinux-decision` | DAC says yes, SELinux says no | S | decision path |
+| 17 | `lnx-netfilter-path` | A packet through the netfilter hooks (nftables) | M | decision path |
+| 18 | `lnx-overlayfs-layers` | Container image layers and copy-up | S | block/layer stack |
+| 19 | `win-kerberos` | Kerberos: AS, TGS and AP exchanges | M | sequence chart |
+| 20 | `win-gpo-precedence` | GPO precedence: LSDOU, enforced, blocked | M | layer stack |
+| 21 | `win-ntfs-share-effective` | Effective access: NTFS plus share permissions | S | rule table |
+| 22 | `ha-quorum-split-brain` | Quorum, partition and split-brain | S | topology |
+
+### 3.3 Backlog
+
+Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have). §4 holds 259 new ideas:
+5 B1, 22 P1, 127 P2 and 105 P3. By area: Linux 55, networking basics 52, Windows 31, internet 30,
+storage/DR 22, security 17, radio 17, HA 11, performance 10, architecture 8, reference/tools 6.
+
+Adoption (§2) holds 88 entries: 20 imports, 14 URM ports, 17 ossimulator pages (about 60 index entries
+through scenarios), 5 larger apps and 32 50ohm applets. The idea sources in §2.6 feed §4 and are not
+counted again.
+
+---
+
+## 4. The full catalogue of new simulators
+
+One concept each, grouped by area. Areas map to courses through the Courses column; the frame thread
+decides the final grouping axes (§7.1).
+
+### 4.1 Networking basics and LAN protocols
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `net-encapsulation` | Encapsulation and decapsulation | each layer adds its header going down and strips it coming up | step a message down the sender's stack and up the receiver's | step | S | P1 | URM | URM card ch04-enkapsulacija-dekapsulacija → §5.9 | |
+| `net-osi-tcpip-map` | OSI vs TCP/IP, and which device lives where | layer models and the layer each device works at | drag protocols and devices onto layers | expl | S | P3 | URM | URM ch04 | |
+| `net-line-coding` | Line coding: NRZ vs Manchester | how bits become a signal and why the clock must be recoverable | type bits, compare waveforms, cut the clock | expl | S | P3 | URM, HAM | URM card ch06 (Manchester) | |
+| `net-delay-components` | Four kinds of delay | propagation vs transmission vs queuing vs processing delay | sliders for distance, bandwidth, packet size, load | expl | S | P2 | URM | URM card ch06 | |
+| `net-nominal-vs-actual` | Nominal vs actual throughput | overhead, half duplex and retries eat the link rate | toggle overheads, watch goodput | expl | S | P3 | URM | URM card ch06 | |
+| `net-ethernet-frame` | Anatomy of an Ethernet frame | fields, minimum size, padding, FCS | edit the payload, see padding and FCS | expl | S | P3 | URM | URM ch07 | |
+| `net-csma-cd` | CSMA/CD and binary exponential backoff | collisions on a shared bus and how backoff resolves them | step stations transmitting at once | step | M | P2 | URM | URM card ch07 | |
+| `net-domains` | Collision and broadcast domains | hubs, switches and routers split different domains | place devices, see the domains coloured | expl | S | P2 | URM | URM card ch07 | |
+| `net-stp` | Spanning tree | root bridge election, port roles, which port blocks the loop | step BPDUs; break a link and watch reconvergence | step | M | P1 | URM, NLA | URM ch07 → §5.10 | |
+| `net-broadcast-storm` | A loop without spanning tree | one broadcast multiplies forever in a switched loop | send one broadcast, count frames per step | step | S | P2 | URM | pairs with `net-stp` → §5.10 | |
+| `net-mac-flooding` | MAC flooding and port security | a full CAM table turns a switch into a hub | flood fake MACs, then enable port security | step | S | P3 | URM, SEC | extends `urm-mac-table` | |
+| `net-vlan-trunk` | Access and trunk ports, native VLAN | 802.1Q tags added and removed at trunk edges | send frames across two switches | step | S | P2 | URM, NLA | extends `urm-vlan` | |
+| `net-intervlan-routing` | Inter-VLAN routing | router on a stick vs L3 switch SVIs | send a frame VLAN 10 → 20, follow the tag | step | S | P2 | URM | URM ch07/11 | |
+| `net-link-aggregation` | Link aggregation and flow hashing | why one flow never exceeds one member link | add flows, change the hash, fail a link | expl | S | P2 | URM, NLA | NLA T06 | |
+| `net-arp-local-remote` | Local or remote, then ARP | the host ANDs the mask, picks the target or the gateway, resolves its MAC | step a ping to a local and a remote host | step | S | P1 | URM | URM cards ch08-lokalno-udaljeno-odrediste, ch08-arp-zahtjev-odgovor → §5.9 | |
+| `net-arp-spoofing` | ARP spoofing, man in the middle | a forged reply rewrites the victim's ARP cache | step the attack, then turn on dynamic ARP inspection | step | S | P2 | URM, SEC | URM ch18 | |
+| `net-ipv4-header` | IPv4 header fields | what each field does and which change in transit | click fields, see their role | ref | S | P3 | URM | URM card ch08 (IPv4 header) | |
+| `net-hop-rewrite` | What changes at each hop | MACs change per hop, IPs stay, TTL drops, checksum recomputed | step a packet across two routers | step | S | P1 | URM | URM card ch11-skok-sto-se-mijenja → §5.9 | |
+| `net-traceroute` | Traceroute and TTL | TTL-exceeded replies map the path, and stars are not failures | step increasing TTLs; drop ICMP on one router | step | S | P2 | URM | URM card ch11-tracert-ttl | |
+| `net-icmp-messages` | What ping answers mean | echo reply, unreachable codes, timeout, and what silence means | ping through scenarios (down host, ACL, no route) | step | S | P2 | URM | URM ch11 | |
+| `net-fragmentation-pmtud` | Fragmentation and PMTUD | fragments vs DF + ICMP "frag needed", and the PMTUD black hole | sliders for MTU and overhead; block ICMP | expl | M | P2 | URM, NLA | `spl-l2l3-protocols` calculator | |
+| `net-route-summarisation` | Route summarisation | aggregating contiguous prefixes into one route | pick networks, see the summary and what it over-covers | expl | S | P2 | URM | URM ch09 | |
+| `net-static-default-route` | Static and default routes | how a default route catches everything, and routing loops | add routes on three routers, send packets | step | S | P2 | URM | URM ch11 | |
+| `net-distance-vector` | Distance vector and count to infinity | RIP-style updates, slow convergence, split horizon | step update rounds; cut a link | step | M | P2 | URM | URM ch11 | |
+| `net-link-state-spf` | Link state and Dijkstra | LSA flooding builds one map; SPF picks paths | step Dijkstra on a weighted graph; change a cost | step | M | P2 | URM, NLA | URM ch11 → §5.11 | |
+| `net-ipv6-slaac` | IPv6 SLAAC | RS/RA, prefix + interface ID, DAD | step a host joining a link | step | M | P2 | URM | URM ch10 | |
+| `net-ipv6-ndp` | NDP instead of ARP | neighbour solicitation to the solicited-node multicast | step an IPv6 neighbour lookup next to ARP | step | S | P2 | URM | URM ch10; pairs with `net-arp-local-remote` | |
+| `net-ipv6-address-types` | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | ref | S | P3 | URM | URM ch10 | |
+| `net-dhcp-dora` | DHCP DORA and the lease | discover/offer/request/ack, T1/T2 renewal, expiry | step a client, let time run, unplug the server | step | S | P1 | URM, UL | URM card ch14 (DORA), UL ch18 | |
+| `net-dhcp-relay` | DHCP relay and giaddr | a relay forwards broadcasts as unicast and tags the subnet | step a client on a remote subnet | step | S | P2 | URM | URM card ch14 (relay) | |
+| `net-dhcp-rogue` | Rogue DHCP and snooping | the first offer wins, so a rogue server takes over | add a rogue server, then trust ports | step | S | P3 | URM, SEC | URM ch18 | |
+| `net-rule-first-match` | First match wins | rule lists are evaluated top down, the first match decides, implicit deny | send packets/requests through presets: router ACL, stateless firewall, `pg_hba.conf` | step | S | P1 | URM, UL, NLA | UL ch22 (pg_hba first match) → §5.1 | |
+| `net-port-forwarding` | Port forwarding (DNAT) | inbound connections to a NAT'd server | add a forward, open from outside | step | S | P2 | URM | extends `urm-pat` → §5.12 | |
+| `net-cgnat` | Carrier-grade NAT | double NAT, shared address space, why port forwarding fails | step a connection through two NATs | step | S | P3 | URM | URM ch11 | |
+| `net-tcp-teardown` | TCP connection teardown | FIN/ACK in both directions, half close, TIME_WAIT | step a close from either side | step | S | P2 | URM | extends `urm-tcp-handshake` → §5.8 | |
+| `net-tcp-states` | TCP state machine | the states a socket passes through, live | drive both ends, watch states | step | M | P3 | URM | URM ch13 | |
+| `net-tcp-retransmit` | Loss and retransmission | RTO, duplicate ACKs, fast retransmit | drop chosen segments, step the exchange | step | M | P2 | URM | URM ch13 → §5.8 | |
+| `net-tcp-congestion` | TCP congestion control | slow start, congestion avoidance, AIMD sawtooth, Reno vs CUBIC | set loss and RTT, watch cwnd over time | expl | M | P1 | URM, NLA | URM ch13 | |
+| `net-tcp-vs-udp-loss` | TCP vs UDP under loss | the same stream: TCP retransmits and stalls, UDP drops and continues | slider for loss, play both side by side | expl | S | P2 | URM | URM card ch13-tcp-naspram-udp-gubitak | |
+| `net-port-multiplexing` | Ports and sockets | the 5-tuple keeps many connections apart on one port 443 | open connections from several clients | step | S | P2 | URM | URM card ch13 (multiplexing) | |
+| `net-syn-outcomes` | Open, closed, filtered | SYN gets SYN/ACK, RST or nothing, and what each means (port scanning) | probe ports on a host behind a firewall | step | S | P1 | URM, SEC | URM card ch15 (three SYN outcomes) | |
+| `net-asymmetric-path` | Asymmetric path through NAT and firewall | replies taking another path break stateful devices | toggle the return path, watch the connection die | step | S | P3 | URM | URM card ch15 | |
+| `net-crc` | Error detection with CRC | how a CRC catches burst errors where parity fails | flip bits, compute parity and CRC | step | S | P2 | URM, HAM | → §5.13 | |
+| `net-wifi-channels` | Wi-Fi channels and overlap | 2.4 GHz 1/6/11, 5 GHz channel widths, co-channel interference | place APs, assign channels | expl | S | P2 | URM | URM ch17 | |
+| `net-wifi-association` | 802.11 association step by step | scan, authenticate, associate, then the 4-way handshake | step a station joining an AP | step | S | P2 | URM | URM card ch17-pridruzivanje-koraci; feeds `net-wpa-handshake` | |
+| `net-wpa-handshake` | WPA2/WPA3 handshake and what an attacker sees | PMK origin, 4-way handshake, why WPA2-PSK can be cracked offline and SAE can't | step the handshake; toggle the attacker's capture view | step | M | B1 | URM, SEC | proposal first batch; URM card ch17-pmk-porijeklo-rukovanje | |
+| `net-csma-ca-rts-cts` | CSMA/CA and RTS/CTS | Wi-Fi avoids collisions it can't detect; RTS/CTS fixes the hidden node | step stations with and without RTS/CTS | step | S | P3 | URM | extends `urm-hidden-node` | |
+| `net-wifi-roaming` | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 | |
+| `net-qos-queues` | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA | | |
+| `net-multicast-igmp` | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA | | |
+| `net-packet-journey` | The whole journey: from URL to page | DNS, ARP, TCP, TLS, HTTP in order, across the real path | step the capstone, open each part's own simulator | step | L | P2 | URM | URM card ch16-put-podataka-detaljno → §5.9 | |
+| `net-poe-budget` | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM | | |
+
+### 4.2 Internet and application protocols
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `inet-dns-resolution` | Recursive and iterative resolution | resolver asks root, TLD and authoritative servers; the client asks once | step a lookup; repeat it warm | step | M | P1 | URM, UL | UL ch19, URM card ch14 (DNS query path) → §5.4 | |
+| `inet-dns-ttl-cache` | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2, DR S6 → §5.4 | |
+| `inet-dns-records` | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM | UL ch19 | |
+| `inet-dns-secondary-expiry` | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR caveat CV-02 → §5.4 | |
+| `inet-dns-split-brain` | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 | |
+| `inet-dnssec-chain` | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC | | |
+| `inet-dns-poisoning` | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC | | |
+| `inet-http-exchange` | One HTTP exchange | request line, headers, status codes, body | send requests, read responses | step | S | P2 | URM, UL | URM ch14 | |
+| `inet-http-versions` | HTTP/1.1 vs HTTP/2 vs HTTP/3 | multiplexing, and head-of-line blocking at TCP vs QUIC | load a page with loss on each version | expl | M | P2 | URM | | |
+| `inet-http-caching` | HTTP caching | Cache-Control, ETag, 304, what a CDN edge keeps | request repeatedly, change headers | step | S | P2 | URM, UL | | |
+| `inet-cookies-sessions` | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC | | |
+| `inet-cors` | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC | | |
+| `inet-reverse-proxy-lb` | Reverse proxy and load balancing | round robin vs least connections vs hash vs sticky; health checks | add servers, fail one, change the algorithm | expl | M | P2 | UL, NLA | UL ch21, NLA T54 | |
+| `inet-cdn-anycast` | Anycast and CDN edges | one address, many places; BGP picks the nearest | move clients, withdraw a site | expl | S | P2 | URM | | |
+| `inet-tls-handshake` | TLS 1.2 vs 1.3 | key exchange, certificate, round trips; 1-RTT vs 2-RTT | step both handshakes side by side | step | M | P1 | UL, URM, SEC | UL ch21 → §5.5 | |
+| `inet-cert-chain` | Chain of trust and expiry | leaf, intermediate, root store; a missing intermediate; expiry clocks | build a chain, remove links, advance time | step | S | P1 | UL, DR | UL ch21, DR S4 → §5.5 | |
+| `inet-acme-renewal` | ACME / Let's Encrypt renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL | | |
+| `inet-email-path` | The path of an e-mail | MUA → MSA → MTA → MDA → IMAP; envelope vs header | send a mail across two domains | step | M | P2 | UL, URM | UL ch20, URM card ch14 (mail send vs fetch) | |
+| `inet-email-auth` | SPF, DKIM and DMARC | three checks, alignment, and the DMARC verdict | send legitimate, forwarded and spoofed mails | step | M | P1 | UL, SEC | UL ch20 | |
+| `inet-smtp-dialogue` | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL | | |
+| `inet-ftp-active-passive` | Active vs passive FTP | the second connection and why NAT breaks active mode | connect through NAT in both modes | step | S | P3 | URM | URM ch14 | |
+| `inet-ssh-key-auth` | SSH host and user keys | known_hosts, key auth vs password, the first-connection warning | connect, change the host key, add a key | step | S | P2 | UL | UL ch15 | |
+| `inet-ssh-tunnels` | SSH port forwarding | local, remote and dynamic forwarding | build each tunnel, send traffic | step | S | P2 | UL, NLA | | |
+| `inet-ntp-sync` | NTP offset and delay | four timestamps give offset and delay; stratum | step an exchange with asymmetric delay | step | S | P2 | UL | UL ch18 | |
+| `inet-bgp-path-selection` | BGP path selection | AS path, local preference, prefix propagation between ASes | step announcements across a small internet | step | M | P2 | NLA, URM | NLA T10 → §5.11 | |
+| `inet-bgp-hijack` | BGP hijack and RPKI | a more-specific prefix wins; route origin validation | announce a hijack, then turn on ROV | step | M | P2 | NLA, SEC | | |
+| `inet-peering-transit` | Transit vs peering | who pays whom, tier-1, IXPs | connect networks, follow the money and the traffic | expl | S | P3 | URM | | |
+| `inet-ddos-amplification` | DRDoS amplification | spoofed small requests become large replies at the victim | pick protocols, see the amplification factor | expl | S | P2 | URM, SEC | URM card ch18 (DRDoS) | |
+| `inet-oauth-flow` | OAuth 2.0 / OIDC authorization code flow | who sees what: browser, app, identity provider | step a login with a third-party IdP | step | M | P3 | SEC | | |
+| `inet-websocket` | WebSocket upgrade | from HTTP request to a persistent two-way channel | step the upgrade, then push messages | step | S | P3 | URM | | |
+
+### 4.3 Security and cryptography
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `sec-sym-vs-asym` | Symmetric vs asymmetric encryption | the key distribution problem and how public keys solve it | send messages with each scheme, count keys | step | S | P2 | URM, SEC | URM card ch18 | |
+| `sec-diffie-hellman` | Diffie–Hellman | a shared secret over a public channel (colour mixing, then numbers) | step both sides and the eavesdropper | step | S | P2 | URM, SEC | feeds `inet-tls-handshake` | |
+| `sec-hash-properties` | Hash functions | avalanche effect, fixed length, integrity, collisions | change one character, compare hashes | expl | S | P2 | SEC | | |
+| `sec-password-storage` | Storing passwords | plain vs hash vs salted vs slow hash; rainbow tables; cracking time | pick a scheme and a password, see attack cost | expl | S | P2 | SEC, UL | | |
+| `sec-digital-signature` | Digital signatures | sign with private, verify with public; tampering breaks it | sign, tamper, verify | step | S | P2 | SEC | feeds `inet-cert-chain` | |
+| `sec-classic-ciphers` | Caesar and Vigenère | why frequency analysis breaks substitution | encrypt, then break by frequency | expl | S | P3 | SEC | | |
+| `sec-dmz-matrix` | DMZ rule matrix | which zone may open what to which | toggle rules between internet, DMZ and LAN | expl | S | P2 | URM, SEC | URM card ch18 (DMZ); extends `urm-firewall` | |
+| `sec-aaa-8021x` | AAA and 802.1X | supplicant, authenticator, RADIUS; port opens after EAP | step a laptop plugging in | step | M | P2 | URM, SEC | URM card ch18 (AAA) | |
+| `sec-ransomware-321` | 3-2-1 and immutable copies vs ransomware | which copies survive encryption and deletion | release ransomware on an estate with different backup designs | step | S | P2 | DR, SEC | DR S3, P09 | |
+| `sec-mfa-phishing` | MFA fatigue and adversary-in-the-middle | push bombing and session-token theft defeat weak MFA | step attacks against OTP, push, FIDO2 | step | S | P3 | SEC | | |
+| `sec-sql-injection` | SQL injection | concatenated input becomes code; parameters fix it | type inputs, see the built query | step | S | P2 | SEC | | |
+| `sec-xss` | Cross-site scripting | stored vs reflected; output encoding | post a comment with a script | step | S | P3 | SEC | | |
+| `sec-buffer-overflow` | Stack buffer overflow | overwriting the return address; canaries, NX, ASLR | feed longer inputs, step the stack | step | M | P3 | SEC, OS, ARH | | |
+| `sec-pki-revocation` | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 | |
+| `sec-wireguard` | WireGuard | handshake, cryptokey routing, roaming | step a handshake; move a peer | step | M | P2 | NLA, SEC | NLA T09 → §5.9 | |
+| `sec-ipsec-ike` | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 | |
+| `sec-lateral-movement` | Lateral movement and tiering | one admin login on a workstation exposes the domain | follow credentials hop to hop; apply tiering | step | M | P2 | WIN, SEC | → §4.5 | |
+
+### 4.4 Linux
+
+Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `lnx-pipes-redirection` | Pipes and the three streams | stdin/stdout/stderr, `>` vs `2>&1` order, pipes | build a command line, see where each stream goes | step | S | P1 | UL | UL ch06 (`cjevovod-i-tri-toka.svg`) → §5.14 | |
+| `lnx-regex-match` | How a regex matches | the matcher walks the input, backtracks, anchors | type a pattern and text, step the match | step | M | P2 | UL, AUT | UL ch06; pairs with `spl-automata` | |
+| `lnx-links-inodes` | Hard links, symlinks and inodes | names point to inodes; the link count; dangling symlinks | create, link, delete, see what survives | step | S | P2 | UL | UL ch05 (`unos-u-direktoriju-i-brojac-poveznica.svg`) | |
+| `lnx-permissions-rwx` | Permission bits, octal, umask | nine bits, octal notation, umask subtracting from defaults | toggle bits, set umask, create files | expl | S | P1 | UL | UL ch07 (`devet-bitova-dozvola.svg`) | |
+| `lnx-access-decision` | The access decision | owner → group → other, first match decides; the ACL mask | pick a user and a file, step the check | step | S | P2 | UL | UL ch07 → §5.1 | |
+| `lnx-special-bits` | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 | |
+| `lnx-signals` | Signals | SIGTERM vs SIGKILL, traps, SIGHUP and nohup | send signals to processes with and without handlers | step | S | P2 | UL | UL ch08 | |
+| `lnx-job-control` | Job control | fg/bg, Ctrl-Z, process groups, what dies on logout | drive jobs from a shell | step | S | P3 | UL | UL ch08 | |
+| `lnx-boot-chain` | The boot chain | firmware → bootloader → kernel → initramfs → systemd | step a boot; break one stage | step | S | P2 | UL | UL ch10 (`lanac-podizanja.svg`) → §5.15 | |
+| `lnx-systemd-ordering` | systemd dependencies and ordering | Wants/Requires vs After/Before; a failed dependency | edit unit relations, boot, see the order and failures | expl | M | P2 | UL | UL ch10 → §5.15 | |
+| `lnx-timers-cron` | cron vs systemd timers | missed runs, `Persistent=`, randomised delay | let time pass with the machine off | step | S | P3 | UL | UL ch10 | |
+| `lnx-mount-layers` | Block device to mount point | disk → partition → filesystem → mount; a mount hides what was there | mount over a non-empty directory | step | S | P2 | UL | UL ch11 (`tocka-montiranja-zaklanja.svg`) | |
+| `lnx-partition-tables` | MBR vs GPT | partition limits, protective MBR, backup header | add partitions to each | ref | S | P3 | UL | UL ch11 | |
+| `lnx-disk-full-mysteries` | "Disk full" with free space | inode exhaustion, and a deleted file still open | fill a disk both ways, find the cause | step | S | P2 | UL | UL ch11, ch23 | |
+| `lnx-mirror-not-backup` | A mirror is not a backup | RAID protects against disk loss, not deletion or corruption | delete a file on a healthy mirror | step | S | P2 | UL, DR | UL ch12 (`granica-zastite-zrcala.svg`) → §5.3 | |
+| `lnx-lvm-extend` | Extending an LV and its filesystem | PV → VG → LV → filesystem, in that order | add a disk, extend each layer | step | S | P2 | UL | UL ch12; stepper companion to `spl-lvm-lab` | |
+| `lnx-quotas` | Disk quotas | soft vs hard limit, grace period | users write files, time passes | step | S | P3 | UL | UL ch12 | |
+| `lnx-memory-swap-oom` | Memory, swap and the OOM killer | page cache vs used, swapping, who the OOM killer picks | start processes, watch memory and the kill | expl | S | P2 | UL, OS | UL ch12 | |
+| `lnx-page-cache` | free vs available | the page cache is not lost memory; dirty pages and writeback | read and write files, watch the counters | expl | S | P2 | UL, NLA | NLA T42 | |
+| `lnx-load-average` | Load average | load counts runnable and D-state tasks, not CPU percent | add CPU and I/O-bound tasks on 1–8 cores | expl | S | P2 | UL, NLA | NLA T41 | |
+| `lnx-log-path` | The path of a log message | app → journald → rsyslog → file or remote | send messages with facilities and priorities | step | S | P2 | UL | UL ch13 (`put-poruke.svg`) | |
+| `lnx-logrotate` | logrotate | rotation numbering, compress, copytruncate vs create | run rotations while an app writes | step | S | P3 | UL | UL ch13 | |
+| `lnx-routing-decision` | Address, route and resolver | the three things a host needs, and the route lookup | break each one, see which command fails | step | S | P2 | UL | UL ch14 (`cetiri-podatka-i-tri-mjesta.svg`); `urm-routing-table` for LPM | |
+| `lnx-firewalld-zones` | firewalld zones | a packet's zone comes from its source or interface | send packets from different sources | step | S | P2 | UL | UL ch15 → §5.16 | |
+| `lnx-selinux-decision` | DAC says yes, SELinux says no | a second, label-based check after permissions | change modes and contexts, retry access | step | S | P1 | UL | UL ch15 (`dozvola-i-politika.svg`, `tri-mjesta-koja-kazu-ne.svg`) | |
+| `lnx-shell-quoting` | Quoting and word splitting | what the shell does to a line before the command sees it | type lines, step expansion, splitting, globbing | step | S | P2 | UL | UL ch16 (`navodnici-i-razdvajanje.svg`) | |
+| `lnx-exit-status` | Exit status and `&&`, `\|\|`, `set -e`, `pipefail` | how failure propagates, and a pipeline that reports success while failing | run chains where one step fails | step | S | P2 | UL, DR | UL ch17 (`izlazni-status-spaja.svg`), DR S8 → §5.3 | |
+| `lnx-subshell-trap` | Subshells and traps | a `cd` in a subshell doesn't stick; cleanup on EXIT | run scripts with and without subshells | step | S | P3 | UL | UL ch17 (`podljuska-i-trap.svg`) | |
+| `lnx-rsync-delete` | rsync, trailing slashes and `--delete` | `src` vs `src/`, and how `--delete` mirrors a mistake | sync, delete at source, sync again | step | S | P2 | UL, DR | UL ch15 | |
+| `lnx-package-deps` | Package dependency resolution | repo metadata, dependency trees, conflicts | install packages into a small repo | step | S | P3 | UL | UL ch09 | |
+| `lnx-nfs-root-squash` | NFS and root squash | the server, not the client, decides who you are | access as root and as a user | step | S | P3 | UL | UL ch18 | |
+| `lnx-namespaces` | A container is a process | PID, network and mount namespaces isolate one process tree | start a container, compare host and container views | step | M | P2 | NLA | NLA T07 → §5.17 | |
+| `lnx-cgroups` | cgroups limits | CPU shares and memory limits; OOM inside a cgroup | set limits, run greedy workloads | expl | S | P2 | NLA | NLA T11 | |
+| `lnx-overlayfs-layers` | Image layers and copy-up | read-only layers, a writable top, copy-up and whiteouts | edit and delete files inside a container | step | S | P1 | NLA | NLA T12–13 → §5.17 | |
+| `lnx-container-volumes` | Where container data is lost | container layer vs volume vs bind mount on `rm` | write data, recreate the container | step | S | P2 | NLA | NLA T15 | |
+| `lnx-container-ports` | Publishing a container port | `-p` is DNAT on the host | publish ports, connect from outside | step | S | P2 | NLA | NLA T16 → §5.12 | |
+| `lnx-userns-mapping` | Rootless containers | root inside maps to an unprivileged UID outside | create files, check owners on the host | step | S | P3 | NLA | NLA T17 | |
+| `lnx-netns-veth-bridge` | Namespaces, veth and a bridge | how container networking is wired by hand | connect two namespaces step by step | step | M | P2 | NLA | NLA T06–08 | |
+| `lnx-netfilter-path` | A packet through netfilter | prerouting, input, forward, output, postrouting; where NAT and filter happen | send inbound, forwarded and local packets | step | M | P1 | NLA | NLA T08 → §5.1 | |
+| `lnx-policy-routing` | Policy routing | `ip rule` picks a table before the route lookup | add rules and tables, send from two sources | step | S | P3 | NLA | NLA T05 | |
+| `lnx-bonding-modes` | Bonding modes | active-backup vs balance vs 802.3ad | fail links, send flows | expl | S | P3 | NLA | NLA T06 → `net-link-aggregation` | |
+| `lnx-lvm-snapshot` | LVM snapshot filling up | CoW snapshot space and invalidation when full | write to the origin, watch the snapshot fill | step | S | P2 | NLA | NLA T20 → §5.2 | |
+| `lnx-thin-overcommit` | Thin provisioning and overcommit | promised vs real space; the pool fills under everyone | create thin volumes, write, run out | expl | S | P2 | NLA, DR | NLA T20 → §5.2 | |
+| `lnx-cow-filesystem` | Copy-on-write filesystems | snapshots share blocks; writes go to new blocks | write, snapshot, write, see shared and owned blocks | step | S | P2 | NLA | NLA T22–23 → §5.2 | |
+| `lnx-send-receive` | Btrfs/ZFS send and receive | incremental replication from snapshot pairs | snapshot, send, change, send incremental | step | S | P3 | NLA, DR | NLA T22 → §5.3 | |
+| `lnx-zfs-self-heal` | Checksums and self-healing | a scrub finds a bad block and repairs it from the mirror | corrupt a block, scrub | step | S | P2 | NLA | NLA T23 | |
+| `lnx-raid-rebuild` | Rebuild under load and the second failure | a long rebuild, an unreadable sector, a lost array | fail a disk, rebuild, hit a URE | step | S | P2 | NLA, DR | NLA T24 → §5.3 | |
+| `lnx-multipath` | Multipath I/O | path failover for iSCSI/FC | fail paths during I/O | step | S | P3 | NLA | NLA T25; `spl-stratis-lab` | |
+| `lnx-ansible-idempotence` | Idempotence | a script run twice breaks things; a declarative task doesn't | run both versions repeatedly | step | S | P2 | NLA | NLA T30 | |
+| `lnx-terraform-drift` | Terraform state and drift | desired vs state vs real; plan shows the diff | change infra by hand, run plan | step | S | P2 | NLA | NLA T31 | |
+| `lnx-deploy-strategies` | Blue-green, canary, rolling | how each moves traffic and rolls back | deploy a bad version with each strategy | step | M | P2 | NLA | NLA T33 | |
+| `lnx-alert-states` | Prometheus alert states | scrape, `for:` duration, pending → firing, flapping | feed a metric, tune the rule | step | S | P2 | NLA | NLA T36–37 | |
+| `lnx-live-migration` | Live migration | pre-copy rounds converge only if dirtying is slower than copying | slider for dirty rate and bandwidth | expl | M | P2 | NLA | NLA T02 | |
+| `lnx-pam-stack` | The PAM stack | required/requisite/sufficient/optional decide a login | reorder modules, fail some, log in | step | S | P2 | NLA | NLA T58 → §5.1 | |
+| `lnx-hypervisor-types` | Type 1 vs type 2, containers vs VMs | where the kernel and the hypervisor sit | compare stacks, click layers | ref | S | P3 | NLA | NLA T01, T07 | |
+
+### 4.5 Windows and Active Directory
+
+No Windows course material was found; these are proposed from the areas you named and from the AD content
+in topologydrafter's samples and the DR estate (see report).
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-domain-logon` | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when the DC is gone | log in on site, at a branch, offline | step | M | P2 | WIN | `link-topologydrafter` two-sites | |
+| `win-kerberos` | Kerberos | AS → TGT, TGS → service ticket, AP; clock skew breaks it | step a user opening a file share; skew the clock | step | M | P1 | WIN, NLA | NLA T57 → §5.6 | |
+| `win-ntlm-vs-kerberos` | NTLM vs Kerberos | challenge-response vs tickets; why pass-the-hash works on NTLM | authenticate both ways, capture the hash | step | S | P2 | WIN, SEC | | |
+| `win-ad-replication` | AD multi-master replication | USNs, up-to-dateness vector, attribute-level last writer wins | change one attribute on two DCs at once | step | M | P2 | WIN | → §5.7 (`ha-multimaster-conflict`) | |
+| `win-ad-sites` | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule | add sites and links, change a password, wait | expl | M | P2 | WIN | `link-topologydrafter` two-sites | |
+| `win-rodc` | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN, SEC | `link-topologydrafter` two-sites | |
+| `win-fsmo-roles` | FSMO roles | the single-master jobs and what breaks when a holder is gone | turn off role holders, try operations | step | S | P3 | WIN | | |
+| `win-gpo-precedence` | GPO precedence | local → site → domain → OU, enforced, block inheritance, security filtering | link GPOs, toggle flags, see the winning setting | step | M | P1 | WIN | | |
+| `win-gpo-loopback` | Loopback processing | user policy from the computer's OU, replace vs merge | log users into a kiosk OU | step | S | P3 | WIN | extends `win-gpo-precedence` | |
+| `win-ntfs-share-effective` | Effective access: NTFS plus share | most restrictive of the two wins; deny beats allow; groups add up | set ACEs on share and folder, test users locally and over the network | expl | S | P1 | WIN | → §5.1 | |
+| `win-ntfs-inheritance` | NTFS inheritance | inherited vs explicit ACEs, disabling inheritance, move vs copy | build a folder tree, move files around | step | S | P2 | WIN | | |
+| `win-access-token` | The access token | SIDs and groups are fixed at logon; why you log off after a group change | add a user to a group, test before and after logon | step | S | P2 | WIN | | |
+| `win-uac` | UAC and the split token | admins run with a filtered token until elevated | run tasks as admin with and without elevation | step | S | P2 | WIN, SEC | | |
+| `win-ad-recycle-bin` | Deleted objects: tombstone and recycle bin | tombstone lifetime, recycle bin, authoritative restore | mass-delete an OU, then recover | step | S | P2 | WIN, DR | DR S15 | |
+| `win-ad-dns` | AD-integrated DNS | dynamic updates, replication with AD, scavenging stale records | join, move and remove machines over time | step | S | P2 | WIN | → §5.4 | |
+| `win-dhcp-failover` | DHCP failover | load-balance vs hot standby, MCLT | fail a server, renew leases | step | S | P3 | WIN | → `net-dhcp-dora` | |
+| `win-dfs` | DFS namespace and replication | referrals to the nearest target; DFS-R conflicts | open a share from two sites; edit on both | step | M | P3 | WIN | | |
+| `win-smb-session` | An SMB session | negotiate, session setup, tree connect, signing | connect with different SMB versions | step | S | P3 | WIN | | |
+| `win-boot` | Windows boot chain | UEFI → Boot Manager → winload → kernel → smss → winlogon | step a boot; break the BCD | step | S | P2 | WIN | → §5.15 | |
+| `win-services` | Services and dependencies | start types, dependencies, delayed start, recovery actions | configure services, boot, fail one | expl | S | P3 | WIN | → §5.15 | |
+| `win-registry` | The registry | hives, HKLM vs HKCU, where policy writes | browse hives, apply a policy, find the key | ref | S | P3 | WIN | | |
+| `win-vss` | Volume Shadow Copy | copy-on-write snapshots behind "Previous Versions" | write files, take shadows, restore | step | S | P2 | WIN | → §5.2 | |
+| `win-hyperv-checkpoints` | Hyper-V checkpoints | AVHDX chain, merge on delete | take checkpoints, delete the middle one | step | S | P3 | WIN | → §5.2 (`sto-backing-chains` preset) | |
+| `win-failover-cluster` | Failover cluster quorum | node majority, disk and file-share witness | fail nodes and the witness | step | S | P2 | WIN | → §5.7 (`ha-quorum-split-brain` preset) | |
+| `win-storage-spaces` | Storage Spaces | mirror vs parity, columns, how many disks you can lose | build a pool, fail disks | expl | S | P3 | WIN | | |
+| `win-bitlocker-tpm` | BitLocker and the TPM | PCR measurements; what triggers the recovery key | change firmware/boot settings, reboot | step | S | P3 | WIN, SEC | | |
+| `win-laps` | LAPS | unique rotated local admin passwords stop lateral movement | compromise one machine with and without LAPS | step | S | P3 | WIN, SEC | → `sec-lateral-movement` | |
+| `win-powershell-objects` | PowerShell pipes objects, bash pipes text | the same task in both pipelines | step each stage, inspect what flows | step | S | P2 | WIN, UL | → §5.14 | |
+| `win-firewall-profiles` | Windows Firewall profiles | domain/private/public profile selection by network | move a laptop between networks | step | S | P3 | WIN | → §5.16 | |
+| `win-ntfs-mft` | NTFS MFT | MFT records, resident vs non-resident data, alternate data streams | create small and large files, add an ADS | ref | S | P3 | WIN | | |
+| `win-update-rings` | Update rings and WSUS | approval, deferral, rings; a bad patch stopped at ring 1 | release patches through rings | step | S | P3 | WIN | | |
+
+### 4.6 Storage, backup and disaster recovery
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `sto-dedup-chunking` | Deduplication: fixed vs content-defined chunks | an inserted byte shifts every fixed chunk; rolling-hash boundaries resynchronise | insert/delete bytes in a file, compare the chunk tables | step | M | B1 | DR, NLA | proposal first batch; NLA T28 → §5.3 | |
+| `sto-dedup-file-funnel` | Finding duplicate files | size → partial hash → full hash, false positives at each stage | run the funnel over a file set | step | S | P3 | DR | filesearcher `idea.md` → §5.3 | |
+| `sto-backup-diff-incr` | Differential vs incremental | what each backup stores, and what a restore needs | change blocks over a week, restore on Thursday | step | S | B1 | DR, UL | proposal first batch; UL ch23 (`lanac-prirasnih-kopija.svg`) → §5.3 | |
+| `sto-backing-chains` | Backing chains (qcow2, VHDX, VMware delta) | reads fall through the chain; commit/merge; a broken link kills children | take snapshots, write, delete or merge one in the middle | step | M | B1 | DR, NLA, WIN | proposal first batch → §5.2 | |
+| `sto-retention-gfs` | Retention: grandfather-father-son | how many copies a schedule keeps and how far back you can go | set daily/weekly/monthly counts, run a year | expl | S | P2 | DR, UL | UL ch23 Example 6 → §5.3 | |
+| `sto-restore-drill` | The backup that lies | backups report OK; only a test restore shows they're empty | run the job for weeks, then restore | step | S | P2 | DR, UL | DR S8, UL ch23 (`provjera-arhive-i-proba-oporavka.svg`) → §5.3 | |
+| `sto-backup-window` | Backup window and offsite seeding | data size vs bandwidth vs window; why the first offsite copy goes by truck | sliders for size, change rate, link speed | expl | S | P2 | DR | NLA T28 | |
+| `sto-cow-vs-row` | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 | |
+| `sto-write-cache` | Write-back vs write-through | write-back is fast until the power fails; battery-backed cache | write, cut power with each setting | step | S | P2 | DR, NLA | scoping note §5 "no write cache" | |
+| `sto-ssd-internals` | Inside an SSD | FTL, erase blocks, write amplification, TRIM, wear | write and overwrite, see erase cycles | step | M | P2 | OS, NLA | `ossim-disk-scheduling` hdd-vs-ssd | |
+| `sto-iops-latency` | IOPS, throughput and latency | queue depth and block size trade them off | sliders for block size, queue depth, device | expl | S | P2 | NLA, DR | NLA T27 | |
+| `sto-nas-vs-san` | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | ref | S | P3 | NLA | NLA T25 | |
+| `sto-ec-vs-replication` | Erasure coding vs replication | overhead vs failures tolerated vs rebuild cost (k+m) | choose k, m, replicas; fail disks | expl | S | P2 | NLA, DR | cephsim → §5.7 | |
+| `sto-ceph-min-size` | size and min_size | `size=2 min_size=2` blocks I/O on one failure; 3/2 doesn't | fail OSDs under each setting, try to write | step | S | P2 | NLA, DR | cephsim, faultline `sizeTwo`, scoping §5, DR S2/P05 → §5.7 | |
+| `sto-ceph-down-out` | down vs out | down is degraded and nothing moves; out triggers rebalancing after a timer | stop an OSD, let time pass | step | S | P2 | NLA, DR | cephsim | |
+| `sto-crush-failure-domain` | Failure domain in a placement rule | same data, rule by host vs by rack; then lose a rack | switch the rule, kill a rack | step | S | P2 | NLA, DR | cephsim `brokenRule` | |
+| `sto-smallest-disk-caps` | One small or full disk caps the pool | the fullest OSD sets MAX AVAIL; uneven hosts fill first | add mismatched disks, fill the pool | expl | S | P2 | NLA, DR | cephsim, scoping note §5 | |
+| `sto-sync-async-replication` | Synchronous vs asynchronous replication | RPO 0 at the cost of latency vs lag and data loss on failover | write, fail the primary at different moments | step | S | P2 | DR, NLA | → §5.7 (with `ha-db-replication`) | |
+| `dr-rpo-rto` | RPO and RTO | how much data and how much time you lose, on one timeline | place backups and an incident, measure loss | expl | S | P2 | DR | DR scenarios | |
+| `dr-site-failover` | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 | |
+| `dr-correlated-failure` | One power strip under three replicas | redundancy that shares one hidden dependency | add dependencies, fail the PDU | step | S | P3 | DR | faultline `onePdu` → link instead | |
+| `dr-alert-to-nobody` | The alert that reaches nobody | the alert path depends on the system that failed | fail the site, follow the alert | step | S | P3 | DR | DR S1 | |
+
+### 4.7 High availability and distributed systems
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `ha-multimaster-conflict` | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN | proposal first batch; NLA T55 → §5.7 | |
+| `ha-quorum-split-brain` | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN | NLA T52–53; cephsim MON quorum → §5.7 | |
+| `ha-fencing` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 | |
+| `ha-vrrp-failover` | VRRP / keepalived | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 | |
+| `ha-db-replication` | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 | |
+| `ha-cap` | CAP under partition | a partitioned system picks consistency or availability | partition, issue reads and writes in CP and AP modes | step | S | P2 | NLA, DR | | |
+| `ha-raft` | Raft leader election and log replication | terms, votes, majority commit | kill leaders, partition, step messages | step | M | P2 | NLA | → §5.7 | |
+| `ha-lamport-clocks` | Logical clocks | Lamport and vector clocks order events without a shared clock | send messages between three processes | step | M | P3 | NLA | | |
+| `ha-two-phase-commit` | Two-phase commit | prepare/commit, and the coordinator crash that blocks everyone | crash participants and the coordinator | step | S | P3 | NLA | | |
+| `ha-consistent-hashing` | Consistent hashing | adding a node moves 1/n of keys, mod-n moves almost all | add and remove nodes in both schemes | expl | S | P2 | NLA | relates to CRUSH in `link-cephsim` | |
+| `ha-never-zero-spof` | No system has zero SPOFs | the implicit authorities: identity, naming, time, change, operator | remove each authority, see what fails | step | S | P3 | DR | faultline authorities → link instead | |
+
+### 4.8 Performance and capacity
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `perf-utilisation-latency` | Latency near full utilisation | waiting time explodes as ρ → 1 | slider for load, watch the queue and latency | expl | S | P2 | DR, NLA, OS | dc-sim `three_tier_chain` | |
+| `perf-littles-law` | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim | |
+| `perf-tail-latency` | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` | |
+| `perf-retry-storm` | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` | |
+| `perf-rate-limiting` | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM | | |
+| `perf-cache-hit-ratio` | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH | | |
+| `perf-goodhart-teams` | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` | |
+| `perf-autoscaling-lag` | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` | |
+| `perf-slo-error-budget` | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim | |
+| `perf-game-tick-server` | Authoritative tick server | a fixed tick, server-side line of sight, why clients lag | step ticks, move players, add latency | step | M | P3 | URM | agentvsagent | |
+
+### 4.9 Computer architecture, OS gaps and automata
+
+ossimulator covers the OS course; these fill small gaps or extend the imported architecture labs.
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `arh-cache-mapping` | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS | | |
+| `arh-pipeline-hazards` | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` | |
+| `arh-mesi` | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` | |
+| `arh-twos-complement` | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH | | |
+| `arh-floating-point` | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH | | |
+| `arh-endianness` | Endianness | byte order in memory and on the wire | write values, read them as bytes | expl | S | P3 | ARH, URM | | |
+| `os-context-switch-cost` | What a context switch costs | saved state, TLB and cache warmup | switch at different rates | expl | S | P3 | OS | ossim covers mode vs process switch | |
+| `aut-regex-to-nfa` | Regex to NFA to DFA | Thompson construction and subset construction | type a regex, step the constructions | step | M | P3 | AUT | pairs with `spl-automata`, `lnx-regex-match` | |
+
+### 4.10 Radio and crisis communications
+
+Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas where nothing exists:
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `ham-superhet-image` | Superheterodyne and the image frequency | mixing to an IF, and the second frequency that also lands there | tune the LO, move a signal onto the image | expl | M | P3 | HAM | 50ohm `ueberlagerungsempfaenger_*`, `spiegelfrequenzen` | |
+| `ham-swr` | SWR and standing waves | mismatch reflects power; standing wave on the line | change load impedance, watch the wave | expl | M | P3 | HAM | 50ohm `swr*` | |
+| `ham-ionosphere-muf` | Ionosphere, MUF and the dead zone | layers by day and night, skip distance, the zone nobody hears | change time of day and frequency | expl | M | P3 | HAM | 50ohm `ionosphaere*`, `muf_luf_*`; near `50ohm-skip-distance` | |
+| `ham-fec-hamming` | Hamming code | correcting one bit error with parity bits | flip bits, decode | step | S | P3 | HAM, URM | 50ohm `fehlerkorrektur` → §5.13 | |
+| `ham-multiple-access` | FDMA, TDMA, CDMA | three ways to share a channel | add users to each scheme | expl | S | P3 | HAM, URM | 50ohm `vielfachzugriff` | |
+| `ham-qam-ofdm` | QAM and OFDM | constellation size vs noise; subcarriers | change order and SNR, watch errors | expl | M | P3 | HAM, URM | 50ohm `qam`, `ofdm`; extends `50ohm-qpsk` | |
+| `ham-shannon` | Shannon–Hartley | capacity from bandwidth and SNR | sliders for B and SNR | expl | S | P3 | HAM, URM | 50ohm `shannon_hartley_gesetzt` | |
+| `ham-packet-aprs` | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` | |
+| `ham-fft-waterfall` | FFT and the waterfall | sample rate sets the span, FFT size sets the resolution | change sample rate and FFT size | expl | M | P3 | HAM | HamMonitor `DESIGN.md` | |
+| `ham-ctcss` | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` | |
+| `ham-lora-css` | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) | |
+| `ham-fsk-psk-ask` | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) | |
+| `ham-adsb-frame` | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) | |
+| `kk-directed-net` | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides | |
+| `kk-priority-traffic` | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` | |
+| `kk-backup-ncs` | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides | |
+| `kk-gateway-tiers` | Multi-tier relay through a gateway | local nets, gateways and delay to the coordination level | send a message from field to HQ | step | M | P3 | KK | KK2 slides | |
+
+### 4.11 Reference posters and classroom tools
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `ref-ports` | Well-known ports | the ports students meet, grouped by service | filter by layer and protocol | ref | S | P3 | URM, UL | | |
+| `ref-http-status` | HTTP status codes | the classes and the codes that matter | filter by class | ref | S | P3 | URM | | |
+| `ref-linux-dirs` | The Linux directory tree | FHS: what lives where and why | click directories | ref | S | P3 | UL | UL ch05 | |
+| `ref-protocol-headers` | Header poster | Ethernet, IPv4, IPv6, TCP, UDP headers side by side | hover fields | ref | S | P3 | URM | overlaps `spl-l2l3-protocols` | |
+| `tool-countdown` | Exercise countdown | a projector-sized timer for in-class exercises | set and start | tool | S | P3 | all | | |
+| `tool-quick-poll` | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today | |
+
+---
+
+## 5. Duplicates, overlaps and shared simulators
+
+Where several entries show the same mechanism, the recommendation is **one simulator with presets** (a
+preset is a scenario, like ossimulator's `?scenario=`), or a clear home with links from the others.
+
+| # | Cluster | Entries | Recommendation |
+|---|---|---|---|
+| 5.1 | **First-match rule evaluation** | `net-rule-first-match`, `urm-firewall`, `lnx-access-decision`, `lnx-netfilter-path`, `lnx-pam-stack`, `win-ntfs-share-effective`, UL ch22 pg_hba | Build one rule-table evaluator with presets: router ACL, stateless firewall, `pg_hba.conf`. Keep netfilter (a path through hooks, not one list), PAM (control flags, not first match) and NTFS (deny wins, not first match) separate, because their rules are different; note the contrast on each page. |
+| 5.2 | **Snapshots and copy-on-write** | `sto-backing-chains` (B1), `lnx-lvm-snapshot`, `lnx-thin-overcommit`, `lnx-cow-filesystem`, `sto-cow-vs-row`, `win-vss`, `win-hyperv-checkpoints` | `sto-backing-chains` gets presets for qcow2, VHDX/AVHDX (covers `win-hyperv-checkpoints`) and VMware. LVM snapshot fill, thin overcommit and CoW filesystem stay separate pages on the same block-grid view. `sto-cow-vs-row` and `win-vss` can become presets of `lnx-cow-filesystem`. |
+| 5.3 | **Backup, dedup and redundancy** | `sto-backup-diff-incr` (B1), `sto-dedup-chunking` (B1), `sto-dedup-file-funnel`, `sto-retention-gfs`, `sto-restore-drill`, `lnx-send-receive`, `lnx-mirror-not-backup`, `lnx-raid-rebuild`, `lnx-exit-status`, `ossim-raid-cache`, `spl-zfs-btrfs-lab` | Block-level dedup (B1) and file-level dedup (funnel) are different concepts; keep both, link them. `lnx-send-receive` is a preset of `sto-backup-diff-incr`. The restore drill and `lnx-exit-status`'s pipefail case show the same failure (a job that lies); build the restore drill and link the pipefail preset to it. RAID levels live in `ossim-raid-cache`: link it rather than building RAID again; build only `lnx-mirror-not-backup` and `lnx-raid-rebuild`, which it doesn't cover. |
+| 5.4 | **DNS** | `inet-dns-resolution`, `inet-dns-ttl-cache`, `inet-dns-secondary-expiry`, `inet-dns-split-brain`, `win-ad-dns`, DR S6 | Resolution and TTL can share one page with two modes, but each is a full 3–5 minute demo, so keep two pages on one model. Secondary expiry and split-brain are presets of one "zone servers over time" page. |
+| 5.5 | **TLS and certificates** | `inet-tls-handshake`, `inet-cert-chain`, `sec-digital-signature`, `sec-pki-revocation`, `inet-acme-renewal`, DR S4 | Handshake and chain are separate pages. Certificate expiry from the DR estate is a preset of `inet-cert-chain`. Revocation and ACME extend the chain page if they are built at all. |
+| 5.6 | **Kerberos** | `win-kerberos`, NLA T57 | One page, one model; the Linux course links it (MIT Kerberos and AD use the same exchanges). |
+| 5.7 | **Replication, quorum and consensus** | `ha-multimaster-conflict` (B1), `win-ad-replication`, `ha-db-replication`, `sto-sync-async-replication`, `ha-quorum-split-brain`, `ha-fencing`, `win-failover-cluster`, `ha-raft`, cephsim MON quorum, `sto-ceph-min-size`, faultline `sizeTwo`, `sto-ec-vs-replication` | B1 multi-master gets presets "database row" and "AD attribute" (covers most of `win-ad-replication`). `ha-db-replication` and `sto-sync-async-replication` are one page. `ha-quorum-split-brain` gets presets for Pacemaker, Windows failover cluster with witness, and Ceph MONs; fencing is its second step. Raft stays separate (it is the mechanism, not the symptom). size/min_size gets **one** native page (`sto-ceph-min-size`) and the cephsim and faultline samples link to it. |
+| 5.8 | **TCP** | `urm-tcp-handshake`, `urm-flow-control`, `urm-window`, `net-tcp-teardown`, `net-tcp-retransmit`, `net-tcp-congestion`, `net-tcp-states`, `net-tcp-vs-udp-loss` | Separate pages, one shared sequence-chart view and one TCP model. Teardown is a second mode of the ported handshake page. The state machine is the union of the others; build it last or not at all. |
+| 5.9 | **A packet's path** | `net-encapsulation`, `net-arp-local-remote`, `net-hop-rewrite`, `net-traceroute`, `net-packet-journey`, `sec-wireguard` / tunnels, `spl-l2l3-protocols` | One topology-with-headers model for the path pages (ARP, hop rewrite, traceroute). Tunnels (VXLAN, GRE, WireGuard, IPsec) are presets of `net-encapsulation`. `net-packet-journey` is the capstone and links into each, like ossimulator's `journey`. |
+| 5.10 | **Switching loops** | `net-stp`, `net-broadcast-storm` | One page: the storm is step 1 (STP off), STP is step 2. |
+| 5.11 | **Routing protocols** | `net-distance-vector`, `net-link-state-spf`, `inet-bgp-path-selection` | Separate pages on one graph view. |
+| 5.12 | **NAT and port publishing** | `urm-nat`, `urm-pat`, `net-port-forwarding`, `lnx-container-ports`, `net-cgnat` | `urm-nat` and `urm-pat` are near-duplicates (8,253 bytes each, same layout); merge them into one page with two modes on port. Port forwarding and container port publishing are both DNAT: one page with a "Docker" preset. |
+| 5.13 | **Error detection and correction** | `net-crc`, `ham-fec-hamming`, 50ohm `fehlererkennung` | One page, parity → CRC → Hamming as steps. |
+| 5.14 | **Pipelines** | `lnx-pipes-redirection`, `win-powershell-objects` | Separate pages; the PowerShell page is built as a comparison against the bash one. |
+| 5.15 | **Boot and service ordering** | `lnx-boot-chain`, `win-boot`, `lnx-systemd-ordering`, `win-services` | One boot-chain page with Linux and Windows presets. One dependency-graph page with systemd and Windows-services presets. |
+| 5.16 | **Firewall zones** | `lnx-firewalld-zones`, `win-firewall-profiles` | One page, two presets; both pick a rule set by where the packet comes from. |
+| 5.17 | **Containers** | `lnx-namespaces`, `lnx-cgroups`, `lnx-overlayfs-layers`, `lnx-container-volumes`, `lnx-userns-mapping` | Separate pages (each is one concept) on one container diagram. |
+| 5.18 | **Imported duplicates** | `lvm-topology-lab` vs `-v2`; three ham-modes pages; `radio-sigurnost-2026` vs `radio-cybersecurity`; `amdahl-simulator` vs `webserver-amdahl` | Import v2 and reference-v2 only. The two radio-security pages carry the same material in two formats: import one (the page has the hr/en toggle, the slides have the arrow keys) and decide which. Webserver Amdahl becomes a preset of Amdahl after import. |
+| 5.19 | **Duplicated across books** | URM and `urm-sveucilisni-udzbenik` share the same 14 interactive pages | Port once; both books link the simdeck copy (→ report). |
+| 5.20 | **Planned twice** | URM's ~40 planned interactive cards (`meta/plan-interaktivne-stranice.md` §6) and §4.1 here | The same concepts are planned in two places. Recommend simdeck builds them and the book embeds or links the simdeck page (→ report). |
+
+---
+
+## 6. External material and licences
+
+simdeck is GPL-3.0-or-later (assumed). What the catalogue draws on from outside your own work:
+
+| Material | Used by | Licence | GPL-3.0 note |
+|---|---|---|---|
+| 50ohm.de content and applets (DARC e.V.) | §2.5, seeds in §4.10 | CC BY 4.0 | compatible one way (FSF); keep attribution and a note of changes; check per applet |
+| 50ohm exam questions | not used | DL-DE-BY 2.0 (Bundesnetzagentur) | don't import |
+| Chart.js 4.4.1 | `spl-multicore-mesi`, 50ohm applets | MIT | compatible; vendor it, pin the version |
+| jQuery 3.7.1, three.js | 50ohm applets | MIT | compatible; vendor |
+| Leaflet | `50ohm-maidenhead` | BSD-2-Clause | compatible; map tiles need the network, so link only |
+| Leaflet.Maidenhead (HA8TKS) | `50ohm-maidenhead` | not checked | linked only, no copy |
+| Marp runtime / Uncover theme | `spl-radio-security-slides` | MIT | compatible |
+| Twemoji graphics | `spl-radio-security-slides` | CC BY 4.0 | attribution needed; or drop emoji (ossimulator's glyph rule forbids them anyway) |
+| Lucide icons | `spl-radio-security-page` | ISC | compatible; pin and vendor instead of `@latest` |
+| Google Fonts used by 11 labs | §2.1 | mostly OFL-1.1 | replace with the kit's local fonts on import |
+| Atkinson Hyperlegible, JetBrains Mono (ossimulator) | candidate kit fonts | OFL-1.1 | compatible as fonts; ship the licence file |
+| `assets/*.png` in single-page-labs | `spl-radio-security-page` | unknown (likely AI-generated) | flag `asset_review: true`; replace before a public release |
+| HAKOM / ETSI allocation data | `spl-rf-bandplan` | public regulation | facts, not copyrightable as such; cite the source |
+| RFCs | protocol pages | IETF Trust (text), BSD (code components) | cite, don't copy text verbatim at length |
+| Lora-Wideband-Decoder | idea for `ham-lora-css` | PolyForm Noncommercial 1.0.0 | **incompatible**; no code |
+| cityfps mapgen lab | not used | AGPL-3.0 | not needed |
+| intercept | idea for `ham-adsb-frame` | Apache-2.0 | compatible with GPLv3, but nothing to copy |
+| SigDigger | idea for `ham-fsk-psk-ask` | LGPL-3 (LICENSE file) | compatible, nothing to copy |
+| Packet Tracer / GNS3 files | presets only | Cisco/GNS3 terms | use as topology references, don't ship `.pkt` |
+
+No external simulator code is proposed for copying. Every new entry in §4 is written fresh.
+
+---
+
+## 7. What this implies for the site frame and the UI kit
+
+Requirements only; the frame and kit threads design them.
+
+### 7.1 For the site frame (index, grouping, manifest)
+
+- **Grouping axes the catalogue needs:** `area` (the §4 sections: networking, internet, security, Linux,
+  Windows, storage/DR, HA, performance, architecture, radio, reference) **and** `courses` (a list: one
+  simulator serves several courses, e.g. `inet-dns-ttl-cache` is UL and DR). Neither alone works.
+- **Further tags that recur:** OSI `layer` (1–7) for networking; `os` (linux, windows, agnostic) so the
+  Windows/Linux preset pairs (§5.14–5.16) can be found together; `protocol` (tcp, dns, dhcp, kerberos…).
+- **Fields beyond the design-notes sketch** (playbook §10.6 already adds `class`, `steps`, `scenario`):
+  - `presets`: several index entries pointing at one page with different presets, as with ossimulator
+    scenarios. §5 relies on this heavily, so native pages need deep links to a preset, not only linked
+    ossimulator entries.
+  - `source` / `attribution`: for CC BY imports (50ohm) the attribution must be shown on the page and the
+    course list.
+  - `audience`: `student` or `instructor`. The DR estate map is an answer key and must never reach a
+    course page; `tool` covers classroom tools but not instructor-only material.
+  - `requires_network`: for linked entries that only work online (50ohm maps).
+  - `status`: planned / building / ready, so the catalogue can live in the manifest and the index shows
+    planned entries to the lecturer only.
+  - `related`: for the capstone links and the overlap clusters in §5.
+- **Scale:** about 260 planned new entries, 88 adopted, about 60 ossimulator scenario entries. The
+  index has to search and filter well beyond the proposal's "≥ 25 native" at this size.
+- **Planning data stays outside the manifest:** Pri and Int belong to this catalogue (or a planning file),
+  not to the student-facing manifest.
+
+### 7.2 For the UI kit (controls and views many simulators need)
+
+Counted over the §4 entries; the first four cover most of the build list.
+
+| Shared view or control | Needed by (examples) | Rough count |
+|---|---|---|
+| **Message sequence chart** (lanes per party, arrows per step, an "attacker sees" overlay) | WPA, DHCP, DNS, TLS, Kerberos, TCP, SMTP, OAuth, NTP, SSH, 802.1X | ~45 |
+| **Topology with moving packets** (nodes, links, a packet per step, link failure) | ARP, hop rewrite, STP, routing protocols, VRRP, quorum, BGP, anycast | ~40 |
+| **Block grid** (cells for blocks/chunks/extents, colour + pattern for state) | dedup, backups, backing chains, snapshots, thin pools, RAID, SSD, CoW | ~25 |
+| **Rule or table view with the matching row highlighted** | first match, MAC/ARP/routing/NAT tables, GPO, NTFS ACEs, PAM, DNS records | ~30 |
+| **Decision path** (a short flowchart lit up step by step) | SELinux, netfilter, SPF/DKIM/DMARC, access decision, boot chain | ~15 |
+| **Bit / field strip** (header fields, permission bits, address bits) | IPv4 header, permissions, subnet, IEEE 754, frames | ~12 |
+| **Time axis** (events over time, TTLs and timers running out) | TTL cache, leases, cert expiry, retention, RPO/RTO, alert states | ~20 |
+| **Small live chart** (one or two lines, updating with parameters) | TCP cwnd, queueing, tail latency, retry storm, error budget | ~15 |
+| **Side-by-side compare** (two variants stepped in lockstep) | TLS 1.2 vs 1.3, fixed vs CDC chunks, TCP vs UDP, diff vs incr | ~25 |
+| **Preset picker with deep link** (`?preset=`) | every page in §5's clusters | most |
+| **Seeded randomness and "new topology"** | CSMA, mesh, retries, random workloads | ~15 |
+| **Sliders and toggles with projector-sized labels** | every `expl` page | ~70 |
+
+Other requirements:
+
+- **Step counts.** Message sequences run 4–20 steps, which suits a 3–5 minute demo. Capstones
+  (`net-packet-journey`) will exceed that and need a declared exception or chapters.
+- **English and Croatian everywhere (owner decision).** Every native simulator and every site page
+  (index, course pages) works in both languages. What this asks of the kit and the frame:
+  - **A language switch** on every page, remembered across pages, with a `?lang=hr|en` deep link so a
+    course page in one language opens the simulators in the same language.
+  - **All visible text in string tables** (`hr`, `en`) next to the page, never hard-coded in the markup or
+    the logic. Event codes stay language-neutral, as in ossimulator's `<area>.<kebab>` codes, so tests
+    never depend on wording.
+  - **Glossary as a component.** Croatian text keeps ossimulator's rule (English term in italics,
+    Croatian in parentheses at first mention). A shared glossary file serves both languages, so a term is
+    translated once for all simulators.
+  - **The contract check** fails a native page that lacks a string in either language, the same way it
+    fails an undefined colour token.
+  - **Layout headroom.** Croatian labels run longer than English ones; the 1920×1080 no-scroll rule must be
+    checked in both languages.
+  - **Manifest:** `title` and `summary` per language (`{hr, en}`), replacing the single `lang` field of the
+    design notes. Course files pick a language; the course page is generated in it.
+  - **Linked entries** declare which languages they have, so the index can mark an hr-only or en-only
+    linked app instead of pretending it is bilingual.
+- **Attribution footer** for CC BY imports, in both languages.
