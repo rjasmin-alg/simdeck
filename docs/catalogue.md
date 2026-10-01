@@ -3,8 +3,8 @@
 What simdeck should contain: what already exists and needs adopting, what to build next and in which
 order, and the full pool of ideas behind both. Research and writing only; no simulator code.
 
-Written 2026-10-01 from a survey of `~/projects` (sources cited per entry) and from the course material
-found there. Sections:
+Written 2026-10-01 from a survey of `~/projects` (sources cited per entry), the course material found
+there, and the owner's answers (Windows courses, licence, languages). Sections:
 
 1. [How to read and rank this catalogue](#1-how-to-read-and-rank-this-catalogue)
 2. [Adoption list: what exists and needs adopting](#2-adoption-list-what-exists-and-needs-adopting)
@@ -41,7 +41,7 @@ group by interest, area or course, and export the ratings to merge back into thi
 | Pri | Meaning |
 |---|---|
 | `B1` | First batch, fixed by the proposal |
-| `P1` | Batch 2: must-have, build right after the first batch (about 20, the "next two weeks" list) |
+| `P1` | Strongest candidates for the next batch (the batch itself is decided later) |
 | `P2` | Must-have this semester |
 | `P3` | Nice to have |
 
@@ -58,7 +58,8 @@ live parameters), `ref` (reference poster, no controls), `tool` (lecturer only, 
 | `URM` | Uvod u računalne mreže (intro to computer networks, 1st year) | `uvod-u-racunalne-mreze/`, `urm-sveucilisni-udzbenik/` |
 | `UL` | Uvod u Linux | `uvod-u-linux/` (syllabus outcomes in `inputs/outcomes.md`) |
 | `NLA` | Napredna Linux administracija | `napredna-linux-administracija/meta/toc.md` (topics T01–T60, no chapters yet) |
-| `WIN` | Windows / Active Directory administration | **assumed**: no Windows course material was found; see report |
+| `WIN1` | Windows administration, basic | owner, 2026-10-01; starting scope AD, GPO, IPAM, DNS, DHCP, WSUS; no material in `~/projects` |
+| `WIN2` | Windows administration, advanced | as `WIN1` |
 | `OS` | Operacijski sustavi | `ossimulator/` |
 | `DR` | Optimisation and disaster recovery | `dr-lecture-estate/` |
 | `SEC` | Security topics (URM ch18, NLA §8, radio security) | spread over several courses, not a course of its own |
@@ -100,10 +101,12 @@ adopted page carries a translation task on top of the kit adaptation. Today's st
 | ossimulator (linked) | hr only, English terms in italics | linked entries are exempt from the contract, but a Croatian-only page breaks "the entire site". Either ossimulator gains an English UI (its glossary `docs/POJMOVNIK.md` already pairs every term) or the index marks it hr-only → report |
 | cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate (linked) | en | same question: Croatian UI, or marked en-only → report |
 
-**Licences of own work.** None of your own repos has a LICENSE file: ossimulator (`"private": true`),
-single-page-labs, cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate, the books. Linking needs
-no licence. Copying into simdeck relicenses that code under the GPL, which only you can do; the report asks
-you to confirm it once for all of your own repos.
+**Licence: AGPL-3.0-or-later** (owner, 2026-10-01) for simdeck and for your own code copied into it.
+None of your own repos has a LICENSE file today: ossimulator (`"private": true`), single-page-labs,
+cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate, the books. Copying from them puts the copy
+under AGPL-3.0-or-later. Linked entries need no licence, but giving each source repo its own AGPL LICENSE
+file keeps the originals open too; that is a change in each of those repos, outside this thread. What AGPL
+means for the pages is in §6.
 
 ### 2.1 single-page-labs → import (23 labs)
 
@@ -220,8 +223,9 @@ Not adopted: `legacy/ugnijezdeni-prekidi.html` (superseded by `interrupts`).
 ### 2.5 50ohm applets → port or link (32 applets, CC BY 4.0)
 
 `~/projects/50ohm-contents-hr/contents/html/` (Croatian translation of DARC's 50ohm.de; German original in
-`50ohm-contents-dl/`). The content licence is **CC BY 4.0** (`LICENSE`, identical in both repos), which the
-FSF lists as compatible with GPLv3. Attribution is required: "50ohm.de-Autorenteam, AJW-Referat des
+`50ohm-contents-dl/`). The content licence is **CC BY 4.0** (`LICENSE`, identical in both repos). Its only
+condition is attribution, which the GPLv3 and AGPLv3 both allow (§7(b) of each), so CC BY 4.0 material
+can go into an AGPL page. Attribution is required: "50ohm.de-Autorenteam, AJW-Referat des
 DARC e.V.", plus a note of changes. Before copying, check that every applet's code is covered by the repo
 licence, as no applet carries its own notice. Ten applets load libraries from `50ohm.de` (jQuery 3.7.1 MIT,
 Chart.js 4.4.1 MIT, three.js MIT, Leaflet BSD-2, Leaflet.Maidenhead by HA8TKS, licence unchecked); port
@@ -290,8 +294,8 @@ geneologija, starenovine, deepdig, cityfps (AGPL mapgen lab), shellpath (no code
 
 ## 3. Build list: what we work on, in order
 
-New native simulators only (adoption is §2). Ordered by Pri, then by a dependency or teaching order
-within the batch. Re-rank by filling in Int; the ranking page does the sorting.
+New native simulators only (adoption is §2). Batch 1 is fixed; everything after it waits for your
+ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 ### 3.1 Batch 1, fixed by the proposal (M3)
 
@@ -303,40 +307,45 @@ within the batch. Re-rank by filling in Int; the ranking page does the sorting.
 | 4 | `ha-multimaster-conflict` | Multi-master replication with a conflict | M | first sequence-over-time page |
 | 5 | `net-wpa-handshake` | WPA2/WPA3 handshake and what an attacker sees | M | first message-sequence page; the kit's sequence chart is born here |
 
-### 3.2 Batch 2 (P1): the proposed "next two weeks" list
+### 3.2 Candidates for the next batch (P1, not decided)
 
-Weighted towards the areas you named (networking, Linux, Windows, internet, basic protocols). Each is S
-or M and reuses one of the kit's shared views (§7.2). 22 entries:
+The batch is decided after the list is complete and rated (owner, 2026-10-01). These are the entries
+marked P1, weighted towards networking, Linux, Windows, internet and basic protocols; each is S or M and
+reuses one of the kit's shared views (§7.2). 26 entries:
 
-| # | ID | Title | Size | Shared view |
+| # | ID | Title | Size | Courses |
 |---|---|---|---|---|
-| 1 | `net-encapsulation` | Encapsulation and decapsulation through the stack | S | layer stack |
-| 2 | `net-arp-local-remote` | Local or remote? The mask decision, then ARP | S | topology + table |
-| 3 | `net-hop-rewrite` | What changes at each hop | S | topology + header strip |
-| 4 | `net-stp` | Spanning tree: root election and the blocked port | M | topology |
-| 5 | `net-dhcp-dora` | DHCP DORA, lease and renewal | S | sequence chart |
-| 6 | `net-syn-outcomes` | Open, closed, filtered: three answers to a SYN | S | sequence chart |
-| 7 | `net-tcp-congestion` | TCP congestion control: slow start, AIMD, loss | M | chart |
-| 8 | `net-rule-first-match` | First match wins: ACL, firewall and pg_hba rule lists | S | rule table |
-| 9 | `inet-dns-resolution` | Recursive and iterative DNS resolution | M | sequence chart + topology |
-| 10 | `inet-dns-ttl-cache` | TTL caching and the DNS cutover | S | timeline |
-| 11 | `inet-tls-handshake` | TLS 1.2 vs 1.3 handshake | M | sequence chart |
-| 12 | `inet-cert-chain` | Certificate chain of trust and expiry | S | chain view |
-| 13 | `inet-email-auth` | SPF, DKIM and DMARC deciding one message | M | decision path |
-| 14 | `lnx-pipes-redirection` | Pipes and the three streams | S | stream diagram |
-| 15 | `lnx-permissions-rwx` | Permission bits, octal and umask | S | bit strip |
-| 16 | `lnx-selinux-decision` | DAC says yes, SELinux says no | S | decision path |
-| 17 | `lnx-netfilter-path` | A packet through the netfilter hooks (nftables) | M | decision path |
-| 18 | `lnx-overlayfs-layers` | Container image layers and copy-up | S | block/layer stack |
-| 19 | `win-kerberos` | Kerberos: AS, TGS and AP exchanges | M | sequence chart |
-| 20 | `win-gpo-precedence` | GPO precedence: LSDOU, enforced, blocked | M | layer stack |
-| 21 | `win-ntfs-share-effective` | Effective access: NTFS plus share permissions | S | rule table |
-| 22 | `ha-quorum-split-brain` | Quorum, partition and split-brain | S | topology |
+| 1 | `net-encapsulation` | Encapsulation and decapsulation | S | URM |
+| 2 | `net-stp` | Spanning tree | M | URM, NLA |
+| 3 | `net-arp-local-remote` | Local or remote, then ARP | S | URM |
+| 4 | `net-hop-rewrite` | What changes at each hop | S | URM |
+| 5 | `net-dhcp-dora` | DHCP DORA and the lease | S | URM, UL, WIN1 |
+| 6 | `net-rule-first-match` | First match wins | S | URM, UL, NLA |
+| 7 | `net-tcp-congestion` | TCP congestion control | M | URM, NLA |
+| 8 | `net-syn-outcomes` | Open, closed, filtered | S | URM, SEC |
+| 9 | `inet-dns-resolution` | Recursive and iterative resolution | M | URM, UL, WIN1 |
+| 10 | `inet-dns-ttl-cache` | TTL caching and the cutover | S | UL, DR |
+| 11 | `inet-tls-handshake` | TLS 1.2 vs 1.3 | M | UL, URM, SEC |
+| 12 | `inet-cert-chain` | Chain of trust and expiry | S | UL, DR |
+| 13 | `inet-email-auth` | SPF, DKIM and DMARC | M | UL, SEC |
+| 14 | `lnx-pipes-redirection` | Pipes and the three streams | S | UL |
+| 15 | `lnx-permissions-rwx` | Permission bits, octal, umask | S | UL |
+| 16 | `lnx-selinux-decision` | DAC says yes, SELinux says no | S | UL |
+| 17 | `lnx-overlayfs-layers` | Image layers and copy-up | S | NLA |
+| 18 | `lnx-netfilter-path` | A packet through netfilter | M | NLA |
+| 19 | `win-group-scopes` | Group scopes and AGDLP | S | WIN1 |
+| 20 | `win-kerberos` | Kerberos | M | WIN2, NLA |
+| 21 | `win-gpo-precedence` | GPO precedence | M | WIN1 |
+| 22 | `win-dns-scavenging` | Aging and scavenging | S | WIN2 |
+| 23 | `win-dhcp-scope-options` | Scopes, reservations and option precedence | S | WIN1 |
+| 24 | `win-wsus-flow` | How an update reaches a client | M | WIN1 |
+| 25 | `win-ntfs-share-effective` | Effective access: NTFS plus share | S | WIN1 |
+| 26 | `ha-quorum-split-brain` | Quorum and split-brain | S | NLA, DR, WIN2 |
 
 ### 3.3 Backlog
 
-Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have). §4 holds 259 new ideas:
-5 B1, 22 P1, 127 P2 and 105 P3. By area: Linux 55, networking basics 52, Windows 31, internet 30,
+Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have). §4 holds 301 new ideas:
+5 B1, 26 P1, 152 P2 and 118 P3. By area: Windows 73, Linux 55, networking basics 52, internet 30,
 storage/DR 22, security 17, radio 17, HA 11, performance 10, architecture 8, reference/tools 6.
 
 Adoption (§2) holds 88 entries: 20 imports, 14 URM ports, 17 ossimulator pages (about 60 index entries
@@ -382,9 +391,9 @@ decides the final grouping axes (§7.1).
 | `net-ipv6-slaac` | IPv6 SLAAC | RS/RA, prefix + interface ID, DAD | step a host joining a link | step | M | P2 | URM | URM ch10 | |
 | `net-ipv6-ndp` | NDP instead of ARP | neighbour solicitation to the solicited-node multicast | step an IPv6 neighbour lookup next to ARP | step | S | P2 | URM | URM ch10; pairs with `net-arp-local-remote` | |
 | `net-ipv6-address-types` | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | ref | S | P3 | URM | URM ch10 | |
-| `net-dhcp-dora` | DHCP DORA and the lease | discover/offer/request/ack, T1/T2 renewal, expiry | step a client, let time run, unplug the server | step | S | P1 | URM, UL | URM card ch14 (DORA), UL ch18 | |
-| `net-dhcp-relay` | DHCP relay and giaddr | a relay forwards broadcasts as unicast and tags the subnet | step a client on a remote subnet | step | S | P2 | URM | URM card ch14 (relay) | |
-| `net-dhcp-rogue` | Rogue DHCP and snooping | the first offer wins, so a rogue server takes over | add a rogue server, then trust ports | step | S | P3 | URM, SEC | URM ch18 | |
+| `net-dhcp-dora` | DHCP DORA and the lease | discover/offer/request/ack, T1/T2 renewal, expiry | step a client, let time run, unplug the server | step | S | P1 | URM, UL, WIN1 | URM card ch14 (DORA), UL ch18 | |
+| `net-dhcp-relay` | DHCP relay and giaddr | a relay forwards broadcasts as unicast and tags the subnet | step a client on a remote subnet | step | S | P2 | URM, WIN1 | URM card ch14 (relay) | |
+| `net-dhcp-rogue` | Rogue DHCP and snooping | the first offer wins, so a rogue server takes over | add a rogue server, then trust ports | step | S | P3 | URM, SEC, WIN1 | URM ch18 | |
 | `net-rule-first-match` | First match wins | rule lists are evaluated top down, the first match decides, implicit deny | send packets/requests through presets: router ACL, stateless firewall, `pg_hba.conf` | step | S | P1 | URM, UL, NLA | UL ch22 (pg_hba first match) → §5.1 | |
 | `net-port-forwarding` | Port forwarding (DNAT) | inbound connections to a NAT'd server | add a forward, open from outside | step | S | P2 | URM | extends `urm-pat` → §5.12 | |
 | `net-cgnat` | Carrier-grade NAT | double NAT, shared address space, why port forwarding fails | step a connection through two NATs | step | S | P3 | URM | URM ch11 | |
@@ -411,9 +420,9 @@ decides the final grouping axes (§7.1).
 
 | ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|
-| `inet-dns-resolution` | Recursive and iterative resolution | resolver asks root, TLD and authoritative servers; the client asks once | step a lookup; repeat it warm | step | M | P1 | URM, UL | UL ch19, URM card ch14 (DNS query path) → §5.4 | |
+| `inet-dns-resolution` | Recursive and iterative resolution | resolver asks root, TLD and authoritative servers; the client asks once | step a lookup; repeat it warm | step | M | P1 | URM, UL, WIN1 | UL ch19, URM card ch14 (DNS query path) → §5.4 | |
 | `inet-dns-ttl-cache` | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2, DR S6 → §5.4 | |
-| `inet-dns-records` | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM | UL ch19 | |
+| `inet-dns-records` | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM, WIN1 | UL ch19 | |
 | `inet-dns-secondary-expiry` | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR caveat CV-02 → §5.4 | |
 | `inet-dns-split-brain` | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 | |
 | `inet-dnssec-chain` | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC | | |
@@ -462,7 +471,7 @@ decides the final grouping axes (§7.1).
 | `sec-pki-revocation` | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 | |
 | `sec-wireguard` | WireGuard | handshake, cryptokey routing, roaming | step a handshake; move a peer | step | M | P2 | NLA, SEC | NLA T09 → §5.9 | |
 | `sec-ipsec-ike` | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 | |
-| `sec-lateral-movement` | Lateral movement and tiering | one admin login on a workstation exposes the domain | follow credentials hop to hop; apply tiering | step | M | P2 | WIN, SEC | → §4.5 | |
+| `sec-lateral-movement` | Lateral movement and tiering | one admin login on a workstation exposes the domain | follow credentials hop to hop; apply tiering | step | M | P2 | WIN2, SEC | → §4.5 | |
 
 ### 4.4 Linux
 
@@ -526,44 +535,121 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-pam-stack` | The PAM stack | required/requisite/sufficient/optional decide a login | reorder modules, fail some, log in | step | S | P2 | NLA | NLA T58 → §5.1 | |
 | `lnx-hypervisor-types` | Type 1 vs type 2, containers vs VMs | where the kernel and the hypervisor sit | compare stacks, click layers | ref | S | P3 | NLA | NLA T01, T07 | |
 
-### 4.5 Windows and Active Directory
+### 4.5 Windows administration
 
-No Windows course material was found; these are proposed from the areas you named and from the AD content
-in topologydrafter's samples and the DR estate (see report).
+Two courses: Windows administration basic (`WIN1`) and advanced (`WIN2`). Their starting scope is AD,
+GPO, IPAM, DNS, DHCP and WSUS (owner, 2026-10-01). No course material was found in `~/projects`, so the
+split between the courses is my proposal. The generic protocol pages (`net-dhcp-dora`, `net-dhcp-relay`,
+`inet-dns-resolution`, `inet-dns-records`) also serve `WIN1`, and the Windows pages here link to them
+instead of repeating them.
+
+#### 4.5.1 Active Directory
 
 | ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|
-| `win-domain-logon` | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when the DC is gone | log in on site, at a branch, offline | step | M | P2 | WIN | `link-topologydrafter` two-sites | |
-| `win-kerberos` | Kerberos | AS → TGT, TGS → service ticket, AP; clock skew breaks it | step a user opening a file share; skew the clock | step | M | P1 | WIN, NLA | NLA T57 → §5.6 | |
-| `win-ntlm-vs-kerberos` | NTLM vs Kerberos | challenge-response vs tickets; why pass-the-hash works on NTLM | authenticate both ways, capture the hash | step | S | P2 | WIN, SEC | | |
-| `win-ad-replication` | AD multi-master replication | USNs, up-to-dateness vector, attribute-level last writer wins | change one attribute on two DCs at once | step | M | P2 | WIN | → §5.7 (`ha-multimaster-conflict`) | |
-| `win-ad-sites` | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule | add sites and links, change a password, wait | expl | M | P2 | WIN | `link-topologydrafter` two-sites | |
-| `win-rodc` | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN, SEC | `link-topologydrafter` two-sites | |
-| `win-fsmo-roles` | FSMO roles | the single-master jobs and what breaks when a holder is gone | turn off role holders, try operations | step | S | P3 | WIN | | |
-| `win-gpo-precedence` | GPO precedence | local → site → domain → OU, enforced, block inheritance, security filtering | link GPOs, toggle flags, see the winning setting | step | M | P1 | WIN | | |
-| `win-gpo-loopback` | Loopback processing | user policy from the computer's OU, replace vs merge | log users into a kiosk OU | step | S | P3 | WIN | extends `win-gpo-precedence` | |
-| `win-ntfs-share-effective` | Effective access: NTFS plus share | most restrictive of the two wins; deny beats allow; groups add up | set ACEs on share and folder, test users locally and over the network | expl | S | P1 | WIN | → §5.1 | |
-| `win-ntfs-inheritance` | NTFS inheritance | inherited vs explicit ACEs, disabling inheritance, move vs copy | build a folder tree, move files around | step | S | P2 | WIN | | |
-| `win-access-token` | The access token | SIDs and groups are fixed at logon; why you log off after a group change | add a user to a group, test before and after logon | step | S | P2 | WIN | | |
-| `win-uac` | UAC and the split token | admins run with a filtered token until elevated | run tasks as admin with and without elevation | step | S | P2 | WIN, SEC | | |
-| `win-ad-recycle-bin` | Deleted objects: tombstone and recycle bin | tombstone lifetime, recycle bin, authoritative restore | mass-delete an OU, then recover | step | S | P2 | WIN, DR | DR S15 | |
-| `win-ad-dns` | AD-integrated DNS | dynamic updates, replication with AD, scavenging stale records | join, move and remove machines over time | step | S | P2 | WIN | → §5.4 | |
-| `win-dhcp-failover` | DHCP failover | load-balance vs hot standby, MCLT | fail a server, renew leases | step | S | P3 | WIN | → `net-dhcp-dora` | |
-| `win-dfs` | DFS namespace and replication | referrals to the nearest target; DFS-R conflicts | open a share from two sites; edit on both | step | M | P3 | WIN | | |
-| `win-smb-session` | An SMB session | negotiate, session setup, tree connect, signing | connect with different SMB versions | step | S | P3 | WIN | | |
-| `win-boot` | Windows boot chain | UEFI → Boot Manager → winload → kernel → smss → winlogon | step a boot; break the BCD | step | S | P2 | WIN | → §5.15 | |
-| `win-services` | Services and dependencies | start types, dependencies, delayed start, recovery actions | configure services, boot, fail one | expl | S | P3 | WIN | → §5.15 | |
-| `win-registry` | The registry | hives, HKLM vs HKCU, where policy writes | browse hives, apply a policy, find the key | ref | S | P3 | WIN | | |
-| `win-vss` | Volume Shadow Copy | copy-on-write snapshots behind "Previous Versions" | write files, take shadows, restore | step | S | P2 | WIN | → §5.2 | |
-| `win-hyperv-checkpoints` | Hyper-V checkpoints | AVHDX chain, merge on delete | take checkpoints, delete the middle one | step | S | P3 | WIN | → §5.2 (`sto-backing-chains` preset) | |
-| `win-failover-cluster` | Failover cluster quorum | node majority, disk and file-share witness | fail nodes and the witness | step | S | P2 | WIN | → §5.7 (`ha-quorum-split-brain` preset) | |
-| `win-storage-spaces` | Storage Spaces | mirror vs parity, columns, how many disks you can lose | build a pool, fail disks | expl | S | P3 | WIN | | |
-| `win-bitlocker-tpm` | BitLocker and the TPM | PCR measurements; what triggers the recovery key | change firmware/boot settings, reboot | step | S | P3 | WIN, SEC | | |
-| `win-laps` | LAPS | unique rotated local admin passwords stop lateral movement | compromise one machine with and without LAPS | step | S | P3 | WIN, SEC | → `sec-lateral-movement` | |
-| `win-powershell-objects` | PowerShell pipes objects, bash pipes text | the same task in both pipelines | step each stage, inspect what flows | step | S | P2 | WIN, UL | → §5.14 | |
-| `win-firewall-profiles` | Windows Firewall profiles | domain/private/public profile selection by network | move a laptop between networks | step | S | P3 | WIN | → §5.16 | |
-| `win-ntfs-mft` | NTFS MFT | MFT records, resident vs non-resident data, alternate data streams | create small and large files, add an ADS | ref | S | P3 | WIN | | |
-| `win-update-rings` | Update rings and WSUS | approval, deferral, rings; a bad patch stopped at ring 1 | release patches through rings | step | S | P3 | WIN | | |
+| `win-ad-structure` | Forest, tree, domain, OU | the logical structure of AD and what each boundary is for (security, replication, policy) | click through a sample forest, place objects | ref | S | P2 | WIN1 | `link-topologydrafter` two-sites | |
+| `win-ou-vs-group` | OU or group? | OUs carry policy and delegation, groups carry permissions; one object, one OU, many groups | sort tasks into "OU" or "group", see why | step | S | P2 | WIN1 | → §5.21 | |
+| `win-group-scopes` | Group scopes and AGDLP | domain local, global, universal: who can be a member, where they can be used; AGDLP nesting | build the nesting for a file share, test a user | expl | S | P1 | WIN1 | | |
+| `win-dc-promotion` | What promoting a DC does | AD DS, the DNS zone and SRV records, SYSVOL, the first replication | step a server becoming the first DC, then a second | step | S | P2 | WIN1 | → §5.21 | |
+| `win-domain-join` | Joining a domain | DNS SRV lookup, computer account, secure channel; a broken secure channel after a snapshot revert | join a client, revert it, try to log in | step | S | P2 | WIN1 | | |
+| `win-domain-logon` | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when no DC answers | log in on site, at a branch, offline | step | M | P2 | WIN1 | `link-topologydrafter` two-sites | |
+| `win-account-lockout` | Account lockout | threshold, bad-password count checked at the PDC emulator, a stale password locking an account | mistype passwords from two machines, keep an old session | step | S | P3 | WIN1 | | |
+| `win-kerberos` | Kerberos | AS → TGT, TGS → service ticket, AP; clock skew breaks it | step a user opening a file share; skew the clock | step | M | P1 | WIN2, NLA | NLA T57 → §5.6 | |
+| `win-ntlm-vs-kerberos` | NTLM vs Kerberos | challenge-response vs tickets; when Windows falls back to NTLM; why pass-the-hash works | authenticate by name and by IP, capture the hash | step | S | P2 | WIN2, SEC | | |
+| `win-time-hierarchy` | Time in a domain | the PDC emulator is the source, members follow DCs, Kerberos fails past 5 minutes | drift clocks, move the PDC role | step | S | P2 | WIN2 | `inet-ntp-sync` → §5.21 | |
+| `win-ad-replication` | AD multi-master replication | USNs, up-to-dateness vector, attribute-level last writer wins | change one attribute on two DCs at once | step | M | P2 | WIN2 | → §5.7 (`ha-multimaster-conflict`) | |
+| `win-ad-sites` | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule; site-aware DC choice | add sites and links, change a password, wait | expl | M | P2 | WIN2 | `link-topologydrafter` two-sites | |
+| `win-sysvol-dfsr` | SYSVOL replication | GPO version in AD vs in SYSVOL; a GPO that half-arrived at a branch | edit a GPO, cut the link to a site | step | S | P2 | WIN2 | → §5.21 | |
+| `win-rodc` | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN2, SEC | `link-topologydrafter` two-sites | |
+| `win-fsmo-roles` | FSMO roles | the single-master jobs and what breaks when a holder is gone; transfer vs seize | turn off role holders, try operations | step | S | P2 | WIN2 | | |
+| `win-functional-levels` | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | ref | S | P3 | WIN2 | | |
+| `win-fgpp` | Password policy and fine-grained policies | one domain policy from the Default Domain Policy GPO; PSOs override it by precedence | apply PSOs to users and groups, see the winner | step | S | P2 | WIN2 | → §5.1 | |
+| `win-delegation` | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 | | |
+| `win-trusts` | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 | | |
+| `win-ad-recycle-bin` | Deleted objects: tombstone and recycle bin | tombstone lifetime, recycle bin, authoritative restore | mass-delete an OU, then recover | step | S | P2 | WIN2, DR | DR S15 | |
+| `win-ad-backup-restore` | Restoring a DC, and USN rollback | non-authoritative vs authoritative restore; reverting a DC snapshot silently breaks replication | restore a DC each way, revert a VM snapshot | step | M | P2 | WIN2, DR | → §5.21 (`sto-backing-chains`) | |
+
+#### 4.5.2 Group Policy
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-gpo-precedence` | GPO precedence | local → site → domain → OU, link order, enforced, block inheritance; the winning setting | link GPOs, toggle flags, see the winning setting | step | M | P1 | WIN1 | | |
+| `win-gpo-processing` | When policy applies | computer at boot, user at logon, background refresh every 90 ± 30 min, `gpupdate`; settings that need a foreground pass | change a GPO, run time, log off and on | step | S | P2 | WIN1 | | |
+| `win-gpo-security-filtering` | Security and WMI filtering | who a GPO applies to; the computer account needs Read too | filter a GPO to a group, add a WMI filter | step | S | P2 | WIN2 | | |
+| `win-gpo-loopback` | Loopback processing | user policy from the computer's OU, replace vs merge | log users into a kiosk OU | step | S | P3 | WIN2 | extends `win-gpo-precedence` | |
+| `win-gpo-tattooing` | Policies vs preferences | a policy reverts when the GPO goes away; a preference stays (tattooing) | apply both kinds, unlink the GPO | step | S | P2 | WIN2 | | |
+| `win-gpo-targeting` | Item-level targeting | one GPO, preferences that apply per group, OS, IP range | target drive maps, move a user | step | S | P3 | WIN2 | extends `win-gpo-tattooing` | |
+| `win-gpo-software-install` | Software installation | assigned vs published, computer vs user, why it needs a reboot or a logon | deploy an MSI each way | step | S | P3 | WIN1 | | |
+| `win-gpo-slow-link` | Slow links | which extensions skip over a slow link, and why a branch behaves differently | change the link speed, refresh | step | S | P3 | WIN2 | | |
+| `win-admx-store` | ADMX and the central store | where templates come from and why editors disagree | edit from two admin machines with and without a central store | ref | S | P3 | WIN2 | | |
+
+#### 4.5.3 DNS on Windows Server
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-dns-zone-types` | Zone types and replication scope | primary, secondary, stub, AD-integrated; forest, domain or custom replication scope | create zones, add DCs, see who holds which | expl | S | P2 | WIN1 | → §5.4 | |
+| `win-dns-srv-records` | What AD puts in DNS | `_ldap._tcp`, `_kerberos._tcp`, `_msdcs`; what breaks when they are missing | delete records, try to join and log in | step | S | P2 | WIN1 | pairs with `win-domain-logon` → §5.21 | |
+| `win-dns-forwarders` | Forwarders, conditional forwarders, root hints | where a DC sends names it doesn't own | resolve internal, partner and internet names | step | S | P2 | WIN1 | preset of `inet-dns-resolution` → §5.4 | |
+| `win-dns-client-order` | How a Windows client resolves a name | hosts file, cache, DNS with suffix search, then LLMNR/NetBIOS; why a short name goes wrong | resolve short and full names with different settings | step | S | P2 | WIN1 | | |
+| `win-dns-dynamic-update` | Secure dynamic updates | clients register their own records; record ownership and why a renamed machine can't update | join, rename, move machines | step | S | P2 | WIN1 | → §5.21 | |
+| `win-dns-scavenging` | Aging and scavenging | timestamps, no-refresh and refresh intervals, which stale records disappear and when | run months of client activity, enable scavenging | step | S | P1 | WIN2 | → §5.21 | |
+| `win-dns-policies` | DNS policies and zone scopes | split-horizon answers by client subnet | query from inside and outside | step | S | P3 | WIN2 | | |
+
+#### 4.5.4 DHCP on Windows Server
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-dhcp-scope-options` | Scopes, reservations and option precedence | exclusions, reservations; server, scope, class and reservation options, the most specific wins | set options at each level, renew a client | expl | S | P1 | WIN1 | builds on `net-dhcp-dora` → §5.1 | |
+| `win-dhcp-authorization` | Authorizing a DHCP server | an unauthorized Windows server stays silent; rogue servers that aren't Windows don't | add servers with and without authorization | step | S | P3 | WIN1 | → `net-dhcp-rogue` | |
+| `win-dhcp-dns-update` | DHCP updating DNS for clients | the server registers records, name protection, DnsUpdateProxy | renew leases for old and new clients | step | S | P2 | WIN2 | → §5.21 | |
+| `win-dhcp-failover` | DHCP failover | load balance vs hot standby, MCLT, partner down; the old 80/20 split scope | fail a server, renew leases | step | S | P2 | WIN2 | | |
+| `win-dhcp-policies` | Policy-based assignment | addresses and options by vendor class, MAC or user class | connect phones and laptops | step | S | P3 | WIN2 | | |
+| `win-dhcp-superscope` | Superscopes | several logical subnets on one segment | grow a scope past its subnet | step | S | P3 | WIN2 | | |
+
+#### 4.5.5 IPAM
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-ipam-address-plan` | Planning the address space | blocks → ranges → addresses for sites and VLANs, with room to grow | allocate a block to sites, run out, re-plan | expl | S | P2 | WIN1, URM | `urm-vlsm` → §5.21 | |
+| `win-ipam-discovery` | IPAM discovery and provisioning | IPAM finds DHCP, DNS and DC servers and gets access through GPO | add servers, provision access, see what IPAM sees | step | S | P3 | WIN2 | | |
+| `win-ipam-utilisation` | Utilisation and thresholds | scope fill across servers, alerts before a range runs out | let leases grow over a term | expl | S | P2 | WIN2 | | |
+| `win-ipam-audit` | Who had this IP at 14:32? | correlating leases and logon events to find a machine and a user | answer an incident question from the audit trail | step | S | P2 | WIN2, SEC | | |
+| `win-ipam-reconcile` | IPAM vs reality | records drift from the DHCP and DNS servers; stale reservations, overlapping ranges | make changes outside IPAM, reconcile | step | S | P3 | WIN2 | | |
+
+#### 4.5.6 WSUS and updates
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-wsus-flow` | How an update reaches a client | Microsoft Update → upstream WSUS → downstream (replica or autonomous) → client; sync, approval, download | step an update through a two-site hierarchy | step | M | P1 | WIN1 | | |
+| `win-wsus-groups` | Computer groups and approvals | approve per group, deadlines; server-side vs client-side targeting by GPO | approve for test, then production | step | S | P2 | WIN1 | → §5.22 | |
+| `win-wsus-client-cycle` | The client update cycle | detect, download, install, reboot; scan interval, deadlines, active hours | run days of client time with different settings | step | S | P2 | WIN1 | | |
+| `win-wsus-cloned-id` | Clients that never report | cloned images share one SusClientId, so many machines show as one | deploy clones, check reporting, fix the id | step | S | P2 | WIN2 | | |
+| `win-wsus-supersedence` | Superseded updates and cleanup | superseded updates pile up; declining and cleanup keep WSUS alive | run a year of releases with and without cleanup | step | S | P3 | WIN2 | | |
+| `win-wsus-delivery` | Delivering updates over a WAN | express vs full files, BITS, delivery optimization peers at a branch | update a branch over a slow link | expl | S | P3 | WIN2 | | |
+| `win-update-rings` | Update rings | approval rings and deferrals; a bad patch stopped at ring 1 | release patches through rings | step | S | P2 | WIN2 | → §5.22 | |
+
+#### 4.5.7 Files, identity and the rest
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `win-ntfs-share-effective` | Effective access: NTFS plus share | most restrictive of the two wins; deny beats allow; groups add up | set ACEs on share and folder, test users locally and over the network | expl | S | P1 | WIN1 | → §5.1 | |
+| `win-ntfs-inheritance` | NTFS inheritance | inherited vs explicit ACEs, disabling inheritance, move vs copy | build a folder tree, move files around | step | S | P2 | WIN1 | | |
+| `win-access-token` | The access token | SIDs and groups are fixed at logon; why you log off after a group change | add a user to a group, test before and after logon | step | S | P2 | WIN1 | | |
+| `win-uac` | UAC and the split token | admins run with a filtered token until elevated | run tasks as admin with and without elevation | step | S | P2 | WIN1, SEC | | |
+| `win-powershell-objects` | PowerShell pipes objects, bash pipes text | the same task in both pipelines | step each stage, inspect what flows | step | S | P2 | WIN1, UL | → §5.14 | |
+| `win-firewall-profiles` | Windows Firewall profiles | domain/private/public profile selection by network | move a laptop between networks | step | S | P3 | WIN1 | → §5.16 | |
+| `win-boot` | Windows boot chain | UEFI → Boot Manager → winload → kernel → smss → winlogon | step a boot; break the BCD | step | S | P2 | WIN1 | → §5.15 | |
+| `win-services` | Services and dependencies | start types, dependencies, delayed start, recovery actions | configure services, boot, fail one | expl | S | P3 | WIN1 | → §5.15 | |
+| `win-registry` | The registry | hives, HKLM vs HKCU, where policy writes | browse hives, apply a policy, find the key | ref | S | P3 | WIN1 | | |
+| `win-vss` | Volume Shadow Copy | copy-on-write snapshots behind "Previous Versions" | write files, take shadows, restore | step | S | P2 | WIN1 | → §5.2 | |
+| `win-smb-session` | An SMB session | negotiate, session setup, tree connect, signing | connect with different SMB versions | step | S | P3 | WIN2 | | |
+| `win-dfs` | DFS namespace and replication | referrals to the nearest target; DFS-R conflicts | open a share from two sites; edit on both | step | M | P3 | WIN2 | | |
+| `win-hyperv-checkpoints` | Hyper-V checkpoints | AVHDX chain, merge on delete | take checkpoints, delete the middle one | step | S | P3 | WIN2 | → §5.2 (`sto-backing-chains` preset) | |
+| `win-failover-cluster` | Failover cluster quorum | node majority, disk and file-share witness | fail nodes and the witness | step | S | P2 | WIN2 | → §5.7 (`ha-quorum-split-brain` preset) | |
+| `win-storage-spaces` | Storage Spaces | mirror vs parity, columns, how many disks you can lose | build a pool, fail disks | expl | S | P3 | WIN2 | | |
+| `win-bitlocker-tpm` | BitLocker and the TPM | PCR measurements; what triggers the recovery key | change firmware/boot settings, reboot | step | S | P3 | WIN2, SEC | | |
+| `win-laps` | LAPS | unique rotated local admin passwords stop lateral movement | compromise one machine with and without LAPS | step | S | P3 | WIN2, SEC | → `sec-lateral-movement` | |
+| `win-ntfs-mft` | NTFS MFT | MFT records, resident vs non-resident data, alternate data streams | create small and large files, add an ADS | ref | S | P3 | WIN2 | | |
 
 ### 4.6 Storage, backup and disaster recovery
 
@@ -572,7 +658,7 @@ in topologydrafter's samples and the DR estate (see report).
 | `sto-dedup-chunking` | Deduplication: fixed vs content-defined chunks | an inserted byte shifts every fixed chunk; rolling-hash boundaries resynchronise | insert/delete bytes in a file, compare the chunk tables | step | M | B1 | DR, NLA | proposal first batch; NLA T28 → §5.3 | |
 | `sto-dedup-file-funnel` | Finding duplicate files | size → partial hash → full hash, false positives at each stage | run the funnel over a file set | step | S | P3 | DR | filesearcher `idea.md` → §5.3 | |
 | `sto-backup-diff-incr` | Differential vs incremental | what each backup stores, and what a restore needs | change blocks over a week, restore on Thursday | step | S | B1 | DR, UL | proposal first batch; UL ch23 (`lanac-prirasnih-kopija.svg`) → §5.3 | |
-| `sto-backing-chains` | Backing chains (qcow2, VHDX, VMware delta) | reads fall through the chain; commit/merge; a broken link kills children | take snapshots, write, delete or merge one in the middle | step | M | B1 | DR, NLA, WIN | proposal first batch → §5.2 | |
+| `sto-backing-chains` | Backing chains (qcow2, VHDX, VMware delta) | reads fall through the chain; commit/merge; a broken link kills children | take snapshots, write, delete or merge one in the middle | step | M | B1 | DR, NLA, WIN2 | proposal first batch → §5.2 | |
 | `sto-retention-gfs` | Retention: grandfather-father-son | how many copies a schedule keeps and how far back you can go | set daily/weekly/monthly counts, run a year | expl | S | P2 | DR, UL | UL ch23 Example 6 → §5.3 | |
 | `sto-restore-drill` | The backup that lies | backups report OK; only a test restore shows they're empty | run the job for weeks, then restore | step | S | P2 | DR, UL | DR S8, UL ch23 (`provjera-arhive-i-proba-oporavka.svg`) → §5.3 | |
 | `sto-backup-window` | Backup window and offsite seeding | data size vs bandwidth vs window; why the first offsite copy goes by truck | sliders for size, change rate, link speed | expl | S | P2 | DR | NLA T28 | |
@@ -596,8 +682,8 @@ in topologydrafter's samples and the DR estate (see report).
 
 | ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|
-| `ha-multimaster-conflict` | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN | proposal first batch; NLA T55 → §5.7 | |
-| `ha-quorum-split-brain` | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN | NLA T52–53; cephsim MON quorum → §5.7 | |
+| `ha-multimaster-conflict` | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN2 | proposal first batch; NLA T55 → §5.7 | |
+| `ha-quorum-split-brain` | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN2 | NLA T52–53; cephsim MON quorum → §5.7 | |
 | `ha-fencing` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 | |
 | `ha-vrrp-failover` | VRRP / keepalived | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 | |
 | `ha-db-replication` | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 | |
@@ -682,7 +768,7 @@ preset is a scenario, like ossimulator's `?scenario=`), or a clear home with lin
 
 | # | Cluster | Entries | Recommendation |
 |---|---|---|---|
-| 5.1 | **First-match rule evaluation** | `net-rule-first-match`, `urm-firewall`, `lnx-access-decision`, `lnx-netfilter-path`, `lnx-pam-stack`, `win-ntfs-share-effective`, UL ch22 pg_hba | Build one rule-table evaluator with presets: router ACL, stateless firewall, `pg_hba.conf`. Keep netfilter (a path through hooks, not one list), PAM (control flags, not first match) and NTFS (deny wins, not first match) separate, because their rules are different; note the contrast on each page. |
+| 5.1 | **First-match rule evaluation** | `net-rule-first-match`, `urm-firewall`, `lnx-access-decision`, `lnx-netfilter-path`, `lnx-pam-stack`, `win-ntfs-share-effective`, UL ch22 pg_hba | Build one rule-table evaluator with presets: router ACL, stateless firewall, `pg_hba.conf`. Keep netfilter (a path through hooks, not one list), PAM (control flags, not first match), NTFS (deny wins, not first match) and the most-specific-wins rules (`win-dhcp-scope-options`, `win-fgpp`) separate, because their rules are different; note the contrast on each page. |
 | 5.2 | **Snapshots and copy-on-write** | `sto-backing-chains` (B1), `lnx-lvm-snapshot`, `lnx-thin-overcommit`, `lnx-cow-filesystem`, `sto-cow-vs-row`, `win-vss`, `win-hyperv-checkpoints` | `sto-backing-chains` gets presets for qcow2, VHDX/AVHDX (covers `win-hyperv-checkpoints`) and VMware. LVM snapshot fill, thin overcommit and CoW filesystem stay separate pages on the same block-grid view. `sto-cow-vs-row` and `win-vss` can become presets of `lnx-cow-filesystem`. |
 | 5.3 | **Backup, dedup and redundancy** | `sto-backup-diff-incr` (B1), `sto-dedup-chunking` (B1), `sto-dedup-file-funnel`, `sto-retention-gfs`, `sto-restore-drill`, `lnx-send-receive`, `lnx-mirror-not-backup`, `lnx-raid-rebuild`, `lnx-exit-status`, `ossim-raid-cache`, `spl-zfs-btrfs-lab` | Block-level dedup (B1) and file-level dedup (funnel) are different concepts; keep both, link them. `lnx-send-receive` is a preset of `sto-backup-diff-incr`. The restore drill and `lnx-exit-status`'s pipefail case show the same failure (a job that lies); build the restore drill and link the pipefail preset to it. RAID levels live in `ossim-raid-cache`: link it rather than building RAID again; build only `lnx-mirror-not-backup` and `lnx-raid-rebuild`, which it doesn't cover. |
 | 5.4 | **DNS** | `inet-dns-resolution`, `inet-dns-ttl-cache`, `inet-dns-secondary-expiry`, `inet-dns-split-brain`, `win-ad-dns`, DR S6 | Resolution and TTL can share one page with two modes, but each is a full 3–5 minute demo, so keep two pages on one model. Secondary expiry and split-brain are presets of one "zone servers over time" page. |
@@ -702,16 +788,34 @@ preset is a scenario, like ossimulator's `?scenario=`), or a clear home with lin
 | 5.18 | **Imported duplicates** | `lvm-topology-lab` vs `-v2`; three ham-modes pages; `radio-sigurnost-2026` vs `radio-cybersecurity`; `amdahl-simulator` vs `webserver-amdahl` | Import v2 and reference-v2 only. The two radio-security pages carry the same material in two formats: import one (the page has the hr/en toggle, the slides have the arrow keys) and decide which. Webserver Amdahl becomes a preset of Amdahl after import. |
 | 5.19 | **Duplicated across books** | URM and `urm-sveucilisni-udzbenik` share the same 14 interactive pages | Port once; both books link the simdeck copy (→ report). |
 | 5.20 | **Planned twice** | URM's ~40 planned interactive cards (`meta/plan-interaktivne-stranice.md` §6) and §4.1 here | The same concepts are planned in two places. Recommend simdeck builds them and the book embeds or links the simdeck page (→ report). |
+| 5.21 | **Windows infrastructure: AD, DNS and DHCP together** | `win-dc-promotion`, `win-dns-srv-records`, `win-domain-logon`, `win-dns-dynamic-update`, `win-dhcp-dns-update`, `win-dns-scavenging`, `win-sysvol-dfsr`, `win-time-hierarchy`, `win-ad-backup-restore`, `win-ou-vs-group`, `win-ipam-address-plan` | One shared model of a small domain (DCs, DNS zones, DHCP server, clients over time) under all of these, like ossimulator's shared engine. Dynamic update, DHCP-registered records and scavenging are three pages on one record-lifecycle model. SRV records and domain logon are one page in two steps. The time hierarchy links to `inet-ntp-sync` for the protocol. USN rollback is a preset next to `sto-backing-chains` (the same "revert a snapshot" act, a different victim). The address plan reuses `urm-vlsm`'s arithmetic. |
+| 5.22 | **Update approval** | `win-wsus-groups`, `win-update-rings`, `lnx-deploy-strategies` (canary) | Groups with approvals and rings with deferrals are the same staged-rollout idea; one page with two presets. The canary deploy in Linux links to it. |
 
 ---
 
 ## 6. External material and licences
 
-simdeck is GPL-3.0-or-later (assumed). What the catalogue draws on from outside your own work:
+simdeck is **AGPL-3.0-or-later** (owner, 2026-10-01). It is the strongest copyleft in common use and the
+"or later" keeps the upgrade path open. What it means here:
 
-| Material | Used by | Licence | GPL-3.0 note |
+- **Network clause (§13).** Anyone who modifies a simdeck page and serves it to users must offer them the
+  source. simdeck itself should do the same: every page and the index link to the source (a kit
+  requirement, §7.2). While `materijali.online` sits behind basic auth, the link can point to a source
+  archive on the same server, or to a public repo once there is one.
+- **Single-file builds.** The build inlines the kit into each page. If the output is minified, it is no
+  longer the "preferred form for modification", so the source link matters; an unminified build keeps
+  every page its own source.
+- **Text and code together.** AGPL covers the explanations inside the pages too. That is fine for simdeck.
+  Only if you later want others to reuse the prose alone (in slides, say) would a separate CC BY-SA 4.0
+  for docs help; nothing needs it now.
+- **Third-party parts keep their licences.** MIT, BSD, ISC, Apache-2.0, LGPL-3.0, OFL-1.1 and CC BY 4.0
+  material all combine with AGPL-3.0, with their notices kept.
+
+What the catalogue draws on from outside your own work:
+
+| Material | Used by | Licence | AGPL-3.0 note |
 |---|---|---|---|
-| 50ohm.de content and applets (DARC e.V.) | §2.5, seeds in §4.10 | CC BY 4.0 | compatible one way (FSF); keep attribution and a note of changes; check per applet |
+| 50ohm.de content and applets (DARC e.V.) | §2.5, seeds in §4.10 | CC BY 4.0 | compatible; keep attribution and a note of changes; check per applet |
 | 50ohm exam questions | not used | DL-DE-BY 2.0 (Bundesnetzagentur) | don't import |
 | Chart.js 4.4.1 | `spl-multicore-mesi`, 50ohm applets | MIT | compatible; vendor it, pin the version |
 | jQuery 3.7.1, three.js | 50ohm applets | MIT | compatible; vendor |
@@ -726,8 +830,8 @@ simdeck is GPL-3.0-or-later (assumed). What the catalogue draws on from outside 
 | HAKOM / ETSI allocation data | `spl-rf-bandplan` | public regulation | facts, not copyrightable as such; cite the source |
 | RFCs | protocol pages | IETF Trust (text), BSD (code components) | cite, don't copy text verbatim at length |
 | Lora-Wideband-Decoder | idea for `ham-lora-css` | PolyForm Noncommercial 1.0.0 | **incompatible**; no code |
-| cityfps mapgen lab | not used | AGPL-3.0 | not needed |
-| intercept | idea for `ham-adsb-frame` | Apache-2.0 | compatible with GPLv3, but nothing to copy |
+| cityfps mapgen lab | not used | AGPL-3.0 | compatible (same licence), but not needed |
+| intercept | idea for `ham-adsb-frame` | Apache-2.0 | compatible, but nothing to copy |
 | SigDigger | idea for `ham-fsk-psk-ask` | LGPL-3 (LICENSE file) | compatible, nothing to copy |
 | Packet Tracer / GNS3 files | presets only | Cisco/GNS3 terms | use as topology references, don't ship `.pkt` |
 
@@ -758,7 +862,7 @@ Requirements only; the frame and kit threads design them.
   - `status`: planned / building / ready, so the catalogue can live in the manifest and the index shows
     planned entries to the lecturer only.
   - `related`: for the capstone links and the overlap clusters in §5.
-- **Scale:** about 260 planned new entries, 88 adopted, about 60 ossimulator scenario entries. The
+- **Scale:** about 300 planned new entries, 88 adopted, about 60 ossimulator scenario entries. The
   index has to search and filter well beyond the proposal's "≥ 25 native" at this size.
 - **Planning data stays outside the manifest:** Pri and Int belong to this catalogue (or a planning file),
   not to the student-facing manifest.
@@ -805,3 +909,4 @@ Other requirements:
   - **Linked entries** declare which languages they have, so the index can mark an hr-only or en-only
     linked app instead of pretending it is bilingual.
 - **Attribution footer** for CC BY imports, in both languages.
+- **Source link** on every page and on the index (AGPL-3.0 §13, see §6), with the licence name.
