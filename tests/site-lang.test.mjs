@@ -30,6 +30,12 @@ test('home and course pages switch between Croatian and English', { skip }, asyn
     assert.ok(await visible('Računalne mreže'));
     assert.ok(!(await visible('Computer networks')));
     assert.equal(await p.getAttribute('#q', 'placeholder'), 'Traži simulator… ( / )');
+    // A title in two language spans looks like any other title (the list's own span styles must not reach it).
+    const looks = await p.evaluate(() => [...document.querySelectorAll('li[data-s] > a')].map((a) => {
+      const el = a.querySelector('span:not([hidden])') || a;
+      return `${getComputedStyle(el).fontSize} ${getComputedStyle(el).color}`;
+    }));
+    assert.equal(new Set(looks).size, 1, looks.join(' | '));
 
     await p.click('[data-lang-switch]');
     assert.equal(await p.evaluate(() => document.documentElement.lang), 'en');
