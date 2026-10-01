@@ -3,6 +3,7 @@
 const q = document.getElementById('q');
 const fold = (s) => s.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/[̀-ͯ]/g, '');
 function filter() {
+  if (!document.querySelector('li[data-s]')) return; // nothing published yet: the page says so itself
   const words = fold(q.value).split(/\s+/).filter(Boolean);
   let shown = 0;
   for (const li of document.querySelectorAll('li[data-s]')) {

@@ -99,6 +99,18 @@ test('the real repository builds every page, and only finished ones', () => {
   }
 });
 
+test('the real repository also builds with drafts (the admin preview), so every sim page is exercised', () => {
+  const out = join(mkdtempSync(join(tmpdir(), 'simdeck-drafts-')), 'site');
+  try {
+    const r = build({ root: ROOT, out, drafts: true, log: () => {} });
+    assert.ok(r.ok, r.errors.join());
+    assert.ok(r.entries.length > 0);
+    for (const e of r.entries) assert.match(readFileSync(join(out, 'sims', e.id, 'index.html'), 'utf8'), /id="simdeck-meta"/, e.id);
+  } finally {
+    rmSync(dirname(out), { recursive: true, force: true });
+  }
+});
+
 test('never empties a folder simdeck did not build', () => {
   const out = mkdtempSync(join(tmpdir(), 'simdeck-usb-'));
   writeFileSync(join(out, 'my-thesis.pdf'), 'x');

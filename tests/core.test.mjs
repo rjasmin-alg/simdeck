@@ -99,3 +99,14 @@ test('the home list shows finished entries only, by topic, with folded search wo
   assert.match(html, /data-s="[^"]*razlucivanje/, 'diacritics folded in search words');
   assert.equal(isPublic(entries[5]), false);
 });
+
+test('empty states: no finished sims on the home page, none on a course page', () => {
+  const wip = entries.map((x) => ({ ...x, status: 'wip' }));
+  assert.match(renderIndexList({ site, vocab, entries: wip }), /class="empty">Još nema objavljenih simulatora/);
+  const course = { title: 'Linux', sections: [{ title: 'Mreža', sims: ['dns'] }] };
+  const r = renderCourse(course, { site, entries: wip }, 2);
+  assert.match(r.html, /<main><p class="h-empty">Simulatori za ovaj kolegij su u pripremi/);
+  assert.doesNotMatch(r.html, /<h2>/, 'no empty section headings');
+  assert.match(renderCourse(course, { site, entries: wip }, 2, true).html, /sims\/dns\/index.html/, 'drafts preview shows them');
+  assert.match(renderIndexList({ site, vocab, entries: wip }, true), /sims\/dns\/index.html/, 'on the home page too');
+});

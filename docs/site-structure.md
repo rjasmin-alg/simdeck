@@ -187,6 +187,7 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
 - **Tools** are listed under their topic (e.g. "Alati za nastavu"), because the lecturer opens them in
   class. They never appear on course pages.
 - **`wip` sims are not published at all:** no list item and no page.
+- **Nothing finished yet:** the home page says "Još nema objavljenih simulatora." instead of an empty list.
 - No filters, toggles, stored state or data blobs. Those are admin features.
 
 ### 3.2 Course pages: the playlists (`courses/<id>/index.html`)
@@ -221,7 +222,9 @@ The page:
 - shows a language badge on a sim whose language differs from the course's.
 
 Tools and unknown ids in a course file are errors. Unfinished sims give a warning and are left off the
-page until they are `ready`, so a course can list a simulator before it is done.
+page until they are `ready`, so a course can list a simulator before it is done. A course with nothing ready yet
+still gets its page, saying "Simulatori za ovaj kolegij su u pripremi.", so its address works from day one. The admin's
+preview builds with drafts and shows everything.
 
 ## 4. The admin
 

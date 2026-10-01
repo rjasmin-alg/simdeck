@@ -156,15 +156,15 @@ export function build({ root, out, log = console.log, drafts = false }) {
     TITLE: escapeHtml(site.title),
     COURSES: list,
     CSS: read(join(SITE, 'index.css')),
-    LIST: renderIndexList(ctx),
+    LIST: renderIndexList(ctx, drafts),
     SCRIPT: read(join(SITE, 'index.js')),
   }));
 
   // Course pages are static HTML (only a print button): students' browsers just follow links.
   const courseCss = read(join(SITE, 'course.css'));
   for (const c of courses) {
-    const { html, skipped } = renderCourse(c, { ...ctx, entries: all }, 2, drafts);
-    for (const s of skipped) warnings.push(`courses/${c.id}.json: "${s.id}" left off the page (${s.why})`);
+    // Skipped items (unfinished sims) were already reported by validate().
+    const { html } = renderCourse(c, { ...ctx, entries: all }, 2, drafts);
     write(`courses/${c.id}/index.html`, fill(read(join(SITE, 'course.html')), {
       LANG: c.lang ?? site.lang,
       TITLE: escapeHtml(c.title),

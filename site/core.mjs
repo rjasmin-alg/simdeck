@@ -4,6 +4,8 @@
 export const STR = {
   classes: { stepper: 'korak po korak', explorer: 'istraživanje', reference: 'pregled', tool: 'alat' },
   levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
+  noneYet: 'Još nema objavljenih simulatora.',
+  courseEmpty: 'Simulatori za ovaj kolegij su u pripremi.',
 };
 
 export function escapeHtml(s) {
@@ -160,7 +162,7 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
   });
   const short = shortUrl(course, ctx.site);
   const html = `<header><h1>${escapeHtml(course.title)}</h1>${course.term ? `<p class="h-term">${escapeHtml(course.term)}</p>` : ''}${short ? `<p class="h-short">${escapeHtml(short.replace(/^https?:\/\//, ''))}</p>` : ''}${course.intro ? `<p class="h-intro">${escapeHtml(course.intro)}</p>` : ''}</header>
-<main>${sections.join('\n')}</main>
+<main>${n ? sections.join('\n') : `<p class="h-empty">${escapeHtml(STR.courseEmpty)}</p>`}</main>
 <footer><p>${escapeHtml(ctx.site.title)} · ${escapeHtml(short ?? ctx.site.siteUrl ?? '')}</p></footer>`;
   return { html, skipped };
 }
@@ -169,8 +171,9 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
  * The published home page's list: every public entry, grouped by topic, as static HTML. Each item
  * carries its folded search words in data-s for the page's one small filter script.
  */
-export function renderIndexList(ctx) {
-  const list = search(ctx.entries.filter(isPublic), ctx.vocab, '');
+export function renderIndexList(ctx, drafts = false) {
+  const list = search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '');
+  if (!list.length) return `<p class="empty">${escapeHtml(STR.noneYet)}</p>`;
   return group(list, ctx.vocab)
     .map((g) => `<section><h2>${escapeHtml(g.label)}</h2><ul>${g.items.map((e) => {
       const f = searchFields(e, ctx.vocab);
