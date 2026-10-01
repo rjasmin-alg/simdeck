@@ -1,14 +1,9 @@
-// Shared by the build (Node) and the browser pages (inlined by scripts/build.mjs, which strips the
-// `export` keywords). Pure functions only: no DOM, no Node APIs, no fetch, so everything also works
-// from file://.
+// Shared by the build (Node) and the admin app (served to the browser as a module). Pure functions
+// only: no DOM, no Node APIs, no fetch. The published site gets HTML rendered from here, not this code.
 
 export const STR = {
   classes: { stepper: 'korak po korak', explorer: 'istraživanje', reference: 'pregled', tool: 'alat' },
   levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
-  steps: (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'korak' : 'koraka'}`,
-  wip: 'u izradi',
-  linked: 'vanjska',
-  noCourse: 'Nije ni na jednom kolegiju',
   linkedNote: 'Stranice označene s ↗ nalaze se u zasebnim projektima i mogu tražiti zasebnu prijavu.',
 };
 
@@ -101,52 +96,44 @@ function cmp(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/**
- * Groups an already ranked list. by: 'topic' | 'course' | 'none'. Groups follow tags.json order
- * (topics) or course title order; an entry on several courses appears under each. Within a group
- * the ranking from `search` is kept.
- */
-export function group(list, by, vocab, courses) {
-  if (by === 'topic') {
-    return Object.keys(vocab.topics ?? {})
-      .map((t) => ({ key: t, label: vocab.topics[t].label, items: list.filter((e) => e.topic === t) }))
-      .filter((g) => g.items.length);
-  }
-  if (by === 'course') {
-    const groups = [...courses]
-      .sort((a, b) => natural(a.title, b.title) || cmp(a.id, b.id))
-      .map((c) => ({ key: c.id, label: c.title, items: list.filter((e) => (e.courses ?? []).includes(c.id)) }));
-    groups.push({ key: '', label: STR.noCourse, items: list.filter((e) => !(e.courses ?? []).length) });
-    return groups.filter((g) => g.items.length);
-  }
-  return [{ key: '', label: '', items: list }];
+/** Groups an already ranked list by topic, in tags.json order, dropping empty topics. */
+export function group(list, vocab) {
+  return Object.keys(vocab.topics ?? {})
+    .map((t) => ({ key: t, label: vocab.topics[t].label, items: list.filter((e) => e.topic === t) }))
+    .filter((g) => g.items.length);
 }
 
-/** Splits requested ids into what a student handout may show, and why the rest was left out. */
-export function handoutItems(ids, byId) {
+/** What the published site carries: finished entries. Tools are listed on the home page (the
+ * lecturer opens them in class) but never on course pages. */
+export function isPublic(e) {
+  return e.status === 'ready';
+}
+
+/** Splits requested ids into what a course page may show, and why the rest was left out. */
+export function courseItems(ids, byId, drafts = false) {
   const items = [];
   const skipped = [];
   for (const id of ids) {
     const e = byId.get(id);
     if (!e) skipped.push({ id, why: 'ne postoji' });
     else if (e.class === 'tool') skipped.push({ id, why: 'alat je samo za predavača' });
-    else if (e.status !== 'ready') skipped.push({ id, why: 'u izradi' });
+    else if (e.status !== 'ready' && !drafts) skipped.push({ id, why: 'u izradi' });
     else items.push(e);
   }
   return { items, skipped };
 }
 
 /**
- * The body of a one-page student handout: a course file, or an ad-hoc selection shaped like one
- * ({ title, term?, intro?, sections: [{ title?, sims: [ids] }] }). Returns { html, skipped }.
+ * The body of a course page, from a course file ({ title, term?, intro?, sections: [{ title?, sims }] }).
+ * Returns { html, skipped }.
  */
-export function renderHandout(course, ctx, depth = 0) {
+export function renderCourse(course, ctx, depth = 0, drafts = false) {
   const byId = new Map(ctx.entries.map((e) => [e.id, e]));
   const skipped = [];
   let anyLinked = false;
   let n = 0;
   const sections = course.sections.map((s) => {
-    const r = handoutItems(s.sims ?? [], byId);
+    const r = courseItems(s.sims ?? [], byId, drafts);
     skipped.push(...r.skipped);
     const lis = r.items.map((e) => {
       n += 1;
@@ -164,4 +151,19 @@ export function renderHandout(course, ctx, depth = 0) {
 <main>${sections.join('\n')}</main>
 <footer>${anyLinked ? `<p>${escapeHtml(STR.linkedNote)}</p>` : ''}<p>${escapeHtml(ctx.site.title)} · ${escapeHtml(ctx.site.siteUrl ?? '')}</p></footer>`;
   return { html, skipped };
+}
+
+/**
+ * The published home page's list: every public entry, grouped by topic, as static HTML. Each item
+ * carries its folded search words in data-s for the page's one small filter script.
+ */
+export function renderIndexList(ctx) {
+  const list = search(ctx.entries.filter(isPublic), ctx.vocab, '');
+  return group(list, ctx.vocab)
+    .map((g) => `<section><h2>${escapeHtml(g.label)}</h2><ul>${g.items.map((e) => {
+      const f = searchFields(e, ctx.vocab);
+      const words = [f.title, f.id, f.tags, f.topic, f.text].join(' ').replace(/\s+/g, ' ').trim();
+      return `<li data-s="${escapeHtml(words)}"><a href="${escapeHtml(entryHref(e, ctx.site, 0))}">${escapeHtml(e.title)}</a>${e.kind === 'linked' ? ' ↗' : ''} <span>${escapeHtml(e.concept)}</span></li>`;
+    }).join('')}</ul></section>`)
+    .join('\n');
 }

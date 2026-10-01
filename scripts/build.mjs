@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// Builds dist/ from the manifest sources. No dependencies: Node's standard library only.
+// Builds the published site from the manifest sources. No dependencies: Node's standard library only.
+// The output is plain static files with relative links, so the folder works on any web server, at
+// any path, or straight from a USB stick (file://).
 //
-//   dist/index.html                      lecturer's index (data inlined, works from file://)
-//   dist/handout.html                    ad-hoc handout from a selection (#title=..&ids=a,b)
-//   dist/courses/<id>/index.html         one page per course file, for students
-//   dist/sims/<id>/index.html            each native sim as one self-contained file
-//   dist/manifest.json                   the merged, validated manifest, for other tools
+//   index.html                  home: course links, then every finished simulator by topic, one search box
+//   courses/<id>/index.html     one page per course file (the "playlist" students get)
+//   sims/<id>/index.html        each native sim as one self-contained file
 //
-// Usage: node scripts/build.mjs [--root <dir>] [--out <dir>]
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, copyFileSync } from 'node:fs';
+// Unfinished (status "wip") entries are not published. Editing happens in the admin app
+// (scripts/admin.mjs), never on the published site.
+//
+// Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts]
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, copyFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate } from '../lib/manifest.mjs';
-import { renderHandout, escapeHtml } from '../site/core.js';
+import { renderCourse, renderIndexList, isPublic, escapeHtml } from '../site/core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SITE = join(HERE, '..', 'site');
@@ -21,10 +24,8 @@ export const META_ID = 'simdeck-meta';
 
 const read = (p) => readFileSync(p, 'utf8');
 
-/** core.js is an ES module for Node; in the browser it is inlined, so its `export`s are dropped. */
-export function inlineCore() {
-  return read(join(SITE, 'core.js')).replace(/^export /gm, '');
-}
+// Marks a folder as built by simdeck, so a rebuild may empty it. Any other non-empty folder is left alone.
+export const STAMP = '.simdeck-site';
 
 /** JSON safe inside <script>: no "</script>" or "<!--" can end the element early. */
 export function scriptJson(value) {
@@ -90,7 +91,7 @@ export function buildNative(html, entry, { simDir, kit }) {
     class: entry.class,
     lang: entry.lang,
     ...(entry.steps ? { steps: entry.steps } : {}),
-    index: `../../index.html#sim=${entry.id}`,
+    index: '../../index.html',
   };
   if (out.includes(`id="${META_ID}"`)) errors.push(`${where}: must not define #${META_ID} itself; the build adds it`);
   if (!/<\/head>/i.test(out)) errors.push(`${where}: no </head>`);
@@ -114,9 +115,22 @@ export function loadKit(root) {
   ].join('\n');
 }
 
-export function build({ root, out, log = console.log }) {
+/** Refuses to empty a folder that has files but no stamp: --out might be a USB stick's root. */
+function prepareOut(out) {
+  if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, STAMP))) {
+    return `${out} is not empty and was not built by simdeck; choose an empty or new folder`;
+  }
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, STAMP), 'Built by simdeck (scripts/build.mjs). Rebuilding replaces this folder.\n');
+  return null;
+}
+
+/** drafts: also publish "wip" entries (for the admin's preview). */
+export function build({ root, out, log = console.log, drafts = false }) {
   const repo = loadRepo(root);
-  const { entries, courses, errors, warnings } = validate(repo);
+  const { entries: all, courses, errors, warnings } = validate(repo);
+  const entries = drafts ? all : all.filter(isPublic);
   const site = { title: 'simdeck', lang: 'hr', ...repo.site };
   const kit = loadKit(root);
   if (!kit) warnings.push('kit/ not found: the kit marker is removed and sims build without the kit');
@@ -131,8 +145,9 @@ export function build({ root, out, log = console.log }) {
     pages.push({ e, html: r.html });
   }
   if (errors.length) return { ok: false, errors, warnings };
+  const outErr = prepareOut(out);
+  if (outErr) return { ok: false, errors: [outErr], warnings };
 
-  rmSync(out, { recursive: true, force: true });
   const write = (rel, content) => {
     const p = join(out, rel);
     mkdirSync(dirname(p), { recursive: true });
@@ -149,41 +164,29 @@ export function build({ root, out, log = console.log }) {
   }
   for (const e of entries) if (e.kind === 'linked' && e.thumb) copy(e.thumb);
 
-  const data = { site, vocab: repo.vocab, entries, courses };
-  const core = inlineCore();
-  write('manifest.json', `${JSON.stringify(data, null, 2)}\n`);
-
+  const ctx = { site, vocab: repo.vocab, entries, courses };
+  const list = courses.length
+    ? `<p class="courses">Kolegiji: ${courses.map((c) => `<a href="courses/${encodeURIComponent(c.id)}/index.html">${escapeHtml(c.title)}</a>`).join(' · ')}</p>`
+    : '';
   write('index.html', fill(read(join(SITE, 'index.html')), {
-    TITLE: escapeHtml(site.title),
-    CSS: read(join(SITE, 'index.css')),
-    DATA: scriptJson(data),
-    SCRIPT: `${core}\n${read(join(SITE, 'index.js'))}`,
-  }));
-
-  const handoutCss = read(join(SITE, 'handout.css'));
-  const toolbar = (back) => `<nav class="toolbar"><a href="${back}">← indeks</a><button type="button" onclick="print()">Ispiši</button></nav>`;
-  write('handout.html', fill(read(join(SITE, 'handout.html')), {
     LANG: site.lang,
-    TITLE: 'Izroček',
-    CSS: handoutCss,
-    TOOLBAR: toolbar('index.html'),
-    BODY: '',
-    EXTRA: `<p id="skipped" class="skipped" hidden></p>
-<script type="application/json" id="simdeck-data">${scriptJson(data)}</script>
-<script type="module">${core}\n${read(join(SITE, 'handout.js'))}</script>`,
+    TITLE: escapeHtml(site.title),
+    COURSES: list,
+    CSS: read(join(SITE, 'index.css')),
+    LIST: renderIndexList(ctx),
+    SCRIPT: read(join(SITE, 'index.js')),
   }));
 
   // Course pages are static HTML (only a print button): students' browsers just follow links.
+  const courseCss = read(join(SITE, 'course.css'));
   for (const c of courses) {
-    const { html, skipped } = renderHandout(c, data, 2);
+    const { html, skipped } = renderCourse(c, { ...ctx, entries: all }, 2, drafts);
     for (const s of skipped) warnings.push(`courses/${c.id}.json: "${s.id}" left off the page (${s.why})`);
-    write(`courses/${c.id}/index.html`, fill(read(join(SITE, 'handout.html')), {
+    write(`courses/${c.id}/index.html`, fill(read(join(SITE, 'course.html')), {
       LANG: c.lang ?? site.lang,
       TITLE: escapeHtml(c.title),
-      CSS: handoutCss,
-      TOOLBAR: '<nav class="toolbar"><button type="button" onclick="print()">Ispiši</button></nav>',
+      CSS: courseCss,
       BODY: html,
-      EXTRA: '',
     }));
   }
 
@@ -198,7 +201,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   const root = arg('--root', resolve(HERE, '..'));
   const out = arg('--out', join(root, 'dist'));
-  const r = build({ root, out });
+  const r = build({ root, out, drafts: process.argv.includes('--drafts') });
   for (const w of [...new Set(r.warnings)]) console.warn(`warning: ${w}`);
   for (const e of r.errors) console.error(`error: ${e}`);
   process.exit(r.ok ? 0 : 1);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, search, group, entryHref, entryAbsUrl, renderHandout, handoutItems } from '../site/core.js';
+import { normalise, search, group, entryHref, entryAbsUrl, renderCourse, courseItems, renderIndexList, isPublic } from '../site/core.js';
 
 const vocab = {
   topics: { networks: { label: 'Računalne mreže' }, storage: { label: 'Pohrana' } },
@@ -56,18 +56,8 @@ test('search: natural title order', () => {
 });
 
 test('group by topic follows tags.json order and drops empty groups', () => {
-  const g = group(search(entries, vocab, 'lvm'), 'topic', vocab, []);
-  assert.deepEqual(g.map((x) => x.key), ['storage']);
-  assert.deepEqual(group(entries, 'topic', vocab, []).map((x) => x.key), ['networks', 'storage']);
-});
-
-test('group by course repeats an entry per course and collects the rest', () => {
-  const courses = [{ id: 'linux', title: 'Linux' }, { id: 'os', title: 'OS' }];
-  const two = entries.map((x) => (x.id === 'dns' ? { ...x, courses: ['linux', 'os'] } : x));
-  const g = group(two, 'course', vocab, courses);
-  assert.deepEqual(g.map((x) => x.key), ['linux', 'os', '']);
-  assert.ok(g[0].items.some((x) => x.id === 'dns') && g[1].items.some((x) => x.id === 'dns'));
-  assert.deepEqual(ids(g[2].items).sort(), ['parts', 'picker', 'wip']);
+  assert.deepEqual(group(search(entries, vocab, 'lvm'), vocab).map((x) => x.key), ['storage']);
+  assert.deepEqual(group(entries, vocab).map((x) => x.key), ['networks', 'storage']);
 });
 
 test('links: native relative with explicit index.html, linked through linkedBase, scenario appended', () => {
@@ -79,20 +69,29 @@ test('links: native relative with explicit index.html, linked through linkedBase
   assert.equal(entryAbsUrl(entries[0], site), 'https://m.o/simdeck/sims/dns/');
 });
 
-test('handouts leave out tools, unfinished and unknown ids, and say why', () => {
+test('course pages leave out tools, unfinished and unknown ids, and say why', () => {
   const byId = new Map(entries.map((x) => [x.id, x]));
-  const r = handoutItems(['dns', 'picker', 'wip', 'nope'], byId);
+  const r = courseItems(['dns', 'picker', 'wip', 'nope'], byId);
   assert.deepEqual(ids(r.items), ['dns']);
   assert.deepEqual(r.skipped.map((s) => s.id), ['picker', 'wip', 'nope']);
 });
 
-test('renderHandout numbers items across sections, escapes text, notes linked pages', () => {
+test('renderCourse numbers items across sections, escapes text, notes linked pages', () => {
   const course = { title: 'Linux <Essentials>', sections: [{ title: 'Mreža', sims: ['dns', 'dhcp'] }, { title: 'Diskovi', sims: ['lvm', 'picker'] }] };
-  const { html, skipped } = renderHandout(course, { site, entries }, 2);
+  const { html, skipped } = renderCourse(course, { site, entries }, 2);
   assert.match(html, /Linux &lt;Essentials&gt;/);
   assert.match(html, /<li value="3"><a href="https:\/\/m.o\/singles\/lvm.html">LVM<\/a> ↗/);
   assert.match(html, /href="\.\.\/\.\.\/sims\/dns\/index.html"/);
   assert.match(html, /zasebnu prijavu/);
   assert.match(html, /<span class="h-lang">EN<\/span>/);
   assert.deepEqual(skipped.map((s) => s.id), ['picker']);
+});
+
+test('the home list shows finished entries only, by topic, with folded search words', () => {
+  const html = renderIndexList({ site, vocab, entries });
+  assert.ok(!html.includes('Nedovršen'), 'wip left out');
+  assert.match(html, /Odabir studenta/, 'tools are listed on the home page');
+  assert.ok(html.indexOf('Računalne mreže') < html.indexOf('Pohrana'), 'tags.json topic order');
+  assert.match(html, /data-s="[^"]*razlucivanje/, 'diacritics folded in search words');
+  assert.equal(isPublic(entries[5]), false);
 });

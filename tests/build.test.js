@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildNative, build, scriptJson, KIT_MARKER } from '../scripts/build.mjs';
 
@@ -54,7 +54,7 @@ test('adds #simdeck-meta with the back link, safely escaped', () => {
   assert.ok(m, 'meta block present');
   const meta = JSON.parse(m[1]);
   assert.equal(meta.title, 'X </script>');
-  assert.equal(meta.index, '../../index.html#sim=x');
+  assert.equal(meta.index, '../../index.html');
   assert.equal(meta.steps, 3);
   assert.match(buildNative(page('<script type="application/json" id="simdeck-meta">{}</script>'), entry, { simDir: d }).errors.join(), /must not define/);
 });
@@ -63,13 +63,14 @@ test('scriptJson cannot close its script element', () => {
   assert.doesNotMatch(scriptJson({ a: '</script><!--' }), /<\//);
 });
 
-test('the real repository builds every page', () => {
-  const out = mkdtempSync(join(tmpdir(), 'simdeck-dist-'));
+test('the real repository builds every page, and only finished ones', () => {
+  const out = join(mkdtempSync(join(tmpdir(), 'simdeck-dist-')), 'site');
   try {
     const r = build({ root: ROOT, out, log: () => {} });
     assert.deepEqual(r.errors, []);
     assert.ok(r.ok);
-    for (const p of ['index.html', 'handout.html', 'manifest.json']) assert.ok(existsSync(join(out, p)), p);
+    assert.ok(existsSync(join(out, 'index.html')));
+    assert.ok(r.entries.every((e) => e.status === 'ready'));
     for (const e of r.entries.filter((x) => x.kind === 'native')) {
       const html = readFileSync(join(out, 'sims', e.id, 'index.html'), 'utf8');
       assert.match(html, /id="simdeck-meta"/, e.id);
@@ -78,7 +79,24 @@ test('the real repository builds every page', () => {
     for (const c of r.courses) assert.ok(existsSync(join(out, 'courses', c.id, 'index.html')), c.id);
     const index = readFileSync(join(out, 'index.html'), 'utf8');
     assert.doesNotMatch(index, /\{\{\w+\}\}/, 'all template variables filled');
-    assert.doesNotMatch(index, /^export /m, 'core.js exports stripped');
+    assert.doesNotMatch(index, /application\/json/, 'no data blob: the home page is plain HTML');
+    assert.doesNotMatch(index, /(src|href)="\//, 'no root-absolute links: the folder can move');
+  } finally {
+    rmSync(dirname(out), { recursive: true, force: true });
+  }
+});
+
+test('never empties a folder simdeck did not build', () => {
+  const out = mkdtempSync(join(tmpdir(), 'simdeck-usb-'));
+  writeFileSync(join(out, 'my-thesis.pdf'), 'x');
+  try {
+    const r = build({ root: ROOT, out, log: () => {} });
+    assert.equal(r.ok, false);
+    assert.match(r.errors.join(), /not built by simdeck/);
+    assert.ok(existsSync(join(out, 'my-thesis.pdf')));
+    rmSync(join(out, 'my-thesis.pdf'));
+    assert.ok(build({ root: ROOT, out, log: () => {} }).ok, 'empty folder is fine');
+    assert.ok(build({ root: ROOT, out, log: () => {} }).ok, 'and a stamped one can be rebuilt');
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
