@@ -322,30 +322,161 @@ Process and infrastructure lessons:
 
 ---
 
-## 10. Applying this to a simulator index (diverse but consistent)
+## 10. Applying this to simdeck
 
-**Keep identical across all simulators.** These are copied from the foundation and never forked:
-- the `sim/` + `ui/` split and the `SimDefinition` contract;
-- the engine, history, step back, determinism rules and the JSON-safe state;
-- the page skeleton and section order, the shell (`mountModule`), theme tokens, shortcuts and accessibility
-  rules;
-- event-code format, log kinds, scenario format, the deep-link registry;
-- the architecture tests, the gate, the DoD, the spec template, the review brief;
-- the two builds, no network at runtime, and the deploy script.
+Sources: `docs/proposal-simdeck.md` and `docs/design-notes-simdeck.md`. Where those leave a question open,
+this section makes a recommendation and says so; nothing here overrides a decision already taken there.
 
-**Free per simulator.** This is where the diversity lives:
-- the model, its config, state, actions, and what one tick means;
-- the visualisation inside `#viz` (SVG, canvas or HTML), and the page's own CSS behind its prefix;
-- its timeline lanes and tracks, comparison variants, and scenarios;
-- its theory and references.
+### 10.1 What is different from ossimulator
 
-**If one simulator does not fit the contract** (a continuous-time model, say, or no natural tick), extend
-the contract additively on a `shared/` branch with a test and a changelog row. Do not let that page bypass
-the engine. Make the first such page the "wave 1" for that extension, and freeze the extension afterwards.
+| | ossimulator | simdeck |
+|---|---|---|
+| Collection | closed: 16 pages designed together, then built | open-ended: 24 imported pages, 5 new in the first batch, about 20 more planned, ≥ 25 native by the end of the semester |
+| One page is | a full simulator with six sections (settings, viz, log, timeline, scenarios, theory) | one concept on one screen, a 3–5 minute demo |
+| Main use | lecture and self-study | the lecturer at the lectern with a presentation clicker; course pages for students |
+| Time model | ticks, a play loop, history with step back | discrete steps (or live parameters, see §10.4) |
+| Readability | ≥ 14 px, 375 px to projector | ≥ ~20 px body text, fits 1920×1080 without scrolling, washed-out projector palette |
+| Index | a fixed layered map built from a module registry | a searchable index and generated course pages, both from one manifest |
+| Entries | all built to one contract | *native* (built to the contract) and *linked* (exempt, manifest only) |
+| Contract enforced by | architecture tests and an e2e gate | a contract check script on every native page, plus a manifest check |
 
-**Template repo.** For a new family, start from a copy of the foundation: `src/shared`, the map, `tests/`,
-`e2e/`, `scripts/`, configs, and the docs skeleton with the domain content removed. Then do only the
-planning phase anew: design reports, `verify_fixtures.py`, glossary, specs.
+The consequence: **simdeck keeps the method** (one contract, rules as checks, one template, a freeze after
+the first real page, the same finish line) **and drops most of the machinery**: the six-section skeleton,
+ticks, the log, the timeline, comparison runners, the layered map.
+
+### 10.2 Identical on every native page (the contract)
+
+Each rule needs a check in the contract script; a rule without a check is a recommendation, not a rule.
+
+| Rule | How it is checked |
+|---|---|
+| The kit is inlined: colour tokens, header with legend, step controller | the build inlines `kit/`; the check finds the kit's marker and version in the output |
+| Only kit tokens for colour; every `var(--x)` used is defined | carry over the undefined-token check from `single-page-labs/deploy.sh` |
+| Fits one 1920×1080 screen, no scrolling | Playwright: `scrollHeight <= innerHeight` and `scrollWidth <= innerWidth` at 1920×1080, in projector mode |
+| Body text ≥ ~20 px (number to tune) | the ossimulator text-size probe, with a 20 px threshold over the whole page |
+| Clicker keys: → / PgDn step forward, ← / PgUp step back, one reset key (Home or R) | e2e presses each key and expects the step counter to change (or a declared exception) |
+| Step back equals replay from the start | `stateAt(n)` from a pure step function (§10.3), compared after forward and back moves |
+| Works offline as one file | open from `file://` with all requests blocked, as in ossimulator's e2e |
+| Colour never the only carrier of meaning | grayscale screenshot, reviewed |
+| Respects `prefers-reduced-motion` | `?motion=reduce` disables animation, as in ossimulator |
+| Has a valid manifest entry | the manifest check (§10.6) |
+| Exceptions are declared, not silent | a `<script type="application/json" id="simdeck-exceptions">` block (or a manifest field) naming each rule waived and why; the check counts them |
+
+### 10.3 The step model (recommendation)
+
+ossimulator's engine (snapshots before every operation, a history limit, a play loop) is more than a 3–5
+minute demo needs. A smaller contract fits:
+
+- A page defines `initial(seed)` and a pure `step(state, n)`.
+  - The kit's controller computes `stateAt(n)` by replaying from the start. This is cheap for a short demo,
+    and step back is correct by construction, with no snapshot history.
+- The page declares `steps`, its number of steps. This makes "a demo runs in 3–5 minutes" visible: the index
+  can show the count, and a page with 60 steps stands out.
+- Keep from ossimulator:
+  - all randomness through a seeded rng;
+  - JSON-safe state;
+  - total sort orders with id tie-breaks;
+  - one test per rule, especially tie-breaks (the most common untested defect, §9).
+- Logic stays in a DOM-free file next to the page, so it can be unit-tested. The page stays one file after
+  the build.
+
+### 10.4 Page classes: not every imported page is a stepper
+
+Only 1 of the 24 `single-page-labs` pages handles arrow keys today. Many are parameter explorers
+(`amdahl-simulator.html`), reference posters (`rf-spektar-eu-hr-bandplan.html`) or classroom tools
+(`random-student-picker.html`). Forcing a step controller onto them would produce exceptions on most
+imports and trip the proposal's "rethink if more than a quarter need exceptions" alarm for the wrong reason.
+
+So the manifest gets a `class` field, and the contract has a common part plus a part per class:
+
+| Class | Example | Contract on top of the common part |
+|---|---|---|
+| `stepper` | dedup, backing chains, WPA handshake | clicker keys, `steps`, `stateAt(n)`, reset |
+| `explorer` | Amdahl, LVM topology lab | parameters through kit controls, one reset key, live update; no step keys required |
+| `reference` | bandplan, protocol posters | no controls; must fit the screen and follow the palette and text-size rules |
+| `tool` | student picker | listed in the index for the lecturer only, never on course pages |
+
+Count exceptions within a class. The rethink signal is a rising exception count *within* a class, not the
+fact that a reference page has no step keys.
+
+### 10.5 Linked entries
+
+Linked entries are exempt from the contract. The manifest still makes them consistent in the index:
+- **ossimulator:**
+  - one entry per page (`modules/<id>/index.html`), not one for the whole app;
+  - an entry may name a public scenario (`?scenario=<id>`, only ids from ossimulator's `PUBLIC_SCENARIOS`), so
+    a lecture can open a specific demo, already paused at step 0;
+  - several entries may point to one page with different scenarios.
+- **cephsim, faultline, topologydrafter:** one entry each, unless they grow deep links.
+- **The check:**
+  - the URL is relative to `materijali.online`, or absolute to a known host;
+  - for ossimulator, the page id and scenario id exist (read `src/shared/deeplinks.ts`, or a small JSON
+    export of it).
+  - Reachability is checked at deploy time, not in the build.
+- **Open: login realms.** `/ossim` uses its own realm (sim/os), while `/singles`, `/ceph` and `/faultline`
+  share another one. A course page that mixes them asks students for two logins. Decide this before M4: one
+  realm for everything students see, or a course-page note naming the logins.
+
+### 10.6 The manifest is the registry
+
+In ossimulator, `MODULE_IDS`, the `meta.ts` files and `PUBLIC_SCENARIOS` together held the registry. In
+simdeck the manifest is that registry.
+
+- **Fields:**
+  - from the design notes: `id`, `title`, `summary`, `tags`, `courses`, `kind`, `url` | `path`, `lang`;
+  - added here: `class`, `steps` (steppers only), `scenario` (linked ossimulator entries only).
+- **The manifest check:**
+  - unique kebab-case ids;
+  - the required fields for each `kind` and `class`;
+  - every native file has exactly one entry, and every entry's `path` exists, like the `PROJECTS.md` hook;
+  - tags come from a controlled `tags.json`, which stops "backup"/"backups"/"sigurnosne kopije" drift;
+  - every course file lists only existing ids, and no `tool`.
+- **Course pages** are generated from the course file and the manifest, never edited by hand.
+
+### 10.7 Importing `single-page-labs`
+
+One page per commit, the same steps each time:
+1. **Pick the canonical version** where there are variants (`lvm-topology-lab` vs `-v2`,
+   `ham-radio-modes-reference` vs `-v2`). Record the choice in the commit message.
+2. **Classify the page** (§10.4) and write its manifest entry.
+3. **Adapt it to the kit:** tokens, header and legend, the controller for its class. Then run the check.
+4. **Record exceptions** in the page's exception block, never as silent workarounds.
+5. **Freeze the original:** add a note in `single-page-labs` pointing to the simdeck copy (proposal: the
+   copy is canonical).
+6. **Check assets** for the GPL audit (generated images, textbook-derived figures), and mark anything
+   unclear in the manifest (`asset_review: true`).
+
+The import is mechanical and parallelises well: up to four agents, each taking a disjoint list of files,
+one worktree each. The kit and the check must be frozen first.
+
+### 10.8 Process, scaled to simdeck
+
+- **M1 is wave 0 plus wave 1.** Build the kit, the contract check and the template. Then build **one new
+  first-batch simulator** (dedup is a good candidate: it is a stepper with a clear rule set) while the kit
+  can still change. Then freeze it as `kit-v1`. After that, the kit and contract change additively only,
+  with a changelog row, and every page agent builds on it.
+- **Per-page DoD** (a short version of ossimulator's):
+  - the contract check passes;
+  - screenshots at 1920×1080 in the projector palette, plus grayscale;
+  - the manifest entry is valid;
+  - unit tests for the step rules (steppers and explorers with logic);
+  - one fresh-reviewer pass for **new** simulators (content correctness, mutation probes on the rules);
+    imports need only the check and a screenshot review.
+- **Ownership:** a page agent edits only its own page files and the logic file next to them. The kit, the
+  check, the manifest schema, `tags.json` and the build belong to the coordinator. Page agents propose
+  manifest entries in their report, and the coordinator adds them, as with `PUBLIC_SCENARIOS`.
+- **Measure the proposal's riskiest assumption.** Log idea-to-deployed time for each first-batch simulator
+  in its commit or NOTES. That is the M3 criterion ("one working session each").
+
+### 10.9 Open decisions this section depends on
+
+| Decision (design notes) | Recommendation | Why |
+|---|---|---|
+| Build tool: plain script or Vite | **Vite + vite-plugin-singlefile + Vitest**, reusing ossimulator's `build-single.mjs`, `check-dist.mjs` and the e2e helpers | the single-file build, the offline check and the text-size probe already exist and are tested; a plain script would rebuild them |
+| UI language | ossimulator's rule: Croatian UI, English term in italics with the Croatian in parentheses at first mention; `lang` in the manifest for pages in English | 13 of the 24 imported pages declare `lang="hr"` and 10 `lang="en"`, so both must be first-class; students meet the English terms in the literature |
+| Deploy location and realm | `materijali.online/simdeck`, with `scripts/deploy.sh` modelled on ossimulator's (rsync with `--chown`/`--chmod`, then a 401/200 check) | the same VPS pattern as `/ossim` and `/ceph`; the realm question is in §10.5 |
+| Minimum text size | start at 20 px for body text and 16 px for legends, then tune after one lecture | the design notes give "~20 px"; legends need a separate, lower floor or every legend becomes an exception |
+| GPL version | GPL-3.0-or-later, as assumed | no reason found to change it; the asset audit is §10.7 step 6 |
 
 ---
 
