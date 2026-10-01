@@ -45,7 +45,27 @@
     return s;
   }
 
-  var core = { version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt };
+  /**
+   * True when the back link should go back in history: the visitor came from this site's index (the back link's
+   * target, also as its folder URL) or from one of its course pages (<site root>/courses/<id>/), on the same origin.
+   */
+  function cameFromSite(referrer, backHref) {
+    try {
+      if (!referrer) return false;
+      var ref = new URL(referrer);
+      var back = new URL(backHref);
+      if (ref.origin !== back.origin) return false;
+      var rootPath = back.pathname.replace(/[^/]*$/, ''); // the index's folder: the site root
+      var p = ref.pathname;
+      if (p === back.pathname || p === rootPath) return true;
+      if (p.slice(0, rootPath.length) !== rootPath) return false;
+      return /^courses\/[a-z0-9]+(-[a-z0-9]+)*\/(index\.html)?$/.test(p.slice(rootPath.length));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  var core = { version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt, cameFromSite: cameFromSite };
 
   if (!hasDom) {
     if (typeof module === 'object' && module.exports) module.exports = core;
@@ -365,15 +385,12 @@
       if (!el.back.querySelector('.sd-icon')) el.back.prepend(icon('back'));
       if (!el.back.title) el.back.title = S.backTitle;
       el.back.addEventListener('click', function (e) {
-        // Opened from the index: go back in history so the index keeps its search and filters.
-        try {
-          var ref = document.referrer && new URL(document.referrer);
-          var target = new URL(el.back.href);
-          if (ref && ref.origin === target.origin && ref.pathname === target.pathname && window.history.length > 1) {
-            e.preventDefault();
-            window.history.back();
-          }
-        } catch (err) { /* follow the link */ }
+        // Opened from the index or a course page: go back in history, so the visitor returns to where they came
+        // from (a student to their course page) and the index keeps its search. Otherwise follow the link home.
+        if (cameFromSite(document.referrer, el.back.href) && window.history.length > 1) {
+          e.preventDefault();
+          window.history.back();
+        }
       });
     }
 

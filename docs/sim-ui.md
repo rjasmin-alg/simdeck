@@ -28,7 +28,7 @@ If the browser is missing, run `npx playwright install chromium` once. simdeck d
 
 No framework and no build step are needed to work on a sim: `kit.js` is a classic script (not an ES module), so a
 page opens straight from `file://` and runs. The build that inlines the kit into one self-contained file per sim
-(design notes) can be added on top without changing a page.
+(`npm run build`, docs/site-structure.md §5) works on the same page unchanged.
 
 ---
 
@@ -300,7 +300,7 @@ the same replay as the page.
 | changed marking, forward-only animation | `.sd-changed`, `.sd-anim-in` |
 | caption with numbers and a highlighted word | "Korak 2: 0111 + 1 = **1000** = 8. Promijenila su se 4 bita…" |
 | collapsed explanation with English terms in italics | "Ideja" |
-| manifest placeholder and exceptions block | `#simdeck-meta`, `#simdeck-exceptions` |
+| metadata placeholder (`id`, `class`, `steps`) and exceptions block | `#simdeck-meta`, `#simdeck-exceptions` |
 | back to index | `data-sd-back` |
 | tests: the model's rules, then the generic block every sim keeps | `sim.test.js` |
 
@@ -309,36 +309,44 @@ by `check-page.mjs --shots`.
 
 ### Starting a new sim
 
-1. `kit/new-sim.sh <id> <dest-dir>`, e.g. `kit/new-sim.sh dedup sims/dedup`. It copies the three files and
-   rewrites the id, the paths to the kit and the index, and the manifest placeholder's path. It refuses to
-   overwrite and rejects non-kebab-case ids.
+1. `kit/new-sim.sh <id> sims/<id>` (or the admin's **+ Novi simulator**, which runs it). It copies the three
+   files, rewrites the id and the paths to the kit and the index, and writes a `status: "wip"` `sim.json` stub
+   (§7). It refuses to overwrite and rejects non-kebab-case ids.
 2. **`sim.js`**: replace the model. Keep the shape (`defaults`, `steps`, `initial`, `step`) and the purity rules.
 3. **`sim.test.js`**: replace the rule tests at the top with your model's rules (tie-breaks first; break the code
    once to see each test fail). Keep the generic block at the bottom. Run `node --test <dest>/sim.test.js`.
-4. **`index.html`**: title, subtitle, legend, params, presets, `render`, `caption`, explanation, and the
-   `#simdeck-meta` fields. Keep page CSS scoped to `[data-sim="<id>"]` and on kit tokens only.
-5. Run `npm run check:page -- <dest>/index.html --shots <dir>` and look at the screenshots, including grayscale.
-6. An explorer: drop `step` and `steps` (or set `steps: 0`); the transport becomes a reset button, and the
+4. **`index.html`**: title, subtitle, legend, params, presets, `render`, `caption` and explanation; keep the
+   `#simdeck-meta` placeholder's `class` and `steps` equal to `sim.json`. Keep page CSS scoped to
+   `[data-sim="<id>"]` and on kit tokens only.
+5. **`sim.json`**: title, concept, summary, topic, tags, level (docs/site-structure.md §2.1); `npm run check`.
+6. Run `npm run check:page -- <dest>/index.html --shots <dir>` and look at the screenshots, including grayscale.
+   Set `status` to `ready` when the sim passes its DoD.
+7. An explorer: drop `step` and `steps` (or set `steps: 0`), and set `"class": "explorer"` without `steps` in `sim.json` and the placeholder; the transport becomes a reset button, and the
    params drive `render` live. A reference page: no params, no presets; it keeps the header, legend and stage.
 
-## 7. What the template assumes about the index and the manifest
+## 7. The kit and the site frame (settled 2026-10-01)
 
-These belong to the site-frame thread (`docs/site-structure.md`). The template assumes the following, and each
-assumption is in exactly one place, so it can be changed to match:
+These were the template's assumptions; the site frame (`docs/site-structure.md`, its §7 from the frame's side)
+settled each one as follows.
 
-| Assumption | Where it lives | If the site frame differs |
+| Question | Settled as | Where |
 |---|---|---|
-| The index is `<repo root>/index.html` | `href` of `.sd-back` in the page; `INDEX` in `new-sim.sh` | change `INDEX` and the template's `href` |
-| A native sim is a folder with `index.html` (+ `sim.js`, `sim.test.js`), at any depth | `new-sim.sh` computes relative paths | nothing |
-| Per-sim metadata sits in the page as `<script type="application/json" id="simdeck-meta">` with `id`, `title`, `summary`, `tags`, `courses`, `kind`, `path`, `lang`, `class`, `steps` (design notes + playbook §10.6) | the page | if the manifest is one central file, generate this block from it at build time, or delete it; the kit reads only `id`, `class` and `steps`, and only to warn on a mismatch |
-| `data-sim` on `<html>` equals the manifest `id` | the page | nothing |
-| Exceptions are declared in `<script type="application/json" id="simdeck-exceptions">` as `[{"rule", "why"}]` (playbook §10.2) | the page | move them into the manifest if preferred |
-| The index opens a sim with a plain link; deep links use `?preset=<id>&step=<n>` | kit | the index and course pages can link presets directly |
-| The back link returns via `history.back()` when the referrer is the index, so its search and filters survive | kit | nothing |
+| Where is the index? | `<site root>/index.html`, both unbuilt (repo root) and built (`dist/`). The back link (`../../index.html` from `sims/<id>/`) and `INDEX` in `new-sim.sh` match | page, `new-sim.sh` |
+| Where do sims live? | `sims/<id>/`, the folder name equal to the id; `index.html`, `sim.js`, `sim.test.js` and `sim.json` | frame |
+| Where is the metadata? | **`sims/<id>/sim.json` is the source** (frame format, `lib/manifest.mjs`). There is no central manifest. The page keeps a `#simdeck-meta` placeholder with only `id`, `class` and `steps`, which the kit reads unbuilt to warn on a mismatch. The build replaces it with one generated from `sim.json`, and the frame's check warns when the placeholder drifts | `sim.json`; page placeholder |
+| Does `new-sim.sh` write `sim.json`? | yes: a `status: "wip"` stub that passes `npm run check` at once (title = id, placeholder concept and summary, the first topic and tag of `tags.json`, `class`, `steps` and `lang` as the template). Replace its content before setting `ready`. The admin's **+ Novi simulator** runs `new-sim.sh` and writes its own `sim.json` over the stub | `new-sim.sh` |
+| `data-sim` | equals the id; `new-sim.sh` sets it, the frame's check enforces it | page |
+| Exceptions | stay in the page, `#simdeck-exceptions` as `[{"rule", "why"}]`; the frame validates and counts them | page |
+| Back link | goes back in history when the referrer is this site's index (as `…/index.html` or its folder) **or one of its course pages** (`…/courses/<id>/`, which is also where short addresses redirect), so a student returns to their course page and the index keeps its search. Otherwise it follows the link home | kit (`Simdeck.cameFromSite`, tested in `kit.test.js`) |
+| Deep links | `?preset=<id>&step=<n>`; course pages link plain sim pages for now and can name a preset later without a kit change | kit |
+| Steps | `sim.json` `steps` is recorded; the kit warns if the page mounts a different count | kit, frame |
 
 ## 8. Not yet covered
 
-- The single-file build (inlining kit CSS, JS and fonts) and the contract check script: `check-page.mjs` and the
-  tests in `kit.test.js` are their seed, not the finished check.
+- **The single-file build exists** (frame, `npm run build`, docs/site-structure.md §5). It inlines `kit.css`,
+  `kit.js` and the page's own scripts, turns the fonts into `data:` URIs, and refuses network loads. A built sim
+  is about 130 KB and passes `npm run check:page` like its source.
+- The full contract check: `check-page.mjs` (in the browser) and `kit.test.js` (tokens, contrast, sizes) are its
+  seed. They are not yet run over every sim by one command.
 - Canvas/SVG drawing helpers (lanes, arrows, chunks). Add them additively once two real sims need the same thing.
 - An English template copy; the kit strings already exist in both languages.

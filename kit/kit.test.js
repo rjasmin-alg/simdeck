@@ -36,6 +36,20 @@ test('stepsOf accepts a number or a function of params', () => {
   assert.equal(kit.stepsOf({}, {}), 0);
 });
 
+test('back link goes back in history only from the index or a course page', () => {
+  const back = 'https://materijali.online/simdeck/index.html';
+  const yes = ['https://materijali.online/simdeck/index.html', 'https://materijali.online/simdeck/',
+    'https://materijali.online/simdeck/index.html?q=dns', 'https://materijali.online/simdeck/courses/linux-essentials/',
+    'https://materijali.online/simdeck/courses/linux-essentials/index.html'];
+  const no = ['', 'https://materijali.online/ossim/index.html', 'https://example.org/simdeck/index.html',
+    'https://materijali.online/simdeck/sims/dns-resolution/index.html', 'https://materijali.online/simdeck/courses/',
+    'https://materijali.online/simdeck/courses/a/b/', 'https://materijali.online/linux', 'not a url'];
+  for (const r of yes) assert.equal(kit.cameFromSite(r, back), true, r);
+  for (const r of no) assert.equal(kit.cameFromSite(r, back), false, r);
+  // Unbuilt from file:// the index is the repo root; the rule is the same.
+  assert.equal(kit.cameFromSite('file:///repo/courses/os/index.html', 'file:///repo/index.html'), true);
+});
+
 // ── stylesheet rules ──
 
 const tokenBlock = (marker) => {
