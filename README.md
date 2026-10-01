@@ -6,5 +6,6 @@ Status: planning. Nothing is built yet.
 
 - `docs/proposal-simdeck.md`: the proposal (source; the PDF next to it is built with the `project-proposal` skill's `build.sh`)
 - `docs/design-notes-simdeck.md`: design decisions and open questions from the proposal review
+- `docs/playbook.md`: method distilled from `ossimulator` (contract, rules as tests, waves, DoD, lessons), to adapt for simdeck
 
 License: GPL (version to be fixed before the first public release; GPL-3.0-or-later assumed).
