@@ -146,12 +146,24 @@ describe('gate', { skip, concurrency: 6 }, () => {
   it('theme: a page that forces its own theme', () => failsOn('theme', script("setInterval(function () { document.documentElement.dataset.theme = 'light'; }, 5);"), /OS dark/));
   it('tokens: an undefined custom property', () => failsOn('tokens', css('[data-sim="gate-x"] .bc { color: var(--nope); }'), /--nope/));
   it('tokens: a colour literal', () => failsOn('tokens', css('[data-sim="gate-x"] .bc { color: #ff0000; }'), /#ff0000/));
+  it('entries: a preset entry whose id is in the page but is not one of its presets', () => failsOn('entries', json({ entries: [{ preset: 'bits', title: { hr: 'Bitovi', en: 'Bits' }, concept: { hr: 'Nije primjer', en: 'Not a preset' } }] }), /entry bits: \?preset=bits opens paused at that preset/));
   it('scope: a change outside the sim\'s folder, committed or not', async () => {
     await failsOn('scope', (x, d) => { writeFileSync(join(d, 'kit', 'kit.css'), '/* edited */\n', { flag: 'a' }); }, /kit\/kit.css/);
     await failsOn('scope', (x, d) => {
       writeFileSync(join(d, 'tags.json'), readFileSync(join(d, 'tags.json'), 'utf8').replace('{', '{ '));
       git(d, 'commit', '-q', '-am', 'outside');
     }, /tags.json/);
+  });
+
+  // ── preset entries (sim.json "entries") ──
+  it('a sim with preset entries passes; the browser check opens each one at its preset', async () => {
+    const r = await run(json({ entries: [
+      { preset: 'carry', title: { hr: 'Prijenos', en: 'Carry' }, concept: { hr: 'Prijenos kroz mjesta', en: 'A carry ripples' } },
+      { preset: 'overflow', query: 'preset=overflow&step=2', title: { hr: 'Preljev', en: 'Overflow' }, concept: { hr: 'Brojač se vrati na nulu', en: 'The counter wraps to zero' } },
+    ] }));
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /gate: pass/);
+    assert.doesNotMatch(r.out, /FAIL/);
   });
 
   // ── shared models (models/, lib/models.mjs) ──

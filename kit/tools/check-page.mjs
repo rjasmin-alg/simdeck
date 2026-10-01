@@ -6,7 +6,8 @@
 // Every check reports under a contract rule (lib/contract.mjs RULES). A failing check whose rule the page declares in
 // #simdeck-exceptions is waived, not failed, and counted. Layout, text and words are checked once per language the
 // page has (Simdeck.languages): Croatian labels run longer, and every visible word must come from the tables.
-// Key checks run for steppers (class from #simdeck-meta); every page gets the rest.
+// Key checks run for steppers (class from #simdeck-meta); every page gets the rest, and each preset entry in
+// #simdeck-meta (sim.json "entries") is opened from its link.
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -281,6 +282,21 @@ if (stepper) {
   await p.goto(url + q);
   await p.waitForFunction(() => window.simdeck);
   check('keys', `${q} opens there, paused`, (await n()) === deep && !(await p.evaluate(() => window.simdeck.playing)) && (await p.evaluate(() => window.simdeck.preset)) === (preset ?? null));
+  await ctx.close();
+}
+
+// ── preset entries (sim.json "entries", in the built page's #simdeck-meta): each link opens the page at its preset ──
+if (Array.isArray(meta.entries) && meta.entries.length) {
+  const { ctx, p } = await open({ width: 1920, height: 1080 });
+  for (const x of meta.entries) {
+    const q = `?${x.query ?? `preset=${encodeURIComponent(x.preset)}`}`;
+    const want = new URLSearchParams(q).get('preset');
+    await p.goto(url + q);
+    await p.waitForFunction(() => window.simdeck);
+    const got = await p.evaluate(() => ({ preset: window.simdeck.preset, playing: window.simdeck.playing }));
+    // A kit preset id the page lacks leaves preset null; an explicit query without preset= only has to open paused.
+    check('entries', `entry ${x.preset}: ${q} opens paused${want ? ' at that preset' : ''}`, !got.playing && (!want || got.preset === want), `preset: ${got.preset}${got.playing ? ', playing' : ''}`);
+  }
   await ctx.close();
 }
 

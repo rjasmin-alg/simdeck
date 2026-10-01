@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic, bi, loc,
+import { normalise, search, group, entryHref, presetItems, refMap, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic, bi, loc,
   sourceHref, licenceLine, renderLicences, LICENCE } from '../site/core.mjs';
 
 const two = (hr, en = hr) => ({ hr, en });
@@ -184,4 +184,56 @@ test('licences page: simdeck, the kit fonts, then each sim\'s credits in both la
   assert.match(html, /<a href="https:\/\/50ohm\.de\/"><span data-l="hr" lang="hr">Slika dipola<\/span><span data-l="en" lang="en">Dipole figure<\/span><\/a> · DARC e\.V\. · CC BY 4\.0/);
   assert.match(html, /Translated\./);
   assert.match(renderLicences({ site, vocab, entries }, 1), /class="h-empty"/, 'no credits: says so');
+});
+
+// ── preset entries (sim.json "entries"): their own line on the home page, "<sim>#<preset>" on course pages ──
+const stp = e('stp', {
+  title: 'STP', concept: two('Stablo bez petlji', 'A loop-free tree'), summary: two('Sklopke biraju korijen.', 'Switches elect a root.'),
+  entries: [
+    { preset: 'broadcast-storm', title: two('Oluja razašiljanja', 'Broadcast storm'), concept: two('Petlja bez STP-a', 'A loop without STP') },
+    { preset: 'belady', query: 'scenario=fifo-belady', title: 'Belady', concept: 'FIFO', summary: two('Više okvira.', 'More frames.') },
+  ],
+});
+
+test('preset entries: links open the preset (kit ?preset=, or the entry\'s own query), with ?lang= after it', () => {
+  const [storm, belady] = presetItems(stp);
+  assert.equal(storm.id, 'stp#broadcast-storm');
+  assert.equal(storm.host, stp);
+  assert.equal(entryHref(storm, 0), 'sims/stp/index.html?preset=broadcast-storm');
+  assert.equal(entryHref(storm, 2, 'en'), '../../sims/stp/index.html?preset=broadcast-storm&lang=en');
+  assert.equal(entryHref(belady, 0), 'sims/stp/index.html?scenario=fifo-belady');
+  assert.equal(entryAbsUrl(storm, site, 'hr'), 'https://m.o/simdeck/sims/stp/?preset=broadcast-storm');
+  assert.equal(entryAbsUrl(belady, site, 'en'), 'https://m.o/simdeck/sims/stp/?scenario=fifo-belady&lang=en');
+  assert.deepEqual([...refMap([stp, entries[0]]).keys()], ['stp', 'stp#broadcast-storm', 'stp#belady', 'dns']);
+  assert.deepEqual(presetItems({ ...stp, entries: [null, { title: 'x' }] }), [], 'malformed items are left to the manifest check');
+});
+
+test('preset entries: one line each on the home page, under their sim, searchable by their own words and the sim\'s', () => {
+  const html = renderIndexList({ site, vocab, entries: [stp, entries[0]] });
+  const lines = html.match(/<li[^>]*>.*?<\/li>/g);
+  const at = (re) => lines.findIndex((l) => re.test(l));
+  assert.equal(at(/sims\/stp\/index.html\?preset=broadcast-storm"/), at(/sims\/stp\/index.html"/) + 1, 'right under the sim');
+  assert.equal(at(/sims\/stp\/index.html\?scenario=fifo-belady"/), at(/sims\/stp\/index.html"/) + 2);
+  const storm = lines[at(/preset=broadcast-storm/)];
+  assert.match(storm, /^<li class="h-preset" data-s="[^"]*oluja razasiljanja[^"]*broadcast storm/, 'its own title, both languages, folded');
+  assert.match(storm, /data-s="[^"]*petlja bez stp-a/, 'its concept');
+  assert.match(storm, /data-s="[^"]*\bstp\b[^"]*stablo bez petlji/, 'the host sim\'s words');
+  assert.match(storm, /<span class="h-host">STP ›<\/span> <a data-lang-link href="sims\/stp\/index.html\?preset=broadcast-storm">/, 'names its sim first');
+  const wip = renderIndexList({ site, vocab, entries: [{ ...stp, status: 'wip' }] });
+  assert.doesNotMatch(wip, /preset=/, 'an unfinished sim\'s entries are not published either');
+});
+
+test('preset entries on a course page: linked at the preset in the course language, the sim named first', () => {
+  const course = { title: two('Mreže'), lang: 'en', sections: [{ sims: ['stp#broadcast-storm', 'stp', 'stp#belady'] }] };
+  const { html, skipped } = renderCourse(course, { site, entries: [stp] }, 2);
+  assert.deepEqual(skipped, []);
+  assert.match(html, /<li value="1" class="h-preset"><span class="h-host">STP ›<\/span> <a data-lang-link href="\.\.\/\.\.\/sims\/stp\/index.html\?preset=broadcast-storm&amp;lang=en">/);
+  assert.match(html, /<li value="2"><a data-lang-link href="\.\.\/\.\.\/sims\/stp\/index.html\?lang=en">STP<\/a>/);
+  assert.match(html, /sims\/stp\/index.html\?scenario=fifo-belady&amp;lang=en/);
+  assert.match(html, /https:\/\/m\.o\/simdeck\/sims\/stp\/\?preset=broadcast-storm&amp;lang=en/, 'printed URL opens the preset');
+  // An entry without a summary has no summary line; one with a summary shows it.
+  const one = html.split('<li ').find((l) => l.includes('preset=broadcast-storm'));
+  assert.doesNotMatch(one, /h-summary/);
+  assert.match(html, /More frames\./);
+  assert.deepEqual(renderCourse({ ...course, sections: [{ sims: ['stp#nope'] }] }, { site, entries: [stp] }, 2).skipped, [{ id: 'stp#nope', why: 'unknown' }]);
 });

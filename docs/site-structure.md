@@ -116,6 +116,7 @@ admin read them all together.
 | `languages` | no | the **single-language exception**: `["hr"]` or `["en"]` for a page not translated yet; left out when the page has both (the rule). `<html lang>` must be one of the page's languages | counted as an exception; a language badge on home and course pages in the other language's view |
 | `steps` | steppers | positive integer | demo length; the contract check compares it with the page (§7) |
 | `aliases` | no | `{ "hr": [...], "en": [...] }`, either list optional: extra search words, synonyms, commands (`fdisk`) | search only (both languages are searched) |
+| `entries` | no | preset entries: `[{ "preset": "<id>", "title": { "hr", "en" }, "concept": { "hr", "en" }, "summary"?: { "hr", "en" }, "query"?: "scenario=<id>" }]`. `preset` is a kebab-case id unique in the sim; `title` ≤ 60 and `concept` ≤ 80 chars, `summary` ≤ 160. The link opens `sims/<id>/index.html?preset=<preset>` (a kit page), or `?<query>` when the entry gives one (an ossimulator page: `scenario=<id>`; no `lang`, the site adds it). The preset id (or the query's first value) must be written, quoted, in the sim's `.js` or `.html` files; the gate also opens each one (§6) | its own line on the home page, under its sim (§3.1); a course file names it `"<sim>#<preset>"` (§3.2) |
 | `related` | no | ids | reserved for "see also"; checked |
 | `origin` | no | where a copy came from (`single-page-labs/x.html`, `ossimulator/scheduling`) | provenance |
 | `asset_review` | no | `true` when assets need the GPL audit (playbook §10.7 step 6) | release audit |
@@ -217,7 +218,11 @@ language button switches without a reload and remembers the choice; links to sim
     languages**, whichever the page shows.
     The build writes these words into each item, so the page's script only shows and hides list items.
   - `Enter` opens the first match and `Esc` clears the search. In class: `/`, `dhcp`, Enter.
-- **Every finished simulator, grouped by topic:** one line each, with title and concept.
+- **Every finished simulator, grouped by topic:** one line each, with title and concept, followed by its
+  **preset entries** (`sim.json` `entries`, §2.1): one line each, indented, named "*sim title* › *entry title*",
+  linked to open the sim at that preset. An entry is searched by its own title, concept, summary and preset id and
+  by its sim's words, so `stp` finds the STP presets and `storm` finds the broadcast storm. An unfinished sim's
+  entries are not published either.
 - **Tools** are listed under their topic (e.g. "Alati za nastavu"), because the lecturer opens them in
   class. They never appear on course pages.
 - **`wip` sims are not published at all:** no list item and no page.
@@ -245,6 +250,10 @@ language button switches without a reload and remembers the choice; links to sim
 
 - `sections` keeps the order. Use one section without a title for a flat list, or one per lecture
   or week.
+- An item is a sim id, or `"<sim>#<preset>"` for one of the sim's preset entries (§2.1): the page lists it as
+  "*sim title* › *entry title*" with the entry's concept (and summary, when it has one), and links it to open the
+  sim at that preset, `?lang=` after the preset's query. A sim and its entries may be listed side by side. A course
+  that lists an entry counts as listing the sim (its derived `courses`).
 - The `id` is the page's address: `materijali.online/simdeck/courses/linux-essentials/`.
 - `short` (optional) adds `materijali.online/linux` through an nginx rule (§4).
 - `title`, `term`, `intro` and section titles are `{ "hr", "en" }`. `lang` is the language the page opens in for a
@@ -392,6 +401,9 @@ sets the limits:
   - length limits on title, concept and summary;
   - `steps` on steppers, and only there;
   - `related` ids exist;
+  - `entries`: known fields, kebab-case preset ids without duplicates, title and concept (and summary) in both
+    languages within their lengths, an explicit `query` of `key=value` pairs without `lang`; the preset id (or the
+    query's first value) appears quoted in the sim's `.js` or `.html` files;
   - in the page: `data-sim` on `<html>` equals the id; `#simdeck-exceptions` is `[{rule, why}]` (counted, as
     a warning); a stale `#simdeck-meta` placeholder (id, class, steps, title, concept differ from `sim.json`) gives
     a warning.
@@ -401,7 +413,7 @@ sets the limits:
   - only known fields;
   - `title` (and `term`, `intro`, section titles when given) in both languages; `lang` is `hr` or `en`;
   - non-empty sections;
-  - only existing ids, no tools, no duplicates;
+  - only existing ids (`"<sim>#<preset>"`: the sim has that preset entry), no tools, no duplicates;
   - `short` is kebab-case, unique across courses, and not in `site.json` `reservedPaths`;
   - `wip` gives a warning.
 
@@ -421,7 +433,9 @@ valid saves land in the hand-edit format, and invalid ones leave the disk unchan
 
 Left to the kit's page check (`kit/tools/check-page.mjs`, which the gate `npm run gate -- <id>` runs on the
 built file, docs/tasks/COMMON.md §7): fit at 1920×1080, text size, clicker keys, themes,
-and the step count the page mounts against `#simdeck-meta` `steps`; per language, the string tables and that every
+the step count the page mounts against `#simdeck-meta` `steps`, and each preset entry (rule `entries`, not
+waivable: the build copies `entries` into `#simdeck-meta`): its link opens the page paused, at that preset when the
+query names one (`preset=`); per language, the string tables and that every
 visible word comes from them (docs/sim-ui.md §9.6). `tests/site-lang.test.mjs` switches a built home and course
 page in the browser.
 
@@ -451,8 +465,9 @@ listed at the end for the kit.
    `sims/<id>/`) and `INDEX` in `new-sim.sh`, both unbuilt (repo root) and built (`dist/`).
 6. **Back link.** The kit goes back in history when the visitor came from the index, and otherwise follows the link to
    the home page.
-7. **Deep links.** The kit opens `?preset=<id>&step=<n>`. Course pages link plain sim pages for now; a course
-   item could name a preset later without changing the kit.
+7. **Deep links.** The kit opens `?preset=<id>&step=<n>`. A preset entry (`sim.json` `entries`, §2.1) is linked
+   from the home page and from course files (`"<sim>#<preset>"`) as `?preset=<id>`, or as the entry's own `query`;
+   no kit change was needed.
 8. **Steps.** `sim.json` `steps` is what the frame records; the kit compares it with what the page mounts.
 9. **Offline.** The build refuses network loads; the kit bundles its fonts, so built sims are complete files.
 10. **Look.** The home and course pages keep their own small CSS (`site/index.css`, `site/course.css`). They

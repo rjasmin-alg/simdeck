@@ -62,7 +62,7 @@ From `docs/design-notes-simdeck.md`, playbook §10.2 and `docs/sim-ui.md`:
   (`[{ "rule", "why" }]`), never worked around silently. `rule` is one of the gate's rule ids (`lib/contract.mjs`):
   `one-screen`, `text-size`, `phone`, `keys`, `steps`, `max-steps`, `motion`, `console`, `languages`, `theme`,
   `tokens`. A declared rule waives that rule's failing checks; the gate counts them, per class over the repo too.
-  `manifest`, `tests`, `offline`, `scope` and `kit` cannot be waived. The single-language exception is `sim.json`
+  `manifest`, `tests`, `offline`, `scope`, `kit` and `entries` cannot be waived. The single-language exception is `sim.json`
   `languages` (§4).
 - **Page skeleton** (`docs/site-structure.md` §7): `<html lang="…" data-sim="<id>">` with `data-sim` equal to
   the folder name; the page links `../../kit/kit.css` and `../../kit/kit.js` itself (so it runs unbuilt from
@@ -104,7 +104,7 @@ labels, legend, captions, explanation, preset names, hints, stage text, attribut
 Fields and rules: `docs/site-structure.md` §2.1. Required: `id` (= folder name), `class`, `status`, `title`
 (≤ 60 chars), `concept` (≤ 80), `summary` (≤ 160), `topic`, `tags`, `level`, and `steps` for steppers.
 `title`, `concept` and `summary` are `{ "hr": "…", "en": "…" }`, both non-empty and each within the limit.
-Optional: `aliases` (`{ "hr": [...], "en": [...] }`), `languages` (only the single-language exception, §4),
+Optional: `aliases` (`{ "hr": [...], "en": [...] }`), `entries` (preset entries, §6), `languages` (only the single-language exception, §4),
 `related`, `origin` (set it for adopted pages), `asset_review`, `credits` (third-party material, §9). `lang` no longer exists. Unknown fields are errors.
 `kit/new-sim.sh <id> sims/<id>` copies the template and writes a `wip` `sim.json` stub that passes the check; the
 admin's + Novi simulator does the same. Fill in the real title, concept, summary, topic and tags. Use the topic
@@ -137,7 +137,10 @@ A task file may say "soft: start after X is merged and reuse its model". Shared 
   reusable part promotable: pure functions over plain data, no strings and no page code, so the coordinator can
   move it to `models/` unchanged.
 - A **preset task** adds a preset to the host folder named in its task file: presets, their strings and tests
-  only. One preset task per host at a time.
+  only, plus the preset's line in the host's `sim.json` `entries`:
+  `{ "preset": "<id>", "title": { "hr", "en" }, "concept": { "hr", "en" } }` (`docs/site-structure.md` §2.1). That
+  lists it on the home page and lets a course file name it as `"<host>#<id>"`; the gate opens it (rule `entries`).
+  Adding the preset to a course file is the coordinator's. One preset task per host at a time.
 
 ## 7. Checks
 

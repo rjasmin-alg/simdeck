@@ -353,7 +353,7 @@ settled each one as follows.
 | `data-sim` | equals the id; `new-sim.sh` sets it, the frame's check enforces it | page |
 | Exceptions | stay in the page, `#simdeck-exceptions` as `[{"rule", "why"}]`; the frame validates and counts them | page |
 | Back link | goes back in history when the referrer is this site's index (as `…/index.html` or its folder) **or one of its course pages** (`…/courses/<id>/`, which is also where short addresses redirect), so a student returns to their course page and the index keeps its search. Otherwise it follows the link home | kit (`Simdeck.cameFromSite`, tested in `kit.test.js`) |
-| Deep links | `?preset=<id>&step=<n>`; course pages link plain sim pages for now and can name a preset later without a kit change | kit |
+| Deep links | `?preset=<id>&step=<n>`; the home page and course pages link a `sim.json` preset entry as `?preset=<id>` (`docs/site-structure.md` §2.1) | kit |
 | Steps | `sim.json` `steps` is recorded; the kit warns if the page mounts a different count | kit, frame |
 
 ## 8. Not yet covered

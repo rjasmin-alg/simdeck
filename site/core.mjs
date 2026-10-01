@@ -112,16 +112,51 @@ export function normalise(s) {
 }
 
 /**
- * The link to a sim. `depth` is how many folders below the site root the linking page sits
- * (home: 0, courses/<id>/: 2). Links name index.html explicitly so they work from file://.
+ * A sim's preset entries (sim.json "entries") as list items of their own: the host's fields (path, class, status,
+ * topic, tags, languages, courses), the entry's own title, concept and summary, and the query that opens the page at
+ * the preset. A course file names one as "<sim>#<preset>", which is its id.
+ */
+export function presetItems(e) {
+  // Malformed items are left out here; lib/manifest.mjs reports them.
+  return (Array.isArray(e.entries) ? e.entries : []).filter((x) => typeof x?.preset === 'string').map((x) => ({
+    id: `${e.id}#${x.preset}`, preset: x.preset, host: e,
+    title: x.title, concept: x.concept, summary: x.summary, query: entryQuery(x),
+    path: e.path, class: e.class, status: e.status, topic: e.topic, tags: e.tags, level: e.level,
+    ...(e.languages ? { languages: e.languages } : {}), courses: e.courses,
+  }));
+}
+
+/** The query string of a preset entry: the one it gives (ossimulator's "scenario=…"), else the kit's "preset=<id>". */
+export function entryQuery(x) {
+  return x.query ?? `preset=${encodeURIComponent(x.preset)}`;
+}
+
+/** Every id a course file may name: each sim's id, and "<sim>#<preset>" for each of its preset entries. */
+export function refMap(entries) {
+  const m = new Map();
+  for (const e of entries) {
+    m.set(e.id, e);
+    for (const p of presetItems(e)) m.set(p.id, p);
+  }
+  return m;
+}
+
+const withQuery = (base, query, lang) => {
+  const q = [query, lang ? `lang=${lang}` : ''].filter(Boolean).join('&');
+  return q ? `${base}?${q}` : base;
+};
+
+/**
+ * The link to a sim, or to a preset entry (its query opens the preset). `depth` is how many folders below the site
+ * root the linking page sits (home: 0, courses/<id>/: 2). Links name index.html explicitly so they work from file://.
  */
 export function entryHref(e, depth = 0, lang = null) {
-  return `${'../'.repeat(depth)}${e.path}index.html${lang ? `?lang=${lang}` : ''}`;
+  return withQuery(`${'../'.repeat(depth)}${e.path}index.html`, e.query, lang);
 }
 
 /** The absolute URL a student would type, for printed course pages; ?lang= only when it is not the site's default. */
 export function entryAbsUrl(e, site, lang = null) {
-  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}${lang && lang !== (site.lang ?? 'hr') ? `?lang=${lang}` : ''}`;
+  return withQuery(`${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}`, e.query, lang && lang !== (site.lang ?? 'hr') ? lang : null);
 }
 
 /** materijali.online/<short> for a course with a short address, or null. */
@@ -279,11 +314,11 @@ export function courseItems(ids, byId, drafts = false) {
 
 /**
  * The body of a course page, from a course file ({ title, term?, intro?, lang?, sections: [{ title?, sims }] }), in
- * both languages. Sim links carry ?lang= in the course's language; site/lang.js rewrites them when the visitor
+ * both languages. An item is a sim id or "<sim>#<preset>" (a preset entry, linked to open at that preset). Sim links carry ?lang= in the course's language; site/lang.js rewrites them when the visitor
  * switches. Returns { html, skipped }.
  */
 export function renderCourse(course, ctx, depth = 0, drafts = false) {
-  const byId = new Map(ctx.entries.map((e) => [e.id, e]));
+  const byId = refMap(ctx.entries);
   const lang = course.lang ?? ctx.site.lang ?? 'hr';
   const skipped = [];
   let n = 0;
@@ -293,9 +328,9 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
     const lis = r.items.map((e) => {
       n += 1;
       const urls = LANGS.map((l) => ({ l, url: entryAbsUrl(e, ctx.site, l) }));
-      return `<li value="${n}"><a data-lang-link href="${escapeHtml(entryHref(e, depth, lang))}">${bi(e.title)}</a>${langBadge(e)}
+      return `<li value="${n}"${e.host ? ' class="h-preset"' : ''}>${hostLabel(e)}<a data-lang-link href="${escapeHtml(entryHref(e, depth, lang))}">${bi(e.title)}</a>${langBadge(e)}
 <span class="h-concept">${bi(e.concept)}</span>
-<span class="h-summary">${bi(e.summary)}</span>
+${e.summary ? `<span class="h-summary">${bi(e.summary)}</span>` : ''}
 <span class="h-url">${bi(Object.fromEntries(urls.map((u) => [u.l, u.url])))}</span></li>`;
     });
     if (!lis.length) return '';
@@ -308,18 +343,28 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
   return { html, skipped };
 }
 
+/** A preset entry's line starts with its host sim's title, so it reads on its own when a search hides the host. */
+function hostLabel(e) {
+  return e.host ? `<span class="h-host">${bi(e.host.title)} ›</span> ` : '';
+}
+
 /**
- * The published home page's list: every public entry, grouped by topic, as static HTML. Each item
- * carries its folded search words in data-s for the page's one small filter script.
+ * The published home page's list: every public entry, grouped by topic, as static HTML, each followed by its preset
+ * entries (sim.json "entries"), one line each. Each item carries its folded search words in data-s for the page's one
+ * small filter script; a preset entry's words include its host's, so "stp" finds the STP presets too.
  */
 export function renderIndexList(ctx, drafts = false) {
   const list = search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '', {}, ctx.site?.lang ?? 'hr');
   if (!list.length) return `<p class="empty">${biStr('noneYet')}</p>`;
+  const wordsOf = (e) => {
+    const f = searchFields(e, ctx.vocab);
+    return [f.title, f.id, f.tags, f.topic, f.text];
+  };
+  const line = (e, words) => `<li${e.host ? ' class="h-preset"' : ''} data-s="${escapeHtml(words.join(' ').replace(/\s+/g, ' ').trim())}">${hostLabel(e)}<a data-lang-link href="${escapeHtml(entryHref(e, 0))}">${bi(e.title)}</a>${langBadge(e)} <span>${bi(e.concept)}</span></li>`;
   return group(list, ctx.vocab)
     .map((g) => `<section><h2>${bi(g.label)}</h2><ul>${g.items.map((e) => {
-      const f = searchFields(e, ctx.vocab);
-      const words = [f.title, f.id, f.tags, f.topic, f.text].join(' ').replace(/\s+/g, ' ').trim();
-      return `<li data-s="${escapeHtml(words)}"><a data-lang-link href="${escapeHtml(entryHref(e, 0))}">${bi(e.title)}</a>${langBadge(e)} <span>${bi(e.concept)}</span></li>`;
+      const host = wordsOf(e);
+      return line(e, host) + presetItems(e).map((p) => line(p, [...wordsOf(p), normalise(p.preset), ...host])).join('');
     }).join('')}</ul></section>`)
     .join('\n');
 }

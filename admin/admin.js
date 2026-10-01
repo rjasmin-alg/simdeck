@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // simdeck admin: edit simulators, courses, topics and tags; preview; publish. Every save goes to the
 // local server, which validates before writing, so a refused save shows the reason and changes nothing.
-import { search, escapeHtml as h, STR as SITE_STR, shortLinkRules, shortUrl, loc, LANGS } from './core.js';
+import { search, refMap, presetItems, escapeHtml as h, STR as SITE_STR, shortLinkRules, shortUrl, loc, LANGS } from './core.js';
 
 // The admin is the lecturer's own tool and stays in Croatian; what it edits is in both languages.
 const STR = SITE_STR.hr;
@@ -161,14 +161,14 @@ function renderCourses() {
 let draft = null;
 function courseForm(c) {
   if (!draft || draft._for !== (ui.newCourse ? '' : c.id)) draft = { ...structuredClone(c), _for: ui.newCourse ? '' : c.id };
-  const byId = new Map(S.entries.map((e) => [e.id, e]));
+  const byId = refMap(S.entries); // sim ids and "<sim>#<preset>" (preset entries)
   const sections = draft.sections.map((s, si) => `<div class="section" data-si="${si}">
     <div class="list-tools">${LANGS.map((l) => `<input type="text" data-k="stitle" data-l="${l}" lang="${l}" value="${h(s.title?.[l] ?? '')}" placeholder="Naslov sekcije, ${l.toUpperCase()} (neobavezno)">`).join('')}
       <button type="button" class="small" data-act="sup" title="Sekcija gore">↑</button><button type="button" class="small" data-act="sdown" title="Sekcija dolje">↓</button>
       <button type="button" class="small danger" data-act="sdel" title="Ukloni sekciju">✕</button></div>
     <ol>${s.sims.map((id, i) => {
       const e = byId.get(id);
-      return `<li data-i="${i}">${e ? h(tr(e.title)) : `<span class="tag wip">${h(id)} ne postoji</span>`} ${e?.status === 'wip' ? '<span class="tag wip">u izradi, ne prikazuje se</span>' : ''}${e?.class === 'tool' ? '<span class="tag wip">alat, ne smije na kolegij</span>' : ''}
+      return `<li data-i="${i}">${e?.host ? `${h(tr(e.host.title))} › ` : ''}${e ? h(tr(e.title)) : `<span class="tag wip">${h(id)} ne postoji</span>`} ${e?.status === 'wip' ? '<span class="tag wip">u izradi, ne prikazuje se</span>' : ''}${e?.class === 'tool' ? '<span class="tag wip">alat, ne smije na kolegij</span>' : ''}
         <button type="button" class="small" data-act="up">↑</button><button type="button" class="small" data-act="down">↓</button><button type="button" class="small" data-act="del">✕</button></li>`;
     }).join('')}</ol>
     <div class="picker"><input type="search" data-k="add" placeholder="+ dodaj simulator (traži)…"><ul class="suggest" hidden></ul></div>
@@ -220,9 +220,11 @@ function bindCourseForm(c) {
     const box = $('.suggest', sec);
     const inCourse = new Set(draft.sections.flatMap((x) => x.sims));
     input.addEventListener('input', () => {
-      const hits = input.value.trim() ? search(S.entries, S.vocab, input.value).filter((e) => !inCourse.has(e.id) && e.class !== 'tool').slice(0, 12) : [];
+      // Sims and their preset entries ("<sim>#<preset>"): a course can open a sim at one of its presets.
+      const items = S.entries.flatMap((e) => [e, ...presetItems(e)]);
+      const hits = input.value.trim() ? search(items, S.vocab, input.value).filter((e) => !inCourse.has(e.id) && e.class !== 'tool').slice(0, 12) : [];
       box.hidden = !hits.length;
-      box.innerHTML = hits.map((e) => `<li data-id="${h(e.id)}">${h(tr(e.title))} <small class="muted">${h(e.id)}${e.status === 'wip' ? ' · u izradi' : ''}</small></li>`).join('');
+      box.innerHTML = hits.map((e) => `<li data-id="${h(e.id)}">${e.host ? `${h(tr(e.host.title))} › ` : ''}${h(tr(e.title))} <small class="muted">${h(e.id)}${e.status === 'wip' ? ' · u izradi' : ''}</small></li>`).join('');
     });
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); box.querySelector('li')?.click(); }

@@ -185,3 +185,68 @@ test('credits: { what (both languages), by, licence, url?, changes? }; anything 
   bad([{ ...ok, changes: two('', 'x') }], /"changes\.hr" must be a non-empty string/);
   bad([{ ...ok, licence_url: 'x' }], /unknown field "licence_url"/);
 });
+
+// ── preset entries (sim.json "entries"), linked from course files as "<sim>#<preset>" ──
+const withPage = (r, id, page) => { r.natives.find((n) => n.dir === id).html = page; return r; };
+const presetPage = `<!doctype html><html lang="hr"><head></head><body><script>presets: [{ id: 'loop' }, { id: "storm" }]; scenario = 'fifo-belady';</script></body></html>`;
+const entry = (over = {}) => ({ preset: 'storm', title: two('Oluja', 'Storm'), concept: two('Petlja bez STP-a', 'A loop without STP'), ...over });
+const presetRepo = (entries, courses) => withPage(repo({ natives: [nativeJson({ entries }), nativeJson({ id: 'lvm-x', topic: 'storage', tags: ['lvm'] })], courses }), 'dns-x', presetPage);
+
+test('entries: a valid preset entry, and one with an explicit query, pass; a course links them as <sim>#<preset>', () => {
+  const r = validate(presetRepo([entry(), entry({ preset: 'belady', query: 'scenario=fifo-belady&frames=3', summary: two('Više okvira, više promašaja.', 'More frames, more faults.') })],
+    [{ id: 'net', title: two('Mreže'), sections: [{ sims: ['dns-x#storm', 'dns-x#belady', 'dns-x', 'lvm-x'] }] }]));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.entries.find((e) => e.id === 'dns-x').courses, ['net']);
+});
+
+test('entries: a course listing only a preset entry puts its sim on the course', () => {
+  const r = validate(presetRepo([entry()], [{ id: 'net', title: two('Mreže'), sections: [{ sims: ['dns-x#storm'] }] }]));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.entries.find((e) => e.id === 'dns-x').courses, ['net']);
+  assert.deepEqual(r.entries.find((e) => e.id === 'lvm-x').courses, []);
+});
+
+test('entries: shape errors', () => {
+  const bad = (entries, re) => assert.match(errorsOf(presetRepo(entries)), re);
+  bad([], /"entries" must be a non-empty array/);
+  bad({ preset: 'storm' }, /"entries" must be a non-empty array/);
+  bad(['storm'], /entries\[0\] must be an object/);
+  bad([entry({ name: 'x' })], /entries\[0\]: unknown field "name"/);
+  bad([entry({ preset: 'Storm' })], /entries\[0\]: "preset" must be the preset's kebab-case id/);
+  bad([entry({ preset: undefined })], /entries\[0\]: "preset" must be/);
+  bad([entry(), entry()], /entries\[1\]: preset "storm" is listed twice/);
+  bad([entry({ title: { hr: 'Oluja' } })], /entries\[0\]: "title.en" must be a non-empty string/);
+  bad([entry({ concept: undefined })], /entries\[0\]: missing required field "concept"/);
+  bad([entry({ title: two('x'.repeat(61)) })], /entries\[0\]: "title.hr" is 61 chars, max 60/);
+  bad([entry({ summary: two('Kratko.', '') })], /entries\[0\]: "summary.en" must be a non-empty string/);
+});
+
+test('entries: an explicit query is the part after "?", key=value pairs, without lang', () => {
+  const bad = (query, re) => assert.match(errorsOf(presetRepo([entry({ preset: 'belady', query })])), re);
+  bad('', /"query" must be a non-empty string/);
+  bad('?scenario=fifo-belady', /no leading "\?"/);
+  bad('scenario=fifo-belady#x', /no "#"/);
+  bad('scenario', /key=value pairs/);
+  bad('scenario=fifo-belady&', /key=value pairs/);
+  bad('scenario=fifo-belady&lang=en', /must not set "lang"/);
+});
+
+test('entries: the preset id (or the query\'s first value) must be in the page', () => {
+  assert.match(errorsOf(presetRepo([entry({ preset: 'flood' })])), /entries\[0\]: preset "flood" is not in the page's \.js or \.html files/);
+  assert.match(errorsOf(presetRepo([entry({ preset: 'belady', query: 'scenario=lru-belady' })])), /entries\[0\]: "lru-belady" \(from its query\) is not in the page/);
+  // Found in the sim's own scripts as loadRepo reads them (sources), not only in index.html.
+  const r = presetRepo([entry({ preset: 'flood' })]);
+  r.natives.find((n) => n.dir === 'dns-x').sources = `${presetPage}\npresets.push({ id: 'flood' });`;
+  assert.deepEqual(validate(r).errors, []);
+});
+
+test('entries: course items naming a preset entry are checked', () => {
+  const course = (sims) => [{ id: 'net', title: two('Mreže'), sections: [{ sims }] }];
+  assert.match(errorsOf(presetRepo([entry()], course(['dns-x#flood']))), /"dns-x#flood": dns-x has no preset entry "flood"/);
+  assert.match(errorsOf(presetRepo([entry()], course(['nope#storm']))), /unknown sim id "nope#storm"/);
+  assert.match(errorsOf(presetRepo([entry()], course(['dns-x#storm', 'dns-x#storm']))), /"dns-x#storm" is listed twice/);
+  const tool = withPage(repo({ natives: [nativeJson({ class: 'tool', steps: undefined, entries: [entry()] })], courses: course(['dns-x#storm']) }), 'dns-x', presetPage);
+  assert.match(errorsOf(tool), /"dns-x#storm" is a tool/);
+  const wip = withPage(repo({ natives: [nativeJson({ status: 'wip', entries: [entry()] })], courses: course(['dns-x#storm']) }), 'dns-x', presetPage);
+  assert.match(validate(wip).warnings.join('\n'), /"dns-x#storm" is not ready/);
+});
