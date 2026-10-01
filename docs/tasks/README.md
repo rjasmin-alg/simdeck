@@ -701,8 +701,11 @@ Area prefixes are dropped from folder names except `win-` and `lnx-`; a few name
 
 ## Tags used by the tasks
 
-Wave 0 task `vocabulary` adds these to `tags.json` (with Croatian and English labels):
+Wave 0 task `vocabulary` added these to `tags.json`, with Croatian and English labels and search aliases
+(`tests/vocabulary.test.mjs` keeps this list, the task files and `tags.json` in step):
 
 `active-directory`, `antennas`, `arp`, `attacks`, `authentication`, `automata`, `automation`, `backup`, `bgp`, `boot`, `caches`, `circuits`, `classroom-tool`, `consensus`, `containers`, `cpu`, `cryptography`, `deduplication`, `dhcp`, `disaster-recovery`, `dns`, `email`, `emergency-comms`, `encapsulation`, `error-detection`, `ethernet`, `fault-tolerance`, `file-sharing`, `filesystems`, `firewall`, `group-policy`, `http`, `icmp`, `ip`, `ip-addressing`, `ipv6`, `kerberos`, `link-aggregation`, `logging`, `lvm`, `memory`, `modulation`, `monitoring`, `multicast`, `nat`, `number-representation`, `operating-systems`, `packages`, `parallelism`, `partitioning`, `performance`, `permissions`, `physical-layer`, `processes`, `propagation`, `qos`, `radio-networks`, `raid`, `receivers`, `replication`, `routing`, `selinux`, `services`, `shell`, `signals`, `snapshots`, `spectrum`, `ssh`, `storage-basics`, `storage-cluster`, `switching`, `tcp`, `time-sync`, `tls`, `topology`, `troubleshooting`, `udp`, `updates`, `virtualization`, `vlan`, `vpn`, `wifi`, `windows-internals`
 
 Topics: `architecture`, `classroom`, `distributed`, `internet`, `linux-admin`, `networks`, `os`, `radio`, `security`, `storage`, `theory`, `windows-admin`.
+
+Also in `tags.json`, used by no task yet: `scheduling`.
