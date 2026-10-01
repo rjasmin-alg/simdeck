@@ -13,6 +13,7 @@ Run order: wave 0 → wave 1 (in parallel) → wave 2a pilots → kit views K1�
 | [`contract-check`](w0/contract-check.md) | one command that checks a sim against the contract, and the per-task gate |
 | [`vocabulary`](w0/vocabulary.md) | topics and tags every task needs, in both languages |
 | [`licence`](w0/licence.md) | AGPL-3.0-or-later: LICENSE, package.json, source link on every page |
+| [`licence-source-repos`](w0/licence-source-repos.md) | AGPL-3.0-or-later in the repos simdeck copies from (owner: AGPL everything) |
 | [`shared-models`](w0/shared-models.md) | where model code shared by several sims lives |
 | [`presets-in-index`](w0/presets-in-index.md) | index and course entries that open a sim at a preset |
 | [`ossimulator-english`](w0/ossimulator-english.md) | English UI for ossimulator (in its own repo) |

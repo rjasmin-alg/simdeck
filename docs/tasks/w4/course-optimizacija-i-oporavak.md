@@ -17,7 +17,8 @@ published).
 ## Do
 
 - Create the course in the admin (Kolegiji → + Novi kolegij), or by hand per `docs/site-structure.md` §3.2.
-- Ask the owner for the course's title, term, sections (lectures or weeks) and short address.
+- Use the working title above; the owner gives official course names later (not needed now). Ask for
+  sections (lectures or weeks) and a short address only when the page is published.
 - Order the sims below by the syllabus; leave out what the owner drops; tools never go on course pages.
 
 ## Candidate sims (47, from the catalogue's course column)

@@ -436,7 +436,9 @@ ADOPT_STEPS = {
    foundation task about presets in the index).
 5. **English** cannot be added to a built bundle. It belongs in ossimulator's source (foundation task
    `ossimulator-english`); this task only imports the Croatian build.
-6. Check that the single file runs from `file://` with the network blocked (ossimulator's own e2e does this).""",
+6. Check that the single file runs from `file://` with the network blocked (ossimulator's own e2e does this).
+7. **ossimulator is the source of truth** (owner, 2026-10-02): never fix this copy. A defect found here goes into
+   ossimulator, and the build is re-imported.""",
     "app": """1. Copy the app's `index.html`, `css/` and `js/` into `sims/{sid}/` (keep `origin`: `{name}`).
 2. The app uses ES modules that import each other. The simdeck build only inlines classic scripts and
    import-free modules (`docs/site-structure.md` §5), so bundle it once into one classic script at import
@@ -771,6 +773,7 @@ W0_TASKS = [
     ("contract-check", "one command that checks a sim against the contract, and the per-task gate"),
     ("vocabulary", "topics and tags every task needs, in both languages"),
     ("licence", "AGPL-3.0-or-later: LICENSE, package.json, source link on every page"),
+    ("licence-source-repos", "AGPL-3.0-or-later in the repos simdeck copies from (owner: AGPL everything)"),
     ("shared-models", "where model code shared by several sims lives"),
     ("presets-in-index", "index and course entries that open a sim at a preset"),
     ("ossimulator-english", "English UI for ossimulator (in its own repo)"),

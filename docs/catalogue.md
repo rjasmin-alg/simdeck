@@ -108,8 +108,9 @@ adopted page carries a translation task on top of the kit adaptation. Today's st
 **Licence: AGPL-3.0-or-later** (owner, 2026-10-01) for simdeck and for your own code copied into it.
 None of your own repos has a LICENSE file today: ossimulator (`"private": true`), single-page-labs,
 cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate, the books. Copying from them puts the copy
-under AGPL-3.0-or-later. Giving each source repo its own AGPL LICENSE file keeps the originals open too; that is a change in each of those repos, outside this thread. What AGPL
-means for the pages is in §6.
+under AGPL-3.0-or-later. **Owner decision, 2026-10-02: AGPL everything**, so the source repos get an AGPL
+LICENSE file too (wave-0 task `licence-source-repos`; each is a change in that repo). What AGPL means for the
+pages is in §6.
 
 ### 2.1 single-page-labs → import (23 labs)
 
@@ -192,8 +193,9 @@ Verdict for all: **import** the built single file (`dist-single/<id>.html`, made
 self-contained file per page, 200–335 KB) into `sims/<id>/`, unchanged except for `data-sim`, the
 `#simdeck-meta` placeholder and the `#simdeck-exceptions` block (it has its own runtime, not the kit; its text
 floor is 14 px; its six-section layout scrolls). ossimulator's TypeScript source, with about 900 tests, stays
-where it is, so for these pages the simdeck copy is a build and not the place to fix things: an exception to
-"copies are canonical" that the owner should confirm (→ report). The *Index entries* column proposes separate
+where it is, so for these pages the simdeck copy is a build and not the place to fix things. **Owner decision,
+2026-10-02: ossimulator is the source of truth** for its pages, the one exception to "copies are canonical":
+fixes and the English UI go into ossimulator, and simdeck re-imports the builds. The *Index entries* column proposes separate
 single-concept entries (each a `?scenario=` deep link); that is about 60 entries from 16 pages, which needs
 the frame's preset entries (task `presets-in-index`).
 

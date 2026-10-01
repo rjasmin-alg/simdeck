@@ -21,8 +21,7 @@ English cannot be added to a built bundle. Add English in ossimulator's source, 
 - Keep event codes and tests language-neutral (they already are, playbook §4.3).
 - Rebuild `dist-single/`, run ossimulator's gate, then re-run step 1 of each simdeck `w1` ossimulator task.
 
-## Decide first (owner)
+## Decided (owner, 2026-10-02)
 
-Whether ossimulator stays the source of truth for these 16 pages (simdeck holds builds; recommended, because
-the source is a TypeScript app with ~900 tests) or the simdeck copies become canonical (then the source has to
-move into simdeck). Record the answer in `docs/site-structure.md` §0.
+ossimulator stays the source of truth for its pages (`docs/site-structure.md` §0): simdeck holds the builds,
+and this work happens in ossimulator, never in the simdeck copies.

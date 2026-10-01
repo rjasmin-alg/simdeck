@@ -208,11 +208,37 @@ English cannot be added to a built bundle. Add English in ossimulator's source, 
 - Keep event codes and tests language-neutral (they already are, playbook §4.3).
 - Rebuild `dist-single/`, run ossimulator's gate, then re-run step 1 of each simdeck `w1` ossimulator task.
 
-## Decide first (owner)
+## Decided (owner, 2026-10-02)
 
-Whether ossimulator stays the source of truth for these 16 pages (simdeck holds builds; recommended, because
-the source is a TypeScript app with ~900 tests) or the simdeck copies become canonical (then the source has to
-move into simdeck). Record the answer in `docs/site-structure.md` §0.
+ossimulator stays the source of truth for its pages (`docs/site-structure.md` §0): simdeck holds the builds,
+and this work happens in ossimulator, never in the simdeck copies.
+"""
+
+W0["licence-source-repos"] = HDR("licence-source-repos", "AGPL-3.0-or-later in the source repos", "0", "S", "owner decision 2026-10-02 (\"AGPL everything\"); one thread per repo or one thread visiting each", "a thread per repo (outside simdeck)") + """
+## Goal
+
+Owner decision (2026-10-02): **AGPL everything**, so the originals stay open, not only the copies in simdeck.
+
+## Repos
+
+`~/projects/ossimulator`, `~/projects/cephsim`, `~/projects/faultline`, `~/projects/topologydrafter`,
+`~/projects/single-page-labs` (not a git repo), `~/projects/uvod-u-racunalne-mreze`,
+`~/projects/urm-sveucilisni-udzbenik`.
+
+## Do, in each
+
+- Add `LICENSE` with the full AGPL-3.0 text, and `"license": "AGPL-3.0-or-later"` where there is a
+  `package.json` (ossimulator: also drop nothing else; `"private": true` may stay, it only stops npm publishing).
+- A one-line licence note in the README.
+- Keep third-party licences as they are (ossimulator's OFL fonts; 50ohm material stays CC BY 4.0).
+- The two books: their `meta/project.yaml` image policy (CC BY / CC0 / PD) is compatible; state in the README
+  that the book's own text and code are AGPL-3.0-or-later, as decided.
+- Follow each repo's own workflow (its `CLAUDE.md`, branch and merge rules); commit there, push when the remote
+  is reachable, or note it in `~/projects/PENDING_PUSH.md`.
+
+## Done when
+
+Each repo has `LICENSE`, the README line and, where present, the package.json field.
 """
 
 W0["freeze-originals"] = HDR("freeze-originals", "notes in the original projects pointing to the simdeck copies", "0 (after wave 1)", "S", "wave 1 merged; owner approval per repo (outside simdeck)") + """
@@ -298,8 +324,8 @@ def course_tasks(tasks_list, by_id, sids):
     names = {
         "URM": ("uvod-u-racunalne-mreze", "Uvod u računalne mreže"), "UL": ("uvod-u-linux", "Uvod u Linux (Linux Essentials?)"),
         "NLA": ("napredna-linux-administracija", "Napredna Linux administracija"), "OS": ("operacijski-sustavi", "Operacijski sustavi"),
-        "DR": ("optimizacija-i-oporavak", "Optimisation and disaster recovery"), "WIN1": ("windows-osnove", "Windows administration, basic (name to confirm)"),
-        "WIN2": ("windows-napredno", "Windows administration, advanced (name to confirm)"), "HAM": ("radioamateri", "Ham radio licence course"),
+        "DR": ("optimizacija-i-oporavak", "Optimisation and disaster recovery"), "WIN1": ("windows-osnove", "Windows administration, basic (working name)"),
+        "WIN2": ("windows-napredno", "Windows administration, advanced (working name)"), "HAM": ("radioamateri", "Ham radio licence course"),
         "KK": ("krizne-komunikacije", "Crisis communications KK1/KK2"), "ARH": ("arhitektura-racunala", "Computer architecture"),
         "AUT": ("automati", "Automata and computability"),
     }
@@ -322,7 +348,8 @@ published).
 ## Do
 
 - Create the course in the admin (Kolegiji → + Novi kolegij), or by hand per `docs/site-structure.md` §3.2.
-- Ask the owner for the course's title, term, sections (lectures or weeks) and short address.
+- Use the working title above; the owner gives official course names later (not needed now). Ask for
+  sections (lectures or weeks) and a short address only when the page is published.
 - Order the sims below by the syllabus; leave out what the owner drops; tools never go on course pages.
 
 ## Candidate sims ({len(items)}, from the catalogue's course column)

@@ -49,6 +49,8 @@ Notes from the catalogue: paging split (stallings-paging), TLB locality (tlb-loc
 5. **English** cannot be added to a built bundle. It belongs in ossimulator's source (foundation task
    `ossimulator-english`); this task only imports the Croatian build.
 6. Check that the single file runs from `file://` with the network blocked (ossimulator's own e2e does this).
+7. **ossimulator is the source of truth** (owner, 2026-10-02): never fix this copy. A defect found here goes into
+   ossimulator, and the build is re-imported.
 
 ## Done when
 

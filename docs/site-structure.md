@@ -31,6 +31,9 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
   from `single-page-labs`, `ossimulator` or any other project is copied in and adopted, and from then on
   the simdeck copy is the one that gets fixed (proposal: copies are canonical). simdeck pages never link
   to other projects' sites.
+  - **Exception (owner, 2026-10-02): ossimulator stays the source of truth** for its pages. simdeck imports
+    its built single files (`dist-single/<page>.html`); fixes and translations go into ossimulator, and the
+    builds are re-imported. Never edit those copies in simdeck beyond the import markers.
   - So there are no linked entries, no per-project logins on course pages, and no external
     dependencies on a USB stick: a published folder is complete.
   - This **supersedes** the proposal's and design notes' "linked entries" for ossimulator, cephsim,
