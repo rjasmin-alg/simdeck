@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildNative, build, scriptJson, KIT_MARKER } from '../scripts/build.mjs';
+import { buildNative, build, scriptJson } from '../scripts/build.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const entry = { id: 'x', title: 'X </script>', concept: 'c', class: 'stepper', lang: 'hr', steps: 3 };
@@ -18,7 +18,7 @@ const page = (head = '', body = '') => `<!doctype html><html lang="hr"><head>${h
 
 test('inlines local scripts and stylesheets, leaves the network ones to the offline check', () => {
   const d = simDir({ 'a.js': 'window.A = 1;', 'b.css': 'body{color:red}' });
-  const r = buildNative(page('<link rel="stylesheet" href="b.css">', '<script src="a.js"></script>'), entry, { simDir: d, kit: null });
+  const r = buildNative(page('<link rel="stylesheet" href="b.css">', '<script src="a.js"></script>'), entry, { simDir: d });
   assert.deepEqual(r.errors, []);
   assert.match(r.html, /<style>\/\* b.css \*\/\nbody\{color:red\}<\/style>/);
   assert.match(r.html, /<script>\/\* a.js \*\/\nwindow.A = 1;<\/script>/);
@@ -28,7 +28,7 @@ test('inlines local scripts and stylesheets, leaves the network ones to the offl
 test('refuses missing files and files outside the sim folder', () => {
   const d = simDir({});
   assert.match(buildNative(page('', '<script src="nope.js"></script>'), entry, { simDir: d }).errors.join(), /not found/);
-  assert.match(buildNative(page('', '<script src="../x.js"></script>'), entry, { simDir: d }).errors.join(), /outside the sim's folder/);
+  assert.match(buildNative(page('', '<script src="../x.js"></script>'), entry, { simDir: d }).errors.join(), /outside the sim's folder and the kit/);
 });
 
 test('refuses anything loaded from the network', () => {
@@ -39,24 +39,37 @@ test('refuses anything loaded from the network', () => {
   assert.deepEqual(buildNative(page('', '<a href="https://example.org">ok</a>'), entry, { simDir: d }).errors, []);
 });
 
-test('replaces the kit marker once, and rejects two', () => {
-  const d = simDir({});
-  const r = buildNative(page(KIT_MARKER), entry, { simDir: d, kit: '<style data-simdeck-kit>k</style>' });
-  assert.match(r.html, /data-simdeck-kit/);
-  assert.doesNotMatch(r.html, /simdeck:kit/);
-  assert.match(buildNative(page(KIT_MARKER + KIT_MARKER), entry, { simDir: d, kit: '' }).errors.join(), /2 times/);
+test('inlines the kit the way the template links it, with its fonts as data: URIs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'simdeck-kit-'));
+  const kitDir = join(root, 'kit');
+  mkdirSync(join(kitDir, 'fonts'), { recursive: true });
+  writeFileSync(join(kitDir, 'kit.css'), "@font-face{src:url('fonts/a.woff2') format('woff2')} body{color:red}");
+  writeFileSync(join(kitDir, 'kit.js'), 'window.Simdeck = {};');
+  writeFileSync(join(kitDir, 'fonts', 'a.woff2'), 'FONT');
+  const simDir = join(root, 'sims', 'x');
+  mkdirSync(simDir, { recursive: true });
+  writeFileSync(join(simDir, 'sim.js'), 'window.SimLogic = {};');
+  const src = page('<link rel="stylesheet" href="../../kit/kit.css"><script src="../../kit/kit.js"></script>', '<script src="sim.js"></script>');
+  try {
+    const r = buildNative(src, entry, { simDir, kitDir });
+    assert.deepEqual(r.errors, []);
+    assert.match(r.html, /window.Simdeck = \{\};/);
+    assert.match(r.html, /window.SimLogic = \{\};/);
+    assert.match(r.html, new RegExp(`url\\("data:font/woff2;base64,${Buffer.from('FONT').toString('base64')}"\\)`));
+    assert.doesNotMatch(r.html, /href="..\/..\/kit|src="..\/..\/kit|fonts\/a.woff2/);
+    assert.match(buildNative(src, entry, { simDir, kitDir: null }).errors.join(), /outside the sim's folder and the kit/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test('adds #simdeck-meta with the back link, safely escaped', () => {
+test('replaces the page placeholder #simdeck-meta with one from sim.json', () => {
   const d = simDir({});
-  const r = buildNative(page(), entry, { simDir: d });
-  const m = /<script type="application\/json" id="simdeck-meta">(.*?)<\/script>/.exec(r.html);
-  assert.ok(m, 'meta block present');
-  const meta = JSON.parse(m[1]);
-  assert.equal(meta.title, 'X </script>');
-  assert.equal(meta.index, '../../index.html');
-  assert.equal(meta.steps, 3);
-  assert.match(buildNative(page('<script type="application/json" id="simdeck-meta">{}</script>'), entry, { simDir: d }).errors.join(), /must not define/);
+  const placeholder = '<script type="application/json" id="simdeck-meta">{"id":"proto","kind":"native"}</script>';
+  const r = buildNative(page(placeholder), entry, { simDir: d });
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.html.match(/id="simdeck-meta"/g).length, 1);
+  assert.doesNotMatch(r.html, /proto/);
 });
 
 test('scriptJson cannot close its script element', () => {

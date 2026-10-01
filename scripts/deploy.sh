@@ -6,9 +6,13 @@
 # files and other branches cannot be published by accident. Publishing is outward-facing: run it when asked.
 #
 # What goes up:
-#   - if package.json on main has a "build" script: npm ci && npm run build in the export, then dist/;
+#   - if package.json on main has a "build" script: npm run build in the export, then dist/ (the site frame's
+#     build uses Node's standard library only, so no npm ci: Playwright is a dev tool for checks, not for the build);
 #   - otherwise the export itself, minus what is not for students (docs/, scripts/, tests, kit tooling, package files).
 #   If the result has no index.html yet (the site frame is not built), a minimal list of the native sims is generated.
+#   - the nginx rules for short course addresses (materijali.online/<short>, set per course in the admin) go to
+#     /etc/nginx/snippets/simdeck-short.conf, included by the vhost (scripts/server-setup.sh). Uploaded only when they
+#     change, then nginx -t and reload; the previous file is restored if the test fails.
 #
 # Usage:
 #   scripts/deploy.sh                 # publish main
@@ -19,6 +23,7 @@ set -euo pipefail
 
 SERVER="${SIMDECK_DEPLOY_HOST:-root@materijali.online}"
 TARGET="/var/www/materijali-online/simdeck/"
+SNIPPET="/etc/nginx/snippets/simdeck-short.conf"
 URL="https://materijali.online/simdeck/"
 AUTH="${SIMDECK_AUTH:-deck:***}"
 REF="${SIMDECK_REF:-main}"
@@ -40,8 +45,8 @@ git archive "$COMMIT" | tar -x -C "$WORK/src"
 
 if [[ -f "$WORK/src/package.json" ]] && node -e 'process.exit(require(process.argv[1]).scripts?.build ? 0 : 1)' "$WORK/src/package.json"; then
   echo "── build (npm run build)"
-  (cd "$WORK/src" && npm ci --no-audit --no-fund && npm run build)
-  cp -r "$WORK/src/dist/." "$WORK/stage/"
+  (cd "$WORK/src" && npm run build)
+  rsync -a --exclude='.simdeck-site' "$WORK/src/dist/" "$WORK/stage/"
 else
   echo "── no build script on $REF: publishing the static tree"
   rsync -a \
@@ -85,6 +90,34 @@ echo "$COMMIT" > "$WORK/stage/VERSION"
 echo "── upload ${DRY:+(dry run) }→ ${SERVER}:${TARGET}"
 # Owner and modes set explicitly: -a alone copies the local uid and the 700 mode of mktemp, and nginx answers 404.
 timeout 300 rsync -rltz --delete --itemize-changes --chown=root:root --chmod=D755,F644 $DRY "$WORK/stage/" "${SERVER}:${TARGET}"
+
+if [[ -f "$WORK/src/scripts/short-links.mjs" ]]; then
+  echo "── short course addresses ${DRY:+(dry run) }→ ${SERVER}:${SNIPPET}"
+  node "$WORK/src/scripts/short-links.mjs" --root "$WORK/src" > "$WORK/short.conf"
+  rules="$(grep -v '^#' "$WORK/short.conf" || true)"
+  echo "${rules:-(none)}" | sed 's/^/   /'
+  # The rules travel base64-encoded in the command line: ssh forwards only stdin, which carries the script.
+  timeout 120 ssh -o ConnectTimeout=10 "$SERVER" DRY="${DRY:+1}" SNIPPET="$SNIPPET" RULES="$(base64 -w0 "$WORK/short.conf")" bash -s <<'REMOTE'
+set -euo pipefail
+NEW=$(mktemp); printf '%s' "$RULES" | base64 -d > "$NEW"
+if ! grep -q 'simdeck-short.conf' /etc/nginx/sites-available/materijali-online; then
+  echo "   not included by the vhost yet: run scripts/server-setup.sh once (rules not installed)"
+elif [[ -f $SNIPPET ]] && cmp -s "$NEW" "$SNIPPET"; then
+  echo "   unchanged"
+elif [[ -n $DRY ]]; then
+  echo "   would update $SNIPPET:"; diff -u "$SNIPPET" "$NEW" 2>/dev/null | sed -n '/^[-+][^-+]/p' || cat "$NEW"
+else
+  [[ -f $SNIPPET ]] && cp -p "$SNIPPET" "$SNIPPET.prev"
+  install -m 644 -o root -g root "$NEW" "$SNIPPET"
+  if nginx -t 2>/dev/null; then systemctl reload nginx; echo "   updated, nginx reloaded"
+  else
+    if [[ -f $SNIPPET.prev ]]; then mv "$SNIPPET.prev" "$SNIPPET"; else : > "$SNIPPET"; fi
+    echo "   nginx -t failed with the new rules; previous rules restored" >&2; exit 1
+  fi
+fi
+rm -f "$NEW"
+REMOTE
+fi
 
 [[ -n "$DRY" ]] && { echo "dry run: nothing changed on the server"; exit 0; }
 

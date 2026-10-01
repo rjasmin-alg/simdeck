@@ -9,6 +9,8 @@
 #   1. backs up the vhost as materijali-online.bak-<date>, then adds `location /simdeck/` after the /ossim/ block;
 #   2. writes /etc/nginx/.htpasswd-simdeck (deck:***);
 #   3. creates /var/www/materijali-online/simdeck/ with a "coming soon" page if it is empty;
+#   3b. includes /etc/nginx/snippets/simdeck-short.conf in the vhost, after the /simdeck/ location (an empty file at
+#       first): the short course addresses (materijali.online/<short>) that scripts/deploy.sh keeps up to date;
 #   4. nginx -t, and only then reload; restores the backup if the test fails;
 #   5. checks 401 without login and 200 with it.
 #
@@ -88,6 +90,39 @@ else
   else
     echo "would: write a placeholder $TARGET/index.html"
   fi
+fi
+
+# 3b. short course addresses: an include after the /simdeck/ location; scripts/deploy.sh writes the file
+SNIPPET=/etc/nginx/snippets/simdeck-short.conf
+if [[ ! -f $SNIPPET ]]; then
+  run install -d -m 755 /etc/nginx/snippets
+  if [[ $DRY == 0 ]]; then printf '# simdeck: short course addresses (written by scripts/deploy.sh)\n' > "$SNIPPET"; chmod 644 "$SNIPPET"
+  else echo "would: create an empty $SNIPPET"; fi
+fi
+if grep -q 'simdeck-short.conf' "$VHOST"; then
+  echo "ok: $VHOST includes $SNIPPET"
+elif ! grep -q 'location /simdeck/' "$VHOST"; then
+  echo "would: include $SNIPPET after location /simdeck/ (once that location exists)"
+else
+  NEW=$(mktemp)
+  python3 - "$VHOST" "$NEW" "$SNIPPET" <<'PY'
+import sys
+src, dst, snippet = sys.argv[1:4]
+lines = open(src).read().split('\n')
+start = next(i for i, l in enumerate(lines) if l.strip() == 'location /simdeck/ {')
+end = next(i for i in range(start, len(lines)) if lines[i] == '    }')
+inc = ['', '    # simdeck: kratke adrese kolegija (materijali.online/<kratko>); datoteku piše scripts/deploy.sh.',
+       f'    include {snippet};']
+open(dst, 'w').write('\n'.join(lines[:end + 1] + inc + lines[end + 1:]))
+PY
+  echo "include to add (after /simdeck/):"
+  diff -u "$VHOST" "$NEW" | sed -n '/^+/p' || true
+  if [[ $DRY == 0 ]]; then
+    cp -p "$VHOST" "$VHOST.bak-$(date +%Y%m%d-%H%M%S)"
+    cat "$NEW" > "$VHOST"
+  fi
+  rm -f "$NEW"
+  CHANGED=1
 fi
 
 # 4. test and reload

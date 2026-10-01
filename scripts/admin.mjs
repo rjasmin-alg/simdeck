@@ -23,12 +23,12 @@ const PORT = Number(arg('--port', 5300));
 const HOST = arg('--host', '127.0.0.1');
 const PREVIEW = mkdtempSync(join(tmpdir(), 'simdeck-preview-'));
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.json': 'application/json' };
 const STATIC = {
   '/': join(APP, 'admin', 'index.html'),
   '/admin.js': join(APP, 'admin', 'admin.js'),
   '/admin.css': join(APP, 'admin', 'admin.css'),
-  '/core.js': join(APP, 'site', 'core.js'),
+  '/core.js': join(APP, 'site', 'core.mjs'),
 };
 
 function send(res, code, body, type = 'application/json') {

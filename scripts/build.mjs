@@ -12,14 +12,13 @@
 //
 // Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts]
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRepo, validate } from '../lib/manifest.mjs';
-import { renderCourse, renderIndexList, isPublic, escapeHtml } from '../site/core.js';
+import { loadRepo, validate, metaFor } from '../lib/manifest.mjs';
+import { renderCourse, renderIndexList, isPublic, escapeHtml } from '../site/core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SITE = join(HERE, '..', 'site');
-export const KIT_MARKER = '<!-- simdeck:kit -->';
 export const META_ID = 'simdeck-meta';
 
 const read = (p) => readFileSync(p, 'utf8');
@@ -43,76 +42,67 @@ function isLocal(ref) {
   return !/^[a-z][a-z0-9+.-]*:/i.test(ref) && !ref.startsWith('//') && !ref.startsWith('/');
 }
 
+const MIME = { '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+const META_RE = new RegExp(`<script\\b[^>]*\\bid=["']${META_ID}["'][^>]*>[\\s\\S]*?<\\/script>`, 'i');
 /**
- * Turns a native sim's source page into one self-contained file:
- *  - local <link rel="stylesheet" href="x.css"> and <script src="x.js"> are inlined;
- *  - the kit marker is replaced by the kit (kit/kit.css + kit/kit.js), when the kit exists;
- *  - a #simdeck-meta JSON block with the manifest fields the page may use is added to <head>.
+ * Turns a sim's source page into one self-contained file:
+ *  - local <link rel="stylesheet"> and <script src> are inlined: files in the sim's folder, and the kit
+ *    (the template links ../../kit/kit.css and kit.js, so a page also runs unbuilt from file://);
+ *  - relative url(...) in inlined CSS (the kit's fonts) become data: URIs;
+ *  - the page's #simdeck-meta placeholder is replaced by one generated from sim.json (added if absent).
  * Returns { html, errors }.
  */
-export function buildNative(html, entry, { simDir, kit }) {
+export function buildNative(html, entry, { simDir, kitDir }) {
   const errors = [];
   const where = `sims/${entry.id}/index.html`;
-  const readLocal = (ref) => {
-    const p = resolve(simDir, ref);
-    const rel = relative(simDir, p);
-    if (rel.startsWith('..') || isAbsolute(rel)) {
-      errors.push(`${where}: "${ref}" is outside the sim's folder`);
+  const inside = (p, dir) => {
+    const rel = relative(dir, p);
+    return !rel.startsWith('..') && !isAbsolute(rel);
+  };
+  const locate = (ref, base) => {
+    const p = resolve(base, ref.split(/[?#]/)[0]);
+    if (!inside(p, simDir) && !(kitDir && inside(p, kitDir))) {
+      errors.push(`${where}: "${ref}" is outside the sim's folder and the kit`);
       return null;
     }
     if (!existsSync(p)) {
       errors.push(`${where}: "${ref}" not found`);
       return null;
     }
-    return read(p);
+    return p;
   };
+  const inlineUrls = (css, cssDir) => css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, ref) => {
+    if (!isLocal(ref) || ref.startsWith('#')) return m;
+    const p = locate(ref, cssDir);
+    if (!p) return m;
+    const type = MIME[extname(p).toLowerCase()] ?? 'application/octet-stream';
+    return `url("data:${type};base64,${readFileSync(p).toString('base64')}")`;
+  });
 
   let out = html.replace(/<link\b([^>]*?)\bhref\s*=\s*["']([^"']+)["']([^>]*)>/gi, (m, a, href, b) => {
     if (!/\brel\s*=\s*["']?stylesheet/i.test(a + b) || !isLocal(href)) return m;
-    const css = readLocal(href);
-    return css === null ? m : `<style>/* ${href} */\n${css}</style>`;
+    const p = locate(href, simDir);
+    return p ? `<style>/* ${href} */\n${inlineUrls(read(p), dirname(p))}</style>` : m;
   });
   out = out.replace(/<script\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (m, a, src, b) => {
     if (!isLocal(src)) return m;
-    const js = readLocal(src);
-    if (js === null) return m;
+    const p = locate(src, simDir);
+    if (!p) return m;
     const attrs = `${a}${b}`.replace(/\s+/g, ' ').trim();
-    return `<script${attrs ? ` ${attrs}` : ''}>/* ${src} */\n${js.replace(/<\/script/gi, '<\\/script')}</script>`;
+    return `<script${attrs ? ` ${attrs}` : ''}>/* ${src} */\n${read(p).replace(/<\/script/gi, '<\\/script')}</script>`;
   });
+  out = out.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (m, a, css) => `<style${a}>${inlineUrls(css, simDir)}</style>`);
 
-  const markers = out.split(KIT_MARKER).length - 1;
-  if (markers > 1) errors.push(`${where}: kit marker appears ${markers} times`);
-  if (markers === 1) out = out.replace(KIT_MARKER, kit ?? '');
-
-  const meta = {
-    id: entry.id,
-    title: entry.title,
-    concept: entry.concept,
-    class: entry.class,
-    lang: entry.lang,
-    ...(entry.steps ? { steps: entry.steps } : {}),
-    index: '../../index.html',
-  };
-  if (out.includes(`id="${META_ID}"`)) errors.push(`${where}: must not define #${META_ID} itself; the build adds it`);
-  if (!/<\/head>/i.test(out)) errors.push(`${where}: no </head>`);
-  out = out.replace(/<\/head>/i, `<script type="application/json" id="${META_ID}">${scriptJson(meta)}</script>\n</head>`);
+  const block = `<script type="application/json" id="${META_ID}">${scriptJson(metaFor(entry))}</script>`;
+  if (META_RE.test(out)) out = out.replace(META_RE, () => block);
+  else if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, () => `${block}\n</head>`);
+  else errors.push(`${where}: no </head>`);
 
   // Offline: nothing the page loads may come from the network (plain <a href> links are fine).
   const net = /<(script|link|img|iframe|audio|video|source)\b[^>]*\b(src|href)\s*=\s*["']?(https?:)?\/\//gi;
   for (const m of out.matchAll(net)) errors.push(`${where}: loads from the network (${m[0].slice(0, 60)}…)`);
-  if (/@import\s+url\(\s*["']?https?:/i.test(out) || /url\(\s*["']?https?:/i.test(out)) errors.push(`${where}: CSS loads from the network`);
+  if (/url\(\s*["']?(https?:)?\/\//i.test(out)) errors.push(`${where}: CSS loads from the network`);
   return { html: out, errors };
-}
-
-/** The kit, inlined at the marker. Owned by the kit thread; absent until it lands. */
-export function loadKit(root) {
-  const css = join(root, 'kit', 'kit.css');
-  const js = join(root, 'kit', 'kit.js');
-  if (!existsSync(css) && !existsSync(js)) return null;
-  return [
-    existsSync(css) ? `<style data-simdeck-kit>${read(css)}</style>` : '',
-    existsSync(js) ? `<script data-simdeck-kit>${read(js).replace(/<\/script/gi, '<\\/script')}</script>` : '',
-  ].join('\n');
 }
 
 /** Refuses to empty a folder that has files but no stamp: --out might be a USB stick's root. */
@@ -132,15 +122,14 @@ export function build({ root, out, log = console.log, drafts = false }) {
   const { entries: all, courses, errors, warnings } = validate(repo);
   const entries = drafts ? all : all.filter(isPublic);
   const site = { title: 'simdeck', lang: 'hr', ...repo.site };
-  const kit = loadKit(root);
-  if (!kit) warnings.push('kit/ not found: the kit marker is removed and sims build without the kit');
+  const kitDir = join(root, 'kit');
 
   const pages = [];
   for (const e of entries) {
     const simDir = join(root, 'sims', e.id);
     const src = repo.natives.find((n) => n.dir === e.id)?.html;
     if (src == null) continue;
-    const r = buildNative(src, e, { simDir, kit });
+    const r = buildNative(src, e, { simDir, kitDir });
     errors.push(...r.errors);
     pages.push({ e, html: r.html });
   }

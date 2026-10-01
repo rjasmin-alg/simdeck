@@ -57,7 +57,7 @@ const bad = [
   ['summary too long', [nativeJson({ summary: 'x'.repeat(161) })], /"summary" is 161 chars/],
   ['stepper without steps', [nativeJson({ steps: undefined })], /needs "steps"/],
   ['steps on an explorer', [nativeJson({ class: 'explorer' })], /only for steppers/],
-  ['bad exceptions', [nativeJson({ exceptions: [{ rule: 'fit' }] })], /"exceptions" must be/],
+  ['exceptions in sim.json (they live in the page, as the kit declares them)', [nativeJson({ exceptions: [] })], /unknown field "exceptions"/],
   ['related id missing', [nativeJson({ related: ['nope'] })], /related id "nope" does not exist/],
 ];
 for (const [name, natives, re] of bad) {
@@ -88,6 +88,20 @@ test('rejects: duplicate id', () => {
   const r = repo();
   r.natives[1].json = { ...r.natives[0].json };
   assert.match(errorsOf(r), /duplicate id "dns-x"/);
+});
+
+test('page checks: data-sim must equal the id; exceptions block well formed and counted; stale meta warned', () => {
+  const r = repo();
+  r.natives[0].html = '<html lang="hr" data-sim="proto"><head></head></html>';
+  assert.match(errorsOf(r), /data-sim="proto"> must equal the id "dns-x"/);
+  r.natives[0].html = '<html lang="hr"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"fit"}]</script></head></html>';
+  assert.match(errorsOf(r), /#simdeck-exceptions must be/);
+  r.natives[0].html = '<html lang="hr" data-sim="dns-x"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"fit","why":"poster"}]</script>'
+    + '<script type="application/json" id="simdeck-meta">{"id":"dns-x","class":"stepper","steps":16}</script></head></html>';
+  const v = validate(r);
+  assert.deepEqual(v.errors, []);
+  assert.match(v.warnings.join('\n'), /1 declared contract exception/);
+  assert.match(v.warnings.join('\n'), /#simdeck-meta steps is 16, sim.json says 4/);
 });
 
 const course = (over) => ({ id: 'linux', title: 'Linux', sections: [{ sims: ['dns-x'] }], ...over });

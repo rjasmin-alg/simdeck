@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic } from '../site/core.js';
+import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic } from '../site/core.mjs';
 
 const vocab = {
   topics: { networks: { label: 'Računalne mreže' }, storage: { label: 'Pohrana' } },

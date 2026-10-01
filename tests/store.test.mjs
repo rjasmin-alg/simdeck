@@ -11,7 +11,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function copyRepo() {
   const d = mkdtempSync(join(tmpdir(), 'simdeck-store-'));
-  for (const p of ['site.json', 'tags.json', 'sims', 'courses']) cpSync(join(ROOT, p), join(d, p), { recursive: true });
+  for (const p of ['site.json', 'tags.json', 'sims', 'courses', 'kit']) cpSync(join(ROOT, p), join(d, p), { recursive: true });
   return d;
 }
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
@@ -50,11 +50,18 @@ test('an invalid save is refused and nothing changes on disk', withRepo((d) => {
   assert.deepEqual(snapshot(d), before);
 }));
 
-test('createSim scaffolds a folder that validates', withRepo((d) => {
+test('createSim copies the kit template with new-sim.sh and fits it to sim.json', withRepo((d) => {
   const r = createSim(d, { id: 'raid-5', class: 'stepper', status: 'wip', title: 'RAID 5', concept: 'Paritet', summary: 'S.', topic: 'storage', tags: ['backup'], level: 'core', lang: 'hr', steps: 5 });
   assert.ok(r.ok, r.errors?.join());
   assert.ok(existsSync(join(d, 'sims/raid-5/index.html')));
-  assert.match(readFileSync(join(d, 'sims/raid-5/index.html'), 'utf8'), /<html lang="hr">[\s\S]*simdeck:kit/);
+  const html = readFileSync(join(d, 'sims/raid-5/index.html'), 'utf8');
+  assert.match(html, /<html lang="hr" data-sim="raid-5">/);
+  assert.match(html, /<title>RAID 5 · simdeck<\/title>/);
+  assert.match(html, /<h1 class="sd-title">RAID 5<\/h1>/);
+  assert.match(html, /href="\.\.\/\.\.\/kit\/kit\.css"/);
+  assert.match(html, /"id": "raid-5"/);
+  assert.doesNotMatch(html, /"kind"|"path"/);
+  for (const f of ['sim.js', 'sim.test.js', 'sim.json']) assert.ok(existsSync(join(d, 'sims/raid-5', f)), f);
   assert.deepEqual(adminState(d).errors, []);
 }));
 
