@@ -9,7 +9,7 @@ status: "Approved for a test run"
 
 # Summary
 
-In lectures I explain concepts that change over time (deduplication, snapshot backing chains, multi-master conflicts, LVM, Wi-Fi handshakes) on a blackboard, where movement is hard to draw and nothing can be replayed. simdeck gathers single-concept browser simulators into one searchable index. From it I either open a demo on the fly in class, or generate a one-page course list for students. It starts from what already exists: 24 single-page labs, ossimulator's 16 subsimulators and three larger apps, all copied in and adopted (simdeck never links out to other projects). Five new simulators form the first batch and test whether a shared template makes new ones fast and consistent. GPL-licensed.
+In lectures I explain concepts that change over time (deduplication, snapshot backing chains, multi-master conflicts, LVM, Wi-Fi handshakes) on a blackboard, where movement is hard to draw and nothing can be replayed. simdeck gathers single-concept browser simulators into one searchable index. From it I either open a demo on the fly in class, or generate a one-page course list for students. It starts from what already exists: 23 single-page labs, ossimulator's 16 subsimulators, three larger apps, the networking book's 14 interactive pages and 29 applets from the ham radio course, all copied in and adopted (simdeck never links out to other projects). Five new simulators form the first batch and test whether a shared template makes new ones fast and consistent. Every simulator and page works in Croatian and English. Licensed AGPL-3.0-or-later.
 
 # Problem
 
@@ -38,7 +38,7 @@ The riskiest assumption is that a template plus a contract makes new simulators 
 
 # Scope
 
-**In scope:** the index and course-page generator; the kit, the written contract, its check script and a template for new simulators; the 24 `single-page-labs` pages copied in and adapted; ossimulator's subsimulators, `cephsim`, `faultline` and `topologydrafter` copied in and adopted the same way. Also the first batch of five new simulators:
+**In scope:** the index and course-page generator; the kit, the written contract, its check script and a template for new simulators; the 23 `single-page-labs` pages copied in and adapted; ossimulator's subsimulators, `cephsim`, `faultline` and `topologydrafter` copied in and adopted the same way; the 14 interactive pages of the *Uvod u računalne mreže* book and 29 50ohm applets (CC BY 4.0, with attribution) ported to the kit. Every simulator, the index and the course pages in Croatian and English. The full list is `docs/catalogue.md`, one task per simulator in `docs/tasks/`. Also the first batch of five new simulators:
 
 - deduplication (fixed vs content-defined chunks)
 - differential vs incremental backup
@@ -68,7 +68,7 @@ My time, in agent-assisted sessions; for scale, ossimulator's 16 pages were buil
 # Risks & mitigations
 
 - **Copies drift from their originals.** **Mitigation:** the copy in simdeck is canonical; each original collection is frozen, with a note pointing to its new home.
-- **GPL and third-party assets.** Some copied pages carry generated images or material derived from textbooks. **Mitigation:** audit assets before the first public release; replace or credit anything unclear.
+- **AGPL and third-party assets.** Some copied pages carry generated images or material derived from textbooks. **Mitigation:** audit assets before the first public release; replace or credit anything unclear.
 - **Student access.** `materijali.online` is behind basic auth, so course pages need credentials for students. **Mitigation:** one realm for `/simdeck` (docs/deploy.md); because every simulator is copied in, a course page never sends students to a second login.
 - **The contract is too rigid for some topics.** **Mitigation:** allow documented, per-page exceptions, and treat a rising exception count as a signal to revise the contract.
 

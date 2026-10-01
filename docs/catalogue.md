@@ -87,7 +87,11 @@ Verdicts:
   `single-page-labs`).
 - **port**: as import, but the page needs real rework first (it is a fragment, depends on another
   project's components, or loads libraries from the network).
-- **link**: a linked entry; it stays where it is and appears through the manifest only.
+
+There is no "link" verdict. **Owner decision, 2026-10-01: simdeck copies and adopts, it never links out**
+(`docs/site-structure.md` §0): every simulator lives in `sims/<id>/`, and a published folder is complete and
+works offline. What used to be linked entries (ossimulator, the larger apps) are now imports or ports, and
+what cannot work offline (three 50ohm maps) is not adopted.
 - **idea**: nothing to copy; the concept goes into the build list (§4).
 
 **Both languages on adoption.** Every native import and port must reach English and Croatian, so each
@@ -98,14 +102,13 @@ adopted page carries a translation task on top of the kit adaptation. Today's st
 | single-page-labs | of the 20 imported: 9 en, 9 hr, the Marp deck in hr (`lang="POSIX"`), 1 with an hr/en toggle (`radio-cybersecurity.html`) | 19 pages need the other language; the toggle page shows the pattern |
 | URM interactive pages | hr only | all 14 need English |
 | 50ohm applets | hr (translated from de) | all need English; the German original helps, as English 50ohm text doesn't exist |
-| ossimulator (linked) | hr only, English terms in italics | linked entries are exempt from the contract, but a Croatian-only page breaks "the entire site". Either ossimulator gains an English UI (its glossary `docs/POJMOVNIK.md` already pairs every term) or the index marks it hr-only → report |
-| cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate (linked) | en | same question: Croatian UI, or marked en-only → report |
+| ossimulator | hr only, English terms in italics | English cannot be added to a built bundle: it goes into ossimulator's source (its glossary `docs/POJMOVNIK.md` already pairs every term), then the builds are re-imported (task `ossimulator-english`) |
+| cephsim, faultline, topologydrafter | en | Croatian is written in the simdeck copy, which is canonical once imported |
 
 **Licence: AGPL-3.0-or-later** (owner, 2026-10-01) for simdeck and for your own code copied into it.
 None of your own repos has a LICENSE file today: ossimulator (`"private": true`), single-page-labs,
 cephsim, faultline, topologydrafter, dc-sim, dr-lecture-estate, the books. Copying from them puts the copy
-under AGPL-3.0-or-later. Linked entries need no licence, but giving each source repo its own AGPL LICENSE
-file keeps the originals open too; that is a change in each of those repos, outside this thread. What AGPL
+under AGPL-3.0-or-later. Giving each source repo its own AGPL LICENSE file keeps the originals open too; that is a change in each of those repos, outside this thread. What AGPL
 means for the pages is in §6.
 
 ### 2.1 single-page-labs → import (23 labs)
@@ -178,15 +181,21 @@ The same book also plans about 40 interactive cards in `meta/plan-interaktivne-s
 unbuilt. They overlap the networking build list in §4.1 almost completely; the seeds there say which card
 each entry corresponds to.
 
-### 2.3 ossimulator → link (16 pages and the map)
+### 2.3 ossimulator → import the built pages (16 pages and the map)
 
 `~/projects/ossimulator/`, `materijali.online/ossim/` (own login realm `sim/os`). All 16 pages are built,
 `status: 'ready'`, about 900 tests, deployed 2026-09-30; teacher review (DoD C18) still open. Croatian UI,
 Stallings 9th ed. Every page loads any of its scenarios paused through `?scenario=<id>` (not only the
 `PUBLIC_SCENARIOS`), so one page can back several single-concept index entries. Licence: none (private).
 
-Verdict for all: **link**, as the proposal says. The *Index entries* column proposes the separate
-single-concept entries (each a `?scenario=` deep link); that is about 60 entries from 16 pages.
+Verdict for all: **import** the built single file (`dist-single/<id>.html`, made for Moodle: one
+self-contained file per page, 200–335 KB) into `sims/<id>/`, unchanged except for `data-sim`, the
+`#simdeck-meta` placeholder and the `#simdeck-exceptions` block (it has its own runtime, not the kit; its text
+floor is 14 px; its six-section layout scrolls). ossimulator's TypeScript source, with about 900 tests, stays
+where it is, so for these pages the simdeck copy is a build and not the place to fix things: an exception to
+"copies are canonical" that the owner should confirm (→ report). The *Index entries* column proposes separate
+single-concept entries (each a `?scenario=` deep link); that is about 60 entries from 16 pages, which needs
+the frame's preset entries (task `presets-in-index`).
 
 | ID | Page | Concept | Index entries (scenario ids) | Pri | Int |
 |---|---|---|---|---|---|
@@ -210,17 +219,17 @@ single-concept entries (each a `?scenario=` deep link); that is about 60 entries
 
 Not adopted: `legacy/ugnijezdeni-prekidi.html` (superseded by `interrupts`).
 
-### 2.4 Larger apps → link
+### 2.4 Larger apps → port
 
 | ID | Item | Where | What it shows | State | Deep links today | Verdict | Licence | Pri | Int |
 |---|---|---|---|---|---|---|---|---|---|
-| `link-topologydrafter` | topologydrafter | `~/projects/topologydrafter`, `materijali.online/topologija/` | network topology drawing with step reveal (AD multi-site, DMZ, campus) | built, in classroom use | **yes**: `?sample=<two-sites\|dmz\|campus>&present=1&step=<n>&theme=` | link, one entry per sample | none | P1 | |
-| `link-cephsim` | cephsim | `~/projects/cephsim`, `materijali.online/ceph/` | Ceph cluster: CRUSH, PGs, replication vs EC, quorum, recovery | 7 phases done, 148/148 checks pass; **never opened in a real browser** | no (samples `hyperconverged`, `threeRacks`, `brokenRule`, `unbalanced`); `?sample=` is about 20 lines | link; single concepts extracted as native pages (§4.7) | none | P1 | |
-| `link-faultline` | faultline | `~/projects/faultline`, `materijali.online/faultline/` | fault-domain tree + dependency gates, minimal cut sets | phase 0b of 7 (spike), 47/47 checks pass | no (samples `threeZone`, `onePdu`, `sizeTwo`, `usEast1`, `frontDoor`) | link, one entry per sample once `?sample=` exists | none | P2 | |
-| `link-dc-sim` | dc-sim | `~/projects/dc-sim` | datacenter as queues + teams: tail latency, retry collapse, Goodhart | 86 pytest tests, Streamlit GUI, not deployed | no | **idea** for native pages (§4.8); the Python repo stays a lab, not an index entry (no server) | none | P3 | |
-| `link-dr-estate` | dr-lecture-estate | `~/projects/dr-lecture-estate` | fictional estate, 15 DR scenarios, 25 projects | v1 complete, not deployed | `instructor/map.html#CV-nn` | link the **student** handout only; `map.html` is the answer key and must stay instructor-only | none | P3 | |
+| `app-topologydrafter` | topologydrafter | `~/projects/topologydrafter`, `materijali.online/topologija/` | network topology drawing with step reveal (AD multi-site, DMZ, campus) | built, in classroom use | **yes**: `?sample=<two-sites\|dmz\|campus>&present=1&step=<n>&theme=` | **port**: copy `index.html`, `css/`, `js/`; bundle its ES modules once into a classic script (`docs/site-structure.md` §5); samples become presets | none | P1 | |
+| `app-cephsim` | cephsim | `~/projects/cephsim`, `materijali.online/ceph/` | Ceph cluster: CRUSH, PGs, replication vs EC, quorum, recovery | 7 phases done, 148/148 checks pass; **never opened in a real browser** | no (samples `hyperconverged`, `threeRacks`, `brokenRule`, `unbalanced`); `?sample=` is about 20 lines | **port** as topologydrafter (bundle once, add `?sample=`, Croatian in the copy); single concepts also become native pages (§4.6–4.7) | none | P1 | |
+| `app-faultline` | faultline | `~/projects/faultline`, `materijali.online/faultline/` | fault-domain tree + dependency gates, minimal cut sets | phase 0b of 7 (spike), 47/47 checks pass | no (samples `threeZone`, `onePdu`, `sizeTwo`, `usEast1`, `frontDoor`) | **port** as topologydrafter (bundle once, add `?sample=`) | none | P2 | |
+| `app-dc-sim` | dc-sim | `~/projects/dc-sim` | datacenter as queues + teams: tail latency, retry collapse, Goodhart | 86 pytest tests, Streamlit GUI, not deployed | no | **idea** only: Python/Streamlit cannot be copied into a static site; its phenomena are native pages (§4.8) | none | P3 | |
+| `app-dr-estate` | dr-lecture-estate | `~/projects/dr-lecture-estate` | fictional estate, 15 DR scenarios, 25 projects | v1 complete, not deployed | `instructor/map.html#CV-nn` | **not adopted**: documents, not a simulator, and `map.html` is the answer key; its scenarios seed §4.6–4.7 | none | P3 | |
 
-### 2.5 50ohm applets → port or link (32 applets, CC BY 4.0)
+### 2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted)
 
 `~/projects/50ohm-contents-hr/contents/html/` (Croatian translation of DARC's 50ohm.de; German original in
 `50ohm-contents-dl/`). The content licence is **CC BY 4.0** (`LICENSE`, identical in both repos). Its only
@@ -229,10 +238,10 @@ can go into an AGPL page. Attribution is required: "50ohm.de-Autorenteam, AJW-Re
 DARC e.V.", plus a note of changes. Before copying, check that every applet's code is covered by the repo
 licence, as no applet carries its own notice. Ten applets load libraries from `50ohm.de` (jQuery 3.7.1 MIT,
 Chart.js 4.4.1 MIT, three.js MIT, Leaflet BSD-2, Leaflet.Maidenhead by HA8TKS, licence unchecked); port
-means vendoring these. Three are maps of live external services and can only be linked.
+means vendoring these. Three are maps of live external services (online tiles, aprs.fi, hamnetdb.net); the build refuses network loads, so they are not adopted.
 
 Verdict: **port** the signal and circuit applets (most double as networking physical-layer material),
-**link** the maps. All `HAM`, some also `URM` ch06.
+leave out the maps. All `HAM`, some also `URM` ch06.
 
 | ID | Applet (`contents/html/…`) | Shows | Verdict | Pri | Int |
 |---|---|---|---|---|---|
@@ -265,9 +274,9 @@ Verdict: **port** the signal and circuit applets (most double as networking phys
 | `50ohm-skip-distance` | `sprungdistanz_applet.html` | ionospheric skip distance | port | P3 | |
 | `50ohm-greyline` | `greyline.html` | grey line propagation | port | P3 | |
 | `50ohm-aurora` | `applet_aurora.html` | aurora propagation (790 KB, embedded data) | port | P3 | |
-| `50ohm-maidenhead` | `maidenhead.html` | Maidenhead locator map (Leaflet, online tiles) | link | P3 | |
-| `50ohm-aprs-map` | `aprs_map.html` | live APRS map (aprs.fi iframe) | link | P3 | |
-| `50ohm-hamnet-map` | `hamnet_map.html` | HAMNET map (hamnetdb.net iframe) | link | P3 | |
+| `50ohm-maidenhead` | `maidenhead.html` | Maidenhead locator map (Leaflet, online tiles) | not adopted (needs the network) | P3 | |
+| `50ohm-aprs-map` | `aprs_map.html` | live APRS map (aprs.fi iframe) | not adopted (needs the network) | P3 | |
+| `50ohm-hamnet-map` | `hamnet_map.html` | HAMNET map (hamnetdb.net iframe) | not adopted (needs the network) | P3 | |
 
 `test.html` is a stub and is not adopted. The German repo has one more (`applet_iq_169`).
 
@@ -348,9 +357,15 @@ Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have).
 5 B1, 26 P1, 152 P2 and 118 P3. By area: Windows 73, Linux 55, networking basics 52, internet 30,
 storage/DR 22, security 17, radio 17, HA 11, performance 10, architecture 8, reference/tools 6.
 
-Adoption (§2) holds 88 entries: 20 imports, 14 URM ports, 17 ossimulator pages (about 60 index entries
-through scenarios), 5 larger apps and 32 50ohm applets. The idea sources in §2.6 feed §4 and are not
-counted again.
+Adoption (§2) holds 88 entries, 83 of them adopted: 20 single-page-labs imports, 14 URM ports, 17
+ossimulator imports (about 60 index entries through scenarios), 3 larger apps ported and 29 50ohm applets
+ported. Not adopted: dc-sim and dr-lecture-estate (ideas only) and the three online-only 50ohm maps. The idea
+sources in §2.6 feed §4 and are not counted again.
+
+**Tasks.** Every adopted item and every §4 entry has its own self-contained task in `docs/tasks/`
+(`README.md` there gives the order): wave 0 foundation, wave 1 adoption, wave 2 core technologies (DNS,
+DHCP, AD, Group Policy, IPAM, WSUS first, then the networking, internet, security, Linux, storage and HA
+cores), wave 3 derivatives, wave 4 course pages.
 
 ---
 
@@ -379,7 +394,7 @@ decides the final grouping axes (§7.1).
 | `net-link-aggregation` | Link aggregation and flow hashing | why one flow never exceeds one member link | add flows, change the hash, fail a link | expl | S | P2 | URM, NLA | NLA T06 | |
 | `net-arp-local-remote` | Local or remote, then ARP | the host ANDs the mask, picks the target or the gateway, resolves its MAC | step a ping to a local and a remote host | step | S | P1 | URM | URM cards ch08-lokalno-udaljeno-odrediste, ch08-arp-zahtjev-odgovor → §5.9 | |
 | `net-arp-spoofing` | ARP spoofing, man in the middle | a forged reply rewrites the victim's ARP cache | step the attack, then turn on dynamic ARP inspection | step | S | P2 | URM, SEC | URM ch18 | |
-| `net-ipv4-header` | IPv4 header fields | what each field does and which change in transit | click fields, see their role | ref | S | P3 | URM | URM card ch08 (IPv4 header) | |
+| `net-ipv4-header` | IPv4 header fields | what each field does and which change in transit | click fields, see their role | expl | S | P3 | URM | URM card ch08 (IPv4 header) | |
 | `net-hop-rewrite` | What changes at each hop | MACs change per hop, IPs stay, TTL drops, checksum recomputed | step a packet across two routers | step | S | P1 | URM | URM card ch11-skok-sto-se-mijenja → §5.9 | |
 | `net-traceroute` | Traceroute and TTL | TTL-exceeded replies map the path, and stars are not failures | step increasing TTLs; drop ICMP on one router | step | S | P2 | URM | URM card ch11-tracert-ttl | |
 | `net-icmp-messages` | What ping answers mean | echo reply, unreachable codes, timeout, and what silence means | ping through scenarios (down host, ACL, no route) | step | S | P2 | URM | URM ch11 | |
@@ -390,7 +405,7 @@ decides the final grouping axes (§7.1).
 | `net-link-state-spf` | Link state and Dijkstra | LSA flooding builds one map; SPF picks paths | step Dijkstra on a weighted graph; change a cost | step | M | P2 | URM, NLA | URM ch11 → §5.11 | |
 | `net-ipv6-slaac` | IPv6 SLAAC | RS/RA, prefix + interface ID, DAD | step a host joining a link | step | M | P2 | URM | URM ch10 | |
 | `net-ipv6-ndp` | NDP instead of ARP | neighbour solicitation to the solicited-node multicast | step an IPv6 neighbour lookup next to ARP | step | S | P2 | URM | URM ch10; pairs with `net-arp-local-remote` | |
-| `net-ipv6-address-types` | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | ref | S | P3 | URM | URM ch10 | |
+| `net-ipv6-address-types` | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | expl | S | P3 | URM | URM ch10 | |
 | `net-dhcp-dora` | DHCP DORA and the lease | discover/offer/request/ack, T1/T2 renewal, expiry | step a client, let time run, unplug the server | step | S | P1 | URM, UL, WIN1 | URM card ch14 (DORA), UL ch18 | |
 | `net-dhcp-relay` | DHCP relay and giaddr | a relay forwards broadcasts as unicast and tags the subnet | step a client on a remote subnet | step | S | P2 | URM, WIN1 | URM card ch14 (relay) | |
 | `net-dhcp-rogue` | Rogue DHCP and snooping | the first offer wins, so a rogue server takes over | add a rogue server, then trust ports | step | S | P3 | URM, SEC, WIN1 | URM ch18 | |
@@ -421,9 +436,9 @@ decides the final grouping axes (§7.1).
 | ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|
 | `inet-dns-resolution` | Recursive and iterative resolution | resolver asks root, TLD and authoritative servers; the client asks once | step a lookup; repeat it warm | step | M | P1 | URM, UL, WIN1 | UL ch19, URM card ch14 (DNS query path) → §5.4 | |
-| `inet-dns-ttl-cache` | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2, DR S6 → §5.4 | |
+| `inet-dns-ttl-cache` | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2 → §5.4 | |
 | `inet-dns-records` | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM, WIN1 | UL ch19 | |
-| `inet-dns-secondary-expiry` | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR caveat CV-02 → §5.4 | |
+| `inet-dns-secondary-expiry` | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR S6 (student timeline); DR caveat CV-02 → §5.4 | |
 | `inet-dns-split-brain` | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 | |
 | `inet-dnssec-chain` | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC | | |
 | `inet-dns-poisoning` | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC | | |
@@ -436,7 +451,7 @@ decides the final grouping axes (§7.1).
 | `inet-cdn-anycast` | Anycast and CDN edges | one address, many places; BGP picks the nearest | move clients, withdraw a site | expl | S | P2 | URM | | |
 | `inet-tls-handshake` | TLS 1.2 vs 1.3 | key exchange, certificate, round trips; 1-RTT vs 2-RTT | step both handshakes side by side | step | M | P1 | UL, URM, SEC | UL ch21 → §5.5 | |
 | `inet-cert-chain` | Chain of trust and expiry | leaf, intermediate, root store; a missing intermediate; expiry clocks | build a chain, remove links, advance time | step | S | P1 | UL, DR | UL ch21, DR S4 → §5.5 | |
-| `inet-acme-renewal` | ACME / Let's Encrypt renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL | | |
+| `inet-acme-renewal` | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL | | |
 | `inet-email-path` | The path of an e-mail | MUA → MSA → MTA → MDA → IMAP; envelope vs header | send a mail across two domains | step | M | P2 | UL, URM | UL ch20, URM card ch14 (mail send vs fetch) | |
 | `inet-email-auth` | SPF, DKIM and DMARC | three checks, alignment, and the DMARC verdict | send legitimate, forwarded and spoofed mails | step | M | P1 | UL, SEC | UL ch20 | |
 | `inet-smtp-dialogue` | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL | | |
@@ -482,7 +497,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-pipes-redirection` | Pipes and the three streams | stdin/stdout/stderr, `>` vs `2>&1` order, pipes | build a command line, see where each stream goes | step | S | P1 | UL | UL ch06 (`cjevovod-i-tri-toka.svg`) → §5.14 | |
 | `lnx-regex-match` | How a regex matches | the matcher walks the input, backtracks, anchors | type a pattern and text, step the match | step | M | P2 | UL, AUT | UL ch06; pairs with `spl-automata` | |
 | `lnx-links-inodes` | Hard links, symlinks and inodes | names point to inodes; the link count; dangling symlinks | create, link, delete, see what survives | step | S | P2 | UL | UL ch05 (`unos-u-direktoriju-i-brojac-poveznica.svg`) | |
-| `lnx-permissions-rwx` | Permission bits, octal, umask | nine bits, octal notation, umask subtracting from defaults | toggle bits, set umask, create files | expl | S | P1 | UL | UL ch07 (`devet-bitova-dozvola.svg`) | |
+| `lnx-permissions-rwx` | Permission bits, octal, umask | nine bits, octal notation, umask clearing bits from the defaults (666 with umask 077 gives 600) | toggle bits, set umask, create files | expl | S | P1 | UL | UL ch07 (`devet-bitova-dozvola.svg`) | |
 | `lnx-access-decision` | The access decision | owner → group → other, first match decides; the ACL mask | pick a user and a file, step the check | step | S | P2 | UL | UL ch07 → §5.1 | |
 | `lnx-special-bits` | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 | |
 | `lnx-signals` | Signals | SIGTERM vs SIGKILL, traps, SIGHUP and nohup | send signals to processes with and without handlers | step | S | P2 | UL | UL ch08 | |
@@ -491,7 +506,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-systemd-ordering` | systemd dependencies and ordering | Wants/Requires vs After/Before; a failed dependency | edit unit relations, boot, see the order and failures | expl | M | P2 | UL | UL ch10 → §5.15 | |
 | `lnx-timers-cron` | cron vs systemd timers | missed runs, `Persistent=`, randomised delay | let time pass with the machine off | step | S | P3 | UL | UL ch10 | |
 | `lnx-mount-layers` | Block device to mount point | disk → partition → filesystem → mount; a mount hides what was there | mount over a non-empty directory | step | S | P2 | UL | UL ch11 (`tocka-montiranja-zaklanja.svg`) | |
-| `lnx-partition-tables` | MBR vs GPT | partition limits, protective MBR, backup header | add partitions to each | ref | S | P3 | UL | UL ch11 | |
+| `lnx-partition-tables` | MBR vs GPT | partition limits, protective MBR, backup header | add partitions to each | expl | S | P3 | UL | UL ch11 | |
 | `lnx-disk-full-mysteries` | "Disk full" with free space | inode exhaustion, and a deleted file still open | fill a disk both ways, find the cause | step | S | P2 | UL | UL ch11, ch23 | |
 | `lnx-mirror-not-backup` | A mirror is not a backup | RAID protects against disk loss, not deletion or corruption | delete a file on a healthy mirror | step | S | P2 | UL, DR | UL ch12 (`granica-zastite-zrcala.svg`) → §5.3 | |
 | `lnx-lvm-extend` | Extending an LV and its filesystem | PV → VG → LV → filesystem, in that order | add a disk, extend each layer | step | S | P2 | UL | UL ch12; stepper companion to `spl-lvm-lab` | |
@@ -528,9 +543,9 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-raid-rebuild` | Rebuild under load and the second failure | a long rebuild, an unreadable sector, a lost array | fail a disk, rebuild, hit a URE | step | S | P2 | NLA, DR | NLA T24 → §5.3 | |
 | `lnx-multipath` | Multipath I/O | path failover for iSCSI/FC | fail paths during I/O | step | S | P3 | NLA | NLA T25; `spl-stratis-lab` | |
 | `lnx-ansible-idempotence` | Idempotence | a script run twice breaks things; a declarative task doesn't | run both versions repeatedly | step | S | P2 | NLA | NLA T30 | |
-| `lnx-terraform-drift` | Terraform state and drift | desired vs state vs real; plan shows the diff | change infra by hand, run plan | step | S | P2 | NLA | NLA T31 | |
+| `lnx-terraform-drift` | Infrastructure as code: state and drift | desired vs state vs real; plan shows the diff | change infra by hand, run plan | step | S | P2 | NLA | NLA T31 | |
 | `lnx-deploy-strategies` | Blue-green, canary, rolling | how each moves traffic and rolls back | deploy a bad version with each strategy | step | M | P2 | NLA | NLA T33 | |
-| `lnx-alert-states` | Prometheus alert states | scrape, `for:` duration, pending → firing, flapping | feed a metric, tune the rule | step | S | P2 | NLA | NLA T36–37 | |
+| `lnx-alert-states` | Alert states: pending and firing | scrape, `for:` duration, pending → firing, flapping | feed a metric, tune the rule | step | S | P2 | NLA | NLA T36–37 | |
 | `lnx-live-migration` | Live migration | pre-copy rounds converge only if dirtying is slower than copying | slider for dirty rate and bandwidth | expl | M | P2 | NLA | NLA T02 | |
 | `lnx-pam-stack` | The PAM stack | required/requisite/sufficient/optional decide a login | reorder modules, fail some, log in | step | S | P2 | NLA | NLA T58 → §5.1 | |
 | `lnx-hypervisor-types` | Type 1 vs type 2, containers vs VMs | where the kernel and the hypervisor sit | compare stacks, click layers | ref | S | P3 | NLA | NLA T01, T07 | |
@@ -547,22 +562,22 @@ instead of repeating them.
 
 | ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|
-| `win-ad-structure` | Forest, tree, domain, OU | the logical structure of AD and what each boundary is for (security, replication, policy) | click through a sample forest, place objects | ref | S | P2 | WIN1 | `link-topologydrafter` two-sites | |
+| `win-ad-structure` | Forest, tree, domain, OU | the logical structure of AD and what each boundary is for (security, replication, policy) | click through a sample forest, place objects | expl | S | P2 | WIN1 | `app-topologydrafter` two-sites | |
 | `win-ou-vs-group` | OU or group? | OUs carry policy and delegation, groups carry permissions; one object, one OU, many groups | sort tasks into "OU" or "group", see why | step | S | P2 | WIN1 | → §5.21 | |
 | `win-group-scopes` | Group scopes and AGDLP | domain local, global, universal: who can be a member, where they can be used; AGDLP nesting | build the nesting for a file share, test a user | expl | S | P1 | WIN1 | | |
 | `win-dc-promotion` | What promoting a DC does | AD DS, the DNS zone and SRV records, SYSVOL, the first replication | step a server becoming the first DC, then a second | step | S | P2 | WIN1 | → §5.21 | |
 | `win-domain-join` | Joining a domain | DNS SRV lookup, computer account, secure channel; a broken secure channel after a snapshot revert | join a client, revert it, try to log in | step | S | P2 | WIN1 | | |
-| `win-domain-logon` | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when no DC answers | log in on site, at a branch, offline | step | M | P2 | WIN1 | `link-topologydrafter` two-sites | |
+| `win-domain-logon` | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when no DC answers | log in on site, at a branch, offline | step | M | P2 | WIN1 | `app-topologydrafter` two-sites | |
 | `win-account-lockout` | Account lockout | threshold, bad-password count checked at the PDC emulator, a stale password locking an account | mistype passwords from two machines, keep an old session | step | S | P3 | WIN1 | | |
 | `win-kerberos` | Kerberos | AS → TGT, TGS → service ticket, AP; clock skew breaks it | step a user opening a file share; skew the clock | step | M | P1 | WIN2, NLA | NLA T57 → §5.6 | |
 | `win-ntlm-vs-kerberos` | NTLM vs Kerberos | challenge-response vs tickets; when Windows falls back to NTLM; why pass-the-hash works | authenticate by name and by IP, capture the hash | step | S | P2 | WIN2, SEC | | |
 | `win-time-hierarchy` | Time in a domain | the PDC emulator is the source, members follow DCs, Kerberos fails past 5 minutes | drift clocks, move the PDC role | step | S | P2 | WIN2 | `inet-ntp-sync` → §5.21 | |
 | `win-ad-replication` | AD multi-master replication | USNs, up-to-dateness vector, attribute-level last writer wins | change one attribute on two DCs at once | step | M | P2 | WIN2 | → §5.7 (`ha-multimaster-conflict`) | |
-| `win-ad-sites` | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule; site-aware DC choice | add sites and links, change a password, wait | expl | M | P2 | WIN2 | `link-topologydrafter` two-sites | |
+| `win-ad-sites` | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule; site-aware DC choice | add sites and links, change a password, wait | expl | M | P2 | WIN2 | `app-topologydrafter` two-sites | |
 | `win-sysvol-dfsr` | SYSVOL replication | GPO version in AD vs in SYSVOL; a GPO that half-arrived at a branch | edit a GPO, cut the link to a site | step | S | P2 | WIN2 | → §5.21 | |
-| `win-rodc` | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN2, SEC | `link-topologydrafter` two-sites | |
+| `win-rodc` | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN2, SEC | `app-topologydrafter` two-sites | |
 | `win-fsmo-roles` | FSMO roles | the single-master jobs and what breaks when a holder is gone; transfer vs seize | turn off role holders, try operations | step | S | P2 | WIN2 | | |
-| `win-functional-levels` | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | ref | S | P3 | WIN2 | | |
+| `win-functional-levels` | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | expl | S | P3 | WIN2 | | |
 | `win-fgpp` | Password policy and fine-grained policies | one domain policy from the Default Domain Policy GPO; PSOs override it by precedence | apply PSOs to users and groups, see the winner | step | S | P2 | WIN2 | → §5.1 | |
 | `win-delegation` | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 | | |
 | `win-trusts` | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 | | |
@@ -580,8 +595,8 @@ instead of repeating them.
 | `win-gpo-tattooing` | Policies vs preferences | a policy reverts when the GPO goes away; a preference stays (tattooing) | apply both kinds, unlink the GPO | step | S | P2 | WIN2 | | |
 | `win-gpo-targeting` | Item-level targeting | one GPO, preferences that apply per group, OS, IP range | target drive maps, move a user | step | S | P3 | WIN2 | extends `win-gpo-tattooing` | |
 | `win-gpo-software-install` | Software installation | assigned vs published, computer vs user, why it needs a reboot or a logon | deploy an MSI each way | step | S | P3 | WIN1 | | |
-| `win-gpo-slow-link` | Slow links | which extensions skip over a slow link, and why a branch behaves differently | change the link speed, refresh | step | S | P3 | WIN2 | | |
-| `win-admx-store` | ADMX and the central store | where templates come from and why editors disagree | edit from two admin machines with and without a central store | ref | S | P3 | WIN2 | | |
+| `win-gpo-slow-link` | Slow links | which extensions skip over a slow link, and why a branch behaves differently | change the link speed, refresh | expl | S | P3 | WIN2 | | |
+| `win-admx-store` | ADMX and the central store | where templates come from and why editors disagree | edit from two admin machines with and without a central store | expl | S | P3 | WIN2 | | |
 
 #### 4.5.3 DNS on Windows Server
 
@@ -663,10 +678,10 @@ instead of repeating them.
 | `sto-restore-drill` | The backup that lies | backups report OK; only a test restore shows they're empty | run the job for weeks, then restore | step | S | P2 | DR, UL | DR S8, UL ch23 (`provjera-arhive-i-proba-oporavka.svg`) → §5.3 | |
 | `sto-backup-window` | Backup window and offsite seeding | data size vs bandwidth vs window; why the first offsite copy goes by truck | sliders for size, change rate, link speed | expl | S | P2 | DR | NLA T28 | |
 | `sto-cow-vs-row` | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 | |
-| `sto-write-cache` | Write-back vs write-through | write-back is fast until the power fails; battery-backed cache | write, cut power with each setting | step | S | P2 | DR, NLA | scoping note §5 "no write cache" | |
+| `sto-write-cache` | Write-back vs write-through | write-back is fast until the power fails; battery-backed cache | write, cut power with each setting | step | S | P2 | DR, NLA | write-back durability (the scoping note's §5 "no write cache" is a performance tier: a separate idea) | |
 | `sto-ssd-internals` | Inside an SSD | FTL, erase blocks, write amplification, TRIM, wear | write and overwrite, see erase cycles | step | M | P2 | OS, NLA | `ossim-disk-scheduling` hdd-vs-ssd | |
 | `sto-iops-latency` | IOPS, throughput and latency | queue depth and block size trade them off | sliders for block size, queue depth, device | expl | S | P2 | NLA, DR | NLA T27 | |
-| `sto-nas-vs-san` | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | ref | S | P3 | NLA | NLA T25 | |
+| `sto-nas-vs-san` | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | step | S | P3 | NLA | NLA T25 | |
 | `sto-ec-vs-replication` | Erasure coding vs replication | overhead vs failures tolerated vs rebuild cost (k+m) | choose k, m, replicas; fail disks | expl | S | P2 | NLA, DR | cephsim → §5.7 | |
 | `sto-ceph-min-size` | size and min_size | `size=2 min_size=2` blocks I/O on one failure; 3/2 doesn't | fail OSDs under each setting, try to write | step | S | P2 | NLA, DR | cephsim, faultline `sizeTwo`, scoping §5, DR S2/P05 → §5.7 | |
 | `sto-ceph-down-out` | down vs out | down is degraded and nothing moves; out triggers rebalancing after a timer | stop an OSD, let time pass | step | S | P2 | NLA, DR | cephsim | |
@@ -675,7 +690,7 @@ instead of repeating them.
 | `sto-sync-async-replication` | Synchronous vs asynchronous replication | RPO 0 at the cost of latency vs lag and data loss on failover | write, fail the primary at different moments | step | S | P2 | DR, NLA | → §5.7 (with `ha-db-replication`) | |
 | `dr-rpo-rto` | RPO and RTO | how much data and how much time you lose, on one timeline | place backups and an incident, measure loss | expl | S | P2 | DR | DR scenarios | |
 | `dr-site-failover` | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 | |
-| `dr-correlated-failure` | One power strip under three replicas | redundancy that shares one hidden dependency | add dependencies, fail the PDU | step | S | P3 | DR | faultline `onePdu` → link instead | |
+| `dr-correlated-failure` | One power strip under three replicas | redundancy that shares one hidden dependency | add dependencies, fail the PDU | step | S | P3 | DR | faultline `onePdu`: a preset on the imported faultline | |
 | `dr-alert-to-nobody` | The alert that reaches nobody | the alert path depends on the system that failed | fail the site, follow the alert | step | S | P3 | DR | DR S1 | |
 
 ### 4.7 High availability and distributed systems
@@ -685,14 +700,14 @@ instead of repeating them.
 | `ha-multimaster-conflict` | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN2 | proposal first batch; NLA T55 → §5.7 | |
 | `ha-quorum-split-brain` | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN2 | NLA T52–53; cephsim MON quorum → §5.7 | |
 | `ha-fencing` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 | |
-| `ha-vrrp-failover` | VRRP / keepalived | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 | |
+| `ha-vrrp-failover` | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 | |
 | `ha-db-replication` | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 | |
 | `ha-cap` | CAP under partition | a partitioned system picks consistency or availability | partition, issue reads and writes in CP and AP modes | step | S | P2 | NLA, DR | | |
 | `ha-raft` | Raft leader election and log replication | terms, votes, majority commit | kill leaders, partition, step messages | step | M | P2 | NLA | → §5.7 | |
 | `ha-lamport-clocks` | Logical clocks | Lamport and vector clocks order events without a shared clock | send messages between three processes | step | M | P3 | NLA | | |
 | `ha-two-phase-commit` | Two-phase commit | prepare/commit, and the coordinator crash that blocks everyone | crash participants and the coordinator | step | S | P3 | NLA | | |
-| `ha-consistent-hashing` | Consistent hashing | adding a node moves 1/n of keys, mod-n moves almost all | add and remove nodes in both schemes | expl | S | P2 | NLA | relates to CRUSH in `link-cephsim` | |
-| `ha-never-zero-spof` | No system has zero SPOFs | the implicit authorities: identity, naming, time, change, operator | remove each authority, see what fails | step | S | P3 | DR | faultline authorities → link instead | |
+| `ha-consistent-hashing` | Consistent hashing | adding a node moves 1/n of keys, mod-n moves almost all | add and remove nodes in both schemes | expl | S | P2 | NLA | relates to CRUSH in `app-cephsim` | |
+| `ha-never-zero-spof` | No system has zero SPOFs | the implicit authorities: identity, naming, time, change, operator | remove each authority, see what fails | step | S | P3 | DR | faultline authorities: a preset on the imported faultline | |
 
 ### 4.8 Performance and capacity
 
@@ -771,15 +786,15 @@ preset is a scenario, like ossimulator's `?scenario=`), or a clear home with lin
 | 5.1 | **First-match rule evaluation** | `net-rule-first-match`, `urm-firewall`, `lnx-access-decision`, `lnx-netfilter-path`, `lnx-pam-stack`, `win-ntfs-share-effective`, UL ch22 pg_hba | Build one rule-table evaluator with presets: router ACL, stateless firewall, `pg_hba.conf`. Keep netfilter (a path through hooks, not one list), PAM (control flags, not first match), NTFS (deny wins, not first match) and the most-specific-wins rules (`win-dhcp-scope-options`, `win-fgpp`) separate, because their rules are different; note the contrast on each page. |
 | 5.2 | **Snapshots and copy-on-write** | `sto-backing-chains` (B1), `lnx-lvm-snapshot`, `lnx-thin-overcommit`, `lnx-cow-filesystem`, `sto-cow-vs-row`, `win-vss`, `win-hyperv-checkpoints` | `sto-backing-chains` gets presets for qcow2, VHDX/AVHDX (covers `win-hyperv-checkpoints`) and VMware. LVM snapshot fill, thin overcommit and CoW filesystem stay separate pages on the same block-grid view. `sto-cow-vs-row` and `win-vss` can become presets of `lnx-cow-filesystem`. |
 | 5.3 | **Backup, dedup and redundancy** | `sto-backup-diff-incr` (B1), `sto-dedup-chunking` (B1), `sto-dedup-file-funnel`, `sto-retention-gfs`, `sto-restore-drill`, `lnx-send-receive`, `lnx-mirror-not-backup`, `lnx-raid-rebuild`, `lnx-exit-status`, `ossim-raid-cache`, `spl-zfs-btrfs-lab` | Block-level dedup (B1) and file-level dedup (funnel) are different concepts; keep both, link them. `lnx-send-receive` is a preset of `sto-backup-diff-incr`. The restore drill and `lnx-exit-status`'s pipefail case show the same failure (a job that lies); build the restore drill and link the pipefail preset to it. RAID levels live in `ossim-raid-cache`: link it rather than building RAID again; build only `lnx-mirror-not-backup` and `lnx-raid-rebuild`, which it doesn't cover. |
-| 5.4 | **DNS** | `inet-dns-resolution`, `inet-dns-ttl-cache`, `inet-dns-secondary-expiry`, `inet-dns-split-brain`, `win-ad-dns`, DR S6 | Resolution and TTL can share one page with two modes, but each is a full 3–5 minute demo, so keep two pages on one model. Secondary expiry and split-brain are presets of one "zone servers over time" page. |
+| 5.4 | **DNS** | `inet-dns-resolution`, `inet-dns-ttl-cache`, `inet-dns-secondary-expiry`, `inet-dns-split-brain`, `win-dns-zone-types`, `win-dns-dynamic-update`, `win-dns-scavenging`, DR S6 | Resolution and TTL can share one page with two modes, but each is a full 3–5 minute demo, so keep two pages on one model. Secondary expiry and split-brain are presets of one "zone servers over time" page. |
 | 5.5 | **TLS and certificates** | `inet-tls-handshake`, `inet-cert-chain`, `sec-digital-signature`, `sec-pki-revocation`, `inet-acme-renewal`, DR S4 | Handshake and chain are separate pages. Certificate expiry from the DR estate is a preset of `inet-cert-chain`. Revocation and ACME extend the chain page if they are built at all. |
 | 5.6 | **Kerberos** | `win-kerberos`, NLA T57 | One page, one model; the Linux course links it (MIT Kerberos and AD use the same exchanges). |
-| 5.7 | **Replication, quorum and consensus** | `ha-multimaster-conflict` (B1), `win-ad-replication`, `ha-db-replication`, `sto-sync-async-replication`, `ha-quorum-split-brain`, `ha-fencing`, `win-failover-cluster`, `ha-raft`, cephsim MON quorum, `sto-ceph-min-size`, faultline `sizeTwo`, `sto-ec-vs-replication` | B1 multi-master gets presets "database row" and "AD attribute" (covers most of `win-ad-replication`). `ha-db-replication` and `sto-sync-async-replication` are one page. `ha-quorum-split-brain` gets presets for Pacemaker, Windows failover cluster with witness, and Ceph MONs; fencing is its second step. Raft stays separate (it is the mechanism, not the symptom). size/min_size gets **one** native page (`sto-ceph-min-size`) and the cephsim and faultline samples link to it. |
+| 5.7 | **Replication, quorum and consensus** | `ha-multimaster-conflict` (B1), `win-ad-replication`, `ha-db-replication`, `sto-sync-async-replication`, `ha-quorum-split-brain`, `ha-fencing`, `win-failover-cluster`, `ha-raft`, cephsim MON quorum, `sto-ceph-min-size`, faultline `sizeTwo`, `sto-ec-vs-replication` | B1 multi-master gets presets "database row" and "AD attribute" (covers most of `win-ad-replication`). `ha-db-replication` and `sto-sync-async-replication` are one page. `ha-quorum-split-brain` gets presets for a Linux HA cluster, a Windows failover cluster with a witness, and Ceph monitors; fencing is its second step. Raft stays separate (it is the mechanism, not the symptom). size/min_size gets **one** native page (`sto-ceph-min-size`) and the cephsim and faultline samples link to it. |
 | 5.8 | **TCP** | `urm-tcp-handshake`, `urm-flow-control`, `urm-window`, `net-tcp-teardown`, `net-tcp-retransmit`, `net-tcp-congestion`, `net-tcp-states`, `net-tcp-vs-udp-loss` | Separate pages, one shared sequence-chart view and one TCP model. Teardown is a second mode of the ported handshake page. The state machine is the union of the others; build it last or not at all. |
 | 5.9 | **A packet's path** | `net-encapsulation`, `net-arp-local-remote`, `net-hop-rewrite`, `net-traceroute`, `net-packet-journey`, `sec-wireguard` / tunnels, `spl-l2l3-protocols` | One topology-with-headers model for the path pages (ARP, hop rewrite, traceroute). Tunnels (VXLAN, GRE, WireGuard, IPsec) are presets of `net-encapsulation`. `net-packet-journey` is the capstone and links into each, like ossimulator's `journey`. |
 | 5.10 | **Switching loops** | `net-stp`, `net-broadcast-storm` | One page: the storm is step 1 (STP off), STP is step 2. |
 | 5.11 | **Routing protocols** | `net-distance-vector`, `net-link-state-spf`, `inet-bgp-path-selection` | Separate pages on one graph view. |
-| 5.12 | **NAT and port publishing** | `urm-nat`, `urm-pat`, `net-port-forwarding`, `lnx-container-ports`, `net-cgnat` | `urm-nat` and `urm-pat` are near-duplicates (8,253 bytes each, same layout); merge them into one page with two modes on port. Port forwarding and container port publishing are both DNAT: one page with a "Docker" preset. |
+| 5.12 | **NAT and port publishing** | `urm-nat`, `urm-pat`, `net-port-forwarding`, `lnx-container-ports`, `net-cgnat` | `urm-nat` and `urm-pat` are near-duplicates (8,253 bytes each, same layout); merge them into one page with two modes on port. Port forwarding and container port publishing are both DNAT: one page with a "container" preset. |
 | 5.13 | **Error detection and correction** | `net-crc`, `ham-fec-hamming`, 50ohm `fehlererkennung` | One page, parity → CRC → Hamming as steps. |
 | 5.14 | **Pipelines** | `lnx-pipes-redirection`, `win-powershell-objects` | Separate pages; the PowerShell page is built as a comparison against the bash one. |
 | 5.15 | **Boot and service ordering** | `lnx-boot-chain`, `win-boot`, `lnx-systemd-ordering`, `win-services` | One boot-chain page with Linux and Windows presets. One dependency-graph page with systemd and Windows-services presets. |
@@ -819,8 +834,8 @@ What the catalogue draws on from outside your own work:
 | 50ohm exam questions | not used | DL-DE-BY 2.0 (Bundesnetzagentur) | don't import |
 | Chart.js 4.4.1 | `spl-multicore-mesi`, 50ohm applets | MIT | compatible; vendor it, pin the version |
 | jQuery 3.7.1, three.js | 50ohm applets | MIT | compatible; vendor |
-| Leaflet | `50ohm-maidenhead` | BSD-2-Clause | compatible; map tiles need the network, so link only |
-| Leaflet.Maidenhead (HA8TKS) | `50ohm-maidenhead` | not checked | linked only, no copy |
+| Leaflet | 50ohm applets | BSD-2-Clause | compatible; vendor it (the map applets that need online tiles are not adopted) |
+| Leaflet.Maidenhead (HA8TKS) | `50ohm-maidenhead` (not adopted) | not checked | not needed |
 | Marp runtime / Uncover theme | `spl-radio-security-slides` | MIT | compatible |
 | Twemoji graphics | `spl-radio-security-slides` | CC BY 4.0 | attribution needed; or drop emoji (ossimulator's glyph rule forbids them anyway) |
 | Lucide icons | `spl-radio-security-page` | ISC | compatible; pin and vendor instead of `@latest` |
@@ -843,29 +858,39 @@ No external simulator code is proposed for copying. Every new entry in §4 is wr
 
 Requirements only; the frame and kit threads design them.
 
-### 7.1 For the site frame (index, grouping, manifest)
+### 7.1 For the site frame (`sim.json`, `tags.json`, courses)
 
-- **Grouping axes the catalogue needs:** `area` (the §4 sections: networking, internet, security, Linux,
-  Windows, storage/DR, HA, performance, architecture, radio, reference) **and** `courses` (a list: one
-  simulator serves several courses, e.g. `inet-dns-ttl-cache` is UL and DR). Neither alone works.
-- **Further tags that recur:** OSI `layer` (1–7) for networking; `os` (linux, windows, agnostic) so the
-  Windows/Linux preset pairs (§5.14–5.16) can be found together; `protocol` (tcp, dns, dhcp, kerberos…).
-- **Fields beyond the design-notes sketch** (playbook §10.6 already adds `class`, `steps`, `scenario`):
-  - `presets`: several index entries pointing at one page with different presets, as with ossimulator
-    scenarios. §5 relies on this heavily, so native pages need deep links to a preset, not only linked
-    ossimulator entries.
-  - `source` / `attribution`: for CC BY imports (50ohm) the attribution must be shown on the page and the
-    course list.
-  - `audience`: `student` or `instructor`. The DR estate map is an answer key and must never reach a
-    course page; `tool` covers classroom tools but not instructor-only material.
-  - `requires_network`: for linked entries that only work online (50ohm maps).
-  - `status`: planned / building / ready, so the catalogue can live in the manifest and the index shows
-    planned entries to the lecturer only.
-  - `related`: for the capstone links and the overlap clusters in §5.
-- **Scale:** about 300 planned new entries, 88 adopted, about 60 ossimulator scenario entries. The
-  index has to search and filter well beyond the proposal's "≥ 25 native" at this size.
-- **Planning data stays outside the manifest:** Pri and Int belong to this catalogue (or a planning file),
-  not to the student-facing manifest.
+Measured against the frame on `main` (`docs/site-structure.md` §2, `tags.json`, `site.json`). Each sim's task
+file in `docs/tasks/` already names its topic, tags and level.
+
+**What fits as it is:**
+- `topic` (one per sim, groups the home page) maps onto the catalogue's areas, and `courses/<id>.json`
+  carries the catalogue's course column. A sim in several courses is simply listed in several course files.
+- `class` (`stepper`, `explorer`, `reference`, `tool`) is the catalogue's Class column; `steps`, `status`
+  (`ready`/`wip`), `aliases`, `related` (the §5 clusters and capstones), `origin` and `asset_review` cover
+  provenance and the audit.
+- `level` (`intro`, `core`, `advanced`): the tasks propose one from the courses (intro for URM, UL, WIN1 and
+  AUT; advanced for NLA, WIN2 and DR; core otherwise), for the owner to adjust.
+- Exceptions live in the page (`#simdeck-exceptions`), which suits the imported ossimulator and app pages.
+
+**What the catalogue needs changed:**
+
+| Need | Frame today | Change | Task |
+|---|---|---|---|
+| Topics for Windows, internet protocols and theory | 9 topics, none for these | add `windows-admin`, `internet`, `theory` | `vocabulary` |
+| Tags for about 300 sims | 18 tags | add the ~85 tags listed in `docs/tasks/README.md`, with Croatian and English labels and aliases | `vocabulary` |
+| Both languages (owner) | `lang` is one value, equal to `<html lang>`; labels are Croatian | `title`, `concept`, `summary`, `aliases` and tag/topic labels per language; the page switches language at runtime | `bilingual` |
+| One page, several index entries | one entry per folder; course items are plain sim ids | entries for presets (`?preset=`) and ossimulator scenarios (`?scenario=`), searchable and listable in course files | `presets-in-index` |
+| Attribution for CC BY imports (29 50ohm applets) | no field | an `attribution` field (or a licence list generated from `NOTES.md`), shown on the page and on a licences page | `licence` |
+| Shared model code | the build inlines only files inside the sim's folder (plus the kit) | a `models/` folder inlined like the kit, so derivatives reuse a core model | `shared-models` |
+
+Not needed any more: `audience` and `requires_network` (proposed in an earlier draft): the DR estate's
+instructor map and the online-only 50ohm maps are not adopted.
+
+- **Scale:** about 300 planned new sims, 83 adopted pages, about 60 ossimulator scenario entries. The home
+  page's one search box and topic grouping has to stay usable at that size; grouping within a topic (the
+  catalogue's §4.5.x subsections, for example) may become necessary.
+- **Planning data stays outside the manifest:** Pri and Int belong to this catalogue, not to `sim.json`.
 
 ### 7.2 For the UI kit (controls and views many simulators need)
 
@@ -904,9 +929,9 @@ Other requirements:
     fails an undefined colour token.
   - **Layout headroom.** Croatian labels run longer than English ones; the 1920×1080 no-scroll rule must be
     checked in both languages.
-  - **Manifest:** `title` and `summary` per language (`{hr, en}`), replacing the single `lang` field of the
-    design notes. Course files pick a language; the course page is generated in it.
-  - **Linked entries** declare which languages they have, so the index can mark an hr-only or en-only
-    linked app instead of pretending it is bilingual.
+  - **Manifest:** `title`, `concept` and `summary` per language (`{hr, en}`), replacing the single `lang`
+    field of `sim.json`. Course files pick a language; the course page is generated in it.
+  - **Imported pages in one language** (ossimulator until it has English) declare a `languages`
+    exception, so the index can mark them instead of pretending they are bilingual.
 - **Attribution footer** for CC BY imports, in both languages.
 - **Source link** on every page and on the index (AGPL-3.0 §13, see §6), with the licence name.

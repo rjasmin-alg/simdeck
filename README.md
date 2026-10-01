@@ -24,6 +24,8 @@ npm run check:page -- sims/<id>/index.html  # browser check: fits 1920×1080, te
 - `docs/design-notes-simdeck.md`: design decisions and open questions from the proposal review
 - `docs/site-structure.md`: the site frame: layout, the `sim.json` and course formats, admin, build, how to add a sim or a course
 - `docs/sim-ui.md`: the simulator UI: layout, palette and type, keys, the kit's API (`kit/`), and how to start a sim from `kit/template/`
+- `docs/catalogue.md`: every simulator simdeck should contain: what to adopt, what to build, overlaps, requirements
+- `docs/tasks/`: one self-contained task per simulator, in waves (`docs/tasks/README.md`), with the rules in `docs/tasks/COMMON.md`
 - `docs/playbook.md`: method distilled from `ossimulator` (contract, rules as tests, waves, DoD, lessons), to adapt for simdeck
 
-License: GPL (version to be fixed before the first public release; GPL-3.0-or-later assumed).
+License: AGPL-3.0-or-later (owner decision, 2026-10-01; the LICENSE file comes with docs/tasks/w0/licence.md).

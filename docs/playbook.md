@@ -331,7 +331,7 @@ this section makes a recommendation and says so; nothing here overrides a decisi
 
 | | ossimulator | simdeck |
 |---|---|---|
-| Collection | closed: 16 pages designed together, then built | open-ended: 24 imported pages, 5 new in the first batch, about 20 more planned, ≥ 25 native by the end of the semester |
+| Collection | closed: 16 pages designed together, then built | open-ended: 23 imported labs plus ossimulator, three apps, 14 book pages and 29 applets, 5 new in the first batch, about 20 more planned, ≥ 25 native by the end of the semester |
 | One page is | a full simulator with six sections (settings, viz, log, timeline, scenarios, theory) | one concept on one screen, a 3–5 minute demo |
 | Main use | lecture and self-study | the lecturer at the lectern with a presentation clicker; course pages for students |
 | Time model | ticks, a play loop, history with step back | discrete steps (or live parameters, see §10.4) |
@@ -382,7 +382,7 @@ minute demo needs. A smaller contract fits:
 
 ### 10.4 Page classes: not every imported page is a stepper
 
-Only 1 of the 24 `single-page-labs` pages handles arrow keys today. Many are parameter explorers
+Only 1 of the 23 `single-page-labs` pages handles arrow keys today. Many are parameter explorers
 (`amdahl-simulator.html`), reference posters (`rf-spektar-eu-hr-bandplan.html`) or classroom tools
 (`random-student-picker.html`). Forcing a step controller onto them would produce exceptions on most
 imports and trip the proposal's "rethink if more than a quarter need exceptions" alarm for the wrong reason.
@@ -482,10 +482,10 @@ one worktree each. The kit and the check must be frozen first.
 | Decision (design notes) | Recommendation | Why |
 |---|---|---|
 | Build tool: plain script or Vite | **Vite + vite-plugin-singlefile + Vitest**, reusing ossimulator's `build-single.mjs`, `check-dist.mjs` and the e2e helpers | the single-file build, the offline check and the text-size probe already exist and are tested; a plain script would rebuild them. *Decided otherwise:* a plain Node build with no dependencies (docs/site-structure.md §5). Sims are HTML with classic scripts (the kit is one), so nothing needs bundling; node:test replaces Vitest, and the kit's `check-page.mjs` (Playwright) does the browser checks. |
-| UI language | ossimulator's rule: Croatian UI, English term in italics with the Croatian in parentheses at first mention; `lang` in the manifest for pages in English | 13 of the 24 imported pages declare `lang="hr"` and 10 `lang="en"`, so both must be first-class; students meet the English terms in the literature |
+| UI language | ossimulator's rule: Croatian UI, English term in italics with the Croatian in parentheses at first mention; `lang` in the manifest for pages in English | 13 of the 24 imported pages declare `lang="hr"` and 10 `lang="en"`, so both must be first-class; students meet the English terms in the literature *Decided (owner, 2026-10-01):* both languages on every page, switched at runtime, from string tables the contract check verifies (docs/tasks/w0/bilingual.md). |
 | Deploy location and realm | `materijali.online/simdeck`, with `scripts/deploy.sh` modelled on ossimulator's (rsync with `--chown`/`--chmod`, then a 401/200 check) | the same VPS pattern as `/ossim` and `/ceph`; the realm question is in §10.5 |
 | Minimum text size | start at 20 px for body text and 16 px for legends, then tune after one lecture | the design notes give "~20 px"; legends need a separate, lower floor or every legend becomes an exception |
-| GPL version | GPL-3.0-or-later, as assumed | no reason found to change it; the asset audit is §10.7 step 6 |
+| GPL version | GPL-3.0-or-later, as assumed | no reason found to change it; the asset audit is §10.7 step 6. *Decided otherwise (owner, 2026-10-01):* AGPL-3.0-or-later. |
 
 ---
 

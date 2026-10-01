@@ -48,6 +48,6 @@ One entry per simulator: `id`, `title`, `summary`, `tags`, `courses`, `kind` (na
 
 ## Open, not decided
 
-- ~~Repo layout, build tool~~ *decided:* `sims/<id>/` per simulator; a plain Node build with no dependencies (docs/site-structure.md §1, §5). Language of the UI (Croatian with English terms, as in ossimulator?): the frame uses Croatian for now.
+- ~~Repo layout, build tool~~ *decided:* `sims/<id>/` per simulator; a plain Node build with no dependencies (docs/site-structure.md §1, §5). ~~Language of the UI~~ *decided (owner, 2026-10-01):* every simulator and the whole site in Croatian and English; Croatian text keeps ossimulator's term rule (English term in italics, Croatian in parentheses at first mention). Mechanism: docs/tasks/w0/bilingual.md.
 - Deploy location (`materijali.online/simdeck`?) and which auth realm course pages use.
-- GPL version (GPL-3.0-or-later assumed) and the asset audit before the first public release.
+- ~~GPL version~~ *decided (owner, 2026-10-01):* AGPL-3.0-or-later, to keep it open as long as possible; every page links its source (AGPL §13). Open: the asset audit before the first public release.
