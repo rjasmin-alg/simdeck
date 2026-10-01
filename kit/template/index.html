@@ -1,0 +1,179 @@
+<!doctype html>
+<!-- simdeck proto-simulator: the template every native sim starts from (kit/new-sim.sh copies it).
+     It uses every common element of the kit on a trivial concept. Rules: docs/sim-ui.md. -->
+<html lang="hr" data-sim="proto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binarno brojanje · simdeck</title>
+<meta name="description" content="Brojač od nekoliko bitova: prijenos (carry), preljev (overflow) i dvojni komplement.">
+<link rel="stylesheet" href="../kit.css">
+<script src="../kit.js"></script>
+
+<!-- Manifest placeholder. The format belongs to docs/site-structure.md; these are the fields this page assumes
+     (design notes + playbook §10.6). The kit reads only id, class and steps, and only to warn on a mismatch. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "proto",
+  "title": "Binarno brojanje",
+  "summary": "Brojač od nekoliko bitova: prijenos, preljev i dvojni komplement.",
+  "tags": ["template"],
+  "courses": [],
+  "kind": "native",
+  "path": "kit/template/index.html",
+  "lang": "hr",
+  "class": "stepper",
+  "steps": 16
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="proto"]; colours only from kit tokens. */
+[data-sim="proto"] .bc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5cqh;
+  height: 100%;
+  padding: 3cqh 3cqw;
+  --cell: min(calc(80cqw / var(--bits)), 26cqh);
+}
+[data-sim="proto"] .bc-row { display: flex; gap: max(1.2rem, calc(var(--cell) * 0.14)); }
+[data-sim="proto"] .bc-col { display: flex; flex-direction: column; align-items: center; gap: 0.3em; }
+[data-sim="proto"] .bc-place { color: var(--muted); font-family: var(--mono); font-size: max(16px, calc(var(--cell) * 0.2)); }
+[data-sim="proto"] .bc-bit {
+  display: grid;
+  place-items: center;
+  width: var(--cell);
+  height: var(--cell);
+  border: 0.35rem solid;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: calc(var(--cell) * 0.55);
+  font-weight: 700;
+}
+[data-sim="proto"] .bc-bit[data-v="0"] { border-style: dashed; border-color: var(--line); background: var(--bg); color: var(--muted); }
+[data-sim="proto"] .bc-prev { color: var(--muted); font-family: var(--mono); font-size: max(16px, calc(var(--cell) * 0.24)); }
+[data-sim="proto"] .bc-value { font-size: max(1.5rem, calc(var(--cell) * 0.42)); font-weight: 700; }
+[data-sim="proto"] .bc-value .sd-mono { color: var(--c1); }
+[data-sim="proto"] .bc-wrap { color: var(--danger); }
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Binarno brojanje</h1>
+      <p class="sd-subtitle">Kako brojač od nekoliko bitova broji, prenosi i preljeva se.</p>
+    </div>
+    <ul class="sd-legend" data-sd-legend aria-label="Legenda"></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage aria-label="Brojač"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel" aria-label="Postavke i primjeri">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary>Ideja</summary>
+        <p>Brojač ima fiksni broj bitova. Pribrajanje jedinice mijenja najniži bit, a svaka jedinica koja se pretvori u nulu
+          šalje <i>carry</i> (prijenos) jedno mjesto ulijevo.</p>
+        <p>Kad rezultat ne stane u zadani broj bitova, nastaje <i>overflow</i> (preljev) i brojač nastavlja od nule.
+          Isti uzorak bitova u dvojnom komplementu (<i>two's complement</i>) tada prelazi s najvećeg pozitivnog na najmanji negativni broj.</p>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport aria-label="Koraci"></footer>
+</div>
+
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var seed = 1; // the random-start button draws from Simdeck.rng; the model itself stays deterministic
+
+  function bitString(v, bits) { return L.bitsOf(v, bits).join(''); }
+  function read(v, p) { return p.signed ? L.signedOf(v, p.bits) : v; }
+  function bitWord(n) { return n + (n < 5 ? ' bita' : ' bitova'); }
+  function minus(x) { return String(x).replace('-', '−'); }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'bits', type: 'range', label: 'Broj bitova', min: 3, max: 8 },
+      { key: 'start', type: 'range', label: 'Početna vrijednost', min: 0, max: function (p) { return Math.pow(2, p.bits) - 1; }, resets: true },
+      { key: 'inc', type: 'choice', label: 'Pribrajamo', options: [[1, '+1'], [2, '+2'], [3, '+3']] },
+      { key: 'signed', type: 'toggle', label: 'Dvojni komplement', hint: 'Isti bitovi, čitani s predznakom.' },
+      { key: 'places', type: 'toggle', label: 'Težine mjesta' },
+      { type: 'button', label: 'Nasumični početak', key: 'n', run: function (sim) {
+          var p = sim.params;
+          sim.set({ start: Simdeck.rng(seed++).int(Math.pow(2, p.bits)) });
+        } }
+    ],
+
+    presets: [
+      { id: 'count', label: 'Brojanje od nule', params: { start: 0 } },
+      { id: 'carry', label: 'Prijenos kroz sve bitove', params: { start: 6 }, hint: 'Korak 2: 0111 + 1 = 1000' },
+      { id: 'overflow', label: 'Preljev', params: { start: 13 } },
+      { id: 'signed', label: 'Dvojni komplement', params: { start: 5, signed: true } },
+      { id: 'byte', label: '8 bitova, korak +3', params: { bits: 8, start: 240, inc: 3 } }
+    ],
+
+    legend: [
+      { c: 1, label: 'bit 1' },
+      { shape: 'hollow', label: 'bit 0' },
+      { shape: 'hl', label: 'promijenjen u ovom koraku' }
+    ],
+
+    render: function (c) {
+      var p = c.params, s = c.state;
+      var bits = L.bitsOf(s.value, p.bits);
+      var row = h('div', { class: 'bc-row' }, bits.map(function (b, i) {
+        var idx = p.bits - 1 - i;
+        var changed = s.flipped.indexOf(idx) >= 0;
+        var place = p.signed && idx === p.bits - 1 ? '−' + Math.pow(2, idx) : String(Math.pow(2, idx));
+        return h('div', { class: 'bc-col' },
+          p.places ? h('span', { class: 'bc-place' }, place) : null,
+          h('div', {
+            class: 'bc-bit' + (b ? ' sd-fill' : '') + (changed ? ' sd-changed' : '') + (changed && c.dir === 'forward' ? ' sd-anim-in' : ''),
+            dataset: { v: String(b), c: '1' }, 'aria-label': 'bit ' + idx + ': ' + b
+          }, String(b)));
+      }));
+      c.stage.replaceChildren(h('div', { class: 'bc', style: { '--bits': String(p.bits) } },
+        c.prev ? h('div', { class: 'bc-prev' }, 'prije: ' + bitString(c.prev.value, p.bits) + '  + ' + s.added) : h('div', { class: 'bc-prev' }, ' '),
+        row,
+        h('div', { class: 'bc-value' }, '= ', h('span', { class: 'sd-mono' }, minus(read(s.value, p))),
+          s.wrapped ? h('span', { class: 'bc-wrap' }, '  preljev!') : null)));
+    },
+
+    caption: function (c) {
+      var p = c.params, s = c.state;
+      var now = bitString(s.value, p.bits) + ' = ' + minus(read(s.value, p));
+      if (c.first) return ['Početak: ', h('b', null, now), '. Pritisni → za sljedeći korak.'];
+      var n = s.flipped.length;
+      var parts = ['Korak ' + c.n + ': ', bitString(c.prev.value, p.bits) + ' + ' + s.added + ' = ', h('b', null, now), '. '];
+      parts.push(n === 1 ? 'Promijenio se 1 bit.' : n < 5 ? 'Promijenila su se ' + n + ' bita.' : 'Promijenilo se ' + n + ' bitova.');
+      if (s.wrapped) parts.push(' ', h('span', { class: 'sd-hl' }, 'Preljev'), ': rezultat ne stane u ' + bitWord(p.bits) + ', brojač kreće ispočetka.');
+      else if (s.added === 1 && n > 2) parts.push(' Prijenos (carry) prošao je kroz ' + (n - 1) + (n - 1 < 5 ? ' jedinice.' : ' jedinica.'));
+      return parts;
+    }
+  });
+})();
+</script>
+</body>
+</html>
