@@ -73,6 +73,8 @@ scripts/deploy.sh          publishes main to materijali.online/simdeck (docs/dep
 scripts/server-setup.sh    one-time nginx and login setup (docs/deploy.md)
 tests/                     node:test unit tests (one failing sample per rule), *.test.mjs
 kit/                       the sim UI kit, template and page check (kit thread, docs/sim-ui.md; inlined at build, §7)
+models/                    model code shared by several sims (models/README.md; inlined at build when a page includes it)
+lib/models.mjs             checks the shared models and finds the ones a page includes
 dist/                      default build output, not committed
 ```
 
@@ -327,14 +329,15 @@ same-origin JSON from the admin's own page.
 `node scripts/build.mjs [--out <dir>] [--drafts]` (or `npm run build`; the admin's Objavi does the
 same). `npm run check` validates only, and `npm test` runs the unit tests.
 
-1. Load and validate every manifest source (§6). Any error stops the build before the output folder
-   is touched.
+1. Load and validate every manifest source (§6) and the shared models (`lib/models.mjs`). Any error stops the
+   build before the output folder is touched.
 2. **Output folder safety:** the build replaces a folder only if it is empty, new, or carries the
    `.simdeck-site` stamp from an earlier build. It never empties a folder of someone else's files (a
    USB stick's root, say).
 3. For each finished sim, produce one self-contained file:
    - inline local `<script src>` and `<link rel=stylesheet>`: files in the sim's folder, and the kit
-     (`../../kit/kit.css`, `../../kit/kit.js`, as kit/template links them); nothing else outside the folder;
+     (`../../kit/kit.css`, `../../kit/kit.js`, as kit/template links them), and the shared models the page
+     includes (`../../models/<name>.js`, `models/README.md`); nothing else outside the folder;
    - turn relative `url(...)` in inlined CSS into `data:` URIs (the kit's fonts, about 70 KB);
    - replace the page's `#simdeck-meta` placeholder with one generated from `sim.json` (or add one);
    - refuse anything loaded from the network (scripts, styles, images, frames, CSS `url()`).
@@ -402,8 +405,14 @@ sets the limits:
   - `short` is kebab-case, unique across courses, and not in `site.json` `reservedPaths`;
   - `wip` gives a warning.
 
+`lib/models.mjs` (run by check, build and the gate; `models/README.md`):
+- every `models/<name>.js` has the licence header, its `models/<name>.test.js` and a `models/CHANGELOG.md` line;
+- it is pure (no DOM, storage, clock, timers or `Math.random`) and loads both as a page script
+  (`SimdeckModels[<name>]`) and under node (`module.exports`), to the same object;
+- every model a sim page includes exists.
+
 `scripts/build.mjs`:
-- local includes exist and stay inside the sim's folder or the kit;
+- local includes exist and stay inside the sim's folder, the kit or `models/`;
 - nothing is loaded from the network;
 - the output folder is safe to replace.
 

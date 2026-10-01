@@ -14,7 +14,7 @@ Run order: wave 0 → wave 1 (in parallel) → wave 2a pilots → kit views K1�
 | [`vocabulary`](w0/vocabulary.md) | topics and tags every task needs, in both languages |
 | [`licence`](w0/licence.md) | AGPL-3.0-or-later: LICENSE, package.json, source link on every page |
 | [`licence-source-repos`](w0/licence-source-repos.md) | AGPL-3.0-or-later in the repos simdeck copies from (owner: AGPL everything) |
-| [`shared-models`](w0/shared-models.md) | where model code shared by several sims lives |
+| [`shared-models`](w0/shared-models.md) | where model code shared by several sims lives (`models/` done; first promotion waits on `dhcp-dora`) |
 | [`presets-in-index`](w0/presets-in-index.md) | index and course entries that open a sim at a preset |
 | [`ossimulator-english`](w0/ossimulator-english.md) | English UI for ossimulator (in its own repo) |
 | [`freeze-originals`](w0/freeze-originals.md) | notes in the original projects pointing to the simdeck copies |

@@ -29,7 +29,7 @@ test('inlines local scripts and stylesheets, leaves the network ones to the offl
 test('refuses missing files and files outside the sim folder', () => {
   const d = simDir({});
   assert.match(buildNative(page('', '<script src="nope.js"></script>'), entry, { simDir: d }).errors.join(), /not found/);
-  assert.match(buildNative(page('', '<script src="../x.js"></script>'), entry, { simDir: d }).errors.join(), /outside the sim's folder and the kit/);
+  assert.match(buildNative(page('', '<script src="../x.js"></script>'), entry, { simDir: d }).errors.join(), /outside the sim's folder, the kit and models\//);
 });
 
 test('refuses anything loaded from the network', () => {
@@ -58,7 +58,7 @@ test('inlines the kit the way the template links it, with its fonts as data: URI
     assert.match(r.html, /window.SimLogic = \{\};/);
     assert.match(r.html, new RegExp(`url\\("data:font/woff2;base64,${Buffer.from('FONT').toString('base64')}"\\)`));
     assert.doesNotMatch(r.html, /href="..\/..\/kit|src="..\/..\/kit|fonts\/a.woff2/);
-    assert.match(buildNative(src, entry, { simDir, kitDir: null }).errors.join(), /outside the sim's folder and the kit/);
+    assert.match(buildNative(src, entry, { simDir, kitDir: null }).errors.join(), /outside the sim's folder, the kit and models\//);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

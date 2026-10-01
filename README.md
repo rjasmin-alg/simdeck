@@ -24,6 +24,7 @@ npm run gate -- <id>                      # every contract rule on one sim (need
 - `docs/design-notes-simdeck.md`: design decisions and open questions from the proposal review
 - `docs/site-structure.md`: the site frame: layout, the `sim.json` and course formats, admin, build, how to add a sim or a course
 - `docs/sim-ui.md`: the simulator UI: layout, palette and type, keys, the kit's API (`kit/`), and how to start a sim from `kit/template/`
+- `models/README.md`: model code shared by several sims: the format, how a sim uses one, promotion and ownership
 - `docs/catalogue.md`: every simulator simdeck should contain: what to adopt, what to build, overlaps, requirements
 - `docs/tasks/`: one self-contained task per simulator, in waves (`docs/tasks/README.md`), with the rules in `docs/tasks/COMMON.md`
 - `docs/playbook.md`: method distilled from `ossimulator` (contract, rules as tests, waves, DoD, lessons), to adapt for simdeck

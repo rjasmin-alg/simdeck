@@ -24,6 +24,7 @@ starting; where a task depends on one, its file says what it does meanwhile.
 |---|---|
 | AGPL-3.0-or-later in the source repos (owner, 2026-10-02) | `w0/licence-source-repos.md` (changes outside simdeck) |
 | ossimulator is the source of truth for its pages (owner, 2026-10-02) | `w0/ossimulator-english.md`; recorded in `docs/site-structure.md` §0 |
+| Promote the first shared model: `models/` exists (wave 0 `shared-models`), but no pilot has a model yet. When `dhcp-dora` (the first pilot with soft dependents: `dhcp-relay`, `dhcp-rogue`, `win-dhcp-authorization`) merges, the coordinator moves its lease model to `models/` (`models/README.md`, "Promotion") before those start | `w0/shared-models.md` "Done when"; then each `models/` promotion as its first soft dependent comes up |
 
 ## For the books' and the estate's authors
 

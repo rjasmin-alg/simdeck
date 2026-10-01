@@ -5,10 +5,10 @@
 // Needs Playwright's Chromium (npx playwright install chromium); without it these tests are skipped, and say so.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -32,10 +32,15 @@ const git = (dir, ...a) => execFileSync('git', ['-C', dir, '-c', 'user.name=gate
 /**
  * A scratch repo: kit, tags.json and site.json committed on main; a task branch with sims/gate-x from new-sim.sh
  * (untracked, as during work). `edit(files)` changes the sim's files in place: { page, json, model, test, strings }.
+ * `base` adds files to main before the branch ({ "models/x.js": "…" }), as the coordinator's shared code.
  */
-function sample(edit = () => {}) {
+function sample(edit = () => {}, base = {}) {
   const d = mkdtempSync(join(tmpdir(), 'simdeck-gate-test-'));
   for (const f of ['kit', 'tags.json', 'site.json']) cpSync(join(ROOT, f), join(d, f), { recursive: true });
+  for (const [k, v] of Object.entries(base)) {
+    mkdirSync(dirname(join(d, k)), { recursive: true });
+    writeFileSync(join(d, k), v);
+  }
   git(d, 'init', '-q', '-b', 'main');
   git(d, 'add', '.');
   git(d, 'commit', '-q', '-m', 'base');
@@ -56,8 +61,32 @@ const json = (over) => (x) => { x.json = JSON.stringify({ ...JSON.parse(x.json),
 const exceptions = (list) => (x) => { x.page = x.page.replace('id="simdeck-exceptions">[]', `id="simdeck-exceptions">${JSON.stringify(list)}`); };
 const all = (...fs) => (x, d) => fs.forEach((f) => f(x, d));
 
-async function run(edit, args = []) {
-  const s = sample(edit);
+// A shared model on main, and a sim that includes it in its page and requires it in its model.
+const MODELS = {
+  'models/wrap.js': `/* SPDX-License-Identifier: AGPL-3.0-or-later */
+(function (root) {
+  'use strict';
+  var model = { wrap: function (v, size) { return v % size; } };
+  if (typeof module === 'object' && module.exports) module.exports = model;
+  else (root.SimdeckModels = root.SimdeckModels || {}).wrap = model;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+`,
+  'models/wrap.test.js': `// SPDX-License-Identifier: AGPL-3.0-or-later
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const m = require('./wrap.js');
+test('wraps', () => { assert.equal(m.wrap(17, 16), 1); });
+`,
+  'models/CHANGELOG.md': '- `models/wrap.js`: promoted from sims/sample\n',
+};
+const useModel = (x) => {
+  x.page = x.page.replace('<script src="sim.js"></script>', '<script src="../../models/wrap.js"></script>\n<script src="sim.js"></script>');
+  x.model = x.model.replace("'use strict';", "'use strict';\n  var wrap = typeof module === 'object' && module.exports ? require('../../models/wrap.js') : root.SimdeckModels.wrap;")
+    .replace('var value = sum % size;', 'var value = wrap.wrap(sum, size);');
+};
+
+async function run(edit, args = [], base = {}) {
+  const s = sample(edit, base);
   try {
     return await gate([ID, '--root', s.dir, ...args]);
   } finally {
@@ -66,8 +95,8 @@ async function run(edit, args = []) {
 }
 
 /** The gate fails, with a summary FAIL line under `rule`. */
-async function failsOn(rule, edit, label) {
-  const r = await run(edit);
+async function failsOn(rule, edit, label, base) {
+  const r = await run(edit, [], base);
   assert.equal(r.code, 1, r.out);
   const fails = r.out.split('\n').filter((l) => l.startsWith('  FAIL ['));
   assert.ok(fails.some((l) => l.startsWith(`  FAIL [${rule}]`)), `expected a FAIL [${rule}]\n${r.out}`);
@@ -123,6 +152,16 @@ describe('gate', { skip, concurrency: 6 }, () => {
       writeFileSync(join(d, 'tags.json'), readFileSync(join(d, 'tags.json'), 'utf8').replace('{', '{ '));
       git(d, 'commit', '-q', '-am', 'outside');
     }, /tags.json/);
+  });
+
+  // ── shared models (models/, lib/models.mjs) ──
+  it('a sim that uses a shared model passes; the model\'s own tests and checks are part of its gate', async () => {
+    const r = await run(useModel, [], MODELS);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /ok {3}shared model models\/wrap.js is valid/);
+    assert.match(r.out, /ok {3}shared model models\/wrap.js: its tests pass/);
+    await failsOn('tests', useModel, /models\/wrap.js: its tests pass/, { ...MODELS, 'models/wrap.test.js': MODELS['models/wrap.test.js'].replace('assert.equal(m.wrap(17, 16), 1)', 'assert.equal(m.wrap(17, 16), 2)') });
+    await failsOn('manifest', useModel, /models\/wrap.js is valid/, { ...MODELS, 'models/CHANGELOG.md': '' });
   });
 
   // ── exceptions ──

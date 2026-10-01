@@ -35,7 +35,7 @@ one-page course lists for students (`docs/proposal-simdeck.md`). Owner decisions
 ```
 sims/<id>/        your folder: sim.json, index.html, strings.js, sim.js, sim.test.js, SPEC.md, NOTES.md, local assets
 kit/              the shared in-sim kit (docs/sim-ui.md): kit.css, kit.js, fonts, template, new-sim.sh, tools
-models/           shared model code, if wave 0 task shared-models creates it (§6)
+models/           shared model code, promoted from sims by the coordinator (§6, models/README.md)
 site/, lib/, scripts/, admin/   the site frame (docs/site-structure.md): build, checks, admin
 tags.json, courses/, site.json  vocabulary, course playlists, site settings
 docs/catalogue.md the catalogue every task comes from; docs/tasks/ these tasks
@@ -114,13 +114,28 @@ title or concept, update the page's `#simdeck-meta` placeholder too (`npm run ch
 
 ## 6. Reusing another sim's model
 
-A task file may say "soft: start after X is merged and reuse its model".
+A task file may say "soft: start after X is merged and reuse its model". Shared model code lives in `models/`
+(`models/README.md`): pure, DOM-free classic scripts, one per model, each with its own tests, that register on
+`globalThis.SimdeckModels` like the kit registers `Simdeck`.
 
-- The build inlines only files inside the sim's folder. Never `<script src="../other-sim/sim.js">`.
-- Until `models/` exists (wave 0 `shared-models`), **copy** the functions you need into your `sim.js` with a
-  comment `// from sims/<x>/sim.js @ <commit>`, and keep their tests.
-- If the source model needs a change, don't edit it. Write the request under "Shared requests" in your
-  `NOTES.md` (what, why, the smallest change), work around it locally, and say so in your report.
+- **If the model is in `models/`, use it from there.** The page includes it before `sim.js`, the way it includes
+  the kit: `<script src="../../models/<name>.js"></script>`. `sim.js` takes it from
+  `root.SimdeckModels['<name>']` in the page and from `require('../../models/<name>.js')` in node tests (the
+  pattern is in `models/README.md`). The build inlines it into the sim's single file; the gate checks it and runs
+  its tests with yours. Your tests cover what you build on top, not the model's own rules again.
+- **If it is not there yet,** the coordinator promotes it from X before your task starts (`models/README.md`,
+  "Promotion"). If it is still missing when you start, **copy** the functions you need into your `sim.js` with a
+  comment `// from sims/<x>/sim.js @ <commit>`, keep their tests, and say so in your report so the coordinator
+  can promote it and point your sim at it.
+- The build inlines only files inside the sim's folder, the kit and `models/`. Never
+  `<script src="../other-sim/sim.js">`.
+- **Never edit `models/`** (or the source sim). If the model needs a change, write the request under "Shared
+  requests" in your `NOTES.md` (what, why, the smallest change), work around it locally, and say so in your
+  report. The coordinator lands it additively (a new function or an optional parameter that keeps every old
+  result, with a test and a `models/CHANGELOG.md` line); you then drop the workaround.
+- **If other sims will reuse your model** (task files of later sims name yours as their soft dependency), keep the
+  reusable part promotable: pure functions over plain data, no strings and no page code, so the coordinator can
+  move it to `models/` unchanged.
 - A **preset task** adds a preset to the host folder named in its task file: presets, their strings and tests
   only. One preset task per host at a time.
 
@@ -136,8 +151,10 @@ npm run gate -- <id> --shots /tmp/<id>-shots   # screenshots somewhere you choos
 The gate (`scripts/gate.mjs`, rules in `lib/contract.mjs`) runs, in order:
 
 1. **manifest**: `sim.json` and the page's blocks (`lib/manifest.mjs`); a stepper has at most 20 steps.
-2. **tests**: `node --test sims/<id>/sim.test.js`.
-3. **build**: the sim alone as one self-contained file in a temp folder; a network load fails it.
+2. **tests**: `node --test sims/<id>/sim.test.js`, and `models/<name>.test.js` for every shared model the page
+   includes (§6); the manifest step checks those models too.
+3. **build**: the sim alone as one self-contained file in a temp folder (its folder, the kit and the shared models
+   it includes); a network load fails it.
 4. **browser**: `kit/tools/check-page.mjs` on the built file from `file://`, every request blocked: one screen at
    1920×1080 light and dark, body ≥ 20 px and nothing under 16 px, no sideways scroll at 375×812, clicker keys
    (steppers), the controller's step count equals `sim.json` `steps`, reduced motion (URL and OS), no console

@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync
 import { join, dirname, resolve, relative, isAbsolute, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, metaFor } from '../lib/manifest.mjs';
+import { checkModels, MODELS_DIR } from '../lib/models.mjs';
 import {
   renderCourse, renderIndexList, renderLicences, licenceLine, sourceHref, isPublic, escapeHtml, bi, biStr, loc, STR, LANGS,
   LICENCE_TEXT, LICENCES_PAGE,
@@ -55,14 +56,15 @@ const MIME = { '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
 const META_RE = new RegExp(`<script\\b[^>]*\\bid=["']${META_ID}["'][^>]*>[\\s\\S]*?<\\/script>`, 'i');
 /**
  * Turns a sim's source page into one self-contained file:
- *  - local <link rel="stylesheet"> and <script src> are inlined: files in the sim's folder, and the kit
- *    (the template links ../../kit/kit.css and kit.js, so a page also runs unbuilt from file://);
+ *  - local <link rel="stylesheet"> and <script src> are inlined: files in the sim's folder, the kit
+ *    (the template links ../../kit/kit.css and kit.js, so a page also runs unbuilt from file://) and the shared
+ *    models the page includes (../../models/<name>.js, lib/models.mjs);
  *  - relative url(...) in inlined CSS (the kit's fonts) become data: URIs;
  *  - the page's #simdeck-meta placeholder is replaced by one generated from sim.json (added if absent);
  *  - a #simdeck-site block gives the kit the licence, source and licences links, as seen from sims/<id>/.
  * Returns { html, errors }.
  */
-export function buildNative(html, entry, { simDir, kitDir, site = {} }) {
+export function buildNative(html, entry, { simDir, kitDir, modelsDir, site = {} }) {
   const errors = [];
   const where = `sims/${entry.id}/index.html`;
   const inside = (p, dir) => {
@@ -71,8 +73,8 @@ export function buildNative(html, entry, { simDir, kitDir, site = {} }) {
   };
   const locate = (ref, base) => {
     const p = resolve(base, ref.split(/[?#]/)[0]);
-    if (!inside(p, simDir) && !(kitDir && inside(p, kitDir))) {
-      errors.push(`${where}: "${ref}" is outside the sim's folder and the kit`);
+    if (!inside(p, simDir) && !(kitDir && inside(p, kitDir)) && !(modelsDir && inside(p, modelsDir))) {
+      errors.push(`${where}: "${ref}" is outside the sim's folder, the kit and models/`);
       return null;
     }
     if (!existsSync(p)) {
@@ -135,13 +137,15 @@ export function build({ root, out, log = console.log, drafts = false }) {
   const entries = drafts ? all : all.filter(isPublic);
   const site = { title: 'simdeck', lang: 'hr', ...repo.site };
   const kitDir = join(root, 'kit');
+  const modelsDir = join(root, MODELS_DIR);
+  errors.push(...checkModels(root, repo.natives));
 
   const pages = [];
   for (const e of entries) {
     const simDir = join(root, 'sims', e.id);
     const src = repo.natives.find((n) => n.dir === e.id)?.html;
     if (src == null) continue;
-    const r = buildNative(src, e, { simDir, kitDir, site });
+    const r = buildNative(src, e, { simDir, kitDir, modelsDir, site });
     errors.push(...r.errors);
     pages.push({ e, html: r.html });
   }

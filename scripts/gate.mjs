@@ -4,7 +4,7 @@
 //   npm run gate -- <id> [--shots <dir>] [--base <ref>] [--root <dir>]
 //
 //  1. manifest   sim.json and the page's blocks (lib/manifest.mjs), and at most MAX_STEPS steps
-//  2. tests      node --test sims/<id>/sim.test.js
+//  2. tests      node --test sims/<id>/sim.test.js, and models/<name>.test.js of every shared model the page includes
 //  3. build      the sim alone, as one self-contained file in a temp folder (the build refuses network loads)
 //  4. browser    kit/tools/check-page.mjs on the built file, from file:// with every request blocked
 //  5. tokens     every var(--x) in the built page is defined; no colour literals in the page's own CSS
@@ -22,6 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, pageExceptions, languagesOf } from '../lib/manifest.mjs';
 import { buildNative } from './build.mjs';
+import { MODELS_DIR, modelProblems, pageModels } from '../lib/models.mjs';
 import { MAX_STEPS, RULES, applyExceptions, colourLiterals, exceptionProblems, gateDir, outsideScope, pageCss, undefinedVars } from '../lib/contract.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -73,22 +74,33 @@ const html = repo.natives.find((n) => n.dir === id)?.html ?? '';
 const exceptions = pageExceptions(html) ?? [];
 const probs = exceptionProblems(exceptions);
 record('manifest', 'manifest', 'declared exceptions name waivable rules', probs.length === 0, probs.join('; '));
+const used = pageModels(html);
+for (const m of used) {
+  const p = modelProblems(root, m);
+  record('manifest', 'manifest', `shared model ${MODELS_DIR}/${m}.js is valid`, p.length === 0, p.join('; '));
+}
 if (entry?.class === 'stepper') record('manifest', 'max-steps', `at most ${MAX_STEPS} steps`, entry.steps <= MAX_STEPS, `${entry.steps} steps`);
 
 // ── 2. tests ──
 head('tests');
 {
-  const file = join(simDir, 'sim.test.js');
-  if (!existsSync(file)) record('tests', 'tests', `${where}sim.test.js exists`, false);
-  else {
-    // Without NODE_TEST_CONTEXT: a gate run under node --test would otherwise make this child report to that runner
-    // and exit 0 whatever its tests do.
-    const env = { ...process.env };
-    delete env.NODE_TEST_CONTEXT;
+  // Without NODE_TEST_CONTEXT: a gate run under node --test would otherwise make this child report to that runner
+  // and exit 0 whatever its tests do.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const runTests = (file, label) => {
     const r = spawnSync(process.execPath, ['--test', file], { encoding: 'utf8', cwd: root, env });
     const summary = (r.stdout.match(/^ℹ (tests|pass|fail) \d+$/gm) || []).map((s) => s.slice(2)).join(', ');
     if (r.status !== 0) console.log((r.stdout + r.stderr).split('\n').filter((l) => /✖|Error|assert/i.test(l)).slice(0, 15).join('\n'));
-    record('tests', 'tests', 'model tests pass', r.status === 0, summary);
+    record('tests', 'tests', label, r.status === 0, summary);
+  };
+  const file = join(simDir, 'sim.test.js');
+  if (!existsSync(file)) record('tests', 'tests', `${where}sim.test.js exists`, false);
+  else runTests(file, 'model tests pass');
+  // A shared model's own tests run too: the sim depends on its rules (its absence is a manifest failure above).
+  for (const m of used) {
+    const t = join(root, MODELS_DIR, `${m}.test.js`);
+    if (existsSync(t)) runTests(t, `shared model ${MODELS_DIR}/${m}.js: its tests pass`);
   }
 }
 
@@ -97,7 +109,7 @@ head('build');
 const built = join(work, 'site', 'sims', id, 'index.html');
 let builtHtml = null;
 if (entry && html) {
-  const r = buildNative(html, entry, { simDir, kitDir: join(root, 'kit') });
+  const r = buildNative(html, entry, { simDir, kitDir: join(root, 'kit'), modelsDir: join(root, MODELS_DIR) });
   record('build', 'offline', 'one self-contained file, nothing from the network', r.errors.length === 0, r.errors.join('; '));
   if (!r.errors.length) {
     mkdirSync(dirname(built), { recursive: true });
