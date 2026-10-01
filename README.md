@@ -17,7 +17,7 @@ npm run check     # validate sims/*/sim.json, courses/*.json, tags.json
 npm run build     # build the site into dist/
 npm test          # all unit tests
 kit/new-sim.sh <id> sims/<id>             # start a sim from the kit's template (the admin does the same)
-npm run check:page -- sims/<id>/index.html  # browser check: fits 1920×1080, text size, keys (needs npm install)
+npm run gate -- <id>                      # every contract rule on one sim (needs npm ci); docs/tasks/COMMON.md §7
 ```
 
 - `docs/proposal-simdeck.md`: the proposal (source; the PDF next to it is built with the `project-proposal` skill's `build.sh`)

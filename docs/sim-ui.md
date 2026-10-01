@@ -23,6 +23,7 @@ npm install                                    # once: Playwright, the only dev 
 npm test                                       # kit + template model, incl. contrast and undefined tokens
 npm run check:template -- --shots /tmp/shots   # browser check of the template
 npm run check:page -- sims/<id>/index.html     # browser check of any page
+npm run gate -- <id>                           # the whole contract on one sim (docs/tasks/COMMON.md §7)
 ```
 
 If the browser is missing, run `npx playwright install chromium` once. simdeck depends on no other project.
@@ -333,7 +334,7 @@ language, are produced by `check-page.mjs --shots` (`<name>-<lang>-<size>-<varia
    `#simdeck-meta` placeholder equal to `sim.json` (the admin and `new-sim.sh` write it). Keep page CSS scoped to
    `[data-sim="<id>"]` and on kit tokens only.
 5. **`sim.json`**: title, concept, summary, topic, tags, level (docs/site-structure.md §2.1); `npm run check`.
-6. Run `npm run check:page -- <dest>/index.html --shots <dir>` and look at the screenshots, including grayscale.
+6. Run `npm run gate -- <id> --shots <dir>` and look at the screenshots, including grayscale.
    Set `status` to `ready` when the sim passes its DoD.
 7. An explorer: drop `step` and `steps` (or set `steps: 0`), and set `"class": "explorer"` without `steps` in `sim.json` and the placeholder; the transport becomes a reset button, and the
    params drive `render` live. A reference page: no params, no presets; it keeps the header, legend and stage.
@@ -360,9 +361,9 @@ settled each one as follows.
 - **The single-file build exists** (frame, `npm run build`, docs/site-structure.md §5). It inlines `kit.css`,
   `kit.js` and the page's own scripts, turns the fonts into `data:` URIs, and refuses network loads. A built sim
   is about 130 KB and passes `npm run check:page` like its source.
-- The full contract check: `check-page.mjs` (in the browser, now in both languages) and `kit.test.js` (tokens,
-  contrast, sizes, strings) are its seed. They are not yet run over every sim by one command (wave-0
-  `contract-check`).
+- The full contract check exists: `npm run gate -- <id>` (`scripts/gate.mjs`, wave-0 `contract-check`) runs the
+  manifest, the model tests, the build, `check-page.mjs` on the built file, the token check and the scope check,
+  and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
 - Canvas/SVG drawing helpers (lanes, arrows, chunks). Add them additively once two real sims need the same thing.
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.

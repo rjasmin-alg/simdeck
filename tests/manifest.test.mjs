@@ -118,13 +118,17 @@ test('page checks: data-sim must equal the id; exceptions block well formed and 
   assert.match(errorsOf(r), /data-sim="proto"> must equal the id "dns-x"/);
   r.natives[0].html = '<html lang="hr"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"fit"}]</script></head></html>';
   assert.match(errorsOf(r), /#simdeck-exceptions must be/);
-  r.natives[0].html = '<html lang="hr" data-sim="dns-x"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"fit","why":"poster"}]</script>'
+  r.natives[0].html = '<html lang="hr" data-sim="dns-x"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"one-screen","why":"poster"}]</script>'
     + '<script type="application/json" id="simdeck-meta">{"id":"dns-x","class":"stepper","steps":16,"title":{"hr":"DNS","en":"Old"}}</script></head></html>';
   const v = validate(r);
   assert.deepEqual(v.errors, []);
   assert.match(v.warnings.join('\n'), /1 declared contract exception/);
   assert.match(v.warnings.join('\n'), /#simdeck-meta steps is 16, sim.json says 4/);
   assert.match(v.warnings.join('\n'), /#simdeck-meta title is .*Old/);
+  for (const [rule, msg] of [['fit', /unknown rule "fit"/], ['scope', /rule "scope" cannot be waived/]]) {
+    r.natives[0].html = `<html lang="hr"><head><script type="application/json" id="simdeck-exceptions">[{"rule":"${rule}","why":"x"}]</script></head></html>`;
+    assert.match(errorsOf(r), msg);
+  }
 });
 
 const course = (over) => ({ id: 'linux', title: two('Linux'), sections: [{ sims: ['dns-x'] }], ...over });

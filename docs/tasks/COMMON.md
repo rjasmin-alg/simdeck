@@ -59,7 +59,11 @@ From `docs/design-notes-simdeck.md`, playbook §10.2 and `docs/sim-ui.md`:
 - **A demo takes 3–5 minutes.** A stepper has at most about 20 steps; more needs a declared exception or a
   second preset.
 - **Exceptions** are declared in the page's `<script type="application/json" id="simdeck-exceptions">` block
-  (`[{ "rule", "why" }]`), never worked around silently. The check validates and counts them.
+  (`[{ "rule", "why" }]`), never worked around silently. `rule` is one of the gate's rule ids (`lib/contract.mjs`):
+  `one-screen`, `text-size`, `phone`, `keys`, `steps`, `max-steps`, `motion`, `console`, `languages`, `theme`,
+  `tokens`. A declared rule waives that rule's failing checks; the gate counts them, per class over the repo too.
+  `manifest`, `tests`, `offline`, `scope` and `kit` cannot be waived. The single-language exception is `sim.json`
+  `languages` (§4).
 - **Page skeleton** (`docs/site-structure.md` §7): `<html lang="…" data-sim="<id>">` with `data-sim` equal to
   the folder name; the page links `../../kit/kit.css` and `../../kit/kit.js` itself (so it runs unbuilt from
   `file://`), and `../../kit/glossary.js` when its strings use `[[terms]]`; a `#simdeck-meta` placeholder written
@@ -125,15 +129,28 @@ A task file may say "soft: start after X is merged and reuse its model".
 Run from the repo root:
 
 ```sh
-node --test sims/<id>/sim.test.js                         # your model's rules (npm test runs every sim's tests)
-npm run check                                             # manifest: sim.json, tags, courses, meta and exceptions blocks
-npm run check:page -- sims/<id>/index.html --shots /tmp/<id>-shots   # per language: fit, text size, words; keys
-npm run build -- --out /tmp/<id>-site --drafts            # your page as one self-contained file
+npm run gate -- <id>                    # every contract rule on sims/<id>/; exits 0 only when all pass
+npm run gate -- <id> --shots /tmp/<id>-shots   # screenshots somewhere you choose (default: the gate's temp folder)
 ```
 
-Wave 0 task `contract-check` replaces these with `npm run gate -- <id>`; use it once it exists. Look at every
-screenshot, including grayscale and the phone size. Open the built single file from `file://` with the network
-off.
+The gate (`scripts/gate.mjs`, rules in `lib/contract.mjs`) runs, in order:
+
+1. **manifest**: `sim.json` and the page's blocks (`lib/manifest.mjs`); a stepper has at most 20 steps.
+2. **tests**: `node --test sims/<id>/sim.test.js`.
+3. **build**: the sim alone as one self-contained file in a temp folder; a network load fails it.
+4. **browser**: `kit/tools/check-page.mjs` on the built file from `file://`, every request blocked: one screen at
+   1920×1080 light and dark, body ≥ 20 px and nothing under 16 px, no sideways scroll at 375×812, clicker keys
+   (steppers), the controller's step count equals `sim.json` `steps`, reduced motion (URL and OS), no console
+   errors, theme follows the OS, both languages (tables, words, the L switch).
+5. **tokens**: every `var(--x)` defined; no colour literals in the page's own CSS.
+6. **scope**: `git diff --name-only --no-renames main...HEAD`, uncommitted and untracked files, all under
+   `sims/<id>/` (a preset task gates its host id). `--base <ref>` compares with another branch.
+7. **exceptions**: declared ones (§3) waive their rule's checks; the count is printed per rule and per class.
+8. **screenshots**: 1920×1080 light, dark and grayscale, and 375×812, in both languages.
+
+Look at every screenshot, including grayscale and the phone size. The single steps are still there when you want
+one alone: `node --test sims/<id>/sim.test.js`, `npm run check`, `npm run check:page -- sims/<id>/index.html`
+(unbuilt), `npm run build -- --out /tmp/<id>-site --drafts`. `npm run gate -- proto` gates the kit's template.
 
 Tests: the model's rules first, **tie-breaks first of all** (the most common untested defect, playbook §9), then
 the template's generic block (determinism, JSON-safe state, step back = replay). Break the code once per rule to
@@ -143,8 +160,8 @@ see the test fail.
 
 - [ ] `SPEC.md` (new sims) states every rule, tie-break and expected number with its source; numbers checked.
 - [ ] Model tests pass; every rule and tie-break has a test that fails when the rule is broken.
-- [ ] Checks in §7 pass; screenshots at 1920×1080 (light, dark, grayscale) and 375×812 reviewed.
-- [ ] Both languages complete (§4): `strings.js` tables match, `check:page` passes in hr and en (every visible word
+- [ ] `npm run gate -- <id>` passes (§7); screenshots at 1920×1080 (light, dark, grayscale) and 375×812 reviewed.
+- [ ] Both languages complete (§4): `strings.js` tables match, the gate's browser checks pass in hr and en (every visible word
       from the tables), and the screenshots of both languages are reviewed.
 - [ ] `sim.json` valid; `status` set to `"ready"` last.
 - [ ] Offline single file works from `file://`.
@@ -158,7 +175,7 @@ see the test fail.
 - Change only `sims/<id>/` (or the host folder for a preset task). Never edit `kit/`, `site/`, `lib/`,
   `scripts/`, `tags.json`, `courses/`, `docs/` outside your task's own notes, or another sim. Needs there go
   in your report.
-- No new dependencies. Install tools with this repo's own `npm ci` (Playwright for `check:page`); never borrow
+- No new dependencies. Install tools with this repo's own `npm ci` (Playwright for the gate's browser checks); never borrow
   another project's `node_modules`.
 - Commit on your thread branch with English messages; the coordinator rebases, runs the gate and merges.
 - Licence: every new source file starts with `SPDX-License-Identifier: AGPL-3.0-or-later` in a comment.

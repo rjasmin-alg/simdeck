@@ -385,7 +385,8 @@ sets the limits:
 Each rule has a test that feeds it a bad sample (`tests/`). The admin's write side has its own tests:
 valid saves land in the hand-edit format, and invalid ones leave the disk unchanged.
 
-Left to the kit's page check (`kit/tools/check-page.mjs`): fit at 1920×1080, text size, clicker keys, themes,
+Left to the kit's page check (`kit/tools/check-page.mjs`, which the gate `npm run gate -- <id>` runs on the
+built file, docs/tasks/COMMON.md §7): fit at 1920×1080, text size, clicker keys, themes,
 and the step count the page mounts against `#simdeck-meta` `steps`; per language, the string tables and that every
 visible word comes from them (docs/sim-ui.md §9.6). `tests/site-lang.test.mjs` switches a built home and course
 page in the browser.
@@ -441,7 +442,7 @@ Everything below can be done in the admin, or by editing the files and running `
 - **Add a simulator:**
   1. Simulatori → **+ Novi simulator**.
   2. Replace the template's model (`sim.js`), rule tests (`sim.test.js`) and page content (docs/sim-ui.md §6), then
-     `npm run check:page -- sims/<id>/index.html`.
+     `npm run gate -- <id>`.
   3. Set its status to `ready` when it passes its DoD.
 - **Adopt one from another project:**
   1. Create it as above, then copy the page (and its local files) into `sims/<id>/`.
