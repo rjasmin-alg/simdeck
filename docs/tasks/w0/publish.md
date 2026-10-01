@@ -5,7 +5,7 @@
 | Task | `publish` (wave 0 (recurring)) |
 | Owner | coordinator |
 | Size | S each time |
-| Depends on | `kit-follow-ups`; owner approval for each deploy |
+| Depends on | owner approval for each deploy |
 | Licence | AGPL-3.0-or-later |
 
 ## Goal

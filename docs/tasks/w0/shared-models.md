@@ -5,7 +5,7 @@
 | Task | `shared-models` (wave 0) |
 | Owner | coordinator |
 | Size | S |
-| Depends on | `kit-follow-ups` |
+| Depends on | main at cd893d4 |
 | Licence | AGPL-3.0-or-later |
 
 ## Goal

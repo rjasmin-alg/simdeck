@@ -629,7 +629,7 @@ def render(cid, r, wave, group, by_id, sids, clusters):
                   "3–6 presets with expected outcomes, step count, legend, captions, terms in both languages, "
                   "misconceptions to target, out of scope._", "",
                   "## Steps", "",
-                  (f"1. Skip: this is a preset on the host." if preset_host else f"1. `npm run admin` → + Novi simulator `{sid}` (runs `kit/new-sim.sh` and writes `sim.json`), or `kit/new-sim.sh {sid} sims/{sid}` plus a hand-written `sim.json`."),
+                  (f"1. Skip: this is a preset on the host." if preset_host else f"1. `kit/new-sim.sh {sid} sims/{sid}` (copies the template and writes a `wip` `sim.json` stub), or the admin's + Novi simulator."),
                   "2. Write `sims/<id>/SPEC.md` from \"Model and presets\" above: every rule, tie-break and expected "
                   "number, with its source. Check the numbers with a small script before coding (playbook §2).",
                   "3. Model in `sim.js` (pure, deterministic), rule tests in `sim.test.js`: one test per rule, tie-breaks "
@@ -768,7 +768,7 @@ def write_index(tasks, by_id, sids):
 
 
 W0_TASKS = [
-    ("kit-follow-ups", "the kit changes the frame left open, and clearing the placeholder sims"),
+    ("kit-follow-ups", "done on main (cd893d4): kept for reference"),
     ("bilingual", "Croatian and English in every sim, the index and course pages"),
     ("contract-check", "one command that checks a sim against the contract, and the per-task gate"),
     ("vocabulary", "topics and tags every task needs, in both languages"),

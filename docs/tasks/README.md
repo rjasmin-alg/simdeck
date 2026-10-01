@@ -8,7 +8,7 @@ Run order: wave 0 → wave 1 (in parallel) → wave 2a pilots → kit views K1�
 
 | Task | What |
 |---|---|
-| [`kit-follow-ups`](w0/kit-follow-ups.md) | the kit changes the frame left open, and clearing the placeholder sims |
+| [`kit-follow-ups`](w0/kit-follow-ups.md) | done on main (cd893d4): kept for reference |
 | [`bilingual`](w0/bilingual.md) | Croatian and English in every sim, the index and course pages |
 | [`contract-check`](w0/contract-check.md) | one command that checks a sim against the contract, and the per-task gate |
 | [`vocabulary`](w0/vocabulary.md) | topics and tags every task needs, in both languages |

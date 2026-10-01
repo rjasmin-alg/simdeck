@@ -86,8 +86,8 @@ preset names, hints, attribution.
 Fields and rules: `docs/site-structure.md` §2.1. Required: `id` (= folder name), `class`, `status`, `title`
 (≤ 60 chars), `concept` (≤ 80), `summary` (≤ 160), `topic`, `tags`, `level`, `lang`, and `steps` for steppers.
 Optional: `aliases`, `related`, `origin` (set it for adopted pages), `asset_review`. Unknown fields are errors.
-The admin's + Novi simulator creates the folder from the template and writes `sim.json`; `kit/new-sim.sh` alone
-does not write `sim.json` yet (wave 0 `kit-follow-ups`). Use the topic and tags your task file names; if `tags.json` lacks one, the wave-0 `vocabulary` task adds
+`kit/new-sim.sh <id> sims/<id>` copies the template and writes a `wip` `sim.json` stub that passes the check; the
+admin's + Novi simulator does the same. Fill in the real title, concept, summary, topic and tags. Use the topic and tags your task file names; if `tags.json` lacks one, the wave-0 `vocabulary` task adds
 it. Never edit `tags.json` yourself: list missing tags in your report. Keep `status: "wip"` until §8 holds.
 The bilingual task will change `title`, `concept` and `summary` to `{ "hr", "en" }`; until then write the
 Croatian there and the English in `NOTES.md` under "English metadata".

@@ -77,7 +77,7 @@ The student: reorder modules, fail some, log in.
 
 ## Steps
 
-1. `npm run admin` → + Novi simulator `lnx-pam-stack` (runs `kit/new-sim.sh` and writes `sim.json`), or `kit/new-sim.sh lnx-pam-stack sims/lnx-pam-stack` plus a hand-written `sim.json`.
+1. `kit/new-sim.sh lnx-pam-stack sims/lnx-pam-stack` (copies the template and writes a `wip` `sim.json` stub), or the admin's + Novi simulator.
 2. Write `sims/<id>/SPEC.md` from "Model and presets" above: every rule, tie-break and expected number, with its source. Check the numbers with a small script before coding (playbook §2).
 3. Model in `sim.js` (pure, deterministic), rule tests in `sim.test.js`: one test per rule, tie-breaks first, and break the code once to see each test fail.
 4. Page in `index.html`: stage, caption, presets, params, legend, explanation, both languages.

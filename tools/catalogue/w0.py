@@ -13,35 +13,17 @@ HDR = lambda tid, what, wave, size, deps, owner="coordinator": "\n".join([
     f"| Depends on | {deps} |", f"| Licence | AGPL-3.0-or-later |", ""])
 
 W0 = {}
-W0["kit-follow-ups"] = HDR("kit-follow-ups", "the kit changes the frame left open, and the placeholder sims", "0", "S", "main at 85b4a66 (frame and kit merged)", "coordinator (kit owner)") + """
-## Goal
+W0["kit-follow-ups"] = HDR("kit-follow-ups", "the kit changes the frame left open (done)", "0", "—", "—", "—") + """
+## Done on main
 
-The frame and the kit are merged and reconciled on `main` (`docs/site-structure.md` §7). §7 ends with a list
-of changes only the kit can make; make them, so that every task starts from a template that passes
-`npm run check` as soon as it is copied.
-
-## Do
-
-1. **Template `#simdeck-meta` placeholder:** keep only `id`, `class` and `steps` (the build generates the rest
-   from `sim.json`); drop `courses`, `kind`, `path`, `tags`, and the matching rewrites in `kit/new-sim.sh`.
-2. **`kit/new-sim.sh` writes a `sim.json` stub** with every required field (`docs/site-structure.md` §2.1),
-   `status: "wip"`, so a sim made with it passes `npm run check` (the admin's + Novi simulator already does).
-3. **Back link from a course page:** go back in history also when the referrer is a simdeck course page
-   (`…/courses/<id>/`).
-4. **`docs/sim-ui.md` §7–§8:** record the resolutions (meta generated from `sim.json`, exceptions stay in the
-   page, index at the site root, the single-file build exists).
-5. **Placeholder sims.** `sims/dhcp-dora`, `dns-resolution`, `disk-partitioning` and `lvm-topology` are the
-   frame's placeholders, and each id is now a real task (`docs/tasks/`). Set them to `status: "wip"` (or remove
-   them) so the tasks start from the template; keep `courses/linux-essentials.json` working (unfinished sims
-   only warn).
-6. Update `docs/tasks/COMMON.md` §2, §5 and §7 if any command or path changed.
-
-## Done when
-
-`kit/new-sim.sh x /tmp/x` gives a folder that passes `npm run check` and `npm run check:page`; `npm test` passes.
+Carried out by thread t-0003 in `cd893d4` and `7f640c7`: the template's `#simdeck-meta` keeps only `id`,
+`class` and `steps`; `kit/new-sim.sh` writes a `status: "wip"` `sim.json` stub that passes `npm run check`; the
+back link returns to the index or a course page; `docs/sim-ui.md` §7–§8 record the settlement; the placeholder
+sims (`dhcp-dora`, `dns-resolution`, `disk-partitioning`, `lvm-topology`) are `wip`, so their tasks start from
+the template. Nothing left to do; kept so links to this task resolve.
 """
 
-W0["bilingual"] = HDR("bilingual", "Croatian and English in every sim, the index and course pages", "0", "M–L", "`kit-follow-ups`", "coordinator (touches kit and frame)") + """
+W0["bilingual"] = HDR("bilingual", "Croatian and English in every sim, the index and course pages", "0", "M–L", "main at cd893d4", "coordinator (touches kit and frame)") + """
 ## Goal
 
 Owner decision (2026-10-01): **all simulators and the entire site support English and Croatian.** Design and
@@ -73,7 +55,7 @@ page switch, the check fails a page with a missing string (with a test), and COM
 pattern so that adoption tasks can start.
 """
 
-W0["contract-check"] = HDR("contract-check", "one command that checks a sim, and the per-task gate", "0", "M", "`kit-follow-ups`; `bilingual` for the language rules") + """
+W0["contract-check"] = HDR("contract-check", "one command that checks a sim, and the per-task gate", "0", "M", "`bilingual` for the language rules") + """
 ## Goal
 
 Turn the contract (COMMON.md §3) into checks, so that "done" is mechanical (playbook §6: a rule without a check
@@ -103,7 +85,7 @@ collide.
 `npm run gate -- <template id>` passes; each rule has a failing-sample test; COMMON.md §7 points to the gate.
 """
 
-W0["vocabulary"] = HDR("vocabulary", "topics and tags every task needs, in both languages", "0", "S", "`kit-follow-ups`; `bilingual` (labels in both languages)") + """
+W0["vocabulary"] = HDR("vocabulary", "topics and tags every task needs, in both languages", "0", "S", "`bilingual` (labels in both languages)") + """
 ## Goal
 
 Tasks may only use tags that exist in `tags.json`, and they are not allowed to edit it (COMMON.md §9). Add
@@ -125,7 +107,7 @@ everything they need up front, so parallel tasks never wait on the vocabulary.
 `npm run check` passes with a test sim that uses every new tag; README's tag list and `tags.json` agree.
 """
 
-W0["licence"] = HDR("licence", "AGPL-3.0-or-later for simdeck", "0", "S", "`kit-follow-ups`") + """
+W0["licence"] = HDR("licence", "AGPL-3.0-or-later for simdeck", "0", "S", "main at cd893d4") + """
 ## Goal
 
 Owner decision (2026-10-01): simdeck is **AGPL-3.0-or-later**, to keep it open as long as possible.
@@ -151,7 +133,7 @@ Owner decision (2026-10-01): simdeck is **AGPL-3.0-or-later**, to keep it open a
 archive.
 """
 
-W0["shared-models"] = HDR("shared-models", "where model code shared by several sims lives", "0", "S", "`kit-follow-ups`") + """
+W0["shared-models"] = HDR("shared-models", "where model code shared by several sims lives", "0", "S", "main at cd893d4") + """
 ## Goal
 
 About 140 wave-3 tasks reuse a core sim's model (task files: "soft: … reuse its model"), and catalogue §5
@@ -173,7 +155,7 @@ One model (from the first pilot that has a soft dependent) lives in `models/`, i
 the build inlines it, and COMMON.md §6 says how to use it.
 """
 
-W0["presets-in-index"] = HDR("presets-in-index", "index and course entries that open a sim at a preset", "0", "S", "`kit-follow-ups`") + """
+W0["presets-in-index"] = HDR("presets-in-index", "index and course entries that open a sim at a preset", "0", "S", "main at cd893d4") + """
 ## Goal
 
 The catalogue relies on opening one page at a preset: about 60 ossimulator scenario entries (`?scenario=`),
@@ -259,7 +241,7 @@ with a note pointing to its simdeck home (playbook §10.7 step 5).
   the nginx change is the deploy's job).
 """
 
-W0["publish"] = HDR("publish", "build and deploy after every merge", "0 (recurring)", "S each time", "`kit-follow-ups`; owner approval for each deploy") + """
+W0["publish"] = HDR("publish", "build and deploy after every merge", "0 (recurring)", "S each time", "owner approval for each deploy") + """
 ## Goal
 
 "Adopt it and publish it": every merged sim reaches `https://materijali.online/simdeck/` (login `deck`/`***`,

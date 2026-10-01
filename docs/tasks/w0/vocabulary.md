@@ -5,7 +5,7 @@
 | Task | `vocabulary` (wave 0) |
 | Owner | coordinator |
 | Size | S |
-| Depends on | `kit-follow-ups`; `bilingual` (labels in both languages) |
+| Depends on | `bilingual` (labels in both languages) |
 | Licence | AGPL-3.0-or-later |
 
 ## Goal

@@ -5,7 +5,7 @@
 | Task | `bilingual` (wave 0) |
 | Owner | coordinator (touches kit and frame) |
 | Size | M–L |
-| Depends on | `kit-follow-ups` |
+| Depends on | main at cd893d4 |
 | Licence | AGPL-3.0-or-later |
 
 ## Goal

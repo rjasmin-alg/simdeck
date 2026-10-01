@@ -5,7 +5,7 @@
 | Task | `contract-check` (wave 0) |
 | Owner | coordinator |
 | Size | M |
-| Depends on | `kit-follow-ups`; `bilingual` for the language rules |
+| Depends on | `bilingual` for the language rules |
 | Licence | AGPL-3.0-or-later |
 
 ## Goal
