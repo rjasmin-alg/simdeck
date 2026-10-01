@@ -4,7 +4,6 @@
 export const STR = {
   classes: { stepper: 'korak po korak', explorer: 'istraživanje', reference: 'pregled', tool: 'alat' },
   levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
-  linkedNote: 'Stranice označene s ↗ nalaze se u zasebnim projektima i mogu tražiti zasebnu prijavu.',
 };
 
 export function escapeHtml(s) {
@@ -21,20 +20,34 @@ export function normalise(s) {
 }
 
 /**
- * The link to an entry. `depth` is how many folders below the site root the linking page sits
- * (index: 0, courses/x.html: 1). Native links name index.html explicitly so they work from file://.
+ * The link to a sim. `depth` is how many folders below the site root the linking page sits
+ * (home: 0, courses/<id>/: 2). Links name index.html explicitly so they work from file://.
  */
-export function entryHref(e, site, depth = 0) {
-  if (e.kind === 'native') return `${'../'.repeat(depth)}${e.path}index.html`;
-  const base = /^https:\/\//.test(e.url) ? '' : String(site.linkedBase ?? '').replace(/\/$/, '');
-  const url = base + e.url;
-  return e.scenario ? `${url}${url.includes('?') ? '&' : '?'}scenario=${encodeURIComponent(e.scenario)}` : url;
+export function entryHref(e, depth = 0) {
+  return `${'../'.repeat(depth)}${e.path}index.html`;
 }
 
-/** The absolute URL a student would type, for printed handouts. */
+/** The absolute URL a student would type, for printed course pages. */
 export function entryAbsUrl(e, site) {
-  if (e.kind === 'native') return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}`;
-  return entryHref(e, site);
+  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}`;
+}
+
+/** materijali.online/<short> for a course with a short address, or null. */
+export function shortUrl(course, site) {
+  if (!course.short || !site.siteUrl) return null;
+  return `${new URL(site.siteUrl).origin}/${course.short}`;
+}
+
+/**
+ * One nginx rule per course with a short address, redirecting /<short> to its course page under
+ * siteUrl. Paste into the server block (or include it); it is regenerated, never hand-edited.
+ */
+export function shortLinkRules(courses, site) {
+  const base = new URL(site.siteUrl ?? 'https://example.org/').pathname.replace(/\/?$/, '/');
+  return courses
+    .filter((c) => c.short)
+    .map((c) => `location ~ ^/${c.short}/?$ { return 302 ${base}courses/${c.id}/; }  # ${c.title.replace(/\n/g, ' ')}`)
+    .join('\n');
 }
 
 /** One searchable string per field, weighted in `search`. */
@@ -45,7 +58,7 @@ export function searchFields(e, vocab) {
     id: normalise(e.id),
     tags: normalise([...tagWords, ...(e.aliases ?? [])].join(' ')),
     topic: normalise(`${e.topic} ${vocab.topics?.[e.topic]?.label ?? ''}`),
-    text: normalise(`${e.concept} ${e.summary} ${e.origin ?? ''}`),
+    text: normalise(`${e.concept} ${e.summary}`),
   };
 }
 
@@ -130,16 +143,14 @@ export function courseItems(ids, byId, drafts = false) {
 export function renderCourse(course, ctx, depth = 0, drafts = false) {
   const byId = new Map(ctx.entries.map((e) => [e.id, e]));
   const skipped = [];
-  let anyLinked = false;
   let n = 0;
   const sections = course.sections.map((s) => {
     const r = courseItems(s.sims ?? [], byId, drafts);
     skipped.push(...r.skipped);
     const lis = r.items.map((e) => {
       n += 1;
-      if (e.kind === 'linked') anyLinked = true;
       const lang = e.lang !== (course.lang ?? ctx.site.lang) ? ` <span class="h-lang">${escapeHtml(e.lang.toUpperCase())}</span>` : '';
-      return `<li value="${n}"><a href="${escapeHtml(entryHref(e, ctx.site, depth))}">${escapeHtml(e.title)}</a>${e.kind === 'linked' ? ' ↗' : ''}${lang}
+      return `<li value="${n}"><a href="${escapeHtml(entryHref(e, depth))}">${escapeHtml(e.title)}</a>${lang}
 <span class="h-concept">${escapeHtml(e.concept)}</span>
 <span class="h-summary">${escapeHtml(e.summary)}</span>
 <span class="h-url">${escapeHtml(entryAbsUrl(e, ctx.site))}</span></li>`;
@@ -147,9 +158,10 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
     if (!lis.length) return '';
     return `<section>${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}<ol>${lis.join('\n')}</ol></section>`;
   });
-  const html = `<header><h1>${escapeHtml(course.title)}</h1>${course.term ? `<p class="h-term">${escapeHtml(course.term)}</p>` : ''}${course.intro ? `<p class="h-intro">${escapeHtml(course.intro)}</p>` : ''}</header>
+  const short = shortUrl(course, ctx.site);
+  const html = `<header><h1>${escapeHtml(course.title)}</h1>${course.term ? `<p class="h-term">${escapeHtml(course.term)}</p>` : ''}${short ? `<p class="h-short">${escapeHtml(short.replace(/^https?:\/\//, ''))}</p>` : ''}${course.intro ? `<p class="h-intro">${escapeHtml(course.intro)}</p>` : ''}</header>
 <main>${sections.join('\n')}</main>
-<footer>${anyLinked ? `<p>${escapeHtml(STR.linkedNote)}</p>` : ''}<p>${escapeHtml(ctx.site.title)} · ${escapeHtml(ctx.site.siteUrl ?? '')}</p></footer>`;
+<footer><p>${escapeHtml(ctx.site.title)} · ${escapeHtml(short ?? ctx.site.siteUrl ?? '')}</p></footer>`;
   return { html, skipped };
 }
 
@@ -163,7 +175,7 @@ export function renderIndexList(ctx) {
     .map((g) => `<section><h2>${escapeHtml(g.label)}</h2><ul>${g.items.map((e) => {
       const f = searchFields(e, ctx.vocab);
       const words = [f.title, f.id, f.tags, f.topic, f.text].join(' ').replace(/\s+/g, ' ').trim();
-      return `<li data-s="${escapeHtml(words)}"><a href="${escapeHtml(entryHref(e, ctx.site, 0))}">${escapeHtml(e.title)}</a>${e.kind === 'linked' ? ' ↗' : ''} <span>${escapeHtml(e.concept)}</span></li>`;
+      return `<li data-s="${escapeHtml(words)}"><a href="${escapeHtml(entryHref(e, 0))}">${escapeHtml(e.title)}</a> <span>${escapeHtml(e.concept)}</span></li>`;
     }).join('')}</ul></section>`)
     .join('\n');
 }

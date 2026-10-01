@@ -11,23 +11,17 @@ const vocab = {
   tags: { dns: { label: 'DNS' }, lvm: { label: 'LVM' } },
 };
 const nativeJson = (over = {}) => ({
-  id: 'dns-x', kind: 'native', class: 'stepper', status: 'ready', title: 'DNS', concept: 'Razlučivanje',
+  id: 'dns-x', class: 'stepper', status: 'ready', title: 'DNS', concept: 'Razlučivanje',
   summary: 'Kratko.', topic: 'networks', tags: ['dns'], level: 'intro', lang: 'hr', steps: 4, ...over,
-});
-const linkedJson = (over = {}) => ({
-  id: 'lvm-x', kind: 'linked', class: 'explorer', status: 'ready', title: 'LVM', concept: 'Volumeni',
-  summary: 'Kratko.', topic: 'storage', tags: ['lvm'], level: 'core', lang: 'en', url: '/singles/lvm.html', ...over,
 });
 const html = (lang = 'hr') => `<!doctype html><html lang="${lang}"><head></head><body></body></html>`;
 
-function repo({ natives, linked, courses } = {}) {
-  const n = natives ?? [nativeJson()];
+function repo({ natives, courses, site = {} } = {}) {
+  const n = natives ?? [nativeJson(), nativeJson({ id: 'lvm-x', class: 'explorer', steps: undefined, topic: 'storage', tags: ['lvm'], lang: 'en' })];
   return {
-    site: {},
+    site,
     vocab,
     natives: n.map((json) => ({ dir: json.id, json, html: html(json.lang), files: ['sim.json', 'index.html'], hasManifest: true })),
-    linked: [{ file: 'x.json', entries: linked ?? [linkedJson()] }],
-    linkedThumbs: [],
     courses: (courses ?? []).map((json) => ({ file: `${json.id}.json`, json })),
   };
 }
@@ -44,13 +38,13 @@ test('a valid repo has no errors', () => {
 test('the real repository validates', () => {
   const r = validate(loadRepo(ROOT));
   assert.deepEqual(r.errors, []);
-  assert.ok(r.entries.some((e) => e.kind === 'native'));
+  assert.ok(r.entries.length > 0);
 });
 
 const bad = [
   ['missing field', [nativeJson({ summary: undefined })], /missing required field "summary"/],
   ['unknown field', [nativeJson({ sumary: 'x' })], /unknown field "sumary"/],
-  ['linked-only field on native', [nativeJson({ url: '/x' })], /only for linked/],
+  ['a field from the old linked kind (simdeck copies, never links out)', [nativeJson({ url: '/x' })], /unknown field "url"/],
   ['id not kebab', [nativeJson({ id: 'Dns_X' })], /not kebab-case/],
   ['bad class', [nativeJson({ class: 'game' })], /"class" must be one of/],
   ['bad level', [nativeJson({ level: 'hard' })], /"level" must be one of/],
@@ -90,26 +84,10 @@ test('rejects: html lang differs from manifest', () => {
   r.natives[0].html = html('en');
   assert.match(errorsOf(r), /does not match manifest lang "hr"/);
 });
-test('rejects: two thumbnails', () => {
+test('rejects: duplicate id', () => {
   const r = repo();
-  r.natives[0].files.push('thumb.svg', 'thumb.png');
-  assert.match(errorsOf(r), /more than one thumbnail/);
-});
-test('rejects: duplicate id across native and linked', () => {
-  assert.match(errorsOf(repo({ linked: [linkedJson({ id: 'dns-x' })] })), /duplicate id "dns-x"/);
-});
-test('rejects: linked url not site-absolute or https', () => {
-  assert.match(errorsOf(repo({ linked: [linkedJson({ url: 'http://x.org/' })] })), /site-absolute/);
-  assert.match(errorsOf(repo({ linked: [linkedJson({ url: 'singles/x.html' })] })), /site-absolute/);
-});
-test('rejects: scenario inside the url', () => {
-  assert.match(errorsOf(repo({ linked: [linkedJson({ url: '/ossim/x/index.html?scenario=a' })] })), /put the scenario in "scenario"/);
-});
-test('rejects: linked thumb that does not exist', () => {
-  assert.match(errorsOf(repo({ linked: [linkedJson({ thumb: 'x.png' })] })), /thumb "x.png" not found/);
-});
-test('rejects: native entry with kind linked', () => {
-  assert.match(errorsOf(repo({ natives: [nativeJson({ kind: 'linked', url: '/x' })] })), /must have kind "native"/);
+  r.natives[1].json = { ...r.natives[0].json };
+  assert.match(errorsOf(r), /duplicate id "dns-x"/);
 });
 
 const course = (over) => ({ id: 'linux', title: 'Linux', sections: [{ sims: ['dns-x'] }], ...over });
@@ -117,7 +95,7 @@ test('rejects: course with unknown sim', () => {
   assert.match(errorsOf(repo({ courses: [course({ sections: [{ sims: ['nope'] }] })] })), /unknown sim id "nope"/);
 });
 test('rejects: tool on a course', () => {
-  const r = repo({ linked: [linkedJson({ class: 'tool' })], courses: [course({ sections: [{ sims: ['lvm-x'] }] })] });
+  const r = repo({ natives: [nativeJson({ class: 'tool', steps: undefined })], courses: [course()] });
   assert.match(errorsOf(r), /is a tool/);
 });
 test('rejects: course id differs from file name', () => {
@@ -131,6 +109,13 @@ test('rejects: sim listed twice in a course', () => {
 test('rejects: empty sections and unknown course fields', () => {
   assert.match(errorsOf(repo({ courses: [course({ sections: [] })] })), /non-empty array/);
   assert.match(errorsOf(repo({ courses: [course({ sims: [] })] })), /unknown field "sims"/);
+});
+test('course short addresses: kebab-case, unique, not a reserved server path', () => {
+  assert.deepEqual(validate(repo({ courses: [course({ short: 'linux' })] })).errors, []);
+  assert.match(errorsOf(repo({ courses: [course({ short: '/Linux' })] })), /kebab-case/);
+  assert.match(errorsOf(repo({ site: { reservedPaths: ['ossim'] }, courses: [course({ short: 'ossim' })] })), /already used on the server/);
+  const two = repo({ courses: [course({ short: 'linux' }), course({ id: 'other', short: 'linux' })] });
+  assert.match(errorsOf(two), /also used by course/);
 });
 test('warns, not fails: wip sim on a course', () => {
   const r = validate(repo({ natives: [nativeJson({ status: 'wip' })], courses: [course()] }));

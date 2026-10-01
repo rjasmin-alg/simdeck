@@ -71,7 +71,7 @@ test('the real repository builds every page, and only finished ones', () => {
     assert.ok(r.ok);
     assert.ok(existsSync(join(out, 'index.html')));
     assert.ok(r.entries.every((e) => e.status === 'ready'));
-    for (const e of r.entries.filter((x) => x.kind === 'native')) {
+    for (const e of r.entries) {
       const html = readFileSync(join(out, 'sims', e.id, 'index.html'), 'utf8');
       assert.match(html, /id="simdeck-meta"/, e.id);
       assert.doesNotMatch(html, /<script[^>]+src=/, `${e.id} is self-contained`);

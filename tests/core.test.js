@@ -1,25 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, search, group, entryHref, entryAbsUrl, renderCourse, courseItems, renderIndexList, isPublic } from '../site/core.js';
+import { normalise, search, group, entryHref, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic } from '../site/core.js';
 
 const vocab = {
   topics: { networks: { label: 'Računalne mreže' }, storage: { label: 'Pohrana' } },
   tags: { dns: { label: 'DNS', aliases: ['resolver'] }, lvm: { label: 'LVM' }, partitioning: { label: 'particioniranje', aliases: ['gpt'] } },
 };
 const e = (id, over) => ({
-  id, kind: 'native', class: 'stepper', status: 'ready', title: id, concept: '', summary: '', topic: 'networks',
+  id, class: 'stepper', status: 'ready', title: id, concept: '', summary: '', topic: 'networks',
   tags: ['dns'], level: 'intro', lang: 'hr', path: `sims/${id}/`, courses: [], ...over,
 });
 const entries = [
   e('dns', { title: 'DNS: razlučivanje imena', concept: 'Rekurzivni resolver', courses: ['linux'] }),
   e('dhcp', { title: 'DHCP: DORA', summary: 'Klijent dobiva adresu od DNS-a? ne.', courses: ['linux'] }),
   e('parts', { title: 'Particioniranje diska', topic: 'storage', tags: ['partitioning'], class: 'explorer' }),
-  e('lvm', { kind: 'linked', title: 'LVM', topic: 'storage', tags: ['lvm'], url: '/singles/lvm.html', lang: 'en', courses: ['linux'] }),
+  e('lvm', { title: 'LVM', topic: 'storage', tags: ['lvm'], lang: 'en', class: 'explorer', courses: ['linux'] }),
   e('picker', { title: 'Odabir studenta', class: 'tool', topic: 'networks' }),
   e('wip', { title: 'Nedovršen DNS', status: 'wip' }),
 ];
 const ids = (list) => list.map((x) => x.id);
-const site = { title: 'simdeck', lang: 'hr', siteUrl: 'https://m.o/simdeck/', linkedBase: 'https://m.o/' };
+const site = { title: 'simdeck', lang: 'hr', siteUrl: 'https://m.o/simdeck/' };
 
 test('normalise folds case and Croatian diacritics', () => {
   assert.equal(normalise('Čvor ĐAK šuma Žica ć'), 'cvor dak suma zica c');
@@ -60,13 +60,17 @@ test('group by topic follows tags.json order and drops empty groups', () => {
   assert.deepEqual(group(entries, vocab).map((x) => x.key), ['networks', 'storage']);
 });
 
-test('links: native relative with explicit index.html, linked through linkedBase, scenario appended', () => {
-  assert.equal(entryHref(entries[0], site, 0), 'sims/dns/index.html');
-  assert.equal(entryHref(entries[0], site, 2), '../../sims/dns/index.html');
-  assert.equal(entryHref(entries[3], site), 'https://m.o/singles/lvm.html');
-  assert.equal(entryHref({ kind: 'linked', url: '/ossim/m/index.html', scenario: 'rr4' }, site), 'https://m.o/ossim/m/index.html?scenario=rr4');
-  assert.equal(entryHref({ kind: 'linked', url: 'https://x.org/a?b=1', scenario: 's' }, site), 'https://x.org/a?b=1&scenario=s');
+test('links are relative with explicit index.html; printed URLs are absolute', () => {
+  assert.equal(entryHref(entries[0], 0), 'sims/dns/index.html');
+  assert.equal(entryHref(entries[0], 2), '../../sims/dns/index.html');
   assert.equal(entryAbsUrl(entries[0], site), 'https://m.o/simdeck/sims/dns/');
+});
+
+test('short addresses: URL and one nginx rule per course that has one', () => {
+  const courses = [{ id: 'linux-essentials', title: 'Linux', short: 'linux' }, { id: 'os', title: 'OS' }];
+  assert.equal(shortUrl(courses[0], site), 'https://m.o/linux');
+  assert.equal(shortUrl(courses[1], site), null);
+  assert.equal(shortLinkRules(courses, site), 'location ~ ^/linux/?$ { return 302 /simdeck/courses/linux-essentials/; }  # Linux');
 });
 
 test('course pages leave out tools, unfinished and unknown ids, and say why', () => {
@@ -76,13 +80,13 @@ test('course pages leave out tools, unfinished and unknown ids, and say why', ()
   assert.deepEqual(r.skipped.map((s) => s.id), ['picker', 'wip', 'nope']);
 });
 
-test('renderCourse numbers items across sections, escapes text, notes linked pages', () => {
-  const course = { title: 'Linux <Essentials>', sections: [{ title: 'Mreža', sims: ['dns', 'dhcp'] }, { title: 'Diskovi', sims: ['lvm', 'picker'] }] };
+test('renderCourse numbers items across sections, escapes text, shows the short address', () => {
+  const course = { title: 'Linux <Essentials>', short: 'linux', sections: [{ title: 'Mreža', sims: ['dns', 'dhcp'] }, { title: 'Diskovi', sims: ['lvm', 'picker'] }] };
   const { html, skipped } = renderCourse(course, { site, entries }, 2);
   assert.match(html, /Linux &lt;Essentials&gt;/);
-  assert.match(html, /<li value="3"><a href="https:\/\/m.o\/singles\/lvm.html">LVM<\/a> ↗/);
+  assert.match(html, /<li value="3"><a href="\.\.\/\.\.\/sims\/lvm\/index.html">LVM<\/a>/);
   assert.match(html, /href="\.\.\/\.\.\/sims\/dns\/index.html"/);
-  assert.match(html, /zasebnu prijavu/);
+  assert.match(html, /m\.o\/linux/);
   assert.match(html, /<span class="h-lang">EN<\/span>/);
   assert.deepEqual(skipped.map((s) => s.id), ['picker']);
 });

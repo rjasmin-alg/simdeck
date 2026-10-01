@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The editorial side: a small local web app for editing simulators, tags and courses, previewing,
 // and publishing the static site. It writes the same files you could edit by hand (sim.json,
-// linked/*.json, courses/*.json, tags.json); git tracks the changes. It is never published.
+// courses/*.json, tags.json); git tracks the changes. It is never published.
 //
 // Usage: node scripts/admin.mjs [--port 5300] [--host 127.0.0.1] [--root <repo>]
 // Then open http://127.0.0.1:5300/. From another machine, use an SSH tunnel rather than --host.
@@ -10,7 +10,7 @@ import { readFileSync, existsSync, statSync, mkdtempSync } from 'node:fs';
 import { join, dirname, resolve, normalize, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { adminState, saveEntry, deleteEntry, createNative, saveCourse, deleteCourse, saveVocab } from '../lib/store.mjs';
+import { adminState, saveEntry, createSim, saveCourse, deleteCourse, saveVocab } from '../lib/store.mjs';
 import { build } from './build.mjs';
 
 const arg = (name, dflt) => {
@@ -51,8 +51,7 @@ function serveFrom(res, base, rel) {
 
 const API = {
   'GET /api/state': () => ({ ...adminState(ROOT), defaultOut: join(ROOT, 'dist') }),
-  'POST /api/entry': (b) => (b.create && b.entry?.kind === 'native' ? createNative(ROOT, b.entry) : saveEntry(ROOT, b.entry, { oldId: b.oldId ?? null, file: b.file })),
-  'POST /api/entry/delete': (b) => deleteEntry(ROOT, b.id),
+  'POST /api/entry': (b) => (b.create ? createSim(ROOT, b.entry) : saveEntry(ROOT, b.entry, { oldId: b.oldId ?? null })),
   'POST /api/course': (b) => saveCourse(ROOT, b.course, { oldId: b.oldId ?? null }),
   'POST /api/course/delete': (b) => deleteCourse(ROOT, b.id),
   'POST /api/vocab': (b) => saveVocab(ROOT, b.vocab),

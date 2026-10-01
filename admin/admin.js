@@ -1,6 +1,6 @@
 // simdeck admin: edit simulators, courses, topics and tags; preview; publish. Every save goes to the
 // local server, which validates before writing, so a refused save shows the reason and changes nothing.
-import { search, escapeHtml as h, STR } from './core.js';
+import { search, escapeHtml as h, STR, shortLinkRules, shortUrl } from './core.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -40,8 +40,8 @@ const opts = (pairs, cur) => pairs.map(([v, l]) => `<option value="${h(v)}"${v =
 
 // ---------- Simulators ----------
 
-function blankEntry(kind) {
-  return { id: '', kind, class: 'stepper', status: 'wip', title: '', concept: '', summary: '', topic: Object.keys(S.vocab.topics)[0], tags: [], level: 'intro', lang: 'hr', ...(kind === 'native' ? { steps: 1 } : { url: '/' }) };
+function blankEntry() {
+  return { id: '', class: 'stepper', status: 'wip', title: '', concept: '', summary: '', topic: Object.keys(S.vocab.topics)[0], tags: [], level: 'intro', lang: 'hr', steps: 1 };
 }
 
 function renderSims() {
@@ -53,9 +53,9 @@ function renderSims() {
       <input type="search" id="sim-q" placeholder="Traži…" value="${h(ui.simQ)}">
       <select id="sim-status">${opts([['', 'svi'], ['ready', 'gotovi'], ['wip', 'u izradi']], ui.simStatus)}</select>
     </div>
-    <div class="list-tools"><button type="button" id="new-native">+ Novi simulator</button><button type="button" id="new-linked">+ Vanjska poveznica</button></div>
+    <div class="list-tools"><button type="button" id="new-sim">+ Novi simulator</button></div>
     <ul class="rows">${list.map((e) => `<li data-id="${h(e.id)}" class="${e.id === ui.simId && !ui.newSim ? 'sel' : ''}">
-      <span>${h(e.title)}</span> <small>${h(e.id)}</small>${e.kind === 'linked' ? ' <span class="tag">↗</span>' : ''}${e.status !== 'ready' ? ' <span class="tag wip">u izradi</span>' : ''}</li>`).join('')}</ul>
+      <span>${h(e.title)}</span> <small>${h(e.id)}</small>${e.status !== 'ready' ? ' <span class="tag wip">u izradi</span>' : ''}</li>`).join('')}</ul>
     <p class="muted">${list.length} / ${S.entries.length}</p>
   </section>
   <section class="pane">${cur ? simForm(cur) : '<p class="muted">Odaberi simulator s popisa ili dodaj novi.</p>'}</section>
@@ -67,41 +67,34 @@ function renderSims() {
     $('#sim-q').setSelectionRange(ui.simQ.length, ui.simQ.length);
   });
   $('#sim-status').onchange = (ev) => { ui.simStatus = ev.target.value; renderSims(); };
-  $('#new-native').onclick = () => { ui.newSim = blankEntry('native'); renderSims(); };
-  $('#new-linked').onclick = () => { ui.newSim = blankEntry('linked'); renderSims(); };
+  $('#new-sim').onclick = () => { ui.newSim = blankEntry(); renderSims(); };
   $$('.rows li').forEach((li) => (li.onclick = () => { ui.simId = li.dataset.id; ui.newSim = null; renderSims(); }));
   if (cur) bindSimForm(cur);
 }
 
 function simForm(e) {
   const isNew = Boolean(ui.newSim);
-  const native = e.kind === 'native';
   const tagChecks = Object.entries(S.vocab.tags).map(([k, t]) => `<label><input type="checkbox" name="tags" value="${h(k)}"${e.tags.includes(k) ? ' checked' : ''}> ${h(t.label)}</label>`).join('');
-  const files = [...new Set([...(S.linkedFiles ?? []), e.source?.file].filter(Boolean))];
   const used = S.courses.filter((c) => (e.courses ?? []).includes(c.id)).map((c) => c.title);
   return `<form id="sim-form" class="form" autocomplete="off">
-  <h2 class="wide">${isNew ? (native ? 'Novi simulator' : 'Nova vanjska poveznica') : h(e.title)} <small class="muted">${native ? `sims/${h(e.id || '…')}/` : `linked/${h(e.source?.file ?? '')}`}</small></h2>
-  <label>id</label><input type="text" name="id" value="${h(e.id)}" ${native && !isNew ? 'readonly title="id je ime mape; preimenuj mapu ručno"' : ''} required pattern="[a-z0-9]+(-[a-z0-9]+)*">
+  <h2 class="wide">${isNew ? 'Novi simulator' : h(e.title)} <small class="muted">sims/${h(e.id || '…')}/</small></h2>
+  <label>id</label><input type="text" name="id" value="${h(e.id)}" ${!isNew ? 'readonly title="id je ime mape; preimenuj mapu ručno"' : ''} required pattern="[a-z0-9]+(-[a-z0-9]+)*">
   <label>naslov</label><input type="text" name="title" value="${h(e.title)}" maxlength="60" required>
   <label>koncept</label><input type="text" name="concept" value="${h(e.concept)}" maxlength="80" required>
   <label>opis</label><textarea name="summary" maxlength="160" required>${h(e.summary)}</textarea>
   <label>stanje</label><select name="status">${opts([['wip', 'u izradi (ne objavljuje se)'], ['ready', 'gotov']], e.status)}</select>
   <label>vrsta</label><select name="class">${opts(Object.entries(STR.classes), e.class)}</select>
-  ${native ? `<label>broj koraka</label><input type="number" name="steps" min="1" value="${h(e.steps ?? '')}">` : ''}
+  <label>broj koraka</label><input type="number" name="steps" min="1" value="${h(e.steps ?? '')}" title="samo za vrstu 'korak po korak'">
   <label>tema</label><select name="topic">${opts(Object.entries(S.vocab.topics).map(([k, t]) => [k, t.label]), e.topic)}</select>
   <label>oznake</label><div class="checks">${tagChecks}</div>
   <label>razina</label><select name="level">${opts(Object.entries(STR.levels), e.level)}</select>
   <label>jezik</label><select name="lang">${opts([['hr', 'hrvatski'], ['en', 'engleski']], e.lang)}</select>
   <label>sinonimi</label><input type="text" name="aliases" value="${h((e.aliases ?? []).join(', '))}" placeholder="odvojeni zarezom, za pretragu">
-  ${native ? '' : `<label>URL</label><input type="text" name="url" value="${h(e.url ?? '')}" placeholder="/ossim/... ili https://...">
-  <label>scenarij</label><input type="text" name="scenario" value="${h(e.scenario ?? '')}" placeholder="samo za ossimulator">
-  <label>zbirka</label><input type="text" name="file" value="${h(e.source?.file ?? files[0] ?? 'apps.json')}" list="files"><datalist id="files">${files.map((f) => `<option value="${h(f)}">`).join('')}</datalist>`}
   <label>izvor</label><input type="text" name="origin" value="${h(e.origin ?? '')}" placeholder="npr. single-page-labs/x.html">
   <label>slike za provjeru</label><label style="text-align:left"><input type="checkbox" name="asset_review"${e.asset_review ? ' checked' : ''}> treba GPL provjeru</label>
   <div class="wide actions">
     <button type="submit" class="primary">${isNew ? 'Stvori' : 'Spremi'}</button>
     ${isNew ? '<button type="button" id="cancel">Odustani</button>' : ''}
-    ${!isNew && !native ? '<button type="button" id="del" class="danger">Obriši</button>' : ''}
     ${!isNew ? `<span class="muted">${used.length ? `Na kolegijima: ${h(used.join(', '))}` : 'Nije ni na jednom kolegiju'}</span>` : ''}
   </div>
 </form>`;
@@ -114,23 +107,17 @@ function bindSimForm(e) {
     const d = new FormData(f);
     const val = (k) => (d.get(k) ?? '').toString().trim();
     const out = {
-      ...Object.fromEntries(Object.entries(e).filter(([k]) => !['source', 'courses', 'path', 'thumb'].includes(k))),
+      ...Object.fromEntries(Object.entries(e).filter(([k]) => !['courses', 'path'].includes(k))),
       id: val('id'), title: val('title'), concept: val('concept'), summary: val('summary'), status: val('status'), class: val('class'),
       topic: val('topic'), tags: d.getAll('tags'), level: val('level'), lang: val('lang'), aliases: csv(val('aliases')),
       origin: val('origin') || undefined, asset_review: d.get('asset_review') ? true : undefined,
     };
-    if (e.kind === 'native') out.steps = out.class === 'stepper' ? Number(val('steps')) || undefined : undefined;
-    else Object.assign(out, { url: val('url'), scenario: val('scenario') || undefined, thumb: e.thumb ? e.thumb.split('/').pop() : undefined });
+    out.steps = out.class === 'stepper' ? Number(val('steps')) || undefined : undefined;
     const isNew = Boolean(ui.newSim);
-    const r = await post('/api/entry', { entry: out, oldId: isNew ? null : e.id, file: val('file') || e.source?.file, create: isNew }, isNew ? 'Stvoreno.' : 'Spremljeno.');
+    const r = await post('/api/entry', { entry: out, oldId: isNew ? null : e.id, create: isNew }, isNew ? 'Stvoreno.' : 'Spremljeno.');
     if (r.ok) { ui.simId = out.id; ui.newSim = null; render(); }
   };
   if ($('#cancel')) $('#cancel').onclick = () => { ui.newSim = null; renderSims(); };
-  if ($('#del')) $('#del').onclick = async () => {
-    if (!confirm(`Obrisati "${e.title}"?`)) return;
-    const r = await post('/api/entry/delete', { id: e.id }, 'Obrisano.');
-    if (r.ok) { ui.simId = null; render(); }
-  };
 }
 
 // ---------- Courses ----------
@@ -169,6 +156,8 @@ function courseForm(c) {
   <h2 class="wide">${ui.newCourse ? 'Novi kolegij' : h(c.title)}</h2>
   <label>id (adresa)</label><input type="text" name="id" value="${h(draft.id)}" required pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="linux-essentials">
   <label>naslov</label><input type="text" name="title" value="${h(draft.title)}" required>
+  <label>kratka adresa</label><span><input type="text" name="short" value="${h(draft.short ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="npr. linux" size="16">
+    <small class="muted" id="short-url">${draft.short ? h(shortUrl(draft, S.site) ?? '') : 'neobavezno; nginx pravilo je na kartici Objava'}</small></span>
   <label>podnaslov</label><input type="text" name="term" value="${h(draft.term ?? '')}" placeholder="npr. zimski semestar 2026.">
   <label>jezik</label><select name="lang">${opts([['hr', 'hrvatski'], ['en', 'engleski']], draft.lang ?? 'hr')}</select>
   <label>uvod</label><textarea name="intro">${h(draft.intro ?? '')}</textarea>
@@ -183,7 +172,8 @@ function courseForm(c) {
 
 function bindCourseForm(c) {
   const f = $('#course-form');
-  for (const k of ['id', 'title', 'term', 'lang', 'intro']) f.elements[k].addEventListener('input', (ev) => (draft[k] = ev.target.value));
+  for (const k of ['id', 'title', 'term', 'lang', 'intro', 'short']) f.elements[k].addEventListener('input', (ev) => (draft[k] = ev.target.value || undefined));
+  f.elements.short.addEventListener('input', () => ($('#short-url').textContent = draft.short ? shortUrl(draft, S.site) ?? '' : ''));
   const rerender = () => { renderCourses(); };
   const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
   $$('.section', f).forEach((sec) => {
@@ -285,6 +275,7 @@ function renderVocab() {
 // ---------- Publish ----------
 
 function renderPublish() {
+  const rules = shortLinkRules(S.courses, S.site);
   $('#view').innerHTML = `<section class="pane">
   <h2>Objava</h2>
   <p>Gradi statičnu stranicu: naslovnicu, stranice kolegija i gotove simulatore. Simulatori u izradi se ne objavljuju.
@@ -293,6 +284,10 @@ function renderPublish() {
   <div class="actions"><label>Mapa: <input type="text" id="out" size="60" value="${h(S.defaultOut)}"></label>
     <button type="button" class="primary" id="publish">Objavi</button></div>
   <p class="muted">Postojeća mapa se zamjenjuje samo ako ju je ranije izgradio simdeck; inače odaberi praznu ili novu mapu (npr. <code>/media/usb/simdeck</code>).</p>
+  <h3>Kratke adrese (nginx)</h3>
+  ${rules ? `<p class="muted">Jedno pravilo po kolegiju s kratkom adresom. Zalijepi u server blok za materijali.online i ponovno učitaj nginx.</p>
+  <textarea id="rules" readonly rows="${Math.min(12, rules.split('\n').length + 1)}">${h(rules)}</textarea>
+  <div class="actions"><button type="button" id="copy-rules">Kopiraj</button></div>` : '<p class="muted">Nijedan kolegij još nema kratku adresu (Kolegiji → kratka adresa).</p>'}
   ${S.errors.length ? `<h3>Greške (objava neće proći)</h3><ul>${S.errors.map((e) => `<li>${h(e)}</li>`).join('')}</ul>` : ''}
   ${S.warnings.length ? `<h3>Upozorenja</h3><ul>${S.warnings.map((e) => `<li>${h(e)}</li>`).join('')}</ul>` : ''}
   <div id="result"></div>
@@ -300,6 +295,9 @@ function renderPublish() {
   $('#publish').onclick = async () => {
     const r = await (await fetch('/api/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ out: $('#out').value }) })).json();
     $('#result').innerHTML = r.ok ? `<p class="msg ok">Objavljeno u ${h(r.out)}.</p>` : `<p class="msg bad">Nije objavljeno:\n${h(r.errors.join('\n'))}</p>`;
+  };
+  if ($('#copy-rules')) $('#copy-rules').onclick = async () => {
+    try { await navigator.clipboard.writeText(rules); flash('Kopirano.', true); } catch { $('#rules').select(); }
   };
   $('#preview-all').onclick = async () => {
     const w = window.open('about:blank', '_blank');

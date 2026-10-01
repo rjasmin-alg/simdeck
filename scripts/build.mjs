@@ -11,7 +11,7 @@
 // (scripts/admin.mjs), never on the published site.
 //
 // Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts]
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, copyFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate } from '../lib/manifest.mjs';
@@ -136,7 +136,7 @@ export function build({ root, out, log = console.log, drafts = false }) {
   if (!kit) warnings.push('kit/ not found: the kit marker is removed and sims build without the kit');
 
   const pages = [];
-  for (const e of entries.filter((x) => x.kind === 'native')) {
+  for (const e of entries) {
     const simDir = join(root, 'sims', e.id);
     const src = repo.natives.find((n) => n.dir === e.id)?.html;
     if (src == null) continue;
@@ -153,16 +153,10 @@ export function build({ root, out, log = console.log, drafts = false }) {
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, content);
   };
-  const copy = (rel) => {
-    mkdirSync(dirname(join(out, rel)), { recursive: true });
-    copyFileSync(join(root, rel), join(out, rel));
-  };
 
   for (const { e, html } of pages) {
     write(`sims/${e.id}/index.html`, html);
-    if (e.thumb) copy(e.thumb);
   }
-  for (const e of entries) if (e.kind === 'linked' && e.thumb) copy(e.thumb);
 
   const ctx = { site, vocab: repo.vocab, entries, courses };
   const list = courses.length
@@ -190,7 +184,7 @@ export function build({ root, out, log = console.log, drafts = false }) {
     }));
   }
 
-  log(`built ${pages.length} native sims, ${entries.length} entries, ${courses.length} course pages → ${relative(process.cwd(), out) || out}`);
+  log(`built ${pages.length} sims, ${courses.length} course pages → ${relative(process.cwd(), out) || out}`);
   return { ok: true, errors, warnings, entries, courses };
 }
 
