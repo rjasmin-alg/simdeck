@@ -1,6 +1,10 @@
 // simdeck admin: edit simulators, courses, topics and tags; preview; publish. Every save goes to the
 // local server, which validates before writing, so a refused save shows the reason and changes nothing.
-import { search, escapeHtml as h, STR, shortLinkRules, shortUrl } from './core.js';
+import { search, escapeHtml as h, STR as SITE_STR, shortLinkRules, shortUrl, loc, LANGS } from './core.js';
+
+// The admin is the lecturer's own tool and stays in Croatian; what it edits is in both languages.
+const STR = SITE_STR.hr;
+const tr = (v) => loc(v, 'hr'); // a { hr, en } field as the admin lists it
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -36,12 +40,26 @@ function render() {
 }
 
 const csv = (s) => String(s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+/** Two inputs for a { hr, en } field, named <name>.hr and <name>.en. */
+function pair(name, v, { max = 0, area = false, required = false, ph = {} } = {}) {
+  return `<span class="pair">${LANGS.map((l) => {
+    const attrs = `name="${name}.${l}"${max ? ` maxlength="${max}"` : ''}${required ? ' required' : ''} lang="${l}" placeholder="${h(ph[l] ?? '')}" aria-label="${name} (${l})"`;
+    const val = v?.[l] ?? '';
+    return `<span class="lang">${l.toUpperCase()}</span>${area ? `<textarea ${attrs}>${h(val)}</textarea>` : `<input type="text" ${attrs} value="${h(val)}">`}`;
+  }).join('')}</span>`;
+}
+/** Reads a pair back: { hr, en }, or undefined when both are empty. */
+function readPair(d, name) {
+  const v = Object.fromEntries(LANGS.map((l) => [l, (d.get(`${name}.${l}`) ?? '').toString().trim()]));
+  return Object.values(v).some(Boolean) ? v : undefined;
+}
 const opts = (pairs, cur) => pairs.map(([v, l]) => `<option value="${h(v)}"${v === cur ? ' selected' : ''}>${h(l)}</option>`).join('');
 
 // ---------- Simulators ----------
 
 function blankEntry() {
-  return { id: '', class: 'stepper', status: 'wip', title: '', concept: '', summary: '', topic: Object.keys(S.vocab.topics)[0], tags: [], level: 'intro', lang: 'hr', steps: 1 };
+  return { id: '', class: 'stepper', status: 'wip', title: {}, concept: {}, summary: {}, topic: Object.keys(S.vocab.topics)[0], tags: [], level: 'intro', steps: 1 };
 }
 
 function renderSims() {
@@ -55,7 +73,7 @@ function renderSims() {
     </div>
     <div class="list-tools"><button type="button" id="new-sim">+ Novi simulator</button></div>
     <ul class="rows">${list.map((e) => `<li data-id="${h(e.id)}" class="${e.id === ui.simId && !ui.newSim ? 'sel' : ''}">
-      <span>${h(e.title)}</span> <small>${h(e.id)}</small>${e.status !== 'ready' ? ' <span class="tag wip">u izradi</span>' : ''}</li>`).join('')}</ul>
+      <span>${h(tr(e.title))}</span> <small>${h(e.id)}</small>${e.status !== 'ready' ? ' <span class="tag wip">u izradi</span>' : ''}</li>`).join('')}</ul>
     <p class="muted">${list.length} / ${S.entries.length}</p>
   </section>
   <section class="pane">${cur ? simForm(cur) : '<p class="muted">Odaberi simulator s popisa ili dodaj novi.</p>'}</section>
@@ -74,22 +92,23 @@ function renderSims() {
 
 function simForm(e) {
   const isNew = Boolean(ui.newSim);
-  const tagChecks = Object.entries(S.vocab.tags).map(([k, t]) => `<label><input type="checkbox" name="tags" value="${h(k)}"${e.tags.includes(k) ? ' checked' : ''}> ${h(t.label)}</label>`).join('');
-  const used = S.courses.filter((c) => (e.courses ?? []).includes(c.id)).map((c) => c.title);
+  const tagChecks = Object.entries(S.vocab.tags).map(([k, t]) => `<label><input type="checkbox" name="tags" value="${h(k)}"${e.tags.includes(k) ? ' checked' : ''}> ${h(tr(t.label))}</label>`).join('');
+  const used = S.courses.filter((c) => (e.courses ?? []).includes(c.id)).map((c) => tr(c.title));
+  const only = e.languages?.length === 1 ? e.languages[0] : '';
   return `<form id="sim-form" class="form" autocomplete="off">
-  <h2 class="wide">${isNew ? 'Novi simulator' : h(e.title)} <small class="muted">sims/${h(e.id || '…')}/</small></h2>
+  <h2 class="wide">${isNew ? 'Novi simulator' : h(tr(e.title))} <small class="muted">sims/${h(e.id || '…')}/</small></h2>
   <label>id</label><input type="text" name="id" value="${h(e.id)}" ${!isNew ? 'readonly title="id je ime mape; preimenuj mapu ručno"' : ''} required pattern="[a-z0-9]+(-[a-z0-9]+)*">
-  <label>naslov</label><input type="text" name="title" value="${h(e.title)}" maxlength="60" required>
-  <label>koncept</label><input type="text" name="concept" value="${h(e.concept)}" maxlength="80" required>
-  <label>opis</label><textarea name="summary" maxlength="160" required>${h(e.summary)}</textarea>
+  <label>naslov</label>${pair('title', e.title, { max: 60, required: true })}
+  <label>koncept</label>${pair('concept', e.concept, { max: 80, required: true })}
+  <label>opis</label>${pair('summary', e.summary, { max: 160, area: true, required: true })}
   <label>stanje</label><select name="status">${opts([['wip', 'u izradi (ne objavljuje se)'], ['ready', 'gotov']], e.status)}</select>
   <label>vrsta</label><select name="class">${opts(Object.entries(STR.classes), e.class)}</select>
   <label>broj koraka</label><input type="number" name="steps" min="1" value="${h(e.steps ?? '')}" title="samo za vrstu 'korak po korak'">
-  <label>tema</label><select name="topic">${opts(Object.entries(S.vocab.topics).map(([k, t]) => [k, t.label]), e.topic)}</select>
+  <label>tema</label><select name="topic">${opts(Object.entries(S.vocab.topics).map(([k, t]) => [k, tr(t.label)]), e.topic)}</select>
   <label>oznake</label><div class="checks">${tagChecks}</div>
   <label>razina</label><select name="level">${opts(Object.entries(STR.levels), e.level)}</select>
-  <label>jezik</label><select name="lang">${opts([['hr', 'hrvatski'], ['en', 'engleski']], e.lang)}</select>
-  <label>sinonimi</label><input type="text" name="aliases" value="${h((e.aliases ?? []).join(', '))}" placeholder="odvojeni zarezom, za pretragu">
+  <label>jezici stranice</label><select name="only" title="Stranica preuzeta na jednom jeziku, dok se ne prevede (iznimka)">${opts([['', 'hrvatski i engleski'], ['hr', 'samo hrvatski (iznimka)'], ['en', 'samo engleski (iznimka)']], only)}</select>
+  <label>sinonimi</label>${pair('aliases', Object.fromEntries(LANGS.map((l) => [l, (e.aliases?.[l] ?? []).join(', ')])), { ph: { hr: 'odvojeni zarezom, za pretragu', en: 'comma-separated, for search' } })}
   <label>izvor</label><input type="text" name="origin" value="${h(e.origin ?? '')}" placeholder="npr. single-page-labs/x.html">
   <label>slike za provjeru</label><label style="text-align:left"><input type="checkbox" name="asset_review"${e.asset_review ? ' checked' : ''}> treba GPL provjeru</label>
   <div class="wide actions">
@@ -108,8 +127,9 @@ function bindSimForm(e) {
     const val = (k) => (d.get(k) ?? '').toString().trim();
     const out = {
       ...Object.fromEntries(Object.entries(e).filter(([k]) => !['courses', 'path'].includes(k))),
-      id: val('id'), title: val('title'), concept: val('concept'), summary: val('summary'), status: val('status'), class: val('class'),
-      topic: val('topic'), tags: d.getAll('tags'), level: val('level'), lang: val('lang'), aliases: csv(val('aliases')),
+      id: val('id'), title: readPair(d, 'title'), concept: readPair(d, 'concept'), summary: readPair(d, 'summary'), status: val('status'), class: val('class'),
+      topic: val('topic'), tags: d.getAll('tags'), level: val('level'), languages: val('only') ? [val('only')] : undefined,
+      aliases: Object.fromEntries(LANGS.map((l) => [l, csv(val(`aliases.${l}`))]).filter(([, v]) => v.length)),
       origin: val('origin') || undefined, asset_review: d.get('asset_review') ? true : undefined,
     };
     out.steps = out.class === 'stepper' ? Number(val('steps')) || undefined : undefined;
@@ -127,11 +147,11 @@ function renderCourses() {
   $('#view').innerHTML = `<div class="split">
   <section class="pane">
     <div class="list-tools"><button type="button" id="new-course">+ Novi kolegij</button></div>
-    <ul class="rows">${S.courses.map((x) => `<li data-id="${h(x.id)}" class="${x.id === ui.courseId && !ui.newCourse ? 'sel' : ''}"><span>${h(x.title)}</span> <small>${x.sections.reduce((n, s) => n + s.sims.length, 0)} sim.</small></li>`).join('')}</ul>
+    <ul class="rows">${S.courses.map((x) => `<li data-id="${h(x.id)}" class="${x.id === ui.courseId && !ui.newCourse ? 'sel' : ''}"><span>${h(tr(x.title))}</span> <small>${x.sections.reduce((n, s) => n + s.sims.length, 0)} sim.</small></li>`).join('')}</ul>
   </section>
   <section class="pane">${c ? courseForm(c) : '<p class="muted">Kolegij je popis simulatora za studente; objavljuje se kao courses/&lt;id&gt;/.</p>'}</section>
 </div>`;
-  $('#new-course').onclick = () => { ui.newCourse = { id: '', title: '', lang: 'hr', sections: [{ title: '', sims: [] }] }; renderCourses(); };
+  $('#new-course').onclick = () => { ui.newCourse = { id: '', title: {}, lang: 'hr', sections: [{ title: {}, sims: [] }] }; renderCourses(); };
   $$('.rows li').forEach((li) => (li.onclick = () => { ui.courseId = li.dataset.id; ui.newCourse = null; renderCourses(); }));
   if (c) bindCourseForm(c);
 }
@@ -142,25 +162,25 @@ function courseForm(c) {
   if (!draft || draft._for !== (ui.newCourse ? '' : c.id)) draft = { ...structuredClone(c), _for: ui.newCourse ? '' : c.id };
   const byId = new Map(S.entries.map((e) => [e.id, e]));
   const sections = draft.sections.map((s, si) => `<div class="section" data-si="${si}">
-    <div class="list-tools"><input type="text" data-k="stitle" value="${h(s.title ?? '')}" placeholder="Naslov sekcije (neobavezno)">
+    <div class="list-tools">${LANGS.map((l) => `<input type="text" data-k="stitle" data-l="${l}" lang="${l}" value="${h(s.title?.[l] ?? '')}" placeholder="Naslov sekcije, ${l.toUpperCase()} (neobavezno)">`).join('')}
       <button type="button" class="small" data-act="sup" title="Sekcija gore">↑</button><button type="button" class="small" data-act="sdown" title="Sekcija dolje">↓</button>
       <button type="button" class="small danger" data-act="sdel" title="Ukloni sekciju">✕</button></div>
     <ol>${s.sims.map((id, i) => {
       const e = byId.get(id);
-      return `<li data-i="${i}">${e ? h(e.title) : `<span class="tag wip">${h(id)} ne postoji</span>`} ${e?.status === 'wip' ? '<span class="tag wip">u izradi, ne prikazuje se</span>' : ''}${e?.class === 'tool' ? '<span class="tag wip">alat, ne smije na kolegij</span>' : ''}
+      return `<li data-i="${i}">${e ? h(tr(e.title)) : `<span class="tag wip">${h(id)} ne postoji</span>`} ${e?.status === 'wip' ? '<span class="tag wip">u izradi, ne prikazuje se</span>' : ''}${e?.class === 'tool' ? '<span class="tag wip">alat, ne smije na kolegij</span>' : ''}
         <button type="button" class="small" data-act="up">↑</button><button type="button" class="small" data-act="down">↓</button><button type="button" class="small" data-act="del">✕</button></li>`;
     }).join('')}</ol>
     <div class="picker"><input type="search" data-k="add" placeholder="+ dodaj simulator (traži)…"><ul class="suggest" hidden></ul></div>
   </div>`).join('');
   return `<form id="course-form" class="form" autocomplete="off">
-  <h2 class="wide">${ui.newCourse ? 'Novi kolegij' : h(c.title)}</h2>
+  <h2 class="wide">${ui.newCourse ? 'Novi kolegij' : h(tr(c.title))}</h2>
   <label>id (adresa)</label><input type="text" name="id" value="${h(draft.id)}" required pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="linux-essentials">
-  <label>naslov</label><input type="text" name="title" value="${h(draft.title)}" required>
+  <label>naslov</label>${pair('title', draft.title, { required: true })}
   <label>kratka adresa</label><span><input type="text" name="short" value="${h(draft.short ?? '')}" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="npr. linux" size="16">
     <small class="muted" id="short-url">${draft.short ? h(shortUrl(draft, S.site) ?? '') : 'neobavezno; nginx pravilo je na kartici Objava'}</small></span>
-  <label>podnaslov</label><input type="text" name="term" value="${h(draft.term ?? '')}" placeholder="npr. zimski semestar 2026.">
-  <label>jezik</label><select name="lang">${opts([['hr', 'hrvatski'], ['en', 'engleski']], draft.lang ?? 'hr')}</select>
-  <label>uvod</label><textarea name="intro">${h(draft.intro ?? '')}</textarea>
+  <label>podnaslov</label>${pair('term', draft.term, { ph: { hr: 'npr. zimski semestar 2026.', en: 'e.g. winter term 2026' } })}
+  <label>otvara se na</label><select name="lang" title="Jezik u kojem se stranica otvara; posjetiteljev izbor ima prednost">${opts([['hr', 'hrvatskom'], ['en', 'engleskom']], draft.lang ?? 'hr')}</select>
+  <label>uvod</label>${pair('intro', draft.intro, { area: true })}
   <div class="wide">${sections}<button type="button" id="add-section">+ Sekcija</button></div>
   <div class="wide actions">
     <button type="submit" class="primary">${ui.newCourse ? 'Stvori' : 'Spremi'}</button>
@@ -172,14 +192,17 @@ function courseForm(c) {
 
 function bindCourseForm(c) {
   const f = $('#course-form');
-  for (const k of ['id', 'title', 'term', 'lang', 'intro', 'short']) f.elements[k].addEventListener('input', (ev) => (draft[k] = ev.target.value || undefined));
+  for (const k of ['id', 'lang', 'short']) f.elements[k].addEventListener('input', (ev) => (draft[k] = ev.target.value || undefined));
+  for (const k of ['title', 'term', 'intro']) {
+    for (const l of LANGS) f.elements[`${k}.${l}`].addEventListener('input', (ev) => { draft[k] = { ...(draft[k] ?? {}), [l]: ev.target.value }; });
+  }
   f.elements.short.addEventListener('input', () => ($('#short-url').textContent = draft.short ? shortUrl(draft, S.site) ?? '' : ''));
   const rerender = () => { renderCourses(); };
   const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
   $$('.section', f).forEach((sec) => {
     const si = Number(sec.dataset.si);
     const s = draft.sections[si];
-    $('[data-k=stitle]', sec).addEventListener('input', (ev) => (s.title = ev.target.value));
+    $$('[data-k=stitle]', sec).forEach((inp) => inp.addEventListener('input', (ev) => { s.title = { ...(s.title ?? {}), [inp.dataset.l]: ev.target.value }; }));
     sec.addEventListener('click', (ev) => {
       const act = ev.target.dataset?.act;
       if (!act) return;
@@ -198,7 +221,7 @@ function bindCourseForm(c) {
     input.addEventListener('input', () => {
       const hits = input.value.trim() ? search(S.entries, S.vocab, input.value).filter((e) => !inCourse.has(e.id) && e.class !== 'tool').slice(0, 12) : [];
       box.hidden = !hits.length;
-      box.innerHTML = hits.map((e) => `<li data-id="${h(e.id)}">${h(e.title)} <small class="muted">${h(e.id)}${e.status === 'wip' ? ' · u izradi' : ''}</small></li>`).join('');
+      box.innerHTML = hits.map((e) => `<li data-id="${h(e.id)}">${h(tr(e.title))} <small class="muted">${h(e.id)}${e.status === 'wip' ? ' · u izradi' : ''}</small></li>`).join('');
     });
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); box.querySelector('li')?.click(); }
@@ -211,17 +234,17 @@ function bindCourseForm(c) {
       $(`.section[data-si="${si}"] [data-k=add]`)?.focus();
     });
   });
-  $('#add-section').onclick = () => { draft.sections.push({ title: '', sims: [] }); rerender(); };
+  $('#add-section').onclick = () => { draft.sections.push({ title: {}, sims: [] }); rerender(); };
   f.onsubmit = async (ev) => {
     ev.preventDefault();
     const { _for, ...course } = draft;
-    course.sections = course.sections.filter((s) => s.sims.length || s.title);
+    course.sections = course.sections.filter((s) => s.sims.length || Object.values(s.title ?? {}).some(Boolean));
     const r = await post('/api/course', { course, oldId: ui.newCourse ? null : c.id }, 'Spremljeno.');
     if (r.ok) { ui.courseId = course.id; ui.newCourse = null; draft = null; render(); }
   };
   if ($('#cancel')) $('#cancel').onclick = () => { ui.newCourse = null; draft = null; renderCourses(); };
   if ($('#del')) $('#del').onclick = async () => {
-    if (!confirm(`Obrisati kolegij "${c.title}"?`)) return;
+    if (!confirm(`Obrisati kolegij "${tr(c.title)}"?`)) return;
     const r = await post('/api/course/delete', { id: c.id }, 'Obrisano.');
     if (r.ok) { ui.courseId = null; draft = null; render(); }
   };
@@ -239,15 +262,15 @@ function bindCourseForm(c) {
 function renderVocab() {
   const use = (k, field) => S.entries.filter((e) => (field === 'topic' ? e.topic === k : e.tags.includes(k))).length;
   const v = structuredClone(S.vocab);
-  const row = (kind, k, t) => `<tr data-kind="${kind}" data-k="${h(k)}"><td><code>${h(k)}</code></td><td><input type="text" data-f="label" value="${h(t.label)}"></td>
+  const row = (kind, k, t) => `<tr data-kind="${kind}" data-k="${h(k)}"><td><code>${h(k)}</code></td>${LANGS.map((l) => `<td><input type="text" data-f="label" data-l="${l}" lang="${l}" value="${h(t.label?.[l] ?? '')}"></td>`).join('')}
     ${kind === 'tags' ? `<td><input type="text" data-f="aliases" value="${h((t.aliases ?? []).join(', '))}"></td>` : ''}
     <td>${use(k, kind === 'topics' ? 'topic' : 'tag')}</td><td><button type="button" class="small danger" data-del>✕</button></td></tr>`;
   $('#view').innerHTML = `<div class="split">
   <section class="pane"><h2>Teme</h2><p class="muted">Jedna po simulatoru; po njima se grupira naslovnica. Redoslijed ovdje je redoslijed na stranici.</p>
-    <table><tr><th>id</th><th>naziv</th><th>sim.</th><th></th></tr>${Object.entries(v.topics).map(([k, t]) => row('topics', k, t)).join('')}</table>
+    <table><tr><th>id</th><th>naziv HR</th><th>naziv EN</th><th>sim.</th><th></th></tr>${Object.entries(v.topics).map(([k, t]) => row('topics', k, t)).join('')}</table>
     <div class="actions"><input type="text" id="new-topic" placeholder="nova-tema"><button type="button" data-add="topics">Dodaj</button></div></section>
   <section class="pane"><h2>Oznake</h2><p class="muted">Pojmovi; simulator ih može imati više. Sinonimi služe pretrazi.</p>
-    <table><tr><th>id</th><th>naziv</th><th>sinonimi</th><th>sim.</th><th></th></tr>${Object.entries(v.tags).map(([k, t]) => row('tags', k, t)).join('')}</table>
+    <table><tr><th>id</th><th>naziv HR</th><th>naziv EN</th><th>sinonimi</th><th>sim.</th><th></th></tr>${Object.entries(v.tags).map(([k, t]) => row('tags', k, t)).join('')}</table>
     <div class="actions"><input type="text" id="new-tags" placeholder="nova-oznaka"><button type="button" data-add="tags">Dodaj</button></div></section>
 </div>
 <div class="actions"><button type="button" class="primary" id="save-vocab">Spremi teme i oznake</button><span class="muted">Brisanje teme ili oznake koju netko koristi bit će odbijeno.</span></div>`;
@@ -255,7 +278,7 @@ function renderVocab() {
     const kind = b.dataset.add;
     const k = $(kind === 'topics' ? '#new-topic' : '#new-tags').value.trim();
     if (!k) return;
-    S.vocab[kind][k] = { label: k };
+    S.vocab[kind][k] = { label: { hr: k, en: k } };
     renderVocab();
   }));
   $$('[data-del]').forEach((b) => (b.onclick = () => {
@@ -266,7 +289,7 @@ function renderVocab() {
   $$('tr[data-k] input').forEach((inp) => inp.addEventListener('input', () => {
     const tr = inp.closest('tr');
     const t = S.vocab[tr.dataset.kind][tr.dataset.k];
-    if (inp.dataset.f === 'label') t.label = inp.value;
+    if (inp.dataset.f === 'label') t.label = { ...(t.label ?? {}), [inp.dataset.l]: inp.value };
     else { const a = csv(inp.value); if (a.length) t.aliases = a; else delete t.aliases; }
   }));
   $('#save-vocab').onclick = () => post('/api/vocab', { vocab: S.vocab }, 'Spremljeno.');

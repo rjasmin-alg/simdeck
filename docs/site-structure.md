@@ -42,6 +42,8 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
   per course in the admin, when wanted, and the admin generates the rules (§4).
 - **Course pages stand on their own.** They list only their simulators, and their one outward link is
   to the simdeck home page.
+- **Croatian and English everywhere** (owner, 2026-10-01): every sim, the home page and the course pages, each in
+  one file that carries both languages and switches (docs/sim-ui.md §9; §2.1, §3 here).
 
 ## 1. Layout
 
@@ -49,6 +51,7 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
 sims/<id>/                 one folder per simulator (the folder name is the id)
   sim.json                 its manifest entry (required)
   index.html               the page (required), started from kit/template; runs unbuilt from file://
+  strings.js               every visible string, { hr, en } (docs/sim-ui.md §9)
   sim.js, sim.test.js      the model and its rule tests (kit template; npm test runs every sims/**/*.test.js)
   *.js, *.css              other local files the page includes; the build inlines them
   NOTES.md                 optional: decisions, deviations, timing (playbook §10.8)
@@ -56,7 +59,8 @@ courses/<course-id>.json   one file per course: the playlist (ordered sims, opti
 tags.json                  the controlled vocabulary: topics and tags
 site.json                  site title, UI language, public URL, server paths short addresses must avoid
 site/                      templates for the published pages (home, course page) and core.mjs
-  core.mjs                 search, grouping, links, renderers, nginx rules; used by the build and the admin
+  core.mjs                 search, grouping, links, renderers (both languages), nginx rules; build and admin
+  lang.js                  the published pages' language switch (inlined into home and course pages)
 admin/                     the admin app's page, script and styles
 lib/manifest.mjs           loads and validates every manifest source (read side)
 lib/store.mjs              validated writes for the admin (write side)
@@ -97,15 +101,15 @@ admin read them all together.
 | `id` | yes | kebab-case, equal to the folder name | URLs, course files, `related` |
 | `class` | yes | `stepper`, `explorer`, `reference`, `tool` (playbook §10.4) | contract part; tools never go on course pages |
 | `status` | yes | `ready`, `wip` | `wip` is not published (admin and its preview only) |
-| `title` | yes | ≤ 60 chars | home and course pages, kit header |
-| `concept` | yes | ≤ 80 chars: the one concept, as a phrase | second line on home and course pages |
-| `summary` | yes | ≤ 160 chars: what the student sees or does | course-page description; searched |
+| `title` | yes | `{ "hr", "en" }`, each ≤ 60 chars | home and course pages, kit header |
+| `concept` | yes | `{ "hr", "en" }`, each ≤ 80 chars: the one concept, as a phrase | second line on home and course pages, kit subtitle |
+| `summary` | yes | `{ "hr", "en" }`, each ≤ 160 chars: what the student sees or does | course-page description; searched |
 | `topic` | yes | one key of `tags.json` `topics` | grouping on the home page ("which part of CS") |
 | `tags` | yes | ≥ 1 keys of `tags.json` `tags` | searched with their labels and aliases |
 | `level` | yes | `intro`, `core`, `advanced` | metadata (admin); not shown on the site yet |
-| `lang` | yes | `hr`, `en`; must equal the page's `<html lang>` | badge on course pages when it differs from the course |
+| `languages` | no | the **single-language exception**: `["hr"]` or `["en"]` for a page not translated yet; left out when the page has both (the rule). `<html lang>` must be one of the page's languages | counted as an exception; a language badge on home and course pages in the other language's view |
 | `steps` | steppers | positive integer | demo length; the contract check compares it with the page (§7) |
-| `aliases` | no | extra search words: synonyms, the other language, commands (`fdisk`) | search only |
+| `aliases` | no | `{ "hr": [...], "en": [...] }`, either list optional: extra search words, synonyms, commands (`fdisk`) | search only (both languages are searched) |
 | `related` | no | ids | reserved for "see also"; checked |
 | `origin` | no | where a copy came from (`single-page-labs/x.html`, `ossimulator/scheduling`) | provenance |
 | `asset_review` | no | `true` when assets need the GPL audit (playbook §10.7 step 6) | release audit |
@@ -115,6 +119,10 @@ Derived by the build, never written by hand:
 - `courses`: the course files that list the sim.
 
 Unknown fields are errors, so a typo never silently drops data.
+
+Every text field is `{ "hr": …, "en": … }`, both non-empty: the site shows every sim in both languages, even a
+single-language page (its title and summary are translated; the page itself carries the badge). A name that is the
+same in both is written twice. `lang` is gone (bilingual, 2026-10-02): provenance stays in `origin`.
 
 **Departure from the design notes:**
 - `courses` is not written on each sim. The course file is the only source of order and membership.
@@ -129,15 +137,17 @@ Unknown fields are errors, so a typo never silently drops data.
   "id": "dhcp-dora",
   "class": "stepper",
   "status": "ready",
-  "title": "DHCP: DORA",
-  "concept": "Discover, Offer, Request, Acknowledge",
-  "summary": "Četiri poruke kojima klijent bez adrese dobiva IP adresu, masku, gateway i DNS od DHCP poslužitelja.",
+  "title": { "hr": "DHCP: DORA", "en": "DHCP: DORA" },
+  "concept": { "hr": "Discover, Offer, Request, Acknowledge", "en": "Discover, Offer, Request, Acknowledge" },
+  "summary": {
+    "hr": "Četiri poruke kojima klijent bez adrese dobiva IP adresu, masku, gateway i DNS od DHCP poslužitelja.",
+    "en": "The four messages in which a client without an address gets an IP address, mask, gateway and DNS from a DHCP server."
+  },
   "topic": "networks",
   "tags": ["dhcp"],
   "level": "intro",
-  "lang": "hr",
   "steps": 4,
-  "aliases": ["lease", "najam adrese"]
+  "aliases": { "hr": ["najam adrese"], "en": ["lease"] }
 }
 ```
 
@@ -145,10 +155,12 @@ Unknown fields are errors, so a typo never silently drops data.
 
 ```json
 {
-  "topics": { "networks": { "label": "Računalne mreže" }, "...": {} },
-  "tags":   { "dns": { "label": "DNS", "aliases": ["name resolution", "resolver"] }, "...": {} }
+  "topics": { "networks": { "label": { "hr": "Računalne mreže", "en": "Computer networks" } }, "...": {} },
+  "tags":   { "dns": { "label": { "hr": "DNS", "en": "DNS" }, "aliases": ["name resolution", "resolver"] }, "...": {} }
 }
 ```
+
+Labels are `{ "hr", "en" }`; tag `aliases` stay one list of search words in any language.
 
 - **Topic:** exactly one per sim, the broad area (storage, OS, networks, security). It is what the
   home page groups by, and its order in `tags.json` is the group order.
@@ -170,6 +182,7 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
 }
 ```
 
+- `lang` is the language the home page opens in (a visitor's own choice wins, §3).
 - `siteUrl` is where the site is deployed. It is used for printed URLs on course pages and for the
   nginx rules.
 - `reservedPaths` are top-level paths already used on the server, so a course's short address can
@@ -177,20 +190,29 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
 
 ## 3. The published site
 
+Both published pages carry every text in both languages, as one `<span data-l="hr|en">` per language; their CSS
+shows the spans of `html[lang]`. `site/lang.js` (inlined) picks the language the way the kit does in a sim
+(docs/sim-ui.md §9.1): `?lang=`, else the visitor's last choice on any simdeck page, else the page's default. The
+language button switches without a reload and remembers the choice; links to sims and to the home page carry
+`?lang=`. Without script a page reads in its default language.
+
 ### 3.1 Home page (`index.html`)
 
-- **Title**, then **links to every course page**.
+- **Title** and the **language button**, then **links to every course page**.
 - **One search box:**
   - focused on load, and `/` focuses it again;
   - every word must match, and case and Croatian diacritics are ignored;
-  - it searches title, id, concept, summary, tag labels and aliases, topic, and the sim's aliases.
+  - it searches title, id, concept, summary, tag labels and aliases, topic, and the sim's aliases, **in both
+    languages**, whichever the page shows.
     The build writes these words into each item, so the page's script only shows and hides list items.
   - `Enter` opens the first match and `Esc` clears the search. In class: `/`, `dhcp`, Enter.
 - **Every finished simulator, grouped by topic:** one line each, with title and concept.
 - **Tools** are listed under their topic (e.g. "Alati za nastavu"), because the lecturer opens them in
   class. They never appear on course pages.
 - **`wip` sims are not published at all:** no list item and no page.
-- **Nothing finished yet:** the home page says "Još nema objavljenih simulatora." instead of an empty list.
+- **Nothing finished yet:** the home page says "Još nema objavljenih simulatora." / "No simulators published yet."
+  instead of an empty list.
+- Opens in `site.json` `lang`.
 - No filters, toggles, stored state or data blobs. Those are admin features.
 
 ### 3.2 Course pages: the playlists (`courses/<id>/index.html`)
@@ -198,14 +220,14 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
 ```json
 {
   "id": "linux-essentials",
-  "title": "Linux Essentials",
-  "term": "Simulatori uz predavanja",
+  "title": { "hr": "Linux Essentials", "en": "Linux Essentials" },
+  "term": { "hr": "Simulatori uz predavanja", "en": "Simulators for the lectures" },
   "lang": "hr",
-  "intro": "Kratki simulatori koje koristimo na predavanjima. …",
+  "intro": { "hr": "Kratki simulatori koje koristimo na predavanjima. …", "en": "Short simulators we use in the lectures. …" },
   "short": "linux",
   "sections": [
-    { "title": "Mreža", "sims": ["dns-resolution", "dhcp-dora"] },
-    { "title": "Diskovi i pohrana", "sims": ["disk-partitioning", "lvm-topology"] }
+    { "title": { "hr": "Mreža", "en": "Networking" }, "sims": ["dns-resolution", "dhcp-dora"] },
+    { "title": { "hr": "Diskovi i pohrana", "en": "Disks and storage" }, "sims": ["disk-partitioning", "lvm-topology"] }
   ]
 }
 ```
@@ -214,15 +236,18 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
   or week.
 - The `id` is the page's address: `materijali.online/simdeck/courses/linux-essentials/`.
 - `short` (optional) adds `materijali.online/linux` through an nginx rule (§4).
+- `title`, `term`, `intro` and section titles are `{ "hr", "en" }`. `lang` is the language the page opens in for a
+  new visitor (a visitor's own choice wins); its sims are linked with `?lang=` in that language, and the links
+  follow the language button.
 
 The page:
 - is standalone: its simulators, plus one link back to the simdeck home page;
-- has no script except a print button;
+- has no script except a print button and the language switch (`site/lang.js`);
 - is readable on a phone;
-- prints on one A4 sheet, with the short address under the title and each simulator's full URL, so a
-  printed or PDF copy still works;
+- prints on one A4 sheet, in the language shown, with the short address under the title and each simulator's full
+  URL (with `?lang=` when that is not the site's default language), so a printed or PDF copy still works;
 - numbers its items across sections;
-- shows a language badge on a sim whose language differs from the course's.
+- shows a language badge on a single-language sim (§2.1 `languages`) in the other language's view.
 
 Tools and unknown ids in a course file are errors. Unfinished sims give a warning and are left off the
 page until they are `ready`, so a course can list a simulator before it is done. A course with nothing ready yet
@@ -237,22 +262,23 @@ from another machine, use an SSH tunnel.
 
 - **Simulatori:**
   - a searchable list with a status filter;
-  - a form per sim: title, concept, summary, status, class, steps, topic, tags (checkboxes), level,
-    language, aliases, origin, asset review;
+  - a form per sim: title, concept and summary (an HR and an EN field each), status, class, steps, topic, tags
+    (checkboxes), level, the page's languages (both, or the single-language exception), aliases per language,
+    origin, asset review;
   - **+ Novi simulator** creates `sims/<id>/`: it runs `kit/new-sim.sh` to copy the kit's template
     (`index.html`, `sim.js`, `sim.test.js`), fits the page to the form (`<html lang>`, title, subtitle from
     the concept, `#simdeck-meta`), and writes `sim.json` (status `wip` by default);
   - each sim shows which courses list it;
   - deleting or renaming a sim means changing its folder by hand; git keeps it.
 - **Kolegiji:**
-  - create a course, then edit its id (= address), **short address**, title, subtitle, language and
-    intro;
+  - create a course, then edit its id (= address), **short address**, title, subtitle and intro (HR and EN),
+    and the language it opens in;
   - sections: add, rename, reorder and remove;
   - add simulators by typing in a section's search box (Enter adds the first match; tools are never
     offered), and reorder or remove them;
   - unfinished and invalid items are flagged in place;
   - **Pregled** previews the course page, including unfinished sims.
-- **Teme i oznake:** edit topic and tag labels and tag aliases, see how many sims use each, and add or
+- **Teme i oznake:** edit topic and tag labels (HR and EN) and tag aliases, see how many sims use each, and add or
   remove. Removing one in use is refused.
 - **Objava:**
   - **Pregled (s nedovršenima)** previews the whole site;
@@ -331,16 +357,21 @@ sets the limits:
   - no unknown fields;
   - kebab-case ids equal to the folder name;
   - every folder under `sims/` has a `sim.json` and an `index.html`;
-  - `<html lang>` = `lang`;
+  - `title`, `concept`, `summary` in both languages (each within its length), `aliases` per language;
+  - `languages` only as the single-language exception (counted, as a warning); `<html lang>` is one of the
+    page's languages;
   - topic and tags exist in `tags.json`, with no duplicate tags;
   - length limits on title, concept and summary;
   - `steps` on steppers, and only there;
   - `related` ids exist;
   - in the page: `data-sim` on `<html>` equals the id; `#simdeck-exceptions` is `[{rule, why}]` (counted, as
-    a warning); a stale `#simdeck-meta` placeholder (id, class, steps differ from `sim.json`) gives a warning.
+    a warning); a stale `#simdeck-meta` placeholder (id, class, steps, title, concept differ from `sim.json`) gives
+    a warning.
+- **`tags.json`:** every topic and tag label in both languages.
 - **Courses:**
   - id = file name;
   - only known fields;
+  - `title` (and `term`, `intro`, section titles when given) in both languages; `lang` is `hr` or `en`;
   - non-empty sections;
   - only existing ids, no tools, no duplicates;
   - `short` is kebab-case, unique across courses, and not in `site.json` `reservedPaths`;
@@ -355,7 +386,9 @@ Each rule has a test that feeds it a bad sample (`tests/`). The admin's write si
 valid saves land in the hand-edit format, and invalid ones leave the disk unchanged.
 
 Left to the kit's page check (`kit/tools/check-page.mjs`): fit at 1920×1080, text size, clicker keys, themes,
-and the step count the page mounts against `#simdeck-meta` `steps`.
+and the step count the page mounts against `#simdeck-meta` `steps`; per language, the string tables and that every
+visible word comes from them (docs/sim-ui.md §9.6). `tests/site-lang.test.mjs` switches a built home and course
+page in the browser.
 
 ## 7. Where the frame meets the kit (reconciled with docs/sim-ui.md, kit 0.1.0)
 
@@ -366,13 +399,15 @@ listed at the end for the kit.
    does, and `new-sim.sh` computes the paths), so it runs unbuilt from `file://`. The build inlines exactly
    those two files and the fonts `kit.css` refers to; there is no build-only marker.
 2. **`#simdeck-meta`: sim.json is the source, the page holds a placeholder.** The template's in-page block stays
-   (unbuilt, the kit reads `id`, `class` and `steps` from it to warn on a mismatch). The build replaces it with
+   (unbuilt, the kit takes the title and concept from it and reads `id`, `class` and `steps` to warn on a
+   mismatch). The build replaces it with
    one generated from `sim.json`:
    ```json
-   {"id":"dhcp-dora","title":"DHCP: DORA","concept":"…","summary":"…","tags":["dhcp"],"lang":"hr","class":"stepper","steps":4}
+   {"id":"dhcp-dora","title":{"hr":"DHCP: DORA","en":"DHCP: DORA"},"concept":{"hr":"…","en":"…"},"summary":{"hr":"…","en":"…"},"tags":["dhcp"],"class":"stepper","steps":4}
    ```
-   The admin writes the same block when it creates a sim. The check warns when the placeholder's `id`, `class`
-   or `steps` drift from `sim.json`. `kind`, `path` and `courses` from the template's placeholder are not
+   (plus `languages` for a single-language page). The kit shows `title` and `concept` in the page's language.
+   The admin and `new-sim.sh` write the same block when they create a sim. The check warns when the
+   placeholder's `id`, `class`, `steps`, `title` or `concept` drift from `sim.json`. `kind`, `path` and `courses` from the template's placeholder are not
    frame fields (§2.1); the build drops them.
 3. **`data-sim` on `<html>` equals the id.** The check enforces it; `new-sim.sh` sets it.
 4. **Exceptions stay in the page**, in `#simdeck-exceptions` as `[{"rule", "why"}]` (the kit's choice, playbook
@@ -425,7 +460,8 @@ Everything below can be done in the admin, or by editing the files and running `
 
 ## 9. Open questions
 
-- **UI language.** The site and the admin are in Croatian, following playbook §10.9 and ossimulator.
+- **UI language.** The published site and every sim are in Croatian and English (§0). The admin stays in
+  Croatian: it is the lecturer's own tool and is never published (docs/tasks/OPEN.md).
 - **Level scale.** `intro`/`core`/`advanced` is a guess, and the site does not show it yet.
 - **Topics.** The 9 topics in `tags.json` are a first cut, and should be revisited against
   docs/catalogue.md.

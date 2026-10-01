@@ -33,7 +33,7 @@ one-page course lists for students (`docs/proposal-simdeck.md`). Owner decisions
 ## 2. Where things live
 
 ```
-sims/<id>/        your folder: sim.json, index.html, sim.js, sim.test.js, SPEC.md, NOTES.md, local assets
+sims/<id>/        your folder: sim.json, index.html, strings.js, sim.js, sim.test.js, SPEC.md, NOTES.md, local assets
 kit/              the shared in-sim kit (docs/sim-ui.md): kit.css, kit.js, fonts, template, new-sim.sh, tools
 models/           shared model code, if wave 0 task shared-models creates it (§6)
 site/, lib/, scripts/, admin/   the site frame (docs/site-structure.md): build, checks, admin
@@ -62,35 +62,51 @@ From `docs/design-notes-simdeck.md`, playbook §10.2 and `docs/sim-ui.md`:
   (`[{ "rule", "why" }]`), never worked around silently. The check validates and counts them.
 - **Page skeleton** (`docs/site-structure.md` §7): `<html lang="…" data-sim="<id>">` with `data-sim` equal to
   the folder name; the page links `../../kit/kit.css` and `../../kit/kit.js` itself (so it runs unbuilt from
-  `file://`); a `#simdeck-meta` placeholder with `id`, `class` and `steps`, which the build replaces with one
-  generated from `sim.json`.
+  `file://`), and `../../kit/glossary.js` when its strings use `[[terms]]`; a `#simdeck-meta` placeholder written
+  from `sim.json` (`new-sim.sh` and the admin do it), which the build replaces with one generated from `sim.json`.
 
 ## 4. Croatian and English
 
-Every visible string exists in both languages: title, concept, summary, labels, legend, captions, explanation,
-preset names, hints, attribution.
+Every visible string exists in both languages, in **one page** that switches at runtime: title, concept, summary,
+labels, legend, captions, explanation, preset names, hints, stage text, attribution. The mechanism is the kit's
+(`docs/sim-ui.md` §9); a task only writes strings.
 
-- Until wave 0 task `bilingual` lands its mechanism, keep all page strings in one object
-  `const STRINGS = { hr: {…}, en: {…} }` in `sim.js` or `index.html`, look strings up through one function,
-  and pick the language from `<html lang>`. That task converts this pattern mechanically; anything else
-  will need rework.
-- Croatian text follows ossimulator's term rule: the English term in italics with the Croatian in parentheses
-  at first mention, e.g. *lease* (najam adrese). Use the Croatian terms from the course books where they exist
-  (`~/projects/uvod-u-linux`, `~/projects/uvod-u-racunalne-mreze`) and list the term pairs you used in
-  `NOTES.md` (the shared glossary is collected from them).
-- Captions are written in both languages from the start, not translated at the end.
-- Model code, event codes and test names are English and language-neutral; tests never assert on wording.
+- **`sims/<id>/strings.js`** holds every visible string as `{ hr: {…}, en: {…} }`, same keys in both (the template
+  shows the shape). Values are strings or plural forms (Croatian 3: 1 / 2–4 / 5+; English 2), `{name}`
+  placeholders, `[[term]]` glossary terms. Nothing visible is typed into `index.html` or `sim.js`.
+- In the page: `var t = Simdeck.useStrings(window.SimStrings);` before `Simdeck.mount`, then `t('key')`,
+  `t.n('key', n)` for plurals, `t.parts('key', { now: node })` for captions with markup, `t.html('key')` for
+  the explanation; static elements take `data-t="key"`, `data-t-html="key"` or `data-t-label="key"`. Data that is
+  not language (host names, addresses, bit strings in text) goes in an element with `translate="no"`.
+- The title and subtitle come from `sim.json` (`title`, `concept`), not from the table.
+- **Term rule** (ossimulator): on Croatian pages the English term is in italics with the Croatian in parentheses
+  at first mention, e.g. *page fault* (promašaj stranice), and alone in italics after that. Write `[[page fault]]`
+  for the first mention and `[[=page fault]]` later; the kit renders both languages. Terms come from
+  `kit/glossary.js` (seeded from ossimulator's `docs/POJMOVNIK.md` and the course books, `~/projects/uvod-u-linux`,
+  `~/projects/uvod-u-racunalne-mreze`). A term you need that is missing: use the books' Croatian term, list the
+  pair in `NOTES.md` under "Term pairs", and say so in your report; the coordinator adds it to the glossary with
+  `"src": "simdeck"` (never edit `kit/` yourself, §9). Until then write the pair out in both tables.
+- Captions are written in both languages from the start, not translated at the end. Croatian runs longer: check
+  the layout in both (§7).
+- **Adopted pages** move their text into `strings.js` and use the kit. A page that cannot be translated in its task
+  declares the single-language exception in `sim.json` (`"languages": ["en"]`) and says so in the report; its
+  metadata is still in both languages. ossimulator imports are translated in ossimulator (`w0/ossimulator-english`)
+  and read `?lang=` the same way.
+- Model code, event codes and test names are English and language-neutral; tests never assert on wording. Keep the
+  template's test that both tables match (`Simdeck.checkStrings`).
 
 ## 5. `sim.json`
 
 Fields and rules: `docs/site-structure.md` §2.1. Required: `id` (= folder name), `class`, `status`, `title`
-(≤ 60 chars), `concept` (≤ 80), `summary` (≤ 160), `topic`, `tags`, `level`, `lang`, and `steps` for steppers.
-Optional: `aliases`, `related`, `origin` (set it for adopted pages), `asset_review`. Unknown fields are errors.
+(≤ 60 chars), `concept` (≤ 80), `summary` (≤ 160), `topic`, `tags`, `level`, and `steps` for steppers.
+`title`, `concept` and `summary` are `{ "hr": "…", "en": "…" }`, both non-empty and each within the limit.
+Optional: `aliases` (`{ "hr": [...], "en": [...] }`), `languages` (only the single-language exception, §4),
+`related`, `origin` (set it for adopted pages), `asset_review`. `lang` no longer exists. Unknown fields are errors.
 `kit/new-sim.sh <id> sims/<id>` copies the template and writes a `wip` `sim.json` stub that passes the check; the
-admin's + Novi simulator does the same. Fill in the real title, concept, summary, topic and tags. Use the topic and tags your task file names; if `tags.json` lacks one, the wave-0 `vocabulary` task adds
-it. Never edit `tags.json` yourself: list missing tags in your report. Keep `status: "wip"` until §8 holds.
-The bilingual task will change `title`, `concept` and `summary` to `{ "hr", "en" }`; until then write the
-Croatian there and the English in `NOTES.md` under "English metadata".
+admin's + Novi simulator does the same. Fill in the real title, concept, summary, topic and tags. Use the topic
+and tags your task file names; if `tags.json` lacks one, the wave-0 `vocabulary` task adds it. Never edit
+`tags.json` yourself: list missing tags in your report. Keep `status: "wip"` until §8 holds. When you change the
+title or concept, update the page's `#simdeck-meta` placeholder too (`npm run check` warns until you do).
 
 ## 6. Reusing another sim's model
 
@@ -111,7 +127,7 @@ Run from the repo root:
 ```sh
 node --test sims/<id>/sim.test.js                         # your model's rules (npm test runs every sim's tests)
 npm run check                                             # manifest: sim.json, tags, courses, meta and exceptions blocks
-npm run check:page -- sims/<id>/index.html --shots /tmp/<id>-shots   # 1920×1080 fit, text size, keys, screenshots
+npm run check:page -- sims/<id>/index.html --shots /tmp/<id>-shots   # per language: fit, text size, words; keys
 npm run build -- --out /tmp/<id>-site --drafts            # your page as one self-contained file
 ```
 
@@ -128,7 +144,8 @@ see the test fail.
 - [ ] `SPEC.md` (new sims) states every rule, tie-break and expected number with its source; numbers checked.
 - [ ] Model tests pass; every rule and tie-break has a test that fails when the rule is broken.
 - [ ] Checks in §7 pass; screenshots at 1920×1080 (light, dark, grayscale) and 375×812 reviewed.
-- [ ] Both languages complete (§4); no string left in one language only.
+- [ ] Both languages complete (§4): `strings.js` tables match, `check:page` passes in hr and en (every visible word
+      from the tables), and the screenshots of both languages are reviewed.
 - [ ] `sim.json` valid; `status` set to `"ready"` last.
 - [ ] Offline single file works from `file://`.
 - [ ] `NOTES.md`: decisions, deviations from the task, sources, unchecked items marked *(check)*, term pairs,
@@ -151,8 +168,8 @@ see the test fail.
 ## 10. Report
 
 At the end, report: what you built, what you could not check, deviations from the task, shared requests,
-tags and topic used (and any missing from `tags.json`), the English metadata, screenshots path, and the time
-from start to done.
+tags and topic used (and any missing from `tags.json`), glossary terms you needed that were missing, screenshots
+path, and the time from start to done.
 
 ## 11. Lessons carried from ossimulator (playbook §9)
 

@@ -13,6 +13,8 @@ starting; where a task depends on one, its file says what it does meanwhile.
 | **`game-tick-server`:** is a tick-batched authoritative server the intended concept? (agentvsagent itself is not tick-authoritative) | `w3/game-tick-server.md` | spec models a tick-batched server |
 | **Radio security:** import the Marp slides or the web page, and where is the Marp source? | `w1/radio-security-slides.md`, `w1/radio-security-page.md` | both tasks exist; run one |
 | **Official course names** (not needed now) | `w4/` course tasks | working names |
+| **Admin language:** the admin (`npm run admin`) stays Croatian; only the published site and the sims are bilingual. Bilingual admin too? | `scripts/admin.mjs`, `admin/` | Croatian, with HR and EN fields for everything it edits |
+| **Glossary conflicts** between ossimulator and the books (`tools/glossary/seed.py` keeps the first source): *file descriptor* = opisnik datoteke (ossimulator) or datotečni deskriptor (UL book); *parity* = paritet or parnost (UL); *handshake* = rukovanje (UL) or trostruko rukovanje (URM, which is the three-way handshake); *lease*: the UL book names the address "dodijeljena adresa" and says it is not a translation of *lease*, so the glossary has no *lease* | `kit/glossary.js`, every sim's Croatian terms | ossimulator first, then UL, then URM; *lease* left out until decided |
 
 ## Decided, still to carry out
 

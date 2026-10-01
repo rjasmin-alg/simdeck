@@ -145,3 +145,24 @@ test('a broken manifest stops the build before dist/ is touched', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('home and course pages carry both languages, the switch and the language script', () => {
+  const out = join(mkdtempSync(join(tmpdir(), 'simdeck-lang-')), 'site');
+  try {
+    const r = build({ root: ROOT, out, drafts: true, log: () => {} });
+    assert.ok(r.ok, r.errors.join());
+    const index = readFileSync(join(out, 'index.html'), 'utf8');
+    assert.match(index, /<html lang="hr">/, 'site.json lang is the default');
+    assert.match(index, /data-lang-switch/);
+    assert.match(index, /simdeck\.lang/, 'site/lang.js is inlined');
+    assert.match(index, /<span data-l="hr" lang="hr">Računalne mreže<\/span><span data-l="en" lang="en">Computer networks<\/span>/);
+    assert.match(index, /data-en="Find a simulator… \( \/ \)"/);
+    assert.match(index, /html\[lang="hr"\] \[data-l="en"\]/, 'the CSS hides the other language');
+    const course = readFileSync(join(out, 'courses', 'linux-essentials', 'index.html'), 'utf8');
+    assert.match(course, /<span data-l="hr" lang="hr">Mreža<\/span><span data-l="en" lang="en">Networking<\/span>/);
+    assert.match(course, /href="\.\.\/\.\.\/sims\/dhcp-dora\/index.html\?lang=hr"/, 'sims linked in the course language');
+    assert.match(course, /data-lang-switch/);
+  } finally {
+    rmSync(dirname(out), { recursive: true, force: true });
+  }
+});

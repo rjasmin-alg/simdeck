@@ -1,4 +1,4 @@
-/* simdeck kit 0.1.0: step controller, controls, transport, header tools and shortcuts for native simulators.
+/* simdeck kit 0.2.0: step controller, controls, transport, header tools and shortcuts for native simulators.
    A classic script (not a module) so a page opens straight from file:// with no build. Load it in <head>: it sets the
    theme before first paint, then the page calls Simdeck.mount(def) at the end of <body>.
    The pure part (rng, stateAt, defaultsOf, stepsOf) touches no DOM, so node tests can require() this file.
@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';
   var hasDom = typeof document !== 'undefined';
 
   // ── pure core ──
@@ -65,7 +65,94 @@
     }
   }
 
-  var core = { version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt, cameFromSite: cameFromSite };
+  // ── languages (pure) ──
+
+  /** Every simdeck page exists in these languages (docs/sim-ui.md §9). */
+  var LANGS = ['hr', 'en'];
+  /** Plural forms per language: hr 1 / 2–4 / 5+ (11–14 take the third), en 1 / other. */
+  var PLURALS = { hr: 3, en: 2 };
+  function pluralIndex(lang, n) {
+    var a = Math.abs(Math.trunc(Number(n)) || 0);
+    if (lang !== 'hr') return a === 1 ? 0 : 1;
+    if (a % 10 === 1 && a % 100 !== 11) return 0;
+    if (a % 10 >= 2 && a % 10 <= 4 && (a % 100 < 12 || a % 100 > 14)) return 1;
+    return 2;
+  }
+  /** '{n} of {all}' with { n: 3, all: 16 } -> '3 of 16'. Unknown names stay as written. */
+  function format(str, vars) {
+    return String(str).replace(/\{(\w+)\}/g, function (m, k) { return vars && vars[k] != null ? String(vars[k]) : m; });
+  }
+  function placeholders(str) {
+    return (String(str).match(/\{\w+\}/g) || []).slice().sort().filter(function (x, i, a) { return a.indexOf(x) === i; });
+  }
+  var TERM_RE = /\[\[(=?)([^\]]+)\]\]/g;
+  /** Glossary list (kit/glossary.js) -> lookup by lower-case English term. */
+  function glossaryIndex(terms) {
+    var m = {};
+    (terms || []).forEach(function (t) { if (t && t.en && t.hr) m[t.en.toLowerCase()] = t; });
+    return m;
+  }
+  /**
+   * Expand glossary markers. [[page fault]] is a first mention: Croatian pages get "page fault (promašaj stranice)",
+   * the English term in italics in html mode; English pages get "page fault". [[=page fault]] is a later mention:
+   * the English term only. Unknown terms are reported through onMissing and left as written.
+   */
+  function expandTerms(str, lang, index, mode, onMissing) {
+    return String(str).replace(TERM_RE, function (m, later, key) {
+      var t = index && index[key.trim().toLowerCase()];
+      if (!t) { if (onMissing) onMissing(key); return key; }
+      var en = mode === 'html' && lang === 'hr' ? '<em lang="en">' + escapeText(t.en) + '</em>' : t.en;
+      return lang === 'hr' && !later ? en + ' (' + (mode === 'html' ? escapeText(t.hr) : t.hr) + ')' : en;
+    });
+  }
+  function escapeText(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  /**
+   * Problems with a page's string table { hr: {...}, en: {...} } (empty = fine). A key must exist in every language;
+   * values are strings, or arrays of plural forms (hr 3, en 2); both languages use the same {placeholders};
+   * [[terms]] must be in the glossary when one is given. `languages` narrows the required languages (an adopted page
+   * declared single-language in sim.json).
+   */
+  function checkStrings(table, opts) {
+    var o = opts || {};
+    var langs = o.languages || LANGS;
+    var out = [];
+    if (!table || typeof table !== 'object') return ['no string table'];
+    Object.keys(table).forEach(function (l) { if (LANGS.indexOf(l) < 0) out.push('unknown language "' + l + '"'); });
+    langs.forEach(function (l) { if (!table[l] || typeof table[l] !== 'object') out.push('missing language "' + l + '"'); });
+    var present = langs.filter(function (l) { return table[l] && typeof table[l] === 'object'; });
+    var keys = [];
+    present.forEach(function (l) { Object.keys(table[l]).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); });
+    keys.sort().forEach(function (k) {
+      var shape = null;
+      present.forEach(function (l) {
+        var v = table[l][k];
+        if (v === undefined) { out.push('"' + k + '" is missing in ' + l); return; }
+        var forms = Array.isArray(v) ? v : [v];
+        if (Array.isArray(v) && v.length !== PLURALS[l]) out.push('"' + k + '" in ' + l + ' needs ' + PLURALS[l] + ' plural forms, has ' + v.length);
+        if (forms.some(function (x) { return typeof x !== 'string' || !x.trim(); })) { out.push('"' + k + '" in ' + l + ' must be a non-empty string (or plural forms)'); return; }
+        var ph = placeholders(forms.join(' ')).join(',');
+        var s = (Array.isArray(v) ? 'plural' : 'string') + ':' + ph;
+        if (shape === null) shape = s;
+        else if (shape !== s) out.push('"' + k + '" differs between languages (' + s + ' vs ' + shape + ')');
+        if (o.glossary) forms.forEach(function (x) { expandTerms(x, l, o.glossary, 'text', function (t) { out.push('"' + k + '" in ' + l + ': [[' + t + ']] is not in the glossary'); }); });
+      });
+    });
+    return out;
+  }
+
+  /** The lower-case words in a list of texts: what a visible text node may be made of (check-page.mjs). */
+  function textWords(texts) {
+    var set = {};
+    (texts || []).forEach(function (t) { (String(t).replace(/\{\w+\}/g, ' ').toLowerCase().match(/\p{L}+/gu) || []).forEach(function (w) { set[w] = true; }); });
+    return set;
+  }
+
+  var core = {
+    version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt, cameFromSite: cameFromSite,
+    LANGS: LANGS, pluralIndex: pluralIndex, format: format, checkStrings: checkStrings, expandTerms: expandTerms,
+    glossaryIndex: glossaryIndex, textWords: textWords
+  };
 
   if (!hasDom) {
     if (typeof module === 'object' && module.exports) module.exports = core;
@@ -80,14 +167,18 @@
       prev: 'Natrag', first: 'Na početak', last: 'Na kraj', reset: 'Vrati postavke', step: 'Korak', speed: 'Brzina',
       params: 'Postavke', presets: 'Primjeri', fullscreen: 'Cijeli zaslon',
       help: 'Prečaci', panel: 'Sakrij / prikaži ploču', blank: 'Zatamni zaslon', on: 'uključeno', off: 'isključeno',
-      close: 'Zatvori', atEnd: 'Kraj.', keys: 'Tipke', page: 'Ova stranica', preset: 'Primjer'
+      close: 'Zatvori', atEnd: 'Kraj.', keys: 'Tipke', page: 'Ova stranica', preset: 'Primjer',
+      legend: 'Legenda', panelLabel: 'Postavke i primjeri', steps: 'Koraci', idea: 'Ideja',
+      langName: 'Hrvatski', langSwitch: 'Prebaci na engleski'
     },
     en: {
       back: 'Index', backTitle: 'Back to the simulator index', play: 'Play', pause: 'Pause', next: 'Next',
       prev: 'Back', first: 'To start', last: 'To end', reset: 'Reset settings', step: 'Step', speed: 'Speed',
       params: 'Settings', presets: 'Examples', fullscreen: 'Full screen',
       help: 'Shortcuts', panel: 'Hide / show panel', blank: 'Blank screen', on: 'on', off: 'off',
-      close: 'Close', atEnd: 'End.', keys: 'Keys', page: 'This page', preset: 'Example'
+      close: 'Close', atEnd: 'End.', keys: 'Keys', page: 'This page', preset: 'Example',
+      legend: 'Legend', panelLabel: 'Settings and examples', steps: 'Steps', idea: 'Idea',
+      langName: 'English', langSwitch: 'Switch to Croatian'
     }
   };
   var docEl = document.documentElement;
@@ -120,6 +211,99 @@
   }
   /** Current value of a token, e.g. cssVar('--c1'), for canvas drawing. Re-read it in an onTheme listener. */
   function cssVar(name) { return getComputedStyle(docEl).getPropertyValue(name).trim(); }
+
+  // ── language (docs/sim-ui.md §9) ──
+  // One page carries every language. The language is ?lang=hr|en, else the visitor's last choice on any simdeck
+  // page (localStorage), else the page's own <html lang>. Switching stores the choice and reloads the same file with
+  // ?lang=, so the page script runs once per language and the kit's URL state brings back the preset and the step.
+  var LANG_KEY = 'simdeck.lang';
+  var pageLang = (docEl.lang || 'hr').slice(0, 2).toLowerCase();
+  function storedLang() { try { return window.localStorage.getItem(LANG_KEY); } catch (e) { return null; } }
+  function storeLang(l) { try { window.localStorage.setItem(LANG_KEY, l); } catch (e) { /* storage off: ?lang= still works */ } }
+  var wantedLang = [query.get('lang'), storedLang(), pageLang].filter(function (l) { return LANGS.indexOf(l) >= 0; })[0] || 'hr';
+  var i18n = { table: null, langs: [pageLang], lang: pageLang, glossary: null };
+
+  /** Called by kit/glossary.js. */
+  function defineGlossary(terms) { i18n.glossary = glossaryIndex(terms); }
+
+  /** A glossary term as a node: first mention "<em>page fault</em> (promašaj stranice)" on Croatian pages. */
+  function term(key, opts) {
+    var span = document.createElement('span');
+    span.innerHTML = expandTerms('[[' + (opts && opts.later ? '=' : '') + key + ']]', i18n.lang, i18n.glossary, 'html', missingTerm);
+    return span.childNodes.length === 1 ? span.firstChild : span;
+  }
+  function missingTerm(k) { console.error('[simdeck] [[' + k + ']] is not in the glossary (load kit/glossary.js, or add the term)'); }
+
+  function lookup(key) {
+    var v = i18n.table && i18n.table[i18n.lang] ? i18n.table[i18n.lang][key] : undefined;
+    if (v === undefined) { console.error('[simdeck] missing string "' + key + '" (' + i18n.lang + ')'); return key; }
+    return v;
+  }
+  function pick(v, n) { return Array.isArray(v) ? v[Math.min(v.length - 1, pluralIndex(i18n.lang, n))] : v; }
+  /** t(key, vars): the string in the page's language, {placeholders} filled and [[terms]] expanded as text. */
+  function t(key, vars) { return expandTerms(format(pick(lookup(key), vars && vars.n), vars), i18n.lang, i18n.glossary, 'text', missingTerm); }
+  /** t.n(key, n, vars): plural forms ['{n} bit', '{n} bita', '{n} bitova'] picked by n. */
+  t.n = function (key, n, vars) { return t(key, Object.assign({ n: n }, vars || {})); };
+  /** t.html(key, vars): for trusted markup in the table (explanations); [[terms]] in italics. */
+  t.html = function (key, vars) { return expandTerms(format(pick(lookup(key), vars && vars.n), vars), i18n.lang, i18n.glossary, 'html', missingTerm); };
+  /** t.parts(key, vars): like t, but vars may be nodes; returns [strings and nodes] for h() and captions. */
+  t.parts = function (key, vars) {
+    var src = pick(lookup(key), vars && vars.n);
+    var out = [];
+    String(src).split(/(\{\w+\})/).forEach(function (bit) {
+      var m = /^\{(\w+)\}$/.exec(bit);
+      if (m && vars && vars[m[1]] != null) out.push(vars[m[1]] instanceof Node ? vars[m[1]] : String(vars[m[1]]));
+      else if (bit) {
+        var hold = document.createElement('span');
+        hold.innerHTML = expandTerms(escapeText(bit), i18n.lang, i18n.glossary, 'html', missingTerm);
+        Array.prototype.slice.call(hold.childNodes).forEach(function (c) { out.push(c); });
+      }
+    });
+    return out;
+  };
+
+  /**
+   * Register the page's string table { hr: {...}, en: {...} } (sims/<id>/strings.js) and fix the page language.
+   * Fills the static page: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. Returns t.
+   */
+  function useStrings(table) {
+    i18n.table = table || {};
+    i18n.langs = LANGS.filter(function (l) { return i18n.table[l]; });
+    if (!i18n.langs.length) i18n.langs = [pageLang];
+    i18n.lang = i18n.langs.indexOf(wantedLang) >= 0 ? wantedLang : i18n.langs.indexOf(pageLang) >= 0 ? pageLang : i18n.langs[0];
+    docEl.lang = i18n.lang;
+    var problems = checkStrings(i18n.table, { languages: i18n.langs, glossary: i18n.glossary });
+    problems.forEach(function (p) { console.error('[simdeck] strings: ' + p); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (e) { e.textContent = t(e.dataset.t); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t-html]'), function (e) { e.innerHTML = t.html(e.dataset.tHtml); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-t-label]'), function (e) { e.setAttribute('aria-label', t(e.dataset.tLabel)); });
+    return t;
+  }
+
+  /** Every word a visible text node may use in the current language: page table, kit strings, metadata. */
+  function allowedWords() {
+    var texts = [];
+    var add = function (v) { (Array.isArray(v) ? v : [v]).forEach(function (x) { texts.push(expandTerms(x, i18n.lang, i18n.glossary, 'text')); }); };
+    var tb = i18n.table && i18n.table[i18n.lang];
+    if (tb) Object.keys(tb).forEach(function (k) { add(tb[k]); });
+    var ks = STRINGS[i18n.lang] || {};
+    Object.keys(ks).forEach(function (k) { add(ks[k]); });
+    Object.keys(STRINGS).forEach(function (l) { texts.push(STRINGS[l].langName); });
+    var meta = readJson('simdeck-meta') || {};
+    ['title', 'concept', 'summary'].forEach(function (k) { if (meta[k] && typeof meta[k] === 'object') add(meta[k][i18n.lang] || ''); });
+    return Object.keys(textWords(texts));
+  }
+
+  /** Reload this page in another language, keeping the URL state (preset, step, params, panel). */
+  function switchLang(to, beforeLeave) {
+    if (LANGS.indexOf(to) < 0 || to === i18n.lang) return;
+    storeLang(to);
+    if (beforeLeave) beforeLeave();
+    var u = new URLSearchParams(window.location.search);
+    u.set('lang', to);
+    if (docEl.dataset.panel === 'hidden') u.set('panel', 'hidden'); else u.delete('panel');
+    window.location.replace(window.location.pathname + '?' + u.toString() + window.location.hash);
+  }
 
   // ── DOM helpers ──
 
@@ -361,17 +545,39 @@
     function writeUrl() {
       if (def.url === false) return;
       window.clearTimeout(urlTimer);
-      urlTimer = window.setTimeout(function () {
+      urlTimer = window.setTimeout(flushUrl, 150);
+    }
+    function flushUrl() {
+      window.clearTimeout(urlTimer);
+      if (def.url === false) return;
+      (function () {
         var u = new URLSearchParams(window.location.search);
         ['preset', 'step'].concat(specs.map(function (s) { return s.key; })).forEach(function (k) { u.delete(k); });
         var base = st.preset ? normalise(Object.assign({}, defaults, presets.filter(function (x) { return x.id === st.preset; })[0].params || {})) : defaults;
         if (st.preset) u.set('preset', st.preset);
         specs.forEach(function (s) { if (!Object.is(st.params[s.key], base[s.key])) u.set(s.key, String(st.params[s.key])); });
         if (st.n) u.set('step', String(st.n));
+        // The language is state too: a copied link opens in the language it was copied in.
+        if (i18n.langs.length > 1 && i18n.lang !== pageLang) u.set('lang', i18n.lang); else u.delete('lang');
         var qs = u.toString();
         try { window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) { /* file:// in some browsers */ }
-      }, 150);
+      })();
     }
+
+    // ---- build: titles and the kit's own labels, in the page language ----
+    var loc = function (v) { return v && typeof v === 'object' ? v[i18n.lang] || v[i18n.langs[0]] || '' : v; };
+    var titleEl = q('.sd-title'), subEl = q('.sd-subtitle');
+    if (meta.title && titleEl) titleEl.textContent = loc(meta.title);
+    if (meta.title) document.title = loc(meta.title) + ' · simdeck';
+    if (meta.concept && subEl) subEl.textContent = loc(meta.concept);
+    if (el.legend) el.legend.setAttribute('aria-label', S.legend);
+    if (q('.sd-panel')) q('.sd-panel').setAttribute('aria-label', S.panelLabel);
+    if (el.transport) el.transport.setAttribute('aria-label', S.steps);
+    var explain = q('.sd-explain > summary');
+    if (explain && !explain.textContent.trim()) explain.textContent = S.idea;
+    var bilingual = i18n.langs.length > 1;
+    var otherLang = bilingual ? i18n.langs.filter(function (l) { return l !== i18n.lang; })[0] : null;
+    function toggleLang() { if (otherLang) { stop(); switchLang(otherLang, flushUrl); } }
 
     // ---- build: legend ----
     if (el.legend && def.legend && !el.legend.children.length) {
@@ -382,8 +588,15 @@
 
     // ---- build: back link ----
     if (el.back) {
+      Array.prototype.slice.call(el.back.childNodes).forEach(function (c) { if (c.nodeType === 3) c.remove(); });
+      el.back.append(S.back);
       if (!el.back.querySelector('.sd-icon')) el.back.prepend(icon('back'));
-      if (!el.back.title) el.back.title = S.backTitle;
+      el.back.title = S.backTitle;
+      if (bilingual) {
+        // The index and course pages read ?lang= too, so the way back stays in this language.
+        var bu = el.back.getAttribute('href').split('?')[0];
+        el.back.setAttribute('href', bu + '?lang=' + i18n.lang);
+      }
       el.back.addEventListener('click', function (e) {
         // Opened from the index or a course page: go back in history, so the visitor returns to where they came
         // from (a student to their course page) and the index keeps its search. Otherwise follow the link home.
@@ -413,6 +626,12 @@
     var blank = h('div', { class: 'sd-blank', hidden: true, onclick: function () { blank.hidden = true; } });
     document.body.append(blank);
     function toggleBlank() { blank.hidden = !blank.hidden; }
+    if (el.tools && bilingual) {
+      // Shows the language it switches to, in that language ("English" on a Croatian page).
+      var lb = noFocusSteal(h('button', { type: 'button', class: 'sd-iconbtn sd-langbtn', lang: otherLang, title: STRINGS[otherLang].langName + ' (L)',
+        'aria-label': S.langSwitch, 'aria-keyshortcuts': 'L', onclick: toggleLang }, h('span', { 'aria-hidden': 'true', translate: 'no' }, otherLang.toUpperCase())));
+      el.tools.append(lb);
+    }
     if (el.tools) {
       el.tools.append(
         toolBtn('panel', S.panel, 'C', togglePanel),
@@ -592,6 +811,7 @@
       buttons.forEach(function (b) { if (b.key) rows.push([[keyLabel(b.key)], b.label]); });
       (def.keys || []).forEach(function (k) { rows.push([[keyLabel(k.key)], k.label]); });
       rows.push([['F'], S.fullscreen], [['C'], S.panel], [['B', '.'], S.blank], [['?'], S.help]);
+      if (bilingual) rows.push([['L'], S.langSwitch]);
       return rows;
     }
     function openHelp() {
@@ -644,6 +864,7 @@
       if (lower === 'c') return hit(togglePanel);
       if (lower === 'b' || k === '.') return hit(toggleBlank);
       if (k === '?' || lower === 'h') return hit(openHelp);
+      if (lower === 'l' && bilingual) return hit(toggleLang);
       var b = buttons.filter(function (x) { return x.key && x.key.toLowerCase() === lower; })[0];
       if (b) return hit(function () { b.run(api); });
       var pk = (def.keys || []).filter(function (x) { return x.key.toLowerCase() === lower; })[0];
@@ -678,8 +899,13 @@
 
   var Simdeck = Object.assign({}, core, {
     mount: mount, h: h, icon: icon, cssVar: cssVar, reducedMotion: reducedMotion, onTheme: onTheme,
-    strings: STRINGS
+    strings: STRINGS, useStrings: useStrings, t: t, term: term, defineGlossary: defineGlossary, switchLang: switchLang,
+    /** For check-page.mjs: the problems in the registered table and the words visible text may use. */
+    i18n: { problems: function () { return i18n.table ? checkStrings(i18n.table, { languages: i18n.langs, glossary: i18n.glossary }) : ['no string table (Simdeck.useStrings)']; }, words: allowedWords }
   });
+  // Live values (Object.assign above would copy a getter's value once).
+  Object.defineProperty(Simdeck, 'lang', { get: function () { return i18n.lang; } });
+  Object.defineProperty(Simdeck, 'languages', { get: function () { return i18n.langs.slice(); } });
   root.Simdeck = Simdeck;
   if (typeof module === 'object' && module.exports) module.exports = Simdeck;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

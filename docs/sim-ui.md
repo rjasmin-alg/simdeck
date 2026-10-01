@@ -1,18 +1,19 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.1.0**, not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
+the template. Kit version **0.2.0** (0.2.0 adds the languages, §9), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
 kit/
   kit.css          tokens, layout, controls (one file, ~17 KB)
-  kit.js           step controller, controls, transport, header tools, shortcuts (one classic script, ~33 KB)
+  kit.js           step controller, controls, transport, header tools, shortcuts, languages (one classic script, ~47 KB)
+  glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
-  template/        the proto-simulator: index.html, sim.js (model), sim.test.js
+  template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
   new-sim.sh       copies the template into a new sim folder
   kit.test.js      tests for the kit's pure core and stylesheet rules
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
-  tools/check-page.mjs  browser check of one page from file:// (fit, text size, keys, screenshots)
+  tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
 ```
 
 Run the checks:
@@ -38,7 +39,7 @@ One screen, three rows, no page scroll at projector sizes:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│ [← Popis]  Title                               legend: ■ a  ▢ b  ▣ changed      [▯][⛶][?] │  header
+│ [← Popis]  Title                           legend: ■ a  ▢ b  ▣ changed  [EN][▯][⛶][?] │  header
 │            one-line subtitle                                                              │
 ├───────────────────────────────────────────────────────────────┬──────────────────────────┤
 │                                                               │ PRIMJERI (presets) 1…9   │
@@ -61,7 +62,7 @@ One screen, three rows, no page scroll at projector sizes:
   the explanation, collapsed by default. `C` hides the panel so the stage gets the full width.
 - **Transport** (`.sd-bar`): step controls, a scrubber that doubles as the progress bar, and speed. An *explorer*
   (no steps) gets only the reset button.
-- **Header**: back to the index, title and subtitle, legend, tools (panel, full screen, help).
+- **Header**: back to the index, title and subtitle, legend, tools (language, panel, full screen, help).
 
 The fixed order and the `data-sd-*` hooks are what the contract check can test, as ossimulator tested its section
 ids (playbook §4.5).
@@ -139,6 +140,7 @@ Keys are handled by the kit; a page may add its own letters through `def.keys` o
 | `C` | hide / show the panel | |
 | `B` `.` | blank the screen (what a clicker's "black screen" button sends) | any other key is ignored while blank; `B`, `.` or `Esc` brings it back |
 | `?` `H` | shortcuts overlay | lists the page's presets and own keys too |
+| `L` | switch language (Croatian ↔ English) | same as the header's language button; the page reloads at the same step (§9) |
 
 Reserved for the kit: the keys above. Free for pages: other letters (the template uses `N` for a random start).
 
@@ -153,8 +155,8 @@ Shortcuts are ignored with Ctrl/Alt/Meta held, while typing in a text field, and
 ### URL state and deep links
 
 The kit keeps `?preset=<id>&step=<n>&<param>=<value>` in the address bar (only values that differ from the preset
-or defaults), so a reload keeps the state and any state can be linked. A link opens paused. Also: `?theme=`,
-`?motion=reduce`, `?panel=hidden`.
+or defaults), so a reload keeps the state and any state can be linked. A link opens paused. Also: `?lang=hr|en`
+(§9; written when it differs from the page's default), `?theme=`, `?motion=reduce`, `?panel=hidden`.
 
 ## 4. Accessibility basics
 
@@ -167,7 +169,8 @@ or defaults), so a reload keeps the state and any state can be linked. A link op
 - The caption is a polite live region; the scrubber has `aria-valuetext` ("Korak 3 / 16"); buttons carry
   `aria-keyshortcuts`.
 - `prefers-reduced-motion` and `?motion=reduce` turn off every animation and transition. Stepping still works.
-- `lang` on `<html>` picks the kit's strings (Croatian for `hr`, English otherwise).
+- `lang` on `<html>` is the page's language: the kit sets it (§9), and its own strings follow it. Glossary terms
+  in Croatian text carry `lang="en"`, so a screen reader switches voice for them.
 
 ## 5. Control kit API
 
@@ -178,33 +181,38 @@ Load the kit in `<head>`, the model and the page script at the end of `<body>`:
 <head>
   <link rel="stylesheet" href="<kit>/kit.css">
   <script src="<kit>/kit.js"></script>
+  <script src="<kit>/glossary.js"></script>        <!-- only if the strings use [[terms]] -->
   ...
 </head>
 <body>
   <div class="sd-page">
     <header class="sd-header">
       <a class="sd-back" data-sd-back href="<index>">Popis</a>
-      <div class="sd-titles"><h1 class="sd-title">…</h1><p class="sd-subtitle">…</p></div>
+      <div class="sd-titles"><h1 class="sd-title">…</h1><p class="sd-subtitle"></p></div>
       <ul class="sd-legend" data-sd-legend></ul>
       <div class="sd-tools" data-sd-tools></div>
     </header>
     <main class="sd-main">
       <div class="sd-stagecol">
-        <section class="sd-stage" data-sd-stage aria-label="…"></section>
+        <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
         <p class="sd-caption" data-sd-caption aria-live="polite"></p>
       </div>
       <aside class="sd-panel">
         <div data-sd-presets></div>
         <div data-sd-controls></div>
-        <details class="sd-explain"><summary>Ideja</summary><p>…</p></details>
+        <details class="sd-explain"><summary></summary><div data-t-html="explain"></div></details>
       </aside>
     </main>
     <footer class="sd-bar" data-sd-transport></footer>
   </div>
+  <script src="strings.js"></script>
   <script src="sim.js"></script>
-  <script> Simdeck.mount({ … }) </script>
+  <script> var t = Simdeck.useStrings(window.SimStrings); Simdeck.mount({ … labels from t('…') … }) </script>
 </body>
 ```
+
+The kit fills the title and subtitle (from `#simdeck-meta`), the back link's text, the explanation's summary
+("Ideja") and the labels of its own containers, in the page's language.
 
 Any `data-sd-*` container may be left out; the kit then skips that part.
 
@@ -231,7 +239,7 @@ Simdeck.mount({
 
 `ctx` passed to `render` and `caption`: `{ state, prev (state at n - 1, or null), n, steps, params, stage, dir
 ('forward' | 'back' | 'jump'), preset (id or null), first, last, t (kit strings) }`. Use `dir === 'forward'` to
-animate only real forward steps.
+animate only real forward steps. The page's own strings come from the `t` that `Simdeck.useStrings` returned (§9).
 
 **Step model** (playbook §10.3): the kit computes the state at step n by replaying `step` from `initial(params)`,
 caching the states. Step back is exact by construction and there is no snapshot history. Changing a param keeps
@@ -280,6 +288,10 @@ after every render; returns an unsubscribe function).
 | `Simdeck.onTheme(fn)` | called when the OS theme changes (the controller re-renders by itself) |
 | `Simdeck.reducedMotion()` | true under the OS setting or `?motion=reduce` |
 | `Simdeck.icon(name)` | the kit's SVG icons |
+| `Simdeck.useStrings(table)` → `t` | registers the page's `{ hr, en }` table and fixes the language (§9) |
+| `Simdeck.term(key, { later })` | a glossary term as a node, in the first-mention style (§9.4) |
+| `Simdeck.lang`, `Simdeck.languages`, `Simdeck.switchLang(l)` | the page language, the languages it has, switch (reload) |
+| `Simdeck.checkStrings(table, opts)`, `Simdeck.pluralIndex(lang, n)`, `Simdeck.format(s, vars)` | pure; for tests |
 
 `kit.js` also works under node (`require('kit/kit.js')` returns the pure part), which is how `sim.test.js` uses
 the same replay as the page.
@@ -291,6 +303,7 @@ the same replay as the page.
 | Element | In the template |
 |---|---|
 | stepper with `steps`, pure `initial`/`step` in a DOM-free file | `sim.js`, 16 steps |
+| every visible string in both languages, plural forms, glossary terms | `strings.js`; Croatian plurals (`bita`/`bitova`), `[[carry]]` in the explanation |
 | range with a param-dependent bound, and one that resets | `bits` (3–8), `start` (0…2^bits − 1, `resets`) |
 | choice | `inc`: +1 / +2 / +3 |
 | toggles: one changes the reading, one only the view | `signed` (two's complement), `places` (place values) |
@@ -302,21 +315,22 @@ the same replay as the page.
 | collapsed explanation with English terms in italics | "Ideja" |
 | metadata placeholder (`id`, `class`, `steps`) and exceptions block | `#simdeck-meta`, `#simdeck-exceptions` |
 | back to index | `data-sd-back` |
-| tests: the model's rules, then the generic block every sim keeps | `sim.test.js` |
+| tests: the model's rules, then the generic block every sim keeps (incl. both string tables match) | `sim.test.js` |
 
-Screenshots of the template at 1920×1080 (light, dark, grayscale, help, panel hidden) and 375×812 are produced
-by `check-page.mjs --shots`.
+Screenshots of the template at 1920×1080 (light, dark, grayscale, help, panel hidden) and 375×812, in each
+language, are produced by `check-page.mjs --shots` (`<name>-<lang>-<size>-<variant>.png`).
 
 ### Starting a new sim
 
-1. `kit/new-sim.sh <id> sims/<id>` (or the admin's **+ Novi simulator**, which runs it). It copies the three
+1. `kit/new-sim.sh <id> sims/<id>` (or the admin's **+ Novi simulator**, which runs it). It copies the four
    files, rewrites the id and the paths to the kit and the index, and writes a `status: "wip"` `sim.json` stub
-   (§7). It refuses to overwrite and rejects non-kebab-case ids.
+   and the page's `#simdeck-meta` placeholder from it (§7). It refuses to overwrite and rejects non-kebab-case ids.
 2. **`sim.js`**: replace the model. Keep the shape (`defaults`, `steps`, `initial`, `step`) and the purity rules.
+   **`strings.js`**: replace the strings, both languages at once (§9).
 3. **`sim.test.js`**: replace the rule tests at the top with your model's rules (tie-breaks first; break the code
    once to see each test fail). Keep the generic block at the bottom. Run `node --test <dest>/sim.test.js`.
-4. **`index.html`**: title, subtitle, legend, params, presets, `render`, `caption` and explanation; keep the
-   `#simdeck-meta` placeholder's `class` and `steps` equal to `sim.json`. Keep page CSS scoped to
+4. **`index.html`**: legend, params, presets, `render`, `caption` and explanation, every word through `t`; keep the
+   `#simdeck-meta` placeholder equal to `sim.json` (the admin and `new-sim.sh` write it). Keep page CSS scoped to
    `[data-sim="<id>"]` and on kit tokens only.
 5. **`sim.json`**: title, concept, summary, topic, tags, level (docs/site-structure.md §2.1); `npm run check`.
 6. Run `npm run check:page -- <dest>/index.html --shots <dir>` and look at the screenshots, including grayscale.
@@ -333,8 +347,8 @@ settled each one as follows.
 |---|---|---|
 | Where is the index? | `<site root>/index.html`, both unbuilt (repo root) and built (`dist/`). The back link (`../../index.html` from `sims/<id>/`) and `INDEX` in `new-sim.sh` match | page, `new-sim.sh` |
 | Where do sims live? | `sims/<id>/`, the folder name equal to the id; `index.html`, `sim.js`, `sim.test.js` and `sim.json` | frame |
-| Where is the metadata? | **`sims/<id>/sim.json` is the source** (frame format, `lib/manifest.mjs`). There is no central manifest. The page keeps a `#simdeck-meta` placeholder with only `id`, `class` and `steps`, which the kit reads unbuilt to warn on a mismatch. The build replaces it with one generated from `sim.json`, and the frame's check warns when the placeholder drifts | `sim.json`; page placeholder |
-| Does `new-sim.sh` write `sim.json`? | yes: a `status: "wip"` stub that passes `npm run check` at once (title = id, placeholder concept and summary, the first topic and tag of `tags.json`, `class`, `steps` and `lang` as the template). Replace its content before setting `ready`. The admin's **+ Novi simulator** runs `new-sim.sh` and writes its own `sim.json` over the stub | `new-sim.sh` |
+| Where is the metadata? | **`sims/<id>/sim.json` is the source** (frame format, `lib/manifest.mjs`). There is no central manifest. The page keeps a `#simdeck-meta` placeholder written from `sim.json` (by `new-sim.sh` and the admin), from which the kit takes the title and concept unbuilt and warns on a mismatch of `id`, `class` or `steps`. The build replaces it with one generated from `sim.json`, and the frame's check warns when the placeholder drifts (bilingual, 2026-10-02) | `sim.json`; page placeholder |
+| Does `new-sim.sh` write `sim.json`? | yes: a `status: "wip"` stub that passes `npm run check` at once (title = id in both languages, placeholder concept and summary in both, the first topic and tag of `tags.json`, `class` and `steps` as the template; the page placeholder is written from it). Replace its content before setting `ready`. The admin's **+ Novi simulator** runs `new-sim.sh` and writes its own `sim.json` over the stub | `new-sim.sh` |
 | `data-sim` | equals the id; `new-sim.sh` sets it, the frame's check enforces it | page |
 | Exceptions | stay in the page, `#simdeck-exceptions` as `[{"rule", "why"}]`; the frame validates and counts them | page |
 | Back link | goes back in history when the referrer is this site's index (as `…/index.html` or its folder) **or one of its course pages** (`…/courses/<id>/`, which is also where short addresses redirect), so a student returns to their course page and the index keeps its search. Otherwise it follows the link home | kit (`Simdeck.cameFromSite`, tested in `kit.test.js`) |
@@ -346,7 +360,91 @@ settled each one as follows.
 - **The single-file build exists** (frame, `npm run build`, docs/site-structure.md §5). It inlines `kit.css`,
   `kit.js` and the page's own scripts, turns the fonts into `data:` URIs, and refuses network loads. A built sim
   is about 130 KB and passes `npm run check:page` like its source.
-- The full contract check: `check-page.mjs` (in the browser) and `kit.test.js` (tokens, contrast, sizes) are its
-  seed. They are not yet run over every sim by one command.
+- The full contract check: `check-page.mjs` (in the browser, now in both languages) and `kit.test.js` (tokens,
+  contrast, sizes, strings) are its seed. They are not yet run over every sim by one command (wave-0
+  `contract-check`).
 - Canvas/SVG drawing helpers (lanes, arrows, chunks). Add them additively once two real sims need the same thing.
-- An English template copy; the kit strings already exist in both languages.
+- The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
+  page uses.
+
+## 9. Languages (Croatian and English)
+
+Every simulator exists in Croatian and English, in **one page** that carries both string tables and switches at
+runtime: no second page per language, so the offline folder and the URLs stay as they are (owner, 2026-10-01).
+
+### 9.1 Which language a page shows
+
+1. `?lang=hr|en` in the URL (course pages link their sims this way, in the course's language);
+2. else the visitor's last choice on any simdeck page (`localStorage` key `simdeck.lang`, shared with the home and
+   course pages; it can be unavailable, so links also carry `?lang=`);
+3. else the page's own `<html lang>`.
+
+A page that has only one language (§9.5) always shows that one. The kit sets `<html lang>` to the result.
+
+**Switching:** the header's language button (it shows the other language's code, `EN` on a Croatian page) or `L`.
+It stores the choice and reloads the same file with `?lang=`; the kit's URL state brings back the preset, the step,
+the params and a hidden panel, so the lecturer stays where they were. Playback pauses. The back link and the URL
+carry the language, so the index the visitor returns to is in the same language.
+
+### 9.2 The string table (`strings.js`)
+
+```js
+(function (root) {
+  var strings = {
+    hr: { bits: 'Broj bitova', captionStep: 'Korak {n}: {sum} = {now}.', flipped: ['Promijenio se {n} bit.', 'Promijenila su se {n} bita.', 'Promijenilo se {n} bitova.'], explain: '<p>… [[carry]] …</p>' },
+    en: { bits: 'Number of bits', captionStep: 'Step {n}: {sum} = {now}.', flipped: ['{n} bit changed.', '{n} bits changed.'], explain: '<p>… [[carry]] …</p>' }
+  };
+  if (typeof module === 'object' && module.exports) module.exports = strings; else root.SimStrings = strings;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+```
+
+- **Every visible string** is in the table: labels, legend, presets, hints, captions, stage text, the explanation.
+  The title and subtitle are not: they come from `sim.json` (`title`, `concept`) through `#simdeck-meta`.
+- Values are strings, or **plural forms** as an array: Croatian 3 (1, 2–4, 5+; 11–14 take the third), English 2.
+- `{name}` is a placeholder; both languages use the same placeholders.
+- `[[term]]` is a glossary term (§9.4).
+- `strings.js` is a classic script like `sim.js`, so node tests `require()` it and the build inlines it.
+
+### 9.3 Looking strings up
+
+`var t = Simdeck.useStrings(window.SimStrings)` before `mount`. It picks the language (§9.1), fills the static
+page (`[data-t]` text, `[data-t-html]` markup, `[data-t-label]` aria-label), reports table problems on the console,
+and returns `t`:
+
+| Call | Returns |
+|---|---|
+| `t(key, vars)` | text, placeholders filled, `[[terms]]` as text |
+| `t.n(key, n, vars)` | the plural form for `n` (`{n}` filled) |
+| `t.parts(key, vars)` | `[strings and nodes]`: a placeholder may be a node (`{ now: h('b', null, '1000') }`); for captions |
+| `t.html(key, vars)` | trusted markup from the table, terms in italics; for explanations |
+
+A missing key logs `[simdeck] missing string "<key>" (<lang>)` and shows the key, so the page check fails on it.
+
+### 9.4 Glossary terms
+
+`kit/glossary.js` is the shared term list, `{ en, hr, src }` per term, about 500 of them, seeded by
+`tools/glossary/seed.py` from ossimulator's `docs/POJMOVNIK.md` and the two course books' term lists (book terms
+the books say are not translations are left out). Terms a sim adds (from its `NOTES.md`) go in with
+`"src": "simdeck"`; a re-seed keeps them.
+
+The term rule (ossimulator, COMMON.md §4): on a Croatian page the English term is in italics with the Croatian in
+parentheses at first mention, *carry* (prijenos), and in italics alone after that. In a table: `[[carry]]` is a
+first mention, `[[=carry]]` a later one. English pages show the term alone. In code: `Simdeck.term('carry')`.
+A page that uses terms links `glossary.js` after `kit.js`; a term not in the glossary is a table problem.
+
+### 9.5 Pages in one language
+
+An adopted page that is not translated yet declares the exception in `sim.json`: `"languages": ["en"]`. The frame
+counts it, its `<html lang>` must be that language, the home and course pages mark it with a language badge in the
+other language's view, and the kit shows no switch (its table has one language).
+
+### 9.6 Checks
+
+- `Simdeck.checkStrings(table)` (pure): every key in both languages, non-empty, same placeholders, plural counts,
+  known terms. The template's `sim.test.js` runs it on `strings.js`.
+- `check-page.mjs` runs the one-screen fit, text sizes and console checks **once per language** (Croatian labels
+  run longer), checks the tables at runtime, and fails **any visible word that is not in the page's tables** for
+  that language (the page strings, the kit's strings, the title and concept), at the start, mid-demo, at the end
+  and with the explanation open. Key caps, `<code>` and anything inside `translate="no"` (data such as host names
+  or addresses) are exempt. It also checks that `L` keeps the step and that the choice is remembered.
+- `tests/check-page.test.mjs` proves both checks fail on a broken copy of the template.

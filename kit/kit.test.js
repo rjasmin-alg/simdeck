@@ -91,3 +91,80 @@ test('no font size under the 16 px floor in kit.css', () => {
   const bad = [...css.matchAll(/font-size:\s*([\d.]+)px/g)].filter((m) => Number(m[1]) < 16);
   assert.deepEqual(bad.map((m) => m[0]), []);
 });
+
+// ── languages: string tables, plurals, glossary terms (docs/sim-ui.md §9) ──
+
+const table = (over = {}) => Object.assign({
+  hr: { a: 'Korak {n}', bits: ['{n} bit', '{n} bita', '{n} bitova'], t: 'Pojam [[carry]].' },
+  en: { a: 'Step {n}', bits: ['{n} bit', '{n} bits'], t: 'Term [[carry]].' }
+}, over);
+const gloss = kit.glossaryIndex([{ en: 'carry', hr: 'prijenos', src: 'test' }]);
+
+test('checkStrings: matching tables pass', () => {
+  assert.deepEqual(kit.checkStrings(table(), { glossary: gloss }), []);
+});
+
+test('checkStrings fails a key that exists in one language only', () => {
+  const t = table();
+  delete t.en.a;
+  assert.deepEqual(kit.checkStrings(t), ['"a" is missing in en']);
+  t.en.extra = 'x';
+  assert.match(kit.checkStrings(t).join('\n'), /"extra" is missing in hr/);
+});
+
+test('checkStrings fails a missing language, an unknown one, empty text and mismatched placeholders', () => {
+  assert.deepEqual(kit.checkStrings({ hr: { a: 'x' } }), ['missing language "en"']);
+  assert.match(kit.checkStrings(table({ de: {} })).join(), /unknown language "de"/);
+  assert.match(kit.checkStrings(table({ en: { a: ' ', bits: ['{n} bit', '{n} bits'], t: 'T [[carry]]' } })).join(), /"a" in en must be a non-empty string/);
+  assert.match(kit.checkStrings(table({ en: { a: 'Step {k}', bits: ['{n} bit', '{n} bits'], t: 'T [[carry]]' } })).join(), /"a" differs between languages/);
+  assert.match(kit.checkStrings(table({ en: { a: ['Step {n}', 'Steps {n}'], bits: ['{n} bit', '{n} bits'], t: 'T [[carry]]' } })).join(), /"a" differs between languages \(plural/);
+});
+
+test('checkStrings: plural forms are hr 3, en 2; unknown glossary terms fail', () => {
+  assert.match(kit.checkStrings(table({ hr: { a: 'K {n}', bits: ['{n} bit', '{n} bitova'], t: 'P [[carry]]' } })).join(), /"bits" in hr needs 3 plural forms, has 2/);
+  assert.match(kit.checkStrings(table(), { glossary: kit.glossaryIndex([]) }).join(), /\[\[carry\]\] is not in the glossary/);
+});
+
+test('checkStrings: a single-language page checks only its language', () => {
+  assert.deepEqual(kit.checkStrings({ en: { a: 'x' } }, { languages: ['en'] }), []);
+});
+
+test('pluralIndex: Croatian 1 / 2–4 / 5+ with 11–14, English 1 / other', () => {
+  const hr = [1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 112, 0].map((n) => kit.pluralIndex('hr', n));
+  assert.deepEqual(hr, [0, 1, 1, 2, 2, 2, 2, 0, 1, 2, 0, 2, 2]);
+  assert.deepEqual([0, 1, 2, 21].map((n) => kit.pluralIndex('en', n)), [1, 0, 1, 1]);
+});
+
+test('format fills {placeholders}, leaves unknown ones', () => {
+  assert.equal(kit.format('{a} + {b} = {c}', { a: 1, b: 2 }), '1 + 2 = {c}');
+});
+
+test('glossary terms: first mention "en (hr)" on Croatian pages, later mentions and English pages the English term', () => {
+  assert.equal(kit.expandTerms('a [[carry]] b', 'hr', gloss, 'text'), 'a carry (prijenos) b');
+  assert.equal(kit.expandTerms('a [[Carry]]', 'hr', gloss, 'html'), 'a <em lang="en">carry</em> (prijenos)');
+  assert.equal(kit.expandTerms('[[=carry]]', 'hr', gloss, 'html'), '<em lang="en">carry</em>');
+  assert.equal(kit.expandTerms('a [[carry]]', 'en', gloss, 'html'), 'a carry');
+  const missing = [];
+  assert.equal(kit.expandTerms('[[nope]]', 'hr', gloss, 'text', (k) => missing.push(k)), 'nope');
+  assert.deepEqual(missing, ['nope']);
+});
+
+test('textWords: lower-case letter words, placeholders dropped, diacritics kept', () => {
+  assert.deepEqual(Object.keys(kit.textWords(['Korak {n}: Promijenila', 'čvor 3'])).sort(), ['korak', 'promijenila', 'čvor']);
+});
+
+test('the shared glossary: every entry has en, hr and src, and no English term twice', () => {
+  const terms = require('./glossary.js');
+  assert.ok(terms.length > 400);
+  for (const t of terms) assert.ok(t.en && t.hr && t.src, JSON.stringify(t));
+  const keys = terms.map((t) => t.en.toLowerCase());
+  assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), []);
+});
+
+test('the kit\'s own strings: same keys in hr and en', () => {
+  const dom = fs.readFileSync(path.join(__dirname, 'kit.js'), 'utf8');
+  const block = dom.slice(dom.indexOf('var STRINGS = {'), dom.indexOf('var docEl'));
+  const keysOf = (l) => [...block.slice(block.indexOf(`${l}: {`)).split('}')[0].matchAll(/(\w+):\s*'/g)].map((m) => m[1]).sort();
+  assert.ok(keysOf('hr').length > 20);
+  assert.deepEqual(keysOf('hr'), keysOf('en'));
+});

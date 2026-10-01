@@ -5,6 +5,7 @@
 //
 //   index.html                  home: course links, then every finished simulator by topic, one search box
 //   courses/<id>/index.html     one page per course file (the "playlist" students get)
+//   (both in Croatian and English: every text is written in both, site/lang.js shows one)
 //   sims/<id>/index.html        each native sim as one self-contained file
 //
 // Unfinished (status "wip") entries are not published. Editing happens in the admin app
@@ -15,7 +16,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync
 import { join, dirname, resolve, relative, isAbsolute, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, metaFor } from '../lib/manifest.mjs';
-import { renderCourse, renderIndexList, isPublic, escapeHtml } from '../site/core.mjs';
+import { renderCourse, renderIndexList, isPublic, escapeHtml, bi, biStr, loc, STR, LANGS } from '../site/core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SITE = join(HERE, '..', 'site');
@@ -148,13 +149,25 @@ export function build({ root, out, log = console.log, drafts = false }) {
   }
 
   const ctx = { site, vocab: repo.vocab, entries, courses };
+  const langJs = read(join(SITE, 'lang.js'));
+  // The switch names the language it switches to, in that language; site/lang.js shows the right one.
+  const langSwitch = `<button type="button" class="lang-switch" data-lang-switch>${LANGS.map((l) => {
+    const to = LANGS.find((x) => x !== l);
+    return `<span data-l="${l}" lang="${to}">${escapeHtml(STR[to].langName)}</span>`;
+  }).join('')}</button>`;
   const list = courses.length
-    ? `<p class="courses">Kolegiji: ${courses.map((c) => `<a href="courses/${encodeURIComponent(c.id)}/index.html">${escapeHtml(c.title)}</a>`).join(' · ')}</p>`
+    ? `<p class="courses">${biStr('courses')}: ${courses.map((c) => `<a data-lang-link href="courses/${encodeURIComponent(c.id)}/index.html">${bi(c.title)}</a>`).join(' · ')}</p>`
     : '';
   write('index.html', fill(read(join(SITE, 'index.html')), {
     LANG: site.lang,
     TITLE: escapeHtml(site.title),
+    LANGJS: langJs,
+    SWITCH: langSwitch,
     COURSES: list,
+    SEARCH: escapeHtml(STR[site.lang]?.search ?? STR.hr.search),
+    SEARCH_HR: escapeHtml(STR.hr.search),
+    SEARCH_EN: escapeHtml(STR.en.search),
+    NONE: biStr('noMatch'),
     CSS: read(join(SITE, 'index.css')),
     LIST: renderIndexList(ctx, drafts),
     SCRIPT: read(join(SITE, 'index.js')),
@@ -167,7 +180,11 @@ export function build({ root, out, log = console.log, drafts = false }) {
     const { html } = renderCourse(c, { ...ctx, entries: all }, 2, drafts);
     write(`courses/${c.id}/index.html`, fill(read(join(SITE, 'course.html')), {
       LANG: c.lang ?? site.lang,
-      TITLE: escapeHtml(c.title),
+      TITLE: escapeHtml(loc(c.title, c.lang ?? site.lang)),
+      LANGJS: langJs,
+      SWITCH: langSwitch,
+      ALL: biStr('allSims'),
+      PRINT: biStr('print'),
       CSS: courseCss,
       BODY: html,
     }));

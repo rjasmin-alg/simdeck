@@ -4,7 +4,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const kit = require('../kit.js');
+const glossary = require('../glossary.js');
 const logic = require('./sim.js');
+const strings = require('./strings.js');
 
 const P = (over) => Object.assign({}, logic.defaults, over);
 const at = (over, n) => kit.stateAt(logic, P(over), n);
@@ -66,6 +68,10 @@ test('step does not mutate its input', () => {
   const copy = structuredClone(s0);
   logic.step(s0, 1, p);
   assert.deepEqual(s0, copy);
+});
+
+test('both languages: same keys, plural forms and placeholders; every [[term]] in the glossary', () => {
+  assert.deepEqual(kit.checkStrings(strings, { glossary: kit.glossaryIndex(glossary) }), []);
 });
 
 test('every preset in the page is valid for the model', () => {

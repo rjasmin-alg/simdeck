@@ -1,15 +1,75 @@
 // Shared by the build (Node) and the admin app (served to the browser as a module). Pure functions
 // only: no DOM, no Node APIs, no fetch. The published site gets HTML rendered from here, not this code.
 
+export const LANGS = ['hr', 'en'];
+
+/** The published pages' own words, in both languages (the admin is Croatian and uses STR.hr). */
 export const STR = {
-  classes: { stepper: 'korak po korak', explorer: 'istraživanje', reference: 'pregled', tool: 'alat' },
-  levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
-  noneYet: 'Još nema objavljenih simulatora.',
-  courseEmpty: 'Simulatori za ovaj kolegij su u pripremi.',
+  hr: {
+    classes: { stepper: 'korak po korak', explorer: 'istraživanje', reference: 'pregled', tool: 'alat' },
+    levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
+    noneYet: 'Još nema objavljenih simulatora.',
+    courseEmpty: 'Simulatori za ovaj kolegij su u pripremi.',
+    courses: 'Kolegiji',
+    search: 'Traži simulator… ( / )',
+    noMatch: 'Ništa ne odgovara.',
+    allSims: '← svi simulatori',
+    print: 'Ispiši',
+    langName: 'Hrvatski',
+    onlyIn: 'samo na jeziku',
+  },
+  en: {
+    classes: { stepper: 'step by step', explorer: 'explorer', reference: 'reference', tool: 'tool' },
+    levels: { intro: 'intro', core: 'core', advanced: 'advanced' },
+    noneYet: 'No simulators published yet.',
+    courseEmpty: 'The simulators for this course are in preparation.',
+    courses: 'Courses',
+    search: 'Find a simulator… ( / )',
+    noMatch: 'Nothing matches.',
+    allSims: '← all simulators',
+    print: 'Print',
+    langName: 'English',
+    onlyIn: 'only in',
+  },
 };
 
 export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+/** A text field { hr, en } in one language (a plain string is the same in both). */
+export function loc(v, lang = 'hr') {
+  if (v == null) return '';
+  if (typeof v !== 'object') return String(v);
+  return v[lang] ?? v.hr ?? v.en ?? '';
+}
+
+/** The languages a sim's page has (sim.json "languages", the single-language exception, else both). */
+export function languagesOf(e) {
+  return Array.isArray(e?.languages) && e.languages.length ? e.languages : LANGS;
+}
+
+/**
+ * A text field as HTML in both languages: one span per language, shown by html[lang] (site/lang.js and the pages'
+ * CSS hide the other). Text that is the same in both languages is written once.
+ */
+export function bi(v, fmt = escapeHtml) {
+  const hr = loc(v, 'hr'), en = loc(v, 'en');
+  if (hr === en) return fmt(hr);
+  return `<span data-l="hr" lang="hr">${fmt(hr)}</span><span data-l="en" lang="en">${fmt(en)}</span>`;
+}
+
+/** The site's own string in both languages: bi of STR.hr[k], STR.en[k]. */
+export function biStr(k) {
+  return bi({ hr: STR.hr[k], en: STR.en[k] });
+}
+
+/** A small badge for a single-language sim, shown only while the page is in a language the sim lacks. */
+export function langBadge(e) {
+  const has = languagesOf(e);
+  return LANGS.filter((l) => !has.includes(l))
+    .map((l) => ` <span class="h-lang" data-l="${l}" lang="${l}" title="${escapeHtml(STR[l].onlyIn)} ${escapeHtml(has.join(', ').toUpperCase())}">${escapeHtml(has.join('/').toUpperCase())}</span>`)
+    .join('');
 }
 
 /** Lower-case, strip diacritics (č→c, đ→d), so "deduplikacija" matches "DEDUPLIKACIJA" and "cvor" matches "čvor". */
@@ -25,13 +85,13 @@ export function normalise(s) {
  * The link to a sim. `depth` is how many folders below the site root the linking page sits
  * (home: 0, courses/<id>/: 2). Links name index.html explicitly so they work from file://.
  */
-export function entryHref(e, depth = 0) {
-  return `${'../'.repeat(depth)}${e.path}index.html`;
+export function entryHref(e, depth = 0, lang = null) {
+  return `${'../'.repeat(depth)}${e.path}index.html${lang ? `?lang=${lang}` : ''}`;
 }
 
-/** The absolute URL a student would type, for printed course pages. */
-export function entryAbsUrl(e, site) {
-  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}`;
+/** The absolute URL a student would type, for printed course pages; ?lang= only when it is not the site's default. */
+export function entryAbsUrl(e, site, lang = null) {
+  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${e.path}${lang && lang !== (site.lang ?? 'hr') ? `?lang=${lang}` : ''}`;
 }
 
 /** materijali.online/<short> for a course with a short address, or null. */
@@ -48,28 +108,32 @@ export function shortLinkRules(courses, site) {
   const base = new URL(site.siteUrl ?? 'https://example.org/').pathname.replace(/\/?$/, '/');
   return courses
     .filter((c) => c.short)
-    .map((c) => `location ~ ^/${c.short}/?$ { return 302 ${base}courses/${c.id}/; }  # ${c.title.replace(/\n/g, ' ')}`)
+    .map((c) => `location ~ ^/${c.short}/?$ { return 302 ${base}courses/${c.id}/; }  # ${loc(c.title, c.lang ?? site.lang ?? 'hr').replace(/\n/g, ' ')}`)
     .join('\n');
 }
 
-/** One searchable string per field, weighted in `search`. */
+const both = (v) => LANGS.map((l) => loc(v, l)).filter((x, i, a) => a.indexOf(x) === i).join(' ');
+
+/** One searchable string per field, weighted in `search`. Both languages: a visitor may type either. */
 export function searchFields(e, vocab) {
-  const tagWords = (e.tags ?? []).flatMap((t) => [t, vocab.tags?.[t]?.label ?? '', ...(vocab.tags?.[t]?.aliases ?? [])]);
+  const tagWords = (e.tags ?? []).flatMap((t) => [t, both(vocab.tags?.[t]?.label), ...(vocab.tags?.[t]?.aliases ?? [])]);
+  const aliases = Object.values(e.aliases ?? {}).flat();
   return {
-    title: normalise(e.title),
+    title: normalise(both(e.title)),
     id: normalise(e.id),
-    tags: normalise([...tagWords, ...(e.aliases ?? [])].join(' ')),
-    topic: normalise(`${e.topic} ${vocab.topics?.[e.topic]?.label ?? ''}`),
-    text: normalise(`${e.concept} ${e.summary}`),
+    tags: normalise([...tagWords, ...aliases].join(' ')),
+    topic: normalise(`${e.topic} ${both(vocab.topics?.[e.topic]?.label)}`),
+    text: normalise(`${both(e.concept)} ${both(e.summary)}`),
   };
 }
 
 /**
  * Filters and ranks entries. Every query word must match somewhere (AND); ranking prefers title
  * hits, then tags and aliases, then the rest. Ties keep title order, so the list is stable.
- * filters: { tags: [..] (all required), topic, level, cls, course, lang }
+ * filters: { tags: [..] (all required), topic, level, cls, course, lang (the page exists in it) }.
+ * `lang` orders titles as they read in that language.
  */
-export function search(entries, vocab, query, filters = {}) {
+export function search(entries, vocab, query, filters = {}, lang = 'hr') {
   const words = normalise(query).split(/\s+/).filter(Boolean);
   const out = [];
   for (const e of entries) {
@@ -77,7 +141,7 @@ export function search(entries, vocab, query, filters = {}) {
     if (filters.topic && e.topic !== filters.topic) continue;
     if (filters.level && e.level !== filters.level) continue;
     if (filters.cls && e.class !== filters.cls) continue;
-    if (filters.lang && e.lang !== filters.lang) continue;
+    if (filters.lang && !languagesOf(e).includes(filters.lang)) continue;
     if (filters.course && !(e.courses ?? []).includes(filters.course)) continue;
     const f = searchFields(e, vocab);
     let score = 0;
@@ -98,7 +162,7 @@ export function search(entries, vocab, query, filters = {}) {
     }
     if (ok) out.push({ e, score });
   }
-  out.sort((a, b) => b.score - a.score || natural(a.e.title, b.e.title) || cmp(a.e.id, b.e.id));
+  out.sort((a, b) => b.score - a.score || natural(loc(a.e.title, lang), loc(b.e.title, lang)) || cmp(a.e.id, b.e.id));
   return out.map((x) => x.e);
 }
 
@@ -130,20 +194,22 @@ export function courseItems(ids, byId, drafts = false) {
   const skipped = [];
   for (const id of ids) {
     const e = byId.get(id);
-    if (!e) skipped.push({ id, why: 'ne postoji' });
-    else if (e.class === 'tool') skipped.push({ id, why: 'alat je samo za predavača' });
-    else if (e.status !== 'ready' && !drafts) skipped.push({ id, why: 'u izradi' });
+    if (!e) skipped.push({ id, why: 'unknown' });
+    else if (e.class === 'tool') skipped.push({ id, why: 'tool' });
+    else if (e.status !== 'ready' && !drafts) skipped.push({ id, why: 'wip' });
     else items.push(e);
   }
   return { items, skipped };
 }
 
 /**
- * The body of a course page, from a course file ({ title, term?, intro?, sections: [{ title?, sims }] }).
- * Returns { html, skipped }.
+ * The body of a course page, from a course file ({ title, term?, intro?, lang?, sections: [{ title?, sims }] }), in
+ * both languages. Sim links carry ?lang= in the course's language; site/lang.js rewrites them when the visitor
+ * switches. Returns { html, skipped }.
  */
 export function renderCourse(course, ctx, depth = 0, drafts = false) {
   const byId = new Map(ctx.entries.map((e) => [e.id, e]));
+  const lang = course.lang ?? ctx.site.lang ?? 'hr';
   const skipped = [];
   let n = 0;
   const sections = course.sections.map((s) => {
@@ -151,18 +217,18 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
     skipped.push(...r.skipped);
     const lis = r.items.map((e) => {
       n += 1;
-      const lang = e.lang !== (course.lang ?? ctx.site.lang) ? ` <span class="h-lang">${escapeHtml(e.lang.toUpperCase())}</span>` : '';
-      return `<li value="${n}"><a href="${escapeHtml(entryHref(e, depth))}">${escapeHtml(e.title)}</a>${lang}
-<span class="h-concept">${escapeHtml(e.concept)}</span>
-<span class="h-summary">${escapeHtml(e.summary)}</span>
-<span class="h-url">${escapeHtml(entryAbsUrl(e, ctx.site))}</span></li>`;
+      const urls = LANGS.map((l) => ({ l, url: entryAbsUrl(e, ctx.site, l) }));
+      return `<li value="${n}"><a data-lang-link href="${escapeHtml(entryHref(e, depth, lang))}">${bi(e.title)}</a>${langBadge(e)}
+<span class="h-concept">${bi(e.concept)}</span>
+<span class="h-summary">${bi(e.summary)}</span>
+<span class="h-url">${bi(Object.fromEntries(urls.map((u) => [u.l, u.url])))}</span></li>`;
     });
     if (!lis.length) return '';
-    return `<section>${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}<ol>${lis.join('\n')}</ol></section>`;
+    return `<section>${s.title ? `<h2>${bi(s.title)}</h2>` : ''}<ol>${lis.join('\n')}</ol></section>`;
   });
   const short = shortUrl(course, ctx.site);
-  const html = `<header><h1>${escapeHtml(course.title)}</h1>${course.term ? `<p class="h-term">${escapeHtml(course.term)}</p>` : ''}${short ? `<p class="h-short">${escapeHtml(short.replace(/^https?:\/\//, ''))}</p>` : ''}${course.intro ? `<p class="h-intro">${escapeHtml(course.intro)}</p>` : ''}</header>
-<main>${n ? sections.join('\n') : `<p class="h-empty">${escapeHtml(STR.courseEmpty)}</p>`}</main>
+  const html = `<header><h1>${bi(course.title)}</h1>${course.term ? `<p class="h-term">${bi(course.term)}</p>` : ''}${short ? `<p class="h-short">${escapeHtml(short.replace(/^https?:\/\//, ''))}</p>` : ''}${course.intro ? `<p class="h-intro">${bi(course.intro)}</p>` : ''}</header>
+<main>${n ? sections.join('\n') : `<p class="h-empty">${biStr('courseEmpty')}</p>`}</main>
 <footer><p>${escapeHtml(ctx.site.title)} · ${escapeHtml(short ?? ctx.site.siteUrl ?? '')}</p></footer>`;
   return { html, skipped };
 }
@@ -172,13 +238,13 @@ export function renderCourse(course, ctx, depth = 0, drafts = false) {
  * carries its folded search words in data-s for the page's one small filter script.
  */
 export function renderIndexList(ctx, drafts = false) {
-  const list = search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '');
-  if (!list.length) return `<p class="empty">${escapeHtml(STR.noneYet)}</p>`;
+  const list = search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '', {}, ctx.site?.lang ?? 'hr');
+  if (!list.length) return `<p class="empty">${biStr('noneYet')}</p>`;
   return group(list, ctx.vocab)
-    .map((g) => `<section><h2>${escapeHtml(g.label)}</h2><ul>${g.items.map((e) => {
+    .map((g) => `<section><h2>${bi(g.label)}</h2><ul>${g.items.map((e) => {
       const f = searchFields(e, ctx.vocab);
       const words = [f.title, f.id, f.tags, f.topic, f.text].join(' ').replace(/\s+/g, ' ').trim();
-      return `<li data-s="${escapeHtml(words)}"><a href="${escapeHtml(entryHref(e, 0))}">${escapeHtml(e.title)}</a> <span>${escapeHtml(e.concept)}</span></li>`;
+      return `<li data-s="${escapeHtml(words)}"><a data-lang-link href="${escapeHtml(entryHref(e, 0))}">${bi(e.title)}</a>${langBadge(e)} <span>${bi(e.concept)}</span></li>`;
     }).join('')}</ul></section>`)
     .join('\n');
 }

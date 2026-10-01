@@ -1,7 +1,8 @@
 // Browser check for one native sim page, opened from file:// with every network request blocked.
 // Usage: node kit/tools/check-page.mjs <page.html> [--shots <dir>]
 // Needs the repo's dev dependency (npm install; npx playwright install chromium if the browser is missing).
-// This is a seed for the contract check, not the check itself.
+// This is a seed for the contract check, not the check itself. Layout, text and words are checked once per language
+// the page has (Simdeck.languages): Croatian labels run longer, and every visible word must come from the tables.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -23,8 +24,8 @@ const check = (label, ok, detail = '') => { results.push({ label, ok, detail });
 const browser = await chromium.launch();
 
 async function open(viewport, query = '', opts = {}) {
-  const ctx = await browser.newContext({ viewport, reducedMotion: opts.reducedMotion || 'no-preference', colorScheme: opts.colorScheme || 'light' });
-  await ctx.route('**/*', (r) => (r.request().url().startsWith('file:') ? r.continue() : r.abort()));
+  const ctx = opts.ctx || await browser.newContext({ viewport, reducedMotion: opts.reducedMotion || 'no-preference', colorScheme: opts.colorScheme || 'light' });
+  if (!opts.ctx) await ctx.route('**/*', (r) => (r.request().url().startsWith('file:') ? r.continue() : r.abort()));
   const p = await ctx.newPage();
   const errors = [];
   p.on('pageerror', (e) => errors.push(String(e)));
@@ -51,54 +52,130 @@ const textProbe = (floor) => {
   return out;
 };
 
+// Every word of visible text must be a word of the page's tables in this language (Simdeck.i18n.words: the page's
+// strings, the kit's, the title and concept). Key caps, code and [translate="no"] (data such as host names) are
+// exempt. Catches a label typed into the page instead of the table, and text left in the other language.
+const wordsProbe = () => {
+  if (!window.Simdeck || !Simdeck.i18n) return { bad: ['the kit has no i18n (kit < 0.2.0)'] };
+  const allowed = new Set(Simdeck.i18n.words());
+  const bad = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const el = n.parentElement;
+    if (!n.textContent.trim() || el.closest('kbd, code, samp, var, [translate="no"], script, style')) continue;
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    if (!r.width || !r.height || cs.visibility === 'hidden' || el.closest('[hidden], .sd-vh, dialog:not([open])')) continue;
+    for (const w of n.textContent.toLowerCase().match(/\p{L}+/gu) || []) {
+      if (!allowed.has(w)) bad.push(`"${w}" in ${el.tagName.toLowerCase()}${el.className ? '.' + String(el.className).split(' ')[0] : ''}: "${n.textContent.trim().slice(0, 40)}"`);
+    }
+  }
+  return { bad: [...new Set(bad)] };
+};
+
 const fits = (p) => p.evaluate(() => ({
   h: document.documentElement.scrollHeight, ih: innerHeight, w: document.documentElement.scrollWidth, iw: innerWidth,
 }));
 
-// ── projector size (the contract target): fit one screen, text floors ──
-for (const [w, hgt] of [[1920, 1080]]) {
-  for (const theme of ['light', 'dark']) {
-    const { ctx, p, errors } = await open({ width: w, height: hgt }, `?theme=${theme}`);
-    const f = await fits(p);
-    check(`${w}×${hgt} ${theme}: no scroll`, f.h <= f.ih && f.w <= f.iw, `${f.w}×${f.h}`);
-    const panel = await p.evaluate(() => { const e = document.querySelector('.sd-panel'); return e ? { sh: e.scrollHeight, ch: e.clientHeight } : { sh: 0, ch: 0 }; });
-    check(`${w}×${hgt} ${theme}: panel fits without its own scroll`, panel.sh <= panel.ch + 1, `${panel.sh} > ${panel.ch}`);
-    const root = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
-    check(`${w}×${hgt}: body text >= 20 px`, root >= 20, `${root}px`);
-    const t = await p.evaluate(textProbe, 16);
-    check(`${w}×${hgt} ${theme}: no text under 16 px`, t.below.length === 0, `min ${t.min}px ${t.below.slice(0, 3).join('; ')}`);
-    check(`${w}×${hgt} ${theme}: no console errors or warnings`, errors.length === 0, errors.join(' | '));
-    if (theme === 'light') check(`${w}×${hgt}: kit marker`, (await p.evaluate(() => document.documentElement.dataset.kit)) === '0.1.0');
-    if (shots) {
-      await p.keyboard.press('2'); // second preset, then two steps: a mid-demo state with changes highlighted
-      await p.keyboard.press('ArrowRight');
-      await p.keyboard.press('ArrowRight');
-      await p.waitForTimeout(450);
-      await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-${theme}.png`) });
+// ── languages the page has ──
+const langs = await (async () => {
+  const { ctx, p } = await open({ width: 1920, height: 1080 });
+  const l = await p.evaluate(() => (window.Simdeck && Simdeck.languages) || [document.documentElement.lang]);
+  await ctx.close();
+  return l;
+})();
+console.log(`languages: ${langs.join(', ')}`);
+
+// ── projector size (the contract target), in every language: fit one screen, text floors, words from the tables ──
+for (const lang of langs) {
+  for (const [w, hgt] of [[1920, 1080]]) {
+    for (const theme of ['light', 'dark']) {
+      const { ctx, p, errors } = await open({ width: w, height: hgt }, `?theme=${theme}&lang=${lang}`);
+      const at = `${w}×${hgt} ${lang} ${theme}`;
+      check(`${at}: page is in ${lang}`, (await p.evaluate(() => document.documentElement.lang)) === lang);
+      const f = await fits(p);
+      check(`${at}: no scroll`, f.h <= f.ih && f.w <= f.iw, `${f.w}×${f.h}`);
+      const panel = await p.evaluate(() => { const e = document.querySelector('.sd-panel'); return e ? { sh: e.scrollHeight, ch: e.clientHeight } : { sh: 0, ch: 0 }; });
+      check(`${at}: panel fits without its own scroll`, panel.sh <= panel.ch + 1, `${panel.sh} > ${panel.ch}`);
+      const root = await p.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+      check(`${at}: body text >= 20 px`, root >= 20, `${root}px`);
+      const t = await p.evaluate(textProbe, 16);
+      check(`${at}: no text under 16 px`, t.below.length === 0, `min ${t.min}px ${t.below.slice(0, 3).join('; ')}`);
       if (theme === 'light') {
-        await p.evaluate(() => { document.documentElement.style.filter = 'grayscale(1)'; });
-        await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-grayscale.png`) });
-        await p.evaluate(() => { document.documentElement.style.filter = ''; });
-        await p.keyboard.press('c');
-        await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-panel-hidden.png`) });
-        await p.keyboard.press('c');
-        await p.keyboard.press('?');
-        await p.screenshot({ path: path.join(shots, `${name}-${w}x${hgt}-help.png`) });
+        const probs = await p.evaluate(() => (window.Simdeck && Simdeck.i18n ? Simdeck.i18n.problems() : ['no kit']));
+        check(`${lang}: string tables complete (same keys in every language)`, probs.length === 0, probs.slice(0, 4).join('; '));
+        check(`${w}×${hgt}: kit marker`, (await p.evaluate(() => document.documentElement.dataset.kit)) === '0.2.0');
+        // Words at the start, mid-demo (second preset, two steps) and at the end: captions change with the state.
+        const bad = (await p.evaluate(wordsProbe)).bad;
+        // The collapsed explanation too (it is visible once opened).
+        if (await p.evaluate(() => { const d = document.querySelector('.sd-explain'); if (d) d.open = true; return !!d; })) {
+          bad.push(...(await p.evaluate(wordsProbe)).bad);
+          await p.evaluate(() => { document.querySelector('.sd-explain').open = false; });
+        }
+        if (await p.evaluate(() => window.simdeck.steps > 0)) {
+          await p.keyboard.press('2'); await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight');
+          bad.push(...(await p.evaluate(wordsProbe)).bad);
+          await p.keyboard.press('End');
+          bad.push(...(await p.evaluate(wordsProbe)).bad);
+          await p.keyboard.press('Home');
+        }
+        const uniq = [...new Set(bad)];
+        check(`${at}: every visible word is from the ${lang} tables`, uniq.length === 0, uniq.slice(0, 5).join('; '));
       }
+      check(`${at}: no console errors or warnings`, errors.length === 0, errors.join(' | '));
+      if (shots) {
+        const base = path.join(shots, `${name}-${lang}-${w}x${hgt}`);
+        await p.keyboard.press('2'); // second preset, then two steps: a mid-demo state with changes highlighted
+        await p.keyboard.press('ArrowRight');
+        await p.keyboard.press('ArrowRight');
+        await p.waitForTimeout(450);
+        await p.screenshot({ path: `${base}-${theme}.png` });
+        if (theme === 'light') {
+          await p.evaluate(() => { document.documentElement.style.filter = 'grayscale(1)'; });
+          await p.screenshot({ path: `${base}-grayscale.png` });
+          await p.evaluate(() => { document.documentElement.style.filter = ''; });
+          await p.keyboard.press('c');
+          await p.screenshot({ path: `${base}-panel-hidden.png` });
+          await p.keyboard.press('c');
+          await p.keyboard.press('?');
+          await p.screenshot({ path: `${base}-help.png` });
+        }
+      }
+      await ctx.close();
     }
+  }
+
+  // ── phone: no horizontal scroll, nothing cut off ──
+  {
+    const { ctx, p, errors } = await open({ width: 375, height: 812 }, `?lang=${lang}`);
+    const f = await fits(p);
+    check(`375×812 ${lang}: no horizontal scroll`, f.w <= f.iw, `${f.w}px`);
+    const t = await p.evaluate(textProbe, 14);
+    check(`375×812 ${lang}: no text under 14 px`, t.below.length === 0, `min ${t.min}px`);
+    check(`375×812 ${lang}: no console errors`, errors.length === 0, errors.join(' | '));
+    if (shots) await p.screenshot({ path: path.join(shots, `${name}-${lang}-375x812-light.png`), fullPage: true });
     await ctx.close();
   }
 }
 
-// ── phone: no horizontal scroll, nothing cut off ──
-{
-  const { ctx, p, errors } = await open({ width: 375, height: 812 });
-  const f = await fits(p);
-  check('375×812: no horizontal scroll', f.w <= f.iw, `${f.w}px`);
-  const t = await p.evaluate(textProbe, 14);
-  check('375×812: no text under 14 px', t.below.length === 0, `min ${t.min}px`);
-  check('375×812: no console errors', errors.length === 0, errors.join(' | '));
-  if (shots) await p.screenshot({ path: path.join(shots, `${name}-375x812-light.png`), fullPage: true });
+// ── language switch: L (and the header button) reload the same file in the other language, at the same step; the
+//    choice is remembered by the next simdeck page opened without ?lang= ──
+if (langs.length > 1) {
+  const { ctx, p } = await open({ width: 1920, height: 1080 }, `?lang=${langs[0]}`);
+  await p.keyboard.press('3');
+  await p.keyboard.press('ArrowRight');
+  await p.keyboard.press('ArrowRight');
+  const before = await p.evaluate(() => ({ n: window.simdeck.n, preset: window.simdeck.preset }));
+  await Promise.all([p.waitForEvent('load'), p.keyboard.press('l')]);
+  await p.waitForFunction(() => window.simdeck);
+  const after = await p.evaluate(() => ({ lang: document.documentElement.lang, n: window.simdeck.n, preset: window.simdeck.preset }));
+  check(`L switches ${langs[0]} -> ${langs[1]} and keeps preset and step`, after.lang === langs[1] && after.n === before.n && after.preset === before.preset, JSON.stringify({ before, after }));
+  const btn = await p.locator('[data-sd-tools] .sd-langbtn').count();
+  check('the header has the language button', btn === 1);
+  const q2 = await open({ width: 1920, height: 1080 }, '', { ctx });
+  check(`the choice is remembered without ?lang= (${langs[1]})`, (await q2.p.evaluate(() => document.documentElement.lang)) === langs[1]);
+  const back = await q2.p.evaluate(() => document.querySelector('[data-sd-back]')?.getAttribute('href') || '');
+  check('the back link keeps the language', back.endsWith(`?lang=${langs[1]}`), back);
   await ctx.close();
 }
 
