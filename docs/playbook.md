@@ -401,6 +401,11 @@ fact that a reference page has no step keys.
 
 ### 10.5 Linked entries
 
+> **Superseded (owner decision, 2026-10-01):** simdeck copies and adopts; it never links out. ossimulator's pages,
+> cephsim, faultline and topologydrafter are copied into `sims/<id>/` like any import (§10.7), from their existing
+> builds, so the login-realm question below no longer arises. Kept for the record. Current design:
+> docs/site-structure.md §0.
+
 Linked entries are exempt from the contract. The manifest still makes them consistent in the index:
 - **ossimulator:**
   - one entry per page (`modules/<id>/index.html`), not one for the whole app;
@@ -425,6 +430,10 @@ simdeck the manifest is that registry.
 - **Fields:**
   - from the design notes: `id`, `title`, `summary`, `tags`, `courses`, `kind`, `url` | `path`, `lang`;
   - added here: `class`, `steps` (steppers only), `scenario` (linked ossimulator entries only).
+  - *As built (docs/site-structure.md §2):* one `sim.json` per `sims/<id>/`, with `id`, `class`, `status`, `title`,
+    `concept`, `summary`, `topic`, `tags`, `level`, `lang`, `steps`, `aliases`, `related`, `origin`,
+    `asset_review`. `kind`, `url`, `path` and `scenario` are gone (§10.5), and `courses` is derived from the
+    course files. Exceptions stay in the page (`#simdeck-exceptions`, the kit's block).
 - **The manifest check:**
   - unique kebab-case ids;
   - the required fields for each `kind` and `class`;
@@ -472,7 +481,7 @@ one worktree each. The kit and the check must be frozen first.
 
 | Decision (design notes) | Recommendation | Why |
 |---|---|---|
-| Build tool: plain script or Vite | **Vite + vite-plugin-singlefile + Vitest**, reusing ossimulator's `build-single.mjs`, `check-dist.mjs` and the e2e helpers | the single-file build, the offline check and the text-size probe already exist and are tested; a plain script would rebuild them |
+| Build tool: plain script or Vite | **Vite + vite-plugin-singlefile + Vitest**, reusing ossimulator's `build-single.mjs`, `check-dist.mjs` and the e2e helpers | the single-file build, the offline check and the text-size probe already exist and are tested; a plain script would rebuild them. *Decided otherwise:* a plain Node build with no dependencies (docs/site-structure.md §5). Sims are HTML with classic scripts (the kit is one), so nothing needs bundling; node:test replaces Vitest, and the kit's `check-page.mjs` (Playwright) does the browser checks. |
 | UI language | ossimulator's rule: Croatian UI, English term in italics with the Croatian in parentheses at first mention; `lang` in the manifest for pages in English | 13 of the 24 imported pages declare `lang="hr"` and 10 `lang="en"`, so both must be first-class; students meet the English terms in the literature |
 | Deploy location and realm | `materijali.online/simdeck`, with `scripts/deploy.sh` modelled on ossimulator's (rsync with `--chown`/`--chmod`, then a 401/200 check) | the same VPS pattern as `/ossim` and `/ceph`; the realm question is in §10.5 |
 | Minimum text size | start at 20 px for body text and 16 px for legends, then tune after one lecture | the design notes give "~20 px"; legends need a separate, lower floor or every legend becomes an exception |

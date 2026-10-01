@@ -45,22 +45,26 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
 ```
 sims/<id>/                 one folder per simulator (the folder name is the id)
   sim.json                 its manifest entry (required)
-  index.html               the page (required)
-  *.js, *.css              local files the page includes; the build inlines them
+  index.html               the page (required), started from kit/template; runs unbuilt from file://
+  sim.js, sim.test.js      the model and its rule tests (kit template; npm test runs every sims/**/*.test.js)
+  *.js, *.css              other local files the page includes; the build inlines them
   NOTES.md                 optional: decisions, deviations, timing (playbook §10.8)
 courses/<course-id>.json   one file per course: the playlist (ordered sims, optional sections)
 tags.json                  the controlled vocabulary: topics and tags
 site.json                  site title, UI language, public URL, server paths short addresses must avoid
-site/                      templates for the published pages (home, course page) and core.js
-  core.js                  search, grouping, links, renderers, nginx rules; used by the build and the admin
+site/                      templates for the published pages (home, course page) and core.mjs
+  core.mjs                 search, grouping, links, renderers, nginx rules; used by the build and the admin
 admin/                     the admin app's page, script and styles
 lib/manifest.mjs           loads and validates every manifest source (read side)
 lib/store.mjs              validated writes for the admin (write side)
 scripts/build.mjs          builds the published site
 scripts/admin.mjs          the admin's local server
 scripts/check.mjs          validates without building
-tests/                     node:test unit tests (one failing sample per rule)
-kit/                       the shared in-sim kit (kit thread; inlined at build time, see §7)
+scripts/short-links.mjs    prints the nginx rules for short course addresses (used by deploy.sh)
+scripts/deploy.sh          publishes main to materijali.online/simdeck (docs/deploy.md)
+scripts/server-setup.sh    one-time nginx and login setup (docs/deploy.md)
+tests/                     node:test unit tests (one failing sample per rule), *.test.mjs
+kit/                       the sim UI kit, template and page check (kit thread, docs/sim-ui.md; inlined at build, §7)
 dist/                      default build output, not committed
 ```
 
@@ -100,7 +104,6 @@ admin read them all together.
 | `steps` | steppers | positive integer | demo length; the contract check compares it with the page (§7) |
 | `aliases` | no | extra search words: synonyms, the other language, commands (`fdisk`) | search only |
 | `related` | no | ids | reserved for "see also"; checked |
-| `exceptions` | no | `[{ "rule": "...", "why": "..." }]` | declared contract exceptions; the check counts them |
 | `origin` | no | where a copy came from (`single-page-labs/x.html`, `ossimulator/scheduling`) | provenance |
 | `asset_review` | no | `true` when assets need the GPL audit (playbook §10.7 step 6) | release audit |
 
@@ -113,8 +116,8 @@ Unknown fields are errors, so a typo never silently drops data.
 **Departure from the design notes:**
 - `courses` is not written on each sim. The course file is the only source of order and membership.
 - `kind`, `url`, `scenario` and `thumb` are gone, because every sim is in the repo (§0).
-- Added: `concept`, `level`, `topic`, `status`, `aliases`, `class`, `steps`, `exceptions`, `origin` and
-  `asset_review`.
+- Added: `concept`, `level`, `topic`, `status`, `aliases`, `class`, `steps`, `origin` and `asset_review`.
+- Contract exceptions are not a `sim.json` field: they stay in the page, as the kit declares them (§7).
 
 ### 2.2 Example (`sims/dhcp-dora/sim.json`)
 
@@ -230,8 +233,9 @@ from another machine, use an SSH tunnel.
   - a searchable list with a status filter;
   - a form per sim: title, concept, summary, status, class, steps, topic, tags (checkboxes), level,
     language, aliases, origin, asset review;
-  - **+ Novi simulator** creates `sims/<id>/` with a `sim.json` and a bare `index.html` (later: the
-    template's), status `wip`;
+  - **+ Novi simulator** creates `sims/<id>/`: it runs `kit/new-sim.sh` to copy the kit's template
+    (`index.html`, `sim.js`, `sim.test.js`), fits the page to the form (`<html lang>`, title, subtitle from
+    the concept, `#simdeck-meta`), and writes `sim.json` (status `wip` by default);
   - each sim shows which courses list it;
   - deleting or renaming a sim means changing its folder by hand; git keeps it.
 - **Kolegiji:**
@@ -273,9 +277,10 @@ same). `npm run check` validates only, and `npm test` runs the unit tests.
    `.simdeck-site` stamp from an earlier build. It never empties a folder of someone else's files (a
    USB stick's root, say).
 3. For each finished sim, produce one self-contained file:
-   - inline local `<script src>` and `<link rel=stylesheet>` (files must be inside the sim's folder);
-   - replace the kit marker with the kit;
-   - add the `#simdeck-meta` block;
+   - inline local `<script src>` and `<link rel=stylesheet>`: files in the sim's folder, and the kit
+     (`../../kit/kit.css`, `../../kit/kit.js`, as kit/template links them); nothing else outside the folder;
+   - turn relative `url(...)` in inlined CSS into `data:` URIs (the kit's fonts, about 70 KB);
+   - replace the page's `#simdeck-meta` placeholder with one generated from `sim.json` (or add one);
    - refuse anything loaded from the network (scripts, styles, images, frames, CSS `url()`).
      Ordinary `<a href>` links are allowed.
 4. Write the home page and the course pages.
@@ -286,9 +291,12 @@ All links are relative and name `index.html` explicitly, so the folder works at 
 `file://`. Because every simulator is copied in (§0), a published folder on a USB stick works
 completely offline.
 
-**Tooling: Node ≥ 20 and its standard library, nothing else.** There is no `npm install` and no
-`node_modules`. The build takes well under a second, and the admin server is about a hundred lines on
-`node:http`.
+A built sim is about 130 KB (kit CSS and JS, fonts, the page and its model). The kit's own browser check,
+`npm run check:page -- dist/sims/<id>/index.html`, passes on the built file as on the source.
+
+**Tooling: Node ≥ 22.12 (the kit's floor) and its standard library.** The build, the check and the admin need no
+packages. The only dev dependency is the kit's Playwright, for page checks. The build takes well under a
+second, and the admin server is about a hundred lines on `node:http`.
 
 **Departure from playbook §10.9**, which recommends Vite + vite-plugin-singlefile:
 - The frame needs no bundler.
@@ -321,8 +329,9 @@ sets the limits:
   - topic and tags exist in `tags.json`, with no duplicate tags;
   - length limits on title, concept and summary;
   - `steps` on steppers, and only there;
-  - `exceptions` well formed;
-  - `related` ids exist.
+  - `related` ids exist;
+  - in the page: `data-sim` on `<html>` equals the id; `#simdeck-exceptions` is `[{rule, why}]` (counted, as
+    a warning); a stale `#simdeck-meta` placeholder (id, class, steps differ from `sim.json`) gives a warning.
 - **Courses:**
   - id = file name;
   - only known fields;
@@ -332,56 +341,57 @@ sets the limits:
   - `wip` gives a warning.
 
 `scripts/build.mjs`:
-- local includes exist and stay inside the sim's folder;
-- one kit marker at most;
-- the page does not define `#simdeck-meta` itself;
+- local includes exist and stay inside the sim's folder or the kit;
 - nothing is loaded from the network;
 - the output folder is safe to replace.
 
 Each rule has a test that feeds it a bad sample (`tests/`). The admin's write side has its own tests:
 valid saves land in the hand-edit format, and invalid ones leave the disk unchanged.
 
-Left to the contract check from the kit thread:
-- fit at 1920×1080;
-- text size;
-- clicker keys;
-- the page's real step count against `steps`.
+Left to the kit's page check (`kit/tools/check-page.mjs`): fit at 1920×1080, text size, clicker keys, themes,
+and the step count the page mounts against `#simdeck-meta` `steps`.
 
-## 7. Where the frame meets the kit (to reconcile with the kit/template thread)
+## 7. Where the frame meets the kit (reconciled with docs/sim-ui.md, kit 0.1.0)
 
-These are the frame's choices. The kit thread may propose changes, and anything below can move as long as
-both sides agree.
+The kit (`kit/`, docs/sim-ui.md §7) and the frame agree on the following. Items the frame cannot fix alone are
+listed at the end for the kit.
 
-1. **Kit inlining.**
-   - The source page puts `<!-- simdeck:kit -->` in its `<head>`, once.
-   - The build replaces it with `kit/kit.css` (as `<style data-simdeck-kit>`) and `kit/kit.js` (as
-     `<script data-simdeck-kit>`), whichever exist.
-   - Until `kit/` exists, the marker is removed and the build warns.
-2. **`#simdeck-meta`.** The build adds this to every sim page:
-   ```html
-   <script type="application/json" id="simdeck-meta">
-     {"id":"dhcp-dora","title":"DHCP: DORA","concept":"…","class":"stepper","lang":"hr","steps":4,
-      "index":"../../index.html"}
-   </script>
+1. **The page loads the kit itself.** A sim page links `../../kit/kit.css` and `../../kit/kit.js` (kit/template
+   does, and `new-sim.sh` computes the paths), so it runs unbuilt from `file://`. The build inlines exactly
+   those two files and the fonts `kit.css` refers to; there is no build-only marker.
+2. **`#simdeck-meta`: sim.json is the source, the page holds a placeholder.** The template's in-page block stays
+   (unbuilt, the kit reads `id`, `class` and `steps` from it to warn on a mismatch). The build replaces it with
+   one generated from `sim.json`:
+   ```json
+   {"id":"dhcp-dora","title":"DHCP: DORA","concept":"…","summary":"…","tags":["dhcp"],"lang":"hr","class":"stepper","steps":4}
    ```
-   The kit header reads `title` (and may show `concept`) from here, so the title is written once, in
-   `sim.json`. A page must not define this block itself.
-3. **Back link.**
-   - The kit header's back link uses `meta.index`, the simdeck home page.
-   - Recommendation: when `document.referrer` is a simdeck course page, use `history.back()`, so a
-     student returns to their course page.
-4. **What the template must fill.** A new sim folder ships:
-   - a `sim.json` with every required field (§2.1), with `status: "wip"` until it is done;
-   - an `index.html` with `<html lang>` equal to `lang`, a `<title>` and the kit marker.
+   The admin writes the same block when it creates a sim. The check warns when the placeholder's `id`, `class`
+   or `steps` drift from `sim.json`. `kind`, `path` and `courses` from the template's placeholder are not
+   frame fields (§2.1); the build drops them.
+3. **`data-sim` on `<html>` equals the id.** The check enforces it; `new-sim.sh` sets it.
+4. **Exceptions stay in the page**, in `#simdeck-exceptions` as `[{"rule", "why"}]` (the kit's choice, playbook
+   §10.2). The frame dropped its `sim.json` field, validates the block and counts the exceptions.
+5. **The index is `<site root>/index.html`**, which matches the template's back link (`../../index.html` from
+   `sims/<id>/`) and `INDEX` in `new-sim.sh`, both unbuilt (repo root) and built (`dist/`).
+6. **Back link.** The kit goes back in history when the visitor came from the index, and otherwise follows the link to
+   the home page.
+7. **Deep links.** The kit opens `?preset=<id>&step=<n>`. Course pages link plain sim pages for now; a course
+   item could name a preset later without changing the kit.
+8. **Steps.** `sim.json` `steps` is what the frame records; the kit compares it with what the page mounts.
+9. **Offline.** The build refuses network loads; the kit bundles its fonts, so built sims are complete files.
+10. **Look.** The home and course pages keep their own small CSS (`site/index.css`, `site/course.css`). They
+    could take the kit's tokens and font later; not needed for the frame to work.
 
-   The admin's **+ Novi simulator** will use the template's `index.html` once it exists (`createSim`
-   takes a `template` argument).
-5. **Exceptions are declared in `sim.json` `exceptions`**, not in an in-page block.
-6. **`steps`** in `sim.json` declares the demo length. The contract check should compare it with the step
-   count the page's controller reports.
-7. **Offline:** the build refuses network loads, so the kit must not load fonts or scripts from a CDN.
-8. **Look:** the home and course pages have their own small CSS (`site/index.css`, `site/course.css`).
-   Once the kit's colour tokens exist, these should use them.
+**For the kit to change (not edited from the frame):**
+- **Template `#simdeck-meta` placeholder:** replace `courses`, `kind`, `path` and `"tags": ["template"]` with the
+  frame's fields (§2.1), or keep only `id`, `class` and `steps`; `new-sim.sh` can then drop its `path` and `tags`
+  rewrites.
+- **`new-sim.sh` does not write `sim.json`:** a sim made with it alone fails `npm run check` until one is
+  added. Either write a `status: "wip"` stub, or print "now create sim.json (or use `npm run admin`)".
+- **Back link from a course page:** go back in history also when the referrer is a simdeck course page
+  (`…/courses/<id>/`), so a student returns to their course page instead of the home page.
+- **docs/sim-ui.md §7 table:** record the resolutions above (meta generated from `sim.json` at build,
+  exceptions stay in the page, index at the site root confirmed), and §8: the single-file build now exists.
 
 ## 8. How to …
 
@@ -389,7 +399,8 @@ Everything below can be done in the admin, or by editing the files and running `
 
 - **Add a simulator:**
   1. Simulatori → **+ Novi simulator**.
-  2. Build the page, using the kit thread's template once it exists.
+  2. Replace the template's model (`sim.js`), rule tests (`sim.test.js`) and page content (docs/sim-ui.md §6), then
+     `npm run check:page -- sims/<id>/index.html`.
   3. Set its status to `ready` when it passes its DoD.
 - **Adopt one from another project:**
   1. Create it as above, then copy the page (and its local files) into `sims/<id>/`.
@@ -400,18 +411,15 @@ Everything below can be done in the admin, or by editing the files and running `
   1. Kolegiji → **+ Novi kolegij**, choose the id and optionally a short address, and add simulators.
   2. Check it with **Pregled**.
   3. Objava → **Objavi**.
-- **Give a course a short address:**
-  1. Set **kratka adresa** on the course.
-  2. Objava → copy the nginx rules into the server block, then `nginx -t && systemctl reload nginx`.
+- **Give a course a short address:** set **kratka adresa** on the course and merge to main; `npm run deploy`
+  installs the nginx rule (docs/deploy.md). The Objava tab shows the rules for review.
 - **Publish:**
-  1. Objava → **Objavi**, to `dist/` or a USB folder.
-  2. Deploy `dist/` with rsync (playbook §9 deploy notes; `scripts/deploy.sh` is still to be written).
+  - to materijali.online: merge to main, then `npm run deploy` (it builds main, not the working copy);
+  - to a USB stick or any folder: Objava → **Objavi** (builds the working copy).
 
 ## 9. Open questions
 
 - **UI language.** The site and the admin are in Croatian, following playbook §10.9 and ossimulator.
-- **Deploy script.** `scripts/deploy.sh` (rsync `dist/` with `--chown`/`--chmod`, then a 401/200 check,
-  playbook §9) is not written. It could also install the nginx short-address rules as an include file.
 - **Level scale.** `intro`/`core`/`advanced` is a guess, and the site does not show it yet.
 - **Topics.** The 9 topics in `tags.json` are a first cut, and should be revisited against
   docs/catalogue.md.

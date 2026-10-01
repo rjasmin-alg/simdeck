@@ -278,14 +278,14 @@ function renderPublish() {
   const rules = shortLinkRules(S.courses, S.site);
   $('#view').innerHTML = `<section class="pane">
   <h2>Objava</h2>
-  <p>Gradi statičnu stranicu: naslovnicu, stranice kolegija i gotove simulatore. Simulatori u izradi se ne objavljuju.
-  Mapa radi na bilo kojem web poslužitelju ili s USB-a (otvori <code>index.html</code>).</p>
+  <p>Gradi statičnu stranicu iz radne kopije: naslovnicu, stranice kolegija i gotove simulatore. Simulatori u izradi se ne objavljuju.
+  Mapa radi na bilo kojem web poslužitelju ili s USB-a (otvori <code>index.html</code>). Na materijali.online ide samo grana main, naredbom <code>npm run deploy</code>.</p>
   <div class="actions"><button type="button" id="preview-all">Pregled (s nedovršenima)</button></div>
   <div class="actions"><label>Mapa: <input type="text" id="out" size="60" value="${h(S.defaultOut)}"></label>
     <button type="button" class="primary" id="publish">Objavi</button></div>
   <p class="muted">Postojeća mapa se zamjenjuje samo ako ju je ranije izgradio simdeck; inače odaberi praznu ili novu mapu (npr. <code>/media/usb/simdeck</code>).</p>
   <h3>Kratke adrese (nginx)</h3>
-  ${rules ? `<p class="muted">Jedno pravilo po kolegiju s kratkom adresom. Zalijepi u server blok za materijali.online i ponovno učitaj nginx.</p>
+  ${rules ? `<p class="muted">Jedno pravilo po kolegiju s kratkom adresom. <code>npm run deploy</code> ih postavlja na poslužitelj (nakon spajanja u main); ovdje su za pregled.</p>
   <textarea id="rules" readonly rows="${Math.min(12, rules.split('\n').length + 1)}">${h(rules)}</textarea>
   <div class="actions"><button type="button" id="copy-rules">Kopiraj</button></div>` : '<p class="muted">Nijedan kolegij još nema kratku adresu (Kolegiji → kratka adresa).</p>'}
   ${S.errors.length ? `<h3>Greške (objava neće proći)</h3><ul>${S.errors.map((e) => `<li>${h(e)}</li>`).join('')}</ul>` : ''}

@@ -105,7 +105,7 @@ if ! grep -q 'simdeck-short.conf' /etc/nginx/sites-available/materijali-online; 
 elif [[ -f $SNIPPET ]] && cmp -s "$NEW" "$SNIPPET"; then
   echo "   unchanged"
 elif [[ -n $DRY ]]; then
-  echo "   would update $SNIPPET:"; diff -u "$SNIPPET" "$NEW" 2>/dev/null | sed -n '/^[-+][^-+]/p' || cat "$NEW"
+  echo "   would update $SNIPPET:"; { diff -u "$SNIPPET" "$NEW" 2>/dev/null || true; } | sed -n '/^[-+][^-+]/p'
 else
   [[ -f $SNIPPET ]] && cp -p "$SNIPPET" "$SNIPPET.prev"
   install -m 644 -o root -g root "$NEW" "$SNIPPET"

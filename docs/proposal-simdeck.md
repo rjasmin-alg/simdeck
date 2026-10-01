@@ -9,7 +9,7 @@ status: "Approved for a test run"
 
 # Summary
 
-In lectures I explain concepts that change over time (deduplication, snapshot backing chains, multi-master conflicts, LVM, Wi-Fi handshakes) on a blackboard, where movement is hard to draw and nothing can be replayed. simdeck gathers single-concept browser simulators into one searchable index. From it I either open a demo on the fly in class, or generate a one-page course list for students. It starts from what already exists: 24 single-page labs copied in, and ossimulator's 16 subsimulators plus three larger apps linked. Five new simulators form the first batch and test whether a shared template makes new ones fast and consistent. GPL-licensed.
+In lectures I explain concepts that change over time (deduplication, snapshot backing chains, multi-master conflicts, LVM, Wi-Fi handshakes) on a blackboard, where movement is hard to draw and nothing can be replayed. simdeck gathers single-concept browser simulators into one searchable index. From it I either open a demo on the fly in class, or generate a one-page course list for students. It starts from what already exists: 24 single-page labs, ossimulator's 16 subsimulators and three larger apps, all copied in and adopted (simdeck never links out to other projects). Five new simulators form the first batch and test whether a shared template makes new ones fast and consistent. GPL-licensed.
 
 # Problem
 
@@ -22,7 +22,7 @@ In lectures I explain concepts that change over time (deduplication, snapshot ba
 
 | Objective | Success criterion | By |
 |------------|------------------------|-----|
-| One index over everything | Every native and linked entry is searchable by title and tag from one page | M2 |
+| One index over everything | Every simulator is searchable by title and tag from one page | M2 |
 | A consistent standard | Every native page passes the automated contract check | M2, and ongoing |
 | Fast authoring | Each first-batch simulator goes from idea to deployed in one working session using the template | M3 |
 | Course lists | At least one generated course page is in students' hands | M4 |
@@ -30,7 +30,7 @@ In lectures I explain concepts that change over time (deduplication, snapshot ba
 
 # Approach
 
-There are two kinds of entry, sharing one manifest. **Native entries** are single-file simulators that live in the repo. They're built from a shared kit (palette, header, step controls) that is inlined at build time, so every page stays standalone and works offline, and an automated check enforces the look and controls. **Linked entries** are large apps that stay where they are and appear in the index through the manifest only. The same manifest drives both modes: the lecturer's index, and a generated course page per course.
+Every simulator lives in the repo: new ones are built there, and existing ones from other projects are copied in and adopted, never linked. They're built from a shared kit (palette, header, step controls) that is inlined at build time, so every page stays standalone and works offline, and an automated check enforces the look and controls. One manifest (a `sim.json` per simulator, plus one file per course) drives two sides: a local admin where the lecturer edits simulators and courses, and the published, read-only site with the searchable index and a page per course.
 
 The riskiest assumption is that a template plus a contract makes new simulators both fast and uniform. The first batch tests it directly: five new simulators, each built in one session from the template.
 
@@ -38,7 +38,7 @@ The riskiest assumption is that a template plus a contract makes new simulators 
 
 # Scope
 
-**In scope:** the index and course-page generator; the kit, the written contract, its check script and a template for new simulators; the 24 `single-page-labs` pages copied in and adapted; linked entries for ossimulator's subsimulators, `cephsim`, `faultline` and `topologydrafter`. Also the first batch of five new simulators:
+**In scope:** the index and course-page generator; the kit, the written contract, its check script and a template for new simulators; the 24 `single-page-labs` pages copied in and adapted; ossimulator's subsimulators, `cephsim`, `faultline` and `topologydrafter` copied in and adopted the same way. Also the first batch of five new simulators:
 
 - deduplication (fixed vs content-defined chunks)
 - differential vs incremental backup
@@ -46,7 +46,7 @@ The riskiest assumption is that a template plus a contract makes new simulators 
 - multi-master replication with a conflict
 - the WPA2/WPA3 handshake and what an attacker sees
 
-**Out of scope:** simulators after the first batch (ongoing content under the contract, not project milestones); porting ossimulator or the larger apps into single files; offline bundling of course pages; LMS integration, student accounts or progress tracking.
+**Out of scope:** simulators after the first batch (ongoing content under the contract, not project milestones); rewriting ossimulator or the larger apps (they are copied in from their existing builds); LMS integration, student accounts or progress tracking.
 
 # Timeline & milestones
 
@@ -55,7 +55,7 @@ No hard deadline; this is a test run ahead of a larger topic list.
 | Milestone | Deliverable | Target |
 |----|------------------------|----------|
 | M1 | Kit, contract, check script, template | Week 1 |
-| M2 | `single-page-labs` imported, linked entries in the manifest, index deployed | Week 1 |
+| M2 | `single-page-labs` imported, ossimulator and the larger apps copied in, index deployed | Week 1 |
 | M3 | Five new simulators, each from the template | Week 2 |
 | M4 | First course page generated and given to students | First course |
 
@@ -69,7 +69,7 @@ My time, in agent-assisted sessions; for scale, ossimulator's 16 pages were buil
 
 - **Copies drift from their originals.** **Mitigation:** the copy in simdeck is canonical; each original collection is frozen, with a note pointing to its new home.
 - **GPL and third-party assets.** Some copied pages carry generated images or material derived from textbooks. **Mitigation:** audit assets before the first public release; replace or credit anything unclear.
-- **Student access.** `materijali.online` is behind basic auth, so course pages need credentials for students. **Mitigation:** a per-course realm, as `/ossim` already has.
+- **Student access.** `materijali.online` is behind basic auth, so course pages need credentials for students. **Mitigation:** one realm for `/simdeck` (docs/deploy.md); because every simulator is copied in, a course page never sends students to a second login.
 - **The contract is too rigid for some topics.** **Mitigation:** allow documented, per-page exceptions, and treat a rising exception count as a signal to revise the contract.
 
 # Next step
