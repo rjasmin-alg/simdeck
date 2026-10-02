@@ -63,7 +63,8 @@ test('a sim using every tag, under every topic, passes the manifest check', () =
   const base = repo.natives[0];
   for (const topic of Object.keys(vocab.topics)) {
     const json = { ...base.json, id: `vocab-${topic}`, topic, tags: Object.keys(vocab.tags) };
-    repo.natives.push({ ...base, dir: json.id, json });
+    const html = base.html?.replace(/(<html\b[^>]*\bdata-sim\s*=\s*["'])[^"']*/i, `$1${json.id}`);
+    repo.natives.push({ ...base, dir: json.id, json, html });
   }
   assert.deepEqual(validate(repo).errors, []);
 });
