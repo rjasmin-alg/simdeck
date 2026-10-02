@@ -1,0 +1,340 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Flow control: adopted from the URM book's web edition (uvod-u-racunalne-mreze, ugradbeno/kontrola-toka.html) into
+     the simdeck kit (docs/sim-ui.md). A stepper: a greedy sender sends 500-octet segments while the receiver's window
+     has room, waits at the right edge, and every acknowledgment slides the window. The model is in sim.js, the words
+     in strings.js. -->
+<html lang="hr" data-sim="flow-control">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrola toka: prozor primatelja · simdeck</title>
+<meta name="description" content="Pošiljatelj šalje segmente dok ima mjesta u prozoru, pa čeka; potvrda pomiče cijeli prozor udesno, a veličina mu ostaje ista.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "flow-control",
+  "class": "stepper",
+  "steps": 12,
+  "title": { "hr": "Kontrola toka: prozor primatelja", "en": "Flow control: the receiver's window" },
+  "concept": { "hr": "Primatelj prozorom kaže koliko prima; pošiljatelj ne smije preko desnog ruba", "en": "The receiver's window says how much it takes; the sender stops at its right edge" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="flow-control"]; colours only from kit tokens. */
+[data-sim="flow-control"] .fc {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4cqh;
+  height: 100%;
+  padding: 2cqh 2.5cqw;
+}
+
+/* sender — event — receiver */
+[data-sim="flow-control"] .fc-actors {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1.2rem;
+}
+[data-sim="flow-control"] .fc-actor {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.5rem 1.1rem;
+  font-size: var(--fs-stage);
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+[data-sim="flow-control"] .fc-actor small { display: block; font-size: var(--fs-md); font-weight: 400; color: var(--muted); }
+[data-sim="flow-control"] .fc-actor b { font-family: var(--mono); }
+[data-sim="flow-control"] .fc-event { display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; text-align: center; font-size: var(--fs-stage); }
+[data-sim="flow-control"] .fc-event b { font-family: var(--mono); }
+[data-sim="flow-control"] .fc-arrow { position: relative; height: 0; border-top: 0.3rem solid var(--ink); margin: 0 1rem; }
+[data-sim="flow-control"] .fc-arrow::after {
+  content: '';
+  position: absolute;
+  top: calc(-0.15rem - 0.75rem);
+  border: 0.75rem solid transparent;
+}
+[data-sim="flow-control"] .fc-arrow.fc-right::after { right: -1rem; border-left: 1.1rem solid var(--ink); border-right-width: 0; }
+[data-sim="flow-control"] .fc-arrow.fc-left::after { left: -1rem; border-right: 1.1rem solid var(--ink); border-left-width: 0; }
+[data-sim="flow-control"] .fc-arrow.fc-none { border-top: var(--line-w) dashed var(--muted); }
+[data-sim="flow-control"] .fc-wait { font-weight: 700; color: var(--danger); }
+
+/* the octet strip: a bracket row, the cells, the region labels */
+[data-sim="flow-control"] .fc-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--cells), minmax(0, 1fr));
+  row-gap: 0.6rem;
+  column-gap: 0.25rem;
+}
+[data-sim="flow-control"] .fc-bracket {
+  grid-row: 2;
+  position: relative;
+  height: 1.1rem;
+  margin-top: 2.2rem;
+  border: 0.3rem solid var(--ink);
+  border-bottom: 0;
+}
+[data-sim="flow-control"] .fc-bracket span {
+  position: absolute;
+  left: -0.3rem;
+  bottom: calc(100% + 0.3rem);
+  white-space: nowrap;
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="flow-control"] .fc-winrow { display: none; }
+[data-sim="flow-control"] .fc-cell {
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 17cqh;
+  min-height: 3.2rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-stage);
+  font-weight: 700;
+  line-height: 1.15;
+}
+[data-sim="flow-control"] .fc-cell .fc-mark { font-size: var(--fs-stage); }
+/* acknowledged: solid fill and ✓; in flight: tint, hatch, solid border; may be sent: dashed and empty;
+   may not be sent yet: cross-hatched, dotted, muted ✕ */
+[data-sim="flow-control"] .fc-cell.fc-flight { border-width: 0.2rem; }
+[data-sim="flow-control"] .fc-cell.fc-allowed { border: 0.2rem dashed var(--ink); background: var(--bg); }
+[data-sim="flow-control"] .fc-cell.fc-blocked {
+  border: var(--line-w) dotted var(--muted);
+  color: var(--muted);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.5em, color-mix(in srgb, var(--ink) 14%, transparent) 0.5em 0.62em),
+    repeating-linear-gradient(-45deg, transparent 0 0.5em, color-mix(in srgb, var(--ink) 14%, transparent) 0.5em 0.62em);
+}
+[data-sim="flow-control"] .fc-cell.fc-refused { outline: max(3px, 0.2rem) dashed var(--danger); outline-offset: max(2px, 0.12rem); }
+[data-sim="flow-control"] .fc-region {
+  grid-row: 4;
+  border-top: var(--line-w) solid var(--ink);
+  padding-top: 0.25rem;
+  text-align: center;
+  font-size: var(--fs-md);
+  line-height: 1.2;
+}
+[data-sim="flow-control"] .fc-region b { display: block; font-family: var(--mono); font-weight: 400; color: var(--muted); }
+
+/* facts below the strip */
+[data-sim="flow-control"] .fc-facts { display: flex; flex-wrap: wrap; gap: 1rem 1.4rem; justify-content: center; }
+[data-sim="flow-control"] .fc-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.45rem 1rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-stage);
+  line-height: 1.2;
+}
+[data-sim="flow-control"] .fc-box small { font-size: var(--fs-md); color: var(--muted); }
+[data-sim="flow-control"] .fc-box b { font-family: var(--mono); }
+[data-sim="flow-control"] .fc-box.fc-full { border-left-color: var(--danger); }
+
+/* legend swatches for the page's own patterns */
+[data-sim="flow-control"] .sd-swatch[data-shape='hatch'] {
+  background-color: color-mix(in srgb, var(--c2) 16%, var(--bg));
+  border-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em);
+}
+[data-sim="flow-control"] .sd-swatch[data-shape='cross'] {
+  background-color: var(--bg);
+  border-style: dotted;
+  border-color: var(--muted);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 30%, transparent) 0.3em 0.42em),
+    repeating-linear-gradient(-45deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 30%, transparent) 0.3em 0.42em);
+}
+
+/* Phone and portrait: the stage grows with its content; cells show their first octet only, the region labels go. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="flow-control"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="flow-control"] .fc { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="flow-control"] .fc-actors { gap: 0.4rem; }
+  [data-sim="flow-control"] .fc-actor { padding: 0.3rem 0.4rem; font-size: 1rem; }
+  [data-sim="flow-control"] .fc-actor small { display: none; }
+  [data-sim="flow-control"] .fc-event { font-size: 1rem; }
+  [data-sim="flow-control"] .fc-arrow { margin: 0 0.6rem; }
+  [data-sim="flow-control"] .fc-strip { column-gap: 2px; }
+  [data-sim="flow-control"] .fc-bracket { margin-top: 0; height: 0.6rem; border-width: 0.2rem; }
+  [data-sim="flow-control"] .fc-bracket span { display: none; }
+  [data-sim="flow-control"] .fc-winrow { display: block; grid-row: 1; grid-column: 1 / -1; font-size: 1rem; font-weight: 700; }
+  [data-sim="flow-control"] .fc-cell { height: 2.6rem; min-height: 0; border-width: 1px; font-size: 14px; letter-spacing: -0.06em; }
+  [data-sim="flow-control"] .fc-cell .fc-to, [data-sim="flow-control"] .fc-cell .fc-mark { display: none; }
+  [data-sim="flow-control"] .fc-region { display: none; }
+  [data-sim="flow-control"] .fc-box { font-size: 1rem; padding: 0.3rem 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kontrola toka: prozor primatelja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var SEG = L.seg, FIRST = L.first, CELLS = 9; // octets 1000–5499 in nine segments of 500
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function range(a, b) { return a + '–' + b; }
+  function col(octet) { return Math.floor((octet - FIRST) / SEG) + 1; } // grid column of the cell holding an octet
+
+  var REGION_KEY = { acked: 'regionAcked', flight: 'regionFlight', allowed: 'regionAllowed', blocked: 'regionBlocked' };
+  var MARK = { acked: '✓', flight: '', allowed: '', blocked: '✕' };
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { win: 1000 } },
+    { id: 'small', label: t('presetSmall'), hint: t('presetSmallHint'), params: { win: 500 } },
+    { id: 'large', label: t('presetLarge'), hint: t('presetLargeHint'), params: { win: 2000 } }
+  ];
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'win', type: 'choice', label: t('win'), hint: t('winHint'),
+        options: L.windows.map(function (w) { return [w, String(w)]; }) }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legendAcked') },
+      { c: 2, shape: 'hatch', label: t('legendFlight') },
+      { shape: 'hollow', label: t('legendAllowed') },
+      { shape: 'cross', label: t('legendBlocked') }
+    ],
+
+    render: function (c) {
+      var s = c.state, ev = s.event, fwd = c.dir === 'forward' && !c.first;
+
+      // sender — event — receiver
+      var middle;
+      if (ev.kind === 'send') middle = [h('span', null, t('evSend'), ' ', data(range(ev.from, ev.to))), h('div', { class: 'fc-arrow fc-right' })];
+      else if (ev.kind === 'ack') middle = [h('span', null, t('evAck'), ' ', data(ev.ack), ' · ', t('evAckWindow', { win: s.win })),
+        h('div', { class: 'fc-arrow fc-left' })];
+      else if (ev.kind === 'wait') middle = [h('span', { class: 'fc-wait' }, t('evWait')), h('div', { class: 'fc-arrow fc-none' })];
+      else middle = [h('span', null, t('evStart')), h('div', { class: 'fc-arrow fc-none' })];
+      var actors = h('div', { class: 'fc-actors' },
+        h('div', { class: 'fc-actor' }, t('sender'), h('small', null, t('senderNote'))),
+        h('div', { class: 'fc-event' + (fwd ? ' sd-anim-in' : '') }, middle),
+        h('div', { class: 'fc-actor' }, t('receiver'), h('small', null, t('receiverNote'), ' ', data(s.win))));
+
+      // the strip
+      var cells = [];
+      var label = t('winLabel', { win: s.win, ack: s.ack });
+      cells.push(h('div', { class: 'fc-bracket', style: { gridColumn: col(s.left) + ' / ' + (col(s.right) + 1) } },
+        h('span', null, label)));
+      cells.push(h('div', { class: 'fc-winrow' }, label)); // the phone's label, on its own row
+      var regions = [];
+      for (var i = 0; i < CELLS; i++) {
+        var from = FIRST + i * SEG, to = from + SEG - 1;
+        var r = L.region(from, s.ack, s.next, s.win);
+        var changed = fwd && ((ev.kind === 'send' && ev.from === from) || (ev.kind === 'ack' && from >= ev.from && from < ev.ack));
+        var refused = ev.kind === 'wait' && ev.from === from;
+        cells.push(h('div', {
+          class: 'fc-cell fc-' + r + (r === 'acked' ? ' sd-fill' : r === 'flight' ? ' sd-soft sd-hatch' : '') +
+            (changed ? ' sd-changed sd-anim-in' : '') + (refused ? ' fc-refused' : ''),
+          dataset: r === 'acked' ? { c: '1' } : r === 'flight' ? { c: '2' } : null,
+          translate: 'no', style: { gridColumn: String(i + 1) }
+        }, h('span', null, String(from)), h('span', { class: 'fc-to' }, '–' + to),
+          MARK[r] ? h('span', { class: 'fc-mark', 'aria-hidden': 'true' }, MARK[r]) : null));
+        var last = regions[regions.length - 1];
+        if (last && last.r === r) { last.end = i; last.to = to; } else regions.push({ r: r, start: i, end: i, from: from, to: to });
+      }
+      regions.forEach(function (g) {
+        var span = g.r === 'blocked' ? h('b', null, h('span', { translate: 'no' }, String(g.from)), ' ', t('andOn'))
+          : h('b', { translate: 'no' }, range(g.from, g.to));
+        cells.push(h('div', { class: 'fc-region', style: { gridColumn: (g.start + 1) + ' / ' + (g.end + 2) } }, t(REGION_KEY[g.r]), span));
+      });
+
+      var full = s.free === 0;
+      var facts = h('div', { class: 'fc-facts' },
+        h('div', { class: 'fc-box' }, h('small', null, t('factAck')), data(s.ack)),
+        h('div', { class: 'fc-box' }, h('small', null, t('factRight')), data(s.right)),
+        h('div', { class: 'fc-box' + (full ? ' fc-full' : '') }, h('small', null, t('factFlight')), data(s.inFlight + ' / ' + s.win)),
+        h('div', { class: 'fc-box' + (full ? ' fc-full' : '') }, h('small', null, t('factFree')), data(s.free)),
+        h('div', { class: 'fc-box' }, h('small', null, t('factSent')), data(s.sent), h('small', null, t.n('factWaits', s.waits))));
+
+      c.stage.replaceChildren(h('div', { class: 'fc' }, actors,
+        h('div', { class: 'fc-strip', style: { '--cells': String(CELLS) } }, cells), facts));
+    },
+
+    caption: function (c) {
+      var s = c.state, ev = s.event;
+      var v = { ack: data(s.ack), ackAgain: data(s.ack), ackStart: data(s.ack), last: data(s.ack - 1), win: data(s.win), right: data(s.right), flight: data(s.inFlight),
+        free: data(s.free) };
+      var out;
+      switch (ev.kind) {
+        case 'start': out = t.parts('captionStart', v); break;
+        case 'send': v.range = data(range(ev.from, ev.to)); out = t.parts(s.free ? 'captionSend' : 'captionSendFull', v); break;
+        case 'wait': v.range = data(range(ev.from, ev.to)); out = t.parts('captionWait', v); break;
+        default: v.moved = data(ev.moved); out = t.parts('captionAck', v);
+      }
+      // the book's figure: moment 1 is step 1, moment 2 is step 4, with its window of 1000 octets
+      if (s.win === 1000 && (c.n === 1 || c.n === 4)) out = out.concat([' ', t(c.n === 1 ? 'captionMoment1' : 'captionMoment2')]);
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
