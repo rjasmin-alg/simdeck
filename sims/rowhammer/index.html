@@ -1,829 +1,328 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Rowhammer: adopted from single-page-labs/rowhammer.html into the simdeck kit (docs/sim-ui.md). An explorer: the
+     params (activations per aggressor row in one refresh window, the weakest cell's threshold, single- or double-sided,
+     a mitigation) drive the DRAM bank live. The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="rowhammer">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rowhammer Attack — Interactive Demo</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rowhammer · simdeck</title>
+<meta name="description" content="Rowhammer: česte aktivacije jednog DRAM retka mijenjaju bitove u susjednim retcima; jednostrano, dvostrano i zaštite.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "rowhammer",
+  "class": "explorer",
+  "title": { "hr": "Rowhammer: smetnja među DRAM retcima", "en": "Rowhammer: disturbance between DRAM rows" },
+  "concept": { "hr": "Česte aktivacije jednog retka prazne ćelije susjednih redaka prije osvježavanja", "en": "Frequent activations of one row drain the cells next to it before a refresh" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
 <style>
-:root {
-  --bg: #0a0a0f;
-  --surface: #12121a;
-  --surface2: #1a1a26;
-  --border: #2a2a3a;
-  --text: #e0e0ec;
-  --text-dim: #7a7a90;
-  --accent: #ff3b3b;
-  --accent-glow: rgba(255, 59, 59, 0.3);
-  --safe: #2ecc71;
-  --warn: #f39c12;
-  --danger: #e74c3c;
-  --bit-on: #00e5ff;
-  --bit-off: #1a2a35;
-  --victim: #ff6b35;
-  --aggressor: #ff3b3b;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-body: 'IBM Plex Sans', sans-serif;
-  --font-heading: 'Space Grotesk', sans-serif;
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-body);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-.noise-overlay {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events: none; z-index: 1000;
-}
-
-header {
-  padding: 2rem 3rem;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255,59,59,0.05) 0%, transparent 100%);
-}
-
-header h1 {
-  font-family: var(--font-heading);
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, var(--accent), #ff8a3b);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-header .subtitle {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  margin-top: 0.3rem;
-  letter-spacing: 1px;
-}
-
-.container {
-  display: grid;
-  grid-template-columns: 320px 1fr 320px;
-  gap: 1.5rem;
-  padding: 1.5rem 2rem;
-  max-width: 1600px;
-  margin: 0 auto;
-}
-
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.2rem;
-}
-
-.panel h2 {
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-  color: var(--text);
-  display: flex; align-items: center; gap: 0.5rem;
-}
-
-.panel h2 .tag {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  background: var(--surface2);
-  padding: 2px 8px;
-  border-radius: 3px;
-  color: var(--text-dim);
-  letter-spacing: 1px;
-}
-
-/* DRAM Bank Visualization */
-.dram-bank {
+/* Page CSS: every selector starts with [data-sim="rowhammer"]; colours only from kit tokens. */
+[data-sim="rowhammer"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="rowhammer"] .sd-preset { line-height: 1.15; }
+[data-sim="rowhammer"] .rh {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 1rem 0;
-}
-
-.dram-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: all 0.3s ease;
-  position: relative;
-}
-
-.dram-row.aggressor {
-  background: rgba(255, 59, 59, 0.12);
-  border: 1px solid rgba(255, 59, 59, 0.3);
-  box-shadow: 0 0 15px rgba(255, 59, 59, 0.15);
-}
-
-.dram-row.victim {
-  background: rgba(255, 107, 53, 0.08);
-  border: 1px solid rgba(255, 107, 53, 0.2);
-}
-
-.dram-row.neutral {
-  background: var(--surface2);
-  border: 1px solid transparent;
-}
-
-.row-label {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  width: 70px;
-  flex-shrink: 0;
-}
-
-.row-label.aggressor-label { color: var(--aggressor); font-weight: 600; }
-.row-label.victim-label { color: var(--victim); font-weight: 600; }
-
-.cells {
-  display: flex;
-  gap: 2px;
-  flex: 1;
-}
-
-.cell {
-  width: 14px;
-  height: 18px;
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: 0.55rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  cursor: default;
-}
-
-.cell.bit-1 {
-  background: var(--bit-on);
-  color: #000;
-  font-weight: 600;
-}
-
-.cell.bit-0 {
-  background: var(--bit-off);
-  color: #3a5a6a;
-}
-
-.cell.flipped {
-  animation: bitFlip 0.5s ease;
-  background: var(--danger) !important;
-  color: #fff !important;
-  font-weight: 700;
-  box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
-}
-
-@keyframes bitFlip {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.8); background: #fff; }
-  100% { transform: scale(1); }
-}
-
-.cell.hammering {
-  animation: hammerPulse 0.1s ease infinite;
-}
-
-@keyframes hammerPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; box-shadow: 0 0 6px var(--aggressor); }
-}
-
-/* Activation counter */
-.activation-bar {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 4px;
-}
-
-.activation-bar label {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  width: 70px;
-}
-
-.bar-track {
-  flex: 1;
-  height: 6px;
-  background: var(--surface2);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.bar-fill {
+  gap: 1.2cqh;
   height: 100%;
-  border-radius: 3px;
-  transition: width 0.1s linear;
-  background: linear-gradient(90deg, var(--safe), var(--warn), var(--danger));
+  padding: 1.4cqh 1.4cqw;
+  font-size: var(--fs-md);
 }
+[data-sim="rowhammer"] .rh-data { font-family: var(--mono); white-space: nowrap; }
 
-.bar-count {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  width: 60px;
-  text-align: right;
-}
-
-/* Controls */
-.controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-}
-
-.control-group label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  display: block;
-  margin-bottom: 4px;
-  letter-spacing: 0.5px;
-}
-
-.control-group input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.control-group .value {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--accent);
-  float: right;
-}
-
-.btn {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  background: var(--surface2);
-  color: var(--text);
-}
-
-.btn:hover { border-color: var(--accent); color: var(--accent); }
-
-.btn.primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.btn.primary:hover {
-  background: #ff5555;
-  box-shadow: 0 0 20px var(--accent-glow);
-}
-
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Log */
-.log-panel {
-  max-height: 400px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-.log-entry {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(42,42,58,0.3);
-  line-height: 1.5;
-}
-
-.log-entry .ts { color: var(--text-dim); }
-.log-entry .msg { color: var(--text); }
-.log-entry.warn .msg { color: var(--warn); }
-.log-entry.danger .msg { color: var(--danger); font-weight: 600; }
-.log-entry.success .msg { color: var(--safe); }
-
-/* Info cards */
-.info-card {
-  background: var(--surface2);
-  border-radius: 6px;
-  padding: 1rem;
-  margin-bottom: 0.8rem;
-  border-left: 3px solid var(--accent);
-}
-
-.info-card h3 {
-  font-family: var(--font-heading);
-  font-size: 0.85rem;
-  margin-bottom: 0.4rem;
-}
-
-.info-card p {
-  font-size: 0.78rem;
-  line-height: 1.6;
-  color: var(--text-dim);
-}
-
-.info-card code {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  background: var(--bg);
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: var(--bit-on);
-}
-
-/* Stats */
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 0.8rem;
-}
-
-.stat-box {
-  background: var(--surface2);
-  border-radius: 6px;
-  padding: 0.6rem;
+/* top: phase indicator and stats */
+[data-sim="rowhammer"] .rh-top { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 2fr); gap: 1.4cqw; align-items: stretch; }
+[data-sim="rowhammer"] .rh-phases { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.3rem; align-content: center; }
+[data-sim="rowhammer"] .rh-phase {
+  padding: 0.3rem 0.2rem;
   text-align: center;
-}
-
-.stat-box .val {
-  font-family: var(--font-mono);
-  font-size: 1.2rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
-  color: var(--accent);
+  border: var(--line-w) dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
 }
-
-.stat-box .lbl {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  margin-top: 2px;
-  letter-spacing: 0.5px;
+[data-sim="rowhammer"] .rh-phase.rh-done { border-style: solid; border-color: var(--muted); color: var(--ink); }
+[data-sim="rowhammer"] .rh-phase.rh-done::before { content: '✓ '; }
+[data-sim="rowhammer"] .rh-phase.rh-now { border: max(3px, 0.2rem) solid var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="rowhammer"] .rh-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6cqw; }
+[data-sim="rowhammer"] .rh-stat {
+  padding: 0.2rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-top: 0.3rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
 }
+[data-sim="rowhammer"] .rh-val { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); color: var(--accent); }
+[data-sim="rowhammer"] .rh-lbl { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; line-height: 1.15; }
 
-/* Capacitor visualization */
-.capacitor-diagram {
-  display: flex;
+/* the bank */
+[data-sim="rowhammer"] .rh-bank { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 0.3cqh; }
+[data-sim="rowhammer"] .rh-head, [data-sim="rowhammer"] .rh-row {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr) 14rem;
+  gap: 1cqw;
   align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
-  margin: 1rem 0;
-  padding: 1rem;
-  background: var(--surface2);
-  border-radius: 8px;
 }
-
-.cap-cell {
-  width: 50px;
-  height: 70px;
-  border: 2px solid var(--border);
-  border-radius: 4px;
+[data-sim="rowhammer"] .rh-head { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="rowhammer"] .rh-head > :last-child { text-align: right; }
+[data-sim="rowhammer"] .rh-row {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 4.2rem;
+  padding: 0 0.4rem;
+  border-left: 0.4rem solid transparent;
+  border-radius: var(--radius-sm);
+}
+[data-sim="rowhammer"] .rh-row.rh-agg { border-left-color: var(--c2); background: color-mix(in srgb, var(--c2) 16%, transparent); }
+[data-sim="rowhammer"] .rh-row.rh-vic { border-left: 0.4rem dashed var(--c4); background: color-mix(in srgb, var(--c4) 10%, transparent); }
+[data-sim="rowhammer"] .rh-name { font-weight: 700; white-space: nowrap; font-size: var(--fs-sm); }
+[data-sim="rowhammer"] .rh-agg .rh-name { color: var(--c2); }
+[data-sim="rowhammer"] .rh-vic .rh-name { color: var(--c4); }
+[data-sim="rowhammer"] .rh-cells { display: flex; gap: 0.6cqw; height: 100%; padding: 0.3cqh 0; min-width: 0; }
+[data-sim="rowhammer"] .rh-word {
+  flex: 1 1 0;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0.2cqw;
   position: relative;
-  overflow: hidden;
+  border-radius: var(--radius-sm);
 }
-
-.cap-fill {
+[data-sim="rowhammer"] .rh-word[data-w]::after {
   position: absolute;
-  bottom: 0;
-  width: 100%;
-  background: var(--bit-on);
-  transition: height 0.3s ease;
+  right: -0.15rem;
+  top: -0.55rem;
+  z-index: 1;
+  padding: 0 0.2rem;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.1;
+  background: var(--bg);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="rowhammer"] .rh-word[data-w='corrected']::after { content: '✓'; color: var(--ok); }
+[data-sim="rowhammer"] .rh-word[data-w='detected']::after { content: '!'; color: var(--warn); }
+[data-sim="rowhammer"] .rh-word[data-w='beyond']::after,
+[data-sim="rowhammer"] .rh-word[data-w='wrong']::after { content: '✗'; color: var(--danger); }
+[data-sim="rowhammer"] .rh-cell {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  border: 2px solid var(--c1);
+  border-radius: 3px;
+}
+[data-sim="rowhammer"] .rh-cell.rh-one { background: var(--c1); color: var(--on-series); }
+[data-sim="rowhammer"] .rh-cell.rh-zero { border-style: dashed; border-color: var(--muted); color: var(--muted); background: var(--bg); }
+[data-sim="rowhammer"] .rh-cell.rh-flip { background: var(--hl); color: var(--on-hl); border: max(3px, 0.2rem) solid var(--ink); }
+
+/* disturbance bar: scaled to the strongest cell's threshold, the weakest cell's marked */
+[data-sim="rowhammer"] .rh-dist { display: grid; grid-template-columns: minmax(0, 1fr) 5.2rem; gap: 0.5rem; align-items: center; }
+[data-sim="rowhammer"] .rh-track { position: relative; height: 1.1rem; border: 2px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="rowhammer"] .rh-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c4); }
+[data-sim="rowhammer"] .rh-fill.rh-over { background: var(--danger); }
+[data-sim="rowhammer"] .rh-thr { position: absolute; top: -0.3rem; bottom: -0.3rem; border-left: 3px dashed var(--ink); }
+[data-sim="rowhammer"] .rh-num { text-align: right; font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm); }
+
+[data-sim="rowhammer"] .rh-key { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; font-size: var(--fs-sm); font-weight: 700; align-items: center; }
+[data-sim="rowhammer"] .rh-key .rh-sym { display: inline-block; padding: 0 0.25rem; margin-right: 0.3rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="rowhammer"] .rh-key .rh-thrkey { display: inline-block; width: 0; height: 1.1rem; margin: 0 0.5rem -0.2rem 0; border-left: 3px dashed var(--ink); }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-sim="rowhammer"]:not([data-motion='reduce']) .rh-fill { transition: width 0.25s ease; }
 }
 
-.cap-label {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  text-align: center;
-  margin-top: 4px;
-}
-
-.cap-arrow {
-  font-size: 1.5rem;
-  color: var(--danger);
-  animation: pulse 1s ease infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-/* Phase indicator */
-.phase-indicator {
-  display: flex;
-  gap: 4px;
-  margin: 1rem 0;
-}
-
-.phase-step {
-  flex: 1;
-  padding: 6px;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  border-radius: 4px;
-  background: var(--surface2);
-  color: var(--text-dim);
-  transition: all 0.3s ease;
-  letter-spacing: 0.5px;
-}
-
-.phase-step.active {
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 0 10px var(--accent-glow);
-}
-
-.phase-step.done {
-  background: rgba(46, 204, 113, 0.2);
-  color: var(--safe);
-}
-
-@media (max-width: 1200px) {
-  .container { grid-template-columns: 1fr; }
+/* Phone and portrait: the stage grows with its content; everything stacks, cells drop their digits. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="rowhammer"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="rowhammer"] .rh { height: auto; gap: 0.6rem; padding: 0.5rem 0.4rem; }
+  [data-sim="rowhammer"] .rh-top { grid-template-columns: 1fr; }
+  [data-sim="rowhammer"] .rh-stats { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  [data-sim="rowhammer"] .rh-bank { flex: none; gap: 0.4rem; }
+  [data-sim="rowhammer"] .rh-head { display: none; }
+  [data-sim="rowhammer"] .rh-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'name dist' 'cells cells'; flex: none; height: auto; max-height: none; padding: 0.2rem 0.3rem; gap: 0.2rem 0.5rem; }
+  [data-sim="rowhammer"] .rh-name { grid-area: name; }
+  [data-sim="rowhammer"] .rh-dist { grid-area: dist; grid-template-columns: minmax(0, 1fr) auto; }
+  [data-sim="rowhammer"] .rh-cells { grid-area: cells; height: 1.4rem; gap: 0.3rem; }
+  [data-sim="rowhammer"] .rh-cell span { display: none; }
 }
 </style>
 </head>
 <body>
-<div class="noise-overlay"></div>
-
-<header>
-  <h1>⚡ Rowhammer Attack Simulator</h1>
-  <div class="subtitle">CVE-2015-0565 // DRAM DISTURBANCE ERROR EXPLOITATION</div>
-</header>
-
-<div class="container">
-  <!-- Left Panel: Controls & Info -->
-  <div>
-    <div class="panel">
-      <h2>Attack Parameters <span class="tag">CONFIG</span></h2>
-      <div class="controls">
-        <div class="control-group">
-          <label>HAMMER FREQUENCY (activations/ms) <span class="value" id="freqVal">50</span></label>
-          <input type="range" id="freq" min="10" max="200" value="50" step="10">
-        </div>
-        <div class="control-group">
-          <label>FLIP THRESHOLD <span class="value" id="threshVal">5000</span></label>
-          <input type="range" id="thresh" min="1000" max="20000" value="5000" step="500">
-        </div>
-        <div class="control-group">
-          <label>DRAM ROWS VISIBLE <span class="value" id="rowsVal">9</span></label>
-          <input type="range" id="rows" min="5" max="15" value="9" step="2">
-        </div>
-        <div class="control-group">
-          <label>CELLS PER ROW <span class="value" id="colsVal">16</span></label>
-          <input type="range" id="cols" min="8" max="32" value="16" step="4">
-        </div>
-        <div style="display:flex;gap:8px;margin-top:0.5rem">
-          <button class="btn primary" id="btnHammer" onclick="startHammer()">▶ HAMMER</button>
-          <button class="btn" id="btnStop" onclick="stopHammer()" disabled>■ STOP</button>
-          <button class="btn" onclick="resetAll()">↻ RESET</button>
-        </div>
-      </div>
-
-      <div class="phase-indicator" id="phases">
-        <div class="phase-step" data-phase="0">IDLE</div>
-        <div class="phase-step" data-phase="1">ACTIVATE</div>
-        <div class="phase-step" data-phase="2">DISTURB</div>
-        <div class="phase-step" data-phase="3">FLIP</div>
-      </div>
-
-      <div class="stats-grid">
-        <div class="stat-box"><div class="val" id="statActivations">0</div><div class="lbl">ACTIVATIONS</div></div>
-        <div class="stat-box"><div class="val" id="statFlips">0</div><div class="lbl">BIT FLIPS</div></div>
-        <div class="stat-box"><div class="val" id="statRate">0</div><div class="lbl">ACT/SEC</div></div>
-        <div class="stat-box"><div class="val" id="statCharge">100%</div><div class="lbl">VICTIM CHARGE</div></div>
-      </div>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Rowhammer: smetnja među DRAM retcima</h1>
+      <p class="sd-subtitle"></p>
     </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
 
-    <div class="panel" style="margin-top:1rem">
-      <h2>Capacitor Charge Leakage</h2>
-      <div class="capacitor-diagram">
-        <div>
-          <div class="cap-cell"><div class="cap-fill" id="capAggressor" style="height:100%;background:var(--aggressor)"></div></div>
-          <div class="cap-label">Aggressor</div>
-        </div>
-        <div class="cap-arrow" id="leakArrow">⚡→</div>
-        <div>
-          <div class="cap-cell"><div class="cap-fill" id="capVictim" style="height:100%"></div></div>
-          <div class="cap-label">Victim</div>
-        </div>
-      </div>
-      <p style="font-size:0.72rem;color:var(--text-dim);line-height:1.5">
-        Each DRAM cell stores a bit as charge in a capacitor. Repeated activation of the <span style="color:var(--aggressor)">aggressor row</span>
-        causes electromagnetic coupling that leaks charge from <span style="color:var(--victim)">adjacent victim cells</span>,
-        eventually causing bit flips when charge drops below the sense amplifier threshold.
-      </p>
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
     </div>
-  </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
 
-  <!-- Center: DRAM Bank Visualization -->
-  <div>
-    <div class="panel" style="min-height:500px">
-      <h2>DRAM Bank 0 — Row Buffer <span class="tag">LIVE</span></h2>
-      <div id="dramBank"></div>
-      <div class="activation-bar" style="margin-top:1rem">
-        <label>ACTIVATION</label>
-        <div class="bar-track"><div class="bar-fill" id="actBar" style="width:0%"></div></div>
-        <div class="bar-count" id="actCount">0 / 5000</div>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-top:1rem">
-      <h2>Attack Event Log <span class="tag">TRACE</span></h2>
-      <div class="log-panel" id="logPanel"></div>
-    </div>
-  </div>
-
-  <!-- Right Panel: Explanation -->
-  <div>
-    <div class="panel">
-      <h2>How Rowhammer Works <span class="tag">THEORY</span></h2>
-
-      <div class="info-card">
-        <h3>1. DRAM Cell Structure</h3>
-        <p>Each bit is stored as charge in a ~20fF trench capacitor accessed via a single transistor.
-        At sub-30nm process nodes, inter-cell parasitic coupling capacitance becomes significant relative to storage capacitance.</p>
-      </div>
-
-      <div class="info-card" style="border-color: var(--warn)">
-        <h3>2. The Disturbance Mechanism</h3>
-        <p>When a wordline is activated, voltage swings on the aggressor row's cells (~1.2V) induce charge injection
-        into adjacent rows via parasitic capacitive coupling (cell-to-cell) and hot-carrier injection through
-        the substrate. Repeated <code>ACT→PRE</code> cycles accumulate this disturbance faster than the
-        normal 64ms refresh interval can restore it.</p>
-      </div>
-
-      <div class="info-card" style="border-color: var(--danger)">
-        <h3>3. Exploitation (double-sided)</h3>
-        <p>The attacker targets two aggressor rows flanking a victim row — a <strong>double-sided hammer</strong>.
-        Using <code>CLFLUSH</code> (x86) or uncacheable memory mappings to bypass the cache hierarchy, the attacker
-        forces repeated row activations in DRAM. By exploiting <code>/proc/self/pagemap</code> or huge pages to
-        determine physical addresses, the attacker can target specific victim pages — e.g., page table entries — to
-        gain write access to arbitrary physical memory.</p>
-      </div>
-
-      <div class="info-card" style="border-color: var(--safe)">
-        <h3>4. Mitigations</h3>
-        <p><strong>TRR (Target Row Refresh):</strong> DRAM controller tracks frequently activated rows and preemptively
-        refreshes neighbors. <strong>ECC:</strong> Detects single-bit errors (but multi-bit Rowhammer can defeat SECDED).
-        <strong>PARA:</strong> Probabilistic Adjacent Row Activation — each ACT has a small probability of refreshing neighbors.
-        <strong>pTRR/RFM:</strong> DDR5 introduces Refresh Management to explicitly handle hammer patterns.</p>
-      </div>
-
-      <div class="info-card" style="border-color: var(--bit-on)">
-        <h3>5. CVE Timeline</h3>
-        <p><strong>2014:</strong> Kim et al. publish original disturbance error paper.
-        <strong>2015:</strong> Google Project Zero demonstrates privilege escalation via Rowhammer (CVE-2015-0565).
-        <strong>2016:</strong> Flip Feng Shui — VM escape via Rowhammer + memory deduplication.
-        <strong>2018:</strong> Throwhammer — remote Rowhammer over RDMA.
-        <strong>2020:</strong> TRRespass — bypasses all deployed TRR implementations.
-        <strong>2021:</strong> SMASH — JavaScript-based Rowhammer in the browser.</p>
-      </div>
-    </div>
-  </div>
+  <footer class="sd-bar" data-sd-transport></footer>
 </div>
 
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-let state = {
-  rows: 9,
-  cols: 16,
-  freq: 50,
-  threshold: 5000,
-  activations: 0,
-  flips: 0,
-  running: false,
-  interval: null,
-  startTime: 0,
-  grid: [],
-  aggressorRows: [],
-  victimRows: [],
-  flipPositions: new Set()
-};
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
 
-function initGrid() {
-  const { rows, cols } = state;
-  state.grid = [];
-  state.flipPositions.clear();
-  const mid = Math.floor(rows / 2);
-  state.aggressorRows = [mid - 1, mid + 1];
-  state.victimRows = [mid];
-
-  for (let r = 0; r < rows; r++) {
-    const row = [];
-    for (let c = 0; c < cols; c++) {
-      row.push(Math.random() > 0.5 ? 1 : 0);
-    }
-    state.grid.push(row);
+  /** Thousands as digits in groups of three (data, not language). */
+  function count(k) {
+    var str = String(Math.round(k * 1000));
+    return str.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   }
-  renderBank();
-}
+  function data(text) { return h('span', { translate: 'no', class: 'rh-data' }, text); }
+  function bold(text) { return h('b', { translate: 'no' }, String(text)); }
 
-function renderBank() {
-  const bank = document.getElementById('dramBank');
-  bank.innerHTML = '';
-  const { rows, cols, grid, aggressorRows, victimRows } = state;
+  var PHASES = ['idle', 'activate', 'disturb', 'flip'];
+  var PHASE_KEY = { idle: 'phaseIdle', activate: 'phaseActivate', disturb: 'phaseDisturb', flip: 'phaseFlip' };
 
-  for (let r = 0; r < rows; r++) {
-    const rowDiv = document.createElement('div');
-    rowDiv.className = 'dram-row';
-    rowDiv.id = `row-${r}`;
-
-    const isAggressor = aggressorRows.includes(r);
-    const isVictim = victimRows.includes(r);
-
-    if (isAggressor) rowDiv.classList.add('aggressor');
-    else if (isVictim) rowDiv.classList.add('victim');
-    else rowDiv.classList.add('neutral');
-
-    const label = document.createElement('span');
-    label.className = 'row-label';
-    if (isAggressor) { label.className += ' aggressor-label'; label.textContent = `AGR Row ${r}`; }
-    else if (isVictim) { label.className += ' victim-label'; label.textContent = `VIC Row ${r}`; }
-    else { label.textContent = `Row ${r}`; }
-    rowDiv.appendChild(label);
-
-    const cellsDiv = document.createElement('div');
-    cellsDiv.className = 'cells';
-
-    for (let c = 0; c < cols; c++) {
-      const cell = document.createElement('div');
-      cell.className = `cell bit-${grid[r][c]}`;
-      cell.id = `cell-${r}-${c}`;
-      cell.textContent = grid[r][c];
-      if (state.flipPositions.has(`${r}-${c}`)) cell.classList.add('flipped');
-      cellsDiv.appendChild(cell);
-    }
-
-    rowDiv.appendChild(cellsDiv);
-    bank.appendChild(rowDiv);
+  function phases(st) {
+    var at = PHASES.indexOf(st.phase);
+    return h('div', { class: 'rh-phases' }, PHASES.map(function (ph, i) {
+      return h('div', { class: 'rh-phase' + (i === at ? ' rh-now' : i < at ? ' rh-done' : '') }, t(PHASE_KEY[ph]));
+    }));
   }
-}
 
-function setPhase(n) {
-  document.querySelectorAll('.phase-step').forEach(el => {
-    const p = parseInt(el.dataset.phase);
-    el.classList.remove('active', 'done');
-    if (p === n) el.classList.add('active');
-    else if (p < n) el.classList.add('done');
-  });
-}
+  function stat(value, label) {
+    return h('div', { class: 'rh-stat' }, h('div', { class: 'rh-val', translate: 'no' }, value), h('div', { class: 'rh-lbl' }, label));
+  }
 
-function addLog(msg, type = '') {
-  const panel = document.getElementById('logPanel');
-  const ts = new Date().toISOString().substr(11, 12);
-  const entry = document.createElement('div');
-  entry.className = `log-entry ${type}`;
-  entry.innerHTML = `<span class="ts">[${ts}]</span> <span class="msg">${msg}</span>`;
-  panel.prepend(entry);
-  if (panel.children.length > 200) panel.removeChild(panel.lastChild);
-}
-
-function startHammer() {
-  if (state.running) return;
-  state.running = true;
-  state.startTime = Date.now();
-  document.getElementById('btnHammer').disabled = true;
-  document.getElementById('btnStop').disabled = false;
-
-  addLog('Initiating double-sided Rowhammer...', 'warn');
-  addLog(`Aggressor rows: ${state.aggressorRows.join(', ')} | Victim row: ${state.victimRows[0]}`, '');
-  addLog(`Target threshold: ${state.threshold} activations`, '');
-  setPhase(1);
-
-  const tickMs = Math.max(5, Math.floor(1000 / state.freq));
-  const activationsPerTick = Math.max(1, Math.floor(state.freq / (1000 / tickMs)));
-
-  state.interval = setInterval(() => {
-    state.activations += activationsPerTick;
-
-    // Update activation bar
-    const pct = Math.min(100, (state.activations / state.threshold) * 100);
-    document.getElementById('actBar').style.width = pct + '%';
-    document.getElementById('actCount').textContent = `${state.activations} / ${state.threshold}`;
-
-    // Update stats
-    const elapsed = (Date.now() - state.startTime) / 1000;
-    document.getElementById('statActivations').textContent = state.activations.toLocaleString();
-    document.getElementById('statRate').textContent = Math.floor(state.activations / elapsed).toLocaleString();
-
-    // Charge visualization
-    const chargeLeft = Math.max(0, 100 - pct);
-    document.getElementById('statCharge').textContent = Math.floor(chargeLeft) + '%';
-    document.getElementById('capVictim').style.height = chargeLeft + '%';
-    document.getElementById('capAggressor').style.height = (50 + Math.random() * 50) + '%';
-
-    // Aggressor row hammering visual
-    state.aggressorRows.forEach(r => {
-      const rowEl = document.getElementById(`row-${r}`);
-      if (rowEl) {
-        rowEl.querySelectorAll('.cell').forEach(c => c.classList.add('hammering'));
-        setTimeout(() => rowEl.querySelectorAll('.cell').forEach(c => c.classList.remove('hammering')), 50);
-      }
-    });
-
-    // Phase update
-    if (pct < 40) setPhase(1);
-    else if (pct < 80) setPhase(2);
-
-    // Probabilistic bit flips as we approach and exceed threshold
-    if (state.activations > state.threshold * 0.6) {
-      const flipProb = Math.min(0.05, (state.activations - state.threshold * 0.6) / (state.threshold * 2));
-      state.victimRows.forEach(vr => {
-        for (let c = 0; c < state.cols; c++) {
-          if (!state.flipPositions.has(`${vr}-${c}`) && Math.random() < flipProb) {
-            // BIT FLIP!
-            state.grid[vr][c] = state.grid[vr][c] === 1 ? 0 : 1;
-            state.flipPositions.add(`${vr}-${c}`);
-            state.flips++;
-            document.getElementById('statFlips').textContent = state.flips;
-            setPhase(3);
-
-            const cell = document.getElementById(`cell-${vr}-${c}`);
-            if (cell) {
-              cell.className = `cell bit-${state.grid[vr][c]} flipped`;
-              cell.textContent = state.grid[vr][c];
-            }
-
-            const dir = state.grid[vr][c] === 0 ? '1→0' : '0→1';
-            addLog(`BIT FLIP at Row ${vr}, Col ${c}: ${dir} — charge depleted below V_th`, 'danger');
-
-            if (state.flips === 1) {
-              addLog('⚠ First disturbance error detected! PTE corruption possible.', 'danger');
-            }
-          }
-        }
+  function rowEl(row, p, st) {
+    var kind = row.kind === 'aggressor' ? ' rh-agg' : row.kind === 'victim' ? ' rh-vic' : '';
+    var name = t(row.kind === 'aggressor' ? 'rowAgg' : row.kind === 'victim' ? 'rowVic' : 'rowFar', { r: row.r });
+    var words = row.words.map(function (w, wi) {
+      var cells = row.cells.slice(wi * L.WORD, (wi + 1) * L.WORD).map(function (c) {
+        var cls = c.flipped ? 'rh-flip' : c.now ? 'rh-one' : 'rh-zero';
+        return h('div', { class: 'rh-cell ' + cls }, h('span', { translate: 'no' }, String(c.now)));
       });
+      return h('div', { class: 'rh-word', dataset: w.status === 'clean' ? {} : { w: w.status } }, cells);
+    });
+    var full = p.thresh * (1 + L.SPREAD);
+    var dist = h('div', { class: 'rh-dist' },
+      h('div', { class: 'rh-track', 'aria-hidden': 'true' },
+        h('div', { class: 'rh-fill' + (row.dist >= p.thresh ? ' rh-over' : ''), style: { width: Math.min(100, row.dist / full * 100) + '%' } }),
+        h('div', { class: 'rh-thr', style: { left: (100 / (1 + L.SPREAD)) + '%' } })),
+      h('span', { class: 'rh-num', translate: 'no' }, row.kind === 'aggressor' ? '—' : count(row.dist)));
+    return h('div', { class: 'rh-row' + kind }, h('span', { class: 'rh-name' }, name), h('div', { class: 'rh-cells' }, words), dist);
+  }
+
+  function key(p) {
+    var items = [h('span', null, h('span', { class: 'rh-thrkey', 'aria-hidden': 'true' }), t('threshMark') + ' · ', data(count(p.thresh)))];
+    if (p.mitigation === 'ecc') {
+      items.push(h('span', null, t('wordKey')));
+      items.push(h('span', null, h('span', { class: 'rh-sym' }, '✓'), t('wordCorrected')));
+      items.push(h('span', null, h('span', { class: 'rh-sym' }, '!'), t('wordDetected')));
+      items.push(h('span', null, h('span', { class: 'rh-sym' }, '✗'), t('wordBeyond')));
+    } else {
+      items.push(h('span', null, h('span', { class: 'rh-sym' }, '✗'), t('wordWrong')));
     }
+    return h('div', { class: 'rh-key' }, items);
+  }
 
-    // Periodic logging
-    if (state.activations % 500 === 0) {
-      addLog(`ACT count: ${state.activations} | charge drain: ${(100 - chargeLeft).toFixed(1)}%`);
-    }
-  }, tickMs);
-}
+  var labels = {
+    single: 'presetSingle', double: 'presetDouble', refresh2x: 'presetRefresh', trr: 'presetTrr',
+    'trr-weak': 'presetTrrWeak', ecc: 'presetEcc', 'ecc-heavy': 'presetEccHeavy'
+  };
 
-function stopHammer() {
-  if (!state.running) return;
-  state.running = false;
-  clearInterval(state.interval);
-  document.getElementById('btnHammer').disabled = false;
-  document.getElementById('btnStop').disabled = true;
-  addLog(`Hammer stopped. Total: ${state.activations} activations, ${state.flips} bit flips.`, 'success');
-  setPhase(0);
-}
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
 
-function resetAll() {
-  stopHammer();
-  state.activations = 0;
-  state.flips = 0;
-  document.getElementById('statActivations').textContent = '0';
-  document.getElementById('statFlips').textContent = '0';
-  document.getElementById('statRate').textContent = '0';
-  document.getElementById('statCharge').textContent = '100%';
-  document.getElementById('actBar').style.width = '0%';
-  document.getElementById('actCount').textContent = `0 / ${state.threshold}`;
-  document.getElementById('capVictim').style.height = '100%';
-  document.getElementById('logPanel').innerHTML = '';
-  addLog('System reset. DRAM bank reinitialized.', 'success');
-  initGrid();
-}
+    params: [
+      { key: 'acts', type: 'range', label: t('acts'), min: 0, max: 120, step: 5, format: count },
+      { key: 'thresh', type: 'range', label: t('thresh'), min: 4, max: 50, step: 1, format: count },
+      { key: 'pattern', type: 'choice', label: t('pattern'), options: [['single', t('patternSingle')], ['double', t('patternDouble')]] },
+      { key: 'mitigation', type: 'choice', label: t('mitigation'), options: [['none', t('mitNone')], ['refresh2x', t('mitRefresh')], ['trr', t('mitTrr')], ['ecc', t('mitEcc')]] },
+      { key: 'size', type: 'choice', label: t('size'), options: Object.keys(L.SIZES).map(function (k) { return [k, L.SIZES[k][0] + ' × ' + L.SIZES[k][1]]; }) }
+    ],
 
-// Slider bindings
-['freq','thresh','rows','cols'].forEach(id => {
-  const el = document.getElementById(id);
-  el.addEventListener('input', () => {
-    const map = { freq: 'freqVal', thresh: 'threshVal', rows: 'rowsVal', cols: 'colsVal' };
-    document.getElementById(map[id]).textContent = el.value;
-    state[id === 'thresh' ? 'threshold' : id] = parseInt(el.value);
-    if (id === 'rows' || id === 'cols') {
-      if (!state.running) {
-        resetAll();
-      }
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { c: 2, label: t('legendAggressor') },
+      { c: 4, shape: 'hollow', label: t('legendVictim') },
+      { c: 1, label: t('legendOne') },
+      { shape: 'hollow', label: t('legendZero') },
+      { shape: 'hl', label: t('legendFlipped') }
+    ],
+
+    render: function (c) {
+      var p = c.params, st = c.state;
+      var ratio = Math.round(st.maxDist / p.thresh * 100);
+      c.stage.replaceChildren(h('div', { class: 'rh' },
+        h('div', { class: 'rh-top' },
+          phases(st),
+          h('div', { class: 'rh-stats' },
+            stat(count(p.acts), t('statActs')),
+            stat(String(st.flips), t('statFlips')),
+            stat(count(st.rate / 1000), t('statRate')),
+            stat(ratio + ' %', t('statDist')))),
+        h('div', { class: 'rh-bank' },
+          h('div', { class: 'rh-head', 'aria-hidden': 'true' }, h('span'), h('span'), h('span', null, t('distHead'))),
+          st.rows.map(function (r) { return rowEl(r, p, st); })),
+        key(p)));
+    },
+
+    caption: function (c) {
+      var p = c.params, st = c.state;
+      if (p.acts === 0) return t('captionIdle');
+      var out = [];
+      var add = function (parts) { if (out.length) out.push(' '); out = out.concat(parts); };
+      var a = st.aggressors;
+      if (p.pattern === 'single') add(t.parts('captionSingle', { a: bold(a[0]), acts: bold(count(p.acts)), rate: bold(count(st.rate / 1000)) }));
+      else add(t.parts('captionDouble', { a: bold(a[0]), b: bold(a[1]), acts: bold(count(p.acts)), rate: bold(count(st.rate / 1000)) }));
+      if (p.mitigation === 'refresh2x') add(t.parts('captionRefresh', { per: bold(count(st.per)) }));
+      if (p.mitigation === 'trr') add(t.parts(p.acts > L.TRR_LIMIT ? 'captionTrr' : 'captionTrrIdle', { limit: bold(count(L.TRR_LIMIT)) }));
+      // The most disturbed row; ties go to the lowest row number.
+      var v = st.rows.reduce(function (b, r) { return r.dist > b.dist ? r : b; }, st.rows[0]);
+      add(t.parts('captionDist', { v: bold(v.r), d: bold(count(v.dist)) }));
+      if (!st.flips) { add([t('captionNone')]); return out; }
+      add([h('span', { class: 'sd-hl' }, t.n('captionFlips', st.flips))]);
+      if (st.words) add(t.parts('captionEcc', { c: bold(st.words.corrected), d: bold(st.words.detected), x: bold(st.words.beyond) }));
+      else add([t.n('captionWrong', st.wrongWords)]);
+      return out;
     }
   });
-});
-
-initGrid();
-addLog('DRAM bank initialized. Configure parameters and press HAMMER.', 'success');
+})();
 </script>
 </body>
 </html>
