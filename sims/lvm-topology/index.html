@@ -1,25 +1,439 @@
 <!doctype html>
-<html lang="hr">
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- LVM topology lab: adopted from single-page-labs/lvm-topology-lab-v2.html into the simdeck kit (docs/sim-ui.md).
+     An explorer: the params drive the drawing live; the model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="lvm-topology">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LVM: topologija</title>
+<title>LVM: topologija · simdeck</title>
+<meta name="description" content="LVM: diskovi postaju fizički volumeni, grupa volumena i logički volumeni; karta fizičkih ekstenata, RAID, LUKS i tanki bazen.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lvm-topology",
+  "class": "explorer",
+  "title": { "hr": "LVM: topologija", "en": "LVM: topology" },
+  "concept": { "hr": "Kako fizički volumeni, grupa volumena i logički volumeni dijele ekstente", "en": "How physical volumes, a volume group and logical volumes share extents" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
 <style>
-  /* Placeholder only: replaced when lvm-topology-lab is copied in from single-page-labs. */
-  body { font: 24px/1.4 system-ui, sans-serif; margin: 2rem; }
-  .row { display: flex; gap: 1rem; margin: 1rem 0; }
-  .box { border: 3px solid #333; padding: 0.5rem 1rem; }
+/* Page CSS: every selector starts with [data-sim="lvm-topology"]; colours only from kit tokens. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (shared request in NOTES.md, as in sims/amdahl). */
+[data-sim="lvm-topology"] .sd-ctl[hidden] { display: none; }
+/* Eight presets in two columns, so the panel fits at 1920×1080 without its own scroll. */
+[data-sim="lvm-topology"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.2rem; }
+[data-sim="lvm-topology"] .sd-preset { line-height: 1.15; }
+
+[data-sim="lvm-topology"] .lv {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.6cqh 1.4cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="lvm-topology"] .lv-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1cqw; }
+[data-sim="lvm-topology"] .lv-kpi {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-top: 0.3rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lvm-topology"] .lv-kpi b { font-family: var(--mono); font-size: 1.6rem; color: var(--accent); }
+[data-sim="lvm-topology"] .lv-kpi span { font-size: var(--fs-sm); color: var(--muted); line-height: 1.15; }
+[data-sim="lvm-topology"] .lv-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.4cqw; min-height: 0; }
+[data-sim="lvm-topology"] .lv-col { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; min-width: 0; }
+[data-sim="lvm-topology"] .lv-h { font-weight: 700; }
+
+/* the extent map */
+[data-sim="lvm-topology"] .lv-disks { display: grid; gap: 0.6rem; align-content: start; }
+[data-sim="lvm-topology"] .lv-disk {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.5rem 0.4rem;
+  min-width: 0;
+}
+[data-sim="lvm-topology"] .lv-disk-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+[data-sim="lvm-topology"] .lv-disk-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lvm-topology"] .lv-disk-sub, [data-sim="lvm-topology"] .lv-disk-foot { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lvm-topology"] .lv-badge {
+  margin-left: auto;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--c7);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+[data-sim="lvm-topology"] .lv-pes {
+  display: grid;
+  grid-template-columns: repeat(8, var(--sq, 2.4rem));
+  grid-auto-rows: var(--sq, 2.4rem);
+  gap: 3px;
+  margin: 0.3rem 0;
+}
+[data-sim="lvm-topology"] .lv-pe {
+  display: grid;
+  place-items: center;
+  border: var(--line-w) solid var(--sw, var(--line));
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+}
+[data-sim="lvm-topology"] .lv-pe.lv-free { border-style: dashed; border-color: var(--line); }
+[data-sim="lvm-topology"] .lv-pe.lv-parity { border-style: dashed; border-color: var(--ink); }
+/* The second LV is hatched, so the two LVs differ in grayscale too. */
+[data-sim="lvm-topology"] .lv-pe.sd-hatch { background-color: var(--sw); }
+
+/* the layers */
+[data-sim="lvm-topology"] .lv-topo { display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="lvm-topology"] .lv-layer { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 0.6rem; align-items: center; }
+[data-sim="lvm-topology"] .lv-layer-label { font-size: var(--fs-sm); color: var(--muted); text-align: right; line-height: 1.1; }
+[data-sim="lvm-topology"] .lv-layer-label::after { content: ' ↓'; }
+[data-sim="lvm-topology"] .lv-layer:last-child .lv-layer-label::after { content: ''; }
+[data-sim="lvm-topology"] .lv-nodes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+[data-sim="lvm-topology"] .lv-node {
+  padding: 0.15rem 0.5rem;
+  border: var(--line-w) solid var(--sw, var(--line));
+  border-left-width: 0.4rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--sw, var(--line)) 12%, var(--bg));
+  line-height: 1.15;
+  min-width: 0;
+}
+[data-sim="lvm-topology"] .lv-node b { display: block; font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="lvm-topology"] .lv-node small { display: block; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lvm-topology"] .lv-node.lv-member { border-style: dashed; }
+[data-sim="lvm-topology"] .lv-node.lv-failed { border-style: dashed; border-color: var(--danger); background: transparent; }
+[data-sim="lvm-topology"] .lv-node.lv-failed small { color: var(--danger); font-weight: 700; }
+
+/* the commands */
+[data-sim="lvm-topology"] .lv-cmds {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  overflow: auto;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-sim="lvm-topology"] .lv-cmds .lv-note { color: var(--muted); }
+[data-sim="lvm-topology"] .lv-cmds .lv-fail { color: var(--danger); font-weight: 700; text-decoration: line-through; }
+[data-sim="lvm-topology"] .lv-cmds .lv-fail-note { color: var(--danger); font-weight: 700; }
+
+/* legend swatches for the hatched second LV and the parity extent */
+[data-sim="lvm-topology"] .sd-legend li:nth-child(3) .sd-swatch {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em);
+}
+[data-sim="lvm-topology"] .sd-legend li:nth-child(4) .sd-swatch {
+  background: color-mix(in srgb, var(--c1) 16%, var(--bg));
+  border-style: dashed;
+  border-color: var(--ink);
+}
+
+/* Phone and portrait: the stage grows with its content instead of a fixed height, one column. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lvm-topology"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lvm-topology"] .lv { height: auto; gap: 0.8rem; padding: 0.8rem; }
+  [data-sim="lvm-topology"] .lv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-sim="lvm-topology"] .lv-kpi { flex-direction: column; gap: 0.1rem; }
+  [data-sim="lvm-topology"] .lv-body { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lvm-topology"] .lv-layer { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  [data-sim="lvm-topology"] .lv-layer-label { text-align: left; }
+  [data-sim="lvm-topology"] .lv-cmds { flex: none; max-height: none; }
+}
 </style>
 </head>
 <body>
-<a id="back" href="../../index.html">← simdeck</a>
-<h1 id="title"></h1>
-<div class="row"><div class="box">LV root</div><div class="box">LV home</div></div>
-<div class="row"><div class="box" style="flex:1">VG data</div></div>
-<div class="row"><div class="box">PV /dev/sda2</div><div class="box">PV /dev/sdb</div></div>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">LVM: topologija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-  const meta = JSON.parse(document.getElementById('simdeck-meta')?.textContent ?? '{}');
-  document.getElementById('title').textContent = meta.title ?? document.title;
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  function num(x, d) { var s = x.toFixed(d); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  function data(tag, text, cls) { return h(tag, { translate: 'no', class: cls || null }, text); }
+  var typeKey = { linear: 'typeLinear', striped: 'typeStriped', raid1: 'typeRaid1', raid5: 'typeRaid5', thinpool: 'typeThinpool' };
+  var errKey = { noSpace: 'errNoSpace', needPVs: 'errNeedPVs', rowSpace: 'errRowSpace', raid1Space: 'errRaid1Space' };
+
+  var labels = {
+    basic: 'presetBasic', span: 'presetSpan', striped: 'presetStriped', raid1: 'presetRaid1', raid5: 'presetRaid5',
+    'luks-below': 'presetLuksBelow', 'luks-above': 'presetLuksAbove', thin: 'presetThin'
+  };
+
+  var params = [
+    { key: 'layout', type: 'select', label: t('layout'),
+      options: [['linear', t('layoutLinear')], ['striped', t('layoutStriped')], ['raid1', t('layoutRaid1')], ['raid5', t('layoutRaid5')], ['thin', t('layoutThin')]] },
+    { key: 'crypt', type: 'choice', label: t('crypt'),
+      options: [['none', t('cryptNone')], ['below', t('cryptBelow')], ['above', t('cryptAbove')]] },
+    { key: 'disks', type: 'range', label: t('disks'), min: 1, max: L.MAX_DISKS, step: 1 },
+    { key: 'diskPE', type: 'range', label: t('diskPE'), min: 8, max: 48, step: 4 },
+    { key: 'size', type: 'range', label: t('size'), min: 1, max: 96, step: 1 },
+    { key: 'width', type: 'range', label: t('width'), step: 1, max: L.MAX_DISKS,
+      min: function (p) { return L.minWidth(p.layout); }, visible: function (p) { return L.usesWidth(p.layout); } },
+    { key: 'lv2', type: 'range', label: t('lv2'), min: 0, max: 32, step: 1,
+      visible: function (p) { return p.crypt === 'above' && p.layout !== 'thin'; } },
+    { key: 'virt', type: 'range', label: t('virt'), min: 4, max: 96, step: 4, visible: function (p) { return p.layout === 'thin'; } }
+  ];
+
+  // ── the extent map ──
+  function peCell(st, d, e, i) {
+    var title, text = '', cls = 'lv-pe', attrs = {};
+    if (!e) {
+      cls += ' lv-free';
+      title = t('peTitleFree', { disk: d.name, pe: i });
+    } else {
+      var lv = st.lvs[e.lv];
+      attrs.dataset = { c: String(e.lv + 1) };
+      if (e.role === 'parity') {
+        cls += ' lv-parity sd-soft';
+        text = 'P';
+        title = t('peTitleParity', { disk: d.name, pe: i, lv: lv.name, row: e.row });
+      } else {
+        cls += ' sd-fill' + (e.lv === 1 ? ' sd-hatch' : '');
+        text = String(e.le);
+        title = e.role === 'mirror'
+          ? t('peTitleCopy', { disk: d.name, pe: i, lv: lv.name, le: e.le, copy: e.copy + 1 })
+          : t('peTitleData', { disk: d.name, pe: i, lv: lv.name, le: e.le });
+      }
+    }
+    attrs['class'] = cls;
+    attrs.title = title;
+    attrs.translate = 'no';
+    return h('span', attrs, text);
+  }
+
+  function diskCard(st, d) {
+    var used = d.extents.filter(Boolean).length;
+    return h('div', { class: 'lv-disk' },
+      h('div', { class: 'lv-disk-head' },
+        data('span', d.name, 'lv-disk-name'),
+        h('span', { class: 'lv-disk-sub' }, t('diskSub', { n: d.extents.length, mib: d.extents.length * st.peMiB })),
+        d.luks ? h('span', { class: 'lv-badge' }, 'LUKS') : null),
+      h('div', { class: 'lv-pes' }, d.extents.map(function (e, i) { return peCell(st, d, e, i); })),
+      h('div', { class: 'lv-disk-foot' }, t.parts('inVg', { vg: data('span', st.vg), used: used, n: d.extents.length })));
+  }
+
+  // ── the layers ──
+  function node(c, title, sub, cls) {
+    return h('div', { class: 'lv-node' + (cls ? ' ' + cls : ''), dataset: c ? { c: String(c) } : {} },
+      data('b', title), sub != null ? h('small', null, sub) : null);
+  }
+  function layer(label, nodes) {
+    if (!nodes.length) return null;
+    return h('div', { class: 'lv-layer' }, h('div', { class: 'lv-layer-label' }, label), h('div', { class: 'lv-nodes' }, nodes));
+  }
+
+  function topology(st, p) {
+    var mib = function (n) { return n * st.peMiB; };
+    var layers = [];
+    layers.push(layer(t('layerDisks'), st.disks.map(function (d) { return node(8, d.name, mib(d.extents.length) + ' MiB'); })));
+    if (st.crypt === 'below') {
+      layers.push(layer(t('layerLuks'), st.disks.map(function (d) { return node(7, d.luks, t('nodeLuks', { disk: d.name })); })));
+    }
+    layers.push(layer(t('layerPV'), st.disks.map(function (d) { return node(3, d.pv, t('nodePV', { n: d.extents.length })); })));
+    layers.push(layer(t('layerVG'), [node(4, st.vg, t('nodeVG', { pvs: st.disks.length, free: st.free }))]));
+    // RAID member devices (the original's "Show RAID member devices", now always on for striped and RAID LVs).
+    {
+      var ms = [];
+      st.lvs.forEach(function (lv) {
+        (lv.members || []).forEach(function (m) {
+          var sub = lv.type === 'striped' ? t('memberStripe', { i: m.lane + 1 })
+            : lv.type === 'raid1' ? t('memberRaid1', { i: m.lane + 1 }) : t('memberRaid5', { i: m.lane + 1 });
+          ms.push(node(lv.index + 1, m.name, sub, 'lv-member'));
+        });
+      });
+      layers.push(layer(t('layerMembers'), ms));
+    }
+    var lvNodes = st.lvs.map(function (lv) {
+      var path = '/dev/' + st.vg + '/' + lv.name;
+      if (!lv.ok) return node(null, path, t('nodeFailed'), 'lv-failed');
+      return node(lv.index + 1, path, t('nodeLV', { type: t(typeKey[lv.type]), le: lv.size, mib: mib(lv.size) }));
+    }).concat(st.thin.map(function (th) {
+      // Thin LVs take no PEs now: dashed, in a colour no extent on the map uses.
+      return node(5, '/dev/' + st.vg + '/' + th.name, t('nodeThin', { type: t('typeThin'), le: th.virt }), 'lv-member');
+    }));
+    layers.push(layer(t('layerLV'), lvNodes));
+
+    var fs = [], luks = [];
+    st.lvs.forEach(function (lv) {
+      if (!lv.ok || lv.type === 'thinpool') return;
+      if (lv.crypt) luks.push(node(7, '/dev/mapper/crypt_' + lv.name, t('nodeLuksAbove', { lv: lv.name })));
+      fs.push(node(6, lv.crypt ? '/dev/mapper/crypt_' + lv.name : '/dev/' + st.vg + '/' + lv.name, t('fsExample')));
+    });
+    st.thin.forEach(function (th) {
+      if (th.crypt) luks.push(node(7, '/dev/mapper/crypt_' + th.name, t('nodeLuksAbove', { lv: th.name })));
+      fs.push(node(6, th.crypt ? '/dev/mapper/crypt_' + th.name : '/dev/' + st.vg + '/' + th.name, t('fsExample')));
+    });
+    layers.push(layer(t('layerLuks'), luks));
+    layers.push(layer(t('layerFS'), fs));
+    return h('div', { class: 'lv-topo' }, layers);
+  }
+
+  function commands(st) {
+    var lines = [h('span', { class: 'lv-note' }, t('cmdNote')), '\n'];
+    st.commands.forEach(function (c) {
+      if (c.failed) lines.push(h('span', { class: 'lv-fail' }, c.cmd), '  ', h('span', { class: 'lv-fail-note' }, t('cmdFailed')), '\n');
+      else lines.push(c.cmd, '\n');
+    });
+    return h('pre', { class: 'lv-cmds', translate: 'no' }, lines);
+  }
+
+  /** Columns of disk cards and square size for the extent map: the layout with the largest squares that fits the
+      column, never under the text size. */
+  function mapLayout(stage, st) {
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var narrow = window.matchMedia('(max-width: 900px), (max-aspect-ratio: 1/1)').matches;
+    var n = st.disks.length;
+    var peRows = Math.ceil(st.disks[0].extents.length / 8);
+    var colW = narrow ? stage.clientWidth - 2 * rem : stage.clientWidth * 0.49 - 1.6 * rem;
+    var colH = stage.clientHeight - 7 * rem;
+    var best = { cols: 1, sq: 0 };
+    for (var cols = 1; cols <= n; cols++) {
+      var cardRows = Math.ceil(n / cols);
+      var byW = (colW - (cols - 1) * 0.6 * rem) / cols / 8 - 1.3 * rem / 8 - 4;
+      var byH = narrow ? Infinity : ((colH - (cardRows - 1) * 0.6 * rem) / cardRows - 3.9 * rem) / peRows - 3;
+      var sq = Math.min(byW, byH, 3.2 * rem);
+      if (sq > best.sq + 0.5) best = { cols: cols, sq: sq };
+    }
+    best.sq = Math.max(1.25 * rem, best.sq);
+    return best;
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: params,
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'hollow', label: t('legendFree') },
+      { c: 1, label: t('legendLv') },
+      { c: 2, label: t('legendLv2') },
+      { c: 1, label: t('legendParity') }
+    ],
+
+    render: function (c) {
+      var st = c.state, p = c.params;
+      var kpi = function (v, label) { return h('div', { class: 'lv-kpi' }, h('b', null, v), h('span', null, label)); };
+      var ml = mapLayout(c.stage, st);
+      var map = h('div', { class: 'lv-disks', style: { gridTemplateColumns: 'repeat(' + ml.cols + ', max-content)' } },
+        st.disks.map(function (d) { return diskCard(st, d); }));
+      var root = h('div', { class: 'lv' },
+        h('div', { class: 'lv-kpis' },
+          kpi(String(st.raw), t('kpiRaw')),
+          kpi(String(st.allocated), t('kpiAlloc')),
+          kpi(String(st.logical), t('kpiLogical')),
+          kpi(st.ratio == null ? t('none') : num(st.ratio, 2) + '×', t('kpiRatio'))),
+        h('div', { class: 'lv-body' },
+          h('div', { class: 'lv-col' }, h('div', { class: 'lv-h' }, t('mapTitle')), map),
+          h('div', { class: 'lv-col' },
+            h('div', { class: 'lv-h' }, t('topoTitle')), topology(st, p),
+            h('div', { class: 'lv-h' }, t('cmdTitle')), commands(st))));
+      c.stage.replaceChildren(root);
+      root.style.setProperty('--sq', ml.sq + 'px');
+    },
+
+    caption: function (c) {
+      var st = c.state;
+      var b = function (x) { return h('b', null, x); };
+      var main = st.lvs[st.lvs.length - 1];
+      var out = [];
+      var add = function (parts) { if (out.length) out.push(' '); out = out.concat(parts); };
+      if (st.layout === 'linear') add(t.parts('ruleLinear'));
+      else if (st.layout === 'striped') add(t.parts('ruleStriped', { n: main.width }));
+      else if (st.layout === 'raid1') add(t.parts('ruleRaid1', { n: main.width }));
+      else if (st.layout === 'raid5') add(t.parts('ruleRaid5', { n: main.width, d: main.width - 1 }));
+      else add(t.parts('ruleThin'));
+      st.lvs.forEach(function (lv) {
+        var name = data('span', lv.name);
+        if (!lv.ok) {
+          add(t.parts(errKey[lv.error.code], { lv: name, need: lv.error.need, free: lv.error.free, n: lv.error.n, rows: lv.error.rows, size: lv.error.size }));
+          add(t.parts('notCreated'));
+          return;
+        }
+        add(t.parts('resultLv', { lv: name, le: b(t.n('le', lv.size)), pe: b(t.n('pe', lv.pe)) }));
+        if (lv.size !== lv.requested) add(t.parts('rounded', { from: lv.requested, to: lv.size }));
+      });
+      if (st.thin.length) {
+        var virt = st.thin.reduce(function (a, x) { return a + x.virt; }, 0);
+        add(t.parts(virt > main.size ? 'resultThinOver' : 'resultThinFits', { le: b(t.n('le', virt)) }));
+      }
+      if (st.crypt === 'below') add(t.parts('luksBelow'));
+      if (st.crypt === 'above') {
+        var enc = st.lvs.filter(function (x) { return x.crypt && x.ok; }).map(function (x) { return x.name; })
+          .concat(st.thin.filter(function (x) { return x.crypt; }).map(function (x) { return x.name; }));
+        if (enc.length) add(t.parts('luksAbove', { lv: data('span', enc.join(', ')) }));
+      }
+      add(t.parts('freeInVg', { pe: t.n('pe', st.free) }));
+      return out;
+    }
+  });
+
+  // The extent map's squares are sized from the stage, so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var last = '';
+    new ResizeObserver(function (es) {
+      var r = es[0].contentRect, key = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (key !== last) { last = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
 </script>
 </body>
 </html>
