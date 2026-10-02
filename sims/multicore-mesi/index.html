@@ -1,333 +1,470 @@
 <!doctype html>
-<html lang="hr">
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Homogeneous multicore (LV13): adopted from single-page-labs/homogeni-multicore-simulator.html into the simdeck kit
+     (docs/sim-ui.md). An explorer with three views (Amdahl, MESI, false sharing): the params drive the drawing live;
+     the model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="multicore-mesi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Homogeni multicore simulator (LV13)</title>
+<title>Homogeni višejezgreni procesor · simdeck</title>
+<meta name="description" content="Amdahlov zakon, koherencija predmemorija (MESI) i lažno dijeljenje na višejezgrenom procesoru.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "multicore-mesi",
+  "class": "explorer",
+  "title": { "hr": "Homogeni višejezgreni procesor", "en": "Homogeneous multicore" },
+  "concept": { "hr": "Ubrzanje na više jezgri, koherencija predmemorija (MESI) i lažno dijeljenje", "en": "Speedup on many cores, cache coherence (MESI) and false sharing" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
 <style>
-    /* --------------------------------------------------------------------
-       Ove su stranice izvorno bile isjecci iz Claude artifacta i koristile
-       njegove dizajn-tokene (--color-text-primary, --border-radius-lg, ...).
-       Izvan artifacta ti tokeni ne postoje, pa je stranica bila neobojena i
-       necitljiva. Ovdje su definirani da lab radi kao samostalna stranica.
-       Vrijednosti prate paletu materijali.online. Ne brisati.
-       -------------------------------------------------------------------- */
-    :root {
-      --color-text-primary:        #16212b;
-      --color-text-secondary:      #5c6b78;
-      --color-text-tertiary:       #8b98a3;
-      --color-text-danger:         #b3261e;
-      --color-text-warning:        #8a5a00;
-      --color-background-primary:  #ffffff;
-      --color-background-secondary: #f2ede1;
-      --color-background-warning:  #fdf4e0;
-      --color-border-secondary:    #c9bfa8;
-      --color-border-tertiary:     #ddd3bd;
-      --color-border-warning:      #e3c680;
-      --border-radius-md:          6px;
-      --border-radius-lg:          10px;
-      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-                   "Liberation Mono", monospace;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --color-text-primary:        #e9e6dd;
-        --color-text-secondary:      #93a1ac;
-        --color-text-tertiary:       #6f7d88;
-        --color-text-danger:         #f2a2a0;
-        --color-text-warning:        #e7a93c;
-        --color-background-primary:  #10161d;
-        --color-background-secondary: #171f28;
-        --color-background-warning:  #2a2113;
-        --color-border-secondary:    #3b444e;
-        --color-border-tertiary:     #2c333c;
-        --color-border-warning:      #6b5320;
-      }
-    }
-    html { color-scheme: light dark; }
-    body {
-      margin: 0 auto;
-      max-width: 60rem;
-      padding: 1.25rem 1.5rem 3rem;
-      background: var(--color-background-primary);
-      color: var(--color-text-primary);
-      font-family: "Helvetica Neue", Arial, sans-serif;
-      line-height: 1.5;
-    }
-    .lab-natrag {
-      display: inline-block; margin-bottom: 1rem;
-      font-size: .82rem; letter-spacing: .04em; text-transform: uppercase;
-      color: var(--color-text-secondary); text-decoration: none;
-    }
-    .lab-natrag:hover { color: var(--color-text-primary); }
+/* Page CSS: every selector starts with [data-sim="multicore-mesi"]; colours only from kit tokens. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (shared request filed by amdahl). */
+[data-sim="multicore-mesi"] .sd-ctl[hidden] { display: none; }
+[data-sim="multicore-mesi"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="multicore-mesi"] .sd-preset { line-height: 1.15; }
+
+/* MESI states: a colour, and the letter written out; I is dashed and hollow, so it differs in grayscale too. */
+[data-sim="multicore-mesi"] [data-st="M"] { --sw: var(--c2); }
+[data-sim="multicore-mesi"] [data-st="E"] { --sw: var(--c1); }
+[data-sim="multicore-mesi"] [data-st="S"] { --sw: var(--c3); }
+[data-sim="multicore-mesi"] [data-st="I"] { --sw: var(--c8); }
+[data-sim="multicore-mesi"] .mc-tag {
+  display: inline-grid; place-items: center; min-width: 1.9em; padding: 0 0.3em;
+  border: var(--line-w) solid var(--sw); border-radius: var(--radius-sm);
+  background: var(--sw); color: var(--on-series); font-weight: 700; font-family: var(--mono);
+}
+[data-sim="multicore-mesi"] .mc-tag[data-st="I"] { background: transparent; color: var(--ink); border-style: dashed; }
+
+[data-sim="multicore-mesi"] .mc { height: 100%; padding: 2.4cqh 2cqw; font-size: 1.1rem; display: grid; gap: 2cqh; min-height: 0; }
+[data-sim="multicore-mesi"] .mc-h { font-size: var(--fs-md); font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5cqw; }
+[data-sim="multicore-mesi"] .mc-meter {
+  padding: 0.5rem 1rem; border: var(--line-w) solid var(--line); border-top: 0.35rem solid var(--accent);
+  border-radius: var(--radius-sm); background: var(--panel);
+}
+[data-sim="multicore-mesi"] .mc-meter-label { font-weight: 700; color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-meter-value { font-size: max(2rem, min(6cqh, 3.2cqw)); font-weight: 700; line-height: 1.1; color: var(--accent); font-family: var(--mono); }
+[data-sim="multicore-mesi"] .mc-meter-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-wall { padding: 0.4rem 1rem; border-left: 0.35rem solid var(--warn); background: var(--panel); }
+
+/* Amdahl */
+[data-sim="multicore-mesi"] .mc-amdahl { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+[data-sim="multicore-mesi"] .mc-formula { font-family: var(--mono); }
+[data-sim="multicore-mesi"] .mc-formula b { color: var(--accent); }
+[data-sim="multicore-mesi"] .mc-plot { position: relative; min-height: 12rem; }
+[data-sim="multicore-mesi"] .mc-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="multicore-mesi"] .mc-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--muted); }
+[data-sim="multicore-mesi"] .mc-plot .mc-grid { stroke: var(--line); stroke-width: 1; opacity: 0.45; }
+[data-sim="multicore-mesi"] .mc-plot .mc-axis { stroke: var(--ink); stroke-width: var(--line-w); }
+[data-sim="multicore-mesi"] .mc-curve { fill: none; stroke-width: 4; stroke-linejoin: round; }
+[data-sim="multicore-mesi"] .mc-curve[data-line="speedup"] { stroke: var(--c1); }
+[data-sim="multicore-mesi"] .mc-curve[data-line="max"] { stroke: var(--c2); stroke-width: 2.5; stroke-dasharray: 12 6; }
+[data-sim="multicore-mesi"] .mc-mark { fill: var(--c1); }
+[data-sim="multicore-mesi"] .mc-dot { fill: var(--hl); stroke: var(--ink); stroke-width: 3; }
+[data-sim="multicore-mesi"] .mc-plot .mc-dot-label { fill: var(--ink); font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-plot .mc-max-label { fill: var(--c2); font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-keys { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="multicore-mesi"] .mc-keys li { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="multicore-mesi"] .mc-keys svg { width: 2.2em; height: 0.8em; overflow: visible; }
+
+/* MESI */
+[data-sim="multicore-mesi"] .mc-mesi { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 2cqw; }
+[data-sim="multicore-mesi"] .mc-col { display: flex; flex-direction: column; gap: 1.6cqh; min-height: 0; min-width: 0; }
+[data-sim="multicore-mesi"] .mc-core {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.3rem 1rem; align-items: center;
+  padding: 0.7rem 1rem; border: 0.2rem solid var(--sw); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--sw) 10%, var(--bg));
+}
+[data-sim="multicore-mesi"] .mc-core[data-st="I"] { border-style: dashed; background: var(--bg); }
+[data-sim="multicore-mesi"] .mc-core-name { font-weight: 700; font-size: 1.2rem; }
+[data-sim="multicore-mesi"] .mc-core .mc-tag { grid-row: 1 / 3; grid-column: 2; font-size: 2.4rem; }
+[data-sim="multicore-mesi"] .mc-core-desc { color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-core-desc b { color: var(--ink); }
+[data-sim="multicore-mesi"] .mc-val { font-family: var(--mono); }
+[data-sim="multicore-mesi"] .mc-btns { grid-column: 1 / 3; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+[data-sim="multicore-mesi"] .mc-btns .sd-btn { flex: 1; }
+[data-sim="multicore-mesi"] .mc-ram {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; padding: 0.6rem 1rem;
+  border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); background: var(--panel);
+}
+[data-sim="multicore-mesi"] .mc-ram b { font-size: 1.2rem; }
+[data-sim="multicore-mesi"] .mc-ram[data-stale] { border-style: solid; border-color: var(--warn); }
+[data-sim="multicore-mesi"] .mc-ram[data-stale] .mc-ram-note { color: var(--warn); font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-log { flex: 1; min-height: 0; overflow: hidden; margin: 0; padding: 0.5rem 1rem; list-style: none;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 0.35rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="multicore-mesi"] .mc-log li { font-size: var(--fs-md); line-height: 1.25; }
+[data-sim="multicore-mesi"] .mc-log li.mc-last { font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-chg { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
+[data-sim="multicore-mesi"] .mc-stat { padding: 0.3rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); text-align: center; background: var(--panel); }
+[data-sim="multicore-mesi"] .mc-stat b { display: block; font-family: var(--mono); font-size: 1.6rem; color: var(--accent); }
+[data-sim="multicore-mesi"] .mc-stat span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-note { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multicore-mesi"] .mc-note[data-warn] { color: var(--warn); font-weight: 700; }
+
+/* False sharing */
+[data-sim="multicore-mesi"] .mc-fs { grid-template-columns: minmax(0, 1fr); gap: 3cqh; align-content: start; }
+[data-sim="multicore-mesi"] .mc-lines { display: flex; flex-direction: column; gap: 2cqh; }
+[data-sim="multicore-mesi"] .mc-line { padding: 0.7rem 1rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="multicore-mesi"] .mc-line-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.5rem; margin-bottom: 0.6rem; font-size: 1.15rem; }
+[data-sim="multicore-mesi"] .mc-line-state { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="multicore-mesi"] .mc-line-state .mc-tag { font-size: 1.4rem; }
+[data-sim="multicore-mesi"] .mc-cells { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 0.3rem; }
+[data-sim="multicore-mesi"] .mc-cell {
+  display: grid; place-items: center; height: max(2.4rem, 8cqh); overflow: hidden; font-size: 1.4rem;
+  border: var(--line-w) dashed var(--line); border-radius: 0.2rem; font-family: var(--mono); font-weight: 700;
+}
+[data-sim="multicore-mesi"] .mc-cell[data-t] { border-style: solid; border-color: var(--sw); background: var(--sw); color: var(--on-series); }
+[data-sim="multicore-mesi"] .mc-cell[data-t="0"], [data-sim="multicore-mesi"] .mc-cellkey[data-t="0"] { --sw: var(--c4); }
+[data-sim="multicore-mesi"] .mc-cell[data-t="1"], [data-sim="multicore-mesi"] .mc-cellkey[data-t="1"] { --sw: var(--c6); }
+[data-sim="multicore-mesi"] .mc-cellkeys { display: flex; flex-wrap: wrap; gap: 0.3rem 1.2rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="multicore-mesi"] .mc-cellkeys li { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="multicore-mesi"] .mc-cellkey { display: inline-block; width: 1.1em; height: 1.1em; border: var(--line-w) solid var(--sw); border-radius: 0.2rem; background: var(--sw); }
+[data-sim="multicore-mesi"] .mc-cellkey[data-t="1"], [data-sim="multicore-mesi"] .mc-cell[data-t="1"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--bg) 35%, transparent) 0.35em 0.5em);
+}
+[data-sim="multicore-mesi"] .mc-cellkey[data-last] { background: var(--hl); border-color: var(--ink); }
+[data-sim="multicore-mesi"] .mc-fs-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2cqw; align-items: start; }
+[data-sim="multicore-mesi"] .mc-fs-side > div { display: flex; flex-direction: column; gap: 1.2cqh; }
+[data-sim="multicore-mesi"] .mc-fs-side .mc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+[data-sim="multicore-mesi"] .mc-fs-last { padding: 0.4rem 1rem; border-left: 0.35rem solid var(--line); background: var(--panel); }
+[data-sim="multicore-mesi"] .mc-bar { height: 1.2rem; border: var(--line-w) solid var(--ink); border-radius: 999px; overflow: hidden; background: var(--bg); }
+[data-sim="multicore-mesi"] .mc-bar span { display: block; height: 100%; background: var(--ok); }
+[data-sim="multicore-mesi"] .mc-verdict { font-weight: 700; }
+[data-sim="multicore-mesi"] .mc-verdict[data-bad] { color: var(--danger); }
+[data-sim="multicore-mesi"] .mc-verdict[data-good] { color: var(--ok); }
+
+/* Phone and portrait: the stage grows with its content, one column. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="multicore-mesi"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="multicore-mesi"] .mc { height: auto; gap: 0.8rem; padding: 0.8rem; font-size: 1rem; }
+  [data-sim="multicore-mesi"] .mc-meters, [data-sim="multicore-mesi"] .mc-mesi, [data-sim="multicore-mesi"] .mc-fs { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="multicore-mesi"] .mc-meter-value { font-size: 1.8rem; }
+  [data-sim="multicore-mesi"] .mc-plot { height: 18rem; }
+  [data-sim="multicore-mesi"] .mc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-sim="multicore-mesi"] .mc-cells { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  [data-sim="multicore-mesi"] .mc-log { flex: none; }
+  [data-sim="multicore-mesi"] .mc-fs-side { grid-template-columns: minmax(0, 1fr); }
+}
 </style>
 </head>
 <body>
-<a class="lab-natrag" href="./">&larr; Svi materijali</a>
-
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',system-ui,sans-serif;color:var(--color-text-primary)}
-h2{font-size:18px;font-weight:500;margin-bottom:1rem;color:var(--color-text-primary)}
-h3{font-size:16px;font-weight:500;margin-bottom:.5rem;color:var(--color-text-primary)}
-.header-bar{background:#1F3864;color:#fff;padding:.75rem 1.25rem;border-radius:var(--border-radius-lg) var(--border-radius-lg) 0 0;font-size:14px;font-weight:500;margin-bottom:1.5rem}
-.section{margin-bottom:2rem;padding-bottom:2rem;border-bottom:.5px solid var(--color-border-tertiary)}
-label{font-size:13px;color:var(--color-text-secondary);display:block;margin-bottom:.25rem}
-input[type=range]{width:100%;accent-color:#1F3864}
-.grid-2{display:grid;grid-template-columns:260px 1fr;gap:1.25rem;align-items:start}
-.stat-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin-top:.75rem}
-.stat{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:.6rem .75rem;text-align:center}
-.stat .v{font-size:1.3rem;font-weight:500;color:#1F3864}
-.stat .l{font-size:.68rem;color:var(--color-text-secondary);margin-top:.1rem}
-.wall{background:var(--color-background-warning);border:1px solid var(--color-border-warning);border-radius:var(--border-radius-md);padding:.5rem .75rem;font-size:.78rem;color:var(--color-text-warning);margin-top:.5rem}
-.chart-wrap{height:220px;position:relative}
-.mesi-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-.core-box{border:1.5px solid var(--color-border-secondary);border-radius:var(--border-radius-lg);padding:.9rem}
-.core-box.M{border-color:#E96B0C;background:rgba(233,107,12,.06)}
-.core-box.E{border-color:#185FA5;background:rgba(24,95,165,.06)}
-.core-box.S{border-color:#2E7D32;background:rgba(46,125,50,.06)}
-.core-box.I{border-color:var(--color-border-secondary)}
-.state-tag{display:inline-block;padding:.15rem .5rem;border-radius:5px;font-size:.75rem;font-weight:700;color:#fff}
-.state-tag.M{background:#E96B0C}.state-tag.E{background:#185FA5}.state-tag.S{background:#2E7D32}.state-tag.I{background:#888}
-.btn-row{display:flex;gap:.4rem;margin-top:.6rem}
-.mbtn{flex:1;padding:.4rem;border:1px solid #1F3864;background:var(--color-background-primary);color:#1F3864;border-radius:var(--border-radius-md);cursor:pointer;font-size:.75rem;font-weight:500}
-.mbtn:hover{background:#1F3864;color:#fff}
-.mbtn.w{border-color:#E96B0C;color:#E96B0C}.mbtn.w:hover{background:#E96B0C;color:#fff}
-.log{background:#1a1a2e;color:#a8e6cf;border-radius:var(--border-radius-md);padding:.75rem;font-family:monospace;font-size:.72rem;height:130px;overflow-y:auto;line-height:1.6;margin-top:.75rem}
-.log .miss{color:#ffcc80}.log .inval{color:#ff8a80}.log .wb{color:#80d8ff}
-.mini-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.4rem;margin-top:.5rem}
-.mini-stat{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:.4rem;text-align:center;font-size:.7rem}
-.mini-stat .v{font-size:1rem;font-weight:500;color:#1F3864}
-.ram-box{border:1.5px dashed #1F3864;border-radius:var(--border-radius-md);padding:.6rem;text-align:center;background:var(--color-background-secondary);margin-top:.75rem;font-size:.8rem}
-.reset-b{width:100%;margin-top:.5rem;padding:.4rem;background:var(--color-background-secondary);border:1px solid #1F3864;color:#1F3864;border-radius:var(--border-radius-md);cursor:pointer;font-size:.75rem}
-.fs-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-.mem-vis{background:#1a1a2e;border-radius:var(--border-radius-lg);padding:1rem;font-family:monospace}
-.mem-vis h4{color:#fff;font-size:.75rem;margin-bottom:.5rem;font-weight:400}
-.cl{border-radius:5px;padding:.3rem .5rem;margin-bottom:.3rem;display:flex;align-items:center;gap:.4rem;transition:all .3s}
-.cl.n{background:#2a2a3e}.cl.a0{background:#1a3a5c}.cl.a1{background:#3a1a1a}.cl.cf{background:#3a2a0a;animation:fl .4s}
-@keyframes fl{0%{background:#7a4a0a}100%{background:#3a2a0a}}
-.cl .ll{color:#aaa;font-size:.68rem;min-width:60px}
-.cells{display:flex;gap:2px;flex:1}
-.c{width:16px;height:16px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:.5rem;font-weight:700;color:#fff;transition:background .3s}
-.c.t0{background:#2E75B6}.c.t1{background:#E96B0C}.c.em{background:#2a2a3e}.c.iv{background:#E24B4A;animation:pu .3s}
-@keyframes pu{0%{transform:scale(1.4)}100%{transform:scale(1)}}
-.toggle-row{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem}
-.tog{width:40px;height:22px;background:#ccc;border-radius:11px;cursor:pointer;position:relative;transition:background .3s;flex-shrink:0}
-.tog.on{background:#2E7D32}
-.tog::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .3s}
-.tog.on::after{left:21px}
-.fs-stats{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin:.5rem 0}
-.fs-stat{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:.4rem;text-align:center}
-.fs-stat .v{font-size:1rem;font-weight:500}
-.fs-stat .v.bad{color:#E24B4A}.fs-stat .v.good{color:#2E7D32}
-.fs-stat .l{font-size:.65rem;color:var(--color-text-secondary)}
-.anim-row{display:flex;gap:.4rem;margin-bottom:.5rem}
-.abtn{flex:1;padding:.4rem;border:1px solid #1F3864;background:var(--color-background-primary);color:#1F3864;border-radius:var(--border-radius-md);cursor:pointer;font-size:.75rem;font-weight:500}
-.abtn:hover,.abtn.on{background:#1F3864;color:#fff}
-.spd-bar{background:var(--color-background-secondary);border-radius:999px;height:10px;overflow:hidden;margin:.25rem 0}
-.spd-fill{height:100%;border-radius:999px;transition:width .5s}
-</style>
-
-<div class="header-bar">LV13 — Homogeni multicore: SMP i skalabilnost — Interaktivni simulator</div>
-
-<div class="section">
-<h2>1. Amdahl's Law</h2>
-<div class="grid-2">
-  <div>
-    <label>Paralelizabilan udio: <strong id="pv">80%</strong></label>
-    <input type="range" id="ps" min="1" max="99" value="80">
-    <label style="margin-top:.6rem">Broj jezgri: <strong id="nv">8</strong></label>
-    <input type="range" id="ns" min="1" max="64" value="8">
-    <div class="stat-row">
-      <div class="stat"><div class="v" id="sv">3.33×</div><div class="l">Speedup</div></div>
-      <div class="stat"><div class="v" id="ev">42%</div><div class="l">Efikasnost</div></div>
-      <div class="stat"><div class="v" id="mv">5.0×</div><div class="l">Max (∞ jezgri)</div></div>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Homogeni višejezgreni procesor</h1>
+      <p class="sd-subtitle"></p>
     </div>
-    <div class="wall" id="wv">Sekvencijalni zid: 20% koda ne može biti paralelan → max speedup 5.0× bez obzira na broj jezgri.</div>
-  </div>
-  <div class="chart-wrap"><canvas id="ac"></canvas></div>
-</div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
 </div>
 
-<div class="section">
-<h2>2. MESI protokol</h2>
-<div class="mesi-grid">
-  <div>
-    <div class="core-box I" id="cb0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem">
-        <span style="font-size:.85rem;font-weight:500">Core 0</span>
-        <span class="state-tag I" id="st0">I</span>
-      </div>
-      <div style="font-size:.7rem;color:var(--color-text-secondary);margin-bottom:.5rem" id="sm0">Invalid — nema kopije</div>
-      <div class="btn-row">
-        <button class="mbtn" onclick="mr(0)">↓ Čitaj</button>
-        <button class="mbtn w" onclick="mw(0)">✎ Piši</button>
-      </div>
-    </div>
-    <div class="core-box I" id="cb1" style="margin-top:.75rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem">
-        <span style="font-size:.85rem;font-weight:500">Core 1</span>
-        <span class="state-tag I" id="st1">I</span>
-      </div>
-      <div style="font-size:.7rem;color:var(--color-text-secondary);margin-bottom:.5rem" id="sm1">Invalid — nema kopije</div>
-      <div class="btn-row">
-        <button class="mbtn" onclick="mr(1)">↓ Čitaj</button>
-        <button class="mbtn w" onclick="mw(1)">✎ Piši</button>
-      </div>
-    </div>
-    <div class="ram-box"><strong>RAM:</strong> X = <span id="rv">0</span></div>
-  </div>
-  <div>
-    <div class="log" id="ml"><span style="color:#666">— Klikni Čitaj ili Piši —</span></div>
-    <div class="mini-stats">
-      <div class="mini-stat"><div class="v" id="mh">0</div>Hits</div>
-      <div class="mini-stat"><div class="v" id="mi">0</div>Invalidacije</div>
-      <div class="mini-stat"><div class="v" id="mw2">0</div>Writebacki</div>
-    </div>
-    <button class="reset-b" onclick="mreset()">↺ Reset MESI</button>
-  </div>
-</div>
-</div>
-
-<div>
-<h2>3. False sharing</h2>
-<div class="fs-grid">
-  <div class="mem-vis">
-    <h4>Memorijski raspored (cache linija = 64 B = 16 int-a)</h4>
-    <div id="mg"></div>
-    <div style="display:flex;gap:.75rem;font-size:.65rem;color:#aaa;margin-top:.35rem">
-      <span style="display:flex;align-items:center;gap:.25rem"><span style="width:10px;height:10px;background:#2E75B6;border-radius:2px;display:inline-block"></span>T0 counter[0]</span>
-      <span style="display:flex;align-items:center;gap:.25rem"><span style="width:10px;height:10px;background:#E96B0C;border-radius:2px;display:inline-block"></span>T1 counter[1]</span>
-      <span style="display:flex;align-items:center;gap:.25rem"><span style="width:10px;height:10px;background:#E24B4A;border-radius:2px;display:inline-block"></span>Invalidacija</span>
-    </div>
-  </div>
-  <div>
-    <div class="toggle-row">
-      <div class="tog" id="pt" onclick="tp()"></div>
-      <span style="font-size:.82rem;font-weight:500">Padding (64B po counteru)</span>
-    </div>
-    <div class="anim-row">
-      <button class="abtn" id="pb" onclick="ta()">▶ Pokreni</button>
-      <button class="abtn" onclick="fr()">↺ Reset</button>
-    </div>
-    <div class="fs-stats">
-      <div class="fs-stat"><div class="v bad" id="fi">0</div><div class="l">Invalidacije</div></div>
-      <div class="fs-stat"><div class="v" id="fo">0</div><div class="l">Operacije</div></div>
-    </div>
-    <div style="font-size:.75rem;color:var(--color-text-secondary);margin-bottom:.25rem" id="spd-lbl">Relativna brzina</div>
-    <div class="spd-bar"><div class="spd-fill" id="sf" style="width:0%"></div></div>
-    <div style="font-size:.7rem;color:var(--color-text-secondary);margin-top:.2rem" id="spd-note"></div>
-  </div>
-</div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-var ac2;
-function calcSp(p,n){return 1/((1-p)+p/n);}
-function updA(){
-  var p=document.getElementById('ps').value/100,n=parseInt(document.getElementById('ns').value);
-  var sp=calcSp(p,n),eff=sp/n*100,mx=1/(1-p);
-  document.getElementById('pv').textContent=Math.round(p*100)+'%';
-  document.getElementById('nv').textContent=n;
-  document.getElementById('sv').textContent=sp.toFixed(2)+'×';
-  document.getElementById('ev').textContent=Math.round(eff)+'%';
-  document.getElementById('mv').textContent=mx>999?'∞':mx.toFixed(1)+'×';
-  document.getElementById('wv').textContent='Sekvencijalni zid: '+Math.round((1-p)*100)+'% koda nije paralelan → max speedup '+(mx>999?'∞':mx.toFixed(1)+'×')+' bez obzira na broj jezgri.';
-  if(ac2){
-    var ns=[1,2,4,8,16,32,64];
-    ac2.data.datasets[0].data=ns.map(function(x){return parseFloat(calcSp(p,x).toFixed(2));});
-    ac2.data.datasets[1].data=ns.map(function(){return parseFloat((mx>999?64:mx).toFixed(1));});
-    ac2.update('none');
-  }
-}
-window.addEventListener('load',function(){
-  var ctx=document.getElementById('ac').getContext('2d');
-  var ns=[1,2,4,8,16,32,64];
-  ac2=new Chart(ctx,{type:'line',data:{labels:ns,datasets:[
-    {label:'Stvarni speedup',data:[],borderColor:'#1F3864',backgroundColor:'rgba(31,56,100,.1)',tension:.4,pointRadius:3,fill:true},
-    {label:'Max (Amdahl)',data:[],borderColor:'#E96B0C',borderDash:[5,3],pointRadius:0}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{font:{size:10},boxWidth:12}}},scales:{x:{title:{display:true,text:'Jezgri',font:{size:10}}},y:{title:{display:true,text:'Speedup',font:{size:10}},beginAtZero:false,min:1}}}});
-  updA();
-});
-document.getElementById('ps').addEventListener('input',updA);
-document.getElementById('ns').addEventListener('input',updA);
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var sim = null;
 
-var ms=['I','I'],rv=0,mh=0,mi=0,mwb=0;
-var mn={I:'Invalid — nema kopije',E:'Exclusive — jedina kopija',S:'Shared — dijeljena kopija',M:'Modified — RAM zastarjeo'};
-function updM(){
-  for(var c=0;c<2;c++){
-    var s=ms[c];
-    document.getElementById('cb'+c).className='core-box '+s;
-    var t=document.getElementById('st'+c);t.className='state-tag '+s;t.textContent=s;
-    document.getElementById('sm'+c).textContent=mn[s];
+  // Numbers in the page's language: a decimal comma in Croatian.
+  function num(x, d) { var s = x.toFixed(d); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  function times(x, d) { return num(x, d == null ? 2 : d) + '×'; }
+  function pct(x) { return t('pct', { v: num(x * 100, 0) }); }
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) e.append(arguments[i]);
+    return e;
   }
-  document.getElementById('rv').textContent=rv;
-  document.getElementById('mh').textContent=mh;
-  document.getElementById('mi').textContent=mi;
-  document.getElementById('mw2').textContent=mwb;
-}
-function mlog(msg,cls){
-  var l=document.getElementById('ml');
-  if(l.querySelector('span[style]'))l.innerHTML='';
-  var d=document.createElement('div');d.className=cls||'';d.textContent=msg;l.appendChild(d);l.scrollTop=l.scrollHeight;
-}
-function mr(c){
-  var o=1-c,s=ms[c],os=ms[o];
-  if(s!=='I'){mh++;mlog('Core '+c+' čita → HIT ('+s+') ✓');return updM();}
-  if(os==='M'){mwb++;mi++;mlog('Core '+o+' writeback → RAM','wb');mlog('Core '+o+': M→S','inval');mlog('Core '+c+': I→S','miss');ms[o]='S';ms[c]='S';}
-  else if(os==='E'){mlog('Core '+o+': E→S','inval');mlog('Core '+c+': I→S','miss');ms[o]='S';ms[c]='S';}
-  else if(os==='S'){mlog('Core '+c+': I→S','miss');ms[c]='S';}
-  else{mlog('Core '+c+': I→E (jedini)','miss');ms[c]='E';}
-  updM();
-}
-function mw(c){
-  var o=1-c,s=ms[c],os=ms[o];rv++;
-  if(s==='M'){mh++;mlog('Core '+c+' piše X='+rv+' → HIT (M) ✓');return updM();}
-  if(s==='E'){mh++;mlog('Core '+c+': E→M (upgrade)');ms[c]='M';return updM();}
-  if(os==='M'||os==='S'||os==='E'){mi++;mlog('Core '+o+': '+os+'→I (invalidacija!)','inval');}
-  if(os==='M'){mwb++;mlog('Core '+o+' writeback','wb');}
-  ms[c]='M';ms[o]='I';
-  mlog('Core '+c+': '+(s==='I'?'I':'S')+'→M','miss');
-  updM();
-}
-function mreset(){ms=['I','I'];rv=0;mh=0;mi=0;mwb=0;document.getElementById('ml').innerHTML='<span style="color:#666">— Klikni Čitaj ili Piši —</span>';updM();}
-updM();
+  function keepFocus(e) { e.preventDefault(); }
+  function data(x) { return h('span', { translate: 'no' }, x); }
+  function tag(st) { return h('span', { class: 'mc-tag', dataset: { st: st }, translate: 'no' }, st); }
 
-var fsr=false,fst=null,fsp=false,fsi=0,fso=0;
-function bmg(){
-  var g=document.getElementById('mg');g.innerHTML='';
-  if(!fsp){
-    var l=document.createElement('div');l.className='cl n';l.id='cl0';
-    l.innerHTML='<span class="ll">Linija 0</span><div class="cells" id="cc0"></div>';g.appendChild(l);
-    var cc=document.getElementById('cc0');
-    for(var i=0;i<16;i++){var c=document.createElement('div');c.className='c '+(i===0?'t0':i===1?'t1':'em');c.id='c0'+i;c.textContent=i===0?'c0':i===1?'c1':'';cc.appendChild(c);}
-    var n=document.createElement('div');n.style='color:#ff8a80;font-size:.65rem;margin-top:.25rem';n.textContent='⚠ counter[0] i counter[1] na ISTOJ liniji!';g.appendChild(n);
-  } else {
-    for(var li=0;li<2;li++){
-      var l2=document.createElement('div');l2.className='cl n';l2.id='cl'+li;
-      l2.innerHTML='<span class="ll">Linija '+li+'</span><div class="cells" id="cc'+li+'"></div>';g.appendChild(l2);
-      var cc2=document.getElementById('cc'+li);
-      for(var i2=0;i2<16;i2++){var c2=document.createElement('div');c2.className='c '+(i2===0?(li===0?'t0':'t1'):'em');c2.id='c'+li+'_'+i2;c2.textContent=i2===0?(li===0?'c0':'c1'):'';cc2.appendChild(c2);}
+  var labels = {
+    'amdahl-80': 'presetAmdahl80', 'amdahl-95': 'presetAmdahl95', 'mesi-empty': 'presetMesiEmpty', 'mesi-share': 'presetMesiShare',
+    'mesi-invalidate': 'presetMesiInval', 'mesi-pingpong': 'presetMesiPing', 'fs-shared': 'presetFsShared', 'fs-padded': 'presetFsPadded'
+  };
+
+  // ── params ──
+  var inView = function (v) { return function (p) { return p.view === v; }; };
+  var params = [
+    { key: 'view', type: 'choice', label: t('view'),
+      options: [['amdahl', t('viewAmdahl')], ['mesi', t('viewMesi')], ['fs', t('viewFs')]] },
+    { key: 'p', type: 'range', label: t('parallel'), min: 1, max: 99, step: 1, visible: inView('amdahl'),
+      format: function (v) { return t('pct', { v: v }); } },
+    { key: 'n', type: 'range', label: t('cores'), min: 1, max: 64, step: 1, visible: inView('amdahl') },
+    { key: 'writes', type: 'range', label: t('writes'), hint: t('writesHint'), min: 0, max: L.MAX_WRITES, step: 1, visible: inView('fs') },
+    { key: 'pad', type: 'toggle', label: t('pad'), hint: t('padHint'), visible: inView('fs') }
+  ];
+  // The MESI operations are params too (never shown), so a reload, a link and the language switch keep them.
+  for (var i = 1; i <= L.MAX_OPS; i++) {
+    params.push({ key: 'o' + i, type: 'choice', label: t('opSlot', { i: i }), visible: function () { return false; },
+      options: [['', '0']].concat(L.OPS.map(function (o) { return [o, o]; })) });
+  }
+
+  function doOp(op) {
+    var p = sim.params;
+    var patch = L.pushOp(p, op);
+    if (!patch) { if (p.view !== 'mesi') sim.set({ view: 'mesi' }); return; }
+    if (p.view !== 'mesi') patch.view = 'mesi';
+    sim.set(patch);
+  }
+  function undo() { var patch = L.popOp(sim.params); if (patch) sim.set(patch); }
+
+  // ── Amdahl view ──
+  function meter(label, value, sub) {
+    return h('div', { class: 'mc-meter' }, h('div', { class: 'mc-meter-label' }, label), h('div', { class: 'mc-meter-value' }, value),
+      sub ? h('div', { class: 'mc-meter-sub' }, sub) : null);
+  }
+  function lineKey(line, label) {
+    return h('li', null, s('svg', { 'aria-hidden': 'true', viewBox: '0 0 40 10' }, s('line', { class: 'mc-curve', 'data-line': line, x1: 0, y1: 5, x2: 40, y2: 5 })), label);
+  }
+  function niceStep(max) {
+    var steps = [1, 2, 5, 10, 20];
+    for (var k = 0; k < steps.length; k++) if (max / steps[k] <= 6) return steps[k];
+    return 20;
+  }
+  function drawChart(box, a) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var pad = { l: 2.6 * rem, r: 1 * rem, t: 0.8 * rem, b: 2.6 * rem };
+    var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    var MAXN = 64;
+    var yMax = Math.max(2, Math.ceil(Math.min(a.ceiling, MAXN) * 1.15));
+    var X = function (n) { return pad.l + (Math.log2(n) / Math.log2(MAXN)) * cw; };
+    var Y = function (v) { return pad.t + ch * (1 - v / yMax); };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('chartTitle') });
+    var step = niceStep(yMax);
+    for (var v = 0; v <= yMax + 1e-9; v += step) {
+      svg.append(s('line', { class: 'mc-grid', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) }));
+      svg.append(s('text', { x: pad.l - 0.4 * rem, y: Y(v) + 0.35 * rem, 'text-anchor': 'end' }, String(v)));
     }
-    var n2=document.createElement('div');n2.style='color:#a8e6cf;font-size:.65rem;margin-top:.25rem';n2.textContent='✓ Svaki counter na zasebnoj liniji!';g.appendChild(n2);
+    L.CHART_N.forEach(function (n) {
+      svg.append(s('line', { class: 'mc-grid', x1: X(n), x2: X(n), y1: pad.t, y2: pad.t + ch }));
+      svg.append(s('text', { x: X(n), y: pad.t + ch + 1.2 * rem, 'text-anchor': 'middle' }, String(n)));
+    });
+    svg.append(s('line', { class: 'mc-axis', x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ch }));
+    svg.append(s('line', { class: 'mc-axis', x1: pad.l, x2: pad.l + cw, y1: pad.t + ch, y2: pad.t + ch }));
+    svg.append(s('text', { x: pad.l + cw / 2, y: H - 0.2 * rem, 'text-anchor': 'middle' }, t('axisN')));
+    if (a.ceiling <= yMax) {
+      svg.append(s('line', { class: 'mc-curve', 'data-line': 'max', x1: pad.l, x2: pad.l + cw, y1: Y(a.ceiling), y2: Y(a.ceiling) }));
+      svg.append(s('text', { class: 'mc-max-label', x: pad.l + 0.5 * rem, y: Y(a.ceiling) - 0.4 * rem }, times(a.ceiling, 1)));
+    }
+    var pts = [];
+    for (var k = 0; k <= 120; k++) { var nn = Math.pow(MAXN, k / 120); pts.push(X(nn).toFixed(1) + ',' + Y(L.speedup(a.p, nn)).toFixed(1)); }
+    svg.append(s('polyline', { class: 'mc-curve', 'data-line': 'speedup', points: pts.join(' ') }));
+    a.curve.forEach(function (c) { svg.append(s('circle', { class: 'mc-mark', cx: X(c.n), cy: Y(c.s), r: 0.25 * rem })); });
+    // Where the current settings sit; the label goes below and right of the rising curve, above and left of it near the edge.
+    var nx = X(a.n), ny = Y(a.speedup);
+    var right = nx > pad.l + cw * 0.7;
+    svg.append(s('circle', { class: 'mc-dot', cx: nx, cy: ny, r: 0.45 * rem }));
+    svg.append(s('text', { class: 'mc-dot-label', x: nx + (right ? -0.8 : 0.8) * rem, y: ny + (right ? -0.8 : 1.5) * rem, 'text-anchor': right ? 'end' : 'start' },
+      t('point', { v: times(a.speedup) })));
+    box.replaceChildren(svg);
   }
-}
-function fsStep(){
-  fso++;var t=fso%2===1?0:1;
-  if(!fsp){fsi++;var l=document.getElementById('cl0');l.className='cl cf';setTimeout(function(){if(l)l.className='cl '+(t===0?'a0':'a1');},400);var cx=document.getElementById('c0'+(t===0?0:1));if(cx){cx.classList.add('iv');setTimeout(function(){if(cx)cx.classList.remove('iv');},300);}}
-  else{var l2=document.getElementById('cl'+t);if(l2){l2.className='cl '+(t===0?'a0':'a1');setTimeout(function(){if(l2)l2.className='cl n';},300);}}
-  document.getElementById('fi').textContent=fsi;document.getElementById('fo').textContent=fso;
-  var eff=fsp?95:Math.max(10,100-Math.round(fsi/Math.max(1,fso)*90));
-  document.getElementById('sf').style.width=eff+'%';document.getElementById('sf').style.background=fsp?'#2E7D32':'#E24B4A';
-  document.getElementById('spd-lbl').textContent=fsp?'Brzina: optimalno (~95%)':'Brzina: usporeno (~'+eff+'%)';
-  document.getElementById('spd-note').textContent=fsp?'Nema false sharinga':'Svaki upis invalidira drugu jezgru';
-}
-function ta(){fsr=!fsr;var b=document.getElementById('pb');if(fsr){b.textContent='⏸ Pauziraj';b.classList.add('on');fst=setInterval(fsStep,500);}else{b.textContent='▶ Pokreni';b.classList.remove('on');clearInterval(fst);}}
-function tp(){fsp=!fsp;var t=document.getElementById('pt');t.classList.toggle('on',fsp);bmg();}
-function fr(){if(fsr)ta();fsi=0;fso=0;document.getElementById('fi').textContent=0;document.getElementById('fo').textContent=0;document.getElementById('sf').style.width='0%';document.getElementById('spd-lbl').textContent='Relativna brzina';document.getElementById('spd-note').textContent='';bmg();}
-bmg();
-</script>
+  var plot = null;
+  function amdahlStage(a) {
+    plot = h('div', { class: 'mc-plot' });
+    return h('div', { class: 'mc mc-amdahl' },
+      h('div', { class: 'mc-meters' },
+        meter(t('meterSpeedup'), times(a.speedup), null),
+        meter(t('meterEff'), pct(a.efficiency), t('meterEffSub')),
+        meter(t('meterMax'), times(a.ceiling, 1), t('meterMaxSub'))),
+      h('div', { class: 'mc-wall' }, t('wall', { serial: pct(a.serial), max: times(a.ceiling, 1) })),
+      h('div', { class: 'mc-h' }, t('chartTitle')),
+      plot,
+      h('ul', { class: 'mc-keys' }, lineKey('speedup', t('lineSpeedup')), lineKey('max', t('lineMax'))));
+  }
 
+  // ── MESI view ──
+  function eventText(ev) {
+    var key = ev.op === 'r' ? (ev.outcome === 'hit' ? 'evReadHit' : 'evReadMiss')
+      : ev.outcome === 'hit' ? 'evWriteHit' : ev.outcome === 'upgrade' ? 'evWriteUpgrade' : 'evWriteMiss';
+    return t(key, { c: ev.core, v: ev.value });
+  }
+  function eventChanges(ev) {
+    return ev.changes.map(function (x) { return t('evChange', { c: x.core, from: x.from, to: x.to }); }).join(' · ');
+  }
+  function eventWhy(ev) {
+    if (ev.op === 'r') {
+      if (ev.outcome === 'hit') return t('whyReadHit');
+      var mine = ev.changes.filter(function (x) { return x.core === ev.core; })[0];
+      return t(mine && mine.to === 'E' ? 'whyReadE' : 'whyReadS');
+    }
+    if (ev.outcome === 'upgrade') return t('whyWriteUpgrade');
+    if (ev.outcome === 'miss') return t('whyWriteMiss');
+    return t(ev.changes.length ? 'whyWriteE' : 'whyWriteM');
+  }
+  function opButton(label, key, op, full) {
+    return h('button', { type: 'button', class: 'sd-btn', 'aria-keyshortcuts': key, 'aria-disabled': full ? 'true' : 'false',
+      onmousedown: keepFocus, onclick: function () { doOp(op); } }, h('span', null, label), h('kbd', null, key.toUpperCase()));
+  }
+  function coreBox(m, c) {
+    var e = m.caches[c][0];
+    return h('div', { class: 'mc-core', dataset: { st: e.st } },
+      h('div', { class: 'mc-core-name' }, t('core', { c: c })),
+      tag(e.st),
+      h('div', { class: 'mc-core-desc' }, h('b', null, t('name' + e.st)), ': ', t('desc' + e.st), ' · ',
+        data(e.v == null ? 'X = –' : 'X = ' + e.v), ' ', t('inCache')),
+      h('div', { class: 'mc-btns' },
+        opButton(t('read'), c === 0 ? 'q' : 'o', 'r' + c, m.full),
+        opButton(t('write'), c === 0 ? 'w' : 'p', 'w' + c, m.full)));
+  }
+  function stat(label, v) { return h('div', { class: 'mc-stat' }, h('b', null, String(v)), h('span', null, label)); }
+  function mesiStage(m) {
+    var shown = m.events.slice(-6);
+    var log = shown.length ? shown.map(function (ev, k) {
+      var chg = eventChanges(ev);
+      return h('li', { class: k === shown.length - 1 ? 'mc-last' : null }, eventText(ev), ev.wb != null ? ' ' + t('evWb', { c: ev.wb }) : '',
+        chg ? h('div', { class: 'mc-chg' }, chg) : null);
+    }) : [h('li', { class: 'mc-note' }, t('logEmpty'))];
+    var btn = function (label, run, off) {
+      return h('button', { type: 'button', class: 'sd-btn', 'aria-disabled': off ? 'true' : 'false', onmousedown: keepFocus, onclick: run }, h('span', null, label));
+    };
+    return h('div', { class: 'mc mc-mesi' },
+      h('div', { class: 'mc-col' },
+        coreBox(m, 0),
+        coreBox(m, 1),
+        h('div', { class: 'mc-ram', dataset: m.stale ? { stale: '' } : {} },
+          h('b', null, t('ram')), data('X = ' + m.ram[0]), h('span', { class: 'mc-ram-note' }, m.stale ? t('ramStale') : t('ramFresh')))),
+      h('div', { class: 'mc-col' },
+        h('div', { class: 'mc-h' }, t('logTitle')),
+        h('ol', { class: 'mc-log' }, log),
+        h('div', { class: 'mc-stats' }, stat(t('statHits'), m.hits), stat(t('statMisses'), m.misses + m.upgrades), stat(t('statInval'), m.inval), stat(t('statWb'), m.wb)),
+        h('div', { class: 'mc-note', dataset: m.full ? { warn: '' } : {} }, m.full ? t('full', { max: L.MAX_OPS }) : t('opsCount', { n: m.ops, max: L.MAX_OPS })),
+        h('div', { class: 'mc-btns' },
+          btn(t('undo'), undo, !m.ops),
+          btn(t('clear'), function () { sim.set(L.clearOps()); }, !m.ops))));
+  }
+
+  // ── false sharing view ──
+  function fsStage(f) {
+    var lines = [];
+    for (var l = 0; l < f.lines; l++) {
+      var cells = [];
+      for (var k = 0; k < L.LINE_INTS; k++) {
+        var who = f.place[0].line === l && f.place[0].slot === k ? 0 : f.place[1].line === l && f.place[1].slot === k ? 1 : null;
+        var last = who != null && f.last && f.last.core === who;
+        cells.push(h('span', { class: 'mc-cell' + (last ? ' sd-changed' : ''), dataset: who == null ? {} : { t: String(who) }, translate: 'no' },
+          who == null ? '' : String(f.counters[who])));
+      }
+      var states = [0, 1].map(function (c) { return h('span', { class: 'mc-line-state' }, t('lineState', { c: c }), tag(f.caches[c][l].st)); });
+      lines.push(h('div', { class: 'mc-line' },
+        h('div', { class: 'mc-line-head' }, h('b', null, t('line', { l: l })), states),
+        h('div', { class: 'mc-cells' }, cells)));
+    }
+    var verdict = f.pad ? t('fsApart') : t('fsSame');
+    return h('div', { class: 'mc mc-fs' },
+      h('div', { class: 'mc-col' },
+        h('div', { class: 'mc-h' }, t('memTitle')),
+        h('div', { class: 'mc-lines' }, lines),
+        h('ul', { class: 'mc-cellkeys' },
+          h('li', null, h('span', { class: 'mc-cellkey', dataset: { t: '0' } }), t('cellKey0')),
+          h('li', null, h('span', { class: 'mc-cellkey', dataset: { t: '1' } }), t('cellKey1')),
+          h('li', null, h('span', { class: 'mc-cellkey', dataset: { last: '' } }), t('cellKeyLast')))),
+      h('div', { class: 'mc-fs-side' },
+        h('div', null,
+          h('div', { class: 'mc-verdict', dataset: f.pad ? { good: '' } : { bad: '' } }, verdict),
+          h('div', null, f.writes ? t('fsHits', { v: pct(f.hitShare) }) : t('fsHitsNone')),
+          h('div', { class: 'mc-bar', 'aria-hidden': 'true' }, h('span', { style: { width: ((f.hitShare || 0) * 100) + '%' } }))),
+        h('div', null,
+          h('div', { class: 'mc-stats' }, stat(t('fsWrites'), f.writes), stat(t('fsMisses'), f.misses), stat(t('fsInval'), f.inval)),
+          f.last ? h('div', { class: 'mc-fs-last' }, t('fsLast', { c: f.last.core }), ' ', t(f.last.outcome === 'hit' ? 'fsLastHit' : 'fsLastMiss'),
+            f.last.changes.length ? h('div', { class: 'mc-chg' }, eventChanges(f.last)) : null) : null)));
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: params,
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { c: 2, label: t('legendM') },
+      { c: 1, label: t('legendE') },
+      { c: 3, label: t('legendS') },
+      { c: 8, shape: 'hollow', label: t('legendI') }
+    ],
+    keys: [
+      { key: 'q', label: t('keyR0'), run: function () { doOp('r0'); } },
+      { key: 'w', label: t('keyW0'), run: function () { doOp('w0'); } },
+      { key: 'o', label: t('keyR1'), run: function () { doOp('r1'); } },
+      { key: 'p', label: t('keyW1'), run: function () { doOp('w1'); } },
+      { key: 'u', label: t('keyUndo'), run: function () { undo(); } }
+    ],
+
+    render: function (c) {
+      var st = c.state;
+      plot = null;
+      if (st.view === 'mesi') c.stage.replaceChildren(mesiStage(st.mesi));
+      else if (st.view === 'fs') c.stage.replaceChildren(fsStage(st.fs));
+      else { c.stage.replaceChildren(amdahlStage(st.amdahl)); drawChart(plot, st.amdahl); }
+    },
+
+    caption: function (c) {
+      var st = c.state;
+      var b = function (x) { return h('b', null, x); };
+      if (st.view === 'mesi') {
+        var m = st.mesi;
+        if (!m.events.length) return t('captionMesiEmpty');
+        var ev = m.events[m.events.length - 1];
+        return [b(eventText(ev)), ' ', ev.wb != null ? t('evWb', { c: ev.wb }) + ' ' : '', eventWhy(ev)];
+      }
+      if (st.view === 'fs') {
+        var f = st.fs;
+        if (!f.writes) return t('captionFsNone');
+        return t.parts(f.pad ? 'captionFsPadded' : 'captionFsShared', { k: b(String(f.writes)), m: b(String(f.misses)), i: b(String(f.inval)) });
+      }
+      var a = st.amdahl;
+      return t.parts('captionAmdahl', { n: b(String(a.n)), s: b(times(a.speedup)), e: pct(a.efficiency), serial: pct(a.serial), max: b(times(a.ceiling, 1)) });
+    }
+  });
+
+  // The chart is drawn in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var lastSize = '';
+    new ResizeObserver(function (es) {
+      var r = es[0].contentRect, key = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (key !== lastSize) { lastSize = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
 </body>
 </html>
