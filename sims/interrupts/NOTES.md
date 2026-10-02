@@ -29,11 +29,13 @@ into ossimulator, and the build is re-imported.
 |---|---|
 | `text-size` | ossimulator's text floor is 14 px; body text is 16 px at 1920×1080 |
 | `one-screen` | the six-section layout scrolls (page height ≈ 4650 px at 1920×1080) |
-| `languages` | Croatian only until `ossimulator-english` lands |
 | `tokens` | ossimulator has its own design tokens, not the kit's |
+| `kit` | an adopted page with its own runtime; it never mounts the kit |
 
-The task also asked for `kit`, but `kit` cannot be waived (`lib/contract.mjs`): declaring it makes
-`npm run check` fail. It is left out, and the gate fails on it (see "Shared requests").
+`kit` can be waived on adopted pages (`origin` set) since task t-0022; the gate then runs
+`scripts/check-adopted.mjs`, the browser checks that need no kit. Croatian only is the `sim.json` `languages`
+exception; the page's `languages` exception was dropped then, as it waived nothing (the kit-only language checks
+are under `kit`).
 
 ## Deep links
 
@@ -60,8 +62,9 @@ how many preset lines the home page shows. The manifest already accepts them as
 - From `file://` with every non-file request aborted (Playwright, light, dark, reduced motion, 375×812 and each
   deep link): no network requests, no console errors or warnings, the theme follows the OS, nothing scrolls
   sideways on a phone, `?motion=reduce` is read by the page's boot script.
-- Not checked by the gate: its browser step waits for `window.simdeck` (the kit), which this page never sets,
-  so none of its browser checks run *(check)* once the gate can handle imports.
+- The gate (since t-0022) runs the kit-free browser checks on the built file: no network, no console errors, no
+  sideways scroll at 375×812, the theme follows the OS, reduced motion, `<html lang>`; the kit-only checks are
+  waived under `kit`.
 
 ## Defects for ossimulator
 
@@ -72,11 +75,8 @@ how many preset lines the home page shows. The manifest already accepts them as
 
 ## Shared requests
 
-- **Gate support for ossimulator imports** (frame: `lib/contract.mjs`, `kit/tools/check-page.mjs`,
-  `scripts/gate.mjs`). An imported build has no kit, and `kit` cannot be waived, so `npm run gate -- interrupts`
-  cannot pass; the browser step stops at the kit and runs none of its other checks. Smallest change: let a page
-  with `origin: "ossimulator/*"` skip the `kit` check (or make `kit` waivable for that origin) and run the page
-  checks without `window.simdeck`.
+- ~~Gate support for ossimulator imports~~: done in t-0022 (`kit` waivable on adopted pages,
+  `scripts/check-adopted.mjs`).
 
 ## Term pairs
 
