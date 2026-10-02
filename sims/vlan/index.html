@@ -1,0 +1,365 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- VLAN: adopted from the URM book's web edition (uvod-u-racunalne-mreze, ugradbeno/vlan.html) into the simdeck kit
+     (docs/sim-ui.md). A stepper through two frames, one per VLAN, crossing two switches joined by one link that is a
+     trunk or an access port: the frame enters untagged, is tagged (trunk), carried untagged (its own access VLAN) or
+     held (another VLAN's access port), then delivered with the tag removed. The model is in sim.js, the words in
+     strings.js. -->
+<html lang="hr" data-sim="vlan">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VLAN · simdeck</title>
+<meta name="description" content="Dva preklopnika i jedan kabel: trunk označava svaki okvir VID-om pa nosi oba VLAN-a, pristupna veza nosi samo svoj VLAN, a drugi tiho odsiječe.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "vlan",
+  "class": "stepper",
+  "steps": 6,
+  "title": { "hr": "VLAN", "en": "VLAN" },
+  "concept": { "hr": "Pristupni priključak nosi jedan VLAN, trunk označava okvire i nosi sve", "en": "An access port carries one VLAN; a trunk tags frames and carries them all" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="vlan"]; colours only from kit tokens. */
+[data-sim="vlan"] .vl {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.5cqh;
+  height: 100%;
+  padding: 2cqh 2.5cqw;
+}
+
+/* the frame as it is right now: its fields, with the 802.1Q tag only while it is tagged */
+[data-sim="vlan"] .vl-frame { display: flex; flex-direction: column; gap: 0.5rem; min-height: 6.6rem; }
+[data-sim="vlan"] .vl-frame-line { font-size: var(--fs-md); font-weight: 700; }
+[data-sim="vlan"] .vl-frame-line.vl-none { color: var(--muted); font-weight: 400; }
+[data-sim="vlan"] .vl-fields { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: stretch; }
+[data-sim="vlan"] .vl-field {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.2rem 0.7rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-md);
+}
+[data-sim="vlan"] .vl-field small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="vlan"] .vl-field b { font-family: var(--mono); }
+[data-sim="vlan"] .vl-field.vl-grow { flex: 1 1 auto; }
+[data-sim="vlan"] .vl-field.vl-tag { border-width: 0.25rem; }
+[data-sim="vlan"] .vl-field.vl-gone { border-style: dashed; }
+[data-sim="vlan"] .vl-field.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="vlan"] .vl-field.sd-changed small { color: var(--on-hl); }
+[data-sim="vlan"] .vl-state { font-size: var(--fs-md); }
+
+/* the network: hosts above and below their switch, the link between the switches */
+[data-sim="vlan"] .vl-net {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto 1fr auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+[data-sim="vlan"] .vl-host {
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.4rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="vlan"] .vl-host.vl-active { border-color: var(--ink); border-width: 0.25rem; }
+[data-sim="vlan"] .vl-host.vl-idle .vl-role { color: var(--muted); font-weight: 400; }
+[data-sim="vlan"] .vl-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 4.4rem;
+  height: 3.4rem;
+  padding: 0 0.4rem;
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="vlan"] .vl-badge[data-shape="square"] { border-radius: var(--radius-sm); }
+[data-sim="vlan"] .vl-badge[data-shape="round"] { border-radius: 1.7rem; }
+[data-sim="vlan"] .vl-host-text { display: flex; flex-direction: column; font-size: var(--fs-md); }
+[data-sim="vlan"] .vl-host-text small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="vlan"] .vl-role { min-height: 1.4em; font-weight: 700; }
+[data-sim="vlan"] .vl-drop {
+  position: relative;
+  justify-self: center;
+  width: 0;
+  min-height: 2.6rem;
+  border-left: var(--line-w) solid var(--line);
+}
+[data-sim="vlan"] .vl-drop.vl-on { border-left: 0.4rem solid var(--ink); }
+[data-sim="vlan"] .vl-drop span {
+  position: absolute;
+  top: 50%;
+  left: 0.6rem;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-family: var(--mono);
+}
+[data-sim="vlan"] .vl-drop.vl-on span { font-weight: 700; }
+[data-sim="vlan"] .vl-switch {
+  display: grid;
+  place-items: center;
+  padding: 1rem 0.6rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="vlan"] .vl-switch.vl-active { border-width: 0.3rem; }
+[data-sim="vlan"] .vl-switch small { font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="vlan"] .vl-link { display: flex; flex-direction: column; justify-content: center; gap: 0.3rem; padding: 0 0.4rem; }
+[data-sim="vlan"] .vl-link-label { text-align: center; font-size: var(--fs-md); font-family: var(--mono); }
+[data-sim="vlan"] .vl-wire { height: 0; border-top: var(--line-w) solid var(--line); }
+[data-sim="vlan"] .vl-wire.vl-on { border-top: 0.4rem solid var(--ink); }
+[data-sim="vlan"] .vl-wire.vl-cut { border-top: 0.4rem dashed var(--ink); }
+[data-sim="vlan"] .vl-wire-text { min-height: 1.5em; text-align: center; font-size: var(--fs-md); font-weight: 700; }
+
+/* outcome per VLAN */
+[data-sim="vlan"] .vl-results { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; font-size: var(--fs-md); }
+[data-sim="vlan"] .vl-results h2 { margin: 0; font-size: var(--fs-md); }
+[data-sim="vlan"] .vl-result { padding: 0.2rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="vlan"] .vl-result.vl-ok { border-color: var(--ok); font-weight: 700; }
+[data-sim="vlan"] .vl-result.vl-cutres { border-color: var(--danger); border-style: dashed; font-weight: 700; }
+[data-sim="vlan"] .vl-result.vl-pending { color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="vlan"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="vlan"] .vl { height: auto; gap: 0.8rem; padding: 0.6rem 0.3rem; }
+  [data-sim="vlan"] .vl-net { grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr); }
+  [data-sim="vlan"] .vl-host { flex-direction: column; gap: 0.2rem; padding: 0.3rem; text-align: center; }
+  [data-sim="vlan"] .vl-badge { min-width: 3rem; height: 2.2rem; font-size: var(--fs-md); }
+  [data-sim="vlan"] .vl-drop { width: auto; min-height: 0; border-left: 0; text-align: center; }
+  [data-sim="vlan"] .vl-drop.vl-on { border-left: 0; }
+  [data-sim="vlan"] .vl-drop::before, [data-sim="vlan"] .vl-drop::after {
+    content: ''; display: block; width: 0; height: 0.8rem; margin: 0 auto; border-left: var(--line-w) solid var(--line);
+  }
+  [data-sim="vlan"] .vl-drop.vl-on::before, [data-sim="vlan"] .vl-drop.vl-on::after { border-left: 0.4rem solid var(--ink); }
+  [data-sim="vlan"] .vl-drop span { position: static; display: block; transform: none; white-space: normal; font-size: var(--fs-sm); }
+  [data-sim="vlan"] .vl-link-label, [data-sim="vlan"] .vl-wire-text { font-size: var(--fs-sm); }
+  [data-sim="vlan"] .vl-field { padding: 0.1rem 0.4rem; font-size: var(--fs-sm); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">VLAN</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  /** Each VLAN has a colour, a badge shape and its number written out: colour is never the only carrier. */
+  var LOOK = { 10: { c: '1', shape: 'square' }, 20: { c: '2', shape: 'round' } };
+
+  // t.parts puts the same node at every use of a placeholder, and a node can stand in one place only: copy repeats.
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) !== -1) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function hostOf(id) { return L.hosts.filter(function (x) { return x.id === id; })[0]; }
+  function name(id) { return h('b', { translate: 'no', class: 'sd-ink', dataset: { c: LOOK[hostOf(id).vlan].c } }, id); }
+
+  function roleOf(s, id) {
+    if (s.phase === 'idle') return null;
+    if (id === s.src) return 'sends';
+    if (s.phase !== 'exit') return null;
+    if (id === s.delivered) return 'gets';
+    return id === s.dst ? 'nothing' : null;
+  }
+
+  function frameView(s) {
+    if (s.phase === 'idle') {
+      return h('div', { class: 'vl-frame' }, h('div', { class: 'vl-frame-line vl-none' }, t('frameNone')));
+    }
+    var fields = [
+      h('div', { class: 'vl-field' }, h('small', null, t('fDst')), data(s.dst)),
+      h('div', { class: 'vl-field' }, h('small', null, t('fSrc')), data(s.src))
+    ];
+    if (s.tag !== null) {
+      fields.push(h('div', { class: 'vl-field vl-tag' + (s.tagChange === 'added' ? ' sd-changed' : '') },
+        h('small', null, t('fTag')), h('b', { translate: 'no' }, t('fTagValue', { v: s.tag }))));
+    } else if (s.tagChange === 'removed') {
+      fields.push(h('div', { class: 'vl-field vl-tag vl-gone sd-changed' }, h('small', null, t('fTag')), t('fTagRemoved')));
+    }
+    fields.push(h('div', { class: 'vl-field' }, h('small', null, t('fType'))));
+    fields.push(h('div', { class: 'vl-field vl-grow' }, h('small', null, t('fData'))));
+    var where = s.at === 'sw1' ? t('whereSw1') : s.at === 'link' ? t('whereLink') : s.at === 'held'
+      ? (s.phase === 'exit' ? t('whereNowhere') : t('whereHeld')) : t('whereHost', { host: s.delivered });
+    return h('div', { class: 'vl-frame' },
+      h('div', { class: 'vl-frame-line' }, parts('frameLine', { k: data(s.frame), src: name(s.src), dst: name(s.dst), v: data(s.vlan) })),
+      h('div', { class: 'vl-fields' }, fields),
+      h('div', { class: 'vl-state' }, (s.tag !== null ? t('stateTagged') : t('stateUntagged')) + ' · ' + where));
+  }
+
+  function hostBox(id, s, c) {
+    var x = hostOf(id), look = LOOK[x.vlan], role = roleOf(s, id);
+    var cls = role === 'sends' || role === 'gets' ? ' vl-active' : role === 'nothing' ? ' vl-idle' : '';
+    var anim = role === 'gets' && c.dir === 'forward' ? ' sd-anim-in' : '';
+    var roleKey = { sends: 'roleSends', gets: 'roleGets', nothing: 'roleNothing' }[role];
+    return h('div', { class: 'vl-host' + cls + anim },
+      h('b', { class: 'vl-badge sd-fill', dataset: { c: look.c, shape: look.shape }, translate: 'no' }, id),
+      h('div', { class: 'vl-host-text' },
+        h('span', null, t('vlanLine', { v: x.vlan, name: t('vlanName' + x.vlan) })),
+        h('small', { class: 'vl-role' }, roleKey ? t(roleKey) : '')));
+  }
+
+  /** The access port between a host and its switch: thick while this host's frame passes it. */
+  function drop(id, s) {
+    var x = hostOf(id);
+    var on = (s.phase === 'enter' && id === s.src) || (s.phase === 'exit' && id === s.delivered);
+    return h('div', { class: 'vl-drop' + (on ? ' vl-on' : '') }, h('span', null, t('portAccess', { v: x.vlan })));
+  }
+
+  function linkView(s, p) {
+    var l = L.parseLink(p.link);
+    var label = l.mode === 'trunk' ? t('portTrunk') : t('portAccess', { v: l.vlan });
+    var wire = 'vl-wire', text = '';
+    if (s.phase === 'link' && s.at === 'link') {
+      wire += ' vl-on';
+      text = s.tag !== null ? t('wireTagged', { v: s.tag }) : t('wireUntagged');
+    } else if (s.at === 'held') {
+      wire += ' vl-cut';
+      text = t('wireHeld', { v: s.vlan });
+    }
+    return h('div', { class: 'vl-link' },
+      h('div', { class: 'vl-link-label', translate: 'no' }, label),
+      h('div', { class: wire }),
+      h('div', { class: 'vl-wire-text' }, text));
+  }
+
+  function switchBox(nr, s) {
+    var active = (nr === 1 && (s.at === 'sw1' || s.at === 'held')) || (nr === 2 && s.phase === 'exit' && s.at === 'host');
+    return h('div', { class: 'vl-switch' + (active ? ' vl-active' : ''), translate: 'no' }, 'SW' + nr);
+  }
+
+  function results(s) {
+    var items = L.frames.map(function (f) {
+      var r = s.results[f.vlan];
+      var key = r === 'ok' ? 'resultOk' : r === 'cut' ? 'resultCut' : 'resultPending';
+      var cls = r === 'ok' ? 'vl-ok' : r === 'cut' ? 'vl-cutres' : 'vl-pending';
+      return h('div', { class: 'vl-result ' + cls }, parts(key, { a: name(f.src), b: name(f.dst) }));
+    });
+    return h('div', { class: 'vl-results' }, h('h2', null, t('resultsTitle')), items);
+  }
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: {} },
+    { id: 'trunk', label: t('presetTrunk'), hint: t('presetTrunkHint'), params: { link: 'trunk' } },
+    { id: 'wrong', label: t('presetWrong'), hint: t('presetWrongHint'), params: { link: 'access-20' } }
+  ];
+
+  var params = [
+    { key: 'link', type: 'choice', label: t('link'), options: [
+      ['trunk', t('optTrunk')], ['access-10', t('optAccess10')], ['access-20', t('optAccess20')]
+    ] }
+  ];
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: params,
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legend10') },
+      { c: 2, shape: 'round', label: t('legend20') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var net = h('div', { class: 'vl-net' },
+        hostBox('Ra1', s, c), h('div'), hostBox('Ra2', s, c),
+        drop('Ra1', s), h('div'), drop('Ra2', s),
+        switchBox(1, s), linkView(s, c.params), switchBox(2, s),
+        drop('Pr1', s), h('div'), drop('Pr2', s),
+        hostBox('Pr1', s, c), h('div'), hostBox('Pr2', s, c));
+      c.stage.replaceChildren(h('div', { class: 'vl' }, frameView(s), net, results(s)));
+    },
+
+    caption: function (c) {
+      var s = c.state, l = L.parseLink(c.params.link);
+      if (s.phase === 'idle') {
+        return parts('captionIdle', { link: l.mode === 'trunk' ? t('linkTrunk') : t('linkAccess', { v: l.vlan }) });
+      }
+      var v = { src: name(s.src), dst: name(s.dst), v: data(s.vlan), lv: data(l.vlan) };
+      var out;
+      if (s.phase === 'enter') out = parts('captionEnter', v);
+      else if (s.phase === 'link') {
+        out = parts(s.at === 'held' ? 'captionLinkHeld' : l.mode === 'trunk' ? 'captionLinkTrunk' : 'captionLinkAccess', v);
+      } else {
+        out = parts(s.at === 'held' ? 'captionExitHeld' : l.mode === 'trunk' ? 'captionExitTrunk' : 'captionExitAccess', v);
+      }
+      if (c.last) {
+        var cut = L.vlans.filter(function (x) { return s.results[x] === 'cut'; });
+        out = out.concat([' '], cut.length ? parts('captionDoneAccess', { cut: data(cut[0]) }) : parts('captionDoneTrunk', {}));
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
