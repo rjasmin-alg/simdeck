@@ -1,0 +1,447 @@
+<html>
+<style>
+    /* ---- Applet Card ---- */
+    .applet-card {
+      overflow: hidden;
+    }
+
+    .applet-header {
+      background: #f5f5f5;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+    }
+    .applet-header .material-icons { font-size: 18px; color: var(--primary); }
+
+    .applet-body { padding: 20px; }
+
+    /* ---- Canvas panels ---- */
+    .panel {
+      margin-bottom: 16px;
+    }
+    .panel-label {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .panel-label .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--canvas-bg);
+    }
+
+    /* ---- Controls ---- */
+    .controls {
+      background: #f9f9f9;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .control-value {
+      text-align: right;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .nyquist-info {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* ---- Info box ---- */
+    .info-box {
+      margin-top: 20px;
+      padding: 14px 18px;
+      background: "#DAEEFA";
+      border-left: 4px solid var(--primary);
+      border-radius: 0 4px 4px 0;
+    }
+    .info-box strong { font-weight: 700; }
+
+    /* ---- Legend ---- */
+    .legend {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-line {
+      width: 24px; height: 3px; border-radius: 2px;
+    }
+    .legend-circle {
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+
+    /* ---- Formula ---- */
+    .formula-box {
+      margin-top: 20px;
+      background: #263238;
+      color: #eceff1;
+      border-radius: 6px;
+      padding: 14px 18px;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+    .formula-box .comment { color: #78909c; }
+    .formula-box .keyword { color: #80cbc4; }
+    .formula-box .func { color: #ffcc02; }
+
+    @media (max-width: 600px) {
+      .control-row { flex-direction: column; align-items: flex-start; }
+      .control-value { text-align: left; }
+    }
+</style>
+
+  <div class="applet-card">
+    <div class="applet-body">
+
+      <!-- Controls -->
+      <div class="controls">
+        <div class="control-row">
+          <span class="control-label">Brzina uzorkovanja $f_\text{s}$:</span>
+          <input type="range" id="sliderFs" min="1.0" max="8.0" step="0.025" value="3.0">
+          <span class="control-value" id="labelFs">3.0 kHz</span>
+        </div>
+      </div>
+
+      <!-- Panel 1: Original signal -->
+      <div class="panel">
+        <div class="panel-label">
+          <span class="dot" style="background:var(--signal-color)"></span>
+          Izvorni signal — sinus s 1 kHz
+        </div>
+        <canvas id="canvasOriginal" height="300"></canvas>
+      </div>
+
+      <!-- Panel 2: Sampled signal -->
+      <div class="panel">
+        <div class="panel-label">
+          <span class="dot" style="background:var(--sample-color)"></span>
+          Uzorkovani signal
+        </div>
+        <canvas id="canvasSampled" height="300"></canvas>
+      </div>
+
+      <!-- Panel 3: Reconstructed signal -->
+      <div class="panel">
+        <div class="panel-label">
+          <span class="dot" style="background:var(--recon-color)"></span>
+          Rekonstruirani signal
+        </div>
+        <canvas id="canvasRecon" height="300"></canvas>
+      </div>
+
+      <!-- Info box -->
+      <div class="info-box" id="infoBox">
+        <strong>✓ Nyquistov uvjet ispunjen:</strong>
+        f<sub>s</sub> = 3.0 kHz ≥ 2 · 1 kHz. Rekonstruirani signal odgovara izvornom signalu.
+      </div><br>
+    </div>
+  </div>
+</main>
+
+<script>
+// ============================================================
+//  Signal- und Darstellungsparameter
+// ============================================================
+const F_SIG   = 1.0;   // Signalfrequenz (normiert auf 1)
+const T_SHOW  = 3.0;   // Angezeigte Zeitdauer in Perioden
+const N_DRAW  = 1000;  // Stützpunkte für analoge Kurve
+
+// Sinc-Funktion (normierte Version: sinc(u) = sin(πu)/(πu))
+function sinc(u) {
+  if (Math.abs(u) < 1e-10) return 1.0;
+  return Math.sin(Math.PI * u) / (Math.PI * u);
+}
+
+// Originalsignal
+function signal(t) {
+  return Math.sin(2 * Math.PI * F_SIG * t);
+}
+
+// Whittaker-Shannon-Rekonstruktion
+function reconstruct(t, samples, fs) {
+  let sum = 0;
+  for (let n = 0; n < samples.length; n++) {
+    sum += samples[n].y * sinc(fs * t - n);
+  }
+  return sum;
+}
+
+// ============================================================
+//  Canvas-Hilfsklasse
+// ============================================================
+class Plot {
+  constructor(canvas, yMin=-1.3, yMax=1.3) {
+    this.canvas = canvas;
+    this.yMin = yMin;
+    this.yMax = yMax;
+    this.resize();
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width  = rect.width  * dpr;
+    this.canvas.height = this.canvas.offsetHeight * dpr;
+    this.ctx = this.canvas.getContext('2d');
+    this.ctx.scale(dpr, dpr);
+    this.W = rect.width;
+    this.H = this.canvas.offsetHeight;
+    this.padL = 44; this.padR = 12;
+    this.padT = 10; this.padB = 22;
+    this.plotW = this.W - this.padL - this.padR;
+    this.plotH = this.H - this.padT - this.padB;
+  }
+
+  // map t∈[0,T_SHOW] to pixel x
+  tx(t) { return this.padL + (t / T_SHOW) * this.plotW; }
+  // map y∈[yMin,yMax] to pixel y
+  ty(y) { return this.padT + (1 - (y - this.yMin) / (this.yMax - this.yMin)) * this.plotH; }
+
+  clear() {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.W, this.H);
+
+    // background
+    ctx.fillStyle = '#fafafa';
+    ctx.fillRect(this.padL, this.padT, this.plotW, this.plotH);
+
+    // grid lines
+    ctx.strokeStyle = '#e8e8e8';
+    ctx.lineWidth = 1;
+    for (let v of [-1, -0.5, 0, 0.5, 1]) {
+      const py = this.ty(v);
+      ctx.beginPath(); ctx.moveTo(this.padL, py); ctx.lineTo(this.padL + this.plotW, py);
+      ctx.stroke();
+    }
+    // time grid
+    for (let k = 0; k <= T_SHOW; k++) {
+      const px = this.tx(k);
+      ctx.beginPath(); ctx.moveTo(px, this.padT); ctx.lineTo(px, this.padT + this.plotH);
+      ctx.stroke();
+    }
+
+    // axes
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(this.padL, this.padT, this.plotW, this.plotH);
+
+    // zero line
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth = 1.5;
+    const y0 = this.ty(0);
+    ctx.beginPath(); ctx.moveTo(this.padL, y0); ctx.lineTo(this.padL + this.plotW, y0);
+    ctx.stroke();
+
+    // y-axis labels
+    ctx.fillStyle = '#888';
+    ctx.textAlign = 'right';
+    for (let v of [-1, 0, 1]) {
+      ctx.fillText(v.toFixed(0), this.padL - 4, this.ty(v) + 3.5);
+    }
+
+    // x-axis labels
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#888';
+    for (let k = 0; k <= T_SHOW; k++) {
+      ctx.fillText(k + 'T', this.tx(k), this.padT + this.plotH + 14);
+    }
+  }
+
+  drawLine(points, color='#47ABE8', lw=2) {
+    const ctx = this.ctx;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+      const px = this.tx(points[i].t);
+      const py = this.ty(points[i].y);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  drawStems(samples, color='#FE756C') {
+    const ctx = this.ctx;
+    const y0  = this.ty(0);
+
+    // Draw vertical stem lines
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    for (const s of samples) {
+      if (s.t < 0 || s.t > T_SHOW) continue;
+      const px = this.tx(s.t);
+      const py = this.ty(s.y);
+      ctx.beginPath(); ctx.moveTo(px, y0); ctx.lineTo(px, py); ctx.stroke();
+    }
+
+    // Draw sample dots on top
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    for (const s of samples) {
+      if (s.t < 0 || s.t > T_SHOW) continue;
+      const px = this.tx(s.t);
+      const py = this.ty(s.y);
+      ctx.beginPath();
+      ctx.arc(px, py, 4.5, 0, 2*Math.PI);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+}
+
+// ============================================================
+//  Globale Plot-Objekte
+// ============================================================
+let plotOrig, plotSamp, plotRecon;
+
+function initPlots() {
+  plotOrig  = new Plot(document.getElementById('canvasOriginal'));
+  plotSamp  = new Plot(document.getElementById('canvasSampled'));
+  plotRecon = new Plot(document.getElementById('canvasRecon'));
+}
+
+// ============================================================
+//  Haupt-Render-Funktion
+// ============================================================
+function render(fs) {
+  // --- 1. Abtastwerte erzeugen ---
+  const Ts = 1 / fs;  // Abtastintervall (in Perioden des Signals)
+  const nSamples = Math.floor(T_SHOW * fs) + 2;
+  const samples = [];
+  for (let n = 0; n < nSamples; n++) {
+    const t = n * Ts;
+    samples.push({ t, y: signal(t) });
+  }
+
+  // --- 2. Analoge Kurve erzeugen ---
+  const analogPts = [];
+  for (let i = 0; i <= N_DRAW; i++) {
+    const t = (i / N_DRAW) * T_SHOW;
+    analogPts.push({ t, y: signal(t) });
+  }
+
+  // --- 3. Rekonstruktion (Sinc-Interpolation) ---
+  const reconPts = [];
+  for (let i = 0; i <= N_DRAW; i++) {
+    const t = (i / N_DRAW) * T_SHOW;
+    reconPts.push({ t, y: reconstruct(t, samples, fs) });
+  }
+
+  // --- 4. Panel 1: Original ---
+  plotOrig.clear();
+  plotOrig.drawLine(analogPts, '#47ABE8', 2.2);
+
+  // --- 5. Panel 2: Samples (analog + stems) ---
+  plotSamp.clear();
+  plotSamp.drawLine(analogPts, '#47ABE8', 1.5); // leicht gedämpft im Hintergrund
+  plotSamp.drawStems(samples, '#FE756C');
+
+  // --- 6. Panel 3: Rekonstruktion ---
+  const nyquistOk = fs >= 2 * F_SIG;
+  const reconColor = nyquistOk ? '#3BB583' : '#FE756C';
+  plotRecon.clear();
+  // Original als gestrichelte Referenz
+  const ctx = plotRecon.ctx;
+  ctx.save();
+  ctx.setLineDash([5, 5]);
+  plotRecon.drawLine(analogPts, '#47ABE8', 1.2);
+  ctx.setLineDash([]);
+  ctx.restore();
+  // Rekonstruiertes Signal
+  plotRecon.drawLine(reconPts, reconColor, 2.2);
+
+  // --- 7. UI-Updates ---
+  updateUI(fs, nyquistOk);
+}
+
+function updateUI(fs, ok) {
+  const infoBox   = document.getElementById('infoBox');
+
+  const ratio     = (fs / F_SIG).toFixed(2);
+  const fAlias    = Math.abs(fs - F_SIG).toFixed(2);  // Aliasing-Frequenz (vereinfacht)
+
+
+  if (ok) {
+    infoBox.style.borderLeftColor = '#1565c0';
+    infoBox.style.background = '#DAEEFA';
+    infoBox.innerHTML =
+      `<strong>✓ Nyquistov uvjet ispunjen:</strong> ` +
+      `f<sub>s</sub> = ${fs.toFixed(2)} kHz ≥ 2 · ${F_SIG} kHz = ${(2*F_SIG).toFixed(2)} kHz. ` +
+      `Rekonstruirani signal odgovara izvornom signalu.`;
+  } else {
+    infoBox.style.borderLeftColor = '#c62828';
+    infoBox.style.background = '#FFE3E2';
+    infoBox.innerHTML =
+      `<strong>⚠ Aliasing:</strong> f<sub>s</sub> = ${fs.toFixed(2)} kHz < 2 · ${F_SIG} kHz. ` +
+      `Rekonstruirani signal pojavljuje se s alias frekvencijom ` +
+      `f<sub>Alias</sub> = |f<sub>s</sub> − f<sub>Signal</sub>| ≈ ${fAlias} kHz. ` +
+      `Povećaj brzinu uzorkovanja iznad ${(2*F_SIG).toFixed(1)} kHz kako bi se signal ispravno prikazao.`;
+  }
+}
+
+// ============================================================
+//  Event-Listener & Init
+// ============================================================
+const slider  = document.getElementById('sliderFs');
+const labelFs = document.getElementById('labelFs');
+
+slider.addEventListener('input', () => {
+  const fs = parseFloat(slider.value);
+  labelFs.textContent = fs.toFixed(2) + ' kHz';
+  render(fs);
+});
+
+function onResize() {
+  if (!plotOrig || !plotSamp || !plotRecon) return;
+  plotOrig.resize();
+  plotSamp.resize();
+  plotRecon.resize();
+  render(parseFloat(slider.value));
+}
+
+window.addEventListener('resize', onResize);
+
+// Erst nach dem Laden initialisieren, wenn Canvas-Dimensionen bekannt sind
+window.addEventListener('load', () => {
+  initPlots();
+  const fs = parseFloat(slider.value);
+  labelFs.textContent = fs.toFixed(2) + ' kHz';
+  render(fs);
+});
+</script>
+</html>
