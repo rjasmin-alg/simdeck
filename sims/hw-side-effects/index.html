@@ -1,0 +1,347 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Hardware side effects: a native explorer (docs/sim-ui.md). Two sliders, speed and space, drive two symmetric panels:
+     a victim's secret bits, and the shared state beside them where a trace of each 1-bit may survive. The victim's
+     result is always correct. A trust choice and a wall of limits close the lesson. Inspired by
+     single-page-labs/spectre-meltdown.html (the topic only; nothing copied). Model: sim.js; words: strings.js. -->
+<html lang="hr" data-sim="hw-side-effects">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nuspojave sklopovlja · simdeck</title>
+<meta name="description" content="Ispravno sklopovlje i ispravni programi, a ipak curenje: optimizacija za brzinu i prostor ostavlja tragove u dijeljenom stanju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "hw-side-effects",
+  "title": {
+    "hr": "Nuspojave sklopovlja: brzina, prostor, povjerenje",
+    "en": "Hardware side effects: speed, space and trust"
+  },
+  "concept": {
+    "hr": "Ispravni dijelovi ostavljaju tragove u dijeljenom stanju; optimizacija ih množi",
+    "en": "Correct parts leave traces in shared state; optimising multiplies them"
+  },
+  "summary": {
+    "hr": "Klizači za brzinu i gustoću: tragovi tipa Spectre i Rowhammer rastu, a gašenje optimizacija košta. Jedina nefizička granica: povjerenje.",
+    "en": "Sliders for speed and density: Spectre- and Rowhammer-type traces grow, and turning optimisations off costs. The one non-physical limit: trust."
+  },
+  "tags": [
+    "attacks",
+    "caches",
+    "memory",
+    "cpu",
+    "performance"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="hw-side-effects"]; colours only from kit tokens. */
+[data-sim="hw-side-effects"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="hw-side-effects"] .sd-preset { line-height: 1.15; }
+[data-sim="hw-side-effects"] .hx {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="hw-side-effects"] .hx-data { font-family: var(--mono); white-space: nowrap; }
+[data-sim="hw-side-effects"] .hx-muted { color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+
+/* the victim's checks, always passing, and what the other program sees */
+[data-sim="hw-side-effects"] .hx-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.3fr); gap: 0.6cqw; }
+[data-sim="hw-side-effects"] .hx-check {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  font-size: var(--fs-sm); font-weight: 700; line-height: 1.15;
+  border: var(--line-w) solid var(--ok);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="hw-side-effects"] .hx-check::before { content: '✓'; color: var(--ok); font-size: var(--fs-lg); }
+[data-sim="hw-side-effects"] .hx-check.hx-sees { border-color: var(--line); }
+[data-sim="hw-side-effects"] .hx-check.hx-sees::before { content: '◆'; color: var(--muted); }
+[data-sim="hw-side-effects"] .hx-check.hx-sees.hx-bad { border: max(3px, 0.2rem) solid var(--danger); }
+[data-sim="hw-side-effects"] .hx-check.hx-sees.hx-bad::before { content: '!'; color: var(--danger); }
+
+/* the two axes */
+[data-sim="hw-side-effects"] .hx-axes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.2cqw; min-height: 0; }
+[data-sim="hw-side-effects"] .hx-axis {
+  display: flex; flex-direction: column; gap: 0.5cqh;
+  min-height: 0;
+  padding: 0.5rem 0.7rem;
+  border: var(--line-w) solid var(--line);
+  border-top: 0.4rem solid var(--axis);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="hw-side-effects"] .hx-speed { --axis: var(--c2); }
+[data-sim="hw-side-effects"] .hx-space { --axis: var(--c4); border-top-style: dashed; }
+[data-sim="hw-side-effects"] .hx-title { font-weight: 700; color: var(--axis); line-height: 1.15; }
+[data-sim="hw-side-effects"] .hx-cells { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 0.25rem; }
+[data-sim="hw-side-effects"] .hx-cell {
+  display: grid; place-items: center;
+  height: var(--ch, 2.2rem);
+  min-width: 0;
+  font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm);
+  border: 2px solid var(--c1);
+  border-radius: 3px;
+}
+[data-sim="hw-side-effects"] .hx-cell.hx-one { background: var(--c1); color: var(--on-series); }
+[data-sim="hw-side-effects"] .hx-cell.hx-zero { border-style: dashed; border-color: var(--muted); color: var(--muted); background: var(--bg); }
+[data-sim="hw-side-effects"] .hx-cell.hx-clean { border-color: var(--line); background: var(--bg); }
+[data-sim="hw-side-effects"] .hx-cell.hx-trace { background: var(--hl); color: var(--on-hl); border: max(3px, 0.2rem) solid var(--ink); }
+[data-sim="hw-side-effects"] .hx-mid { display: flex; align-items: center; min-height: 3.6rem; }
+[data-sim="hw-side-effects"] .hx-ahead { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 0.25rem; flex: 1; }
+[data-sim="hw-side-effects"] .hx-slot { height: 1.1rem; border: 2px dashed var(--line); border-radius: 3px; }
+[data-sim="hw-side-effects"] .hx-slot.hx-on { border: 2px solid var(--c2); background: repeating-linear-gradient(135deg, var(--c2) 0 3px, transparent 3px 8px); }
+[data-sim="hw-side-effects"] .hx-gap { width: 100%; border-left: 3px dashed var(--c4); margin-left: 1rem; }
+[data-sim="hw-side-effects"] .hx-read { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 1.2rem; align-items: end; margin-top: auto; }
+[data-sim="hw-side-effects"] .hx-val { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); color: var(--axis); }
+[data-sim="hw-side-effects"] .hx-curve { position: relative; height: 4.2rem; border-left: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+[data-sim="hw-side-effects"] .hx-curve svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="hw-side-effects"] .hx-curve polyline { fill: none; stroke: var(--axis); stroke-width: 3; vector-effect: non-scaling-stroke; }
+[data-sim="hw-side-effects"] .hx-dot {
+  position: absolute; width: 1rem; height: 1rem; margin: -0.5rem 0 0 -0.5rem;
+  background: var(--hl); border: 3px solid var(--ink); border-radius: 50%;
+}
+[data-sim="hw-side-effects"] .hx-curvelbl { display: flex; justify-content: space-between; }
+
+/* bottom: leak chance, cost, limits */
+[data-sim="hw-side-effects"] .hx-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr); gap: 1.2cqw; }
+[data-sim="hw-side-effects"] .hx-box { padding: 0.4rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="hw-side-effects"] .hx-head { font-weight: 700; font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="hw-side-effects"] .hx-big { font-family: var(--mono); font-weight: 700; font-size: var(--fs-xl); }
+[data-sim="hw-side-effects"] .hx-track { position: relative; height: 1.3rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="hw-side-effects"] .hx-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--danger); }
+[data-sim="hw-side-effects"] .hx-fill.hx-calm { background: repeating-linear-gradient(135deg, var(--muted) 0 3px, transparent 3px 8px); }
+[data-sim="hw-side-effects"] .hx-risk { font-weight: 700; font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="hw-side-effects"] .hx-cost { display: grid; grid-template-columns: auto minmax(0, 1fr) 3.6rem; gap: 0.25rem 0.5rem; align-items: center; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="hw-side-effects"] .hx-cost .hx-track { height: 1rem; border-width: 2px; }
+[data-sim="hw-side-effects"] .hx-cost .hx-fill { background: var(--c3); }
+[data-sim="hw-side-effects"] .hx-num { text-align: right; font-family: var(--mono); }
+[data-sim="hw-side-effects"] .hx-limits { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="hw-side-effects"] .hx-limit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; padding: 0 0.4rem; border: 2px solid var(--line); border-radius: 3px; line-height: 1.3; }
+[data-sim="hw-side-effects"] .hx-limit > :last-child { color: var(--muted); }
+[data-sim="hw-side-effects"] .hx-limit.hx-trust { border: 2px dashed var(--ink); }
+[data-sim="hw-side-effects"] .hx-limit.hx-trust.hx-binds { background: var(--hl); color: var(--on-hl); border: max(3px, 0.2rem) solid var(--ink); }
+[data-sim="hw-side-effects"] .hx-limit.hx-trust.hx-binds > :last-child { color: var(--on-hl); }
+[data-sim="hw-side-effects"] .hx-quote { font-weight: 700; font-style: italic; line-height: 1.2; }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-sim="hw-side-effects"]:not([data-motion='reduce']) .hx-fill,
+  [data-sim="hw-side-effects"]:not([data-motion='reduce']) .hx-dot { transition: all 0.25s ease; }
+}
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="hw-side-effects"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="hw-side-effects"] .hx { height: auto; gap: 0.6rem; padding: 0.5rem 0.4rem; grid-template-rows: none; }
+  [data-sim="hw-side-effects"] .hx-checks, [data-sim="hw-side-effects"] .hx-axes, [data-sim="hw-side-effects"] .hx-bottom { grid-template-columns: 1fr; gap: 0.5rem; }
+  [data-sim="hw-side-effects"] .hx-cells { gap: 2px; }
+  [data-sim="hw-side-effects"] .hx-cell { height: 1.4rem; }
+  [data-sim="hw-side-effects"] .hx-cell span { display: none; }
+  [data-sim="hw-side-effects"] .hx-read { grid-template-columns: auto auto; }
+  [data-sim="hw-side-effects"] .hx-curve, [data-sim="hw-side-effects"] .hx-curvelbl { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Nuspojave sklopovlja: brzina, prostor, povjerenje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Numbers are data: a percentage, and a multiplier with the language's decimal mark. */
+  function pct(p) { return Math.round(p * 100) + ' %'; }
+  function times(v) { var s = (Math.round(v * 10) / 10).toFixed(1); return (Simdeck.lang === 'hr' ? s.replace('.', ',') : s) + '×'; }
+  function bold(text) { return h('b', { translate: 'no' }, String(text)); }
+  function muted(text) { return h('div', { class: 'hx-muted' }, text); }
+
+  function secretRow(cells) {
+    return h('div', { class: 'hx-cells' }, cells.map(function (c) {
+      return h('div', { class: 'hx-cell ' + (c.bit ? 'hx-one' : 'hx-zero') }, h('span', { translate: 'no' }, String(c.bit)));
+    }));
+  }
+  function traceRow(cells) {
+    return h('div', { class: 'hx-cells' }, cells.map(function (c) {
+      return h('div', { class: 'hx-cell ' + (c.trace ? 'hx-trace' : 'hx-clean') }, c.trace ? h('span', { 'aria-hidden': 'true' }, '◆') : null);
+    }));
+  }
+
+  /** The axis's chance per bit over its levels, with the current level marked. */
+  function curve(x, mitigate) {
+    var pts = [];
+    for (var i = 0; i <= L.MAX; i++) pts.push((i * 100 / L.MAX) + ',' + (100 - L.chance(i, mitigate) * 100));
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    var line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    line.setAttribute('points', pts.join(' '));
+    svg.appendChild(line);
+    return h('div', null,
+      h('div', { class: 'hx-curve' }, svg,
+        h('div', { class: 'hx-dot', style: { left: (x * 100 / L.MAX) + '%', top: (100 - L.chance(x, mitigate) * 100) + '%' } })),
+      h('div', { class: 'hx-curvelbl hx-muted' }, h('span', { translate: 'no' }, '0'), h('span', null, t('curveX')), h('span', { translate: 'no' }, String(L.MAX))));
+  }
+
+  function readout(ax, mitigate) {
+    return h('div', { class: 'hx-read' },
+      h('div', null, h('div', { class: 'hx-val', translate: 'no' }, pct(ax.p)), muted(t('perBit'))),
+      h('div', null, h('div', { class: 'hx-val', translate: 'no' }, ax.traces + ' / ' + L.SECRET.filter(Boolean).length), muted(t('traces'))),
+      curve(ax.level, mitigate));
+  }
+
+  function speedPanel(st, p) {
+    var ax = st.speed;
+    var slots = [];
+    for (var i = 0; i < L.MAX; i++) slots.push(h('div', { class: 'hx-slot' + (i < ax.level ? ' hx-on' : '') }));
+    return h('div', { class: 'hx-axis hx-speed' },
+      h('div', { class: 'hx-title' }, t('axisSpeed')), muted(t('exampleSpeed')),
+      muted(t('rowSecret')), secretRow(ax.cells),
+      h('div', { class: 'hx-mid' }, h('div', { style: { flex: '1' } },
+        muted(ax.level ? t('ahead', { n: ax.level, max: L.MAX }) : t('aheadNone')),
+        h('div', { class: 'hx-ahead', 'aria-hidden': 'true' }, slots))),
+      muted(t('rowCache')), traceRow(ax.cells),
+      readout(ax, p.mitigate));
+  }
+
+  function spacePanel(st, p) {
+    var ax = st.space;
+    var size = st.cost.size; // 1 at the densest, 2 at the sparsest: rows drawn that much further apart, cells taller
+    var cellH = { '--ch': (1.6 + (size - 1) * 0.8) + 'rem' };
+    return h('div', { class: 'hx-axis hx-space' },
+      h('div', { class: 'hx-title' }, t('axisSpace')), muted(t('exampleSpace')),
+      muted(t('rowVictim')), h('div', { style: cellH }, secretRow(ax.cells)),
+      h('div', { class: 'hx-mid' },
+        h('div', { class: 'hx-gap', style: { height: (0.6 + (size - 1) * 2.6) + 'rem' }, 'aria-hidden': 'true' }),
+        muted(t('spacing', { v: Math.round(size * 50) }))),
+      muted(t('rowNeighbour')), h('div', { style: cellH }, traceRow(ax.cells)),
+      readout(ax, p.mitigate));
+  }
+
+  function bar(frac, cls) { return h('div', { class: 'hx-track', 'aria-hidden': 'true' }, h('div', { class: 'hx-fill' + (cls ? ' ' + cls : ''), style: { width: Math.min(100, frac * 100) + '%' } })); }
+
+  var COST_MAX = 4;
+  function costBox(c) {
+    var row = function (key, v) { return [h('span', null, t(key)), bar(v / COST_MAX), h('span', { class: 'hx-num', translate: 'no' }, times(v))]; };
+    return h('div', { class: 'hx-box' }, h('div', { class: 'hx-head' }, t('costHead')),
+      h('div', { class: 'hx-cost' }, row('costTime', c.time), row('costArea', c.area), row('costEnergy', c.energy)));
+  }
+
+  var LIMIT_KEY = { light: 'limitLight', heat: 'limitHeat', quantum: 'limitQuantum', atoms: 'limitAtoms', trust: 'limitTrust' };
+  function limitsBox(st) {
+    return h('div', { class: 'hx-box' }, h('div', { class: 'hx-head' }, t('limitsHead')),
+      h('ul', { class: 'hx-limits' }, L.LIMITS.map(function (l) {
+        var cls = 'hx-limit' + (l.physical ? '' : ' hx-trust' + (st.trustBinds ? ' hx-binds' : ''));
+        return h('li', { class: cls }, h('span', null, t(LIMIT_KEY[l.id])), h('span', null, t(l.physical ? 'physical' : 'notPhysical')));
+      })),
+      h('div', { class: 'hx-quote' }, t('quote')));
+  }
+
+  var labels = { safe: 'presetSafe', speed: 'presetSpeed', space: 'presetSpace', both: 'presetBoth', mitigated: 'presetMitigated', trusted: 'presetTrusted' };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'speed', type: 'range', label: t('speed'), hint: t('speedHint'), min: 0, max: L.MAX, step: 1, format: function (v) { return v + ' / ' + L.MAX; } },
+      { key: 'density', type: 'range', label: t('density'), hint: t('densityHint'), min: 0, max: L.MAX, step: 1, format: function (v) { return v + ' / ' + L.MAX; } },
+      { key: 'mitigate', type: 'toggle', label: t('mitigate'), hint: t('mitigateHint') },
+      { key: 'trust', type: 'choice', label: t('trust'), options: [['hostile', t('trustHostile')], ['trusted', t('trustTrusted')]] }
+    ],
+
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { c: 1, label: t('legendOne') },
+      { shape: 'hollow', label: t('legendZero') },
+      { shape: 'hl', label: t('legendTrace') }
+    ],
+
+    render: function (c) {
+      var p = c.params, st = c.state;
+      var trusted = p.trust === 'trusted';
+      c.stage.replaceChildren(h('div', { class: 'hx' },
+        h('div', { class: 'hx-checks' },
+          h('div', { class: 'hx-check' }, t('checkResult')),
+          h('div', { class: 'hx-check' }, t('checkSoftware')),
+          h('div', { class: 'hx-check' }, t('checkHardware')),
+          h('div', { class: 'hx-check hx-sees' + (st.seen && !trusted ? ' hx-bad' : '') }, t('otherSees', { k: st.seen, n: st.ones }))),
+        h('div', { class: 'hx-axes' }, speedPanel(st, p), spacePanel(st, p)),
+        h('div', { class: 'hx-bottom' },
+          h('div', { class: 'hx-box' },
+            h('div', { class: 'hx-head' }, t('meter')),
+            h('div', { class: 'hx-big', translate: 'no' }, pct(st.p)),
+            bar(st.p, trusted ? 'hx-calm' : ''),
+            h('div', { class: 'hx-risk' }, trusted ? t('riskTrusted') : t('riskHostile', { p: pct(st.risk) })),
+            muted(t('illustrative'))),
+          costBox(st.cost),
+          limitsBox(st))));
+    },
+
+    caption: function (c) {
+      var p = c.params, st = c.state, k = st.cost;
+      var mit = function (out) { if (p.mitigate) { out.push(' '); out = out.concat(t.parts('captionMit', { time: bold(times(k.time)) })); } return out; };
+      if (st.p === 0) return mit(t.parts('captionSafe', { time: bold(times(k.time)), area: bold(times(k.area)), energy: bold(times(k.energy)) }));
+      if (!st.seen) return mit(t.parts('captionNoTrace', { p: bold(pct(st.p)) }));
+      var out = t.parts('captionLeak', { ts: bold(st.speed.traces), td: bold(st.space.traces) });
+      out.push(' ');
+      out = mit(out.concat(t.parts('captionChance', { p: bold(pct(st.p)) })));
+      out.push(' ', h('span', { class: 'sd-hl' }, t(p.trust === 'trusted' ? 'captionTrusted' : 'captionHostile')));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
