@@ -1,0 +1,378 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- The hidden node and RTS/CTS. Adopted from the URM book's web edition (uvod-u-racunalne-mreze,
+     ugradbeno/skriveni-cvor.html) into the simdeck kit (docs/sim-ui.md): a stepper, one slot per step; A and C hear
+     B but not each other, collide at B without RTS/CTS, and with it C waits on the CTS it hears from B.
+     The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="hidden-node">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skriveni čvor i RTS/CTS · simdeck</title>
+<meta name="description" content="A i C čuju B, ali ne jedna drugu: obje šalju i sudaraju se na B, a nijedna to ne primijeti. S RTS/CTS-om C čuje CTS od B i čeka.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "hidden-node",
+  "title": {
+    "hr": "Skriveni čvor i RTS/CTS",
+    "en": "The hidden node and RTS/CTS"
+  },
+  "concept": {
+    "hr": "Dvije stanice koje se ne čuju sudaraju se na access pointu",
+    "en": "Two stations out of range of each other collide at the access point"
+  },
+  "summary": {
+    "hr": "A i C čuju B, ali ne jedna drugu: obje šalju i sudaraju se na B, a nijedna to ne primijeti. S RTS/CTS-om C čuje CTS od B i čeka.",
+    "en": "A and C hear B but not each other: both send and collide at B, and neither notices. With RTS/CTS, C hears the CTS from B and waits."
+  },
+  "tags": [
+    "wifi"
+  ],
+  "class": "stepper",
+  "steps": 16
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="hidden-node"]; colours only from kit tokens. */
+[data-sim="hidden-node"] .hn {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3cqh;
+  height: 100%;
+  padding: 2cqh 2.5cqw;
+}
+
+/* who hears whom: A — B — C on one line, the A–C range under it */
+[data-sim="hidden-node"] .hn-topo {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr 1.2fr 1fr;
+  align-items: start;
+  row-gap: 0.4rem;
+}
+[data-sim="hidden-node"] .hn-node { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; text-align: center; }
+[data-sim="hidden-node"] .hn-dot {
+  display: grid;
+  place-items: center;
+  width: 12cqh;
+  height: 12cqh;
+  min-width: 3rem;
+  min-height: 3rem;
+  border: 0.25rem solid var(--sw, var(--ink));
+  border-radius: 50%;
+  background: var(--panel);
+  font-size: 5cqh;
+  font-weight: 700;
+}
+[data-sim="hidden-node"] .hn-dot.hn-on { border-width: 0.45rem; }
+[data-sim="hidden-node"] .hn-dot.hn-x { border-color: var(--danger); border-style: double; border-width: 0.6rem; }
+[data-sim="hidden-node"] .hn-role { font-size: var(--fs-md); color: var(--muted); }
+[data-sim="hidden-node"] .hn-status { font-size: var(--fs-md); font-weight: 700; min-height: 1.3em; }
+[data-sim="hidden-node"] .hn-badge {
+  min-height: 1.6em;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+[data-sim="hidden-node"] .hn-link {
+  align-self: center;
+  margin-top: -3cqh;
+  border-top: 0.3rem solid var(--ink);
+  text-align: center;
+  font-size: var(--fs-md);
+  padding-top: 0.2rem;
+}
+[data-sim="hidden-node"] .hn-span {
+  grid-column: 1 / -1;
+  margin: 0 8%;
+  border-top: 0.3rem solid var(--ink);
+  text-align: center;
+  font-size: var(--fs-md);
+  padding-top: 0.2rem;
+}
+[data-sim="hidden-node"] .hn-span.hn-out { border-top: 0.3rem dashed var(--danger); color: var(--danger); font-weight: 700; }
+
+/* the timeline: slot ruler, rows A, B, C, then what B hears */
+[data-sim="hidden-node"] .hn-time {
+  display: grid;
+  grid-template-columns: auto repeat(16, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+[data-sim="hidden-node"] .hn-rowlabel { align-self: center; padding-right: 0.5rem; font-size: var(--fs-stage); font-weight: 700; }
+[data-sim="hidden-node"] .hn-tick { text-align: center; font-family: var(--mono); font-size: var(--fs-md); color: var(--muted); }
+[data-sim="hidden-node"] .hn-tick.hn-now { color: var(--ink); font-weight: 700; }
+[data-sim="hidden-node"] .hn-cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 6.5cqh;
+  min-height: 2.2rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  overflow: hidden;
+}
+[data-sim="hidden-node"] .hn-cell.hn-future { border-style: dotted; }
+[data-sim="hidden-node"] .hn-cell.hn-none { border-color: transparent; }
+[data-sim="hidden-node"] .hn-cell.hn-reply { border-radius: 999px; }
+[data-sim="hidden-node"] .hn-cell.hn-nav { border: var(--line-w) dotted var(--ink); color: var(--muted); background: var(--bg); }
+[data-sim="hidden-node"] .hn-cell.hn-deaf { color: var(--muted); border-color: transparent; }
+[data-sim="hidden-node"] .hn-cell.hn-coll,
+[data-sim="hidden-node"] .sd-swatch[data-shape='cross'] {
+  border: 0.2rem solid var(--danger);
+  color: var(--danger);
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.55em),
+    repeating-linear-gradient(-45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.55em);
+}
+[data-sim="hidden-node"] .hn-cell.hn-coll, [data-sim="hidden-node"] .hn-badge.hn-coll { font-family: inherit; font-size: var(--fs-stage); }
+[data-sim="hidden-node"] .sd-swatch[data-shape='hatch'] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 45%, transparent) 0.2em 0.35em);
+}
+[data-sim="hidden-node"] .sd-swatch[data-shape='nav'] { background: var(--bg); border-style: dotted; }
+
+/* facts */
+[data-sim="hidden-node"] .hn-facts { display: flex; flex-wrap: wrap; gap: 0.8rem 1.2rem; justify-content: center; }
+[data-sim="hidden-node"] .hn-box {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.4rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-md);
+}
+[data-sim="hidden-node"] .hn-box b { font-family: var(--mono); font-size: var(--fs-stage); }
+[data-sim="hidden-node"] .hn-box.hn-bad { border-left-color: var(--danger); }
+
+/* Phone and portrait: the stage grows with its content; the timeline cells drop their text, the pattern stays. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="hidden-node"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="hidden-node"] .hn { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="hidden-node"] .hn-topo { grid-template-columns: 1fr 0.6fr 1fr 0.6fr 1fr; }
+  [data-sim="hidden-node"] .hn-dot { width: 3rem; height: 3rem; font-size: 1.4rem; }
+  [data-sim="hidden-node"] .hn-link { margin-top: 1.5rem; font-size: 1rem; }
+  [data-sim="hidden-node"] .hn-link span { display: none; }
+  [data-sim="hidden-node"] .hn-role, [data-sim="hidden-node"] .hn-status, [data-sim="hidden-node"] .hn-badge,
+  [data-sim="hidden-node"] .hn-span { font-size: 1rem; }
+  [data-sim="hidden-node"] .hn-time { gap: 1px; }
+  [data-sim="hidden-node"] .hn-rowlabel { font-size: 1rem; padding-right: 0.2rem; }
+  [data-sim="hidden-node"] .hn-tick { font-size: 1rem; }
+  [data-sim="hidden-node"] .hn-tick:not(:nth-child(4n+2)) span { display: none; }
+  [data-sim="hidden-node"] .hn-cell { height: 1.6rem; min-height: 0; border-width: 1px; }
+  [data-sim="hidden-node"] .hn-cell span { display: none; }
+  [data-sim="hidden-node"] .hn-box { font-size: 1rem; padding: 0.3rem 0.6rem; }
+  [data-sim="hidden-node"] .hn-box b { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Skriveni čvor i RTS/CTS</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var COLOR = { A: '1', B: '3', C: '2' };
+  var OTHER = { A: 'C', C: 'A' };
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { rts: false, hear: false } },
+    { id: 'rts', label: t('presetRts'), hint: t('presetRtsHint'), params: { rts: true, hear: false } },
+    { id: 'hear', label: t('presetHear'), hint: t('presetHearHint'), params: { rts: false, hear: true } },
+    { id: 'hear-rts', label: t('presetHearRts'), hint: t('presetHearRtsHint'), params: { rts: true, hear: true } }
+  ];
+
+  // a frame cell: A solid, C solid and hatched, B's replies round and tinted
+  function frameCell(f, now) {
+    var cls = 'hn-cell ' + (f.src === 'B' ? 'hn-reply sd-soft' : 'sd-fill' + (f.src === 'C' ? ' sd-hatch' : ''));
+    return h('div', { class: cls + (now ? ' sd-changed sd-anim-in' : ''), dataset: { c: COLOR[f.src] }, translate: 'no' },
+      h('span', null, f.kind));
+  }
+
+  function status(x, s) {
+    var n = s.n, slot = s.slots[n - 1] || null;
+    if (x === 'B') {
+      if (!slot) return t('stBQuiet');
+      if (slot.sends.B) return t('stBSend');
+      if (slot.collide) return t('stBCollide');
+      return slot.heard.B.length ? t('stBHear') : t('stBQuiet');
+    }
+    var st = s.sta[x];
+    if (st.phase === 'done') return t('stDone');
+    if (slot && slot.sends[x]) return t('stSend', { k: slot.sends[x].k });
+    if (st.phase === 'await' || st.phase === 'send') return t('stAwait');
+    if (st.nav >= n && n > 0) return t('stNav', { until: st.nav });
+    if (st.ready > n + 1) return st.attempt > 1 ? t('stBackoff', { ready: st.ready }) : t('stIdle');
+    if (s.events.some(function (e) { return e.e === 'defer' && e.who === x; })) return t('stBusy');
+    return t('stReady');
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'rts', type: 'toggle', label: t('rts'), hint: t('rtsHint') },
+      { key: 'hear', type: 'toggle', label: t('hear'), hint: t('hearHint') }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legendA') },
+      { c: 2, shape: 'hatch', label: t('legendC') },
+      { c: 3, shape: 'round', label: t('legendB') },
+      { shape: 'cross', label: t('legendCollide') },
+      { shape: 'nav', label: t('legendNav') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params, fwd = c.dir === 'forward' && !c.first;
+      var slot = s.slots[s.n - 1] || null;
+
+      function node(x) {
+        var f = slot && slot.sends[x];
+        var x2 = x === 'B' && slot && slot.collide;
+        return h('div', { class: 'hn-node' },
+          h('div', { class: 'hn-dot' + (f ? ' hn-on' : '') + (x2 ? ' hn-x' : ''), dataset: { c: COLOR[x] }, translate: 'no' }, x),
+          x === 'B' ? h('div', { class: 'hn-role' }, h('em', null, t('ap'))) : h('div', { class: 'hn-role' }, t('station')),
+          h('div', { class: 'hn-status' }, status(x, s)),
+          f ? h('div', { class: 'hn-badge ' + (x === 'B' ? 'sd-soft' : 'sd-fill'), dataset: { c: COLOR[x] }, translate: 'no' }, f.kind)
+            : x2 ? h('div', { class: 'hn-badge hn-cell hn-coll', 'aria-hidden': 'true' }, '✕') : h('div', { class: 'hn-badge' }));
+      }
+      var topo = h('div', { class: 'hn-topo' },
+        node('A'), h('div', { class: 'hn-link' }, h('span', null, t('inRange'))),
+        node('B'), h('div', { class: 'hn-link' }, h('span', null, t('inRange'))),
+        node('C'),
+        h('div', { class: 'hn-span' + (p.hear ? '' : ' hn-out') },
+          data('A ↔ C'), ': ', p.hear ? t('inRange') : t('outRange')));
+
+      var cells = [h('div', { class: 'hn-rowlabel' }, t('slot'))];
+      for (var i = 1; i <= L.steps; i++) {
+        cells.push(h('div', { class: 'hn-tick' + (i === s.n ? ' hn-now' : ''), translate: 'no' }, h('span', null, String(i))));
+      }
+      ['A', 'B', 'C'].forEach(function (x) {
+        cells.push(h('div', { class: 'hn-rowlabel', translate: 'no' }, x));
+        for (var i = 1; i <= L.steps; i++) {
+          var r = s.slots[i - 1], now = fwd && i === s.n;
+          if (!r) cells.push(h('div', { class: 'hn-cell hn-future' }));
+          else if (r.sends[x]) cells.push(frameCell({ src: x, kind: r.sends[x].kind }, now));
+          else if (r.nav[x]) cells.push(h('div', { class: 'hn-cell hn-nav', translate: 'no' }, h('span', null, 'NAV')));
+          else cells.push(h('div', { class: 'hn-cell hn-none' }));
+        }
+      });
+      cells.push(h('div', { class: 'hn-rowlabel' }, t('rowAtB')));
+      for (i = 1; i <= L.steps; i++) {
+        var r = s.slots[i - 1], now = fwd && i === s.n;
+        if (!r) cells.push(h('div', { class: 'hn-cell hn-future' }));
+        else if (r.sends.B) cells.push(h('div', { class: 'hn-cell hn-deaf', 'aria-hidden': 'true' }, h('span', null, '—')));
+        else if (r.collide) cells.push(h('div', { class: 'hn-cell hn-coll' + (now ? ' sd-anim-in' : ''), 'aria-hidden': 'true' }, h('span', null, '✕')));
+        else if (r.heard.B.length) {
+          var from = r.heard.B[0];
+          cells.push(h('div', { class: 'hn-cell sd-soft' + (from === 'C' ? ' sd-hatch' : ''), dataset: { c: COLOR[from] }, translate: 'no' }, h('span', null, from)));
+        } else cells.push(h('div', { class: 'hn-cell hn-none' }));
+      }
+
+      function delivered(x) { var d = s.sta[x].delivered; return x + (d ? ' ✓ ' + d + '.' : ' –'); }
+      var facts = h('div', { class: 'hn-facts' },
+        h('div', { class: 'hn-box' }, t('factDelivered'), data(delivered('A')), data(delivered('C'))),
+        h('div', { class: 'hn-box' + (s.collisions ? ' hn-bad' : '') }, t('factCollide'), data(s.collisions)),
+        h('div', { class: 'hn-box' + (s.lost ? ' hn-bad' : '') }, t('factLost'), data(s.lost)));
+
+      c.stage.replaceChildren(h('div', { class: 'hn' }, topo, h('div', { class: 'hn-time' }, cells), facts));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      if (s.n === 0) {
+        return t.parts('captionStart', { hearing: t(p.hear ? 'startHear' : 'startHidden'), rtsState: t(p.rts ? 'rtsOn' : 'rtsOff') });
+      }
+      var slot = s.slots[s.n - 1], out = [];
+      function add(key, vars) { if (out.length) out.push(' '); out = out.concat(t.parts(key, vars)); }
+      s.events.forEach(function (e) {
+        if (e.e === 'reply') {
+          if (e.kind === 'DATA') add('evReplyData', { who: data(e.who) });
+          else add(e.kind === 'CTS' ? 'evReplyCts' : 'evReplyAck', { owner: data(e.owner) });
+        } else if (e.e === 'defer') {
+          add(e.why === 'nav' ? 'evDeferNav' : 'evDeferBusy', { who: data(e.who), until: data(e.until) });
+        } else if (e.e === 'start') {
+          var o = OTHER[e.who];
+          var hidden = slot.sends[o] && !L.hears(p, e.who, o);
+          add(hidden ? 'evStartHidden' : 'evStart', { who: data(e.who), other: data(o), kind: data(e.kind), k: data(e.k) });
+        } else if (e.e === 'collide') {
+          add('evCollide', {});
+        } else if (e.e === 'nav') {
+          var hid = e.kind === 'CTS' && !L.hears(p, e.who, e.owner);
+          add(hid ? 'evNavHidden' : 'evNav', { who: data(e.who), other: data(e.owner), kind: data(e.kind), until: data(e.until) });
+        } else if (e.e === 'timeout') {
+          add('evTimeout', { who: data(e.who), kind: data(e.kind), wait: t.n('wait', e.wait), ready: data(e.ready) });
+        } else if (e.e === 'delivered') {
+          add('evDelivered', { who: data(e.who), k: data(e.k) });
+        }
+      });
+      if (!out.length) add('evQuiet', {});
+      if (s.n === L.steps) {
+        var done = (s.sta.A.delivered ? 1 : 0) + (s.sta.C.delivered ? 1 : 0);
+        add('captionEnd', { n: data(s.n), done: data(done), coll: data(s.collisions), lost: data(s.lost) });
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
