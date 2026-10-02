@@ -61,9 +61,9 @@ From `docs/design-notes-simdeck.md`, playbook §10.2 and `docs/sim-ui.md`:
 - **Exceptions** are declared in the page's `<script type="application/json" id="simdeck-exceptions">` block
   (`[{ "rule", "why" }]`), never worked around silently. `rule` is one of the gate's rule ids (`lib/contract.mjs`):
   `one-screen`, `text-size`, `phone`, `keys`, `steps`, `max-steps`, `motion`, `console`, `languages`, `theme`,
-  `tokens`. A declared rule waives that rule's failing checks; the gate counts them, per class over the repo too.
-  `manifest`, `tests`, `offline`, `scope`, `kit` and `entries` cannot be waived. The single-language exception is `sim.json`
-  `languages` (§4).
+  `tokens`, and `kit` on adopted pages only (`sim.json` `origin` set; §12). A declared rule waives that rule's
+  failing checks; the gate counts them, per class over the repo too. `manifest`, `tests`, `offline`, `scope` and
+  `entries` cannot be waived, nor `kit` on a native sim. The single-language exception is `sim.json` `languages` (§4).
 - **Page skeleton** (`docs/site-structure.md` §7): `<html lang="…" data-sim="<id>">` with `data-sim` equal to
   the folder name; the page links `../../kit/kit.css` and `../../kit/kit.js` itself (so it runs unbuilt from
   `file://`), and `../../kit/glossary.js` when its strings use `[[terms]]`; a `#simdeck-meta` placeholder written
@@ -162,6 +162,9 @@ The gate (`scripts/gate.mjs`, rules in `lib/contract.mjs`) runs, in order:
    1920×1080 light and dark, body ≥ 20 px and nothing under 16 px, no sideways scroll at 375×812, clicker keys
    (steppers), the controller's step count equals `sim.json` `steps`, reduced motion (URL and OS), no console
    errors, theme follows the OS, both languages (tables, words, the L switch).
+   An adopted page that waives `kit` gets `scripts/check-adopted.mjs` instead: the same checks where they need no
+   kit (no network requests, console, fit and text at 1920×1080, phone, `<html lang>`, theme, reduced motion, each
+   entry opens), and the kit-only ones reported as waived under `kit` (§12).
 5. **tokens**: every `var(--x)` defined; no colour literals in the page's own CSS.
 6. **scope**: `git diff --name-only --no-renames main...HEAD`, uncommitted and untracked files, all under
    `sims/<id>/` (a preset task gates its host id). `--base <ref>` compares with another branch.
@@ -217,3 +220,28 @@ path, and the time from start to done.
 - Long labels break the projector layout: check them at 1920×1080 in both languages (Croatian runs longer).
 - Comparisons: when one variant finishes, run the others to their own end and show each outcome.
 - Collect questions instead of blocking: do something sensible, and write down exactly what you did.
+
+## 12. Importing a built page without the kit (ossimulator)
+
+ossimulator pages (and any other adopted page with its own runtime) are imported as built single files and never
+adapted to the kit (`docs/site-structure.md` §0). The gate handles them so (since t-0022); where a task file's
+steps say otherwise, these rules win.
+
+- **Markers, the only edits to the build:** `data-sim="<id>"` on `<html>`, then first in `<head>` the
+  `#simdeck-meta` placeholder (one line, `metaFor(sim.json)` from `lib/manifest.mjs`) and the `#simdeck-exceptions`
+  block (one line). `sims/interrupts/` is the worked example, its `sim.test.js` the test to copy: it takes the
+  markers out and checks the build's sha256, so a hand edit of the copy fails.
+- **`sim.json`:** `origin` is `ossimulator/<module>`. Without `origin`, `kit` cannot be waived and `npm run check`
+  fails. Croatian-only builds take the single-language exception, `"languages": ["hr"]` (§4).
+- **Declare** `kit` (its own runtime), and each of these that its gate run shows failing: `text-size`
+  (ossimulator's floor is 14 px), `one-screen` (the layouts scroll), `tokens` (its own design tokens), `phone`,
+  `motion`. Give each a `why` naming the ossimulator cause.
+- **Do not declare `languages`**, even where the task file says to: the single-language exception is `sim.json`
+  `languages`, and the language checks a page without the kit could fail are kit-only, waived under `kit`. Nor
+  `keys` or `steps`: they are kit-only too.
+- **The gate's browser step** for such a page is `scripts/check-adopted.mjs` (§7); it says so in its output. Its
+  `unused` line names exceptions that waived nothing: drop them. A page that mounts the kit (`window.simdeck`) may
+  not declare `kit`, and fails on it.
+- **Defects** (a check that fails and is not one of the exceptions above, broken in-page links) go into
+  ossimulator, in `NOTES.md` under "Defects for ossimulator", and the build is re-imported; keep `status: "wip"`
+  while one stands.

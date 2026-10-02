@@ -405,7 +405,7 @@ sets the limits:
     languages within their lengths, an explicit `query` of `key=value` pairs without `lang`; the preset id (or the
     query's first value) appears quoted in the sim's `.js` or `.html` files;
   - in the page: `data-sim` on `<html>` equals the id; `#simdeck-exceptions` is `[{rule, why}]` (counted, as
-    a warning); a stale `#simdeck-meta` placeholder (id, class, steps, title, concept differ from `sim.json`) gives
+    a warning) and names only waivable rules: `kit` only when `sim.json` has `origin` (an adopted page); a stale `#simdeck-meta` placeholder (id, class, steps, title, concept differ from `sim.json`) gives
     a warning.
 - **`tags.json`:** every topic and tag label in both languages.
 - **Courses:**
@@ -438,6 +438,14 @@ waivable: the build copies `entries` into `#simdeck-meta`): its link opens the p
 query names one (`preset=`); per language, the string tables and that every
 visible word comes from them (docs/sim-ui.md §9.6). `tests/site-lang.test.mjs` switches a built home and course
 page in the browser.
+
+An adopted page that waives `kit` (`origin` set and `kit` in `#simdeck-exceptions`, such as an ossimulator build) has
+no `window.simdeck` for that check to drive. The gate runs `scripts/check-adopted.mjs` on it instead: no network
+request, no console errors, one screen and text floors at 1920×1080 (light and dark), no sideways scroll at 375×812,
+`<html lang>` per language (`?lang=`), the background follows the OS theme, no animation under reduced motion (URL
+and OS), and each preset entry's link opens; the kit-only checks (mount and marker, string tables and words, the L
+switch, keys, the step count, an entry opening paused) are reported under `kit`, waived. A page that mounts the kit
+may not declare `kit` (docs/tasks/COMMON.md §12).
 
 ## 7. Where the frame meets the kit (reconciled with docs/sim-ui.md, kit 0.1.0)
 
@@ -497,7 +505,8 @@ Everything below can be done in the admin, or by editing the files and running `
   1. Create it as above, then copy the page (and its local files) into `sims/<id>/`.
   2. Set `origin`.
   3. Follow playbook §10.7: classify, adapt to the kit, record exceptions, freeze the original, check
-     assets.
+     assets. A built page with its own runtime (ossimulator) is not adapted: it declares `kit`
+     (docs/tasks/COMMON.md §12).
 - **Make a course page:**
   1. Kolegiji → **+ Novi kolegij**, choose the id and optionally a short address, and add simulators.
   2. Check it with **Pregled**.

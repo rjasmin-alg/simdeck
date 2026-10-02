@@ -2,7 +2,7 @@
 // The pure parts of the contract checks (lib/contract.mjs), each fed a bad sample it must catch.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, applyExceptions, colourLiterals, exceptionProblems, gateDir, outsideScope, pageCss, undefinedVars } from '../lib/contract.mjs';
+import { RULES, applyExceptions, canWaive, colourLiterals, exceptionProblems, gateDir, kitWaived, outsideScope, pageCss, undefinedVars } from '../lib/contract.mjs';
 
 test('undefinedVars: catches a var(--x) nobody defines; CSS and script definitions count', () => {
   assert.deepEqual(undefinedVars([':root{--a:1} x{color:var(--a);background:var(--nope)}']), ['--nope']);
@@ -34,8 +34,25 @@ test('outsideScope: anything not under the sim\'s folder, renames as two paths, 
 test('exceptionProblems: unknown rules, rules that cannot be waived, duplicates', () => {
   assert.deepEqual(exceptionProblems([{ rule: 'one-screen', why: 'poster' }]), []);
   assert.match(exceptionProblems([{ rule: 'fit', why: 'x' }])[0], /unknown rule "fit"/);
-  for (const r of ['manifest', 'tests', 'offline', 'scope', 'kit']) assert.match(exceptionProblems([{ rule: r, why: 'x' }])[0], /cannot be waived/);
+  for (const r of ['manifest', 'tests', 'offline', 'scope', 'entries']) assert.match(exceptionProblems([{ rule: r, why: 'x' }])[0], /cannot be waived/);
+  for (const r of ['manifest', 'tests', 'offline', 'scope', 'entries']) assert.match(exceptionProblems([{ rule: r, why: 'x' }], { adopted: true })[0], /cannot be waived/);
   assert.match(exceptionProblems([{ rule: 'keys', why: 'a' }, { rule: 'keys', why: 'b' }]).join(), /declared twice/);
+});
+
+test('kit: waivable only on an adopted page (sim.json origin)', () => {
+  assert.match(exceptionProblems([{ rule: 'kit', why: 'x' }])[0], /only on an adopted page/);
+  assert.deepEqual(exceptionProblems([{ rule: 'kit', why: 'x' }], { adopted: true }), []);
+  assert.equal(canWaive('kit'), false);
+  assert.equal(canWaive('kit', { adopted: true }), true);
+  assert.equal(canWaive('one-screen'), true);
+  assert.equal(canWaive('scope', { adopted: true }), false);
+  const results = [{ rule: 'kit', ok: false }, { rule: 'kit', ok: false }];
+  const kit = [{ rule: 'kit', why: 'x' }];
+  assert.equal(applyExceptions(results, kit).failed.length, 2);
+  assert.deepEqual(applyExceptions(results, kit, { adopted: true }).waived, { kit: 2 });
+  assert.equal(kitWaived({ origin: 'ossimulator/x' }, kit), true);
+  assert.equal(kitWaived({}, kit), false);
+  assert.equal(kitWaived({ origin: 'ossimulator/x' }, [{ rule: 'tokens', why: 'x' }]), false);
 });
 
 test('applyExceptions: a declared rule waives its failing checks only; unused and non-waivable are not waivers', () => {
@@ -52,7 +69,7 @@ test('applyExceptions: a declared rule waives its failing checks only; unused an
 
 test('every rule says whether it can be waived and what it checks', () => {
   for (const [k, v] of Object.entries(RULES)) {
-    assert.equal(typeof v.waivable, 'boolean', k);
+    assert.ok(typeof v.waivable === 'boolean' || v.waivable === 'adopted', k);
     assert.ok(v.what.length > 10, k);
   }
 });

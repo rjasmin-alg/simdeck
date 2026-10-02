@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { metaFor } from '../lib/manifest.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GATE = join(ROOT, 'scripts', 'gate.mjs');
@@ -83,6 +84,33 @@ const useModel = (x) => {
   x.page = x.page.replace('<script src="sim.js"></script>', '<script src="../../models/wrap.js"></script>\n<script src="sim.js"></script>');
   x.model = x.model.replace("'use strict';", "'use strict';\n  var wrap = typeof module === 'object' && module.exports ? require('../../models/wrap.js') : root.SimdeckModels.wrap;")
     .replace('var value = sum % size;', 'var value = wrap.wrap(sum, size);');
+};
+
+// An adopted page without the kit (an ossimulator-style single-file build): its own runtime, theme from the OS
+// (system colours), ?lang= read by its own script. `extra` goes before </body>, `css` into its style.
+const adopted = ({ origin = 'ossimulator/gate-x', exc = [{ rule: 'kit', why: 'its own runtime' }], extra = '', css: style = '' } = {}) => (x) => {
+  const entry = { ...JSON.parse(x.json), class: 'explorer', origin };
+  delete entry.steps;
+  if (!origin) delete entry.origin;
+  x.json = JSON.stringify(entry, null, 2);
+  x.test = "// SPDX-License-Identifier: AGPL-3.0-or-later\nrequire('node:test')('the import is there', () => {});\n";
+  x.page = `<!doctype html>
+<html lang="hr" data-sim="${ID}">
+<head>
+  <script type="application/json" id="simdeck-meta">${JSON.stringify(metaFor(entry))}</script>
+  <script type="application/json" id="simdeck-exceptions">${JSON.stringify(exc)}</script>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <script>document.documentElement.lang = new URLSearchParams(location.search).get('lang') || 'hr';</script>
+  <style>body { font-size: 1.25rem; background: Canvas; color: CanvasText; } ${style}</style>
+</head>
+<body>
+  <h1>Adopted</h1>
+  <p>A page with its own runtime.</p>
+  ${extra}
+</body>
+</html>
+`;
 };
 
 async function run(edit, args = [], base = {}) {
@@ -188,6 +216,28 @@ describe('gate', { skip, concurrency: 6 }, () => {
     assert.equal(r2.code, 1, r2.out);
     assert.match(r2.out, /FAIL \[phone\]/);
     assert.doesNotMatch(r2.out, /FAIL \[one-screen\]/);
+  });
+
+  // ── adopted pages without the kit (sim.json origin, kit declared): scripts/check-adopted.mjs ──
+  it('an adopted page that waives kit passes; the kit-only checks are waived, the rest run', async () => {
+    const r = await run(adopted());
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /without the kit: scripts\/check-adopted.mjs/);
+    assert.match(r.out, /WAIV the page mounts the kit .*\(waived: kit\)/);
+    assert.match(r.out, /\d+ check\(s\) waived \(kit \d+\)/);
+    assert.match(r.out, /gate: pass/);
+  });
+  it('kit: waived only on an adopted page (no origin, no waiver)', () => failsOn('manifest', adopted({ origin: null }), /only on an adopted page/));
+  it('kit: an adopted page that does mount the kit may not waive it', () => failsOn('manifest', all(json({ origin: 'single-page-labs/x.html' }), exceptions([{ rule: 'kit', why: 'x' }])), /declares no kit exception/));
+  it('adopted, console: an error in the console', () => failsOn('console', adopted({ extra: "<script>console.error('boom');</script>" }), /no console errors/));
+  it('adopted, phone: wider than a phone', () => failsOn('phone', adopted({ css: 'body { min-width: 600px; }' }), /375×812 .*horizontal scroll/));
+  it('adopted, offline: a request to the network at run time', () => failsOn('offline', adopted({ extra: "<script>fetch('https://' + 'example.org/x').catch(function () {});</script>" }), /no network requests/));
+  it('adopted, theme: a page that ignores the OS', () => failsOn('theme', adopted({ css: 'body { background: white; }' }), /follows the OS/));
+  it('adopted, one-screen: still checked and waivable', async () => {
+    const tall = 'body::after { content: ""; display: block; height: 2000px; }';
+    await failsOn('one-screen', adopted({ css: tall }), /no scroll/);
+    const r = await run(adopted({ css: tall, exc: [{ rule: 'kit', why: 'x' }, { rule: 'one-screen', why: 'y' }] }));
+    assert.equal(r.code, 0, r.out);
   });
 
   it('an exception that waives nothing is reported as unused', async () => {

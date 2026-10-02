@@ -6,7 +6,9 @@
 //  1. manifest   sim.json and the page's blocks (lib/manifest.mjs), and at most MAX_STEPS steps
 //  2. tests      node --test sims/<id>/sim.test.js, and models/<name>.test.js of every shared model the page includes
 //  3. build      the sim alone, as one self-contained file in a temp folder (the build refuses network loads)
-//  4. browser    kit/tools/check-page.mjs on the built file, from file:// with every request blocked
+//  4. browser    kit/tools/check-page.mjs on the built file, from file:// with every request blocked; for an adopted
+//                page that waives `kit` (lib/contract.mjs kitWaived), scripts/check-adopted.mjs: the checks that
+//                need no window.simdeck, and the kit-only ones reported as waived
 //  5. tokens     every var(--x) in the built page is defined; no colour literals in the page's own CSS
 //  6. scope      git diff --name-only --no-renames <base>...HEAD (and untracked files) only under sims/<id>/
 //  7. exceptions declared in the page waive the matching check; counted per rule, and per class over the repo
@@ -23,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, pageExceptions, languagesOf } from '../lib/manifest.mjs';
 import { buildNative } from './build.mjs';
 import { MODELS_DIR, modelProblems, pageModels } from '../lib/models.mjs';
-import { MAX_STEPS, RULES, applyExceptions, colourLiterals, exceptionProblems, gateDir, outsideScope, pageCss, undefinedVars } from '../lib/contract.mjs';
+import { MAX_STEPS, RULES, applyExceptions, colourLiterals, exceptionProblems, gateDir, kitWaived, outsideScope, pageCss, undefinedVars } from '../lib/contract.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -72,7 +74,8 @@ record('manifest', 'manifest', 'sim.json and the page blocks are valid', errs.le
 for (const w of v.warnings.filter(mine)) console.log(`     warning: ${w}`);
 const html = repo.natives.find((n) => n.dir === id)?.html ?? '';
 const exceptions = pageExceptions(html) ?? [];
-const probs = exceptionProblems(exceptions);
+const adopted = { adopted: !!entry?.origin };
+const probs = exceptionProblems(exceptions, adopted);
 record('manifest', 'manifest', 'declared exceptions name waivable rules', probs.length === 0, probs.join('; '));
 const used = pageModels(html);
 for (const m of used) {
@@ -123,7 +126,9 @@ if (entry && html) {
 head('browser');
 if (builtHtml) {
   const json = join(work, 'check-page.json');
-  const r = spawnSync(process.execPath, [join(REPO, 'kit', 'tools', 'check-page.mjs'), built, '--shots', shots, '--json', json], { encoding: 'utf8', timeout: 300000 });
+  const tool = kitWaived(entry, exceptions) ? join(REPO, 'scripts', 'check-adopted.mjs') : join(REPO, 'kit', 'tools', 'check-page.mjs');
+  if (kitWaived(entry, exceptions)) console.log(`     adopted page (origin ${entry.origin}) without the kit: scripts/check-adopted.mjs`);
+  const r = spawnSync(process.execPath, [tool, built, '--shots', shots, '--json', json], { encoding: 'utf8', timeout: 300000 });
   const out = `${r.stdout}${r.stderr}`;
   const lines = out.split('\n').filter((l) => /^(FAIL|WAIV) /.test(l));
   console.log(lines.length ? lines.join('\n') : out.trim().split('\n').slice(-1)[0]);
@@ -162,7 +167,7 @@ else {
 
 // ── 7. exceptions ──
 head('exceptions');
-const ex = applyExceptions(results, exceptions);
+const ex = applyExceptions(results, exceptions, adopted);
 const single = entry && entry.languages ? 1 : 0; // the single-language exception lives in sim.json (COMMON.md §4)
 const nWaived = Object.values(ex.waived).reduce((a, b) => a + b, 0);
 console.log(`     ${id} (${entry?.class ?? '?'}): ${exceptions.length + single} declared${exceptions.length ? ` (${exceptions.map((x) => x.rule).join(', ')})` : ''}${single ? `${exceptions.length ? ',' : ''} single language ${languagesOf(entry).join('')}` : ''}; ${nWaived} check(s) waived${nWaived ? ` (${Object.entries(ex.waived).map(([k, n]) => `${k} ${n}`).join(', ')})` : ''}`);
