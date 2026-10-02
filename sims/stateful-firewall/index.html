@@ -1,0 +1,331 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- stateful-firewall: adopted from the URM book's web edition (uvod-u-racunalne-mreze, ugradbeno/vatrozid.html) into
+     the simdeck kit (docs/sim-ui.md). A stepper: a routing firewall with three interfaces judges five packets, one per
+     step, stateless (rules only) or stateful (state table first, then rules). The model is in sim.js, the words in
+     strings.js. -->
+<html lang="hr" data-sim="stateful-firewall">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vatrozid bez stanja i sa stanjem · simdeck</title>
+<meta name="description" content="Klijent pita poslužitelj na portu 443: vatrozid bez stanja odgovor odbacuje bez zasebnog pravila, vatrozid sa stanjem ga prepozna.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "stateful-firewall",
+  "class": "stepper",
+  "steps": 5,
+  "title": { "hr": "Vatrozid bez stanja i sa stanjem", "en": "Stateless and stateful firewall" },
+  "concept": { "hr": "Odgovor treba zasebno pravilo, osim ako vatrozid pamti vezu", "en": "The reply needs its own rule, unless the firewall remembers the connection" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="stateful-firewall"]; colours only from kit tokens. */
+[data-sim="stateful-firewall"] .fw {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.4cqh;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+  font-size: 1.15rem;
+}
+[data-sim="stateful-firewall"] .fw-addr { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="stateful-firewall"] .fw-small { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+
+/* the three zones around the firewall: internet | firewall | DMZ over the protected network */
+[data-sim="stateful-firewall"] .fw-topo { display: grid; grid-template-columns: 1fr auto 1fr; grid-template-rows: auto auto; gap: 0.6rem 1.6cqw; }
+[data-sim="stateful-firewall"] .fw-zone {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 0.4rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="stateful-firewall"] .fw-inet { grid-row: 1 / 3; grid-column: 1; justify-content: center; }
+[data-sim="stateful-firewall"] .fw-wall {
+  grid-row: 1 / 3; grid-column: 2;
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: 1fr auto 1fr; gap: 0.2rem 0.8rem; align-items: center;
+  padding: 0.4rem 0.6rem;
+  border: 0.3rem solid var(--ink);
+  border-radius: var(--radius);
+}
+[data-sim="stateful-firewall"] .fw-wall-name { grid-column: 2; grid-row: 1 / 4; text-align: center; font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="stateful-firewall"] .fw-wall-name .fw-small { display: block; }
+[data-sim="stateful-firewall"] .fw-if { font-size: var(--fs-sm); font-weight: 700; padding: 0.05rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="stateful-firewall"] .fw-if.fw-if-on { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+[data-sim="stateful-firewall"] .fw-if1 { grid-column: 1; grid-row: 2; }
+[data-sim="stateful-firewall"] .fw-if2 { grid-column: 3; grid-row: 1; }
+[data-sim="stateful-firewall"] .fw-if3 { grid-column: 3; grid-row: 3; }
+[data-sim="stateful-firewall"] .fw-dmz { grid-row: 1; grid-column: 3; }
+[data-sim="stateful-firewall"] .fw-prot { grid-row: 2; grid-column: 3; }
+[data-sim="stateful-firewall"] .fw-host { display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; padding: 0 0.4rem; border: 0.2rem solid transparent; border-radius: var(--radius-sm); }
+[data-sim="stateful-firewall"] .fw-host.fw-src, [data-sim="stateful-firewall"] .fw-host.fw-dst { border-color: var(--ink); background: var(--bg); }
+[data-sim="stateful-firewall"] .fw-host.fw-dst.fw-blocked { border-style: dashed; }
+[data-sim="stateful-firewall"] .fw-role { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--ink); color: var(--bg); }
+[data-sim="stateful-firewall"] .fw-dst .fw-role { background: none; color: var(--ink); border: var(--line-w) solid var(--ink); }
+
+/* the packet of this step and the decision */
+[data-sim="stateful-firewall"] .fw-pkt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.2rem;
+  padding: 0.5rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--fs-lg);
+}
+[data-sim="stateful-firewall"] .fw-pkt.fw-none { border-style: dashed; color: var(--muted); font-style: italic; font-size: var(--fs-md); }
+[data-sim="stateful-firewall"] .fw-pkt .fw-small { font-size: var(--fs-sm); }
+[data-sim="stateful-firewall"] .fw-verdict { margin-left: auto; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: var(--radius-sm); border: 0.2rem solid var(--ink); }
+[data-sim="stateful-firewall"] .fw-verdict.fw-allow::before { content: '✓ '; }
+[data-sim="stateful-firewall"] .fw-verdict.fw-deny { background: var(--bg); }
+[data-sim="stateful-firewall"] .fw-verdict.fw-deny::before { content: '✗ '; }
+[data-sim="stateful-firewall"] .fw-pkt.fw-dropped { border-style: dashed; }
+[data-sim="stateful-firewall"] .fw-strip { align-self: stretch; width: 1.2rem; margin: -0.3rem 0 -0.3rem -0.5rem; border-radius: var(--radius-sm); }
+
+/* rules and state table */
+[data-sim="stateful-firewall"] .fw-tables { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.6cqw; align-items: start; }
+[data-sim="stateful-firewall"] .fw-box { display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="stateful-firewall"] .fw-rule {
+  display: grid; grid-template-columns: 1.6rem auto 1fr; gap: 0 0.6rem; align-items: baseline;
+  padding: 0.15rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+}
+[data-sim="stateful-firewall"] .fw-rule .fw-num { font-weight: 700; }
+[data-sim="stateful-firewall"] .fw-rule .fw-act { font-weight: 700; }
+[data-sim="stateful-firewall"] .fw-rule .fw-tag { grid-column: 2 / -1; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="stateful-firewall"] .fw-rule.fw-miss { color: var(--muted); }
+[data-sim="stateful-firewall"] .fw-rule.fw-miss .fw-tag::before { content: '– '; }
+[data-sim="stateful-firewall"] .fw-rule.fw-hit { border: 0.3rem solid var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="stateful-firewall"] .fw-rule.fw-hit .fw-tag::before { content: '▶ '; }
+[data-sim="stateful-firewall"] .fw-rule.fw-default { border-style: dashed; }
+[data-sim="stateful-firewall"] .fw-rule.fw-default.fw-hit { border-style: solid; }
+[data-sim="stateful-firewall"] .fw-skip { font-size: var(--fs-sm); font-weight: 700; padding-left: 0.5rem; border-left: 0.3rem solid var(--ink); }
+[data-sim="stateful-firewall"] .fw-entry {
+  display: flex; flex-wrap: wrap; gap: 0 0.8rem; align-items: baseline;
+  padding: 0.15rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+}
+[data-sim="stateful-firewall"] .fw-entry .fw-num { font-weight: 700; }
+[data-sim="stateful-firewall"] .fw-entry.fw-used { border: 0.3rem solid var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="stateful-firewall"] .fw-entry.fw-new { border-color: var(--sw); }
+[data-sim="stateful-firewall"] .fw-etag { flex-basis: 100%; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="stateful-firewall"] .fw-entry.fw-used .fw-etag::before { content: '▶ '; }
+[data-sim="stateful-firewall"] .fw-empty { color: var(--muted); font-style: italic; padding-left: 0.5rem; border-left: 0.3rem solid var(--line); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="stateful-firewall"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="stateful-firewall"] .fw { height: auto; gap: 0.8rem; padding: 0.5rem 0.4rem; }
+  [data-sim="stateful-firewall"] .fw-topo { grid-template-columns: 1fr; grid-template-rows: none; }
+  [data-sim="stateful-firewall"] .fw-inet, [data-sim="stateful-firewall"] .fw-wall,
+  [data-sim="stateful-firewall"] .fw-dmz, [data-sim="stateful-firewall"] .fw-prot { grid-row: auto; grid-column: 1; }
+  [data-sim="stateful-firewall"] .fw-wall { grid-template-columns: 1fr; grid-template-rows: none; }
+  [data-sim="stateful-firewall"] .fw-wall > * { grid-column: 1; grid-row: auto; justify-self: center; }
+  [data-sim="stateful-firewall"] .fw-tables { grid-template-columns: 1fr; }
+  [data-sim="stateful-firewall"] .fw-pkt { font-size: var(--fs-md); }
+  [data-sim="stateful-firewall"] .fw-verdict { margin-left: 0; }
+  [data-sim="stateful-firewall"] .fw-addr { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Vatrozid bez stanja i sa stanjem</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  function data(text) { return h('span', { translate: 'no', class: 'fw-addr' }, text); }
+  function bold(text) { return h('b', { translate: 'no' }, text); }
+  function sock(e) { return e.ip + ':' + e.port; }
+  var ZONE = { internet: 'internet', dmz: 'dmz', protected: 'protectedNet' };
+  var HOSTNAME = { client: 'client', web: 'webServer', dns: 'dnsServer', stranger: 'stranger', dmzWeb: 'dmzWeb' };
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { kind: 'stateless', returnRule: false, proto: 'tcp' } },
+    { id: 'stateful', label: t('presetStateful'), hint: t('presetStatefulHint'), params: { kind: 'stateful', returnRule: false, proto: 'tcp' } },
+    { id: 'return-rule', label: t('presetReturn'), hint: t('presetReturnHint'), params: { kind: 'stateless', returnRule: true, proto: 'tcp' } },
+    { id: 'dns-udp', label: t('presetUdp'), hint: t('presetUdpHint'), params: { kind: 'stateful', returnRule: false, proto: 'udp' } },
+    { id: 'dmz', label: t('presetDmz'), hint: t('presetDmzHint'), params: { kind: 'stateful', returnRule: false, proto: 'tcp' }, step: 5 }
+  ];
+
+  /** One rule as a line of words: action, protocol, from → to, then its conditions. */
+  function ruleText(r) {
+    var parts = [data(r.proto.toUpperCase()), ' · ', t(ZONE[r.from]), ' → ', t(ZONE[r.to])];
+    if (r.dst) parts.push(' ', data(r.dst));
+    if (r.dport != null) parts.push(' · ', t.parts('ruleDport', { p: data(String(r.dport)) }));
+    if (r.sport != null) parts.push(' · ', t.parts('ruleSport', { p: data(String(r.sport)) }));
+    return h('span', null, parts);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'kind', type: 'choice', label: t('kind'), options: [['stateless', t('kindStateless')], ['stateful', t('kindStateful')]] },
+      { key: 'returnRule', type: 'toggle', label: t('returnRule'), hint: t('returnRuleHint') },
+      { key: 'proto', type: 'choice', label: t('proto'), options: [['tcp', t('protoTcp')], ['udp', t('protoUdp')]] }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { shape: 'round', c: 3, label: t('legendAllow') },
+      { shape: 'hollow', label: t('legendDeny') },
+      { shape: 'hl', label: t('legendHit') },
+      { c: 1, label: t('legendNew') }
+    ],
+
+    render: function (c) {
+      var s = c.state, e = s.event, pk = e && e.packet, fwd = c.dir === 'forward';
+      var allow = e && e.verdict === 'allow';
+
+      // the zones and their hosts; the sender and the receiver of this step's packet are framed and named
+      function host(key) {
+        var hst = L.hosts[key], role = null, cls = 'fw-host';
+        if (pk && pk.src.host === key) { role = 'roleSrc'; cls += ' fw-src'; }
+        else if (pk && pk.dst.host === key) { role = 'roleDst'; cls += ' fw-dst' + (allow ? '' : ' fw-blocked'); }
+        return h('div', { class: cls }, h('span', null, t(HOSTNAME[key])), data(hst.ip), role ? h('span', { class: 'fw-role' }, t(role)) : null);
+      }
+      var svcHost = L.service[s.proto].host;
+      var onIf = {};
+      if (pk) { onIf[L.ifaces[pk.src.zone]] = true; if (allow) onIf[L.ifaces[pk.dst.zone]] = true; }
+      function iface(n) { return h('span', { class: 'fw-if fw-if' + n + (onIf[n] ? ' fw-if-on' : '') }, t('iface', { n: n })); }
+      var topo = h('div', { class: 'fw-topo' },
+        h('div', { class: 'fw-zone fw-inet' }, h('span', { class: 'fw-small' }, t('internet')), host(svcHost), host('stranger')),
+        h('div', { class: 'fw-wall' },
+          h('div', { class: 'fw-wall-name' }, t('firewall'), h('span', { class: 'fw-small' }, t('routing'))),
+          iface(1), iface(2), iface(3)),
+        h('div', { class: 'fw-zone fw-dmz' }, h('span', { class: 'fw-small' }, t('dmz')), host('dmzWeb')),
+        h('div', { class: 'fw-zone fw-prot' }, h('span', { class: 'fw-small' }, t('protectedNet')), host('client')));
+
+      // the packet and the decision
+      var pkt;
+      if (!e) pkt = h('div', { class: 'fw-pkt fw-none' }, t('noPacket'));
+      else {
+        var verdict = e.by === 'state' ? t('verdictState', { n: e.stateRow + 1 })
+          : e.by === 'rule' ? t('verdictRule', { n: s.rules[e.rule].id }) : t('verdictDeny');
+        pkt = h('div', { class: 'fw-pkt' + (allow ? '' : ' fw-dropped') },
+          allow ? null : h('span', { class: 'fw-strip sd-hatch', 'aria-hidden': 'true' }),
+          h('span', { class: 'fw-small' }, t('packet')),
+          data(pk.proto.toUpperCase()),
+          h('span', null, data(sock(pk.src)), ' → ', data(sock(pk.dst))),
+          h('span', { class: 'fw-small' }, t(allow ? 'ifaces' : 'ifacesDrop', { a: L.ifaces[pk.src.zone], b: L.ifaces[pk.dst.zone] })),
+          h('span', { class: 'fw-verdict ' + (allow ? 'fw-allow sd-fill' : 'fw-deny'), dataset: allow ? { c: '3' } : null }, verdict));
+        if (fwd) pkt.classList.add('sd-anim-in');
+      }
+
+      // the rule list, first match; the default deny is the last line
+      var rows = s.rules.map(function (r, i) {
+        var tr = e ? e.trace[i] : 'unchecked';
+        return h('div', { class: 'fw-rule' + (tr === 'hit' ? ' fw-hit' : tr === 'miss' ? ' fw-miss' : '') },
+          h('span', { class: 'fw-num', translate: 'no' }, String(r.id)),
+          h('span', { class: 'fw-act' }, t('ruleAllow')),
+          ruleText(r),
+          tr === 'hit' ? h('span', { class: 'fw-tag' }, t('tagHit')) : tr === 'miss' ? h('span', { class: 'fw-tag' }, t('tagMiss')) : null);
+      });
+      var defHit = e && e.by === 'default';
+      rows.push(h('div', { class: 'fw-rule fw-default' + (defHit ? ' fw-hit' : '') },
+        h('span', { class: 'fw-num' }, ''), h('span', { class: 'fw-act' }, ''), h('span', null, t('ruleDefault')),
+        defHit ? h('span', { class: 'fw-tag' }, t('tagHit')) : null));
+      var rulesBox = h('div', { class: 'fw-box' }, h('span', { class: 'fw-small' }, t('rulesTitle')),
+        e && e.by === 'state' ? h('span', { class: 'fw-skip' }, t('tagSkipped')) : null, rows);
+
+      // the state table (stateful only)
+      var stateBody;
+      if (s.kind === 'stateless') stateBody = h('span', { class: 'fw-empty' }, t('stateNone'));
+      else if (!s.table.length) stateBody = h('span', { class: 'fw-empty' }, t('stateEmpty'));
+      else {
+        stateBody = s.table.map(function (en, k) {
+          var fresh = e && e.added === k, used = e && e.by === 'state' && e.stateRow === k;
+          return h('div', { class: 'fw-entry' + (fresh ? ' fw-new sd-fill' + (c.dir === 'forward' ? ' sd-anim-in' : '') : used ? ' fw-used' : ''), dataset: fresh ? { c: '1' } : null },
+            h('span', { class: 'fw-num', translate: 'no' }, String(k + 1)),
+            data(en.proto.toUpperCase()),
+            h('span', null, data(sock(en.a)), ' → ', data(sock(en.b))),
+            fresh || used ? h('span', { class: 'fw-etag' }, t(fresh ? 'tagNew' : 'tagUsed')) : null);
+        });
+      }
+      var stateBox = h('div', { class: 'fw-box' }, h('span', { class: 'fw-small' }, t('stateTitle')), s.kind === 'stateful' && s.table.length ? h('span', { class: 'fw-small' }, t('stateCols')) : null, stateBody);
+
+      c.stage.replaceChildren(h('div', { class: 'fw' }, topo, pkt, h('div', { class: 'fw-tables' }, rulesBox, stateBox)));
+    },
+
+    caption: function (c) {
+      var s = c.state, e = s.event, svc = L.service[s.proto], srv = L.hosts[svc.host].ip + ':' + svc.port;
+      if (!e) {
+        return t.parts('captionStart', {
+          client: bold(L.hosts.client.ip), svc: t(s.proto === 'tcp' ? 'svcWeb' : 'svcDns'), srv: bold(srv),
+          kind: t(s.kind === 'stateful' ? 'captionStartStateful' : 'captionStartStateless')
+        });
+      }
+      var pk = e.packet, n = e.rule >= 0 ? bold(String(s.rules[e.rule].id)) : null;
+      var v = { srv: bold(srv), src: bold(sock(pk.src)), dst: bold(sock(pk.dst)), n: n, port: bold(String(svc.port)),
+        a: bold(String(L.ifaces[pk.src.zone])), b: bold(String(L.ifaces[pk.dst.zone])) };
+      switch (pk.kind) {
+        case 'request': {
+          var out = t.parts('captionRequest', v);
+          return s.kind === 'stateful' ? out.concat([' ', h('span', { class: 'sd-hl' }, t('captionRequestState'))]) : out;
+        }
+        case 'reply':
+          return t.parts(e.by === 'state' ? 'captionReplyState' : e.by === 'rule' ? 'captionReplyRule' : 'captionReplyDeny', v);
+        case 'unsolicited':
+          return t.parts(e.verdict === 'allow' ? 'captionUnsolHole' : s.kind === 'stateful' ? 'captionUnsolDenyState' : 'captionUnsolDeny', v);
+        case 'toDmz':
+          return t.parts('captionToDmz', v);
+        default:
+          return t.parts('captionDmzOut', v);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
