@@ -1,147 +1,206 @@
-<html>
-    <script src="https://www.50ohm.de/assets/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://www.50ohm.de/assets/chartjs/4.4.1/chart.min.js"></script>
-    <p>Ovdje postoji mogućnost da to još jednom isprobaš. Vremenski kontinuirani sinusni signal digitalizira se pomoću A/D pretvarača, a zatim se ponovno pretvara u analogni signal pomoću D/A pretvarača. Pomoću klizača možeš podesiti vremensku kvantizaciju i kvantizaciju vrijednosti A/D i D/A pretvarača.</p><br>
-    <table>
-        <tr>
-            <td>
-                Vremenska kvantizacija:
-            </td>
-            <td>
-                <input type="range" class="slider" value="10" min="1" max="10" id="timeq">
-            </td>
-            <td>
-                <div id="timeqSteps" style="display:inline-block;">1024</div> uzoraka/s.
-            </td>
-        </tr>
-        <tr>
-            <td>
-                Kvantizacija vrijednosti:
-            </td>
-            <td>
-                <input type="range" class="slider" value="16" min="1" max="16" id="valueq">
-            </td>
-            <td>
-                <div id="valueqBits" style="display:inline-block;">16</div> bit
-          </td>
-        </tr>
-    </table><br>
-  <p><canvas id="Sine" style="max-height:200px;"></canvas></p>
-    
-    <script>
-        // Script by DL9MJ, 2024
-        var a = 100;
-        var max = 1;
-        var steps = 1024;
-        var stepSize = max/steps;
-        var b = 16;
-        var delta = a/(Math.pow(2,b)-1);
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Sampling and quantisation: adopted from 50ohm-contents-hr/contents/html/quantisierung_und_sampling.html
+     (script by DL9MJ, 2024; CC BY 4.0, 50ohm.de-Autorenteam, AJW-Referat des DARC e.V.) into the simdeck kit
+     (docs/sim-ui.md), translated and changed. An explorer: the two sliders drive the drawing live; the model is in
+     sim.js, the words in strings.js. The original's jQuery and Chart.js are gone: the plot is SVG. -->
+<html lang="hr" data-sim="quantisation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uzorkovanje i kvantizacija · simdeck</title>
+<meta name="description" content="Sinus od 1 Hz digitalizira se A/D pretvaračem i vraća D/A pretvaračem: brzina uzorkovanja i broj bitova.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
 
-        sine = new Chart("Sine", {
-            type: 'scatter',
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        fill: false,
-                        showLine: true,
-                        stepped: true,
-                        borderColor: "#00AEDF",
-                        label: "Vrijednosno i vremenski kvantizirani signal",
-                        pointRadius: 0,
-                        data: [],
-                    },
-                    {
-                        fill: false,
-                        showLine: true,
-                        tenstion: 0.1,
-                        label: "Vremenski kontinuirani signal",
-                        borderColor: "#999999",
-                        pointRadius: 0,
-                        data: [],
-                    },
-                ]
-            },    
-            options: {
-                animation: {
-                    duration: 0
-                },
-                responsive:true,
-                scales: {
-                    y: {
-                        min: -120,
-                        max: +120,
-                        ticks: {
-                            callback: function(value, index, ticks) {
-                                return value + "%";
-                            }
-                        }
-                    },
-                    x: {
-                        min: 0,
-                        max: max,
-                        title: {
-                            display: true,
-                            text: 'Vrijeme'
-                        },
-                        ticks: {
-                            stepSize: 1,
-                            callback: function(val, index) {
-                                return val+"s";
-                            },
-                        }
-                    }
-                },
-            }
-        });
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "quantisation",
+  "class": "explorer",
+  "title": { "hr": "Uzorkovanje i kvantizacija", "en": "Sampling and quantisation" },
+  "concept": { "hr": "A/D pretvarač mjeri signal u razmacima 1/fs i zaokružuje ga na 2ⁿ razina", "en": "An A/D converter measures a signal every 1/fs and rounds it to 2ⁿ levels" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
 
-        generateValues(0, max, stepSize);
+<style>
+/* Page CSS: every selector starts with [data-sim="quantisation"]; colours only from kit tokens. */
+[data-sim="quantisation"] .qz { height: 100%; padding: 1.6cqh 1.6cqw; display: flex; }
+[data-sim="quantisation"] .qz-plot { position: relative; flex: 1; min-height: 12rem; }
+[data-sim="quantisation"] .qz-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="quantisation"] .qz-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--muted); }
+[data-sim="quantisation"] .qz-frame { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+[data-sim="quantisation"] .qz-grid { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
+[data-sim="quantisation"] .qz-level { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 6; }
+[data-sim="quantisation"] .qz-zero { stroke: var(--muted); stroke-width: 1.5; }
+[data-sim="quantisation"] .qz-line { fill: none; stroke-linejoin: round; }
+[data-sim="quantisation"] .qz-line[data-line="signal"] { stroke: var(--c1); stroke-width: 2.5; stroke-dasharray: 9 6; }
+[data-sim="quantisation"] .qz-line[data-line="output"] { stroke: var(--c3); stroke-width: 4.5; stroke-linejoin: miter; }
+[data-sim="quantisation"] .qz-dot { fill: var(--c2); stroke: var(--bg); stroke-width: 2; }
+[data-sim="quantisation"] .qz-axis { font-style: italic; }
+/* Attribution (CC BY 4.0), at the end of the footer bar, after the kit's reset button. */
+[data-sim="quantisation"] .qz-credit { order: 9; flex: 1 1 30rem; margin: 0; text-align: right; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="quantisation"] .qz-credit a { color: inherit; }
 
-        $("#timeq").on("change", function() {
-            steps = Math.pow(2,($(this).val()));
-            stepSize = max/steps;
-            generateValues(0, max, stepSize, delta);
-        });
+/* Phone and portrait: the stage grows with its content instead of a fixed height. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="quantisation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="quantisation"] .qz { height: auto; padding: 0.6rem; }
+  [data-sim="quantisation"] .qz-plot { flex: none; width: 100%; height: 16rem; }
+  [data-sim="quantisation"] .qz-credit { text-align: left; }
+  /* The kit makes the bar sticky on a phone; with the credit in it, it would cover a third of the screen. */
+  [data-sim="quantisation"] .sd-bar { position: static; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Uzorkovanje i kvantizacija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
 
-        $("#valueq").on("change", function() {
-            b = $(this).val();
-            delta = (2*a)/(Math.pow(2,b));
-            console.log(delta);
-            generateValues(0, max, stepSize, delta);
-        });
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
 
-        function generateValues(i1, i2, step = 1, delta=0.001) {
-            // Reset all values:
-            sine.data.datasets[0].data = [];
-            sine.data.datasets[1].data = [];
+  <footer class="sd-bar" data-sd-transport>
+    <p class="qz-credit" data-t-html="credit"></p>
+  </footer>
+</div>
 
-            // Reference Sine:
-            for (let x = i1; x <= i2; x += 1/32) {
-                // Set I:
-                sine.data.datasets[1].data.push({
-                    x: x,
-                    y: a*Math.sin(2*Math.PI*x)
-                });
-            }
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var POINTS = 400;
+  var DOTS_MAX = 64;      // sample dots are drawn up to 64 samples/s; above that they would merge into the line
+  var LEVELS_MAX = 16;    // level lines are drawn up to 4 bits
+  var sim = null;
 
-            // Generate new Data:
-            for (let x = i1; x <= i2; x += step) {
-                y1 = a*Math.sin(2*Math.PI*x);
-                y2 = Math.max(-100,Math.min(100,Math.sign(y1)*delta*Math.floor(((Math.abs(y1))/(delta))+1)));
-                // Set I:
-                sine.data.datasets[0].data.push({
-                    x: x,
-                    //y: a*Math.sin(2*Math.PI*x)
-                    y: y2
-                });
-            }
+  // Numbers in the page's language: a decimal comma in Croatian.
+  function num(x) { var s = String(x); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  // A percentage of the amplitude (x is a fraction): three significant digits, trailing zeros dropped.
+  function pct(x) { return t('pct', { v: num(parseFloat((x * 100).toPrecision(3))) }); }
+  // A time in ms, up to three decimals (62,5 ms, 0,977 ms).
+  function ms(x) { return t('ms', { v: num(parseFloat((x * 1000).toFixed(3))) }); }
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) e.append(arguments[i]);
+    return e;
+  }
 
-            // Update Graphs
-            sine.update();
+  var labels = {
+    fine: 'presetFine', 'coarse-time': 'presetCoarseTime', 'coarse-value': 'presetCoarseValue', both: 'presetBoth',
+    'one-bit': 'presetOneBit', limit: 'presetLimit'
+  };
 
-            // Set Text:
-            $('#timeqSteps').html(steps); 
-            $('#valueqBits').html(b); 
-        }
-    </script>
+  // ── the stage: one plot over the 1 s window, values as % of the amplitude ──
+  function drawPlot(box, st) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var pad = { l: 4.4 * rem, r: 1.2 * rem, t: 0.6 * rem, b: 1.7 * rem };
+    var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    var yMax = 1.2;   // the original's ±120 %
+    var X = function (tm) { return pad.l + (tm / L.DURATION) * cw; };
+    var Y = function (y) { return pad.t + ch * (1 - (y + yMax) / (2 * yMax)); };
+    var svg = s('svg', { width: W, height: H, 'aria-hidden': 'true' });
+    svg.append(s('rect', { class: 'qz-frame', x: pad.l, y: pad.t, width: cw, height: ch }));
+    [-1, -0.5, 0.5, 1].forEach(function (v) { svg.append(s('line', { class: 'qz-grid', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) })); });
+    [0.25, 0.5, 0.75].forEach(function (v) { svg.append(s('line', { class: 'qz-grid', x1: X(v), x2: X(v), y1: pad.t, y2: pad.t + ch })); });
+    if (st.levels <= LEVELS_MAX) L.levelsOf(st.bits).forEach(function (v) {
+      svg.append(s('line', { class: 'qz-level', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) }));
+    });
+    svg.append(s('line', { class: 'qz-zero', x1: pad.l, x2: pad.l + cw, y1: Y(0), y2: Y(0) }));
+    [-1, -0.5, 0, 0.5, 1].forEach(function (v) {
+      svg.append(s('text', { x: pad.l - 0.5 * rem, y: Y(v) + 0.35 * rem, 'text-anchor': 'end' },
+        v === 0 ? '0' : (v < 0 ? '−' : '') + pct(Math.abs(v))));
+    });
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (v) {
+      var anchor = v === 0 ? 'start' : v === 1 ? 'end' : 'middle';
+      svg.append(s('text', { x: X(v), y: H - 0.2 * rem, 'text-anchor': anchor }, t('s', { v: num(v) })));
+    });
+    var line = function (kind, pts) {
+      return s('polyline', { class: 'qz-line', 'data-line': kind,
+        points: pts.map(function (p) { return X(p.t).toFixed(1) + ',' + Y(p.y).toFixed(1); }).join(' ') });
+    };
+    svg.append(line('signal', L.curve(POINTS)));
+    svg.append(line('output', L.held(st.samples)));
+    if (st.fs <= DOTS_MAX) st.samples.forEach(function (p) {
+      svg.append(s('circle', { class: 'qz-dot', cx: X(p.t), cy: Y(p.v), r: 0.42 * rem }));
+    });
+    box.replaceChildren(svg);
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'rate', type: 'range', label: t('rate'), hint: t('rateHint'), min: L.RATE_MIN, max: L.RATE_MAX, step: 1,
+        format: function (v) { return t.n('sps', Math.pow(2, v)); } },
+      { key: 'bits', type: 'range', label: t('bits'), hint: t('bitsHint'), min: L.BITS_MIN, max: L.BITS_MAX, step: 1,
+        format: function (v) { return t.n('bitCount', v); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { c: 1, label: t('legendSignal') },
+      { c: 2, shape: 'round', label: t('legendSamples') },
+      { c: 3, label: t('legendOutput') }
+    ],
+
+    render: function (c) {
+      var plot = h('div', { class: 'qz-plot' });
+      c.stage.replaceChildren(h('div', { class: 'qz' }, plot));
+      drawPlot(plot, c.state);
+    },
+
+    caption: function (c) {
+      var st = c.state;
+      var b = function (x) { return h('b', null, x); };
+      if (st.atLimit) return t.parts('captionLimit', { rate: b(t.n('sps', st.fs)) });
+      return t.parts('caption', {
+        rate: b(t.n('sps', st.fs)), ts: b(ms(st.ts)), bits: b(t.n('bitCount', st.bits)),
+        levels: b(t.n('levelCount', st.levels)), delta: b(pct(st.delta)), err: b(pct(st.errorBound))
+      });
+    }
+  });
+
+  // The plot is drawn in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var last = '';
+    new ResizeObserver(function (es) {
+      var rc = es[0].contentRect, key = Math.round(rc.width) + 'x' + Math.round(rc.height);
+      if (key !== last) { last = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
+</body>
 </html>
