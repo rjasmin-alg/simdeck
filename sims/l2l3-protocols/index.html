@@ -1,0 +1,1675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L2/L3 Protocol Deep Dive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0d12;
+  --surface: #12151e;
+  --surface2: #1a1e2b;
+  --border: #252a3a;
+  --border2: #353b50;
+  --text: #dde2f0;
+  --muted: #7a839e;
+  --accent: #4f9eff;
+  --accent2: #00d4a0;
+  --accent3: #ff7c5c;
+  --accent4: #c07eff;
+  --accent5: #ffe566;
+  --accent6: #ff4b7a;
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Syne', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.scanline-bg {
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.012) 2px, rgba(255,255,255,0.012) 4px),
+    var(--bg);
+  min-height: 100vh;
+}
+
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 2.5rem 3rem 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+header::before {
+  content: '';
+  position: absolute;
+  top: -60px; left: -60px;
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(79,158,255,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+header::after {
+  content: '';
+  position: absolute;
+  bottom: -80px; right: 100px;
+  width: 300px; height: 300px;
+  background: radial-gradient(circle, rgba(0,212,160,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.header-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--accent2);
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-tag::before {
+  content: '';
+  width: 20px;
+  height: 1px;
+  background: var(--accent2);
+}
+
+h1 {
+  font-family: var(--display);
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+h1 span { color: var(--accent); }
+
+.header-sub {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 600px;
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 1.5rem;
+}
+
+.toc-item {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+  font-family: var(--mono);
+}
+
+.toc-item:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+nav.proto-nav {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.proto-tab {
+  padding: 10px 18px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.proto-tab:hover { color: var(--text); }
+.proto-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 3rem 4rem;
+}
+
+.section {
+  padding-top: 3rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-num {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+
+h2 {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+h3 {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 1.5rem 0 0.75rem;
+}
+
+.proto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: 2rem;
+}
+
+.proto-card {
+  background: var(--surface);
+  padding: 1.25rem 1.5rem;
+  transition: background 0.15s;
+}
+
+.proto-card:hover { background: var(--surface2); }
+
+.card-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 0.5rem;
+}
+
+.card-title {
+  font-family: var(--display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+
+.card-meta {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 2px;
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.tag-l2 { background: rgba(79,158,255,0.15); color: var(--accent); }
+.tag-l3 { background: rgba(0,212,160,0.15); color: var(--accent2); }
+.tag-overlay { background: rgba(192,126,255,0.15); color: var(--accent4); }
+.tag-encap { background: rgba(255,124,92,0.15); color: var(--accent3); }
+.tag-security { background: rgba(255,229,102,0.15); color: var(--accent5); }
+
+/* ─── FRAME DISSECTOR ─────────────────────────────────────── */
+.dissector-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.dissector-title {
+  padding: 8px 14px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dissector-title .proto-name { color: var(--text); font-weight: 600; }
+
+.frame-vis {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 14px;
+  gap: 1px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.field:hover { transform: translateY(-2px); }
+
+.field-box {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: center;
+  white-space: nowrap;
+  border-right: 1px solid rgba(0,0,0,0.3);
+  position: relative;
+}
+
+.field-box:last-of-type { border-right: none; }
+
+.field-label {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 5px;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+.field-bits {
+  font-size: 8px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.f-eth-dst  { background: #1a2744; color: #6ba4ff; width: 90px; }
+.f-eth-src  { background: #1a2744; color: #6ba4ff; width: 90px; }
+.f-eth-type { background: #102438; color: #4f9eff; width: 56px; }
+.f-dot1q    { background: #1e1a44; color: #a07eff; width: 68px; }
+.f-vxlan    { background: #1e1a44; color: #c07eff; width: 80px; }
+.f-geneve   { background: #2a1a44; color: #d07eff; width: 80px; }
+.f-ipv4     { background: #0f2718; color: #00c890; width: 240px; }
+.f-ipv4-sm  { background: #0f2718; color: #00c890; width: 80px; }
+.f-udp      { background: #1a2212; color: #80d070; width: 100px; }
+.f-tcp      { background: #1a2812; color: #80d888; width: 100px; }
+.f-payload  { background: #1e1a10; color: #c8b870; width: 120px; flex: 1; min-width: 80px; }
+.f-payload-sm { background: #1e1a10; color: #c8b870; width: 80px; }
+.f-icmp     { background: #1a1010; color: #d07070; width: 80px; }
+.f-fcs      { background: #1a1a1a; color: #607080; width: 50px; }
+.f-gre      { background: #2a1a10; color: #e09050; width: 80px; }
+.f-mpls     { background: #2a1010; color: #e06060; width: 68px; }
+.f-vlan-inner { background: #281844; color: #b07eff; width: 68px; }
+.f-pvlan    { background: #301848; color: #cc8eff; width: 68px; }
+.f-nsh      { background: #102a2a; color: #30d0d0; width: 80px; }
+.f-ipv6     { background: #0a2010; color: #40e890; width: 200px; }
+.f-esp      { background: #2a1a0a; color: #e0a050; width: 80px; }
+.f-ah       { background: #2a200a; color: #d0c050; width: 68px; }
+.f-livewire { background: #1a1030; color: #9060e0; width: 80px; }
+.f-stag     { background: #28183c; color: #c070e8; width: 68px; }
+.f-ctag     { background: #2a1a44; color: #b07eff; width: 68px; }
+
+/* tooltip */
+.field-tooltip {
+  position: fixed;
+  z-index: 999;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 11px;
+  max-width: 280px;
+  pointer-events: none;
+  display: none;
+  line-height: 1.6;
+}
+
+.field-tooltip .tt-name { font-weight: 600; color: #fff; margin-bottom: 4px; font-size: 12px; }
+.field-tooltip .tt-bits { color: var(--accent); font-size: 10px; margin-bottom: 6px; }
+.field-tooltip .tt-desc { color: var(--muted); }
+
+/* ─── COMPARE TABLE ───────────────────────────────────────── */
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 1.5rem 0;
+}
+
+.compare-table th {
+  background: var(--surface2);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.compare-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: top;
+}
+
+.compare-table tr:hover td { background: var(--surface2); }
+
+.compare-table td:first-child { 
+  font-weight: 600; 
+  color: #fff; 
+  white-space: nowrap;
+}
+
+/* ─── COEXISTENCE DIAGRAM ─────────────────────────────────── */
+.coexist-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+
+/* ─── FRAGMENTATION ───────────────────────────────────────── */
+.frag-demo {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.frag-packet {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin: 8px 0;
+}
+
+.frag-block {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.frag-hdr  { background: #0f2718; color: #00c890; width: 70px; min-width: 70px; }
+.frag-pay  { color: #c8b870; }
+.frag-arrow { color: var(--muted); padding: 0 8px; font-size: 16px; }
+.frag-label { font-size: 10px; color: var(--muted); margin-left: 8px; white-space: nowrap; }
+.frag-row  { display: flex; align-items: center; margin: 4px 0; }
+
+/* ─── PVLAN TOPOLOGY ──────────────────────────────────────── */
+.pvlan-diagram {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+/* ─── MTU EXPLAINER ───────────────────────────────────────── */
+.mtu-bar {
+  position: relative;
+  height: 48px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.mtu-seg {
+  position: absolute;
+  top: 0; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border-right: 1px solid rgba(0,0,0,0.4);
+}
+
+.mtu-label {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+/* ─── CODE BLOCKS ─────────────────────────────────────────── */
+pre {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text);
+  margin: 1rem 0;
+}
+
+.hl-kw { color: var(--accent4); }
+.hl-val { color: var(--accent5); }
+.hl-cmt { color: var(--muted); font-style: italic; }
+.hl-field { color: var(--accent2); }
+.hl-hex { color: var(--accent3); }
+
+/* ─── INFO BOX ────────────────────────────────────────────── */
+.info-box {
+  border-left: 2px solid var(--accent);
+  padding: 0.75rem 1rem;
+  background: rgba(79,158,255,0.05);
+  margin: 1rem 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.warn-box {
+  border-left: 2px solid var(--accent3);
+  padding: 0.75rem 1rem;
+  background: rgba(255,124,92,0.05);
+  margin: 1rem 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.warn-box strong, .info-box strong { color: var(--text); }
+
+/* ─── STACK VIS ───────────────────────────────────────────── */
+.stack-vis {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 1.5rem 0;
+}
+
+.stack-col {
+  flex: 1;
+  min-width: 220px;
+}
+
+.stack-col-title {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stack-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 1px;
+  font-size: 11px;
+  border-left: 2px solid transparent;
+  transition: all 0.12s;
+}
+
+.stack-item:hover { background: var(--surface2); }
+
+.stack-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── BITFIELD ────────────────────────────────────────────── */
+.bitfield {
+  display: grid;
+  font-size: 9px;
+  margin: 1rem 0;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.bf-row {
+  display: flex;
+}
+
+.bf-cell {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 3px 5px;
+  text-align: center;
+  min-width: 28px;
+}
+
+.bf-cell:last-child { border-right: none; }
+
+.bf-header { background: var(--surface2); color: var(--muted); font-size: 8px; }
+.bf-val    { color: var(--text); font-weight: 600; letter-spacing: 0.05em; }
+.bf-name   { background: var(--surface); color: var(--muted); }
+
+/* ─── INTERACTIVE FRAG ─────────────────────────────────────── */
+#frag-slider-wrap { margin: 1.5rem 0; }
+.slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.slider-row label { font-size: 11px; color: var(--muted); white-space: nowrap; min-width: 120px; }
+.slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.slider-row .val { font-size: 11px; color: var(--accent); min-width: 50px; text-align: right; }
+
+#frag-output { font-size: 11px; }
+
+.frag-fragment {
+  display: inline-flex;
+  margin: 3px;
+  vertical-align: top;
+}
+
+.frag-hdr-mini {
+  background: #0f2718;
+  color: #00c890;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 4px 6px;
+  white-space: nowrap;
+  border-right: 1px solid rgba(0,0,0,0.4);
+}
+
+.frag-pay-mini {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 4px 6px;
+  color: #c8b870;
+}
+
+/* ─── SECTION TABS ────────────────────────────────────────── */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ─── GRID 3 ──────────────────────────────────────────────── */
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin: 1rem 0;
+}
+
+.grid3 > div {
+  background: var(--surface);
+  padding: 1rem 1.25rem;
+}
+
+/* ─── SCROLLBAR ───────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ─── RESPONSIVE ──────────────────────────────────────────── */
+@media (max-width: 700px) {
+  header { padding: 1.5rem; }
+  .content { padding: 0 1rem 3rem; }
+  .pvlan-diagram { grid-template-columns: 1fr; }
+  .grid3 { grid-template-columns: 1fr; }
+  .proto-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="scanline-bg">
+
+<div id="tooltip" class="field-tooltip"></div>
+
+<header>
+  <div class="header-tag">OSI Layer 2 &amp; 3 · Complete Protocol Reference</div>
+  <h1>L2 / L3 <span>Protocol</span><br>Internals</h1>
+  <p class="header-sub">Frame dissection · Packet anatomy · Fragmentation · Overlay encapsulation · VLAN/PVLAN/GENEVE/VXLAN/GRE/MPLS/LISP/NSH/IPsec · Coexistence diagrams</p>
+  <div class="toc">
+    <a class="toc-item" href="#" onclick="switchTab('ethernet')">Ethernet</a>
+    <a class="toc-item" href="#" onclick="switchTab('vlan')">802.1Q / PVLAN</a>
+    <a class="toc-item" href="#" onclick="switchTab('ip')">IPv4 / IPv6</a>
+    <a class="toc-item" href="#" onclick="switchTab('overlay')">VXLAN / GENEVE</a>
+    <a class="toc-item" href="#" onclick="switchTab('tunnels')">GRE / MPLS / IPsec</a>
+    <a class="toc-item" href="#" onclick="switchTab('sfc')">NSH / LISP</a>
+    <a class="toc-item" href="#" onclick="switchTab('frag')">Fragmentation</a>
+    <a class="toc-item" href="#" onclick="switchTab('compare')">Compare all</a>
+    <a class="toc-item" href="#" onclick="switchTab('coexist')">Coexistence</a>
+  </div>
+</header>
+
+<nav class="proto-nav">
+  <div class="proto-tab active" onclick="switchTab('ethernet')">01 · Ethernet</div>
+  <div class="proto-tab" onclick="switchTab('vlan')">02 · VLAN/PVLAN</div>
+  <div class="proto-tab" onclick="switchTab('ip')">03 · IPv4/v6</div>
+  <div class="proto-tab" onclick="switchTab('overlay')">04 · VXLAN/GENEVE</div>
+  <div class="proto-tab" onclick="switchTab('tunnels')">05 · GRE/MPLS/IPsec</div>
+  <div class="proto-tab" onclick="switchTab('sfc')">06 · NSH/LISP</div>
+  <div class="proto-tab" onclick="switchTab('frag')">07 · Fragmentation</div>
+  <div class="proto-tab" onclick="switchTab('compare')">08 · Compare All</div>
+  <div class="proto-tab" onclick="switchTab('coexist')">09 · Coexistence</div>
+</nav>
+
+<div class="content">
+
+<!-- ═══════════════════════════════════════════════════════════ 01 ETHERNET -->
+<div id="panel-ethernet" class="panel active section">
+  <div class="section-header">
+    <span class="section-num">01</span>
+    <h2>Ethernet — IEEE 802.3</h2>
+  </div>
+
+  <p style="color:var(--muted);font-size:11px;max-width:780px;line-height:1.8;margin-bottom:1.5rem;">
+    Ethernet is the dominant L2 framing format. The <strong style="color:var(--text)">Ethernet II</strong> (DIX) variant is used almost universally; IEEE 802.3 SNAP survives in legacy bridged environments. Click any field to inspect it.
+  </p>
+
+  <div class="dissector-wrap">
+    <div class="dissector-title">
+      <span class="proto-name">Ethernet II frame (DIX) — minimum 64 B, maximum 1518 B (1522 with 802.1Q)</span>
+      <span style="color:var(--muted);font-size:9px;">click field to inspect</span>
+    </div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Preamble + SFD','7 + 1 bytes','7 bytes of 0xAA alternating bits for clock sync, followed by SFD 0xAB which signals start of frame. Stripped before L2 processing — not visible to the OS or NIC driver in most cases.')">
+        <div class="field-box" style="background:#111;color:#444;width:80px;">PREAMBLE</div>
+        <div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Destination MAC','6 bytes','48-bit MAC address. Bit 0 of byte 0: 0=unicast, 1=multicast. All 1s = broadcast (ff:ff:ff:ff:ff:ff). Upper 24 bits = OUI (organizationally unique identifier, IEEE-assigned).')">
+        <div class="field-box f-eth-dst">DST MAC</div>
+        <div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Source MAC','6 bytes','48-bit MAC of sender. Bit 0 of byte 0 = I/G bit (should be 0 for unicast source). Bit 1 = U/L bit — if 1, MAC is locally administered (LAA), not globally unique.')">
+        <div class="field-box f-eth-src">SRC MAC</div>
+        <div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'EtherType / Length','2 bytes','≥ 0x0600 = EtherType (protocol ID). Common: 0x0800=IPv4, 0x86DD=IPv6, 0x0806=ARP, 0x8100=802.1Q VLAN, 0x88A8=802.1ad QinQ, 0x8847=MPLS unicast, 0x8848=MPLS multicast, 0x8906=FCoE, 0x8035=RARP. Values ≤ 1500 = IEEE 802.3 length field (legacy, carries 802.2 LLC/SNAP).')">
+        <div class="field-box f-eth-type">ETYPE</div>
+        <div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Payload','46–1500 bytes (Ethernet II)','Carries L3 PDU (IP packet, ARP, etc.). Minimum 46 bytes — NIC pads to this if short (CSMA/CD collision detection requires ≥ 64 B total). Maximum 1500 B = MTU. Jumbo frames (9000 B) require explicit switch/NIC support — not standard 802.3.')">
+        <div class="field-box f-payload" style="flex:1;min-width:140px;">PAYLOAD (L3 PDU)</div>
+        <div class="field-label">46–1500 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'FCS','4 bytes','Frame Check Sequence — CRC-32 over DST MAC through payload. Computed by NIC hardware; stripped on ingress. A bad FCS = frame silently dropped. With TSO/GRO offloads, the OS never sees FCS. 802.3an (10GbE+) switches to RS-FEC at PHY layer instead.')">
+        <div class="field-box f-fcs">FCS</div>
+        <div class="field-label">4 B</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <strong>Jumbo frames:</strong> Standard MTU is 1500 B (payload). Jumbo frames (typically 9000 B) require end-to-end NIC, switch, and OS support. Linux: <code>ip link set eth0 mtu 9000</code>. Benefits: reduced CPU overhead for iSCSI/NFS. Risk: silent drops at any hop not configured for jumbos — no ICMP PTB generated for L2 MTU mismatches.
+  </div>
+
+  <h3>Bit-level: EtherType field</h3>
+  <div class="bitfield">
+    <div class="bf-row">
+      <div class="bf-cell bf-header" style="min-width:280px;">Common EtherType values (0x0800+)</div>
+      <div class="bf-cell bf-header" style="flex:1;">Carried protocol</div>
+      <div class="bf-cell bf-header" style="min-width:120px;">Layer</div>
+    </div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x0800</div><div class="bf-cell bf-name" style="flex:1;">IPv4</div><div class="bf-cell bf-name">L3</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x86DD</div><div class="bf-cell bf-name" style="flex:1;">IPv6</div><div class="bf-cell bf-name">L3</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x0806</div><div class="bf-cell bf-name" style="flex:1;">ARP</div><div class="bf-cell bf-name">L2.5</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8100</div><div class="bf-cell bf-name" style="flex:1;">802.1Q VLAN tag</div><div class="bf-cell bf-name">L2</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x88A8</div><div class="bf-cell bf-name" style="flex:1;">802.1ad QinQ (outer S-TAG)</div><div class="bf-cell bf-name">L2</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8847</div><div class="bf-cell bf-name" style="flex:1;">MPLS unicast</div><div class="bf-cell bf-name">L2.5</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8848</div><div class="bf-cell bf-name" style="flex:1;">MPLS multicast</div><div class="bf-cell bf-name">L2.5</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8906</div><div class="bf-cell bf-name" style="flex:1;">FCoE (Fibre Channel over Ethernet)</div><div class="bf-cell bf-name">L2</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8100 + 0x88A8</div><div class="bf-cell bf-name" style="flex:1;">802.1ad double-tag (QinQ)</div><div class="bf-cell bf-name">L2</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x8864</div><div class="bf-cell bf-name" style="flex:1;">PPPoE session</div><div class="bf-cell bf-name">L2.5</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x88CC</div><div class="bf-cell bf-name" style="flex:1;">LLDP (Link Layer Discovery Protocol)</div><div class="bf-cell bf-name">L2</div></div>
+    <div class="bf-row"><div class="bf-cell bf-val" style="min-width:280px;color:var(--accent3);">0x88F7</div><div class="bf-cell bf-name" style="flex:1;">PTP (IEEE 1588 Precision Time Protocol)</div><div class="bf-cell bf-name">L2</div></div>
+  </div>
+
+  <h3>Livewire (PRISM packet header)</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin-bottom:1rem;">
+    <strong style="color:var(--text)">Livewire</strong> (also called <em>PRISM</em> capture header or Wireshark "PRISM monitor mode") is not a network protocol per se — it is a <strong style="color:var(--text)">capture metadata header</strong> prepended by wireless NICs in monitor mode before the 802.11 frame. Used in 802.11 packet capture pipelines. Carries RSSI, channel, rate, etc.
+  </p>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">PRISM / Livewire capture header (802.11 monitor)</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'PRISM message code','4 bytes','0x00000044 = "DID_MSGCODE_MONITOR". Identifies header type. Followed by a length field then a sequence of TLV-style data elements (DID=data ID, status, length, value).')">
+        <div class="field-box f-livewire" style="width:100px;">MSG CODE</div>
+        <div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Length','4 bytes','Total header length in bytes, typically 144 (0x90).')">
+        <div class="field-box f-livewire" style="width:60px;">LEN</div>
+        <div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Device name','16 bytes','Null-terminated ASCII string of the capturing interface, e.g. "wlan0".')">
+        <div class="field-box f-livewire" style="width:100px;">DEV NAME</div>
+        <div class="field-label">16 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'PRISM DID fields','~120 bytes (10 × 12 B each)','Each element: DID (4B) + status (2B) + len (2B) + value (4B). Fields: hosttime, mactime, channel, rssi, sq, signal, noise, rate, istx, frmlen.')">
+        <div class="field-box f-livewire" style="width:160px;">DID FIELDS (RSSI, CH, RATE…)</div>
+        <div class="field-label">~120 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'802.11 frame','variable','Original 802.11 MAC frame follows immediately — includes 802.11 header (24–36 B), LLC/SNAP, payload, FCS.')">
+        <div class="field-box" style="background:#1a1030;color:#b090e0;flex:1;min-width:120px;">802.11 FRAME</div>
+        <div class="field-label">variable</div>
+      </div>
+    </div>
+  </div>
+  <div class="warn-box"><strong>Note:</strong> Livewire/PRISM is a <em>host-local</em> construct — it never appears on the wire. Radiotap is the modern replacement (DLT_IEEE802_11_RADIO). tcpdump/Wireshark transparently strips it when decoding.</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 02 VLAN / PVLAN -->
+<div id="panel-vlan" class="panel section">
+  <div class="section-header">
+    <span class="section-num">02</span>
+    <h2>802.1Q VLAN · 802.1ad QinQ · PVLAN</h2>
+  </div>
+
+  <p style="color:var(--muted);font-size:11px;max-width:780px;line-height:1.8;margin-bottom:1.5rem;">
+    VLANs partition a physical L2 domain into isolated broadcast domains. <strong style="color:var(--text)">802.1Q</strong> inserts a 4-byte tag. <strong style="color:var(--text)">802.1ad (QinQ)</strong> stacks two tags for provider isolation. <strong style="color:var(--text)">PVLAN (Private VLAN, RFC 5517)</strong> further subdivides a single VLAN into isolated sub-domains without consuming multiple VLAN IDs.
+  </p>
+
+  <h3>802.1Q tagged frame</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IEEE 802.1Q — VLAN tag inserted between Src MAC and EtherType</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Destination MAC','6 bytes','Same as untagged frame.')">
+        <div class="field-box f-eth-dst">DST MAC</div><div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Source MAC','6 bytes','')">
+        <div class="field-box f-eth-src">SRC MAC</div><div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'TPID (Tag Protocol ID)','2 bytes','0x8100 = 802.1Q. When a switch or NIC sees this, it knows a 4-byte tag follows. Note: this REPLACES the normal EtherType position.')">
+        <div class="field-box f-eth-type" style="background:#201040;color:#b07eff;">TPID<br><span style="font-size:8px;">0x8100</span></div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'TCI — Tag Control Information','2 bytes (16 bits)','Bits 15–13: PCP (Priority Code Point) — 802.1p CoS, 0–7. Bit 12: DEI (Drop Eligible Indicator, formerly CFI). Bits 11–0: VID (VLAN ID) — 12 bits = 4094 usable VLANs (0 and 4095 reserved).')">
+        <div class="field-box f-dot1q" style="width:160px;">PCP(3)|DEI(1)|VID(12)</div><div class="field-label">2 B / TCI</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner EtherType','2 bytes','The ORIGINAL EtherType of the payload (0x0800=IPv4, 0x86DD=IPv6, etc.)')">
+        <div class="field-box f-eth-type">ETYPE</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Payload','42–1500 bytes','Same as untagged, but max frame size grows to 1522 B due to the 4-byte tag. A standards-compliant 802.3 switch must accept 1522 B tagged frames.')">
+        <div class="field-box f-payload" style="flex:1;min-width:120px;">PAYLOAD</div><div class="field-label">42–1500 B</div>
+      </div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+
+  <h3>802.1ad QinQ — double-tagged (S-TAG + C-TAG)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IEEE 802.1ad — provider outer tag (S-TAG 0x88A8) + customer inner tag (C-TAG 0x8100)</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-dst">DST MAC</div><div class="field-label">6 B</div></div>
+      <div class="field"><div class="field-box f-eth-src">SRC MAC</div><div class="field-label">6 B</div></div>
+      <div class="field" onclick="showTip(event,'S-TAG TPID','2 bytes','0x88A8 — identifies outer provider tag. Some legacy equipment uses 0x9100. Cisco historically used 0x9100 on older IOS versions.')">
+        <div class="field-box f-stag">S-TPID<br><span style="font-size:8px;">0x88A8</span></div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'S-TAG TCI','2 bytes','PCP(3)|DEI(1)|S-VID(12) — provider-assigned VLAN. Up to 4094 provider VLANs, each carrying up to 4094 customer VLANs = ~16M virtual circuits.')">
+        <div class="field-box f-stag" style="width:80px;">S-VID TCI</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'C-TAG TPID','2 bytes','0x8100 — inner customer tag. Provider equipment only inspects S-TAG, passes C-TAG transparently.')">
+        <div class="field-box f-ctag">C-TPID<br><span style="font-size:8px;">0x8100</span></div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'C-TAG TCI','2 bytes','Customer VLAN ID — invisible to provider forwarding decisions.')">
+        <div class="field-box f-ctag" style="width:80px;">C-VID TCI</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field"><div class="field-box f-eth-type">ETYPE</div><div class="field-label">2 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:100px;">PAYLOAD</div><div class="field-label">≤1496 B</div></div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+  <div class="warn-box"><strong>MTU impact:</strong> Each tag adds 4 B. QinQ total overhead = 8 B → effective payload MTU = 1492 B (or frame grows to 1526 B). Many switches need explicit "system mtu 1526" or equivalent to avoid silently truncating double-tagged frames.</div>
+
+  <h3>Private VLAN (PVLAN) — RFC 5517 / Cisco</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin:0.5rem 0 1rem;">
+    PVLAN is a <strong style="color:var(--text)">port-level isolation mechanism</strong> operating within a single primary VLAN. It does NOT add a different EtherType or tag structure — the frame on-wire still uses standard 802.1Q. The isolation is enforced by switch <strong style="color:var(--text)">port associations</strong>.
+  </p>
+
+  <div class="pvlan-diagram">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;">
+      <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent4);margin-bottom:1rem;">PVLAN Port Types</div>
+      <div class="stack-item" style="border-left-color:var(--accent);">
+        <div class="stack-dot" style="background:var(--accent);"></div>
+        <div>
+          <div style="font-size:11px;color:#fff;font-weight:600;">Promiscuous</div>
+          <div style="font-size:10px;color:var(--muted);">Can talk to all ports in primary VLAN. Routers, firewalls.</div>
+        </div>
+      </div>
+      <div class="stack-item" style="border-left-color:var(--accent2);">
+        <div class="stack-dot" style="background:var(--accent2);"></div>
+        <div>
+          <div style="font-size:11px;color:#fff;font-weight:600;">Isolated</div>
+          <div style="font-size:10px;color:var(--muted);">Only talks to promiscuous. Cannot talk to any community port or other isolated ports. Typical: servers in DMZ.</div>
+        </div>
+      </div>
+      <div class="stack-item" style="border-left-color:var(--accent4);">
+        <div class="stack-dot" style="background:var(--accent4);"></div>
+        <div>
+          <div style="font-size:11px;color:#fff;font-weight:600;">Community</div>
+          <div style="font-size:10px;color:var(--muted);">Talks to its own community + promiscuous. Cannot talk to isolated or other communities.</div>
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;">
+      <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent4);margin-bottom:1rem;">PVLAN Sub-VLAN Mapping</div>
+      <div style="font-size:10px;color:var(--muted);line-height:1.8;">
+        <div style="color:#fff;margin-bottom:4px;font-size:11px;">Primary VLAN: <span style="color:var(--accent);">VLAN 100</span></div>
+        <div>↳ Isolated secondary: <span style="color:var(--accent2);">VLAN 101</span></div>
+        <div>↳ Community A secondary: <span style="color:var(--accent4);">VLAN 102</span></div>
+        <div>↳ Community B secondary: <span style="color:var(--accent4);">VLAN 103</span></div>
+        <br>
+        <div style="color:var(--muted);">Traffic still tagged with <strong style="color:var(--text)">primary VLAN 100</strong> at egress. Secondary VLANs are local switch constructs — not propagated via VTP or visible externally.</div>
+        <br>
+        <div style="color:var(--accent3);font-size:10px;">⚠ PVLAN frames on trunk ports use the <em>primary VLAN</em> tag only.</div>
+      </div>
+    </div>
+  </div>
+
+  <pre><span class="hl-cmt"># Cisco IOS PVLAN config skeleton</span>
+<span class="hl-kw">vlan</span> <span class="hl-val">100</span>
+  <span class="hl-kw">private-vlan</span> primary
+
+<span class="hl-kw">vlan</span> <span class="hl-val">101</span>
+  <span class="hl-kw">private-vlan</span> isolated
+
+<span class="hl-kw">vlan</span> <span class="hl-val">100</span>
+  <span class="hl-kw">private-vlan</span> association <span class="hl-val">101</span>   <span class="hl-cmt"># bind isolated 101 to primary 100</span>
+
+<span class="hl-kw">interface</span> GigabitEthernet0/1         <span class="hl-cmt"># promiscuous (router/firewall uplink)</span>
+  <span class="hl-kw">switchport mode</span> private-vlan promiscuous
+  <span class="hl-kw">switchport private-vlan mapping</span> <span class="hl-val">100 101</span>
+
+<span class="hl-kw">interface</span> GigabitEthernet0/2         <span class="hl-cmt"># isolated host</span>
+  <span class="hl-kw">switchport mode</span> private-vlan host
+  <span class="hl-kw">switchport private-vlan host-association</span> <span class="hl-val">100 101</span></pre>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 03 IPv4/v6 -->
+<div id="panel-ip" class="panel section">
+  <div class="section-header">
+    <span class="section-num">03</span>
+    <h2>IPv4 · IPv6</h2>
+  </div>
+
+  <h3>IPv4 header (RFC 791)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IPv4 header — 20 bytes minimum (without options)</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Version + IHL','1 byte','4-bit Version = 4. 4-bit IHL (Internet Header Length) = header length in 32-bit words. Min=5 (20 bytes), max=15 (60 bytes). IHL > 5 means IP options are present.')">
+        <div class="field-box f-ipv4-sm" style="width:90px;">VER|IHL</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'DSCP + ECN','1 byte','6-bit DSCP (Differentiated Services Code Point, RFC 2474) — QoS marking. Replaced legacy TOS. 2-bit ECN (Explicit Congestion Notification, RFC 3168): 00=non-ECN, 01/10=ECT, 11=CE (congestion experienced).')">
+        <div class="field-box f-ipv4-sm" style="width:90px;">DSCP|ECN</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Total Length','2 bytes','Total IP datagram size including header and data, in bytes. Max = 65535. For UDP over Ethernet with no fragmentation, max payload = 65535 - 20(IP) - 8(UDP) = 65507 bytes. In practice limited to link MTU.')">
+        <div class="field-box f-ipv4-sm">TOT LEN</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Identification','2 bytes','16-bit ID assigned by sender. All fragments of the same original datagram carry the same ID. Used by receiver to reassemble. Predictable IDs are a security vulnerability (idle scan, IP ID side-channel).')">
+        <div class="field-box f-ipv4-sm">ID</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Flags + Fragment Offset','2 bytes','Bit 0: reserved (0). Bit 1: DF (Don\'t Fragment) — if set and fragmentation needed, router drops and sends ICMP Type 3 Code 4. Bit 2: MF (More Fragments) — set on all fragments except the last. Bits 15–3: Fragment Offset in 8-byte units.')">
+        <div class="field-box f-ipv4-sm" style="width:100px;">FLAGS|OFFSET</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'TTL','1 byte','Time To Live — decremented by 1 at each router. Packet dropped when TTL=0 (router sends ICMP Time Exceeded). OS defaults: Linux=64, Windows=128, Cisco IOS=255. Used by traceroute.')">
+        <div class="field-box f-ipv4-sm">TTL</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Protocol','1 byte','L4 protocol number. Common: 6=TCP, 17=UDP, 1=ICMP, 50=ESP (IPsec), 51=AH (IPsec), 47=GRE, 89=OSPF, 132=SCTP, 4=IP-in-IP (IPIP), 41=IPv6 (6in4 tunnel).')">
+        <div class="field-box f-ipv4-sm">PROTO</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Header Checksum','2 bytes','One\'s complement checksum over IP header only (NOT payload). Recomputed at every router hop (TTL decrement changes it). TCP/UDP have their own checksums. Removed in IPv6.')">
+        <div class="field-box f-ipv4-sm">CSUM</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Source IP','4 bytes','32-bit source address. Can be spoofed without BCP38 (uRPF). Used in ECMP hashing.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">SRC IP</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Destination IP','4 bytes','32-bit destination. Router longest-prefix-match in FIB/RIB.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">DST IP</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Options','0–40 bytes','Present if IHL > 5. Rarely used in practice (performance cost, potential security issues). Types: NOP (padding), Record Route, Strict/Loose Source Route, Timestamp, Router Alert (used by RSVP, IGMP).')">
+        <div class="field-box f-ipv4-sm" style="width:80px;color:#556;">OPTIONS</div><div class="field-label">0–40 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Payload','variable','L4 segment or tunneled packet.')">
+        <div class="field-box f-payload" style="flex:1;min-width:80px;">PAYLOAD</div><div class="field-label">variable</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>IPv6 header (RFC 8200)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IPv6 fixed header — always exactly 40 bytes</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Version + Traffic Class + Flow Label','4 bytes','4-bit Ver=6. 8-bit Traffic Class (= DSCP+ECN, same semantics as IPv4). 20-bit Flow Label — used to identify a flow for QoS/ECMP; typically set by sender and unchanged.')">
+        <div class="field-box f-ipv6" style="width:180px;">VER|TC|FLOW LABEL</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Payload Length','2 bytes','Length of payload after the fixed 40-byte header, in bytes. Unlike IPv4, does NOT include the header itself. Extension headers count as payload.')">
+        <div class="field-box f-ipv6" style="width:90px;">PAY LEN</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Next Header','1 byte','Same semantics as IPv4 Protocol field. Points to first extension header or upper-layer protocol: 6=TCP, 17=UDP, 58=ICMPv6, 0=Hop-by-Hop options, 43=Routing, 44=Fragment, 50=ESP, 51=AH, 59=No Next Header.')">
+        <div class="field-box f-ipv6" style="width:90px;">NEXT HDR</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Hop Limit','1 byte','Direct equivalent of IPv4 TTL. No header checksum means no recalculation overhead on transit routers — one of IPv6\'s design wins.')">
+        <div class="field-box f-ipv6" style="width:80px;">HOP LIM</div><div class="field-label">1 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Source IPv6','16 bytes','128-bit source address. Structured: network prefix + subnet ID + interface ID. Interface ID often EUI-64 (MAC-derived) or randomized (RFC 8981 privacy extensions).')">
+        <div class="field-box f-ipv6" style="width:110px;">SRC IPv6</div><div class="field-label">16 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Destination IPv6','16 bytes','128-bit destination.')">
+        <div class="field-box f-ipv6" style="width:110px;">DST IPv6</div><div class="field-label">16 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Extension Headers (optional)','variable','Chained via Next Header field. Types: Hop-by-Hop (processed by every node), Routing (source routing, used by SRv6), Fragment (RFC 8200 — routers NEVER fragment; only hosts), Destination Options, AH/ESP.')">
+        <div class="field-box" style="background:#0a2010;color:#30a860;width:120px;">EXT HDRS?</div><div class="field-label">variable</div>
+      </div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <strong>Key IPv6 differences:</strong> No header checksum (upper layers must checksum). No fragmentation by intermediate routers — Path MTU Discovery is mandatory (ICMPv6 Type 2 "Packet Too Big"). Fragment extension header only usable by originating host. No broadcast — replaced by multicast (FF02::/16). NDP replaces ARP. SLAAC enables stateless address assignment.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 04 VXLAN / GENEVE -->
+<div id="panel-overlay" class="panel section">
+  <div class="section-header">
+    <span class="section-num">04</span>
+    <h2>VXLAN · GENEVE · NVGRE · LISP overlay at L2</h2>
+  </div>
+
+  <p style="color:var(--muted);font-size:11px;max-width:780px;line-height:1.8;margin-bottom:1.5rem;">
+    Overlay protocols tunnel L2 frames over L3 UDP/IP, extending virtual broadcast domains across routed boundaries. Primary driver: data center multi-tenancy and VM mobility across racks/DCs. VXLAN dominates; GENEVE is its flexible successor with metadata extension support (the basis for OVN, Cilium, NSH transport).
+  </p>
+
+  <h3>VXLAN — RFC 7348</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">VXLAN full encapsulation: outer Eth / outer IP / outer UDP / VXLAN header / inner Eth frame</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Outer Ethernet','14 B','VTEP MAC addresses. No VLAN tag in basic VXLAN, though 802.1Q-in-VXLAN is common for transport VLAN isolation.')">
+        <div class="field-box f-eth-src" style="width:90px;">OUTER ETH</div><div class="field-label">14 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Outer IPv4/6','20/40 B','VTEP IP addresses. src=originating VTEP, dst=destination VTEP (or multicast group for BUM traffic). TTL typically 64. DF bit usually set to trigger PMTUD.')">
+        <div class="field-box f-ipv4-sm" style="width:90px;">OUTER IP</div><div class="field-label">20–40 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Outer UDP','8 B','src port = entropy hash of inner frame L4 tuple (enables ECMP on underlay). dst port = 4789 (IANA-assigned for VXLAN). Note: original implementations used 8472 (Linux default pre-3.18).')">
+        <div class="field-box f-udp">OUTER UDP<br><span style="font-size:8px;">dst:4789</span></div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'VXLAN header','8 bytes','Byte 0: flags. Bit 3 (I-bit) MUST be 1 to indicate valid VNI. Bytes 1–3: reserved (0). Bytes 4–6: 24-bit VNI (VXLAN Network Identifier) — 16 million virtual networks vs 4094 VLANs. Byte 7: reserved (0).')">
+        <div class="field-box f-vxlan">VXLAN HDR<br><span style="font-size:8px;">I|rsvd|VNI(24)</span></div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner Ethernet','14 B','Original L2 frame including inner MACs. The entire original frame is encapsulated — including any 802.1Q tags if the original traffic was tagged.')">
+        <div class="field-box f-eth-dst">INNER DST MAC</div><div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner Src MAC','6 bytes','')">
+        <div class="field-box f-eth-src">INNER SRC MAC</div><div class="field-label">6 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner EtherType','2 bytes','0x0800 for IPv4 payload, etc.')">
+        <div class="field-box f-eth-type">ETYPE</div><div class="field-label">2 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner Payload','variable','Original IP packet or any L3 payload.')">
+        <div class="field-box f-payload" style="flex:1;min-width:80px;">INNER PAYLOAD</div><div class="field-label">variable</div>
+      </div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <strong>VXLAN MTU overhead:</strong> Outer Eth(14) + IP(20) + UDP(8) + VXLAN(8) = <strong>50 bytes</strong>. Inner frame MTU = 1500 − 50 = <strong>1450 bytes</strong>. With outer 802.1Q tag: 1446 B. Physical underlay must run MTU ≥ 1550 B (typically 9000 B jumbo). If not: fragmentation of the outer UDP packet occurs at L3, or inner TCP MSS clamping must be applied.
+  </div>
+
+  <h3>GENEVE — RFC 8926</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin:0.5rem 0 1rem;">
+    GENEVE is the extensible successor to VXLAN/NVGRE/STT. The key differentiator: a variable-length <strong style="color:var(--text)">options field</strong> carrying TLV (Type-Length-Value) metadata — enables NSH-like service chaining, OVN context passing, and hardware offload hints without a separate encapsulation layer.
+  </p>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">GENEVE header — variable length, dst UDP port 6081</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:90px;">OUTER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:90px;">OUTER IP</div><div class="field-label">20–40 B</div></div>
+      <div class="field" onclick="showTip(event,'Outer UDP','8 B','dst port = 6081 (IANA GENEVE). src port = entropy hash for underlay ECMP, same as VXLAN.')">
+        <div class="field-box f-udp">OUTER UDP<br><span style="font-size:8px;">dst:6081</span></div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'GENEVE fixed header','8 bytes','Bits 0–1: Version (0). Bits 2–7: Options Length in 4-byte multiples (0–252 bytes of options). Bit 8: OAM bit (control/OAM packet, not data). Bit 9: Critical bit (receiver MUST process options if set). Bits 10–15: reserved. Bits 16–31: Protocol Type (same namespace as EtherType). Bits 32–55: Virtual Network Identifier (VNI, 24 bits). Bits 56–63: reserved.')">
+        <div class="field-box f-geneve" style="width:180px;">VER|OPT_LEN|O|C|RSVD|PROTO|VNI</div><div class="field-label">8 B fixed</div>
+      </div>
+      <div class="field" onclick="showTip(event,'GENEVE Options (TLV)','0–252 bytes','Each option: 16-bit class + 8-bit type + 3-bit rsvd + 5-bit length + variable data. Class 0x0100 = IANA-defined (hardware offload hints). Class 0x0110 = Ethernet VPN. Vendors define proprietary classes. OVN uses this for ACL/routing context. Cilium uses it for policy metadata.')">
+        <div class="field-box f-geneve" style="width:160px;background:#2e1050;color:#d898ff;">TLV OPTIONS</div><div class="field-label">0–252 B</div>
+      </div>
+      <div class="field"><div class="field-box f-eth-dst">INNER DST</div><div class="field-label">6 B</div></div>
+      <div class="field"><div class="field-box f-eth-src">INNER SRC</div><div class="field-label">6 B</div></div>
+      <div class="field"><div class="field-box f-eth-type">ETYPE</div><div class="field-label">2 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">INNER PAYLOAD</div><div class="field-label">variable</div></div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+
+  <h3>NVGRE — draft (Microsoft, pre-standardized)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">NVGRE — GRE-based overlay (IP proto 47), 4-byte VSID</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:90px;">OUTER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:90px;">OUTER IP<br><span style="font-size:8px;">proto=47</span></div><div class="field-label">20 B</div></div>
+      <div class="field" onclick="showTip(event,'GRE header (NVGRE variant)','8 bytes','First 2 bytes: flags — Key bit (K) MUST be set. No Sequence Number, no Checksum. Next 2 bytes: Protocol type = 0x6558 (Transparent Ethernet Bridging). Bytes 4–7: Key field = VSID (24 bits) + FlowID (8 bits for ECMP entropy).')">
+        <div class="field-box f-gre" style="width:150px;">GRE FLAGS|0x6558|VSID|FID</div><div class="field-label">8 B</div>
+      </div>
+      <div class="field"><div class="field-box f-eth-dst">INNER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">INNER PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <div class="info-box"><strong>ECMP problem with NVGRE/GRE:</strong> GRE (IP proto 47) gives L3 switches no entropy to hash on — src/dst IPs are the same for all flows between a VTEP pair. VSID/FlowID requires deep-packet inspection. This is why VXLAN/GENEVE (UDP-based) dominate: the outer UDP src port is entropy-filled, enabling standard 5-tuple ECMP on any commodity switch.</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 05 GRE / MPLS / IPsec -->
+<div id="panel-tunnels" class="panel section">
+  <div class="section-header">
+    <span class="section-num">05</span>
+    <h2>GRE · MPLS · IP-in-IP · IPsec (AH/ESP)</h2>
+  </div>
+
+  <h3>GRE — Generic Routing Encapsulation (RFC 2784 / 2890)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">GRE tunnel frame — IP proto 47</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:90px;">OUTER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field" onclick="showTip(event,'Outer IP','20 bytes','IP proto = 47. src/dst = tunnel endpoints.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">OUTER IP<br><span style="font-size:8px;">proto=47</span></div><div class="field-label">20 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'GRE header','4–16 bytes','Required 4 bytes: C(1)|0(1)|K(1)|S(1)|0(9)|Version(3) + Protocol Type (EtherType of payload). Optional: Checksum (4B, if C=1). Optional: Key (4B, if K=1) — used for VRF disambiguation or NVGRE. Optional: Sequence Number (4B, if S=1).')">
+        <div class="field-box f-gre" style="width:140px;">GRE FLAGS|PROTO<br><span style="font-size:8px;">[CSUM][KEY][SEQ]</span></div><div class="field-label">4–16 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'GRE payload','variable','Can carry any EtherType: IPv4 (0x0800), IPv6 (0x86DD), MPLS (0x8847), Ethernet (0x6558 — used by NVGRE/L2TPv3-like).')">
+        <div class="field-box f-payload" style="flex:1;min-width:120px;">PAYLOAD (any EtherType)</div><div class="field-label">variable</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>MPLS label stack (RFC 3032) — L2.5</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin:0.5rem 0 1rem;">
+    MPLS operates between L2 and L3 — sometimes called <strong style="color:var(--text)">"L2.5"</strong>. Multiple labels can be stacked (label stack). Used in service provider backbones for traffic engineering, L3VPN (BGP/MPLS, RFC 4364), and L2VPN (VPLS, EVPN).
+  </p>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">MPLS label stack entry — 32 bits per label</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:90px;">OUTER ETH<br><span style="font-size:8px;">0x8847/8848</span></div><div class="field-label">14 B</div></div>
+      <div class="field" onclick="showTip(event,'MPLS Label Entry (outer)','4 bytes per entry','Bits 31–12: Label value (20 bits, ~1M labels). Bits 11–9: TC/EXP — 3-bit traffic class (originally Experimental, now MPLS TC, RFC 5462). Bit 8: S — Bottom of Stack. If S=1, this is the innermost label. Bits 7–0: TTL — decremented at each LSR (Label Switching Router).')">
+        <div class="field-box f-mpls" style="width:140px;">LABEL(20)|TC(3)|S(1)|TTL(8)</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Additional label entries (stacked)','4 bytes each','Multiple labels stacked — outer pushed/popped by LSRs. PHP (Penultimate Hop Popping): last LSR before egress pops outer label to reduce PE processing. Implicit Null label (value=3) signals PHP.')">
+        <div class="field-box f-mpls" style="width:120px;opacity:.7;">LABEL|TC|S=0|TTL</div><div class="field-label">4 B ×n</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Bottom label (S=1)','4 bytes','S bit set = bottom of stack. Next byte is the IP header (or L2 frame for VPLS).')">
+        <div class="field-box f-mpls" style="background:#3a1818;color:#ff8080;">LABEL|TC|S=1|TTL</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:80px;">IP / L2</div><div class="field-label">variable</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <h3>IPsec — AH (RFC 4302) and ESP (RFC 4303)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IPsec ESP — Transport mode vs Tunnel mode</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:80px;">ETH</div><div class="field-label">14 B</div></div>
+      <div class="field" onclick="showTip(event,'IP header (Tunnel mode)','20 B','Tunnel mode: NEW outer IP header added with gateway addresses. Transport mode: original IP header retained, only L4+ encrypted. Proto field = 50 (ESP) or 51 (AH).')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">IP HDR<br><span style="font-size:8px;">proto=50/51</span></div><div class="field-label">20 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'ESP Header','8 bytes','SPI (Security Parameter Index, 4B): identifies SA (Security Association) at receiver. Together with dst IP and protocol, uniquely identifies the SA in the SAD. Sequence Number (4B): anti-replay, 32-bit or 64-bit (ESN, RFC 4304).')">
+        <div class="field-box f-esp" style="width:100px;">SPI(32)|SEQ(32)</div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'IV/Nonce','variable','Initialization Vector for block ciphers (AES-CBC: 16B) or nonce for AEAD (AES-GCM: 8B explicit). Not encrypted, but authenticated. With AES-256-GCM-128: 8B IV + payload + 16B ICV = AEAD authenticated encryption.')">
+        <div class="field-box f-esp" style="width:80px;opacity:.8;">IV/NONCE</div><div class="field-label">8–16 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Encrypted payload','variable','In tunnel mode: original IP header + L4 + data. In transport mode: L4 + data only. Padding added to align to cipher block boundary + protocol next-header byte.')">
+        <div class="field-box f-payload" style="flex:1;min-width:100px;border:2px dashed #554422;">ENCRYPTED PAYLOAD + PAD</div><div class="field-label">variable</div>
+      </div>
+      <div class="field" onclick="showTip(event,'ESP Trailer','4+ bytes','Pad length (1B) + Next Header (1B, the original IP proto). Followed by ICV (Integrity Check Value): 16B for AES-GCM-128.')">
+        <div class="field-box f-esp" style="width:100px;">PAD|NH|ICV</div><div class="field-label">≥4 B</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid3" style="margin-top:1.5rem;">
+    <div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent5);margin-bottom:8px;">AH vs ESP</div>
+      <div style="font-size:10px;color:var(--muted);line-height:1.8;">
+        <strong style="color:var(--text)">AH (proto 51):</strong> Authenticates IP header + payload. No encryption. Incompatible with NAT (IP header changes break ICV).<br><br>
+        <strong style="color:var(--text)">ESP (proto 50):</strong> Encrypts + authenticates payload. Header not authenticated (transport) or outer header not (tunnel). NAT-T wraps ESP in UDP/4500.
+      </div>
+    </div>
+    <div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent5);margin-bottom:8px;">IP-in-IP (IPIP)</div>
+      <div style="font-size:10px;color:var(--muted);line-height:1.8;">
+        IP proto <strong style="color:var(--text)">4</strong> = IPv4 in IPv4. Proto <strong style="color:var(--text)">41</strong> = IPv6 in IPv4 (6in4 tunnel, RFC 4213). No encryption, no overhead beyond outer IP header (20B). Used in 6to4, Teredo, 6rd. Simplest possible L3-in-L3 tunnel.
+      </div>
+    </div>
+    <div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent5);margin-bottom:8px;">SRv6 (Segment Routing)</div>
+      <div style="font-size:10px;color:var(--muted);line-height:1.8;">
+        Uses IPv6 Routing Extension Header (Next Header = 43, Routing Type = 4). Segment list = ordered array of IPv6 SIDs. Active segment = DST IPv6 field (updated hop-by-hop). Replaces MPLS TE in many SP deployments. No additional encapsulation needed.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 06 NSH / LISP -->
+<div id="panel-sfc" class="panel section">
+  <div class="section-header">
+    <span class="section-num">06</span>
+    <h2>NSH · LISP · TRILL · SPB · MACsec · PBB</h2>
+  </div>
+
+  <h3>NSH — Network Service Header (RFC 8300)</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin:0.5rem 0 1rem;">
+    NSH is a <strong style="color:var(--text)">service function chaining</strong> header. It does not encapsulate by itself — it rides inside VXLAN-GPE (RFC 8676) or GRE. Carries a Service Path ID and Service Index to steer traffic through an ordered chain of VNFs (firewall → IDS → DPI → load balancer).
+  </p>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">NSH fixed + variable header (4 or 8 words base)</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:80px;">OUTER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">OUTER IP</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-udp" style="width:80px;">VXLAN-GPE<br><span style="font-size:8px;">UDP:4790</span></div><div class="field-label">8 B+</div></div>
+      <div class="field" onclick="showTip(event,'NSH Base Header','4 bytes','Bits 0–3: Version=0. Bit 4: O (OAM). Bit 5: U (unassigned, must be 0). Bits 6–13: TTL (6 bits, RFC 8390 update). Bits 14–21: Length in 4-B words. Bits 22–23: U. Bits 24–27: MD Type (1=fixed 16B ctx, 2=variable TLV, 0xFF=experimental). Bits 28–31: Next Protocol (0x1=IPv4, 0x3=Ethernet, 0x4=NSH, 0x5=MPLS).')">
+        <div class="field-box f-nsh" style="width:120px;">VER|O|TTL|LEN|MDT|NP</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'NSH Service Path Header','4 bytes','Bits 0–23: Service Path Identifier (SPI) — identifies the service chain. Bits 24–31: Service Index (SI) — current position in chain (decremented at each SF). SI=255 max depth.')">
+        <div class="field-box f-nsh" style="width:120px;">SPI (24) | SI (8)</div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'NSH Context Header','16 bytes (MD Type 1) or variable (MD Type 2)','MD Type 1: four fixed 32-bit context fields (network platform context, service platform context, etc.). MD Type 2: TLV optional metadata — class (2B) + type (1B) + len (1B) + value (variable). Used for policy ID, tenant ID, security group tags, etc.')">
+        <div class="field-box f-nsh" style="background:#0a2a2a;color:#40d8d8;width:140px;">CTX HDR (16B or TLV)</div><div class="field-label">16 B / var</div>
+      </div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">ORIGINAL PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <h3>LISP — Locator/ID Separation Protocol (RFC 9300)</h3>
+  <p style="color:var(--muted);font-size:11px;line-height:1.7;margin:0.5rem 0 1rem;">
+    LISP separates endpoint identity (EID) from routing locators (RLOC), solving the routing table scaling problem. EIDs are the inner addresses; RLOCs are the tunnel endpoints. LISP uses a Map-Server/Map-Resolver infrastructure to resolve EID→RLOC mappings.
+  </p>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">LISP data-plane encapsulation — UDP port 4341</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:80px;">OUTER ETH</div><div class="field-label">14 B</div></div>
+      <div class="field" onclick="showTip(event,'Outer IP (RLOC)','20 B','RLOC-to-RLOC. Source = ingress tunnel router (ITR) RLOC. Dest = egress tunnel router (ETR) RLOC.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">OUTER IP<br><span style="font-size:8px;">(RLOC→RLOC)</span></div><div class="field-label">20 B</div>
+      </div>
+      <div class="field"><div class="field-box f-udp" style="width:80px;">UDP<br><span style="font-size:8px;">dst:4341</span></div><div class="field-label">8 B</div></div>
+      <div class="field" onclick="showTip(event,'LISP header','8 bytes','Bit 0: N (Nonce present). Bit 1: L (LocSt — locator status bits present). Bit 2: E (Echo-Nonce). Bit 3: V (Map-Version present). Bit 4: I (Instance ID present). Bits 8–31: Nonce or Map-Version. Bits 32–55: Instance ID (24 bits) — like VXLAN VNI. Bits 56–63: Locator Status Bits.')">
+        <div class="field-box" style="background:#102830;color:#40a8c8;width:160px;">NONCE|FLAGS|IID(24)|LSB</div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Inner IP (EID)','20 B','EID-to-EID. The original packet with endpoint identity addresses. EIDs are not globally routable — only known to the LISP mapping system.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">INNER IP<br><span style="font-size:8px;">(EID→EID)</span></div><div class="field-label">20 B</div>
+      </div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:80px;">INNER PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <h3>Other notable L2/L2.5 protocols</h3>
+  <div class="proto-grid">
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent);">IEEE 802.1AE</div>
+      <div class="card-title">MACsec</div>
+      <div class="card-meta">L2 encryption at wire speed. Inserts a 16-byte SecTAG between Src MAC and EtherType (EtherType = 0x88E5). Encrypts and authenticates from EtherType to FCS. Operates per-port or per-flow. Hardware-enforced — cannot be bypassed at L3. Used in campus/DC for east-west encryption. Note: each hop decrypts/re-encrypts (hop-by-hop, not end-to-end).</div>
+    </div>
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent2);">IEEE 802.1ah</div>
+      <div class="card-title">PBB (Provider Backbone Bridge)</div>
+      <div class="card-meta">MAC-in-MAC encapsulation for provider networks. Adds outer B-MAC (backbone) header (14B) + B-TAG (4B, 0x88A8) + I-TAG (6B, 0x88E7). The 24-bit I-SID (service instance ID) in I-TAG = 16M services. Provider core only sees B-MACs — customer MACs never leak into backbone. Predecessor to EVPN in many deployments.</div>
+    </div>
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent3);">RFC 7364</div>
+      <div class="card-title">TRILL (Transparent Interconnect of Lots of Links)</div>
+      <div class="card-meta">IS-IS-based L2 routing protocol. RBridges (routing bridges) use a 6-byte TRILL header (EtherType 0x22F3). Hop count prevents loops. Supports ECMP at L2 natively via equal-cost ECMP tree computation. Largely superseded by VXLAN+BGP EVPN but still deployed in some DC fabrics.</div>
+    </div>
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent4);">IEEE 802.1aq</div>
+      <div class="card-title">SPB (Shortest Path Bridging)</div>
+      <div class="card-meta">IS-IS-computed shortest paths for Ethernet. Supports ECMP without STP. Two modes: SPBM (MAC-in-MAC, uses PBB I-SID) and SPBV (VLAN-based). Used in Avaya/Extreme enterprise fabrics. Less common than TRILL in DC, but strong in enterprise campus.</div>
+    </div>
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent5);">RFC 5462</div>
+      <div class="card-title">MPLS-TP</div>
+      <div class="card-meta">Transport Profile for MPLS — deterministic, OAM-rich variant for carrier transport networks. Eliminates PHP, uses explicit NULL at bottom of stack. Adds G-ACh (Generic Associated Channel) for OAM. No IP dependency — runs over Ethernet or SDH/SONET. Competes with OTN in SP metro.</div>
+    </div>
+    <div class="proto-card">
+      <div class="card-label" style="color:var(--accent);">IEEE 802.3ah</div>
+      <div class="card-title">EFM OAM (Ethernet in the First Mile)</div>
+      <div class="card-meta">L2 OAM protocol. Slow-protocol EtherType 0x8809, subtype 0x03. OAMPDU types: Information, Event Notification, Variable Request/Response, Loopback Control. Runs on a single link. Enables remote loopback, link monitoring, fault signaling. Distinct from 802.1ag (CFM, multipoint OAM).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 07 FRAGMENTATION -->
+<div id="panel-frag" class="panel section">
+  <div class="section-header">
+    <span class="section-num">07</span>
+    <h2>IP Fragmentation &amp; Path MTU Discovery</h2>
+  </div>
+
+  <p style="color:var(--muted);font-size:11px;max-width:780px;line-height:1.8;margin-bottom:1.5rem;">
+    IPv4 fragmentation occurs when a datagram exceeds an interface MTU. IPv6 routers <strong style="color:var(--text)">never fragment</strong> — the originating host must do PMTUD. The Identification field, MF flag, and Fragment Offset are the reassembly mechanism.
+  </p>
+
+  <div id="frag-slider-wrap">
+    <div class="slider-row">
+      <label>Datagram size (bytes)</label>
+      <input type="range" id="datagram-size" min="100" max="3000" value="1600" step="1" oninput="updateFrag()">
+      <span class="val" id="dg-size-val">1600</span>
+    </div>
+    <div class="slider-row">
+      <label>Link MTU (bytes)</label>
+      <input type="range" id="link-mtu" min="576" max="9000" value="1500" step="4" oninput="updateFrag()">
+      <span class="val" id="mtu-val">1500</span>
+    </div>
+    <div class="slider-row">
+      <label>Encap overhead (bytes)</label>
+      <input type="range" id="encap-overhead" min="0" max="100" value="0" step="1" oninput="updateFrag()">
+      <span class="val" id="enc-val">0 B</span>
+    </div>
+  </div>
+
+  <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;margin-bottom:1rem;">
+    <div id="frag-output"></div>
+    <div id="frag-stats" style="margin-top:1rem;font-size:10px;color:var(--muted);display:flex;gap:24px;flex-wrap:wrap;"></div>
+  </div>
+
+  <h3>IPv4 fragmentation field anatomy</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">IPv4 fragment fields — Flags(3) + Fragment Offset(13) in 2 bytes</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Reserved bit','1 bit','Must be 0 (RFC 3514 jokingly assigned it as "Evil bit").')">
+        <div class="field-box f-ipv4-sm" style="width:40px;">0</div><div class="field-label">1 bit</div>
+      </div>
+      <div class="field" onclick="showTip(event,'DF — Don\'t Fragment','1 bit','If set: router MUST NOT fragment. If packet exceeds MTU, router drops and sends ICMP Type 3 Code 4 "Fragmentation Needed, DF Set" with the next-hop MTU in the ICMP body. Essential for PMTUD (Path MTU Discovery, RFC 1191). ALWAYS set this on tunnel outer headers.')">
+        <div class="field-box f-ipv4-sm" style="width:40px;color:var(--accent3);">DF</div><div class="field-label">1 bit</div>
+      </div>
+      <div class="field" onclick="showTip(event,'MF — More Fragments','1 bit','Set on all fragments except the last. The last fragment has MF=0. Receiver uses MF=0 to know when all fragments have arrived.')">
+        <div class="field-box f-ipv4-sm" style="width:40px;color:var(--accent5);">MF</div><div class="field-label">1 bit</div>
+      </div>
+      <div class="field" onclick="showTip(event,'Fragment Offset','13 bits','Position of this fragment\'s data in the original datagram, measured in 8-byte units. First fragment = 0. Max offset = 2^13 − 1 = 8191 × 8 = 65528 bytes. This means fragment data must always be a multiple of 8 bytes (except the last fragment). A 1500-byte MTU with 20-byte IP header = 1480 bytes payload = 185 × 8.')">
+        <div class="field-box f-ipv4-sm" style="width:200px;color:var(--accent2);">FRAGMENT OFFSET (×8 bytes)</div><div class="field-label">13 bits</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="warn-box">
+    <strong>Fragmentation attack vectors:</strong> (1) <strong>Teardrop</strong> — overlapping fragment offsets crash old TCP/IP stacks. (2) <strong>Tiny fragment attack</strong> — fragment so small that TCP flags split across fragments, bypassing stateless ACL inspection. Defense: require MF=0 for all TCP first fragments (i.e., first fragment must contain full TCP header). (3) <strong>Fragment reassembly timeout exhaustion</strong> — send first fragment only, forcing target to hold partial datagrams until TTL (RFC 791 requires 15-second minimum wait). (4) VXLAN fragmentation: if outer UDP is fragmented, the inner IP header lands in a later fragment — stateful firewalls can't match the session.
+  </div>
+
+  <h3>Path MTU Discovery (PMTUD) — RFC 1191 (IPv4), RFC 8201 (IPv6)</h3>
+  <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;margin:1rem 0;font-size:11px;line-height:1.8;color:var(--muted);">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;">
+      <div>
+        <div style="color:var(--text);font-weight:600;margin-bottom:6px;">Algorithm</div>
+        1. Send with DF=1, size = suspected MTU<br>
+        2. If ICMP Type 3 Code 4 received → reduce to suggested MTU<br>
+        3. Retry with smaller size<br>
+        4. Repeat until no ICMP → MTU found<br>
+        5. Cache MTU per destination (5–10 min timeout)<br>
+        <br>
+        <span style="color:var(--accent3);">Failure mode:</span> ICMP black holes — firewalls silently drop ICMP Type 3 → sender never learns MTU → TCP hangs after 3WHS (data stalls). Fix: TCP MSS clamping via iptables <code>TCPMSS</code> target.
+      </div>
+      <div>
+        <div style="color:var(--text);font-weight:600;margin-bottom:6px;">MTU values by tunnel type</div>
+        <table style="font-size:10px;width:100%;border-collapse:collapse;">
+          <tr><td style="color:var(--text);padding:3px 0;font-weight:600;">Raw Ethernet</td><td style="color:var(--accent2);text-align:right;">1500 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">802.1Q (+4B)</td><td style="color:var(--muted);text-align:right;">1496 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">QinQ (+8B)</td><td style="color:var(--muted);text-align:right;">1492 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">PPPoE (+8B)</td><td style="color:var(--muted);text-align:right;">1492 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">VXLAN (+50B)</td><td style="color:var(--muted);text-align:right;">1450 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">GENEVE (+50-302B)</td><td style="color:var(--muted);text-align:right;">≤1450 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">GRE (+24B)</td><td style="color:var(--muted);text-align:right;">1476 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">IPsec ESP/AES-GCM (+59B)</td><td style="color:var(--muted);text-align:right;">~1418 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">GRE over IPsec</td><td style="color:var(--muted);text-align:right;">~1394 B</td></tr>
+          <tr><td style="color:var(--muted);padding:3px 0;">MPLS (+4B/label)</td><td style="color:var(--muted);text-align:right;">varies</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 08 COMPARE ALL -->
+<div id="panel-compare" class="panel section">
+  <div class="section-header">
+    <span class="section-num">08</span>
+    <h2>Protocol Comparison Matrix</h2>
+  </div>
+
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th>Protocol</th>
+        <th>Layer</th>
+        <th>Encap overhead</th>
+        <th>Tenant scale</th>
+        <th>ECMP entropy</th>
+        <th>Encryption</th>
+        <th>Metadata</th>
+        <th>Primary use case</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Ethernet II</td><td><span class="tag tag-l2">L2</span></td><td>18 B (14+FCS)</td><td>N/A</td><td>Via 802.3ad LAG</td><td>None (MACsec option)</td><td>None</td><td>Physical LAN framing</td></tr>
+      <tr><td>802.1Q VLAN</td><td><span class="tag tag-l2">L2</span></td><td>+4 B</td><td>4094 VLANs</td><td>PCP/DEI for QoS</td><td>None</td><td>PCP CoS</td><td>L2 domain segmentation</td></tr>
+      <tr><td>802.1ad QinQ</td><td><span class="tag tag-l2">L2</span></td><td>+8 B</td><td>4094×4094 ≈ 16M</td><td>Inner PCP</td><td>None</td><td>S-VID, C-VID</td><td>Provider L2 isolation</td></tr>
+      <tr><td>PVLAN</td><td><span class="tag tag-l2">L2</span></td><td>0 (port policy)</td><td>Within 1 VLAN</td><td>—</td><td>None</td><td>Port role</td><td>DMZ server isolation</td></tr>
+      <tr><td>IPv4</td><td><span class="tag tag-l3">L3</span></td><td>20 B (min)</td><td>4.3B addresses</td><td>src/dst IP</td><td>None (IPsec option)</td><td>DSCP, options</td><td>Universal L3 routing</td></tr>
+      <tr><td>IPv6</td><td><span class="tag tag-l3">L3</span></td><td>40 B (fixed)</td><td>2^128</td><td>src/dst + flow label</td><td>None (IPsec)</td><td>DSCP, flow label, ext hdrs</td><td>Global addressing scale</td></tr>
+      <tr><td>VXLAN</td><td><span class="tag tag-overlay">Overlay</span></td><td>50 B</td><td>16M (24-bit VNI)</td><td>UDP src port (hash)</td><td>None (external)</td><td>VNI only</td><td>DC VM overlay</td></tr>
+      <tr><td>GENEVE</td><td><span class="tag tag-overlay">Overlay</span></td><td>50–302 B</td><td>16M VNI</td><td>UDP src port</td><td>None</td><td>Extensible TLV options</td><td>OVN, Cilium, SFC transport</td></tr>
+      <tr><td>NVGRE</td><td><span class="tag tag-overlay">Overlay</span></td><td>42 B</td><td>16M VSID</td><td>GRE Flow ID (DPI)</td><td>None</td><td>VSID + FlowID</td><td>Microsoft HyperV (legacy)</td></tr>
+      <tr><td>GRE</td><td><span class="tag tag-encap">Tunnel</span></td><td>24 B (IP+GRE)</td><td>Per-key (32-bit)</td><td>None (IP 5-tuple same)</td><td>None</td><td>Key, seq</td><td>Generic L3 tunnel</td></tr>
+      <tr><td>IP-in-IP</td><td><span class="tag tag-encap">Tunnel</span></td><td>20 B</td><td>N/A</td><td>None</td><td>None</td><td>None</td><td>Minimal L3 tunnel, 6in4</td></tr>
+      <tr><td>MPLS</td><td><span class="tag tag-l2">L2.5</span></td><td>4 B/label</td><td>~1M labels</td><td>Label + IP 5-tuple</td><td>None (GAL+OAM)</td><td>TC bits, TTL</td><td>SP core, L3VPN, VPLS</td></tr>
+      <tr><td>IPsec ESP</td><td><span class="tag tag-security">Security</span></td><td>~59 B (AES-GCM)</td><td>Per SA (SPI)</td><td>SPI + IPs</td><td>Yes (AES-GCM-256)</td><td>SPI, seq, padding</td><td>Encrypted tunnels (VPN)</td></tr>
+      <tr><td>IPsec AH</td><td><span class="tag tag-security">Security</span></td><td>~28 B</td><td>Per SA</td><td>SPI + IPs</td><td>No (auth only)</td><td>SPI, seq</td><td>IP auth without encryption</td></tr>
+      <tr><td>NSH</td><td><span class="tag tag-overlay">SFC</span></td><td>8–260 B (in VXLAN-GPE)</td><td>16M SPI</td><td>Via outer UDP</td><td>None</td><td>SPI, SI, context TLV</td><td>Service function chaining</td></tr>
+      <tr><td>LISP</td><td><span class="tag tag-encap">Tunnel</span></td><td>28 B</td><td>16M IID</td><td>UDP src port</td><td>None</td><td>IID, nonce</td><td>EID/RLOC separation</td></tr>
+      <tr><td>TRILL</td><td><span class="tag tag-l2">L2.5</span></td><td>6 B TRILL hdr + 14 B outer ETH</td><td>N/A</td><td>RBridge paths</td><td>None</td><td>Hop count</td><td>L2 multipath (DC fabric)</td></tr>
+      <tr><td>MACsec (802.1AE)</td><td><span class="tag tag-security">Security</span></td><td>+16 B SecTAG + 16 B ICV</td><td>Per link/CA</td><td>N/A</td><td>Yes (AES-GCM-128/256)</td><td>Packet number, SCI</td><td>L2 hop-by-hop encryption</td></tr>
+      <tr><td>PBB (802.1ah)</td><td><span class="tag tag-l2">L2</span></td><td>+24 B (B-MAC+B-TAG+I-TAG)</td><td>16M I-SID</td><td>B-MAC ECMP</td><td>None</td><td>I-SID, B-VID</td><td>Provider backbone bridge</td></tr>
+      <tr><td>SRv6</td><td><span class="tag tag-l3">L3</span></td><td>8 B RH + 16 B/SID</td><td>Per IPv6 space</td><td>SID + 5-tuple</td><td>None</td><td>SID list, TLVs</td><td>SR-MPLS replacement, TE</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 09 COEXISTENCE -->
+<div id="panel-coexist" class="panel section">
+  <div class="section-header">
+    <span class="section-num">09</span>
+    <h2>Protocol Coexistence &amp; Nesting</h2>
+  </div>
+
+  <p style="color:var(--muted);font-size:11px;max-width:780px;line-height:1.8;margin-bottom:1.5rem;">
+    Real-world deployments stack multiple protocols. The total encapsulation overhead accumulates — MTU budget must account for every layer. Below: common coexistence scenarios in cloud DC, service provider, and enterprise environments.
+  </p>
+
+  <h3>Cloud DC: VXLAN over ECMP fabric with QoS</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">VM→VM across racks: inner 802.1Q inside VXLAN over routed spine</span></div>
+    <div class="frame-vis">
+      <div class="field" onclick="showTip(event,'Outer Eth (server→TOR)','14B','Server NIC to Top-of-Rack switch.')">
+        <div class="field-box f-eth-src" style="width:80px;">OUT ETH</div><div class="field-label">14 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'DSCP-marked outer IPv4','20B','DSCP EF (0x2E) for latency-sensitive. ECMP hashes on 5-tuple. DF=1.')">
+        <div class="field-box f-ipv4-sm" style="width:80px;">OUT IP<br><span style="font-size:8px;">DSCP=EF</span></div><div class="field-label">20 B</div>
+      </div>
+      <div class="field"><div class="field-box f-udp" style="width:70px;">UDP:4789</div><div class="field-label">8 B</div></div>
+      <div class="field"><div class="field-box f-vxlan" style="width:70px;">VXLAN<br><span style="font-size:8px;">VNI=5001</span></div><div class="field-label">8 B</div></div>
+      <div class="field" onclick="showTip(event,'Inner Eth + 802.1Q','18B','Guest VM traffic with tenant VLAN tag intact inside the tunnel.')">
+        <div class="field-box f-eth-dst" style="width:70px;">IN ETH</div><div class="field-label">14 B</div>
+      </div>
+      <div class="field"><div class="field-box f-dot1q" style="width:70px;">IN 802.1Q<br><span style="font-size:8px;">VID=200</span></div><div class="field-label">4 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">IN IPv4</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-tcp" style="width:70px;">TCP</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:60px;">DATA</div><div class="field-label">1396 B</div></div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+  <div style="font-size:10px;color:var(--muted);margin:-0.5rem 0 1.5rem;padding:0 14px;">
+    Total overhead: 14+20+8+8+14+4+20+20 = <strong style="color:var(--accent3);">108 B</strong>. Effective app payload at 1500B outer MTU = 1392 B. Physical MTU must be ≥ 1618 B — hence 9000 B jumbo frames in DC fabric.
+  </div>
+
+  <h3>Service Provider: MPLS L3VPN over QinQ access</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">CE→PE: QinQ access → MPLS backbone (VPN label + transport label)</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:70px;">P-ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-stag" style="width:70px;">S-TAG<br><span style="font-size:8px;">S-VID=10</span></div><div class="field-label">4 B</div></div>
+      <div class="field"><div class="field-box f-ctag" style="width:70px;">C-TAG<br><span style="font-size:8px;">C-VID=100</span></div><div class="field-label">4 B</div></div>
+      <div class="field" onclick="showTip(event,'MPLS transport label','4B','Outer label for LSP (Label Switched Path) across provider core. Popped at penultimate hop (PHP).')">
+        <div class="field-box f-mpls" style="width:90px;">MPLS TRANS<br><span style="font-size:8px;">S=0|TTL=255</span></div><div class="field-label">4 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'MPLS VPN label','4B','Inner label identifying the VPN (VRF) on the egress PE. S=1 (bottom of stack).')">
+        <div class="field-box f-mpls" style="width:90px;">MPLS VPN<br><span style="font-size:8px;">S=1|TTL=255</span></div><div class="field-label">4 B</div>
+      </div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">CE IPv4</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:60px;">PAYLOAD</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <h3>IPsec VPN over VXLAN (encrypted overlay)</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">Multi-tenant encrypted DC: VXLAN + ESP tunnel mode — MTU budget is critical</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:70px;">PHY ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">OUT IP<br><span style="font-size:8px;">RLOC</span></div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-udp" style="width:60px;">UDP:4789</div><div class="field-label">8 B</div></div>
+      <div class="field"><div class="field-box f-vxlan" style="width:65px;">VXLAN<br><span style="font-size:8px;">VNI</span></div><div class="field-label">8 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">GW IP<br><span style="font-size:8px;">DF=1</span></div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-esp" style="width:80px;">ESP HDR<br><span style="font-size:8px;">SPI|SEQ</span></div><div class="field-label">8 B</div></div>
+      <div class="field"><div class="field-box f-esp" style="width:50px;">IV</div><div class="field-label">8 B</div></div>
+      <div class="field" onclick="showTip(event,'Encrypted inner payload','variable','Contains inner IP + TCP + data, all encrypted. Only AES-GCM decryption can reveal contents.')">
+        <div class="field-box f-payload" style="flex:1;min-width:60px;border:2px dashed #554422;">ENC(IP+TCP+DATA)</div><div class="field-label">variable</div>
+      </div>
+      <div class="field"><div class="field-box f-esp" style="width:50px;">ICV<br><span style="font-size:8px;">16B</span></div><div class="field-label">16 B</div></div>
+      <div class="field"><div class="field-box f-fcs">FCS</div><div class="field-label">4 B</div></div>
+    </div>
+  </div>
+  <div style="font-size:10px;color:var(--muted);margin:-0.5rem 0 1.5rem;padding:0 14px;">
+    Overhead: 14+20+8+8+20+8+8+16+4 = <strong style="color:var(--accent3);">106 B</strong>. Plus AES-GCM padding (up to 15 B block alignment). Available app data per 9000 B jumbo frame ≈ 8875 B. On standard 1500 B: effective MTU ≈ 1375 B.
+  </div>
+
+  <h3>NSH service chain over VXLAN-GPE</h3>
+  <div class="dissector-wrap">
+    <div class="dissector-title"><span class="proto-name">SFC: VXLAN-GPE (4790) + NSH + original frame — VNF chain: FW → IDS → LB</span></div>
+    <div class="frame-vis">
+      <div class="field"><div class="field-box f-eth-src" style="width:70px;">ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">IP</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-udp" style="width:65px;">UDP:4790</div><div class="field-label">8 B</div></div>
+      <div class="field" onclick="showTip(event,'VXLAN-GPE header','8B','Standard VXLAN header with P-bit (Protocol Type present). Next Protocol = 0x4 (NSH).')">
+        <div class="field-box f-vxlan" style="width:80px;">VXLAN-GPE<br><span style="font-size:8px;">NP=NSH</span></div><div class="field-label">8 B</div>
+      </div>
+      <div class="field" onclick="showTip(event,'NSH header','8B base','SPI identifies this chain. SI=3 → FW processes, decrements to SI=2 → IDS processes, SI=1 → LB processes, SI=0 → deliver.')">
+        <div class="field-box f-nsh" style="width:90px;">NSH BASE<br><span style="font-size:8px;">SPI|SI=3</span></div><div class="field-label">8 B</div>
+      </div>
+      <div class="field"><div class="field-box f-nsh" style="width:80px;background:#0a2a2a;color:#40d8d8;">NSH CTX</div><div class="field-label">16 B</div></div>
+      <div class="field"><div class="field-box f-eth-dst" style="width:70px;">IN ETH</div><div class="field-label">14 B</div></div>
+      <div class="field"><div class="field-box f-ipv4-sm" style="width:70px;">IN IP</div><div class="field-label">20 B</div></div>
+      <div class="field"><div class="field-box f-payload" style="flex:1;min-width:60px;">DATA</div><div class="field-label">variable</div></div>
+    </div>
+  </div>
+
+  <h3>Stack nesting rules — what can go inside what</h3>
+  <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;margin:1rem 0;overflow-x:auto;">
+    <div style="font-size:10px;color:var(--muted);margin-bottom:12px;letter-spacing:0.05em;">PROTOCOL → CAN CARRY (EtherType / IP proto / Next Header)</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;font-size:10px;">
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent);">
+        <strong style="color:var(--text);">Ethernet</strong><br>
+        <span style="color:var(--muted);">→ IPv4, IPv6, ARP, 802.1Q, QinQ, MPLS, LLDP, MACsec, PBB, PTP, TRILL, FCoE, PPPoE, EAP</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent2);">
+        <strong style="color:var(--text);">IPv4</strong><br>
+        <span style="color:var(--muted);">→ TCP, UDP, ICMP, GRE, ESP, AH, OSPF, SCTP, IPIP(4), 6in4(41), L2TP, PIM, VRRP</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent3);">
+        <strong style="color:var(--text);">IPv6</strong><br>
+        <span style="color:var(--muted);">→ TCP, UDP, ICMPv6, ESP, AH, GRE, routing ext (SRv6), hop-by-hop, fragment ext</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent4);">
+        <strong style="color:var(--text);">UDP (any)</strong><br>
+        <span style="color:var(--muted);">→ VXLAN(:4789), GENEVE(:6081), VXLAN-GPE(:4790), LISP(:4341), L2TPv3(:1701), WireGuard(:51820)</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent5);">
+        <strong style="color:var(--text);">GRE</strong><br>
+        <span style="color:var(--muted);">→ Any EtherType: IPv4(0x0800), IPv6(0x86DD), Ethernet(0x6558), MPLS(0x8847), NVGRE via 0x6558</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent);">
+        <strong style="color:var(--text);">MPLS</strong><br>
+        <span style="color:var(--muted);">→ IPv4, IPv6, Ethernet (VPLS/EVPN), MPLS-TP OAM, another MPLS label (stacking)</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent2);">
+        <strong style="color:var(--text);">VXLAN / GENEVE</strong><br>
+        <span style="color:var(--muted);">→ Inner Ethernet frame (any EtherType), including inner VLAN-tagged frames. VXLAN-GPE→NSH</span>
+      </div>
+      <div style="background:var(--surface2);padding:8px 12px;border-left:2px solid var(--accent3);">
+        <strong style="color:var(--text);">IPsec ESP (tunnel)</strong><br>
+        <span style="color:var(--muted);">→ Original IP packet (any inner protocol). Transport mode: inner L4 directly.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+</div><!-- /scanline-bg -->
+
+<script>
+const tooltip = document.getElementById('tooltip');
+
+function showTip(e, name, bits, desc) {
+  tooltip.innerHTML = `<div class="tt-name">${name}</div><div class="tt-bits">${bits}</div><div class="tt-desc">${desc}</div>`;
+  tooltip.style.display = 'block';
+  const r = tooltip.getBoundingClientRect();
+  let x = e.clientX + 14;
+  let y = e.clientY - 10;
+  if (x + r.width > window.innerWidth - 10) x = e.clientX - r.width - 14;
+  if (y + r.height > window.innerHeight - 10) y = window.innerHeight - r.height - 10;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.field')) tooltip.style.display = 'none';
+});
+
+document.addEventListener('mousemove', e => {
+  if (tooltip.style.display === 'block') {
+    let x = e.clientX + 14;
+    let y = e.clientY - 10;
+    const r = tooltip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 10) x = e.clientX - r.width - 14;
+    if (y + r.height > window.innerHeight - 10) y = window.innerHeight - r.height - 10;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }
+});
+
+function switchTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.proto-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  const tabs = ['ethernet','vlan','ip','overlay','tunnels','sfc','frag','compare','coexist'];
+  const idx = tabs.indexOf(id);
+  document.querySelectorAll('.proto-tab')[idx].classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Fragmentation calculator
+function updateFrag() {
+  const dgSize = parseInt(document.getElementById('datagram-size').value);
+  const mtu    = parseInt(document.getElementById('link-mtu').value);
+  const encap  = parseInt(document.getElementById('encap-overhead').value);
+
+  document.getElementById('dg-size-val').textContent = dgSize;
+  document.getElementById('mtu-val').textContent = mtu;
+  document.getElementById('enc-val').textContent = encap + ' B';
+
+  const effectiveMtu = mtu - encap;
+  const ipHdr = 20;
+  const maxPayloadPerFrag = Math.floor((effectiveMtu - ipHdr) / 8) * 8;
+  const dgPayload = dgSize - ipHdr;
+  const out = document.getElementById('frag-output');
+  const stats = document.getElementById('frag-stats');
+
+  if (effectiveMtu < 68) {
+    out.innerHTML = '<div style="color:var(--accent3);font-size:11px;">MTU too small — minimum is 68 bytes (RFC 791)</div>';
+    return;
+  }
+
+  if (dgSize <= effectiveMtu) {
+    out.innerHTML = `
+      <div style="font-size:10px;color:var(--accent2);margin-bottom:8px;">No fragmentation needed (datagram ≤ effective MTU)</div>
+      <div class="frag-fragment">
+        <div class="frag-hdr-mini">IP HDR (${ipHdr}B)</div>
+        <div class="frag-pay-mini" style="background:#1e1a10;width:${Math.max(40,Math.round((dgPayload/1500)*400))}px;">PAYLOAD (${dgPayload}B)</div>
+      </div>`;
+    stats.innerHTML = `<span>Fragments: <strong style="color:var(--accent2)">1</strong></span>
+      <span>Effective MTU: <strong style="color:var(--accent)">${effectiveMtu} B</strong></span>
+      <span>Overhead: <strong style="color:var(--muted)">${ipHdr}B IP</strong></span>`;
+    return;
+  }
+
+  let fragments = [];
+  let offset = 0;
+  let remaining = dgPayload;
+
+  while (remaining > 0) {
+    const isLast = remaining <= maxPayloadPerFrag;
+    const payloadSize = isLast ? remaining : maxPayloadPerFrag;
+    fragments.push({ offset, payloadSize, mf: !isLast, last: isLast });
+    offset += payloadSize;
+    remaining -= payloadSize;
+  }
+
+  const maxBarWidth = Math.min(380, window.innerWidth - 100);
+  let html = `<div style="font-size:10px;color:var(--accent3);margin-bottom:10px;">Fragmented into ${fragments.length} fragments</div>`;
+  html += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
+  fragments.forEach((f, i) => {
+    const barW = Math.max(40, Math.round((f.payloadSize / maxPayloadPerFrag) * 120));
+    html += `<div class="frag-fragment">
+      <div style="font-size:9px;color:var(--muted);text-align:center;margin-bottom:2px;">Frag ${i+1}</div>
+      <div style="display:flex;">
+        <div class="frag-hdr-mini" title="ID, MF=${f.mf?1:0}, offset=${f.offset/8}">IP HDR<br><span style="color:var(--muted);font-size:8px;">off=${f.offset/8}|MF=${f.mf?1:0}</span></div>
+        <div class="frag-pay-mini" style="background:#1e1a10;width:${barW}px;display:flex;align-items:center;justify-content:center;">${f.payloadSize}B</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  out.innerHTML = html;
+
+  const totalBytes = fragments.length * (ipHdr + fragments[0].payloadSize) - (ipHdr * (fragments.length - 1));
+  const overhead = fragments.length * ipHdr;
+  stats.innerHTML = `
+    <span>Fragments: <strong style="color:var(--accent3)">${fragments.length}</strong></span>
+    <span>Max payload/frag: <strong style="color:var(--accent)">${maxPayloadPerFrag} B</strong></span>
+    <span>Effective MTU: <strong style="color:var(--accent)">${effectiveMtu} B</strong></span>
+    <span>IP overhead added: <strong style="color:var(--accent3)">+${(fragments.length-1)*ipHdr} B</strong></span>
+    <span>Reassembly ID: needed</span>`;
+}
+
+updateFrag();
+</script>
+</body>
+</html>
