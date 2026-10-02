@@ -1,0 +1,340 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Sliding window: window size and throughput. Adopted from the URM book's web edition (uvod-u-racunalne-mreze,
+     ugradbeno/prozor.html) into the simdeck kit (docs/sim-ui.md), rebuilt on the catalogue's concept (NOTES.md): a
+     stepper, one millisecond per step; the sender fills its window, the link idles until an acknowledgment comes back
+     a round trip later. The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="tcp-window">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Klizni prozor: veličina prozora i brzina · simdeck</title>
+<meta name="description" content="Pošiljatelj šalje dok prozor ne napuni, pa veza miruje do potvrde. Mali prozor ili dug put ostavljaju rupe; prozor jednak putu puni vezu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tcp-window",
+  "title": {
+    "hr": "Klizni prozor: veličina prozora i brzina",
+    "en": "Sliding window: window size and throughput"
+  },
+  "concept": {
+    "hr": "Brzina je prozor / kružno vrijeme, a nikad više od brzine veze",
+    "en": "Throughput is window / round-trip time, never more than the link's rate"
+  },
+  "summary": {
+    "hr": "Pošiljatelj šalje dok prozor ne napuni, pa veza miruje do potvrde. Mali prozor ili dug put ostavljaju rupe; prozor jednak putu puni vezu.",
+    "en": "The sender sends until the window is full, then the link idles until an acknowledgment. A small window or long path leaves gaps; one equal to the path fills it."
+  },
+  "tags": [
+    "tcp"
+  ],
+  "class": "stepper",
+  "steps": 16
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tcp-window"]; colours only from kit tokens. */
+[data-sim="tcp-window"] .tw {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3.5cqh;
+  height: 100%;
+  padding: 2cqh 2.5cqw;
+}
+
+/* sender — path (one slot per millisecond of the round trip) — receiver */
+[data-sim="tcp-window"] .tw-path {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+[data-sim="tcp-window"] .tw-actor {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-stage);
+  font-weight: 700;
+  text-align: center;
+}
+[data-sim="tcp-window"] .tw-pipe { display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="tcp-window"] .tw-pipe-label { text-align: center; font-size: var(--fs-stage); font-weight: 700; }
+[data-sim="tcp-window"] .tw-slots { display: grid; grid-template-columns: repeat(var(--slots), minmax(0, 1fr)); gap: 0.3rem; }
+[data-sim="tcp-window"] .tw-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 8cqh;
+  min-height: 2.6rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-stage);
+  font-weight: 700;
+  line-height: 1.15;
+}
+[data-sim="tcp-window"] .tw-slot.tw-back { border-radius: 999px; }
+[data-sim="tcp-window"] .tw-dir { text-align: center; font-size: var(--fs-md); color: var(--muted); }
+[data-sim="tcp-window"] .tw-slot.tw-empty { border: 0.2rem dashed var(--muted); background: var(--bg); color: var(--muted); }
+[data-sim="tcp-window"] .tw-slot .tw-ms { font-size: var(--fs-md); font-weight: 400; }
+
+/* the timeline: a ruler, the link row, the acknowledgment row */
+[data-sim="tcp-window"] .tw-time {
+  display: grid;
+  grid-template-columns: auto repeat(16, minmax(0, 1fr));
+  gap: 0.25rem;
+  align-items: stretch;
+}
+[data-sim="tcp-window"] .tw-rowlabel { align-self: center; padding-right: 0.5rem; font-size: var(--fs-stage); font-weight: 700; }
+[data-sim="tcp-window"] .tw-tick { text-align: center; font-family: var(--mono); font-size: var(--fs-md); color: var(--muted); }
+[data-sim="tcp-window"] .tw-tick.tw-now { color: var(--ink); font-weight: 700; }
+[data-sim="tcp-window"] .tw-cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 8cqh;
+  min-height: 2.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="tcp-window"] .tw-cell.tw-future { border: var(--line-w) dotted var(--line); background: transparent; }
+[data-sim="tcp-window"] .tw-cell.tw-idle {
+  border: var(--line-w) dotted var(--muted);
+  color: var(--muted);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.5em, color-mix(in srgb, var(--ink) 18%, transparent) 0.5em 0.62em),
+    repeating-linear-gradient(-45deg, transparent 0 0.5em, color-mix(in srgb, var(--ink) 18%, transparent) 0.5em 0.62em);
+}
+[data-sim="tcp-window"] .tw-cell.tw-noack { border-color: transparent; }
+[data-sim="tcp-window"] .tw-cell.tw-ack { border-radius: 999px; }
+
+/* facts */
+[data-sim="tcp-window"] .tw-facts { display: flex; flex-wrap: wrap; gap: 0.8rem 1.2rem; justify-content: center; }
+[data-sim="tcp-window"] .tw-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.4rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-stage);
+  line-height: 1.2;
+}
+[data-sim="tcp-window"] .tw-box small { font-size: var(--fs-md); color: var(--muted); }
+[data-sim="tcp-window"] .tw-box b { font-family: var(--mono); }
+[data-sim="tcp-window"] .tw-box.tw-full { border-left-color: var(--danger); }
+
+[data-sim="tcp-window"] .sd-swatch[data-shape='cross'] {
+  background-color: var(--bg);
+  border-style: dotted;
+  border-color: var(--muted);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 30%, transparent) 0.3em 0.42em),
+    repeating-linear-gradient(-45deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 30%, transparent) 0.3em 0.42em);
+}
+
+/* Phone and portrait: the stage grows with its content; the timeline cells drop their text, the pattern stays. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tcp-window"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tcp-window"] .tw { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="tcp-window"] .tw-path { grid-template-columns: 1fr; gap: 0.4rem; }
+  [data-sim="tcp-window"] .tw-actor { display: none; }
+  [data-sim="tcp-window"] .tw-pipe-label { font-size: 1rem; }
+  [data-sim="tcp-window"] .tw-slots { gap: 2px; }
+  [data-sim="tcp-window"] .tw-slot { height: 2.4rem; min-height: 0; border-width: 1px; font-size: 1rem; }
+  [data-sim="tcp-window"] .tw-slot .tw-ms { display: none; }
+  [data-sim="tcp-window"] .tw-dir { font-size: 1rem; }
+  [data-sim="tcp-window"] .tw-time { gap: 1px; }
+  [data-sim="tcp-window"] .tw-rowlabel { font-size: 1rem; padding-right: 0.2rem; }
+  [data-sim="tcp-window"] .tw-tick { font-size: 1rem; }
+  [data-sim="tcp-window"] .tw-tick:not(:nth-child(4n+2)) span { display: none; }
+  [data-sim="tcp-window"] .tw-cell { height: 1.6rem; min-height: 0; border-width: 1px; }
+  [data-sim="tcp-window"] .tw-cell span { display: none; }
+  [data-sim="tcp-window"] .tw-box { font-size: 1rem; padding: 0.3rem 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Klizni prozor: veličina prozora i brzina</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var SEG = L.seg, FIRST = L.first;
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function range(a, b) { return a + '–' + b; }
+  // octets/ms as a whole number, Mbit/s to one decimal, with the decimal comma on Croatian pages
+  function num(x, places) {
+    var v = String(Math.round(x * Math.pow(10, places)) / Math.pow(10, places));
+    return /^hr/i.test(document.documentElement.lang) ? v.replace('.', ',') : v;
+  }
+  function rateVars(r) { return { rate: num(r, 0), mbit: num(r * 8 / 1000, 1) }; }
+  function rateNow(s) { return s.ms ? s.sent * SEG / s.ms : 0; }
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { win: 1000, rtt: 4 } },
+    { id: 'full', label: t('presetFull'), hint: t('presetFullHint'), params: { win: 2000, rtt: 4 } },
+    { id: 'far', label: t('presetFar'), hint: t('presetFarHint'), params: { win: 2000, rtt: 8 } },
+    { id: 'big', label: t('presetBig'), hint: t('presetBigHint'), params: { win: 4000, rtt: 4 } }
+  ];
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'win', type: 'choice', label: t('win'), hint: t('winHint'),
+        options: L.windows.map(function (w) { return [w, String(w)]; }) },
+      { key: 'rtt', type: 'choice', label: t('rtt'), hint: t('rttHint'),
+        options: L.rtts.map(function (r) { return [r, String(r)]; }) }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legendBusy') },
+      { shape: 'cross', label: t('legendIdle') },
+      { c: 3, shape: 'round', label: t('legendAck') },
+      { shape: 'hollow', label: t('legendEmpty') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params, fwd = c.dir === 'forward' && !c.first;
+      var lim = L.limit(p.win, p.rtt);
+
+      // the path, folded: the first half of the round trip goes right (segments), the second half comes back left
+      // (acknowledgments); a segment k ms on its way sits in slot k
+      var half = p.rtt / 2;
+      function slot(j) {
+        var f = null;
+        s.flight.forEach(function (x) { if (s.ms - x.ms + 1 === j) f = x; });
+        if (!f) return h('div', { class: 'tw-slot tw-empty' }, h('span', { class: 'tw-ms' }, t('slotMs', { k: j })));
+        var back = j > half;
+        return h('div', {
+          class: 'tw-slot sd-soft' + (back ? ' tw-back' : ' sd-hatch') + (fwd && j === 1 && s.sentNow ? ' sd-changed' : ''),
+          dataset: { c: back ? '3' : '1' }
+        }, h('span', { translate: 'no' }, (back ? '✓' : '') + '#' + f.k));
+      }
+      var goRow = [], backRow = [];
+      for (var j = 1; j <= half; j++) goRow.push(slot(j));
+      for (j = p.rtt; j > half; j--) backRow.push(slot(j));
+      var path = h('div', { class: 'tw-path' },
+        h('div', { class: 'tw-actor' }, t('sender')),
+        h('div', { class: 'tw-pipe' },
+          h('div', { class: 'tw-pipe-label' }, t('pathLabel', { rtt: p.rtt, pipe: lim.pipe })),
+          h('div', { class: 'tw-dir' }, t('goes')),
+          h('div', { class: 'tw-slots', style: { '--slots': String(half) } }, goRow),
+          h('div', { class: 'tw-slots', style: { '--slots': String(half) } }, backRow),
+          h('div', { class: 'tw-dir' }, t('returns'))),
+        h('div', { class: 'tw-actor' }, t('receiver')));
+
+      // the timeline: 16 ms
+      var cells = [h('div', { class: 'tw-rowlabel' }, t('msAxis'))];
+      for (var i = 1; i <= L.steps; i++) cells.push(h('div', { class: 'tw-tick' + (i === s.ms ? ' tw-now' : ''), translate: 'no' }, h('span', null, String(i))));
+      cells.push(h('div', { class: 'tw-rowlabel' }, t('rowSend')));
+      for (i = 1; i <= L.steps; i++) {
+        var e = s.timeline[i - 1], now = fwd && i === s.ms;
+        if (!e) cells.push(h('div', { class: 'tw-cell tw-future' }));
+        else if (e.k) cells.push(h('div', { class: 'tw-cell sd-fill' + (now ? ' sd-changed sd-anim-in' : ''), dataset: { c: '1' }, translate: 'no' }, h('span', null, String(e.k))));
+        else cells.push(h('div', { class: 'tw-cell tw-idle' + (now ? ' sd-changed sd-anim-in' : ''), 'aria-hidden': 'true' }, h('span', null, '–')));
+      }
+      cells.push(h('div', { class: 'tw-rowlabel' }, t('rowAck')));
+      for (i = 1; i <= L.steps; i++) {
+        var a = s.timeline[i - 1];
+        if (a && a.acks) cells.push(h('div', { class: 'tw-cell tw-ack sd-soft', dataset: { c: '3' }, translate: 'no' }, h('span', null, '✓')));
+        else cells.push(h('div', { class: 'tw-cell tw-noack' }));
+      }
+
+      var full = s.inFlight === p.win;
+      var rate = rateNow(s);
+      var facts = h('div', { class: 'tw-facts' },
+        h('div', { class: 'tw-box' }, h('small', null, t('factPipe')), data(lim.pipe), h('small', null, t('factPipeNote'))),
+        h('div', { class: 'tw-box' + (full ? ' tw-full' : '') }, h('small', null, t('factFlight')), data(s.inFlight + ' / ' + p.win)),
+        h('div', { class: 'tw-box' }, h('small', null, t('factBusy')), h('b', null, t('factBusyValue', { busy: s.busy, ms: s.ms }))),
+        h('div', { class: 'tw-box' }, h('small', null, t('factRate')), h('b', null, t('rateValue', rateVars(rate)))),
+        h('div', { class: 'tw-box' }, h('small', null, t('factLimit')),
+          h('b', null, t('rateValue', rateVars(lim.rate))),
+          h('small', null, t(lim.by === 'window' ? 'limitWindow' : lim.by === 'link' ? 'limitLink' : 'limitBoth'))));
+
+      c.stage.replaceChildren(h('div', { class: 'tw' }, path, h('div', { class: 'tw-time' }, cells), facts));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      if (s.ms === 0) return t.parts('captionStart', { last: data(FIRST - 1), rtt: data(p.rtt), win: data(p.win) });
+      var out = [];
+      if (s.acked.length) out = out.concat(t.parts('captionAcks', { ack: data(s.ack), left: data(s.ack), right: data(s.right) }), [' ']);
+      if (s.sentNow) {
+        out = out.concat(t.parts(s.inFlight === p.win ? 'captionSendFull' : 'captionSend', {
+          ms: data(s.ms), k: data(s.sentNow.k), range: data(range(s.sentNow.seq, s.sentNow.seq + SEG - 1)),
+          flight: data(s.inFlight), win: data(p.win) }));
+      } else {
+        out = out.concat(t.parts('captionIdle', { ms: data(s.ms), win: data(p.win) }));
+      }
+      if (s.ms === L.steps) {
+        var lim = L.limit(p.win, p.rtt);
+        var key = lim.by === 'window' ? 'captionEndWindow' : lim.by === 'link' ? 'captionEndLink' : 'captionEndBoth';
+        out = out.concat([' '], t.parts(key, { ms: data(s.ms), busy: data(s.busy), rate: data(num(rateNow(s), 0)), win: data(p.win), rtt: data(p.rtt) }));
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
