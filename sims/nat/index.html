@@ -1,0 +1,290 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- NAT: adopted from the URM book's web edition (uvod-u-racunalne-mreze, ugradbeno/nat.html, which is also pat.html)
+     into the simdeck kit (docs/sim-ui.md). A stepper: router R translates the packets of hosts A and B and builds its
+     translation table, in PAT or Basic NAT mode. The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="nat">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAT: tablica prijevoda · simdeck</title>
+<meta name="description" content="Usmjernik R prevodi adrese računala A i B i gradi tablicu prijevoda; dolazni paket bez zapisa odbacuje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "nat",
+  "class": "stepper",
+  "steps": 5,
+  "title": { "hr": "NAT: tablica prijevoda", "en": "NAT: the translation table" },
+  "concept": { "hr": "Zapis nastaje kad paket krene van; dolazni paket bez zapisa se odbacuje", "en": "An entry is made when a packet goes out; inbound with no entry is dropped" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="nat"]; colours only from kit tokens. */
+[data-sim="nat"] .nt {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3.5cqh;
+  height: 100%;
+  padding: 2cqh 2cqw;
+  font-size: var(--fs-stage);
+}
+[data-sim="nat"] .nt-addr { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="nat"] .nt-small { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+
+/* the three places: inside network, router, internet */
+[data-sim="nat"] .nt-topo { display: grid; grid-template-columns: 1fr auto 1fr; gap: 2cqw; align-items: stretch; }
+[data-sim="nat"] .nt-box {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.5rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="nat"] .nt-router { border: 0.3rem solid var(--ink); text-align: center; justify-content: center; }
+[data-sim="nat"] .nt-host { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.1rem 0.4rem; border: 0.2rem solid transparent; border-radius: var(--radius-sm); }
+[data-sim="nat"] .nt-host.nt-active { border-color: var(--ink); background: var(--bg); }
+[data-sim="nat"] .nt-host .nt-name { font-weight: 700; min-width: 1.4em; }
+
+/* the packet: inside card, direction through R, outside card */
+[data-sim="nat"] .nt-pkt { display: grid; grid-template-columns: 1fr auto 1fr; gap: 2cqw; align-items: stretch; }
+[data-sim="nat"] .nt-card {
+  display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.8rem; align-content: start;
+  padding: 0.5rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+}
+[data-sim="nat"] .nt-card > .nt-small:first-child { grid-column: 1 / -1; }
+[data-sim="nat"] .nt-card .nt-field { justify-self: start; padding: 0 0.2rem; }
+[data-sim="nat"] .nt-card .nt-field.sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; }
+[data-sim="nat"] .nt-card.nt-none { border-style: dashed; color: var(--muted); }
+[data-sim="nat"] .nt-card.nt-drop { border-style: dashed; }
+[data-sim="nat"] .nt-dropmsg { grid-column: 1 / -1; justify-self: start; align-self: center; background: var(--bg); font-weight: 700; padding: 0.2rem 0.5rem; border-radius: var(--radius-sm); border: var(--line-w) solid var(--ink); }
+[data-sim="nat"] .nt-dropmsg::before { content: '✗ '; }
+[data-sim="nat"] .nt-msg { grid-column: 1 / -1; font-style: italic; }
+[data-sim="nat"] .nt-dir { display: grid; place-items: center; min-width: 4.5rem; font-size: 2.5rem; font-weight: 700; line-height: 1; }
+
+/* the translation table */
+[data-sim="nat"] .nt-tablebox { display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="nat"] .nt-table { display: grid; grid-template-columns: repeat(3, auto) 1fr; gap: 0.35rem 2.2rem; align-items: center; }
+[data-sim="nat"] .nt-table > * { grid-row: var(--r); }
+[data-sim="nat"] .nt-cell { padding: 0.1rem 0.5rem; z-index: 1; }
+[data-sim="nat"] .nt-frame { grid-column: 1 / -1; align-self: stretch; margin: -0.15rem -0.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="nat"] .nt-frame.sd-fill { border-color: var(--c1); }
+[data-sim="nat"] .nt-frame.nt-used { border: 0.3rem solid var(--ink); background: var(--panel); }
+[data-sim="nat"] .nt-empty { grid-column: 1 / -1; color: var(--muted); font-style: italic; padding-left: 0.5rem; border-left: 0.3rem solid var(--line); }
+[data-sim="nat"] .nt-tag { grid-column: 4; justify-self: end; z-index: 1; padding: 0 0.4rem; font-size: var(--fs-sm); font-weight: 700; border-radius: var(--radius-sm); margin-right: 0.5rem; }
+[data-sim="nat"] .nt-tag.nt-tag-new { border: var(--line-w) solid currentColor; }
+[data-sim="nat"] .nt-tag.nt-tag-used { background: var(--ink); color: var(--bg); }
+[data-sim="nat"] .nt-on { color: var(--on-series); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="nat"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="nat"] .nt { height: auto; gap: 1rem; padding: 0.6rem 0.4rem; font-size: var(--fs-md); }
+  [data-sim="nat"] .nt-topo, [data-sim="nat"] .nt-pkt { grid-template-columns: 1fr; gap: 0.5rem; }
+  [data-sim="nat"] .nt-dir { min-width: 0; font-size: 1.5rem; transform: rotate(90deg); }
+  [data-sim="nat"] .nt-table { grid-template-columns: 1fr; gap: 0.1rem; }
+  [data-sim="nat"] .nt-table > * { grid-row: auto; }
+  [data-sim="nat"] .nt-frame, [data-sim="nat"] .nt-head { display: none; }
+  [data-sim="nat"] .nt-cell { grid-column: 1; padding: 0 0.4rem; }
+  [data-sim="nat"] .nt-cell.nt-c1 { margin-top: 0.5rem; border-top: var(--line-w) solid var(--line); padding-top: 0.3rem; }
+  [data-sim="nat"] .nt-cell[data-k]::before { content: attr(data-k) ': '; font-family: var(--sans); font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+  [data-sim="nat"] .nt-on { color: inherit; }
+  [data-sim="nat"] .nt-tag { grid-column: 1; justify-self: start; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">NAT: tablica prijevoda</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  function data(text, cls) { return h('span', { translate: 'no', class: 'nt-addr' + (cls ? ' ' + cls : '') }, text); }
+  function bold(text) { return h('b', { translate: 'no' }, text); }
+  function sock(e) { return e.ip + ':' + e.port; }
+  function both(list) {
+    var out = [];
+    list.forEach(function (x, j) { if (j) out.push(j === list.length - 1 ? t('listAnd') : ', '); out.push(bold(x)); });
+    return h('span', null, out);
+  }
+  var SRV = sock(L.server);
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { mode: 'pat', second: 'B', probe: '61050' } },
+    { id: 'open-port', label: t('presetOpen'), hint: t('presetOpenHint'), params: { mode: 'pat', second: 'B', probe: '61000' } },
+    { id: 'same-host', label: t('presetTwice'), hint: t('presetTwiceHint'), params: { mode: 'pat', second: 'A', probe: '61050' } },
+    { id: 'basic-one', label: t('presetBasic'), hint: t('presetBasicHint'), params: { mode: 'basic', second: 'B', probe: '61050' } },
+    { id: 'basic-two', label: t('presetBasic2'), hint: t('presetBasic2Hint'), params: { mode: 'basic2', second: 'B', probe: '61050' } }
+  ];
+
+  /** A packet card: label, source, destination; `changed` names the field R rewrote ('src' or 'dst'). */
+  function card(label, pkt, changed) {
+    return h('div', { class: 'nt-card' },
+      h('span', { class: 'nt-small' }, label),
+      h('span', null, t('src')),
+      pkt.src ? data(sock(pkt.src), 'nt-field' + (changed === 'src' ? ' sd-changed' : '')) : h('span', { class: 'nt-field' }, t('anyOutside')),
+      h('span', null, t('dst')),
+      data(sock(pkt.dst), 'nt-field' + (changed === 'dst' ? ' sd-changed' : '')));
+  }
+  function empty(label, msg) {
+    return h('div', { class: 'nt-card nt-none' }, h('span', { class: 'nt-small' }, label), h('span', { class: 'nt-msg' }, msg));
+  }
+  /** Where a dropped packet would have gone: no packet, only the word that R dropped it. */
+  function dropped(label) {
+    return h('div', { class: 'nt-card nt-drop sd-hatch' }, h('span', { class: 'nt-small' }, label), h('span', { class: 'nt-dropmsg' }, t('dropped')));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['pat', t('modePat')], ['basic', t('modeBasic')], ['basic2', t('modeBasic2')]] },
+      { key: 'second', type: 'choice', label: t('second'), options: [['B', t('secondB')], ['A', t('secondA')]] },
+      { key: 'probe', type: 'choice', label: t('probe'), options: L.probes.map(function (p) { return [p, p]; }) }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { shape: 'hl', label: t('legendChanged') },
+      { c: 1, label: t('legendNew') },
+      { shape: 'hollow', label: t('legendDrop') }
+    ],
+
+    render: function (c) {
+      var s = c.state, e = s.event, fwd = c.dir === 'forward', pat = s.mode === 'pat';
+      var active = e && e.who && (e.kind !== 'probe' || e.outcome === 'deliver') ? e.who : null;
+
+      // the three places
+      var hosts = ['A', 'B'].map(function (k) {
+        return h('div', { class: 'nt-host' + (active === k ? ' nt-active' : '') },
+          h('span', { class: 'nt-name', translate: 'no' }, k), data(L.hosts[k] + ':' + L.srcPort));
+      });
+      var topo = h('div', { class: 'nt-topo' },
+        h('div', { class: 'nt-box' }, h('span', { class: 'nt-small' }, t('insideNet')), hosts),
+        h('div', { class: 'nt-box nt-router' },
+          h('span', null, t('router'), ' ', bold('R')),
+          h('span', { class: 'nt-small' }, t(s.outside.length > 1 ? 'outsideAddrs' : 'outsideAddr')),
+          s.outside.map(function (a) { return data(a); })),
+        h('div', { class: 'nt-box' }, h('span', { class: 'nt-small' }, t('internet')),
+          h('div', { class: 'nt-host' + (e && (e.kind === 'out' || e.kind === 'reply') ? ' nt-active' : '') }, h('span', null, t('server')), data(SRV)),
+          h('div', { class: 'nt-host' + (e && e.kind === 'probe' ? ' nt-active' : '') }, h('span', null, t('someone')))));
+
+      // the packet on each side of R
+      var inside, outside, dir = '';
+      if (!e) { inside = empty(t('pktInside'), t('noPacket')); outside = empty(t('pktOutside'), t('noPacket')); }
+      else if (e.kind === 'noreply') { inside = empty(t('pktInside'), t('notSent')); outside = empty(t('pktOutside'), t('notSent')); }
+      else if (e.kind === 'out') {
+        dir = '→';
+        inside = card(t('pktInside'), e.before, null);
+        outside = e.after ? card(t('pktOutside'), e.after, 'src') : dropped(t('pktOutside'));
+      } else {
+        dir = '←';
+        outside = card(t('pktOutside'), e.before, null);
+        inside = e.after ? card(t('pktInside'), e.after, 'dst') : dropped(t('pktInside'));
+      }
+      if (fwd && e) (e.kind === 'out' ? outside : inside).classList.add('sd-anim-in');
+      var pkt = h('div', { class: 'nt-pkt' }, inside, h('div', { class: 'nt-dir', 'aria-hidden': 'true' }, dir), outside);
+
+      // the translation table (Basic NAT binds addresses, so its inside and outside columns show addresses only)
+      var cells = [
+        h('span', { class: 'nt-cell nt-small nt-head', style: { '--r': '1', gridColumn: '1' } }, t('colInside')),
+        h('span', { class: 'nt-cell nt-small nt-head', style: { '--r': '1', gridColumn: '2' } }, t('colOutside')),
+        h('span', { class: 'nt-cell nt-small nt-head', style: { '--r': '1', gridColumn: '3' } }, t('colDest'))
+      ];
+      if (!s.table.length) cells.push(h('span', { class: 'nt-empty', style: { '--r': '2' } }, t('tableEmpty')));
+      s.table.forEach(function (row, k) {
+        var r = String(k + 2), here = e && e.row === k;
+        var fresh = here && e.outcome === 'new', used = here && !fresh;
+        var on = fresh ? ' nt-on' : '';
+        cells.push(h('div', { class: 'nt-frame' + (fresh ? ' sd-fill' + (fwd ? ' sd-anim-in' : '') : used ? ' nt-used' : ''), dataset: fresh ? { c: '1' } : null, style: { '--r': r } }));
+        cells.push(h('span', { class: 'nt-cell nt-c1' + on, dataset: { k: t('colInside') }, style: { '--r': r, gridColumn: '1' } }, data(pat ? sock(row.inside) : row.inside.ip)));
+        cells.push(h('span', { class: 'nt-cell' + on, dataset: { k: t('colOutside') }, style: { '--r': r, gridColumn: '2' } }, data(pat ? sock(row.outside) : row.outside.ip)));
+        cells.push(h('span', { class: 'nt-cell' + on, dataset: { k: t('colDest') }, style: { '--r': r, gridColumn: '3' } }, data(sock(row.dest))));
+        if (fresh || used) cells.push(h('span', { class: 'nt-tag ' + (fresh ? 'nt-tag-new nt-on' : 'nt-tag-used'), style: { '--r': r } }, t(fresh ? 'tagNew' : 'tagUsed')));
+      });
+      var table = h('div', { class: 'nt-tablebox' }, h('span', { class: 'nt-small' }, t('tableTitle')), h('div', { class: 'nt-table' }, cells));
+
+      c.stage.replaceChildren(h('div', { class: 'nt' }, topo, pkt, table));
+    },
+
+    caption: function (c) {
+      var s = c.state, e = s.event, pat = s.mode === 'pat';
+      if (!e) {
+        return t.parts('captionStart', {
+          a: bold(L.hosts.A), b: bold(L.hosts.B), srv: bold(SRV), port: bold(String(L.srcPort)),
+          out: h('span', null, s.outside.length > 1 ? t.parts('captionStartTwo', { addrs: both(s.outside) }) : t.parts('captionStartOne', { addr: bold(s.outside[0]) }))
+        });
+      }
+      var who = bold(e.who || '');
+      if (e.kind === 'out') {
+        if (e.outcome === 'nofree') {
+          return t.parts('captionNoFree', { who: who, addr: bold(s.outside[0]), same: bold(s.outside[0] + ':' + L.srcPort + ' → ' + SRV) });
+        }
+        var v = { who: who, from: bold(sock(e.before.src)), to: bold(sock(e.after.src)), srv: bold(SRV), addr: bold(e.after.src.ip) };
+        if (e.outcome === 'reuse') return t.parts(pat ? 'captionReusePat' : 'captionReuseBasic', v);
+        if (!pat) return t.parts('captionOutBasic', v);
+        var out = t.parts('captionOutPat', v);
+        if (s.table.length === 2) out = out.concat([' ', h('span', { class: 'sd-hl' }, t.parts('captionOutPatSecond', { port: bold(String(L.srcPort)) }))]);
+        return out;
+      }
+      if (e.kind === 'noreply') return t.parts('captionNoReply', { who: who });
+      if (e.kind === 'reply') return t.parts('captionReply', { who: who, dst: bold(sock(e.before.dst)), to: bold(sock(e.after.dst)) });
+      var w = { who: who, dst: bold(sock(e.before.dst)), to: e.after ? bold(sock(e.after.dst)) : null, addr: bold(e.before.dst.ip) };
+      if (e.outcome === 'drop') return t.parts('captionProbeDrop', w);
+      return t.parts(pat ? 'captionProbePat' : 'captionProbeBasic', w);
+    }
+  });
+})();
+</script>
+</body>
+</html>
