@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // App wiring: toolbar, keyboard, presentation mode, first-run behaviour.
 
 import {
   state, on, changed, undo, redo, canUndo, canRedo, loadDoc, readAutosave,
-  loadPrefs, savePrefs, maxStep, clearSelection, select,
+  loadPrefs, savePrefs, maxStep, clearSelection, select, flushAutosave,
 } from './state.js';
+import { t, applyStatic, switchLang } from './i18n.js';
 import { LINK_KINDS } from './catalog.js';
 import { initRenderer, applyTheme, scheduleRender, setFocus, getFocus } from './render.js';
 import {
@@ -19,7 +21,7 @@ const $ = (sel) => document.querySelector(sel);
 const canvas = $('#canvas');
 
 // Surface anything unexpected instead of dying silently mid-lecture.
-window.addEventListener('error', (e) => toast(e.message || 'Something went wrong', true));
+window.addEventListener('error', (e) => toast(e.message || t('toast.error'), true));
 window.addEventListener('unhandledrejection', (e) => toast(String(e.reason), true));
 
 // Declared up here because boot toasts before it would otherwise be initialised.
@@ -42,7 +44,16 @@ function tryFit() {
   if (fitToContent()) pendingFit = false;
 }
 
+// The sample on the canvas while nobody has edited it: a language switch rebuilds it in the other language.
+let sampleId = null;
+// Set when the page reloads itself (language switch) after saving the drawing, so it does not ask to discard.
+let leaving = false;
+
 // ------------------------------------------------------------------- boot ---
+applyStatic();
+if (new URLSearchParams(location.search).get('motion') === 'reduce') {
+  document.documentElement.classList.add('reduce-motion');
+}
 loadPrefs();
 initRenderer(canvas);
 initInteractions(canvas);
@@ -79,12 +90,14 @@ function restoreOrSeed() {
 
   if (fromUrl) {
     loadDoc(fromUrl);
+    sampleId = wanted;
   } else if (saved) {
     loadDoc(saved);
-    toast('Restored your last diagram');
+    toast(t('toast.restored'));
   } else {
     loadDoc(makeSample('two-sites'));
-    toast('Loaded a sample — File ▸ New to start empty');
+    sampleId = 'two-sites';
+    toast(t('toast.seeded'));
   }
   requestFit();
 
@@ -113,7 +126,7 @@ function buildLinkKinds() {
 function buildSamplesMenu() {
   $('#samples-menu').innerHTML = SAMPLES.map((s) =>
     `<button data-sample="${s.id}">${s.label}<small>${s.hint}</small></button>`).join('')
-    + '<button data-sample="__blank">Blank canvas<small>start from nothing</small></button>';
+    + `<button data-sample="__blank">${t('ui.blank')}<small>${t('ui.blankHint')}</small></button>`;
 }
 
 function wireToolbar() {
@@ -128,6 +141,7 @@ function wireToolbar() {
       if (!confirmDiscard()) return;
       if (id === '__blank') newDocument();
       else loadDoc(makeSample(id));
+      sampleId = id === '__blank' ? null : id;
       requestFit();
       return;
     }
@@ -163,14 +177,19 @@ function wireToolbar() {
 async function runAction(act) {
   try {
     switch (act) {
-      case 'new': if (confirmDiscard()) { newDocument(); resetZoom(); } break;
-      case 'open': { const name = await openJson(); if (name) { requestFit(); toast(`Opened ${name}`); } break; }
-      case 'save': { const name = await saveJson(); if (name) toast(`Saved ${name}`); break; }
-      case 'png2': await exportPng(2); toast('PNG exported'); break;
-      case 'png3': await exportPng(3); toast('PNG exported at 3×'); break;
-      case 'pngT': await exportPng(2, { transparent: true }); toast('Transparent PNG exported'); break;
-      case 'svg': exportSvg(); toast('SVG exported'); break;
-      case 'copy': await copyPng(2); toast('Image copied — paste into your slides'); break;
+      case 'new': if (confirmDiscard()) { newDocument(); sampleId = null; resetZoom(); } break;
+      case 'open': {
+        const name = await openJson();
+        if (name) { sampleId = null; requestFit(); toast(t('toast.opened', { name })); }
+        break;
+      }
+      case 'save': { const name = await saveJson(); if (name) toast(t('toast.savedAs', { name })); break; }
+      case 'png2': await exportPng(2); toast(t('toast.png')); break;
+      case 'png3': await exportPng(3); toast(t('toast.png3')); break;
+      case 'pngT': await exportPng(2, { transparent: true }); toast(t('toast.pngT')); break;
+      case 'svg': exportSvg(); toast(t('toast.svg')); break;
+      case 'copy': await copyPng(2); toast(t('toast.copied')); break;
+      case 'lang': changeLanguage(); break;
       case 'undo': undo(); break;
       case 'redo': redo(); break;
       case 'snap': state.snapOn = !state.snapOn; savePrefs(); changed({ structural: false }); break;
@@ -210,7 +229,22 @@ function setTool(tool) {
 
 function confirmDiscard() {
   if (!state.dirty || !state.doc.nodes.length) return true;
-  return window.confirm('Discard the current diagram? Unsaved changes will be lost.');
+  return window.confirm(t('ui.confirmDiscard'));
+}
+
+// A sample nobody has edited comes back built in the other language, at the same step; any other drawing comes
+// back from the autosave, as it is.
+function changeLanguage() {
+  const params = new URLSearchParams(location.search);
+  for (const k of ['sample', 'present', 'step']) params.delete(k);
+  if (sampleId && !state.dirty) {
+    params.set('sample', sampleId);
+    if (state.present) { params.set('present', '1'); params.set('step', String(state.step)); }
+  } else {
+    flushAutosave();
+  }
+  leaving = true;
+  switchLang(params);
 }
 
 // -------------------------------------------------------------- presenting --
@@ -276,6 +310,13 @@ function wireKeyboard() {
       case ' ':
         if (state.present) { e.preventDefault(); setStep(state.step + 1); }
         break;
+      // simdeck copy: a presenter's clicker sends PageDown / PageUp; Home / End jump to the first and last step.
+      case 'PageDown': case 'PageUp': case 'Home': case 'End':
+        if (state.present) {
+          e.preventDefault();
+          setStep({ PageDown: state.step + 1, PageUp: state.step - 1, Home: 0, End: maxStep() }[e.key]);
+        }
+        break;
       case '0': fitToContent(); break;
       case '+': case '=': zoomBy(1.2); break;
       case '-': zoomBy(1 / 1.2); break;
@@ -292,7 +333,7 @@ function wireKeyboard() {
   });
 
   window.addEventListener('beforeunload', (e) => {
-    if (!state.dirty || !state.doc.nodes.length) return;
+    if (leaving || !state.dirty || !state.doc.nodes.length) return;
     e.preventDefault();
     e.returnValue = '';
   });
@@ -305,8 +346,8 @@ function syncChrome() {
   $('#btn-snap').classList.toggle('on', state.snapOn);
   $('#btn-grid').classList.toggle('on', state.showGrid);
   $('#btn-routing').classList.toggle('on', state.routing === 'orthogonal');
-  $('#btn-routing').textContent = state.routing === 'orthogonal' ? 'Elbow' : 'Direct';
-  $('#btn-theme').textContent = state.theme === 'light' ? 'Light' : 'Dark';
+  $('#btn-routing').textContent = state.routing === 'orthogonal' ? t('ui.elbow') : t('ui.direct');
+  $('#btn-theme').textContent = state.theme === 'light' ? t('ui.light') : t('ui.dark');
   $('#btn-theme').classList.toggle('on', state.theme === 'dark');
   $('#zoom-level').textContent = `${Math.round(state.view.k * 100)}%`;
   $('#link-kind').value = state.linkKind;
@@ -323,28 +364,30 @@ function syncChrome() {
   const hint = $('#placing-hint');
   if (state.placingType) {
     hint.hidden = false;
-    hint.textContent = 'Click the canvas to place — Shift-click to keep placing — Esc to cancel';
+    hint.textContent = t('ui.hintPlace');
   } else if (state.tool === 'link') {
     hint.hidden = false;
-    hint.textContent = 'Click a device, then click the one to connect it to';
+    hint.textContent = t('ui.hintLink');
   } else if (state.tool === 'zone') {
     hint.hidden = false;
-    hint.textContent = 'Drag out a site / zone box';
+    hint.textContent = t('ui.hintZone');
   } else if (state.tool === 'note') {
     hint.hidden = false;
-    hint.textContent = 'Click where the text should go';
+    hint.textContent = t('ui.hintNote');
   } else {
     hint.hidden = true;
   }
 
   const sel = state.selection.size;
   $('#status-left').textContent = sel
-    ? `${sel} selected`
-    : `${state.doc.nodes.length} devices · ${state.doc.links.length} links`;
+    ? t('ui.selected', { n: sel })
+    : t('ui.devicesLinks', {
+      devices: t('n.device', { n: state.doc.nodes.length }), links: t('n.link', { n: state.doc.links.length }),
+    });
 
   const max = maxStep();
-  $('#step-label').textContent = max ? `Step ${state.step} / ${max}` : 'No steps';
-  $('#status-right').textContent = state.dirty ? 'Unsaved changes' : 'Saved';
+  $('#step-label').textContent = max ? t('ui.step', { n: state.step, max }) : t('ui.noSteps');
+  $('#status-right').textContent = state.dirty ? t('ui.unsaved') : t('ui.saved');
 }
 
 on('selection', syncChrome);

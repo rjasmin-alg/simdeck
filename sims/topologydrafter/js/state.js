@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Document model, undo history, selection and autosave.
 //
 // The whole drawing is one plain-JSON `doc`. Undo is snapshot based: cheap and
 // impossible to get subtly wrong, which matters more here than memory use.
 
 import { deviceOrDefault } from './catalog.js';
+import { t } from './i18n.js';
 
 export const DOC_VERSION = 2;
 const AUTOSAVE_KEY = 'topologydrafter.autosave.v2';
@@ -16,7 +18,7 @@ export function uid(prefix = 'n') {
   return `${prefix}${Date.now().toString(36).slice(-4)}${idSeq.toString(36)}`;
 }
 
-export function newDoc(title = 'Untitled topology') {
+export function newDoc(title = t('doc.untitled')) {
   return { version: DOC_VERSION, title, nodes: [], links: [], zones: [], notes: [] };
 }
 
@@ -200,7 +202,7 @@ export function addLink(from, to, kind = state.linkKind, overrides = {}) {
 export function addZone(x, y, w, h, overrides = {}) {
   const zone = {
     id: uid('zn'), x, y, w, h,
-    label: 'Site', color: state.zoneColor, step: 0, ...overrides,
+    label: t('doc.site'), color: state.zoneColor, step: 0, ...overrides,
   };
   state.doc.zones.push(zone);
   return zone;
@@ -209,7 +211,7 @@ export function addZone(x, y, w, h, overrides = {}) {
 export function addNote(x, y, overrides = {}) {
   const note = {
     id: uid('tx'), x, y, w: 200,
-    text: 'Note', size: 14, color: '#334155', step: 0, ...overrides,
+    text: t('doc.note'), size: 14, color: '#334155', step: 0, ...overrides,
   };
   state.doc.notes.push(note);
   return note;
@@ -240,7 +242,7 @@ export function loadDoc(doc, { name = null } = {}) {
 }
 
 function migrate(raw) {
-  const doc = { ...newDoc(raw.title || 'Untitled topology'), ...raw };
+  const doc = { ...newDoc(raw.title || t('doc.untitled')), ...raw };
   doc.version = DOC_VERSION;
   for (const key of ['nodes', 'links', 'zones', 'notes']) {
     if (!Array.isArray(doc[key])) doc[key] = [];
@@ -271,11 +273,15 @@ export function maxStep() {
 let autosaveTimer = null;
 function scheduleAutosave() {
   clearTimeout(autosaveTimer);
-  autosaveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state.doc));
-    } catch { /* quota or private mode: not worth interrupting a lecture over */ }
-  }, 600);
+  autosaveTimer = setTimeout(flushAutosave, 600);
+}
+
+/** Write the autosave now (before the page reloads in the other language). */
+export function flushAutosave() {
+  clearTimeout(autosaveTimer);
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state.doc));
+  } catch { /* quota or private mode: not worth interrupting a lecture over */ }
 }
 
 export function readAutosave() {

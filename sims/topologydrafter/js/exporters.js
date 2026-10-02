@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Getting the drawing out: SVG, PNG, and JSON round-trip.
 //
 // Exports are built from a *fresh* SVG rather than the live one, so UI-only
@@ -6,12 +7,14 @@
 import { state, loadDoc, newDoc } from './state.js';
 import { CANVAS_CSS, THEMES } from './render.js';
 import { contentBounds } from './interact.js';
+import { t } from './i18n.js';
 
 const stamp = () => new Date().toISOString().slice(0, 10);
 
 function safeName(ext) {
   const base = (state.doc.title || 'topology')
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'topology';
+    .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'topology';
   return `${base}-${stamp()}.${ext}`;
 }
 
@@ -43,7 +46,7 @@ export function buildSvg({ transparent = false, padding = 48 } = {}) {
      viewBox="${round(bounds.x)} ${round(bounds.y)} ${round(bounds.w)} ${round(bounds.h)}"
      class="td-canvas"
      style="--paper:${theme.paper};--grid:${theme.grid};--ink:${theme.ink};--ink-soft:${theme.inkSoft};--sel:${theme.sel}">
-  <title>${escapeXml(state.doc.title || 'Network topology')}</title>
+  <title>${escapeXml(state.doc.title || t('doc.svgTitle'))}</title>
   <defs>${defs}</defs>
   <style>${CANVAS_CSS}</style>
   ${transparent ? '' : `<rect x="${round(bounds.x)}" y="${round(bounds.y)}" width="${round(bounds.w)}" height="${round(bounds.h)}" fill="${theme.paper}"/>`}
@@ -79,7 +82,7 @@ export async function exportPng(scale = 2, { transparent = false } = {}) {
 
 /** Copy a PNG of the diagram straight to the clipboard — paste into slides. */
 export async function copyPng(scale = 2) {
-  if (!navigator.clipboard?.write) throw new Error('Clipboard images are not available in this browser');
+  if (!navigator.clipboard?.write) throw new Error(t('err.clipboard'));
   const svgText = buildSvg();
   const bounds = contentBounds(48) || { w: 800, h: 600 };
   const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
@@ -100,7 +103,7 @@ function loadImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Could not rasterise the diagram'));
+    img.onerror = () => reject(new Error(t('err.raster')));
     img.src = url;
   });
 }
@@ -127,7 +130,7 @@ export async function saveJson({ saveAs = false } = {}) {
       if (saveAs || !handle) {
         handle = await window.showSaveFilePicker({
           suggestedName: safeName('json'),
-          types: [{ description: 'Topology', accept: { 'application/json': ['.json'] } }],
+          types: [{ description: t('file.kind'), accept: { 'application/json': ['.json'] } }],
         });
         state.filePath = handle;
       }
@@ -150,7 +153,7 @@ export async function openJson() {
   if (hasFsApi()) {
     try {
       const [handle] = await window.showOpenFilePicker({
-        types: [{ description: 'Topology', accept: { 'application/json': ['.json'] } }],
+        types: [{ description: t('file.kind'), accept: { 'application/json': ['.json'] } }],
       });
       const file = await handle.getFile();
       loadDoc(JSON.parse(await file.text()), { name: handle });

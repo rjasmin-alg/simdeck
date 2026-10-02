@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Left rail: searchable device palette. Drag an item onto the canvas, or click
 // it to arm it and then click where you want it (fastest when placing a row of
 // identical machines — hold Shift while clicking to stay armed).
@@ -5,6 +6,7 @@
 import { DEVICES, DEVICE_CATEGORIES, SERVICES } from './catalog.js';
 import { iconFor } from './icons.js';
 import { state, changed } from './state.js';
+import { t } from './i18n.js';
 
 let root;
 let query = '';
@@ -13,7 +15,7 @@ export function initPalette(container) {
   root = container;
   root.innerHTML = `
     <div class="palette-search">
-      <input type="search" id="palette-q" placeholder="Search devices and services…"
+      <input type="search" id="palette-q" placeholder="${t('pal.search')}"
              autocomplete="off" spellcheck="false">
     </div>
     <div class="palette-list" id="palette-list"></div>`;
@@ -50,14 +52,18 @@ export function focusPaletteSearch() {
   if (input) { input.focus(); input.select(); }
 }
 
+// A search finds a label in either language ("router" on the Croatian page too).
+const inEither = (key) => ['hr', 'en']
+  .some((l) => (globalThis.SimStrings?.[l]?.[key] || '').toLowerCase().includes(query));
+
 function matches(dev) {
   if (!query) return true;
-  if (dev.label.toLowerCase().includes(query)) return true;
+  if (inEither(`dev.${dev.id}`)) return true;
   if (dev.id.includes(query)) return true;
   // Searching "dns" should also surface every box that ships DNS by default.
   return dev.services.some((s) => {
     const svc = SERVICES[s];
-    return svc && (svc.short.toLowerCase().includes(query) || svc.label.toLowerCase().includes(query));
+    return svc && (svc.short.toLowerCase().includes(query) || inEither(`svc.${s}`));
   });
 }
 
@@ -77,7 +83,7 @@ function renderList() {
       <div class="palette-grid">${items.map(paintItem).join('')}</div>
     </section>`;
   }
-  if (!html) html = '<p class="palette-empty">Nothing matches that.</p>';
+  if (!html) html = `<p class="palette-empty">${t('pal.empty')}</p>`;
   list.innerHTML = html;
 }
 

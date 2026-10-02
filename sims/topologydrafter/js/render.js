@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SVG painting. One rAF-batched full redraw of each layer.
 //
 // Everything that affects how the drawing *looks* lives in CANVAS_CSS so that
@@ -302,6 +303,7 @@ function paintNode(node) {
 // ------------------------------------------------------------------ notes ---
 function paintNote(note) {
   const sel = state.selection.has(note.id);
+  // simdeck copy: inline style, because .note-text's CSS font-size beat the attribute and every note drew at 14.
   const size = note.size || 14;
   const lines = String(note.text || '').split('\n');
   const tspans = lines.map((line, i) => {
@@ -313,7 +315,7 @@ function paintNote(note) {
   return `<g class="note${sel ? ' selected' : ''}${dimClass(note.id)}" data-id="${note.id}" data-kind="note">
     <rect class="node-hit" x="${r1(note.x - 6)}" y="${r1(note.y - size)}"
           width="${r1(note.w)}" height="${r1(h + 8)}"/>
-    <text class="note-text" x="${r1(note.x)}" y="${r1(note.y)}" font-size="${size}"
+    <text class="note-text" x="${r1(note.x)}" y="${r1(note.y)}" style="font-size:${size}px"
           fill="${note.color || 'currentColor'}">${tspans}</text>
     ${sel ? `<rect class="sel-ring" x="${r1(note.x - 9)}" y="${r1(note.y - size - 3)}"
                    width="${r1(note.w + 6)}" height="${r1(h + 14)}"/>` : ''}

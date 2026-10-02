@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Geometry: node boxes, link anchors and path routing.
 //
 // A node's (x, y) is the centre of its icon tile. Labels and service badges

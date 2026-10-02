@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Ready-made topologies. These double as the fastest way to start a lecture:
 // load one, rename the boxes, delete what you don't need.
+// simdeck copy: the words are in strings.js (s.<sample>.*); host names, addresses and VLAN numbers are data.
 
 import { DOC_VERSION } from './state.js';
 import { deviceOrDefault } from './catalog.js';
+import { t } from './i18n.js';
 
 /** Tiny DSL so the diagrams below read like the picture they draw. */
 function build(title, fn) {
@@ -39,23 +42,23 @@ function build(title, fn) {
 }
 
 // ---------------------------------------------------------------------------
-const twoSites = () => build('Two sites over the Internet', (d) => {
-  d.note(40, 90, 'Two sites, one directory', 24, '#0f172a');
-  d.note(40, 120, 'Head office holds the writable DC; the branch gets a read-only copy.', 13, '#64748b');
+const twoSites = () => build(t('s.twoSites.label'), (d) => {
+  d.note(40, 90, t('s.twoSites.heading'), 24, '#0f172a');
+  d.note(40, 120, t('s.twoSites.lead'), 13, '#64748b');
 
-  d.zone(40, 170, 680, 500, 'Head office — writable directory', 'blue');
-  d.zone(1080, 170, 600, 500, 'Branch office — read-only', 'green');
+  d.zone(40, 170, 680, 500, t('s.twoSites.hq'), 'blue');
+  d.zone(1080, 170, 600, 500, t('s.twoSites.branch'), 'green');
 
-  d.node('inet', 'internet', 900, 190, 'Internet', 'untrusted');
+  d.node('inet', 'internet', 900, 190, t('dev.internet'), t('s.twoSites.untrusted'));
 
   // --- head office ---
-  d.node('fw', 'ngfw', 350, 250, 'Edge firewall', '203.0.113.10');
-  d.node('core', 'switch-core', 350, 390, 'Core switch', 'VLAN 10 / 20 / 30');
+  d.node('fw', 'ngfw', 350, 250, t('s.twoSites.edgeFw'), '203.0.113.10');
+  d.node('core', 'switch-core', 350, 390, t('s.twoSites.core'), 'VLAN 10 / 20 / 30');
   d.node('dc', 'dc', 110, 560, 'DC01', '10.10.0.10');
   d.node('fs', 'file-server-w', 280, 560, 'FS01', '10.10.0.20 — \\\\FS01\\share');
-  d.node('lin', 'file-server', 450, 560, 'files01', '10.10.0.30 — Samba + NFS');
-  d.node('acc', 'switch-l2', 620, 390, 'Access switch', '');
-  d.node('pcs', 'pc', 620, 560, 'Staff PCs', '×24, VLAN 20');
+  d.node('lin', 'file-server', 450, 560, 'files01', '10.10.0.30 — SMB + NFS');
+  d.node('acc', 'switch-l2', 620, 390, t('s.twoSites.access'), '');
+  d.node('pcs', 'pc', 620, 560, t('s.twoSites.pcs'), t('s.twoSites.pcsSub'));
 
   d.link('fw', 'core', 'fiber', { fromLabel: 'LAN', toLabel: 'Te1/0/1' });
   d.link('core', 'acc', 'trunk', { label: '802.1Q' });
@@ -65,11 +68,11 @@ const twoSites = () => build('Two sites over the Internet', (d) => {
   d.link('acc', 'pcs');
 
   // --- branch ---
-  d.node('bfw', 'fw-oss', 1370, 250, 'Branch firewall', '198.51.100.7 — pfSense');
-  d.node('bsw', 'switch-l2', 1370, 390, 'Branch switch', '');
-  d.node('rodc', 'rodc', 1200, 560, 'RODC01', '10.20.0.10 — no writes');
-  d.node('nas', 'nas', 1370, 560, 'NAS01', '10.20.0.20 — DFS replica');
-  d.node('bpc', 'pc', 1540, 560, 'Branch PCs', '×8, VLAN 20');
+  d.node('bfw', 'fw-oss', 1370, 250, t('s.twoSites.branchFw'), '198.51.100.7');
+  d.node('bsw', 'switch-l2', 1370, 390, t('s.twoSites.branchSw'), '');
+  d.node('rodc', 'rodc', 1200, 560, 'RODC01', t('s.twoSites.rodcSub'));
+  d.node('nas', 'nas', 1370, 560, 'NAS01', t('s.twoSites.nasSub'));
+  d.node('bpc', 'pc', 1540, 560, t('s.twoSites.branchPcs'), t('s.twoSites.branchPcsSub'));
 
   d.link('bfw', 'bsw');
   d.link('bsw', 'rodc');
@@ -77,81 +80,75 @@ const twoSites = () => build('Two sites over the Internet', (d) => {
   d.link('bsw', 'bpc');
 
   // --- between the sites ---
-  d.link('fw', 'inet', 'wan', { label: '1 Gb fibre' });
+  d.link('fw', 'inet', 'wan', { label: t('s.twoSites.fibre') });
   d.link('inet', 'bfw', 'wan', { label: '200/50 Mb' });
-  d.link('fw', 'bfw', 'vpn', { label: 'IPsec site-to-site', offset: 24 });
+  d.link('fw', 'bfw', 'vpn', { label: t('s.twoSites.tunnel'), offset: 24 });
 
   d.note(760, 700,
-    'Talking points:\n'
-    + '· The RODC caches credentials but never writes back.\n'
-    + '· DFS-R keeps FS01 and NAS01 in step over the tunnel.\n'
-    + '· If the tunnel drops, the branch still logs in — locally.', 13, '#475569');
+    t('s.twoSites.talk'), 13, '#475569');
 });
 
 // ---------------------------------------------------------------------------
-const dmz = () => build('Perimeter, DMZ and internal LAN', (d) => {
-  d.note(140, 70, 'Three-legged perimeter', 24, '#0f172a');
-  d.note(140, 100, 'Press → in presentation mode to build this up one tier at a time.', 13, '#64748b');
+const dmz = () => build(t('s.dmz.label'), (d) => {
+  d.note(140, 70, t('s.dmz.heading'), 24, '#0f172a');
+  d.note(140, 100, t('s.dmz.lead'), 13, '#64748b');
 
-  d.node('inet', 'internet', 420, 190, 'Internet', '');
-  d.node('fw', 'ngfw', 420, 330, 'Perimeter firewall', 'NAT + inspection');
+  d.node('inet', 'internet', 420, 190, t('dev.internet'), '');
+  d.node('fw', 'ngfw', 420, 330, t('s.dmz.perimeterFw'), t('s.dmz.perimeterSub'));
   d.link('inet', 'fw', 'wan');
 
   // The DMZ hangs off its own switch — a firewall leg per server would put
   // cables straight through the neighbouring boxes.
-  d.zone(640, 250, 680, 430, 'DMZ — published services', 'amber', 1);
+  d.zone(640, 250, 680, 430, t('s.dmz.zone'), 'amber', 1);
   // Centred over the three servers so every drop routes vertically and
   // nothing is cabled through its neighbour.
-  d.node('dmzsw', 'switch-l2', 940, 330, 'DMZ switch', '', null, 1);
+  d.node('dmzsw', 'switch-l2', 940, 330, t('s.dmz.switch'), '', null, 1);
   d.node('web', 'web-server', 760, 520, 'www01', '198.51.100.20', null, 1);
   d.node('mail', 'mail-server', 940, 520, 'mx01', '198.51.100.21', null, 1);
-  d.node('rp', 'waf', 1120, 520, 'Reverse proxy', 'TLS termination', null, 1);
-  d.link('fw', 'dmzsw', 'lan', { label: 'DMZ leg', step: 1 });
+  d.node('rp', 'waf', 1120, 520, t('s.dmz.revProxy'), t('s.dmz.revProxySub'), null, 1);
+  d.link('fw', 'dmzsw', 'lan', { label: t('s.dmz.leg'), step: 1 });
   d.link('dmzsw', 'web', 'lan', { step: 1 });
   d.link('dmzsw', 'mail', 'lan', { step: 1 });
   d.link('dmzsw', 'rp', 'lan', { step: 1 });
 
-  d.node('ifw', 'firewall', 420, 540, 'Internal firewall', 'default deny inbound', null, 2);
-  d.link('fw', 'ifw', 'lan', { label: 'inside leg', directed: true, step: 2 });
+  d.node('ifw', 'firewall', 420, 540, t('s.dmz.internalFw'), t('s.dmz.internalSub'), null, 2);
+  d.link('fw', 'ifw', 'lan', { label: t('s.dmz.insideLeg'), directed: true, step: 2 });
 
-  d.zone(140, 650, 700, 380, 'Internal LAN — trusted', 'green', 2);
-  d.node('core', 'switch-l3', 420, 730, 'Core switch', 'inter-VLAN routing', null, 2);
+  d.zone(140, 650, 700, 380, t('s.dmz.lan'), 'green', 2);
+  d.node('core', 'switch-l3', 420, 730, t('s.dmz.core'), t('s.dmz.coreSub'), null, 2);
   d.node('dc', 'dc', 250, 900, 'DC01', '10.0.0.10', null, 2);
-  d.node('fs', 'file-server', 420, 900, 'files01', '10.0.0.20 — Samba', null, 2);
-  d.node('pcs', 'pc', 620, 900, 'Workstations', 'VLAN 20', null, 2);
+  d.node('fs', 'file-server', 420, 900, 'files01', '10.0.0.20 — SMB', null, 2);
+  d.node('pcs', 'pc', 620, 900, t('s.dmz.workstations'), 'VLAN 20', null, 2);
   d.link('ifw', 'core', 'lan', { step: 2 });
   d.link('core', 'dc', 'lan', { step: 2 });
   d.link('core', 'fs', 'lan', { step: 2 });
   d.link('core', 'pcs', 'trunk', { step: 2 });
 
   d.note(1400, 300,
-    'Why two firewalls?\n'
-    + '· A compromise in the DMZ is still outside.\n'
-    + '· Different rule owners, different change windows.\n'
-    + '· One vendor bug does not open both doors.', 13, '#475569', 2);
+    t('s.dmz.talk'), 13, '#475569', 2);
 });
 
 // ---------------------------------------------------------------------------
-const campus = () => build('Campus: core, distribution, access', (d) => {
-  d.note(180, 70, 'Three-tier campus', 24, '#0f172a');
+const campus = () => build(t('s.campus.title'), (d) => {
+  d.note(180, 70, t('s.campus.heading'), 24, '#0f172a');
 
-  d.node('rtr', 'router', 560, 170, 'Internet edge', 'BGP ×2');
+  d.node('rtr', 'router', 560, 170, t('s.campus.edge'), t('s.campus.edgeSub'));
   d.node('core1', 'switch-core', 400, 320, 'Core-1', '');
   d.node('core2', 'switch-core', 720, 320, 'Core-2', '');
-  d.node('wlc', 'wlc', 1010, 320, 'WLC', 'controller-based APs');
+  d.node('wlc', 'wlc', 1010, 320, 'WLC', t('s.campus.wlcSub'));
 
-  d.node('dist1', 'switch-l3', 290, 490, 'Dist-A', 'Building A');
-  d.node('dist2', 'switch-l3', 830, 490, 'Dist-B', 'Building B');
+  d.node('dist1', 'switch-l3', 290, 490, 'Dist-A', t('s.campus.buildingA'));
+  d.node('dist2', 'switch-l3', 830, 490, 'Dist-B', t('s.campus.buildingB'));
 
-  d.node('acc1', 'switch-poe', 170, 660, 'Access A1', '');
-  d.node('acc2', 'switch-l2', 400, 660, 'Access A2', '');
-  d.node('acc3', 'switch-l2', 720, 660, 'Access B1', '');
-  d.node('acc4', 'switch-poe', 950, 660, 'Access B2', '');
+  d.node('acc1', 'switch-poe', 170, 660, t('s.campus.accA1'), '');
+  d.node('acc2', 'switch-l2', 400, 660, t('s.campus.accA2'), '');
+  d.node('acc3', 'switch-l2', 720, 660, t('s.campus.accB1'), '');
+  d.node('acc4', 'switch-poe', 950, 660, t('s.campus.accB2'), '');
 
-  d.node('ap', 'ap', 170, 830, 'APs', 'SSID: staff / guest');
-  d.node('pcs', 'pc', 400, 830, 'Labs', '×60');
-  d.node('voip', 'ipphone', 720, 830, 'IP phones', 'voice VLAN 100');
-  d.node('cam', 'camera', 950, 830, 'Cameras', 'PoE+');
+  d.node('ap', 'ap', 170, 830, t('s.campus.aps'), t('s.campus.apsSub'));
+  d.node('pcs', 'pc', 400, 830, t('s.campus.labs'), '×60');
+  d.node('voip', 'ipphone', 720, 830, t('s.campus.phones'), t('s.campus.phonesSub'));
+  d.node('cam', 'camera', 950, 830, t('s.campus.cameras'), 'PoE+');
 
   d.link('rtr', 'core1', 'fiber');
   d.link('rtr', 'core2', 'fiber');
@@ -171,15 +168,17 @@ const campus = () => build('Campus: core, distribution, access', (d) => {
   d.link('acc4', 'cam');
 
   d.note(1130, 620,
-    'Every access switch has two ways up.\n'
-    + 'Pull one fibre in front of the class and\n'
-    + 'ask what spanning-tree does next.', 13, '#475569');
+    t('s.campus.talk'), 13, '#475569');
 });
 
+// Each id is also a simdeck preset entry (sim.json `entries`: ?sample=<id>&present=1).
+const sample = (id, key, make) => ({
+  id, make, get label() { return t(`s.${key}.label`); }, get hint() { return t(`s.${key}.hint`); },
+});
 export const SAMPLES = [
-  { id: 'two-sites', label: 'Two sites over the Internet', hint: 'HQ + branch, DC and RODC, IPsec', make: twoSites },
-  { id: 'dmz', label: 'Perimeter, DMZ and internal LAN', hint: 'demonstrates step-by-step reveal', make: dmz },
-  { id: 'campus', label: 'Campus: core / distribution / access', hint: 'redundant three-tier design', make: campus },
+  sample('two-sites', 'twoSites', twoSites),
+  sample('dmz', 'dmz', dmz),
+  sample('campus', 'campus', campus),
 ];
 
 export function makeSample(id) {

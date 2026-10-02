@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pointer, wheel and drag-and-drop handling for the canvas.
 //
 // All pointer events are bound on the <svg> root rather than on individual
@@ -9,6 +10,7 @@ import {
   addNode, addLink, addZone, addNote, removeIds, selectedNodes, uid, kindOf, emit,
 } from './state.js';
 import { SERVICES } from './catalog.js';
+import { t } from './i18n.js';
 import {
   layoutNode, routeLink, distanceToPolyline, normalizeRect, rectsIntersect,
   pointInRect, HALF, TILE,
@@ -539,7 +541,7 @@ export function groupIntoZone() {
   }
   const pad = 34;
   commit('group into zone');
-  const zone = addZone(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2, { label: 'Site' });
+  const zone = addZone(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2, { label: t('doc.site') });
   select(zone.id);
   changed();
 }

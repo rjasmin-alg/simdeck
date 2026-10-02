@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Inline SVG device glyphs, all drawn in a 0 0 24 24 box.
 //
 // The renderer wraps these in a <g class="ico"> that sets
