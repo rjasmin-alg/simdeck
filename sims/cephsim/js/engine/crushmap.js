@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Building and finalising a CRUSH map.
 //
 // A map is plain data. `finalize()` does the two derivations Ceph does for you

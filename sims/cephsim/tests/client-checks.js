@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Client layers and the console.
 //
 // The interesting property of a client layer is that it fails for reasons that

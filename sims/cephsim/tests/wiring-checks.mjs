@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Static wiring checks. Node-only: these read the source files, so they cannot
 // run in the browser page like the other check modules.
 //
@@ -86,7 +87,9 @@ check('every element the app reaches for exists in index.html', () => {
 check('index.html loads only files that exist', () => {
   const html = read('index.html');
   const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1])
-    .filter((u) => !/^(https?:|data:|#|mailto:)/.test(u));
+    .filter((u) => !/^(https?:|data:|#|mailto:)/.test(u))
+    // simdeck copy: the back link points at the simdeck index, which exists in the built site, not here.
+    .filter((u) => u !== '../../index.html');
   for (const u of refs) assert(existsSync(join(ROOT, u)), `index.html references missing ${u}`);
   return refs.join(', ');
 });
@@ -112,7 +115,8 @@ check('every data-act the inspector emits is handled', () => {
   const emitted = new Set([
     ...[...src.matchAll(/data-act="([\w-]+)"/g)].map((m) => m[1]),
     // toggle() builds its own data-act from the second argument.
-    ...[...src.matchAll(/toggle\('[^']*',\s*'([\w-]+)'/g)].map((m) => m[1]),
+    // simdeck copy: the label is t('ins.…') now.
+    ...[...src.matchAll(/toggle\((?:'[^']*'|t\('[^']*'\)),\s*'([\w-]+)'/g)].map((m) => m[1]),
   ]);
   const handled = new Set([...src.matchAll(/case '([\w-]+)':/g)].map((m) => m[1]));
   const orphans = [...emitted].filter((a) => !handled.has(a));
@@ -135,9 +139,10 @@ check('every toolbar tool button maps to a real tool', () => {
 
 check('every sample offered in the picker exists', () => {
   const main = read('js/main.js');
-  assert(main.includes("makeSample('threeRacks')"), 'the boot sample is not one of the samples');
+  // simdeck copy: boot goes through loadSample(), and the labels are getters on strings.js.
+  assert(main.includes("loadSample('threeRacks')"), 'the boot sample is not one of the samples');
   const samples = read('js/samples.js');
-  const keys = [...samples.matchAll(/^  (\w+): \{ label:/gm)].map((m) => m[1]);
+  const keys = [...samples.matchAll(/^  '(\w+)': \{ get label\(\)/gm)].map((m) => m[1]);
   assert(keys.length >= 3, `only ${keys.length} samples defined`);
   for (const k of keys) assert(samples.includes(`make: `), `sample ${k} has no maker`);
   return keys.join(', ');

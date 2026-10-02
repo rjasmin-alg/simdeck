@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Engine checks, as plain data rather than as a page.
 //
 // These are properties of a randomised algorithm, not fixtures: "no PG ever puts

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Recovery and backfill: the lag between what CRUSH wants and what the disks hold.
 //
 // `evaluate()` answers "where should this data be?" instantly, because CRUSH is

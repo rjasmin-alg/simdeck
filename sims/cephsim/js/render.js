@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The physical canvas: hosts with their disks, switches, and the cables between.
 //
 // One rAF-batched full redraw of each layer. The layer DOM is replaced wholesale
@@ -13,6 +14,7 @@ import { DEVICE_CLASSES, DAEMONS, NETS, classOrDefault } from './catalog.js';
 import { hostBox, switchBox, routeLink, contentBounds } from './geom.js';
 import { iconFor } from './icons.js';
 import { RATIOS } from './engine/capacity.js';
+import { t } from './i18n.js';
 
 export const CANVAS_CSS = `
 .cs-canvas { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -103,7 +105,10 @@ export function initRenderer(el) {
 
 export function applyTheme(name) {
   const vars = THEMES[name] || THEMES.dark;
-  for (const [k, v] of Object.entries(vars)) svg.style.setProperty(k, v);
+  // simdeck copy: the CRUSH tree and the OSD map are drawn with the same variables; set on the physical canvas
+  // alone, their var(--paper) was undefined and painted black in both themes.
+  const panes = svg.ownerDocument?.querySelectorAll('svg.pane') ?? [svg];
+  for (const el of panes) for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
 }
 
 export function scheduleRender() {
@@ -209,8 +214,8 @@ export function paintHost(host, box) {
     <rect class="box-hit" x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}"/>
     <text class="host-name" x="${box.x + 10}" y="${box.y + 16}">${esc(host.name)}</text>
     <text class="host-sub" x="${box.x + 10}" y="${box.y + 26}"
-      >${host.osds.length} OSD${host.osds.length === 1 ? '' : 's'} · ${raw} TiB${
-        host.up === false ? ' · down' : cut ? ' · unreachable' : ''}</text>
+      >${t('cv.hostSub', { n: host.osds.length, tib: raw })}${
+        host.up === false ? t('cv.down') : cut ? t('cv.unreachable') : ''}</text>
     ${badges}${slots}
   </g>`;
 }
@@ -243,7 +248,7 @@ export function paintSwitch(sw, box) {
     <g color="var(--ink-soft)">${iconFor('switchbox', { x: box.x + 9, y: box.y + 11, size: 22 })}</g>
     <text class="sw-name" x="${box.x + 39}" y="${box.y + 21}">${esc(sw.name)}</text>
     <text class="sw-sub" x="${box.x + 39}" y="${box.y + 34}"
-      >${sw.speed}G · ${sw.ports} ports${down ? ' · down' : ''}</text>
+      >${t('cv.swSub', { speed: sw.speed, ports: sw.ports })}${down ? t('cv.down') : ''}</text>
   </g>`;
 }
 

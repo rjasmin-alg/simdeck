@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // `ceph health detail`, assembled.
 //
 // Check names are Ceph's real ones, so that what you learn here is what you will

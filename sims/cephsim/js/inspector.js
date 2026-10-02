@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The right rail: whatever is selected, editable.
 //
 // Rebuilt wholesale on every change, so events are delegated from the container
@@ -16,6 +17,8 @@ import { poolWidth, poolMinSize, poolEfficiency } from './engine/pgmap.js';
 import { poolWarning, domainsAvailable } from './panel-pools.js';
 import { poolConsumers } from './engine/clients.js';
 import { recentEvents } from './timeline.js';
+import { t } from './i18n.js';
+import { engineText } from './engine-text.js';
 
 let root = null;
 
@@ -56,34 +59,34 @@ function clusterPanel() {
 
   const pools = d.pools.length ? d.pools.map((p) => {
     const ev = der?.evals.find((e) => e.pool.id === p.id);
-    const geom = p.type === 'erasure' ? `EC ${p.k}+${p.m}` : `${p.size}x replicated`;
+    const geom = p.type === 'erasure' ? `EC ${p.k}+${p.m}` : t('ins.replicated', { n: p.size });
     const pctFull = der && p.stored
-      ? ` · ${fmtBytes(ev?.rawUsed || 0)} raw` : '';
+      ? t('ins.storedRaw', { bytes: fmtBytes(ev?.rawUsed || 0) }) : '';
     return `<div class="hr"></div>
       <div class="stat"><span class="k">${esc(p.name)}</span>
         <span class="v">${geom} · ${p.pg_num} pg</span></div>
-      ${field(`Stored data — ${fmtBytes(p.stored || 0)}${pctFull}`,
+      ${field(`${t('ins.storedData', { bytes: fmtBytes(p.stored || 0) })}${pctFull}`,
         `<input type="range" min="0" max="200" step="1" data-act="pool-stored" data-id="${p.id}"
          value="${Math.round((p.stored || 0) / TiB)}">`)}`;
-  }).join('') : '<p class="hint">No pools yet. The pool editor arrives in phase 3; '
-    + 'sample clusters come with pools already defined.</p>';
+  }).join('') : `<p class="hint">${t('ins.noPools')}</p>`;
 
-  return `<h2>Cluster</h2>
-    ${stat('Hosts', d.hosts.length)}
-    ${stat('OSDs', osds)}
-    ${stat('Raw capacity', fmtBytes(rawTiB * TiB))}
-    ${stat('Switches', d.switches.length)}
-    ${stat('Cables', d.links.length)}
+  return `<h2>${t('ins.cluster')}</h2>
+    ${stat(t('ins.hosts'), d.hosts.length)}
+    ${stat(t('ins.osds'), osds)}
+    ${stat(t('ins.raw'), fmtBytes(rawTiB * TiB))}
+    ${stat(t('ins.switches'), d.switches.length)}
+    ${stat(t('ins.cables'), d.links.length)}
     <div class="hr"></div>
-    ${stat('MON', `${daemonCount('mon')} up · quorum needs ${Math.floor(d.hosts.filter((h) => h.daemons.includes('mon')).length / 2) + 1}`)}
+    ${stat('MON', t('ins.monUp', { up: daemonCount('mon'),
+      need: Math.floor(d.hosts.filter((h) => h.daemons.includes('mon')).length / 2) + 1 }))}
     ${stat('MGR', daemonCount('mgr'))}
     ${stat('MDS', daemonCount('mds'))}
     ${stat('RGW', daemonCount('rgw'))}
     ${der ? `<div class="hr"></div>
-      ${stat('Raw used', `${fmtBytes(der.df.used)} (${(der.df.ratio * 100).toFixed(1)}%)`)}
-      ${stat('Fill spread', `${(der.df.spread * 100).toFixed(1)} pts`)}
-      ${stat('Fill stddev', `${(der.df.stddev * 100).toFixed(2)} pts`)}` : ''}
-    <h2 style="margin-top:16px">Pools</h2>${pools}
+      ${stat(t('ins.rawUsed'), `${fmtBytes(der.df.used)} (${(der.df.ratio * 100).toFixed(1)}%)`)}
+      ${stat(t('ins.spread'), t('ins.pts', { v: (der.df.spread * 100).toFixed(1) }))}
+      ${stat(t('ins.stddev'), t('ins.pts', { v: (der.df.stddev * 100).toFixed(2) }))}` : ''}
+    <h2 style="margin-top:16px">${t('ins.pools')}</h2>${pools}
     ${healthSection(der)}`;
 }
 
@@ -92,28 +95,27 @@ function healthSection(der) {
   const sev = { HEALTH_OK: 'ok', HEALTH_WARN: 'warn', HEALTH_ERR: 'err' }[der.health.status];
   const rows = der.health.checks.map((c) => `
     <div class="check ${c.severity === 'HEALTH_ERR' ? 'err' : 'warn'}">
-      <div class="check-name">${esc(c.name)}</div>
-      <div class="check-sum">${esc(c.summary)}</div>
+      <div class="check-name" translate="no">${esc(c.name)}</div>
+      <div class="check-sum" translate="no">${esc(c.summary)}</div>
       ${c.detail.length ? `<ul class="check-detail">${
-        c.detail.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}
+        c.detail.map((d) => `<li>${esc(engineText(d))}</li>`).join('')}</ul>` : ''}
     </div>`).join('');
   const q = der.net.quorum;
-  return `<h2 style="margin-top:16px">Health</h2>
-    <p class="health-line ${sev}">${esc(der.health.status)}</p>
-    ${q.configured ? stat('MON quorum',
-      `${q.largestGroup}/${q.configured} (need ${q.needed})${q.hasQuorum ? '' : q.partitioned ? ' — SPLIT' : ' — LOST'}`) : ''}
-    ${der.net.enabled ? '' : '<p class="hint">No cables drawn, so the network is not being '
-      + 'modelled. Draw one and partitions and quorum start to count.</p>'}
-    ${der.net.uncabled.size ? `<p class="hint">${der.net.uncabled.size} host(s) have no cables; `
-      + 'their network is not modelled.</p>' : ''}
-    ${rows || '<p class="hint">Nothing failing.</p>'}
+  return `<h2 style="margin-top:16px">${t('ins.health')}</h2>
+    <p class="health-line ${sev}" translate="no">${esc(der.health.status)}</p>
+    ${q.configured ? stat(t('ins.quorum'),
+      `${t('ins.quorumVal', { have: q.largestGroup, of: q.configured, need: q.needed })}${
+        q.hasQuorum ? '' : q.partitioned ? t('ins.split') : t('ins.lost')}`) : ''}
+    ${der.net.enabled ? '' : `<p class="hint">${t('ins.noNet')}</p>`}
+    ${der.net.uncabled.size ? `<p class="hint">${t('ins.uncabled', { n: der.net.uncabled.size })}</p>` : ''}
+    ${rows || `<p class="hint">${t('ins.nothingFailing')}</p>`}
     ${eventsSection()}`;
 }
 
 function eventsSection() {
   const items = recentEvents(6);
   if (!items) return '';
-  return `<h2 style="margin-top:16px">Recent events</h2><ul class="events">${items}</ul>`;
+  return `<h2 style="margin-top:16px">${t('ins.events')}</h2><ul class="events">${items}</ul>`;
 }
 
 function onePanel(id) {
@@ -127,27 +129,27 @@ function onePanel(id) {
   if (bucket) return bucketPanel(bucket);
   if (typeof id === 'string' && id.startsWith('pool:')) {
     const p = poolById(Number(id.slice(5)));
-    return p ? poolPanel(p) : '<p class="empty">That pool is gone.</p>';
+    return p ? poolPanel(p) : `<p class="empty">${t('ins.goneP')}</p>`;
   }
   if (typeof id === 'string' && id.startsWith('rule:')) {
     const r = ruleById(Number(id.slice(5)));
-    return r ? rulePanel(r) : '<p class="empty">That rule is gone.</p>';
+    return r ? rulePanel(r) : `<p class="empty">${t('ins.goneR')}</p>`;
   }
   if (typeof id === 'string' && id.startsWith('fs:')) {
     const f = fsById(Number(id.slice(3)));
-    return f ? fsPanel(f) : '<p class="empty">That filesystem is gone.</p>';
+    return f ? fsPanel(f) : `<p class="empty">${t('ins.goneF')}</p>`;
   }
   if (typeof id === 'string' && id.startsWith('rbd:')) {
     const r = rbdById(Number(id.slice(4)));
-    return r ? rbdPanel(r) : '<p class="empty">That image is gone.</p>';
+    return r ? rbdPanel(r) : `<p class="empty">${t('ins.goneI')}</p>`;
   }
   if (typeof id === 'string' && id.startsWith('rgw:')) {
     const g = rgwById(Number(id.slice(4)));
-    return g ? rgwPanel(g) : '<p class="empty">That gateway is gone.</p>';
+    return g ? rgwPanel(g) : `<p class="empty">${t('ins.goneG')}</p>`;
   }
   const found = osdById(id);
   if (found) return osdPanel(found.osd, found.host);
-  return '<p class="empty">Nothing selected.</p>';
+  return `<p class="empty">${t('ins.nothing')}</p>`;
 }
 
 const poolOptions = (sel) => state.doc.pools.map((p) =>
@@ -157,73 +159,71 @@ function clientStatus(s) {
   if (!s) return '';
   return `<div class="hr"></div>
     <p class="health-line ${s.up ? (s.degraded ? 'warn' : 'ok') : 'err'}"
-      >${s.up ? (s.degraded ? 'degraded' : 'available') : 'unavailable'}</p>
+      >${s.up ? (s.degraded ? t('ins.cDegraded') : t('ins.cAvailable')) : t('ins.cUnavailable')}</p>
     ${s.reasons.length ? `<ul class="check-detail">${
-      s.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}`;
+      s.reasons.map((r) => `<li>${esc(engineText(r))}</li>`).join('')}</ul>` : ''}`;
 }
 
 function fsPanel(fs) {
   const s = state.derived?.clients.filesystems.find((f) => f.id === fs.id);
   const data = poolById(state.doc.pools.find((p) => p.name === fs.dataPool)?.id);
   return `<h2>CephFS</h2>
-    ${field('Name', `<input data-act="fs-name" data-id="${fs.id}" value="${esc(fs.name)}">`)}
-    ${field('Data pool', `<select data-act="fs-data" data-id="${fs.id}">${poolOptions(fs.dataPool)}</select>`)}
-    ${field('Metadata pool', `<select data-act="fs-meta" data-id="${fs.id}">${poolOptions(fs.metaPool)}</select>`)}
-    ${field('max_mds (active ranks)',
+    ${field(t('ins.name'), `<input data-act="fs-name" data-id="${fs.id}" value="${esc(fs.name)}">`)}
+    ${field(t('ins.dataPool'), `<select data-act="fs-data" data-id="${fs.id}">${poolOptions(fs.dataPool)}</select>`)}
+    ${field(t('ins.metaPool'), `<select data-act="fs-meta" data-id="${fs.id}">${poolOptions(fs.metaPool)}</select>`)}
+    ${field(t('ins.maxMds'),
       `<input type="number" min="1" max="8" step="1" data-act="fs-maxmds" data-id="${fs.id}" value="${fs.maxMds}">`)}
-    ${data ? field(`Stored — ${fmtBytes(data.stored || 0)}`,
+    ${data ? field(t('ins.stored', { bytes: fmtBytes(data.stored || 0) }),
       `<input type="range" min="0" max="500" step="1" data-act="pool-stored"
        data-id="${data.id}" value="${Math.round((data.stored || 0) / TiB)}">`) : ''}
     ${s ? `<div class="hr"></div>
-      ${stat('Used', fmtBytes(s.used))}
-      ${stat('Free', fmtBytes(s.free))}
-      ${stat('MDS ranks', `${s.mds.ranksActive}/${s.mds.ranksWanted} active, ${s.mds.standbys} standby`)}` : ''}
+      ${stat(t('ins.used'), fmtBytes(s.used))}
+      ${stat(t('ins.free'), fmtBytes(s.free))}
+      ${stat(t('ins.mdsRanks'), t('ins.mdsRanksVal', { active: s.mds.ranksActive,
+        wanted: s.mds.ranksWanted, standby: s.mds.standbys }))}` : ''}
     ${clientStatus(s)}
-    <p class="hint">Put the metadata pool on SSD or NVMe. It is small and latency-bound, and
-    it is what makes a filesystem feel fast or feel broken.</p>
+    <p class="hint">${t('ins.fsHint')}</p>
     <div class="hr"></div>
-    <button class="danger" data-act="remove-fs" data-id="${fs.id}">Delete this filesystem</button>`;
+    <button class="danger" data-act="remove-fs" data-id="${fs.id}">${t('ins.fsDelete')}</button>`;
 }
 
 function rbdPanel(img) {
   const s = state.derived?.clients.rbd.find((r) => r.id === img.id);
-  return `<h2>RBD image</h2>
-    ${field('Name', `<input data-act="rbd-name" data-id="${img.id}" value="${esc(img.name)}">`)}
-    ${field('Pool', `<select data-act="rbd-pool" data-id="${img.id}">${poolOptions(img.pool)}</select>`)}
-    ${field(`Provisioned — ${fmtBytes(img.provisioned || 0)}`,
+  return `<h2>${t('ins.rbd')}</h2>
+    ${field(t('ins.name'), `<input data-act="rbd-name" data-id="${img.id}" value="${esc(img.name)}">`)}
+    ${field(t('ins.pool'), `<select data-act="rbd-pool" data-id="${img.id}">${poolOptions(img.pool)}</select>`)}
+    ${field(t('ins.provisioned', { bytes: fmtBytes(img.provisioned || 0) }),
       `<input type="range" min="0" max="500" step="1" data-act="rbd-provisioned"
        data-id="${img.id}" value="${Math.round((img.provisioned || 0) / TiB)}">`)}
-    ${toggle('Thin provisioned', 'rbd-thin', img.id, img.thin !== false)}
-    ${img.thin !== false ? field(`Actually used — ${fmtBytes(img.used || 0)}`,
+    ${toggle(t('ins.thin'), 'rbd-thin', img.id, img.thin !== false)}
+    ${img.thin !== false ? field(t('ins.actuallyUsed', { bytes: fmtBytes(img.used || 0) }),
       `<input type="range" min="0" max="500" step="1" data-act="rbd-used"
        data-id="${img.id}" value="${Math.round((img.used || 0) / TiB)}">`) : ''}
     ${s ? `<div class="hr"></div>
-      ${stat('Consumes', fmtBytes(s.used))}
-      ${stat('Pool has free', fmtBytes(s.free))}` : ''}
+      ${stat(t('ins.consumes'), fmtBytes(s.used))}
+      ${stat(t('ins.poolFree'), fmtBytes(s.free))}` : ''}
     ${clientStatus(s)}
-    <p class="hint">A thin image promises capacity it has not taken yet. Promise more than the
-    pool holds and the images are fine right up until they are not.</p>
+    <p class="hint">${t('ins.rbdHint')}</p>
     <div class="hr"></div>
-    <button class="danger" data-act="remove-rbd" data-id="${img.id}">Delete this image</button>`;
+    <button class="danger" data-act="remove-rbd" data-id="${img.id}">${t('ins.rbdDelete')}</button>`;
 }
 
 function rgwPanel(gw) {
   const s = state.derived?.clients.rgw.find((g) => g.id === gw.id);
   const data = state.doc.pools.find((p) => p.name === gw.dataPool);
-  return `<h2>Object gateway</h2>
-    ${field('Name', `<input data-act="rgw-name" data-id="${gw.id}" value="${esc(gw.name)}">`)}
-    ${field('Data pool', `<select data-act="rgw-data" data-id="${gw.id}">${poolOptions(gw.dataPool)}</select>`)}
-    ${field('Index pool', `<select data-act="rgw-index" data-id="${gw.id}">${poolOptions(gw.indexPool)}</select>`)}
-    ${field('Buckets',
+  return `<h2>${t('ins.rgw')}</h2>
+    ${field(t('ins.name'), `<input data-act="rgw-name" data-id="${gw.id}" value="${esc(gw.name)}">`)}
+    ${field(t('ins.dataPool'), `<select data-act="rgw-data" data-id="${gw.id}">${poolOptions(gw.dataPool)}</select>`)}
+    ${field(t('ins.indexPool'), `<select data-act="rgw-index" data-id="${gw.id}">${poolOptions(gw.indexPool)}</select>`)}
+    ${field(t('ins.buckets'),
       `<input type="number" min="0" step="1" data-act="rgw-buckets" data-id="${gw.id}" value="${gw.buckets}">`)}
-    ${data ? field(`Stored — ${fmtBytes(data.stored || 0)}`,
+    ${data ? field(t('ins.stored', { bytes: fmtBytes(data.stored || 0) }),
       `<input type="range" min="0" max="500" step="1" data-act="pool-stored"
        data-id="${data.id}" value="${Math.round((data.stored || 0) / TiB)}">`) : ''}
     ${clientStatus(s)}
-    <p class="hint">RGW itself is stateless, so losing a gateway loses an endpoint and nothing
-    else. The index pool is the one that hurts — it is small, hot, and belongs on fast devices.</p>
+    <p class="hint">${t('ins.rgwHint')}</p>
     <div class="hr"></div>
-    <button class="danger" data-act="remove-rgw" data-id="${gw.id}">Delete this gateway</button>`;
+    <button class="danger" data-act="remove-rgw" data-id="${gw.id}">${t('ins.rgwDelete')}</button>`;
 }
 
 function poolPanel(p) {
@@ -237,7 +237,7 @@ function poolPanel(p) {
     `<option value="${e.k}:${e.m}" ${isEC && e.k === p.k && e.m === p.m ? 'selected' : ''}>${esc(e.label)}</option>`).join('');
 
   const geom = isEC ? `
-    ${field('Erasure profile', `<select data-act="pool-ec" data-id="${p.id}">${ecOpts}</select>`)}
+    ${field(t('ins.ecProfile'), `<select data-act="pool-ec" data-id="${p.id}">${ecOpts}</select>`)}
     ${field(`min_size — ${poolMinSize(p)}`,
       `<input type="number" min="1" max="${p.k + p.m}" step="1" data-act="pool-minsize"
        data-id="${p.id}" value="${poolMinSize(p)}">`)}` : `
@@ -246,66 +246,64 @@ function poolPanel(p) {
       ${field('min_size', `<input type="number" min="1" max="${p.size}" step="1" data-act="pool-minsize" data-id="${p.id}" value="${poolMinSize(p)}">`)}
     </div>`;
 
-  return `<h2>Pool</h2>
-    ${field('Name', `<input data-act="pool-name" data-id="${p.id}" value="${esc(p.name)}">`)}
-    ${field('Type', `<select data-act="pool-type" data-id="${p.id}">
-      <option value="replicated" ${!isEC ? 'selected' : ''}>Replicated</option>
-      <option value="erasure" ${isEC ? 'selected' : ''}>Erasure coded</option></select>`)}
+  return `<h2>${t('ins.poolH')}</h2>
+    ${field(t('ins.name'), `<input data-act="pool-name" data-id="${p.id}" value="${esc(p.name)}">`)}
+    ${field(t('ins.type'), `<select data-act="pool-type" data-id="${p.id}">
+      <option value="replicated" ${!isEC ? 'selected' : ''}>${t('ins.typeReplicated')}</option>
+      <option value="erasure" ${isEC ? 'selected' : ''}>${t('ins.typeErasure')}</option></select>`)}
     ${geom}
-    ${field('CRUSH rule', `<select data-act="pool-rule" data-id="${p.id}">${rules}</select>`)}
+    ${field(t('ins.crushRule'), `<select data-act="pool-rule" data-id="${p.id}">${rules}</select>`)}
     <div class="row">
       ${field('pg_num', `<input type="number" min="1" step="1" data-act="pool-pgnum" data-id="${p.id}" value="${p.pg_num}">`)}
       ${field('pgp_num', `<input type="number" min="1" step="1" data-act="pool-pgpnum" data-id="${p.id}" value="${p.pgp_num}">`)}
     </div>
-    ${field(`Stored data — ${fmtBytes(p.stored || 0)}`,
+    ${field(t('ins.storedData', { bytes: fmtBytes(p.stored || 0) }),
       `<input type="range" min="0" max="500" step="1" data-act="pool-stored"
        data-id="${p.id}" value="${Math.round((p.stored || 0) / TiB)}">`)}
     ${warn ? `<p class="hint" style="color:var(--warn)">${esc(warn)}</p>` : ''}
     <div class="hr"></div>
-    ${stat('Shards per PG', poolWidth(p))}
-    ${stat('Usable fraction', `${(poolEfficiency(p) * 100).toFixed(0)}%`)}
-    ${df ? `${stat('Raw on disk', fmtBytes(df.used))}
+    ${stat(t('ins.shards'), poolWidth(p))}
+    ${stat(t('ins.usable'), `${(poolEfficiency(p) * 100).toFixed(0)}%`)}
+    ${df ? `${stat(t('ins.rawOnDisk'), fmtBytes(df.used))}
       ${stat('MAX AVAIL', fmtBytes(df.maxAvail))}` : ''}
-    ${ev ? `${stat('Clean', `${ev.pool.pg_num - ev.degraded - ev.inactive} of ${ev.pool.pg_num}`)}
-      ${ev.degraded ? stat('Degraded', ev.degraded) : ''}
-      ${ev.inactive ? stat('Inactive', ev.inactive) : ''}` : ''}
-    <p class="hint">Raising <code>pg_num</code> alone splits PGs without moving data;
-    raising <code>pgp_num</code> is what actually shuffles it.</p>
+    ${ev ? `${stat(t('ins.clean'), t('ins.cleanVal', { clean: ev.pool.pg_num - ev.degraded - ev.inactive, total: ev.pool.pg_num }))}
+      ${ev.degraded ? stat(t('ins.degraded'), ev.degraded) : ''}
+      ${ev.inactive ? stat(t('ins.inactive'), ev.inactive) : ''}` : ''}
+    <p class="hint">${t('ins.pgHint')}</p>
     <div class="hr"></div>
-    <button class="danger" data-act="remove-pool" data-id="${p.id}">Delete this pool</button>`;
+    <button class="danger" data-act="remove-pool" data-id="${p.id}">${t('ins.poolDelete')}</button>`;
 }
 
 function rulePanel(r) {
   const roots = state.doc.buckets.filter((b) => b.type === 'root').map((b) =>
     `<option value="${esc(b.name)}" ${b.name === r.root ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
-  const classes = ['<option value="">any class</option>',
+  const classes = [`<option value="">${t('ins.anyClass')}</option>`,
     ...Object.values(DEVICE_CLASSES).map((c) =>
-      `<option value="${c.id}" ${c.id === r.class ? 'selected' : ''}>${c.label} only</option>`)].join('');
+      `<option value="${c.id}" ${c.id === r.class ? 'selected' : ''}>${t('ins.classOnly', { cls: c.label })}</option>`)].join('');
   const domains = FAILURE_DOMAINS.map((f) =>
     `<option value="${f}" ${f === (r.failureDomain || 'host') ? 'selected' : ''}>${f}</option>`).join('');
   const have = domainsAvailable(state.doc, r);
   const users = state.doc.pools.filter((p) => p.crush_rule === r.name);
   const worst = users.reduce((m, p) => Math.max(m, poolWidth(p)), 0);
 
-  return `<h2>CRUSH rule</h2>
-    ${field('Name', `<input data-act="rule-name" data-id="${r.id}" value="${esc(r.name)}">`)}
-    ${field('Type', `<select data-act="rule-type" data-id="${r.id}">
-      <option value="replicated" ${r.type !== 'erasure' ? 'selected' : ''}>Replicated (firstn)</option>
-      <option value="erasure" ${r.type === 'erasure' ? 'selected' : ''}>Erasure coded (indep)</option></select>`)}
-    ${field('Take root', `<select data-act="rule-root" data-id="${r.id}">${roots}</select>`)}
-    ${field('Device class', `<select data-act="rule-class" data-id="${r.id}">${classes}</select>`)}
-    ${field('Failure domain', `<select data-act="rule-domain" data-id="${r.id}">${domains}</select>`)}
+  return `<h2>${t('ins.ruleH')}</h2>
+    ${field(t('ins.name'), `<input data-act="rule-name" data-id="${r.id}" value="${esc(r.name)}">`)}
+    ${field(t('ins.type'), `<select data-act="rule-type" data-id="${r.id}">
+      <option value="replicated" ${r.type !== 'erasure' ? 'selected' : ''}>${t('ins.ruleReplicated')}</option>
+      <option value="erasure" ${r.type === 'erasure' ? 'selected' : ''}>${t('ins.ruleErasure')}</option></select>`)}
+    ${field(t('ins.takeRoot'), `<select data-act="rule-root" data-id="${r.id}">${roots}</select>`)}
+    ${field(t('ins.deviceClass'), `<select data-act="rule-class" data-id="${r.id}">${classes}</select>`)}
+    ${field(t('ins.failureDomain'), `<select data-act="rule-domain" data-id="${r.id}">${domains}</select>`)}
     <div class="hr"></div>
-    ${stat('Domains available', have)}
-    ${stat('Used by', `${users.length} pool${users.length === 1 ? '' : 's'}`)}
-    ${worst > have ? `<p class="hint" style="color:var(--warn)">A pool on this rule wants
-      ${worst} domains and only ${have} exist.</p>` : ''}
-    <p class="hint">Compiles to:<br>
+    ${stat(t('ins.domainsAvail'), have)}
+    ${stat(t('ins.usedBy'), t('ins.nPools', { n: users.length }))}
+    ${worst > have ? `<p class="hint" style="color:var(--warn)">${t('ins.ruleShort', { want: worst, have })}</p>` : ''}
+    <p class="hint">${t('ins.compiles')}<br>
       <code>step take ${esc(r.root || 'default')}${r.class ? ` class ${esc(r.class)}` : ''}</code><br>
       <code>step chooseleaf ${r.type === 'erasure' ? 'indep' : 'firstn'} 0 type ${esc(r.failureDomain || 'host')}</code><br>
       <code>step emit</code></p>
     <div class="hr"></div>
-    <button class="danger" data-act="remove-rule" data-id="${r.id}">Delete this rule</button>`;
+    <button class="danger" data-act="remove-rule" data-id="${r.id}">${t('ins.ruleDelete')}</button>`;
 }
 
 function hostPanel(h) {
@@ -318,20 +316,19 @@ function hostPanel(h) {
       data-val="${dm.id}" title="${esc(dm.note)}"
       style="${on_ ? `background:${dm.colour}` : ''}">${dm.label}</button>`;
   }).join('');
-  return `<h2>Host</h2>
-    ${field('Name', `<input data-act="host-name" data-id="${h.id}" value="${esc(h.name)}">`)}
-    ${field('CRUSH parent', `<select data-act="host-parent" data-id="${h.id}">${parents}</select>`)}
-    ${toggle('Up', 'host-up', h.id, h.up !== false)}
-    <div class="field"><label>Daemons</label><div class="chips">${chips}</div></div>
+  return `<h2>${t('ins.host')}</h2>
+    ${field(t('ins.name'), `<input data-act="host-name" data-id="${h.id}" value="${esc(h.name)}">`)}
+    ${field(t('ins.parent'), `<select data-act="host-parent" data-id="${h.id}">${parents}</select>`)}
+    ${toggle(t('ins.up'), 'host-up', h.id, h.up !== false)}
+    <div class="field"><label>${t('ins.daemons')}</label><div class="chips">${chips}</div></div>
     <div class="hr"></div>
-    ${stat('OSDs', h.osds.length)}
-    ${stat('CRUSH weight', `${raw} TiB`)}
+    ${stat(t('ins.osds'), h.osds.length)}
+    ${stat(t('ins.weight'), `${raw} TiB`)}
     <div class="row">
-      <button data-act="add-osd" data-id="${h.id}">Add OSD</button>
-      <button data-act="add-osd-ssd" data-id="${h.id}">Add SSD</button>
+      <button data-act="add-osd" data-id="${h.id}">${t('ins.addOsd')}</button>
+      <button data-act="add-osd-ssd" data-id="${h.id}">${t('ins.addSsd')}</button>
     </div>
-    <p class="hint">Marking a host down takes every OSD on it out of the acting sets,
-    but leaves its weight in the CRUSH tree — exactly as a real failure does.</p>`;
+    <p class="hint">${t('ins.hostHint')}</p>`;
 }
 
 function osdPanel(o, host) {
@@ -339,75 +336,71 @@ function osdPanel(o, host) {
   const classes = Object.values(DEVICE_CLASSES).map((c) =>
     `<option value="${c.id}" ${c.id === o.class ? 'selected' : ''}>${c.label}</option>`).join('');
   return `<h2>osd.${o.id}</h2>
-    <p class="hint">on ${esc(host.name)}</p>
-    ${field('Size / CRUSH weight (TiB)',
+    <p class="hint">${t('ins.on', { host: esc(host.name) })}</p>
+    ${field(t('ins.osdSize'),
       `<input type="number" min="0.1" step="0.5" data-act="osd-size" data-id="${o.id}" value="${o.size}">`)}
-    ${field('Device class', `<select data-act="osd-class" data-id="${o.id}">${classes}</select>`)}
-    ${toggle('Up', 'osd-up', o.id, o.up !== false)}
-    ${toggle('In', 'osd-in', o.id, o.in !== false)}
-    ${field(`Reweight — ${(o.reweight ?? 1).toFixed(2)}`,
+    ${field(t('ins.deviceClass'), `<select data-act="osd-class" data-id="${o.id}">${classes}</select>`)}
+    ${toggle(t('ins.up'), 'osd-up', o.id, o.up !== false)}
+    ${toggle(t('ins.in'), 'osd-in', o.id, o.in !== false)}
+    ${field(t('ins.reweight', { v: (o.reweight ?? 1).toFixed(2) }),
       `<input type="range" min="0" max="1" step="0.05" data-act="osd-reweight"
        data-id="${o.id}" value="${o.reweight ?? 1}">`)}
-    <p class="hint"><b>Reweight is not the CRUSH weight.</b> It is a rejection roll applied
-    when CRUSH picks this OSD, so it leaves the host and rack weights above alone and moves
-    far less data. Editing the size above is the one that cascades.</p>
+    <p class="hint">${t('ins.osdHint')}</p>
     ${u ? `<div class="hr"></div>
-      ${stat('Used', `${fmtBytes(u.used)} of ${fmtBytes(u.total)}`)}
-      ${stat('Full', `${(u.ratio * 100).toFixed(1)}%${u.ratio >= RATIOS.nearfull ? ' — nearfull' : ''}`)}
-      ${stat('PGs', u.pgs)}` : ''}
+      ${stat(t('ins.used'), t('ins.usedOf', { used: fmtBytes(u.used), total: fmtBytes(u.total) }))}
+      ${stat(t('ins.full'), `${(u.ratio * 100).toFixed(1)}%${u.ratio >= RATIOS.nearfull ? t('ins.nearfull') : ''}`)}
+      ${stat(t('ins.pgs'), u.pgs)}` : ''}
     <div class="hr"></div>
-    <button class="danger" data-act="remove-osd" data-id="${o.id}">Remove this OSD</button>`;
+    <button class="danger" data-act="remove-osd" data-id="${o.id}">${t('ins.osdRemove')}</button>`;
 }
 
 function switchPanel(s) {
   const speeds = NIC_SPEEDS.map((v) =>
-    `<option value="${v}" ${v === s.speed ? 'selected' : ''}>${v} Gb/s</option>`).join('');
-  return `<h2>Switch</h2>
-    ${field('Name', `<input data-act="sw-name" data-id="${s.id}" value="${esc(s.name)}">`)}
-    ${field('Port speed', `<select data-act="sw-speed" data-id="${s.id}">${speeds}</select>`)}
-    ${field('Ports', `<input type="number" min="1" step="1" data-act="sw-ports" data-id="${s.id}" value="${s.ports}">`)}
-    ${toggle('Up', 'sw-up', s.id, s.up !== false)}
-    <p class="hint">Partition and quorum modelling lands in phase 4. For now a switch is
-    drawing and cable bandwidth.</p>`;
+    `<option value="${v}" ${v === s.speed ? 'selected' : ''}>${t('ins.gbps', { v })}</option>`).join('');
+  return `<h2>${t('ins.switch')}</h2>
+    ${field(t('ins.name'), `<input data-act="sw-name" data-id="${s.id}" value="${esc(s.name)}">`)}
+    ${field(t('ins.portSpeed'), `<select data-act="sw-speed" data-id="${s.id}">${speeds}</select>`)}
+    ${field(t('ins.ports'), `<input type="number" min="1" step="1" data-act="sw-ports" data-id="${s.id}" value="${s.ports}">`)}
+    ${toggle(t('ins.up'), 'sw-up', s.id, s.up !== false)}
+    <p class="hint">${t('ins.switchHint')}</p>`;
 }
 
 function linkPanel(l) {
   const nets = Object.values(NETS).map((n) =>
-    `<option value="${n.id}" ${n.id === l.net ? 'selected' : ''}>${n.label} network</option>`).join('');
+    `<option value="${n.id}" ${n.id === l.net ? 'selected' : ''}>${t('ins.netOption', { net: n.label })}</option>`).join('');
   const speeds = NIC_SPEEDS.map((v) =>
-    `<option value="${v}" ${v === l.speed ? 'selected' : ''}>${v} Gb/s</option>`).join('');
-  return `<h2>Cable</h2>
-    ${field('Network', `<select data-act="link-net" data-id="${l.id}">${nets}</select>`)}
-    ${field('Speed', `<select data-act="link-speed" data-id="${l.id}">${speeds}</select>`)}
-    ${toggle('Up', 'link-up', l.id, l.up !== false)}
-    <p class="hint">Ceph separates client traffic (public) from replication and recovery
-    (cluster). A cluster-network outage is invisible to clients until recovery needs to run.</p>`;
+    `<option value="${v}" ${v === l.speed ? 'selected' : ''}>${t('ins.gbps', { v })}</option>`).join('');
+  return `<h2>${t('ins.cable')}</h2>
+    ${field(t('ins.network'), `<select data-act="link-net" data-id="${l.id}">${nets}</select>`)}
+    ${field(t('ins.speed'), `<select data-act="link-speed" data-id="${l.id}">${speeds}</select>`)}
+    ${toggle(t('ins.up'), 'link-up', l.id, l.up !== false)}
+    <p class="hint">${t('ins.cableHint')}</p>`;
 }
 
 function bucketPanel(b) {
   const kids = state.doc.hosts.filter((h) => h.parent === b.id).length;
-  const parents = [`<option value="">(no parent — this is a root)</option>`,
+  const parents = [`<option value="">${t('ins.noParent')}</option>`,
     ...state.doc.buckets.filter((x) => x.id !== b.id).map((x) =>
       `<option value="${x.id}" ${x.id === b.parent ? 'selected' : ''}>${esc(x.name)}</option>`)].join('');
   return `<h2>${esc(b.type)}</h2>
-    ${field('Name', `<input data-act="bucket-name" data-id="${b.id}" value="${esc(b.name)}">`)}
-    ${field('Parent', `<select data-act="bucket-parent" data-id="${b.id}">${parents}</select>`)}
-    ${stat('Hosts inside', kids)}
-    <p class="hint">A bucket's weight is never set by hand — it is the sum of what is inside it.</p>`;
+    ${field(t('ins.name'), `<input data-act="bucket-name" data-id="${b.id}" value="${esc(b.name)}">`)}
+    ${field(t('ins.parent'), `<select data-act="bucket-parent" data-id="${b.id}">${parents}</select>`)}
+    ${stat(t('ins.hostsInside'), kids)}
+    <p class="hint">${t('ins.bucketHint')}</p>`;
 }
 
 function multiPanel(sel) {
   const osds = sel.map((id) => osdById(id)).filter(Boolean);
   const classes = Object.values(DEVICE_CLASSES).map((c) =>
     `<option value="${c.id}">${c.label}</option>`).join('');
-  return `<h2>${sel.length} selected</h2>
-    ${osds.length ? `${stat('OSDs', osds.length)}
-      ${field('Set size (TiB) for all',
-        `<input type="number" min="0.1" step="0.5" data-act="bulk-size" placeholder="e.g. 8">`)}
-      ${field('Set class for all',
+  return `<h2>${t('ins.selected', { n: sel.length })}</h2>
+    ${osds.length ? `${stat(t('ins.osds'), osds.length)}
+      ${field(t('ins.bulkSize'),
+        `<input type="number" min="0.1" step="0.5" data-act="bulk-size" placeholder="${t('ins.bulkSizePh')}">`)}
+      ${field(t('ins.bulkClass'),
         `<select data-act="bulk-class"><option value="">—</option>${classes}</select>`)}` : ''}
     <div class="hr"></div>
-    <button class="danger" data-act="delete-selection">Delete selection</button>`;
+    <button class="danger" data-act="delete-selection">${t('ins.deleteSel')}</button>`;
 }
 
 // ------------------------------------------------------------------ events --
@@ -591,7 +584,7 @@ function onClick(e) {
       const pool = poolById(Number(id));
       const users = pool ? poolConsumers(state.doc, pool.name) : [];
       if (users.length && !confirm(
-        `${pool.name} is used by ${users.join(', ')}. Delete it anyway?`)) break;
+        t('ins.poolInUse', { pool: pool.name, users: users.join(', ') }))) break;
       commit('delete pool');
       state.doc.pools = state.doc.pools.filter((p) => p.id !== Number(id));
       state.selection.delete(`pool:${id}`);
@@ -603,7 +596,7 @@ function onClick(e) {
       const users = state.doc.pools.filter((p) => p.crush_rule === r?.name);
       if (users.length) {
         // Deleting a rule out from under a pool would leave it unplaceable.
-        alert(`${r.name} is still used by ${users.map((p) => p.name).join(', ')}.`);
+        alert(t('ins.ruleInUse', { rule: r.name, pools: users.map((p) => p.name).join(', ') }));
         break;
       }
       commit('delete rule');

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Robert Jenkins' hash, exactly as Ceph implements it in src/crush/hash.c.
 //
 // This one is a faithful port, not an approximation: CRUSH's whole behaviour —

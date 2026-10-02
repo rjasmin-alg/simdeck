@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The cluster document, undo history, selection and autosave.
 //
 // The whole cluster is one plain-JSON `doc`. Undo is snapshot based: cheap, and
@@ -459,8 +460,9 @@ export function readAutosave() {
 }
 export function savePrefs() {
   if (!hasStorage) return;
-  const { theme, showGrid, snapOn, snap, tab } = state;
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, showGrid, snapOn, snap, tab })); }
+  // simdeck copy: themeChosen, so the theme follows the OS until someone presses Theme.
+  const { theme, themeChosen, showGrid, snapOn, snap, tab } = state;
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, themeChosen, showGrid, snapOn, snap, tab })); }
   catch { /* ignore */ }
 }
 export function loadPrefs() {

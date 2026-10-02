@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Document + compiler checks. DOM-free, same shape as engine-checks.js.
 //
 // The engine is tested on its own properties; this file tests the translation

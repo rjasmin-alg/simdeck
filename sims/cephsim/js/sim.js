@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The clock.
 //
 // Everything else in this app answers instantly, because CRUSH is a function.
@@ -12,6 +13,7 @@
 import { state, on, emit } from './model.js';
 import { Recovery, placementFrom } from './engine/recovery.js';
 import { fmtBytes } from './engine/capacity.js';
+import { t } from './i18n.js';
 
 export const sim = {
   playing: false,
@@ -51,12 +53,12 @@ export function retarget(derived) {
 
   if (rec.items.length) {
     if (!wasBusy) {
-      logEvent(`recovery started — ${fmtBytes(rec.totalBytes)} to move across `
-        + `${rec.items.length} shard copies`, 'start');
+      logEvent(t('ev.started', { bytes: fmtBytes(rec.totalBytes),
+        n: t('ev.copies', { n: rec.items.length }) }), 'start');
     }
     sim.recovery = rec;
   } else {
-    if (wasBusy) logEvent('recovery complete', 'done');
+    if (wasBusy) logEvent(t('ev.complete'), 'done');
     sim.recovery = rec;                    // keeps `current` in sync when idle
   }
   emit('sim');
@@ -94,7 +96,7 @@ export function skip() {
   sim.time += sim.recovery.eta() ?? 0;
   sim.recovery.finish();
   pause();
-  logEvent(`skipped ahead — ${fmtBytes(bytes)} moved`, 'done');
+  logEvent(t('ev.skipped', { bytes: fmtBytes(bytes) }), 'done');
   emit('change');
 }
 
@@ -107,7 +109,7 @@ function advance(seconds) {
   sim.time += seconds;
   if (rec.done) {
     pause();
-    logEvent(`recovery complete after ${formatDuration(rec.elapsed)}`, 'done');
+    logEvent(t('ev.completeAfter', { d: formatDuration(rec.elapsed) }), 'done');
   }
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The crushtool text format, both directions.
 //
 // The fixture below is real-shaped `crushtool -d` output, quirks included:

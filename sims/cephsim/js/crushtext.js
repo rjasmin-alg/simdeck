@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The real crushtool text format, both directions.
 //
 // This is the format `ceph osd getcrushmap | crushtool -d -` produces and

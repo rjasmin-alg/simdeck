@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Terminal runner for the checks. `node tests/run.mjs`
 //
 // Same checks as tests/crush.html, printed instead of painted. Exits non-zero on
 // failure so it can gate a commit. The page is the one to open when you want to
 // look at something; this is the one to run when you want an answer.
 
+// simdeck copy: the string tables first (js/i18n.js reads them; in node the language is English).
+import '../strings.js';
 import { results as engine } from './engine-checks.js';
 import { results as model } from './model-checks.js';
 import { results as view } from './view-checks.js';

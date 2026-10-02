@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The Console tab: the commands you would actually type, with their real output.
 //
 // Read-only on purpose. This is not a shell — there is nothing to configure and
@@ -7,6 +8,7 @@
 import { state, on } from './model.js';
 import { COMMANDS, runCommand } from './console-cmds.js';
 import { sim } from './sim.js';
+import { t } from './i18n.js';
 
 let root = null;
 let current = 'status';
@@ -41,8 +43,8 @@ export function renderConsole() {
       `<button class="cmd${c.id === current ? ' on' : ''}" data-cmd="${c.id}"
         >${esc(c.cmd)}</button>`).join('')}
       <span class="spacer"></span>
-      <button data-copy="1" title="Copy this output">Copy</button></div>
-    <pre class="cmd-out" id="cmd-out">$ ${esc(cmd.cmd)}\n${esc(body)}</pre>`;
+      <button data-copy="1" title="${t('con.copyTitle')}">${t('con.copy')}</button></div>
+    <pre class="cmd-out" id="cmd-out" translate="no">$ ${esc(cmd.cmd)}\n${esc(body)}</pre>`;
 }
 
 async function copyOut() {

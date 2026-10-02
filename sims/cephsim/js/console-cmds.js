@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The commands, rendered.
 //
 // These are the outputs a student will actually meet, formatted the way the real

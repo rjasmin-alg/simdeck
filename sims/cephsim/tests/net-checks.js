@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Network, quorum, daemons and health.
 //
 // The interesting cases here are the ones where the disks are all fine and the

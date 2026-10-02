@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The network, and what losing part of it does to the cluster.
 //
 // Ceph runs on two networks and people forget it: the **public** network carries

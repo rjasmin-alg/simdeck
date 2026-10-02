@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // PGs: the layer between "a pool holds data" and "these disks hold bytes".
 //
 // A pool is pg_num placement groups. Each PG hashes to a placement value, CRUSH

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Geometry and sample-cluster checks. DOM-free.
 //
 // The samples are teaching material, so they get asserted like code: the one

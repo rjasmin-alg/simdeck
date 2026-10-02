@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The bridge from the editable document to the pure engine.
 //
 // The document is what the UI edits: hosts at x/y, OSDs with a size in TiB,

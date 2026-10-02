@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pointer, keyboard and viewport handling.
 //
 // Every handler lives on the <svg> root and works from ids captured at

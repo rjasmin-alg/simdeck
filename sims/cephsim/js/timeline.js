@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The recovery timeline strip: play, pause, step, and what is happening.
 
 import { state, on } from './model.js';
@@ -5,6 +6,7 @@ import {
   sim, SPEEDS, play, pause, togglePlay, step, skip, setSpeed, formatDuration,
 } from './sim.js';
 import { fmtBytes } from './engine/capacity.js';
+import { t } from './i18n.js';
 
 let root = null;
 
@@ -39,34 +41,33 @@ export function render() {
   const counts = rec && state.derived ? rec.liveCounts(state.derived.evals) : null;
   const speeds = SPEEDS.map((v) =>
     `<option value="${v}" ${v === sim.speed ? 'selected' : ''}>${
-      v === 1 ? 'real time' : `${formatDuration(v)} / s`}</option>`).join('');
+      v === 1 ? t('tl.realTime') : t('tl.perSec', { d: formatDuration(v) })}</option>`).join('');
 
   const pct = busy ? rec.progress * 100 : (rec ? 100 : 0);
   const eta = busy ? rec.eta() : null;
 
   root.innerHTML = `
-    <button data-sim="play" ${busy ? '' : 'disabled'} title="Play/pause (Space)"
-      >${sim.playing ? '❚❚ Pause' : '▶ Play'}</button>
-    <button data-sim="step" ${busy ? '' : 'disabled'} title="Advance one minute">+1 min</button>
-    <button data-sim="step-long" ${busy ? '' : 'disabled'} title="Advance ten minutes">+10 min</button>
-    <button data-sim="skip" ${busy ? '' : 'disabled'} title="Jump to the settled layout">Skip ahead</button>
-    <select data-sim="speed" aria-label="Simulation speed">${speeds}</select>
+    <button data-sim="play" ${busy ? '' : 'disabled'} title="${t('tl.playTitle')}"
+      >${sim.playing ? t('tl.pause') : t('tl.play')}</button>
+    <button data-sim="step" ${busy ? '' : 'disabled'} title="${t('tl.stepTitle')}">${t('tl.step')}</button>
+    <button data-sim="step-long" ${busy ? '' : 'disabled'} title="${t('tl.stepLongTitle')}">${t('tl.stepLong')}</button>
+    <button data-sim="skip" ${busy ? '' : 'disabled'} title="${t('tl.skipTitle')}">${t('tl.skip')}</button>
+    <select data-sim="speed" aria-label="${t('tl.speed')}">${speeds}</select>
     <div class="tl-bar" role="progressbar" aria-valuenow="${pct.toFixed(0)}"
       ><div class="tl-fill${busy ? ' busy' : ''}" style="width:${pct.toFixed(1)}%"></div></div>
     <span class="tl-text mono">${
       busy
-        ? `${fmtBytes(rec.movedBytes)} / ${fmtBytes(rec.totalBytes)}`
-          + ` · ${fmtBytes(rec.currentRate())}/s`
-          + ` · eta ${formatDuration(eta ?? Infinity)}`
+        ? t('tl.busy', { moved: fmtBytes(rec.movedBytes), total: fmtBytes(rec.totalBytes),
+          rate: fmtBytes(rec.currentRate()), eta: formatDuration(eta ?? Infinity) })
         : rec && rec.totalBytes
-          ? `settled · ${fmtBytes(rec.totalBytes)} moved in ${formatDuration(rec.elapsed)}`
-          : 'idle — nothing to move'
+          ? t('tl.settled', { total: fmtBytes(rec.totalBytes), d: formatDuration(rec.elapsed) })
+          : t('tl.idle')
     }</span>
     <span class="spacer"></span>
-    ${counts ? `<span class="tl-text mono">${counts.clean} clean`
-      + (counts.degraded ? ` · <b class="warn">${counts.degraded} degraded</b>` : '')
-      + (counts.misplaced ? ` · ${counts.misplaced} backfilling` : '')
-      + (counts.inactive ? ` · <b class="err">${counts.inactive} inactive</b>` : '')
+    ${counts ? `<span class="tl-text mono">${t('tl.clean', { n: counts.clean })}`
+      + (counts.degraded ? ` · <b class="warn">${t('tl.degraded', { n: counts.degraded })}</b>` : '')
+      + (counts.misplaced ? ` · ${t('tl.backfilling', { n: counts.misplaced })}` : '')
+      + (counts.inactive ? ` · <b class="err">${t('tl.inactive', { n: counts.inactive })}</b>` : '')
       + `</span>` : ''}
     <span class="tl-text mono">t+${formatDuration(sim.time)}</span>`;
 }

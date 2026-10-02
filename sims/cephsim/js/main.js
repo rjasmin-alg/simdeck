@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // App wiring: toolbar, keyboard, derived state, first-run behaviour.
 
 import {
@@ -10,7 +11,7 @@ import {
   initInteractions, fitToContent, zoomBy, resetZoom, isTyping, deleteSelection,
 } from './interact.js';
 import { initPalette, refreshPalette } from './palette.js';
-import { initInspector } from './inspector.js';
+import { initInspector, refresh as refreshInspector } from './inspector.js';
 import { initCrushView, renderCrush, collapseAllHosts, expandAll, resetCrushScroll } from './render-crush.js';
 import { initOsdMap, renderOsdMap, resetOsdMapScroll } from './render-osdmap.js';
 import { initPools, renderPools } from './panel-pools.js';
@@ -28,12 +29,13 @@ import {
 } from './exporters.js';
 import { SAMPLES, makeSample } from './samples.js';
 import { fmtBytes } from './engine/capacity.js';
+import { t, applyStatic, switchLang } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
 const canvas = $('#canvas');
 
 // Surface anything unexpected rather than dying silently mid-lecture.
-window.addEventListener('error', (e) => toast(e.message || 'Something went wrong', true));
+window.addEventListener('error', (e) => toast(e.message || t('toast.error'), true));
 window.addEventListener('unhandledrejection', (e) => toast(String(e.reason), true));
 
 // Declared up here because boot calls both before the sections below run.
@@ -77,10 +79,13 @@ function derive() {
       retarget(state.derived);
     } catch (err) {
       state.derived = null;
-      toast(`Could not evaluate the cluster: ${err.message}`, true);
+      toast(t('toast.evalFailed', { msg: err.message }), true);
     }
     refreshStatus();
     renderActiveTab();
+    // simdeck copy: the inspector repainted on 'change', before this derivation, so its health section showed
+    // the cluster as it was one edit ago (HEALTH_OK beside a HEALTH_ERR status bar).
+    refreshInspector();
   });
 }
 on('remap', derive);
@@ -107,7 +112,8 @@ function renderActiveTab() {
 function setTab(name) {
   if (!PANES[name]) name = 'physical';
   state.tab = name;
-  for (const [key, sel] of Object.entries(PANES)) $(sel).hidden = key !== name;
+  // simdeck copy: three panes are <svg>, which has no .hidden property; set the attribute.
+  for (const [key, sel] of Object.entries(PANES)) $(sel).toggleAttribute('hidden', key !== name);
   for (const el of document.querySelectorAll('.tab')) {
     el.classList.toggle('active', el.dataset.tab === name);
     el.setAttribute('aria-selected', el.dataset.tab === name ? 'true' : 'false');
@@ -125,24 +131,22 @@ function renderPaneActions() {
   const el = $('#pane-actions');
   const sets = {
     physical: '',
-    crush: `<button data-pane-act="collapse">Collapse hosts</button>
-            <button data-pane-act="expand">Expand all</button>
+    crush: `<button data-pane-act="collapse">${t('ui.paneCollapse')}</button>
+            <button data-pane-act="expand">${t('ui.paneExpand')}</button>
             <span class="sep"></span>
-            <button data-pane-act="export-crush">Export CRUSH map</button>
-            <button data-pane-act="import-crush">Import CRUSH map</button>
+            <button data-pane-act="export-crush">${t('ui.paneExportCrush')}</button>
+            <button data-pane-act="import-crush">${t('ui.paneImportCrush')}</button>
             <span class="spacer"></span>
-            <span class="hint" style="margin:0">Drag a host onto a bucket to change its failure domain.</span>`,
-    osdmap: `<span class="hint" style="margin:0">Every cell is one OSD, coloured by how full it is.
-             Click one to select it.</span>`,
-    pools: `<button data-pane-act="add-pool">Add replicated pool</button>
-            <button data-pane-act="add-ec-pool">Add EC pool</button>
-            <button data-pane-act="add-rule">Add CRUSH rule</button>
+            <span class="hint" style="margin:0">${t('ui.paneCrushHint')}</span>`,
+    osdmap: `<span class="hint" style="margin:0">${t('ui.paneOsdHint')}</span>`,
+    pools: `<button data-pane-act="add-pool">${t('ui.paneAddPool')}</button>
+            <button data-pane-act="add-ec-pool">${t('ui.paneAddEcPool')}</button>
+            <button data-pane-act="add-rule">${t('ui.paneAddRule')}</button>
             <span class="sep"></span>
-            <button data-pane-act="add-fs">Add CephFS</button>
-            <button data-pane-act="add-rbd">Add RBD image</button>
-            <button data-pane-act="add-rgw">Add RGW</button>`,
-    console: `<span class="hint" style="margin:0">Read-only. This is what the same cluster
-              looks like from a shell.</span>`,
+            <button data-pane-act="add-fs">${t('ui.paneAddFs')}</button>
+            <button data-pane-act="add-rbd">${t('ui.paneAddRbd')}</button>
+            <button data-pane-act="add-rgw">${t('ui.paneAddRgw')}</button>`,
+    console: `<span class="hint" style="margin:0">${t('ui.paneConsoleHint')}</span>`,
   };
   el.innerHTML = sets[state.tab] ?? '';
 }
@@ -194,10 +198,8 @@ function openSheet(mode) {
   $('#sheet-err').textContent = '';
   $('#sheet-apply').hidden = mode !== 'import';
   if (mode === 'export') {
-    $('#sheet-title').textContent = 'CRUSH map — decompiled';
-    $('#sheet-hint').textContent =
-      'The same text crushtool -d produces. Shadow trees are included, so this can go '
-      + 'straight into crushtool -c and ceph osd setcrushmap.';
+    $('#sheet-title').textContent = t('ui.sheetExportTitle');
+    $('#sheet-hint').textContent = t('ui.sheetExportHint');
     try {
       $('#sheet-text').value = decompile(compileMap(state.doc));
     } catch (err) {
@@ -205,11 +207,8 @@ function openSheet(mode) {
       $('#sheet-err').textContent = err.message;
     }
   } else {
-    $('#sheet-title').textContent = 'Import a CRUSH map';
-    $('#sheet-hint').textContent =
-      'Paste the output of `ceph osd getcrushmap -o m && crushtool -d m`. Hosts, buckets, '
-      + 'device classes, weights and rules all come across; positions and cabling are invented, '
-      + 'and there is no pool information in a crushmap.';
+    $('#sheet-title').textContent = t('ui.sheetImportTitle');
+    $('#sheet-hint').textContent = t('ui.sheetImportHint');
     $('#sheet-text').value = '';
   }
   sheet.hidden = false;
@@ -219,8 +218,8 @@ bind('#sheet-cancel', 'click', () => { $('#sheet').hidden = true; });
 bind('#sheet-copy', 'click', async () => {
   try {
     await navigator.clipboard.writeText($('#sheet-text').value);
-    toast('Copied');
-  } catch { $('#sheet-text').select(); toast('Select and copy manually', true); }
+    toast(t('toast.copied'));
+  } catch { $('#sheet-text').select(); toast(t('toast.copyManually'), true); }
 });
 bind('#sheet-apply', 'click', () => {
   try {
@@ -229,7 +228,8 @@ bind('#sheet-apply', 'click', () => {
     invalidate();
     $('#sheet').hidden = true;
     setTab('crush');
-    toast(`Imported ${doc.hosts.length} hosts and ${doc.rules.length} rules`);
+    sampleKey = null;
+    toast(t('toast.imported', { n: doc.hosts.length, rules: t('toast.importedRules', { n: doc.rules.length }) }));
   } catch (err) {
     $('#sheet-err').textContent = err.message;
   }
@@ -243,7 +243,7 @@ function refreshStatus() {
   const pgline = $('#pgline');
   const capline = $('#capline');
   if (!der) {
-    health.textContent = d.hosts.length ? '—' : 'EMPTY';
+    health.textContent = d.hosts.length ? '—' : t('ui.empty');
     health.className = 'health';
     pgline.textContent = '';
     capline.textContent = '';
@@ -252,10 +252,10 @@ function refreshStatus() {
   const status = der.health.status;
   health.textContent = status;
   health.className = `health ${status === 'HEALTH_ERR' ? 'err' : status === 'HEALTH_WARN' ? 'warn' : 'ok'}`;
-  health.title = der.health.checks.map((c) => `${c.name}: ${c.summary}`).join('\n') || 'no checks failing';
+  health.title = der.health.checks.map((c) => `${c.name}: ${c.summary}`).join('\n') || t('ui.noChecks');
 
   if (!d.pools.length) {
-    pgline.textContent = d.hosts.length ? 'no pools — the cluster stores nothing' : '';
+    pgline.textContent = d.hosts.length ? t('ui.noPools') : '';
   } else {
     // Mid-recovery the honest number is what the disks hold right now, not the
     // layout CRUSH is aiming at.
@@ -268,16 +268,16 @@ function refreshStatus() {
           inactive: a.inactive + ev.inactive,
           total: a.total + ev.pool.pg_num,
         }), { clean: 0, degraded: 0, misplaced: 0, inactive: 0, total: 0 });
-    pgline.textContent = `${c.total} pgs: ${c.clean} active+clean`
-      + (c.degraded ? `, ${c.degraded} degraded` : '')
-      + (c.inactive ? `, ${c.inactive} inactive` : '')
-      + (c.misplaced ? `, ${c.misplaced} backfilling` : '');
+    pgline.textContent = t('ui.pgline', { total: c.total, clean: c.clean })
+      + (c.degraded ? t('ui.pgDegraded', { n: c.degraded }) : '')
+      + (c.inactive ? t('ui.pgInactive', { n: c.inactive }) : '')
+      + (c.misplaced ? t('ui.pgBackfilling', { n: c.misplaced }) : '');
   }
   const q = der.net.quorum;
-  capline.textContent = `${fmtBytes(der.df.used)} / ${fmtBytes(der.df.total)}`
-    + ` (${(der.df.ratio * 100).toFixed(1)}%)`
-    + ` · spread ${(der.df.spread * 100).toFixed(1)} pts`
-    + (q.configured ? ` · mon ${q.largestGroup}/${q.configured}${q.hasQuorum ? '' : ' NO QUORUM'}` : '');
+  capline.textContent = t('ui.capline', { used: fmtBytes(der.df.used), total: fmtBytes(der.df.total),
+    pct: (der.df.ratio * 100).toFixed(1), spread: (der.df.spread * 100).toFixed(1) })
+    + (q.configured ? t('ui.capMon', { have: q.largestGroup, of: q.configured })
+      + (q.hasQuorum ? '' : t('ui.noQuorum')) : '');
 }
 
 // ---------------------------------------------------------------- toolbar --
@@ -285,8 +285,9 @@ function bind(sel, evt, fn) { const el = $(sel); if (el) el.addEventListener(evt
 
 bind('#doc-title', 'input', (e) => { state.doc.title = e.target.value; document.title = `${e.target.value} — CephSim`; });
 bind('#btn-new', 'click', () => {
-  if (state.dirty && !confirm('Discard the current cluster?')) return;
-  loadDoc(newDoc());
+  if (state.dirty && !confirm(t('ui.discard'))) return;
+  loadDoc(newDoc(t('ui.untitled')));
+  sampleKey = null;
   invalidate();
   requestFit();
 });
@@ -298,8 +299,9 @@ bind('#file-input', 'change', async (e) => {
     loadDoc(JSON.parse(await file.text()));
     invalidate();
     requestFit();
-    toast(`Opened ${file.name}`);
-  } catch (err) { toast(`Could not read that file: ${err.message}`, true); }
+    sampleKey = null;
+    toast(t('toast.opened', { name: file.name }));
+  } catch (err) { toast(t('toast.readFailed', { msg: err.message }), true); }
   e.target.value = '';
 });
 bind('#btn-save', 'click', () => exportJson());
@@ -308,37 +310,45 @@ bind('#export-picker', 'change', async (e) => {
   e.target.value = '';
   try {
     switch (what) {
-      case 'svg': exportSvg(); toast('SVG exported'); break;
-      case 'png': await exportPng(); toast('PNG exported'); break;
-      case 'copy': await copyPng(); toast('PNG copied to the clipboard'); break;
-      case 'crush': exportCrushmap(); toast('CRUSH map exported'); break;
-      case 'script': exportCephScript(); toast('ceph command script exported'); break;
-      case 'json': exportJson(); toast('Cluster JSON saved'); break;
+      case 'svg': exportSvg(); toast(t('toast.svg')); break;
+      case 'png': await exportPng(); toast(t('toast.png')); break;
+      case 'copy': await copyPng(); toast(t('toast.pngCopied')); break;
+      case 'crush': exportCrushmap(); toast(t('toast.crush')); break;
+      case 'script': exportCephScript(); toast(t('toast.script')); break;
+      case 'json': exportJson(); toast(t('toast.json')); break;
       default: break;
     }
   } catch (err) {
-    toast(`Export failed: ${err.message}`, true);
+    toast(t('toast.exportFailed', { msg: err.message }), true);
   }
 });
 bind('#sample-picker', 'change', (e) => {
   const key = e.target.value;
   e.target.value = '';
   if (!key) return;
-  if (state.dirty && !confirm('Discard the current cluster?')) return;
+  if (state.dirty && !confirm(t('ui.discard'))) return;
+  if (!loadSample(key)) return;
+  toast(SAMPLES[key].label);
+});
+
+// simdeck copy: the sample on the canvas while nobody has edited it; the language switch rebuilds it.
+let sampleKey = null;
+function loadSample(key) {
   const doc = makeSample(key);
-  if (!doc) return;
+  if (!doc) return false;
   loadDoc(doc);
   invalidate();
   requestFit();
-  toast(SAMPLES[key].label);
-});
+  sampleKey = key;
+  return true;
+}
 
 for (const el of document.querySelectorAll('.tool')) {
   el.addEventListener('click', () => { state.tool = el.dataset.tool; changed({ remap: false }); });
 }
 bind('#link-net', 'change', (e) => { state.linkNet = e.target.value; });
-bind('#btn-undo', 'click', () => { if (!undo()) toast('Nothing to undo'); });
-bind('#btn-redo', 'click', () => { if (!redo()) toast('Nothing to redo'); });
+bind('#btn-undo', 'click', () => { if (!undo()) toast(t('toast.nothingUndo')); });
+bind('#btn-redo', 'click', () => { if (!redo()) toast(t('toast.nothingRedo')); });
 bind('#btn-fit', 'click', () => requestFit());
 bind('#btn-zoom-in', 'click', () => zoomBy(1.2));
 bind('#btn-zoom-out', 'click', () => zoomBy(1 / 1.2));
@@ -354,10 +364,20 @@ bind('#exit-present', 'click', () => setPresent(false));
 
 bind('#btn-theme', 'click', () => {
   state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  state.themeChosen = true;
   document.body.classList.toggle('light', state.theme === 'light');
   applyTheme(state.theme);
   savePrefs();
   scheduleRender();
+});
+
+// simdeck copy: EN / HR. Store the choice and reload with ?lang=; an unedited sample comes back as the same sample
+// in the other language, anything else from the autosave as it is.
+bind('#btn-lang', 'click', () => {
+  const params = new URLSearchParams(location.search);
+  if (sampleKey && !state.dirty) params.set('sample', sampleKey); else params.delete('sample');
+  state.dirty = false;                     // the autosave holds the drawing; do not ask to discard it
+  switchLang(params);
 });
 
 window.addEventListener('keydown', (e) => {
@@ -376,7 +396,7 @@ window.addEventListener('keydown', (e) => {
     togglePlay();
   } else if (e.key.toLowerCase() === 'p' && !meta) {
     setPresent(!state.present);
-  } else if (e.key >= '1' && e.key <= '6' && !meta) {
+  } else if (e.key >= '1' && e.key <= '5' && !meta) {
     setTab(Object.keys(PANES)[Number(e.key) - 1]);
   }
 });
@@ -391,7 +411,7 @@ function refreshChrome() {
   }
   const hint = $('#placing-hint');
   hint.hidden = !state.placing || state.tab !== 'physical';
-  if (state.placing) hint.textContent = 'Click the canvas to place — Esc to cancel';
+  if (state.placing) hint.textContent = t('ui.placing');
   const title = $('#doc-title');
   if (document.activeElement !== title) title.value = state.doc.title || '';
   canvas.style.cursor = state.tool === 'pan' ? 'grab'
@@ -415,7 +435,22 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 // ------------------------------------------------------------------- boot --
+// simdeck copy: the page's language (js/i18n.js), and the URL settings: ?sample=<key> loads a sample
+// (hyperconverged, threeRacks, brokenRule, unbalanced), ?tab=<pane>, ?present=1, ?theme=light|dark and
+// ?motion=reduce. Without ?theme= and until someone presses Theme, the theme follows the OS.
+applyStatic();
+document.title = t('ui.pageTitle');
+// simdeck copy: the original never filled the Samples picker, so it offered nothing.
+$('#sample-picker').insertAdjacentHTML('beforeend', Object.entries(SAMPLES)
+  .map(([key, s]) => `<option value="${key}">${s.label}</option>`).join(''));
+const params = new URLSearchParams(location.search);
 loadPrefs();
+if (params.get('theme') === 'light' || params.get('theme') === 'dark') state.theme = params.get('theme');
+else if (!state.themeChosen) {
+  state.theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+if (params.get('tab') && PANES[params.get('tab')]) state.tab = params.get('tab');
+document.documentElement.classList.toggle('reduce-motion', params.get('motion') === 'reduce');
 document.body.classList.toggle('light', state.theme === 'light');
 initRenderer(canvas);
 initInteractions(canvas);
@@ -428,11 +463,13 @@ initInspector($('#inspector'));
 initTimeline($('#timeline'));
 
 const saved = readAutosave();
-if (saved && (saved.hosts?.length || saved.switches?.length)) {
+if (SAMPLES[params.get('sample')]) {
+  loadSample(params.get('sample'));
+} else if (saved && (saved.hosts?.length || saved.switches?.length)) {
   loadDoc(saved);
-  toast('Restored your last cluster');
+  toast(t('toast.restored'));
 } else {
-  loadDoc(makeSample('threeRacks'));
+  loadSample('threeRacks');
 }
 invalidate();
 resetCrushScroll();
@@ -440,4 +477,5 @@ resetOsdMapScroll();
 setTab(state.tab || 'physical');
 derive();
 refreshChrome();
+if (params.get('present') === '1') setPresent(true);
 requestFit();

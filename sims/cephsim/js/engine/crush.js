@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The CRUSH engine: straw2 buckets and rule execution.
 //
 // Ported from Ceph's src/crush/mapper.c. The structure is faithful — recursive

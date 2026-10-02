@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // What a user actually touches: a filesystem, a block device, an S3 endpoint.
 //
 // None of these store anything themselves. Each is a view over one or two RADOS

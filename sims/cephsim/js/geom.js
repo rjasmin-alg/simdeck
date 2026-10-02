@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Layout and cable routing. Pure maths, no DOM — node can test it.
 //
 // Unlike topologydrafter's fixed icon tiles, a host here is as tall as its disk

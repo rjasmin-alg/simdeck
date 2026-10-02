@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The OSD map: where an abstract CRUSH rule turns into a picture of skew.
 //
 // Three panels, top to bottom:
@@ -13,6 +14,7 @@ import { classOrDefault } from './catalog.js';
 import { fmtBytes, RATIOS, poolDf } from './engine/capacity.js';
 import { poolWidth } from './engine/pgmap.js';
 import { fillColour } from './render.js';
+import { t } from './i18n.js';
 
 export const CELL = 18;
 export const CELL_GAP = 3;
@@ -102,15 +104,15 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
-  if (!derived) return '<text class="sub" x="10" y="24">No pools yet — nothing to place.</text>';
+  if (!derived) return `<text class="sub" x="10" y="24">${t('map.noPools')}</text>`;
   const parts = [];
   let y = 0;
 
   // ---- 1. fill per OSD -----------------------------------------------------
-  parts.push(`<text class="head" x="0" y="${y + 10}">Fill per OSD</text>`);
-  parts.push(`<text class="sub" x="0" y="${y + 26}">spread ${(derived.df.spread * 100).toFixed(1)} points`
-    + ` · stddev ${(derived.df.stddev * 100).toFixed(2)} · ${fmtBytes(derived.df.used)}`
-    + ` of ${fmtBytes(derived.df.total)}</text>`);
+  parts.push(`<text class="head" x="0" y="${y + 10}">${t('map.fill')}</text>`);
+  parts.push(`<text class="sub" x="0" y="${y + 26}">${t('map.fillSub', {
+    spread: (derived.df.spread * 100).toFixed(1), stddev: (derived.df.stddev * 100).toFixed(2),
+    used: fmtBytes(derived.df.used), total: fmtBytes(derived.df.total) })}</text>`);
   y += 40;
 
   const { rows, height } = osdMapLayout(doc, derived.usage);
@@ -126,7 +128,8 @@ export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
         class="cell${sel ? ' sel' : ''}${c.down ? ' osd-down' : ''}${c.out ? ' out' : ''}"
         x="${c.x}" y="${ry}" width="${CELL}" height="${CELL}"
         fill="${fillColour(c.ratio)}" stroke="${sel ? 'var(--accent)' : cls.colour}"
-        ><title>osd.${c.osd.id} · ${cls.label} · ${c.osd.size} TiB · ${(c.ratio * 100).toFixed(1)}% · ${c.pgs} pgs</title>
+        ><title>${t('map.cellTitle', { id: c.osd.id, cls: cls.label, size: c.osd.size,
+          pct: (c.ratio * 100).toFixed(1), pgs: c.pgs })}</title>
         </rect></g>`);
     }
   }
@@ -134,9 +137,9 @@ export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
 
   // ---- 2. PG distribution --------------------------------------------------
   const h = pgHistogram(derived.usage);
-  parts.push(`<text class="head" x="0" y="${y + 10}">PGs per OSD</text>`);
-  parts.push(`<text class="sub" x="0" y="${y + 26}">${h.min} to ${h.max}, mean ${h.mean.toFixed(1)}`
-    + ` — the gap CRUSH leaves and the balancer exists to close</text>`);
+  parts.push(`<text class="head" x="0" y="${y + 10}">${t('map.pgs')}</text>`);
+  parts.push(`<text class="sub" x="0" y="${y + 26}">${t('map.pgsSub', {
+    min: h.min, max: h.max, mean: h.mean.toFixed(1) })}</text>`);
   y += 42;
   const HH = 90;
   const peak = Math.max(1, ...h.bins);
@@ -144,7 +147,7 @@ export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
   h.bins.forEach((count, i) => {
     const bh = (count / peak) * HH;
     parts.push(`<rect class="hbar" x="${LABEL_W + i * bw}" y="${y + HH - bh}"
-      width="${bw - 3}" height="${bh.toFixed(1)}"><title>${count} OSDs</title></rect>`);
+      width="${bw - 3}" height="${bh.toFixed(1)}"><title>${t('map.binTitle', { n: count })}</title></rect>`);
   });
   parts.push(`<line class="axis" x1="${LABEL_W}" y1="${y + HH}" x2="${LABEL_W + h.bins.length * bw}" y2="${y + HH}"/>`);
   parts.push(`<text class="tick" x="${LABEL_W - 8}" y="${y + HH}">${h.min}</text>`);
@@ -157,7 +160,7 @@ export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
   y += HH + 34;
 
   // ---- 3. PG state per pool ------------------------------------------------
-  parts.push(`<text class="head" x="0" y="${y + 10}">PG state by pool</text>`);
+  parts.push(`<text class="head" x="0" y="${y + 10}">${t('map.state')}</text>`);
   y += 24;
   const BARW = 460;
   for (const ev of derived.evals) {
@@ -176,7 +179,7 @@ export function paintOsdMap(doc, derived, { selection = new Set() } = {}) {
     const geom = ev.pool.type === 'erasure'
       ? `EC ${ev.pool.k}+${ev.pool.m}` : `${ev.pool.size}x`;
     parts.push(`<text class="seglbl" x="${LABEL_W + BARW + 12}" y="${y + 9}"
-      >${geom} · ${total} pg · ${fmtBytes(df.maxAvail)} free</text>`);
+      >${t('map.segLabel', { geom, total, free: fmtBytes(df.maxAvail) })}</text>`);
     y += 26;
   }
   y += 8;

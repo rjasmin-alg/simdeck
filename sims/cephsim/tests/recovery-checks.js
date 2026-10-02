@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Recovery and backfill.
 //
 // The property that matters most is conservation: every byte the plan says has

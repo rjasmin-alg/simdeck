@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The CRUSH view: the tree the way `ceph osd tree` shows it, but editable.
 //
 // This is the second projection of the same cluster. The physical canvas says

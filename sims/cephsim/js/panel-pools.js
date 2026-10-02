@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The Pools tab: what the cluster actually serves, and the rules that place it.
 //
 // Rows only — clicking one selects it and the inspector does the editing, the
@@ -6,6 +7,8 @@
 import { state, on, poolKey, ruleKey, fsKey, rbdKey, rgwKey, select } from './model.js';
 import { fmtBytes, poolDf, TiB } from './engine/capacity.js';
 import { poolWidth, poolEfficiency, poolMinSize } from './engine/pgmap.js';
+import { t } from './i18n.js';
+import { engineText } from './engine-text.js';
 
 let root = null;
 
@@ -47,28 +50,26 @@ export function domainsAvailable(doc, rule) {
  */
 export function poolWarning(doc, pool) {
   const rule = doc.rules.find((r) => r.name === pool.crush_rule);
-  if (!rule) return `no rule named "${pool.crush_rule}"`;
+  if (!rule) return t('pools.wNoRule', { rule: pool.crush_rule });
   const want = poolWidth(pool);
   const have = domainsAvailable(doc, rule);
   const domain = rule.failureDomain || 'host';
   if (have === 0) {
     return rule.class
-      ? `rule ${rule.name} takes device class ${rule.class}, and there are no ${rule.class} `
-        + 'OSDs under its root — nothing can be placed at all'
-      : `rule ${rule.name} has no OSDs under its root — nothing can be placed at all`;
+      ? t('pools.wNoClass', { rule: rule.name, cls: rule.class })
+      : t('pools.wNoOsds', { rule: rule.name });
   }
   if (have < poolMinSize(pool)) {
-    return `needs ${want} ${domain}s, only ${have} available — PGs cannot even reach min_size`;
+    return t('pools.wMinSize', { want, domain, have });
   }
   if (have < want) {
-    return `needs ${want} ${domain}s, only ${have} available — every PG will be undersized`;
+    return t('pools.wUndersized', { want, domain, have });
   }
   if (pool.type === 'erasure' && have === want) {
-    return `exactly ${have} ${domain}s for ${want} shards — no room for CRUSH to retry, and`
-      + ` losing one ${domain} drops straight to min_size`;
+    return t('pools.wExact', { want, domain, have });
   }
   if (pool.pgp_num < pool.pg_num) {
-    return `pgp_num ${pool.pgp_num} is below pg_num ${pool.pg_num} — the extra PGs share placements`;
+    return t('pools.wPgp', { pgp: pool.pgp_num, pg: pool.pg_num });
   }
   return null;
 }
@@ -82,20 +83,22 @@ export function renderPools() {
     const ev = der?.evals.find((e) => e.pool.id === p.id);
     const df = der ? poolDf(der.map, p, der.usage, der.evals) : null;
     const geom = p.type === 'erasure'
-      ? `EC ${p.k}+${p.m}` : `${p.size}x replicated`;
+      ? `EC ${p.k}+${p.m}` : t('ins.replicated', { n: p.size });
     const warn = poolWarning(d, p);
     const bad = ev && (ev.inactive || ev.degraded);
     return `<button class="list-row${state.selection.has(poolKey(p.id)) ? ' on' : ''}"
       data-sel="${poolKey(p.id)}">
       <span class="lr-name">${esc(p.name)}</span>
-      <span class="lr-meta">${geom} · ${p.pg_num} pg · rule ${esc(p.crush_rule)}
-        · ${(poolEfficiency(p) * 100).toFixed(0)}% usable</span>
-      <span class="lr-nums">${fmtBytes(p.stored || 0)} stored${df ? ` · ${fmtBytes(df.maxAvail)} free` : ''}
-        ${ev ? ` · ${ev.pool.pg_num - ev.degraded - ev.inactive}/${ev.pool.pg_num} clean` : ''}</span>
+      <span class="lr-meta">${t('pools.meta', { geom, pg: p.pg_num, rule: esc(p.crush_rule),
+        pct: (poolEfficiency(p) * 100).toFixed(0) })}</span>
+      <span class="lr-nums">${t('pools.nums', { stored: fmtBytes(p.stored || 0) })}${
+        df ? t('pools.numsFree', { free: fmtBytes(df.maxAvail) }) : ''}
+        ${ev ? t('pools.numsClean', { clean: ev.pool.pg_num - ev.degraded - ev.inactive, total: ev.pool.pg_num }) : ''}</span>
       ${warn ? `<span class="lr-warn">${esc(warn)}</span>` : ''}
-      ${bad ? `<span class="lr-warn">${ev.inactive ? `${ev.inactive} inactive · ` : ''}${ev.degraded} degraded</span>` : ''}
+      ${bad ? `<span class="lr-warn">${ev.inactive ? t('pools.badInactive', { n: ev.inactive }) : ''}${
+        t('pools.bad', { n: ev.degraded })}</span>` : ''}
     </button>`;
-  }).join('') : '<p class="hint">No pools. A cluster with no pools stores nothing.</p>';
+  }).join('') : `<p class="hint">${t('pools.none')}</p>`;
 
   const rules = d.rules.map((r) => {
     const have = domainsAvailable(d, r);
@@ -103,18 +106,19 @@ export function renderPools() {
     return `<button class="list-row${state.selection.has(ruleKey(r.id)) ? ' on' : ''}"
       data-sel="${ruleKey(r.id)}">
       <span class="lr-name">${esc(r.name)}</span>
-      <span class="lr-meta">${r.type} · take ${esc(r.root || 'default')}${r.class ? ` class ${esc(r.class)}` : ''}
-        · ${r.mode || 'firstn'} type ${esc(r.failureDomain || 'host')}</span>
-      <span class="lr-nums">${have} ${esc(r.failureDomain || 'host')}${have === 1 ? '' : 's'} available
-        · used by ${users} pool${users === 1 ? '' : 's'}</span>
+      <span class="lr-meta">${t('pools.ruleMeta', { type: r.type, root: esc(r.root || 'default'),
+        cls: r.class ? ` class ${esc(r.class)}` : '', mode: r.mode || 'firstn',
+        domain: esc(r.failureDomain || 'host') })}</span>
+      <span class="lr-nums">${t('pools.ruleNums', {
+        avail: t('pools.avail', { n: have, domain: esc(r.failureDomain || 'host') }),
+        users: t('ins.nPools', { n: users }) })}</span>
     </button>`;
   }).join('');
 
   root.innerHTML = `
-    <div class="list-group"><h3>Pools</h3>${pools}</div>
-    <div class="list-group"><h3>CRUSH rules</h3>${rules}
-      <p class="hint">A rule is where the failure domain lives. Changing one here changes
-      every pool that uses it — and moves data.</p></div>
+    <div class="list-group"><h3>${t('pools.pools')}</h3>${pools}</div>
+    <div class="list-group"><h3>${t('pools.rules')}</h3>${rules}
+      <p class="hint">${t('pools.rulesHint')}</p></div>
     ${clientGroups(der)}`;
 }
 
@@ -135,34 +139,36 @@ function clientGroups(der) {
   const fsRows = d.fs.map((fs) => {
     const s = der?.clients.filesystems.find((f) => f.id === fs.id);
     return row(fsKey(fs.id), fs.name,
-      `data ${esc(fs.dataPool)} · metadata ${esc(fs.metaPool)} · max_mds ${fs.maxMds}`,
-      s ? `${fmtBytes(s.used)} used · ${fmtBytes(s.free)} free · ${s.up ? 'up' : 'DOWN'}` : '',
-      s && !s.up ? s.reasons.join('; ') : '');
-  }).join('') || '<p class="hint">No filesystem. A CephFS is a data pool, a metadata pool and an MDS.</p>';
+      t('pools.fsMeta', { data: esc(fs.dataPool), meta: esc(fs.metaPool), n: fs.maxMds }),
+      s ? t('pools.fsNums', { used: fmtBytes(s.used), free: fmtBytes(s.free),
+        state: s.up ? t('pools.up') : t('pools.down') }) : '',
+      s && !s.up ? s.reasons.map(engineText).join('; ') : '');
+  }).join('') || `<p class="hint">${t('pools.noFs')}</p>`;
 
   const rbdRows = d.rbd.map((img) => {
     const s = der?.clients.rbd.find((r) => r.id === img.id);
     return row(rbdKey(img.id), img.name,
-      `pool ${esc(img.pool)} · ${img.thin ? 'thin' : 'thick'} provisioned`,
-      s ? `${fmtBytes(s.used)} of ${fmtBytes(s.provisioned)} used · ${s.up ? 'up' : 'READ-ONLY'}` : '',
-      s && !s.up ? s.reasons.join('; ') : '');
-  }).join('') || '<p class="hint">No block images.</p>';
+      t('pools.rbdMeta', { pool: esc(img.pool), kind: img.thin ? t('pools.thin') : t('pools.thick') }),
+      s ? t('pools.rbdNums', { used: fmtBytes(s.used), prov: fmtBytes(s.provisioned),
+        state: s.up ? t('pools.up') : t('pools.readOnly') }) : '',
+      s && !s.up ? s.reasons.map(engineText).join('; ') : '');
+  }).join('') || `<p class="hint">${t('pools.noRbd')}</p>`;
 
   const rgwRows = d.rgw.map((gw) => {
     const s = der?.clients.rgw.find((g) => g.id === gw.id);
     return row(rgwKey(gw.id), gw.name,
-      `data ${esc(gw.dataPool)} · index ${esc(gw.indexPool)} · ${gw.buckets} buckets`,
-      s ? `${fmtBytes(s.used)} stored · ${fmtBytes(s.free)} free · ${s.up ? 'up' : 'DOWN'}` : '',
-      s && !s.up ? s.reasons.join('; ') : '');
-  }).join('') || '<p class="hint">No object gateway.</p>';
+      t('pools.rgwMeta', { data: esc(gw.dataPool), index: esc(gw.indexPool), n: gw.buckets }),
+      s ? t('pools.rgwNums', { used: fmtBytes(s.used), free: fmtBytes(s.free),
+        state: s.up ? t('pools.up') : t('pools.down') }) : '',
+      s && !s.up ? s.reasons.map(engineText).join('; ') : '');
+  }).join('') || `<p class="hint">${t('pools.noRgw')}</p>`;
 
   const over = (der?.clients.overcommit || []).map((o) =>
-    `<p class="hint" style="color:var(--warn)">Pool <b>${esc(o.pool)}</b> has
-     ${fmtBytes(o.provisioned)} of images promised against ${fmtBytes(o.capacity)} of capacity
-     (${o.ratio.toFixed(1)}x). Thin provisioning is a loan, not a discount.</p>`).join('');
+    `<p class="hint" style="color:var(--warn)">${t('pools.over', { pool: esc(o.pool),
+      prov: fmtBytes(o.provisioned), cap: fmtBytes(o.capacity), ratio: o.ratio.toFixed(1) })}</p>`).join('');
 
   return `
-    <div class="list-group"><h3>CephFS</h3>${fsRows}</div>
-    <div class="list-group"><h3>RBD images</h3>${rbdRows}${over}</div>
-    <div class="list-group"><h3>Object gateway (RGW)</h3>${rgwRows}</div>`;
+    <div class="list-group"><h3>${t('pools.fs')}</h3>${fsRows}</div>
+    <div class="list-group"><h3>${t('pools.rbd')}</h3>${rbdRows}${over}</div>
+    <div class="list-group"><h3>${t('pools.rgw')}</h3>${rgwRows}</div>`;
 }

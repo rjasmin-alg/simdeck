@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Getting work out: SVG and PNG for slides, JSON to keep, and a shell script
 // that would build the same cluster for real.
 //

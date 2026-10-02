@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The left rail: things you can drop on the canvas.
 //
 // Click to arm, then click the canvas to place; or drag the row onto the canvas.
@@ -7,6 +8,7 @@ import {
   state, commit, changed, addHost, addOsd, addSwitchNode, addBucketNode, select,
 } from './model.js';
 import { CHASSIS, SWITCHES, BUCKET_TYPES, DEVICE_CLASSES } from './catalog.js';
+import { t } from './i18n.js';
 
 let root = null;
 
@@ -48,20 +50,19 @@ export function refreshPalette() {
     const n = c.osds.reduce((a, g) => a + g.n, 0);
     const tib = c.osds.reduce((a, g) => a + g.n * g.size, 0);
     const cls = c.osds[0] ? DEVICE_CLASSES[c.osds[0].cls].colour : 'var(--ink-soft)';
-    const sub = n ? `${n} OSD · ${tib} TiB` : (c.daemons.join(', ') || 'no disks');
+    const sub = n ? t('pal.osdSub', { n, tib }) : (c.daemons.join(', ') || t('pal.noDisks'));
     return item('host', c.id, c.label, sub, cls);
   }).join('');
   const switches = Object.values(SWITCHES)
-    .map((s) => item('switch', s.id, s.label, `${s.speed}G · ${s.ports} ports`, '#4a9ee0')).join('');
+    .map((s) => item('switch', s.id, s.label, t('pal.switchSub', { speed: s.speed, ports: s.ports }), '#4a9ee0')).join('');
   const buckets = BUCKET_TYPES.filter((b) => b.id !== 'root')
-    .map((b) => item('bucket', `bucket:${b.id}`, b.label, 'CRUSH failure domain', '#8b9ab2')).join('');
+    .map((b) => item('bucket', `bucket:${b.id}`, b.label, t('pal.bucketSub', { type: b.id }), '#8b9ab2')).join('');
 
   root.innerHTML = `
-    <div class="pal-group"><p class="pal-head">Hosts</p>${hosts}</div>
-    <div class="pal-group"><p class="pal-head">Network</p>${switches}</div>
-    <div class="pal-group"><p class="pal-head">CRUSH buckets</p>${buckets}
-      <p class="hint">Buckets are containers in the CRUSH tree. Put hosts in racks,
-      then set a rule's failure domain to <code>rack</code>.</p></div>`;
+    <div class="pal-group"><p class="pal-head">${t('pal.hosts')}</p>${hosts}</div>
+    <div class="pal-group"><p class="pal-head">${t('pal.network')}</p>${switches}</div>
+    <div class="pal-group"><p class="pal-head">${t('pal.buckets')}</p>${buckets}
+      <p class="hint">${t('pal.bucketsHint')}</p></div>`;
 }
 
 /**

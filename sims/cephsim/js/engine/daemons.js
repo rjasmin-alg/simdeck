@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Daemon availability. OSDs hold the data; these decide whether you can get at it.
 
 /**

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Preset clusters. Plain documents, built without touching the live model.
 //
 // Two of these are deliberately wrong. A sample that is always healthy teaches
@@ -5,6 +6,7 @@
 // when this one survived?".
 
 import { TiB } from './engine/capacity.js';
+import { t } from './i18n.js';
 
 let seq = 0;
 const id = (p) => `${p}${(seq += 1).toString(36)}`;
@@ -42,7 +44,7 @@ function hyperconverged() {
     osd += 4;
   }
   const sw = { id: id('sw'), name: 'sw-core', x: 300, y: 120, speed: 25, ports: 48, up: true };
-  return doc('3-node hyperconverged', {
+  return doc(t('s.hyperconverged'), {
     buckets: [{ id: root, name: 'default', type: 'root', parent: null }],
     hosts,
     switches: [sw],
@@ -92,7 +94,7 @@ function threeRacks() {
   for (const sw of switches.slice(0, 3)) {
     links.push({ id: id('lk'), a: sw.id, b: spine.id, net: 'public', speed: 100, up: true, offset: 0 });
   }
-  return doc('9 nodes across 3 racks', {
+  return doc(t('s.threeRacks'), {
     buckets, hosts, switches, links,
     rules: [
       rule(0, 'replicated_rule', 'host'),
@@ -135,7 +137,7 @@ function threeRacks() {
  */
 function replicasInOneRack() {
   const d = threeRacks();
-  d.title = 'Three replicas, one rack (broken on purpose)';
+  d.title = t('s.brokenRule');
   d.rules = [rule(0, 'replicated_rule', 'host')];
   d.fs = []; d.rbd = []; d.rgw = [];
   d.pools = [{
@@ -167,7 +169,7 @@ function unbalancedHosts() {
     host('ceph-small-2', 620, 340, root, disks(2, 8, 'hdd', 14), ['mon']),
   ];
   const sw = { id: id('sw'), name: 'sw-core', x: 330, y: 120, speed: 25, ports: 48, up: true };
-  return doc('Unbalanced hosts (the small ones cap the cluster)', {
+  return doc(t('s.unbalanced'), {
     buckets: [{ id: root, name: 'default', type: 'root', parent: null }],
     hosts,
     switches: [sw],
@@ -180,11 +182,13 @@ function unbalancedHosts() {
   });
 }
 
+// simdeck copy: titles and labels come from strings.js (s.*); the keys are the ?sample= presets, quoted so the
+// manifest check finds each sim.json entry's key in the source.
 export const SAMPLES = {
-  hyperconverged: { label: '3-node hyperconverged', make: hyperconverged },
-  threeRacks: { label: '9 nodes across 3 racks', make: threeRacks },
-  brokenRule: { label: 'Three replicas in one rack (broken)', make: replicasInOneRack },
-  unbalanced: { label: 'Unbalanced hosts (small ones cap the cluster)', make: unbalancedHosts },
+  'hyperconverged': { get label() { return t('s.hyperconverged'); }, make: hyperconverged },
+  'threeRacks': { get label() { return t('s.threeRacks'); }, make: threeRacks },
+  'brokenRule': { get label() { return t('s.brokenRuleShort'); }, make: replicasInOneRack },
+  'unbalanced': { get label() { return t('s.unbalanced'); }, make: unbalancedHosts },
 };
 
 export const makeSample = (key) => (SAMPLES[key] ? SAMPLES[key].make() : null);

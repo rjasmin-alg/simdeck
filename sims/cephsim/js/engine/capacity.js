@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Capacity. The part everyone gets wrong on a real cluster.
 //
 // A Ceph cluster does not have "free space". It has a fullest OSD, and that OSD
