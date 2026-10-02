@@ -1,0 +1,298 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Routing table: adopted from the URM book's web edition (uvod-u-racunalne-mreze, ugradbeno/tablica-usmjeravanja.html)
+     into the simdeck kit (docs/sim-ui.md). A stepper: router R2 checks its four entries one by one against the
+     destination, bit by bit, then picks the longest matching prefix. The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="routing-table">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tablica usmjeravanja · simdeck</title>
+<meta name="description" content="Usmjernik R2 uspoređuje odredišnu adresu sa svakim zapisom svoje tablice i bira najdulji podudarajući prefiks.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "routing-table",
+  "class": "stepper",
+  "steps": 5,
+  "title": { "hr": "Tablica usmjeravanja", "en": "Routing table" },
+  "concept": { "hr": "Od svih zapisa koji se podudaraju, pobjeđuje najdulji prefiks", "en": "Of all the entries that match, the longest prefix wins" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="routing-table"]; colours only from kit tokens. */
+[data-sim="routing-table"] .rt {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3cqh;
+  height: 100%;
+  padding: 2cqh 1.5cqw;
+  --labw: 12.5rem;
+  --resw: 6rem;
+  --hopw: 7rem;
+  --gap8: 0.55rem;
+  --bw: min(calc((100cqw - var(--labw) - var(--resw) - var(--hopw) - 3cqw - 3 * var(--gap8) - 6rem) / 32), 5cqh);
+}
+
+/* the table: entry, 32 bit columns with a gap after every octet, result, next hop */
+[data-sim="routing-table"] .rt-table {
+  display: grid;
+  grid-template-columns:
+    var(--labw)
+    repeat(8, var(--bw)) var(--gap8) repeat(8, var(--bw)) var(--gap8)
+    repeat(8, var(--bw)) var(--gap8) repeat(8, var(--bw))
+    var(--resw) var(--hopw);
+  column-gap: 0.1rem;
+  row-gap: 2.4cqh;
+  align-items: center;
+  justify-content: center;
+}
+/* --r is the table row; on a phone every row's words take their own row above its bits (rows 2r − 1 and 2r) */
+[data-sim="routing-table"] .rt-table > *, [data-sim="routing-table"] .rt-meta > * { grid-row: var(--r); }
+[data-sim="routing-table"] .rt-meta { display: contents; }
+[data-sim="routing-table"] .rt-entry { grid-column: 1; font-family: var(--mono); font-weight: 700; font-size: var(--fs-stage); padding-left: 0.5rem; white-space: nowrap; }
+[data-sim="routing-table"] .rt-res { grid-column: 37; text-align: center; font-size: var(--fs-stage); font-weight: 700; }
+[data-sim="routing-table"] .rt-hop { grid-column: 38; font-size: var(--fs-stage); white-space: nowrap; }
+[data-sim="routing-table"] .rt-head { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; line-height: 1.2; }
+[data-sim="routing-table"] .rt-head.rt-bitshead { grid-column: 2 / 37; text-align: center; }
+[data-sim="routing-table"] .rt-head.rt-res, [data-sim="routing-table"] .rt-head.rt-hop, [data-sim="routing-table"] .rt-head.rt-entry { font-family: inherit; font-size: var(--fs-sm); white-space: normal; }
+[data-sim="routing-table"] .rt-destrow .rt-entry { display: flex; flex-direction: column; line-height: 1.15; }
+[data-sim="routing-table"] .rt-destrow .rt-entry small { font-family: var(--sans); font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="routing-table"] .rt-bit {
+  grid-column: var(--dc);
+  display: grid;
+  place-items: center;
+  height: calc(var(--bw) * 1.6);
+  border: var(--line-w) solid var(--line);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: max(16px, calc(var(--bw) * 0.7));
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="routing-table"] .rt-bit.rt-dest { border-color: var(--ink); }
+/* a bit inside the prefix that is not (yet) compared: hollow and dashed */
+[data-sim="routing-table"] .rt-bit.rt-open { border-style: dashed; color: var(--muted); }
+/* the first differing bit: highlighter fill plus the kit's thick outline */
+[data-sim="routing-table"] .rt-bit.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="routing-table"] .rt-none { grid-column: 2 / 36; font-size: var(--fs-md); color: var(--muted); font-style: italic; padding-left: 0.4rem; border-left: 0.3rem solid var(--ink); }
+[data-sim="routing-table"] .rt-yes::before { content: '✓ '; }
+[data-sim="routing-table"] .rt-no::before { content: '✗ '; }
+[data-sim="routing-table"] .rt-no { color: var(--muted); }
+[data-sim="routing-table"] .rt-wait { color: var(--muted); }
+/* a row's frame: the winner gets a thick ink outline and a word, a miss is struck through by its dashed frame */
+[data-sim="routing-table"] .rt-frame {
+  grid-column: 1 / -1;
+  align-self: stretch;
+  margin: -0.5cqh -0.3rem;
+  border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+[data-sim="routing-table"] .rt-frame.rt-current { border-color: var(--line); background: var(--panel); }
+[data-sim="routing-table"] .rt-frame.rt-win { border: 0.3rem solid var(--ink); background: var(--panel); }
+/* the tags stand at the right end of the bits area, where no entry of R2's table has bits (the longest is /24) */
+[data-sim="routing-table"] .rt-tags { grid-column: 30 / 37; justify-self: end; display: flex; gap: 0.4rem; }
+[data-sim="routing-table"] .rt-tag { display: inline-block; padding: 0 0.35rem; font-size: var(--fs-sm); font-weight: 700; border-radius: var(--radius-sm); vertical-align: middle; }
+[data-sim="routing-table"] .rt-tag.rt-tag-win { background: var(--ink); color: var(--bg); }
+[data-sim="routing-table"] .rt-tag.rt-tag-first { border: var(--line-w) dashed var(--ink); }
+
+[data-sim="routing-table"] .rt-outcome {
+  align-self: center;
+  padding: 0.5rem 1.2rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.5rem solid var(--ok);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="routing-table"] .rt-later { visibility: hidden; }
+
+/* Phone and portrait: the stage grows with its content; each row's words go above its bits. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="routing-table"] .sd-stage { height: auto; container-type: inline-size; }
+  /* 16 bits a line: row r takes grid rows 3r − 2 (words), 3r − 1 (bits 1–16) and 3r (bits 17–32) */
+  [data-sim="routing-table"] .rt { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; --gap8: 0.4rem; --bw: calc((100cqw - 0.6rem - 0.4rem - 1.6rem) / 16); }
+  [data-sim="routing-table"] .rt-table { grid-template-columns: repeat(8, var(--bw)) var(--gap8) repeat(8, var(--bw)); column-gap: 0.1rem; row-gap: 0.3rem; }
+  [data-sim="routing-table"] .rt-table > *, [data-sim="routing-table"] .rt-meta > * { grid-row: calc(var(--r) * 3 - 1); grid-column: 1 / -1; }
+  [data-sim="routing-table"] .rt-table > .rt-bit { grid-row: calc(var(--r) * 3 - 1 + var(--h)); grid-column: var(--pc); }
+  [data-sim="routing-table"] .rt-table > .rt-meta {
+    display: flex; flex-wrap: wrap; gap: 0 0.8rem; align-items: baseline;
+    grid-row: calc(var(--r) * 3 - 2); grid-column: 1 / -1; padding-top: 0.4rem;
+  }
+  [data-sim="routing-table"] .rt-meta > * { grid-row: auto; font-size: var(--fs-md); padding: 0; }
+  [data-sim="routing-table"] .rt-head.rt-bitshead { display: none; }
+  [data-sim="routing-table"] .rt-table > .rt-frame { grid-row: calc(var(--r) * 3 - 2) / span 3; }
+  [data-sim="routing-table"] .rt-bit { font-size: var(--fs-md); height: 1.6rem; }
+  [data-sim="routing-table"] .rt-none { font-size: var(--fs-sm); }
+  [data-sim="routing-table"] .rt-table > .rt-tags { grid-row: calc(var(--r) * 3); grid-column: 10 / -1; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tablica usmjeravanja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, text); }
+  function bold(text) { return h('b', { translate: 'no' }, text); }
+  function entryName(row) { return L.format(row.net) + '/' + row.prefix; }
+  function grid(i) { return 2 + i + Math.floor(i / 8); } // grid column of bit i (0 = leftmost)
+  function bitCell(r, i, ch, cls) {
+    var j = i % 16; // on a phone: 16 bits a line, --h the line, --pc the column
+    return h('span', { class: 'rt-bit ' + cls, dataset: cls.indexOf('sd-fill') >= 0 ? { c: '1' } : null, translate: 'no',
+      'aria-hidden': 'true', style: { '--dc': String(grid(i)), '--pc': String(1 + j + Math.floor(j / 8)), '--h': i < 16 ? '0' : '1', '--r': String(r) } }, ch);
+  }
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { dest: '10.1.2.55', order: 'book' } },
+    { id: 'default-route', label: t('presetDefault'), hint: t('presetDefaultHint'), params: { dest: '172.16.5.5' } },
+    { id: 'slash-8', label: t('presetEight'), hint: t('presetEightHint'), params: { dest: '10.5.0.1' } },
+    { id: 'slash-16', label: t('presetSixteen'), hint: t('presetSixteenHint'), params: { dest: '10.1.3.7' } },
+    { id: 'reversed', label: t('presetReversed'), hint: t('presetReversedHint'), params: { dest: '10.1.2.55', order: 'reversed' } }
+  ];
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'dest', type: 'choice', label: t('dest'), options: L.dests.map(function (a) { return [a, a]; }) },
+      { key: 'order', type: 'choice', label: t('order'), options: [['book', t('orderBook')], ['reversed', t('orderReversed')]] }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legendMatch') },
+      { shape: 'hollow', label: t('legendIgnored') },
+      { shape: 'hl', label: t('legendDiff') }
+    ],
+
+    render: function (c) {
+      var s = c.state, choose = s.phase === 'choose', fwd = c.dir === 'forward';
+      var destBits = L.bits(s.dest), cells = [];
+
+      // row 1: column heads
+      cells.push(h('div', { class: 'rt-meta', style: { '--r': '1' } },
+        h('span', { class: 'rt-head rt-entry' }, t('colEntry')),
+        h('span', { class: 'rt-head rt-res' }, t('colResult')),
+        h('span', { class: 'rt-head rt-hop' }, t('colHop'))));
+      cells.push(h('div', { class: 'rt-head rt-bitshead', style: { '--r': '1' } }, t('colBits')));
+
+      // row 2: the destination, every bit
+      cells.push(h('div', { class: 'rt-meta rt-destrow', style: { '--r': '2' } },
+        h('span', { class: 'rt-entry' }, h('small', null, t('destLabel')), data(L.format(s.dest)))));
+      for (var i = 0; i < 32; i++) cells.push(bitCell(2, i, destBits[i], 'rt-dest'));
+
+      // rows 3…: one per entry, its network's bits up to the prefix length
+      s.rows.forEach(function (row, k) {
+        var r = 3 + k, done = k < s.checked, current = s.phase === 'check' && k === s.checked - 1;
+        var win = choose && k === s.winner, first = choose && k === s.firstMatch && s.firstMatch !== s.winner;
+        cells.push(h('div', { class: 'rt-frame' + (win ? ' rt-win' : current ? ' rt-current' : ''), style: { '--r': String(r) } }));
+        var nb = L.bits(row.net);
+        for (var b = 0; b < row.prefix; b++) {
+          var cls = 'rt-open';
+          if (done) {
+            if (row.diff < 0 || b < row.diff) cls = 'sd-fill';
+            else if (b === row.diff) cls = 'sd-changed' + (fwd && current ? ' sd-anim-in' : '');
+          }
+          cells.push(bitCell(r, b, nb[b], cls));
+        }
+        if (row.prefix === 0) cells.push(h('div', { class: 'rt-none', style: { '--r': String(r) } }, t('noBits')));
+        cells.push(h('div', { class: 'rt-meta', style: { '--r': String(r) } },
+          h('span', { class: 'rt-entry' }, data(entryName(row))),
+          h('span', { class: 'rt-res ' + (!done ? 'rt-wait' : row.match ? 'rt-yes' : 'rt-no') },
+            !done ? t('resultWait') : t(row.match ? 'resultYes' : 'resultNo')),
+          h('span', { class: 'rt-hop' }, t.parts('hop', { r: data(row.hop) }))));
+        if (win || first) cells.push(h('div', { class: 'rt-tags', style: { '--r': String(r) } },
+          win ? h('span', { class: 'rt-tag rt-tag-win' }, t('winner')) : null,
+          first ? h('span', { class: 'rt-tag rt-tag-first' }, t('firstInTable')) : null));
+      });
+
+      var winRow = s.rows[s.winner];
+      c.stage.replaceChildren(h('div', { class: 'rt' },
+        h('div', { class: 'rt-table' }, cells),
+        h('div', { class: 'rt-outcome' + (choose ? (fwd ? ' sd-anim-in' : '') : ' rt-later') },
+          t.parts('outcome', { r: data(winRow.hop) }))));
+    },
+
+    caption: function (c) {
+      var s = c.state, dest = bold(L.format(s.dest));
+      if (s.phase === 'start') return t.parts('captionStart', { dest: dest });
+      if (s.phase === 'check') {
+        var row = s.rows[s.checked - 1], v = { dest: dest, entry: bold(entryName(row)), net: bold(L.format(row.net)), n: bold(String(row.prefix)) };
+        if (row.prefix === 0) return t.parts('captionMatchDefault', v);
+        if (row.match) return t.parts('captionMatch', v);
+        v.bit = bold(String(row.diff + 1));
+        v.octet = String(Math.floor(row.diff / 8) + 1);
+        return t.parts('captionMiss', v);
+      }
+      var win = s.rows[s.winner];
+      var w = { dest: dest, win: bold(entryName(win)), hop: h('b', null, t.parts('hop', { r: data(win.hop) })) };
+      if (win.prefix === 0) return t.parts('captionChooseDefault', w);
+      var list = [];
+      s.matches.forEach(function (k, j) {
+        if (j) list.push(j === s.matches.length - 1 ? t('listAnd') : ', ');
+        list.push(data(entryName(s.rows[k])));
+      });
+      w.count = t.n('matchCount', s.matches.length, { count: s.matches.length });
+      w.list = h('span', null, list);
+      var out = t.parts('captionChoose', w);
+      if (s.firstMatch !== s.winner) out = out.concat([' ', h('span', { class: 'sd-hl' }, t.parts('captionNotFirst', { first: bold(entryName(s.rows[s.firstMatch])) }))]);
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
