@@ -4,10 +4,18 @@
 // CLAUDE.md.
 //
 // Every painter is a pure function returning an SVG string, exported so the
-// checks can exercise the markup in node. Headless Firefox is broken on this
-// machine; string painters are what keeps the renderer testable anyway.
+// checks can exercise the markup in node.
 
 import { domainIndex } from './engine/domain.js';
+import { has, t } from './i18n.js';
+
+// simdeck copy: the words the canvas paints come from strings.js. A role or domain kind the table does not know is
+// shown as it is written in the document (it is data), and the authorities nobody drew are named in the page's
+// language by their kind, since the engine names them in English. A component that is down gets a ✕ before its
+// name, so colour is not the only sign (the original only recoloured it).
+const word = (prefix, v) => (v && has(`${prefix}.${v}`) ? t(`${prefix}.${v}`) : v || '');
+const compName = (c) => (c.implicit && c.authorityKind ? t(`auth.${c.authorityKind}`) : c.name || c.id);
+const domName = (d) => (d.implicit ? t('cv.notDrawnDomain') : d.name || d.id);
 
 const PAD = 14, HEADER = 26, GAP = 12;
 const COMP_W = 138, COMP_H = 40, COMP_GAP = 8, MAX_COLS = 3;
@@ -147,8 +155,8 @@ export function paintDomain(domain, box, { down = false } = {}) {
   const cls = ['domain', down ? 'down' : ''].filter(Boolean).join(' ');
   return `<g class="${cls}" data-kind="domain" data-id="${esc(domain.id)}">` +
     `<rect class="dom" x="${r1(box.x)}" y="${r1(box.y)}" width="${r1(box.w)}" height="${r1(box.h)}"/>` +
-    `<text class="dom-title" x="${r1(box.x + PAD)}" y="${r1(box.y + 17)}">${esc(domain.name || domain.id)}</text>` +
-    `<text class="dom-kind" x="${r1(box.x + box.w - PAD)}" y="${r1(box.y + 17)}" text-anchor="end">${esc(domain.kind || '')}</text>` +
+    `<text class="dom-title" x="${r1(box.x + PAD)}" y="${r1(box.y + 17)}">${esc(domName(domain))}</text>` +
+    `<text class="dom-kind" x="${r1(box.x + box.w - PAD)}" y="${r1(box.y + 17)}" text-anchor="end">${esc(word('kind', domain.kind))}</text>` +
     `<rect class="hit" x="${r1(box.x)}" y="${r1(box.y)}" width="${r1(box.w)}" height="20"/>` +
     `</g>`;
 }
@@ -161,8 +169,8 @@ export function paintComponent(comp, box, { down = false, lit = false } = {}) {
     `<rect class="comp" x="${r1(box.x)}" y="${r1(box.y)}" width="${r1(box.w)}" height="${r1(box.h)}"/>` +
     (lit ? `<rect class="cut-lit-ring" x="${r1(box.x - 3)}" y="${r1(box.y - 3)}" width="${r1(box.w + 6)}" height="${r1(box.h + 6)}"/>` : '') +
     `<rect class="swatch" x="${r1(box.x + 8)}" y="${r1(box.y + 13)}" width="4" height="14" fill="${esc(colour)}"/>` +
-    `<text class="comp-name" x="${r1(box.x + 18)}" y="${r1(box.y + 18)}">${esc(comp.name || comp.id)}</text>` +
-    `<text class="comp-role" x="${r1(box.x + 18)}" y="${r1(box.y + 31)}">${esc(comp.role || '')}${comp.implicit ? ' · not drawn' : ''}</text>` +
+    `<text class="comp-name" x="${r1(box.x + 18)}" y="${r1(box.y + 18)}">${down ? '✕ ' : ''}${esc(compName(comp))}</text>` +
+    `<text class="comp-role" x="${r1(box.x + 18)}" y="${r1(box.y + 31)}">${esc(word('role', comp.role))}${comp.implicit ? ` · ${esc(t('cv.notDrawn'))}` : ''}</text>` +
     `</g>`;
 }
 
@@ -210,7 +218,8 @@ export function initRenderer(el) {
   svg = el;
   svg.classList.add('fl-canvas');
   svg.innerHTML = `<style id="fl-style">${CANVAS_CSS}${UI_CSS}</style><g id="fl-layer"></g>`;
-  applyTheme('light');
+  // simdeck copy: the theme the page chose (js/main.js); the original always painted light.
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
 }
 
 export function applyTheme(name) {

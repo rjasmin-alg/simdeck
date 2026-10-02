@@ -7,9 +7,10 @@
 
 import { SAMPLES, makeSample } from './samples.js';
 import { analyse, invalidate } from './compile.js';
-import { initRenderer, paint } from './render.js';
+import { applyTheme, initRenderer, paint } from './render.js';
 import { evaluator } from './engine/graph.js';
 import { authorityById } from './engine/authorities.js';
+import { applyStatic, has, lang, switchLang, t } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -21,6 +22,20 @@ let current = null;             // last analyse() result
 const esc = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// simdeck copy: an event's name in the page's language. The engine names a lost domain "<name> lost" and an
+// authority by its English name; the view rebuilds both from the event id (ev:dom:<id>, ev:comp:auth:<kind>).
+// Component and correlated events already carry the sample's name, which samples.js wrote in this language.
+function evName(e) {
+  const [, kind, ...rest] = e.id.split(':');
+  const target = rest.join(':');
+  if (kind === 'dom') {
+    const d = current?.doc.domains.find((x) => x.id === target);
+    return t('ev.domainLost', { name: d ? d.name : target });
+  }
+  if (kind === 'comp' && target.startsWith('auth:')) return t(`auth.${target.slice(5)}`);
+  return e.name;
+}
 
 // --- derivation -----------------------------------------------------------
 
@@ -54,9 +69,9 @@ function renderEvents() {
   }
 
   const labels = {
-    correlated: 'Correlated events',
-    domain: 'Lose a whole domain',
-    component: 'Lose one thing',
+    correlated: t('ev.groupCorrelated'),
+    domain: t('ev.groupDomain'),
+    component: t('ev.groupComponent'),
   };
 
   const html = [];
@@ -69,7 +84,7 @@ function renderEvents() {
         `<button class="ev${on ? ' on' : ''}" type="button" data-ev="${esc(e.id)}"` +
         (e.note ? ` title="${esc(e.note)}"` : '') + '>' +
         `<span class="ev-kind">${e.hits.size}</span>` +
-        `<span>${esc(e.name)}</span></button>`,
+        `<span>${esc(evName(e))}</span></button>`,
       );
     }
   }
@@ -79,39 +94,38 @@ function renderEvents() {
 // --- right rail: the answer -----------------------------------------------
 
 function cutHtml(cut, i) {
-  const names = cut.events.map((e) => esc(e.name)).join(' <b>+</b> ');
+  const names = cut.events.map((e) => esc(evName(e))).join(' <b>+</b> ');
   const q = cut.events.length === 1 ? authorityById(cut.events[0].id.replace('ev:comp:', '')) : null;
   return (
     `<div class="cut sz${Math.min(cut.size, 3)}" data-cut="${i}">` +
     `<div class="cut-head">` +
     `<span class="cut-size">${cut.size}</span>` +
     `<span class="cut-names">${names}</span>` +
-    `<span class="cut-radius">${cut.blastRadius} hit</span>` +
+    `<span class="cut-radius">${esc(t('cut.hit', { n: cut.blastRadius }))}</span>` +
     `</div>` +
-    (q ? `<p class="cut-q">${esc(q.question)}</p>` : '') +
+    (q ? `<p class="cut-q">${esc(t(`authq.${q.kind}`))}</p>` : '') +
     `</div>`
   );
 }
 
 function renderCutsets(down) {
   const s = current.services[0];
-  if (!s) { $('#cutset-panel').innerHTML = '<p class="empty">No service in this scenario.</p>'; return; }
+  if (!s) { $('#cutset-panel').innerHTML = `<p class="empty">${esc(t('cut.noService'))}</p>`; return; }
 
   const html = [];
-  html.push('<div class="section-label">In what you drew</div>');
+  html.push(`<div class="section-label">${esc(t('cut.drawn'))}</div>`);
   if (s.drawnCuts.length) {
     s.drawnCuts.forEach((c, i) => html.push(cutHtml(c, s.cuts.indexOf(c))));
   } else {
-    html.push('<p class="empty">Nothing you drew can take it down on its own.</p>');
+    html.push(`<p class="empty">${esc(t('cut.noneDrawn'))}</p>`);
   }
 
   if (s.implicitCuts.length) {
     const n = s.drawnCuts.filter((c) => c.size === 1).length;
     html.push(
       '<div class="reveal">' +
-      `<h3>${n ? 'And then there is what nobody drew' : 'It still is not zero'}</h3>` +
-      '<p>You can keep adding zones. These do not go away, because ' +
-      'something has to be authoritative about what the cluster looks like.</p>' +
+      `<h3>${esc(t(n ? 'cut.revealMore' : 'cut.revealZero'))}</h3>` +
+      `<p>${esc(t('cut.revealText'))}</p>` +
       '</div>',
     );
     s.implicitCuts.forEach((c) => html.push(cutHtml(c, s.cuts.indexOf(c))));
@@ -125,18 +139,16 @@ function renderCutsets(down) {
 // because the footer cannot be scrolled away from, and because the number on its
 // own is the part that misleads — "1" is both `threeZone`, which is redundant to
 // the region boundary, and a design where one server ends it.
-const SCOPE_WORDS = {
-  correlated: 'correlated event',
-  component: 'component',
-  implicit: 'authority nobody drew',
-};
+//
+// simdeck copy: the scope words are in strings.js, scope1.<scope> ("one region") and scopeN.<scope> (the unit in
+// "2 things at region scale"); a scope the table lacks (a domain kind someone made up) is said as it is written.
+const scopeWord = (prefix, scope) => (has(`${prefix}.${scope}`) ? t(`${prefix}.${scope}`) : scope);
 
 function headline(h) {
-  if (!h) return 'nothing you drew can take it down';
-  const unit = SCOPE_WORDS[h.scope] || h.scope;
+  if (!h) return t('hl.none');
   return h.size === 1
-    ? `smallest drawn failure: one ${unit} · ${h.blastRadius} hit`
-    : `smallest drawn failure: ${h.size} things at ${unit} scale · ${h.blastRadius} hit`;
+    ? t('hl.one', { unit: scopeWord('scope1', h.scope), hit: h.blastRadius })
+    : t('hl.many', { n: h.size, unit: scopeWord('scopeN', h.scope), hit: h.blastRadius });
 }
 
 function renderStatus(down) {
@@ -146,19 +158,23 @@ function renderStatus(down) {
   const up = ev.isUp(s.service.id);
   const el = $('#verdict');
   el.className = up ? 'up' : 'down';
-  el.textContent = up
-    ? `${s.service.name} is serving`
-    : `${s.service.name} is down`;
+  el.textContent = t(up ? 'st.up' : 'st.down', { name: s.service.name });
   $('#searched').textContent =
     `${headline(s.smallestDrawn)} · ` +
-    `${s.cuts.length} cuts (${s.drawnCuts.length} drawn, ${s.implicitCuts.length} not drawn) · ` +
-    `searched ${s.searched.toLocaleString()} combinations to size ${s.maxSize}` +
-    (s.truncated ? ' · TRUNCATED' : '');
+    `${t('st.cuts', { n: s.cuts.length })} ` +
+    `${t('st.split', { drawn: s.drawnCuts.length, hidden: s.implicitCuts.length })} · ` +
+    t('st.searched', { n: s.searched, num: s.searched.toLocaleString(lang() === 'hr' ? 'hr-HR' : 'en-GB'), size: s.maxSize }) +
+    (s.truncated ? ` · ${t('st.truncated')}` : '');
 }
 
 // --- events ---------------------------------------------------------------
 
+// simdeck copy: the sample on the canvas, kept for ?sample= when the language switches.
+let sampleKey = null;
+
 function load(key) {
+  sampleKey = key;
+  $('#sample-picker').value = key;
   doc = makeSample(key);
   doc.settings = { ...doc.settings, maxCutSize: Number($('#max-size').value) };
   failedEvents = new Set();
@@ -177,7 +193,29 @@ function applySettings() {
 
 // --- boot -----------------------------------------------------------------
 
+// simdeck copy: the page's language (js/i18n.js) and the URL settings: ?sample=<key> (threeZone, onePdu, sizeTwo,
+// usEast1, frontDoor), ?theme=light|dark (else the OS setting, followed live), ?motion=reduce. The original had no
+// URL settings and always painted light.
+const params = new URLSearchParams(location.search);
+applyStatic();
+document.title = t('ui.pageTitle');
+const darkQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+function applyPageTheme() {
+  const asked = params.get('theme');
+  const dark = asked === 'dark' || (asked !== 'light' && !!darkQuery?.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  applyTheme(dark ? 'dark' : 'light');
+}
+document.documentElement.classList.toggle('reduce-motion', params.get('motion') === 'reduce');
+
 initRenderer($('#canvas'));
+applyPageTheme();
+darkQuery?.addEventListener?.('change', applyPageTheme);
+$('#btn-lang').addEventListener('click', () => {
+  const next = new URLSearchParams(location.search);
+  if (sampleKey) next.set('sample', sampleKey);
+  switchLang(next);
+});
 
 $('#sample-picker').innerHTML = Object.entries(SAMPLES)
   .map(([k, v]) => `<option value="${esc(k)}">${esc(v.label)}</option>`)
@@ -222,6 +260,6 @@ $('#cutset-panel').addEventListener('click', (e) => {
   render();
 });
 
-load(Object.keys(SAMPLES)[0]);
+load(SAMPLES[params.get('sample')] ? params.get('sample') : Object.keys(SAMPLES)[0]);
 
 window.FL = { get doc() { return doc; }, get current() { return current; }, load, render };

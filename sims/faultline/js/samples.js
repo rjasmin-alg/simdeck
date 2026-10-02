@@ -2,6 +2,11 @@
 // and the two cloud ones are real, dated and sourced — because invented
 // scenarios feel invented and students end up learning the tool instead of the
 // trade.
+//
+// simdeck copy: every visible word comes from strings.js (t('s.*')), so a sample is built in the page's language.
+// Ids, gates and hits are the same in both; names that are data (us-east-1, osd-1, etcd-1) are not translated.
+
+import { t } from './i18n.js';
 
 const dom = (id, name, kind, parent = null) => ({ id, name, kind, parent });
 const comp = (id, name, role, domain, extra = {}) => ({ id, name, role, domain, up: true, ...extra });
@@ -15,7 +20,7 @@ const dep = (from, to, gate = 'all', extra = {}) => ({ id: `dep:${from}>${to}`, 
 function threeZone() {
   return {
     version: 1,
-    title: 'Three zones, and still not zero',
+    title: t('s.threeZone.title'),
     settings: { profile: 'aws', maxCutSize: 3 },
     domains: [
       dom('reg', 'us-east-1', 'region'),
@@ -46,16 +51,16 @@ function threeZone() {
 function onePdu() {
   return {
     version: 1,
-    title: 'Three racks, one power strip',
+    title: t('s.onePdu.title'),
     settings: { profile: 'onprem', maxCutSize: 3 },
     domains: [
-      dom('dc', 'Server room', 'dc'),
-      dom('r1', 'Rack 1', 'rack', 'dc'),
-      dom('r2', 'Rack 2', 'rack', 'dc'),
-      dom('r3', 'Rack 3', 'rack', 'dc'),
+      dom('dc', t('s.serverRoom'), 'dc'),
+      dom('r1', t('s.rack', { n: 1 }), 'rack', 'dc'),
+      dom('r2', t('s.rack', { n: 2 }), 'rack', 'dc'),
+      dom('r3', t('s.rack', { n: 3 }), 'rack', 'dc'),
     ],
     components: [
-      comp('svc', 'file service', 'service', 'dc'),
+      comp('svc', t('s.onePdu.service'), 'service', 'dc'),
       comp('osd1', 'osd-1', 'replica', 'r1'),
       comp('osd2', 'osd-2', 'replica', 'r2'),
       comp('osd3', 'osd-3', 'replica', 'r3'),
@@ -69,9 +74,9 @@ function onePdu() {
     events: [
       {
         id: 'pdu-a',
-        name: 'PDU A trips',
+        name: t('s.onePdu.event'),
         hits: ['r1', 'r2'],
-        note: 'Racks 1 and 2 were commissioned first and share a feed. Nobody drew the feed.',
+        note: t('s.onePdu.note'),
       },
     ],
   };
@@ -83,9 +88,9 @@ function onePdu() {
 function sizeTwo() {
   return {
     version: 1,
-    title: 'size=2, min_size=2',
+    title: t('s.sizeTwo.title'),
     settings: { profile: 'ceph', maxCutSize: 2 },
-    domains: [dom('dc', 'Server room', 'dc'), dom('h1', 'host-1', 'host', 'dc'), dom('h2', 'host-2', 'host', 'dc')],
+    domains: [dom('dc', t('s.serverRoom'), 'dc'), dom('h1', 'host-1', 'host', 'dc'), dom('h2', 'host-2', 'host', 'dc')],
     components: [
       comp('svc', 'rbd pool', 'service', 'dc'),
       comp('osd1', 'osd-1', 'replica', 'h1'),
@@ -107,7 +112,7 @@ function sizeTwo() {
 function usEast1() {
   return {
     version: 1,
-    title: 'Multi-region, single-region control plane (AWS, 20 Oct 2025)',
+    title: t('s.usEast1.title'),
     settings: { profile: 'aws', maxCutSize: 2 },
     domains: [
       dom('aws', 'aws partition', 'partition'),
@@ -122,8 +127,8 @@ function usEast1() {
       comp('app2', 'app-2', 'replica', 'euw1b'),
       // Drawn where they actually live, which is the entire lesson.
       comp('iam', 'IAM / STS', 'authority', 'use1', { authorityKind: 'identity' }),
-      comp('r53', 'Route 53 control plane', 'authority', 'use1', { authorityKind: 'naming' }),
-      comp('ddb', 'DynamoDB (session store)', 'plane', 'use1'),
+      comp('r53', t('s.usEast1.r53'), 'authority', 'use1', { authorityKind: 'naming' }),
+      comp('ddb', t('s.usEast1.ddb'), 'plane', 'use1'),
     ],
     deps: [
       dep('svc', 'app1', 'any'), dep('svc', 'app2', 'any'),
@@ -133,9 +138,9 @@ function usEast1() {
     events: [
       {
         id: 'ddb-dns',
-        name: 'DynamoDB DNS automation race (us-east-1)',
+        name: t('s.usEast1.event'),
         hits: ['use1'],
-        note: '20 Oct 2025. An empty DNS record for the regional endpoint; the global control planes homed here went with it.',
+        note: t('s.usEast1.note'),
       },
     ],
   };
@@ -150,15 +155,15 @@ function usEast1() {
 function frontDoor() {
   return {
     version: 1,
-    title: 'A config push reaches every region by design (Azure, 29 Oct 2025)',
+    title: t('s.frontDoor.title'),
     settings: { profile: 'azure', maxCutSize: 2 },
     domains: [
-      dom('global', 'Global edge', 'geo'),
+      dom('global', t('s.frontDoor.edge'), 'geo'),
       dom('weu', 'West Europe', 'region'),
       dom('neu', 'North Europe', 'region'),
-      dom('weu1', 'Zone 1', 'zone', 'weu'),
-      dom('weu2', 'Zone 2', 'zone', 'weu'),
-      dom('neu1', 'Zone 1', 'zone', 'neu'),
+      dom('weu1', t('s.zone', { n: 1 }), 'zone', 'weu'),
+      dom('weu2', t('s.zone', { n: 2 }), 'zone', 'weu'),
+      dom('neu1', t('s.zone', { n: 1 }), 'zone', 'neu'),
     ],
     components: [
       comp('svc', 'portal', 'service', 'global'),
@@ -177,20 +182,22 @@ function frontDoor() {
     events: [
       {
         id: 'afd-config',
-        name: 'Front Door configuration rollout',
+        name: t('s.frontDoor.event'),
         hits: ['afd'],
-        note: '29 Oct 2025. Nodes across the global fleet failed to load the new config. Rolled back; every region was affected at once.',
+        note: t('s.frontDoor.note'),
       },
     ],
   };
 }
 
+// simdeck copy: the keys are quoted so the manifest check finds each entry's ?sample= key; labels are getters, so
+// they follow the language.
 export const SAMPLES = {
-  threeZone: { label: 'Three zones, and still not zero', make: threeZone },
-  onePdu:    { label: 'Three racks, one power strip', make: onePdu },
-  sizeTwo:   { label: 'size=2, min_size=2', make: sizeTwo },
-  usEast1:   { label: 'AWS us-east-1, 20 Oct 2025', make: usEast1 },
-  frontDoor: { label: 'Azure Front Door, 29 Oct 2025', make: frontDoor },
+  'threeZone': { get label() { return t('s.threeZone.label'); }, make: threeZone },
+  'onePdu':    { get label() { return t('s.onePdu.label'); }, make: onePdu },
+  'sizeTwo':   { get label() { return t('s.sizeTwo.label'); }, make: sizeTwo },
+  'usEast1':   { get label() { return t('s.usEast1.label'); }, make: usEast1 },
+  'frontDoor': { get label() { return t('s.frontDoor.label'); }, make: frontDoor },
 };
 
 export const makeSample = (key) => (SAMPLES[key] ? SAMPLES[key].make() : null);

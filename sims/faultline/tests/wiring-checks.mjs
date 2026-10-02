@@ -82,6 +82,7 @@ check('index.html loads only files that exist', () => {
   let n = 0;
   for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
     if (/^(https?:|#|data:)/.test(m[1])) continue;
+    if (m[1] === '../../index.html') continue; // simdeck copy: the back link to the site's index, outside this folder
     assert(existsSync(join(ROOT, m[1])), `index.html references ${m[1]}, which does not exist`);
     n++;
   }

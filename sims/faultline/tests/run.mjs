@@ -9,6 +9,8 @@
 // Firefox fault: headless needs a virtual display, and it needs a profile that
 // has already been initialised. scripts/shot.sh supplies both.
 
+// simdeck copy: the page's strings first (js/i18n.js reads globalThis.SimStrings); in node the language is English.
+import '../strings.js';
 import { results as engine } from './engine-checks.js';
 import { results as view } from './view-checks.js';
 import { results as wiring } from './wiring-checks.mjs';
