@@ -1,0 +1,296 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Layer-by-layer troubleshooting. Adopted from the URM book's web edition (uvod-u-racunalne-mreze,
+     ugradbeno/dijagnostika-po-slojevima.html) into the simdeck kit (docs/sim-ui.md): a stepper, one check per step;
+     bottom-up, top-down and divide and conquer look for the same faulty layer side by side.
+     The model is in sim.js, the words in strings.js. -->
+<html lang="hr" data-sim="layered-diagnosis">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dijagnostika po slojevima · simdeck</title>
+<meta name="description" content="Tri redoslijeda provjera traže isti kvar, korak po korak. Test dostupnosti na mrežnom sloju odmah isključi pola slojeva, pa podjela napola obično završi prva.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "layered-diagnosis",
+  "title": {
+    "hr": "Dijagnostika po slojevima",
+    "en": "Layer-by-layer troubleshooting"
+  },
+  "concept": {
+    "hr": "Odozdo prema gore, odozgo prema dolje i podjela napola kroz isti OSI stog",
+    "en": "Bottom-up, top-down and divide and conquer through the same OSI stack"
+  },
+  "summary": {
+    "hr": "Tri redoslijeda provjera traže isti kvar, korak po korak. Test dostupnosti na mrežnom sloju odmah isključi pola slojeva, pa podjela napola obično završi prva.",
+    "en": "Three orders of checks hunt the same fault. A reachability test at the network layer rules out half the layers, so divide and conquer usually ends first."
+  },
+  "tags": [
+    "troubleshooting"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="layered-diagnosis"]; colours only from kit tokens. */
+[data-sim="layered-diagnosis"] .ld {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.5cqh;
+  height: 100%;
+  padding: 2cqh 2cqw;
+}
+[data-sim="layered-diagnosis"] .ld-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2cqw; }
+[data-sim="layered-diagnosis"] .ld-col { display: flex; flex-direction: column; gap: 0.8cqh; min-width: 0; }
+[data-sim="layered-diagnosis"] .ld-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border-left: 0.5rem solid var(--sw, var(--ink));
+  font-size: var(--fs-stage);
+  font-weight: 700;
+}
+[data-sim="layered-diagnosis"] .ld-count { font-size: var(--fs-md); font-weight: 400; white-space: nowrap; }
+[data-sim="layered-diagnosis"] .ld-dir { padding-left: 1.1rem; font-size: var(--fs-md); color: var(--muted); }
+[data-sim="layered-diagnosis"] .ld-cell {
+  display: grid;
+  grid-template-columns: 2.2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  height: 8cqh;
+  min-height: 2.4rem;
+  padding: 0 0.6rem 0 0.3rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 1.1rem;
+}
+[data-sim="layered-diagnosis"] .ld-ord {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+[data-sim="layered-diagnosis"] .ld-ord.ld-plan { border: var(--line-w) dotted var(--muted); color: var(--muted); }
+[data-sim="layered-diagnosis"] .ld-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-sim="layered-diagnosis"] .ld-name b { font-family: var(--mono); }
+[data-sim="layered-diagnosis"] .ld-mark { font-weight: 700; white-space: nowrap; }
+[data-sim="layered-diagnosis"] .ld-cell.ld-ok,
+[data-sim="layered-diagnosis"] .sd-swatch[data-shape='ok'] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--bg)); }
+[data-sim="layered-diagnosis"] .ld-cell.ld-ok .ld-mark { color: var(--ok); }
+[data-sim="layered-diagnosis"] .ld-cell.ld-testfail { border: 0.2rem dashed var(--danger); }
+[data-sim="layered-diagnosis"] .ld-cell.ld-testfail .ld-mark { color: var(--danger); }
+[data-sim="layered-diagnosis"] .ld-cell.ld-fault,
+[data-sim="layered-diagnosis"] .sd-swatch[data-shape='cross'] {
+  border: 0.3rem double var(--danger);
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 30%, transparent) 0.4em 0.55em),
+    repeating-linear-gradient(-45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 30%, transparent) 0.4em 0.55em);
+}
+[data-sim="layered-diagnosis"] .ld-cell.ld-fault .ld-mark { color: var(--danger); }
+[data-sim="layered-diagnosis"] .ld-cell.ld-out,
+[data-sim="layered-diagnosis"] .sd-swatch[data-shape='hatch'] {
+  border-style: dashed;
+  color: var(--muted);
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 22%, transparent) 0.35em 0.5em);
+}
+[data-sim="layered-diagnosis"] .ld-status { min-height: 2.6em; padding: 0 0.3rem; font-size: var(--fs-md); line-height: 1.3; }
+[data-sim="layered-diagnosis"] .ld-status.ld-done { font-weight: 700; }
+
+[data-sim="layered-diagnosis"] .ld-facts { display: flex; justify-content: center; }
+[data-sim="layered-diagnosis"] .ld-facts.ld-hidden { visibility: hidden; }
+[data-sim="layered-diagnosis"] .ld-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 1rem;
+  padding: 0.4rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-md);
+}
+[data-sim="layered-diagnosis"] .ld-box b { font-family: var(--mono); font-size: 1.2rem; }
+
+/* Phone and portrait: the stage grows with its content and the three columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="layered-diagnosis"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="layered-diagnosis"] .ld { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="layered-diagnosis"] .ld-cols { grid-template-columns: 1fr; gap: 1.2rem; }
+  [data-sim="layered-diagnosis"] .ld-head { font-size: 1.15rem; }
+  [data-sim="layered-diagnosis"] .ld-cell { height: 2.4rem; font-size: 1rem; }
+  [data-sim="layered-diagnosis"] .ld-box b { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Dijagnostika po slojevima</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var COLOR = { bu: '1', td: '2', dc: '3' };
+  var NAME = { bu: 'apBu', td: 'apTd', dc: 'apDc' };
+  var DIR = { bu: 'dirBu', td: 'dirTd', dc: 'dirDc' };
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function avg(a) { return L.average(a).toFixed(1).replace(/\.0$/, '').replace('.', Simdeck.lang === 'hr' ? ',' : '.'); }
+
+  var faults = [];
+  for (var f = 7; f >= 1; f--) faults.push([f, f + ' · ' + t('name' + f)]);
+
+  var presets = [
+    { id: 'book', label: t('presetBook'), hint: t('presetBookHint'), params: { fault: 7 } },
+    { id: 'down', label: t('presetDown'), hint: t('presetDownHint'), params: { fault: 1 } },
+    { id: 'transport', label: t('presetMid'), hint: t('presetMidHint'), params: { fault: 4 } },
+    { id: 'network', label: t('presetNet'), hint: t('presetNetHint'), params: { fault: 3 } }
+  ];
+
+  // the status line under a column: the last thing that approach did
+  function status(a, run) {
+    if (run.found) {
+      var k = run.found.elim ? 'stElim' : 'stFound';
+      return t(k, { layer: t('layer' + run.found.layer + 'L'), checks: t.n('checks', run.found.checks) });
+    }
+    var last = run.checks[run.checks.length - 1];
+    if (!last) return t('stWait');
+    if (last.test) return t(last.ok ? 'stTestOk' : 'stTestFail');
+    return t('stCheck', { k: run.checks.length, layer: t('layer' + last.layer) });
+  }
+
+  function column(a, s, fresh) {
+    var run = s.runs[a];
+    var plan = L.plan(a, a === 'dc' ? s.ping : null);
+    var out = a === 'dc' ? L.excluded(s.ping) : [];
+    var cells = [];
+    for (var layer = L.layers; layer >= 1; layer--) {
+      var idx = -1;
+      run.checks.forEach(function (c, i) { if (c.layer === layer) idx = i; });
+      var check = idx >= 0 ? run.checks[idx] : null;
+      var order = plan.indexOf(layer);
+      var cls = 'ld-cell', mark = null;
+      if (run.found && run.found.layer === layer) { cls += ' ld-fault'; mark = '✗ ' + t('markFault'); }
+      else if (check && check.test) { cls += check.ok ? ' ld-ok' : ' ld-testfail'; mark = (check.ok ? '✓ ' : '✗ ') + t('test'); }
+      else if (check) { cls += ' ld-ok'; mark = '✓ ' + t('markOk'); }
+      else if (out.indexOf(layer) >= 0) { cls += ' ld-out'; mark = t('markOut'); }
+      if (fresh && idx === run.checks.length - 1) cls += ' sd-changed sd-anim-in';
+      cells.push(h('div', { class: cls },
+        order >= 0 ? h('span', { class: 'ld-ord' + (check ? ' sd-fill' : ' ld-plan'), dataset: { c: COLOR[a] }, translate: 'no' }, String(order + 1)) : h('span'),
+        h('span', { class: 'ld-name' }, h('b', { translate: 'no' }, layer + ' · '), t('name' + layer)),
+        h('span', { class: 'ld-mark' }, mark)));
+    }
+    return h('div', { class: 'ld-col' },
+      h('div', { class: 'ld-head', dataset: { c: COLOR[a] } },
+        h('span', null, t(NAME[a])), h('span', { class: 'ld-count' }, t.n('count', run.checks.length))),
+      h('div', { class: 'ld-dir' }, t(DIR[a])),
+      cells,
+      h('div', { class: 'ld-status' + (run.found ? ' ld-done' : '') }, status(a, run)));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'fault', type: 'select', label: t('fault'), hint: t('faultHint'), options: faults }
+    ],
+
+    presets: presets,
+
+    legend: [
+      { shape: 'ok', label: t('legendOk') },
+      { shape: 'cross', label: t('legendFault') },
+      { shape: 'hatch', label: t('legendOut') },
+      { shape: 'hl', label: t('legendNow') }
+    ],
+
+    render: function (c) {
+      var s = c.state, fwd = c.dir === 'forward' && !c.first;
+      var done = L.approaches.every(function (a) { return s.runs[a].found; });
+      var facts = h('div', { class: 'ld-facts' + (done ? '' : ' ld-hidden') },
+        h('div', { class: 'ld-box' }, t('factAvg'),
+          L.approaches.map(function (a) { return h('span', null, t(NAME[a]) + ' ', data(avg(a))); })));
+      c.stage.replaceChildren(h('div', { class: 'ld' },
+        h('div', { class: 'ld-cols' }, L.approaches.map(function (a) {
+          return column(a, s, fwd && s.events.some(function (e) { return e.a === a; }));
+        })),
+        facts));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      if (c.n === 0) return t.parts('captionStart', { layer: t('layer' + p.fault + 'L') });
+      var out = [];
+      function add(key, vars) { if (out.length) out.push(' '); out = out.concat(t.parts(key, vars)); }
+      s.events.forEach(function (e) {
+        var ap = t(NAME[e.a]);
+        if (e.e === 'test') add(e.ok ? 'evTestOk' : 'evTestFail', { ap: ap });
+        else if (e.e === 'found') add(e.elim ? 'evElim' : 'evFound', { ap: ap, layer: t('layer' + e.layer + 'L'), checks: t.n('checks', e.checks) });
+        else if (e.e === 'check' && e.ok && !(e.a === 'dc' && e.layer === 1 && s.ping === false)) add('evCheck', { ap: ap, layer: t('layer' + e.layer) });
+      });
+      var done = L.approaches.every(function (a) { return s.runs[a].found; });
+      if (done && (!out.length || c.n === c.steps)) {
+        add('evDone', { bu: data(s.runs.bu.found.checks), td: data(s.runs.td.found.checks), dc: data(s.runs.dc.found.checks) });
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
