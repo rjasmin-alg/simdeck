@@ -1,8 +1,8 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.5.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
-sequence chart view K1, §11; 0.5.0 the rule table view K4, §12; changes in
+the template. Kit version **0.6.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
+sequence chart view K1, §11; 0.5.0 the rule table view K4, §12; 0.6.0 the block grid view K3, §13; changes in
 `kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
@@ -12,6 +12,7 @@ kit/
   topology.js      view K2: topology with moving packets (§10; a classic script, ~19 KB, linked only by pages that draw one)
   sequence.js      view K1: message sequence chart (§11; a classic script, ~15 KB, linked only by pages that draw one)
   ruletable.js     view K4: rule table with the matching row (§12; a classic script, ~13 KB, linked only by pages that draw one)
+  blockgrid.js     view K3: block grid (§13; a classic script, ~22 KB, linked only by pages that draw one)
   glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
   template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
@@ -20,6 +21,7 @@ kit/
   topology.test.js tests for view K2's geometry, spec checks and stylesheet rules
   sequence.test.js tests for view K1's lane geometry, tie-breaks, spec checks and stylesheet rules
   ruletable.test.js tests for view K4's evaluation modes, tie-breaks, spec checks and stylesheet rules
+  blockgrid.test.js tests for view K3's arrow routes, space counter, row splitting, tie-breaks, spec checks and stylesheet rules
   CHANGELOG.md     one line per kit change
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
   tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
@@ -375,7 +377,7 @@ settled each one as follows.
   and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
 - Drawing helpers come as **kit views**, each extracted from a pilot sim once it works, then checked against two
   later consumers before its API is frozen: K2 topology (§10, 0.3.0), K1 sequence chart (§11, 0.4.0), K4 rule table
-  (§12, 0.5.0). K3 block grid follows the same way (`docs/tasks/w0/kit-block-grid.md`).
+  (§12, 0.5.0), K3 block grid (§13, 0.6.0).
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.
 
@@ -840,3 +842,157 @@ and screenshots: `library/k4-consumer-sketch.html` and `library/k4-sketch-*.png`
   and `stickyMark`.
 - **`win-gpo-precedence`** (fit): ten GPOs in processing order in `specific` mode with ranks = order and the Enforced
   link ranked highest; three values `beaten`, the implicit "not configured" row hatched.
+
+## 13. View K3: block grid (`kit/blockgrid.js`, 0.6.0)
+
+Rows of equal cells for blocks, chunks, pages, extents or bands of a disk; a cell's state shown by colour **and**
+pattern; runs of cells outlined as spans with their number under them; a bracket above a range (a rolling window, the
+active erase block); arrows between cells or rows (backing chains, pointers, a map); shared vs owned blocks with a
+reference count; and the counter of space used in the header. Extracted from the pilot `sims/dedup-chunking/`; built
+for the 25 consumers in `docs/tasks/w0/kit-block-grid.md` (`lnx-cow-filesystem`, `backing-chains`, `ssd-internals`,
+`lnx-raid-rebuild`, `lnx-thin-overcommit`, `win-ntfs-mft`, …).
+
+```html
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>    <!-- after kit.js; the build inlines it like the kit -->
+```
+
+```js
+render: function (c) {
+  var s = c.state;
+  var grid = Simdeck.blockGrid({
+    dir: c.dir,
+    title: t('poolTitle'), meta: [t('blockSize', { k: 4 })],
+    count: { text: t('used', { n: sp.used, of: sp.total }), hl: s.phase === 'done' },   // sp = Simdeck.blockGrid.space(rows)
+    colLabels: s.blocks.map(function (b, i) { return i % 4 ? '' : String(i); }),
+    rows: [
+      { id: 'live', label: 'podaci', cells: s.live.map(function (b, k) { return { text: String(k), sub: '→' + b, now: k === s.wrote }; }) },
+      { id: 'pool', label: h('span', null, t('pool')), cells: s.blocks.map(function (b) {
+          return b.refs ? { text: b.ver, refs: b.refs, kind: b.refs > 1 ? 'soft' : 'fill', c: b.owner } : {};
+        }) }
+    ],
+    links: [{ from: { row: 'live', cell: s.wrote }, to: { row: 'pool', cell: s.newBlock }, now: true }],
+    foot: [spaceTable]
+  });
+  c.stage.replaceChildren(grid);
+}
+```
+
+**How it draws.** One box (header, then the grid, then `foot`) holding one CSS grid: per row a band above (brackets),
+the cells, and a band under them (span numbers); a label column on the left and an aside column on the right when
+any row has one; rows stand `--bg-row-gap` (0.2rem) apart, which a page may set on `.sd-bg-grid`. Everything is HTML
+at 1:1 except the arrows, which are SVG drawn over the grid in CSS pixels after
+layout (no `viewBox`) and redrawn on resize. The view holds no words. **In the grid** (cell text and `sub`, row
+`label` and `aside`, `colLabels`, span labels) a bare string or number is data (`translate="no"`, monospace: bytes,
+block ids, LBAs, file names, sizes); pass a node for a translated word. **In the header** (`title`, `meta`, `count`)
+and in bracket labels, strings are words.
+
+### `Simdeck.blockGrid(spec)` → element
+
+| Field | Meaning |
+|---|---|
+| `title`, `meta[]`, `count` | the heading; muted notes after it (settings, version); the counter of space used on the right, a string or node or `{ text, hl }` (`hl` puts it on the highlight, for the step that gives the result) |
+| `rows[]` | `{ id, label, aside, offset, cells, spans, brackets }`, top to bottom (below) |
+| `cols` | the number of cell columns (default: the widest row, counting `offset`) |
+| `colLabels[]` | a header line over the columns (disk names, LBAs, every fourth block number); `''` leaves one empty |
+| `links[]` | arrows `{ from: { row, cell }, to: { row, cell }, style, now, broken, c, head }` (below) |
+| `foot[]` | nodes placed in the box under the grid: a table, a store, a meter |
+| `joined` | the cells touch with no gap (the bytes of one strip, the pilot); by default each block stands apart with its own edges |
+| `cellWidth`, `cellWidthPhone`, `cellHeight` | CSS lengths; by default the cells share the width (`minmax(0, 1fr)`), on a phone take `minmax(1.05rem, max-content)` and the box scrolls sideways, and are `2.5rem` high (give `3rem` when cells have a `sub` line) |
+| `dir` | `ctx.dir`: brackets and a changed span number pop in only on `'forward'` (never under reduced motion) |
+| `bare`, `className` | no box around the grid; an extra class (the pilot sets its flex share with it) |
+
+**Rows.** `id` names the row for links (or use its index). `label` sits left of the cells (`EB0`, `base.qcow2`,
+`@s1`, a band "40–50%"), `aside` right of them (an erase count, "erased ×2"). `offset` moves the row's cells right by
+that many columns (four NAND pages under ten LBAs). `cells[i]` is one block; `null` is a hole (no block there: a gap
+before the spare disk), not drawn and not counted.
+
+**Cells:** `{ text, kind, c, refs, sub, dim, mark, now }`. Each kind is a pattern as well as a colour, so it reads in
+grayscale:
+
+| `kind` | Drawn | Meaning |
+|---|---|---|
+| none (`'free'`) | the page colour, a hairline edge | free, unallocated |
+| `'fill'` | solid series colour `c`, light text | owned, written, new (`c` = the owner: a volume, a tree, a file) |
+| `'soft'` | a tint of `c`, hatched | shared, reused, already stored (with `refs`, the count in the corner) |
+| `'dead'` | grey, crossed, the text struck | invalid, stale, freed but not erased |
+| `'bad'` | a `--danger` frame, ✕ in the corner | lost, failed, unreadable |
+| `'ghost'` | a dashed outline, no fill | reserved, promised, not allocated (thin provisioning, a spare not yet written) |
+
+`refs` (a number) puts `×n` in the corner when it is 2 or more. `sub` is a second, small line (the physical block a
+pointer leads to, a page's LBA). `dim` greys the text (a space byte). `mark: 'under'` underlines the cell (an inserted
+byte), `'gap'` draws a bar at its left edge (a byte was removed here). `now: true` is the kit's changed mark (yellow,
+ink outline); `now: 'gap'` highlights only the gap bar.
+
+**Spans:** `{ from, len, label, style, now, c, open }` outline `len` cells from `from` with an ink border (`style`
+`'solid'`, `'dashed'` or `'dotted'`; `c` colours the border) and put `label` (data: the chunk number) in the band
+under them; `now` marks the outline and puts the number on the highlight. Spans may overlap. **Brackets:** `{ from,
+len, label, open }` draw an open-bottomed bracket above the cells with its label (a word) inside. Give the row a
+`brackets` list, even an empty one, when a bracket comes and goes during the run: the band keeps its height and the row
+does not jump. `open` (`'start'`, `'end'`, `'both'`) leaves out that side of a span or bracket that goes on in the next
+row (`split` sets it).
+
+**Links (references).** An arrow from the `from` cell (or from the row's label when `cell` is left out: a whole layer
+points at its backing file) to the `to` cell or row. The route is an elbow: down (or up) from the middle of the
+source, a level run **just above the target** (0.35 rem) so it crosses the rows in between in the gap over the target
+row, and into the middle of the target; cells side by side in one row get an arc over the top (the tie-break: over,
+never under). Lines pass **under** the cells, so they never hide a cell's text, and show in the gaps; heads and crosses
+are drawn over them. `style` `'dashed'` or `'dotted'`, `now` thick with a highlight halo (the pointer that moved this
+step), `broken` grey with a ✕ on its longest leg (a reference that no longer resolves), `c` a series colour, `head:
+false` for a plain line. Links stay inside one grid: put things that point at each other in one grid's rows (the
+host's LBAs and the NAND pages as rows of one grid, not two grids side by side). Keep them few (the pointers of this
+step, not every pointer): write the rest as `sub` text.
+
+**Space counter.** `Simdeck.blockGrid.space(rows)` (pure) counts `{ total, free, used, shared, kinds, colours }` over
+the given rows: used is `fill`, `soft`, `dead` and `bad` (invalid pages still take room until erased), not `free` or
+`ghost`; shared is cells with `refs ≥ 2`, or of kind `soft` when they give no `refs`; `colours` counts used cells per
+owner `c`. The page words the counter from it (`count`) or draws a meter.
+
+**Meter.** `Simdeck.blockGrid.meter({ total, parts: [{ n, kind, c }], mark: { at, label }, label, text })` is a bar of
+space used: each part a segment of `n / total`, drawn like a cell of its kind; parts past the total are cut off and the
+bar gets a dashed `--danger` end (overcommitted: promised more than the pool holds); `mark` is a tick (the autoextend
+threshold) with its label under it; `label` before the bar, `text` after it (words).
+
+**Long rows.** `Simdeck.blockGrid.split(row, n)` (pure) cuts one row into rows of `n` cells (a pool of 100 blocks as
+five rows of 20), with ids `id/0`, `id/1`, …, the label and aside on the first line only, and spans and brackets cut at
+the line ends (`open`, the label on the first piece).
+
+**Legend swatches:** `{ shape: 'bg-fill', c }`, `'bg-soft'`, `'bg-dead'`, `'bg-bad'`, `'bg-ghost'`, `'bg-span'`,
+`'bg-span-dashed'`, `'bg-span-dotted'`, `'bg-bracket'`, `'bg-link'` (→) and `'bg-refs'` (×2); the kit's `'hl'` is
+"changed".
+
+**Fit.** At 1920×1080 with the panel open and a 17rem card beside it, a grid holds 16 disks plus a spare × 10 bands
+at 2.6rem (the RAID sketch), or 2–6 rows of up to about 40 cells (the pilot: 33 bytes per row, two grids). Cells share
+the width, so wide rows get narrow cells: keep cell text to one to three characters (or set `cellWidth` and let the box
+scroll). Long labels and asides take their own width from the row.
+
+**Phone and portrait.** Cells take their content's width (at least 1.05rem) and the grid scrolls sideways inside its
+box, never the page; a page puts its stage at `height: auto` as the pilot does.
+
+**Spec checks.** `Simdeck.blockGrid.checkSpec(spec)` (pure, also under node: `require('kit/blockgrid.js')`) lists no
+rows, duplicate row ids, an unknown `kind`, `mark`, span or link `style`, a `now` that is not true/false/`'gap'`, a span
+or bracket outside its row (counting `offset`), `cols` narrower than a row, and a link with a missing end, an unknown
+row, a cell outside its row, a hole, or the same cell at both ends; the view logs them on the console, which the page
+check fails.
+
+### Checked against consumers (sketched, not built)
+
+The API was frozen after drawing four later sims with different needs on it (sketch page and screenshots:
+`library/k3-consumer-sketch.html` and `library/k3-sketch-*.png` in the thread t-0103 report):
+
+- **`lnx-cow-filesystem`**: two trees (`podaci`, `@s1`) as rows of logical blocks over a pool row of 24 physical
+  blocks; pool cells `soft` with `refs` ×2 where both trees point, `fill` in the owner's colour where one does; the
+  pointer of this step as a `now` link from the tree's block to the new block, the others as `sub` "→7"; the space
+  table and a meter from `space()` beside it. This sketch moved the arrows **under** the cells (a long arrow hid the
+  middle row's text) and their level run to just above the target.
+- **`ssd-internals`**: host LBAs as the top row (`sub` = block.page), four erase blocks as rows of four pages with
+  `offset`, labels `EB0`… and the erase count as `aside`; invalid pages `dead`; the active block as a bracket; the
+  write as a `now` link and the stale mapping as a `broken` one. It showed that arrows cannot join two grids side by
+  side: one grid holds both. This sketch added the **gap between blocks** by default (`joined` for the pilot's bytes):
+  equal filled cells ran together into one bar.
+- **`lnx-raid-rebuild`** (fit): 16 disks + a spare × 10 bands with `colLabels`, the failed disk `bad`, a URE `soft`,
+  the band being rebuilt `now`, the spare `ghost` below the rebuild. This sketch added **holes** (`null` cells: the gap
+  before the spare) and let column labels overflow their narrow column ("spare").
+- **`lnx-thin-overcommit`**: a 100-cell pool through `split()` into five rows of 20 coloured by volume; meters for
+  Data% with the autoextend tick, the promised total overcommitted (dashed `--danger` end), and per volume (allocated
+  `fill`, written but not allocated `ghost`). This sketch added the **meter** and on phones the content-width cells.

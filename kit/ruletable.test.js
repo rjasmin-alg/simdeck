@@ -163,7 +163,7 @@ test('kit.css has the K4 section: marks carried by shape, the implicit row, the 
     "[data-shape='rt-no']", "[data-shape='rt-hit']", "[data-shape='rt-warn']", "[data-shape='rt-verdict']", '.sd-rt-scroll { overflow-x: auto']) {
     assert.ok(css.includes(sel), sel);
   }
-  const sec = css.slice(css.indexOf('view K4'), css.indexOf('small screens: stack'));
+  const sec = css.slice(css.indexOf('── view K4'), css.indexOf('/* ──', css.indexOf('── view K4') + 1));   // up to the next section
   assert.ok(!/#[0-9a-f]{3,8}\b|rgb\(/i.test(sec), 'no colour literals: tokens only');
   assert.ok(!/\d+px/.test(sec.replace(/@media[^{]*/g, '')), 'sizes in rem');
 });

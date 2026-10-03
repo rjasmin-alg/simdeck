@@ -51,7 +51,11 @@ each node) is `kit/topology.js`, `Simdeck.topology(spec)` (`docs/sim-ui.md` §10
 struck, the deciding row outlined, unread rows hatched, an implicit default row; modes first match, most specific and
 deny wins, or marks the page sets for a rule of its own) is `kit/ruletable.js`, `Simdeck.ruleTable(spec)`
 (`docs/sim-ui.md` §12; pilot `sims/rule-first-match/`).
-The page links the view's script (`../../kit/sequence.js`, `../../kit/topology.js`, `../../kit/ruletable.js`) after `kit.js`. If the view lacks something your sim needs, draw that part
+**K3, block grid** (rows of cells for blocks, chunks, pages or extents, state by colour and pattern: owned, shared and
+hatched with a reference count, invalid, lost, reserved; spans with their numbers, a bracket above a range, arrows
+between cells or rows, holes, a meter and the counter of space used) is `kit/blockgrid.js`, `Simdeck.blockGrid(spec)`
+(`docs/sim-ui.md` §13; pilot `sims/dedup-chunking/`).
+The page links the view's script (`../../kit/sequence.js`, `../../kit/topology.js`, `../../kit/ruletable.js`, `../../kit/blockgrid.js`) after `kit.js`. If the view lacks something your sim needs, draw that part
 in the page and write the request in `NOTES.md` under "Shared requests"; the kit owner adds it.
 
 ## 3. The contract (every page)

@@ -3,6 +3,13 @@
 
 One line per change; the kit only grows (playbook §4). Rules and API: `docs/sim-ui.md`.
 
+- **0.6.0** (2026-10-04): view K3, block grid: `kit/blockgrid.js` (`Simdeck.blockGrid`, `.space`, `.split`, `.route`,
+  `.meter`, `.checkSpec`), its section in `kit.css`, tests in `kit/blockgrid.test.js`, docs/sim-ui.md §13. Cell kinds
+  fill, soft (hatched), dead, bad, ghost with reference counts, sub lines, under/gap marks and the changed mark; holes;
+  spans with numbers (solid, dashed, dotted, open ends), brackets, row labels and asides, column labels, offsets;
+  arrows between cells or rows under the cells with heads over them (dashed, dotted, now, broken); the space counter,
+  the meter and `split` for long rows; `joined` for touching cells; legend swatches `bg-*`. Pilot `dedup-chunking`
+  moved onto it.
 - **0.5.0** (2026-10-04): view K4, rule table with the matching row: `kit/ruletable.js` (`Simdeck.ruleTable`,
   `.evaluate`, `.checkSpec`, `.verdict`), its section in `kit.css`, tests in `kit/ruletable.test.js`, docs/sim-ui.md §12.
   Modes first match, most specific (tie: the earlier row) and deny wins (allows add up), page-set marks for other

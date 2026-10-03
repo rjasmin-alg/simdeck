@@ -28,7 +28,15 @@ New stepper (task `docs/tasks/w2/dedup-chunking.md`, catalogue `sto-dedup-chunki
   table with one column per chunk of the whole run (columns keep their width as chunks arrive), and the store as hash
   chips (original ones outlined, added ones filled). Spaces are drawn as `·`. The inserted byte is underlined, a
   deleted one leaves a bar at the gap; in step 2 they are highlighted. On a phone the strip and table scroll inside
-  their box. Reusable for later K3 pages: the `.dc-strip` grid and the model's `fixedChunks`/`cdcChunks`/`dedup`.
+  their box. Reusable for later K3 pages: the model's `fixedChunks`/`cdcChunks`/`dedup`; the grid is the kit's (below).
+- **On the kit view since kit 0.6.0** (task `kit-block-grid`, 2026-10-04): each method's box (header with the counter,
+  the byte strip with the chunk outlines and numbers, the window bracket) is drawn by `Simdeck.blockGrid` with
+  `joined: true` (`docs/sim-ui.md` §13), the chunk table and the store passed as its `foot`; the legend uses the kit's
+  `bg-span`, `bg-span-dashed` and `bg-bracket` swatches. The page keeps the chunk table, the store and the same/NEW
+  swatches. Screenshots before and after (139 states: every step of every preset in hr at 1920×1080, `prepend` in en,
+  dark, `showHash` off, 375×812 in both languages, two other size/window pairs) are pixel-identical except the
+  window's label "prozor"/"window", which is a word and now set in the sans face instead of the monospace of the data
+  around it (a 58×12 px area).
 - **Model is promotable:** pure functions over strings and arrays, no words (`EDITS` and `TEXT` are data).
 - **Concepts, not tools:** no backup product is named on the page. "Rabin fingerprint" and "Gear hash" are named in
   the explanation as algorithms, not tools. restic and Borg are only in Sources.
