@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'deadlock';
-// sha256 of ossimulator's dist-single/deadlock.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '0fb9d77c1dab8ffee326e3cf370079a51655ec6d2fcde2d2e2ab525e350a7d8b';
+// sha256 of ossimulator's dist-simdeck/deadlock.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '712676bb9dc327d324bc978093c4e2600ec191269fcbc3e9fd1d27d1fd3e0b8e';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['rag-classic', 'banker-safe', 'banker-unsafe', 'detect-fig610', 'dining-naive'];
 

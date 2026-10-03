@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'address-translation';
-// sha256 of ossimulator's dist-single/address-translation.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'c093ecfd79aed24f47bdac26b612204b6cff49acf9ab584d3bca60b628de79c4';
+// sha256 of ossimulator's dist-simdeck/address-translation.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'c4067e53023b7fb251635c034f0ba2f0c2c896734522264995b9b4369ad5df39';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['stallings-paging', 'tlb-locality', 'two-level-walk', 'inverted-chain', 'protection-fault'];
 

@@ -8,6 +8,10 @@ into ossimulator, and the build is re-imported. Done the same way as `sims/inter
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/synchronization.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `3190e334492c8b2de9e21153526e187afe0fe8bb98172458c7c3abaa19e1ad7d`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/sync.html`, built 2026-09-30 10:09 from `src/modules/sync/`
   (ossimulator HEAD `ce83949`; last change to the module `6b51b81`, 2026-09-30 07:59; to the module or
   `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/sync/` or `src/shared/` was newer than the
@@ -91,12 +95,9 @@ home page shows. The manifest accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=sync` (in simdeck that is the page itself); "Povezano" (Dretve, Potpuni zastoj) and the theory
-  links go to `./threads.html` (also `?scenario=klt-blocking`), `./deadlock.html` (also `?scenario=dining-naive`),
-  `./interrupts.html`, `./scheduling.html?scenario=starvation`, all missing in `sims/synchronization/`. A
-  simdeck build target should link `../../index.html` and `../<id>/index.html?scenario=…`, or hide links to pages
-  simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

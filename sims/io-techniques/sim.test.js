@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'io-techniques';
-// sha256 of ossimulator's dist-single/io-techniques.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'cb9ab98767b34225c8ac61d183565a6560b64ae2cefdebd3adceec5e570d141b';
+// sha256 of ossimulator's dist-simdeck/io-techniques.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'a18f9adc7a2cfe21a8072675513122421da98ee006b5986ef514ba1f66572803';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['three-techniques', 'buffering-compare'];
 

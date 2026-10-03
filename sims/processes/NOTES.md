@@ -7,6 +7,10 @@ into ossimulator, and the build is re-imported. Done the same way as `sims/inter
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/processes.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `e25d09c2431abffcbfd28ab3e94b9c2e2ec5af0c62646dad77f644452b6109f6`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/processes.html`, built 2026-09-30 10:09 from
   `src/modules/processes/` (ossimulator HEAD `ce83949`, last change to the module or `src/shared` `be6fb14`).
   Nothing in `src/` was newer than the build, so it was not rebuilt.
@@ -68,11 +72,9 @@ the home page shows. The manifest accepts them as `{ "preset": "orphan", "query"
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in `sims/interrupts/`). "Natrag na kartu" links
-  `./index.html?m=processes` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./scheduling.html`, `./threads.html`, `./syscalls.html`, `./interrupts.html`, `./memory-allocation.html`,
-  `./journey.html` (missing in `sims/processes/`). A simdeck build target should link `../../index.html` and
-  `../<id>/index.html?scenario=…`, or hide links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

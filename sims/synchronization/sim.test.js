@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'synchronization';
-// sha256 of ossimulator's dist-single/sync.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '90c40084a53d7b31d744d0a06baf071374473232c3fa6ea60dd5ab23ea7bfac9';
+// sha256 of ossimulator's dist-simdeck/synchronization.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '3190e334492c8b2de9e21153526e187afe0fe8bb98172458c7c3abaa19e1ad7d';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = [
   'race-counter-lost-update', 'attempt2-violation', 'attempt3-trap', 'attempt4-livelock',

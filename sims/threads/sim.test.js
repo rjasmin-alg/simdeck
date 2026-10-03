@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'threads';
-// sha256 of ossimulator's dist-single/threads.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'feb9976fdfdc90819add257a9532e4a1f0f0aeefeca52d33c015e6b59577c06b';
+// sha256 of ossimulator's dist-simdeck/threads.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '448bca0dd63e8e7e9aa5bb1f9beefe5bff53305d5f25be59c27dc50f80ab9c10';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['ult-blocking', 'klt-blocking', 'ult-jacketing', 'multicore'];
 

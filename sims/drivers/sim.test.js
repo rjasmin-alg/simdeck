@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'drivers';
-// sha256 of ossimulator's dist-single/drivers.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'fb14fbcd140a4c75db868b1b405718879864e47721660a8a41bd727ea5311b21';
+// sha256 of ossimulator's dist-simdeck/drivers.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'dd96ed28fd9671bd20f18d14cf27e40eefde03040aa60d4c664374c4bb2d00de';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['top-bottom-half', 'blocking-vs-nonblocking'];
 

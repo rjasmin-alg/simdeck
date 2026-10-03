@@ -8,6 +8,10 @@ imports (COMMON §12); `sim.test.js` is `sims/deadlock/sim.test.js` with this si
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/raid-cache.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `e6ce6808dc1fe50fa4c67b06122a895b9cc31cb8f31579037ad59e36bc56a9c1`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/raid-cache.html`, built 2026-09-30 10:09 from
   `src/modules/raid-cache/` (ossimulator HEAD `ce83949`; last change to the module `d63d007`, 2026-09-30 09:29; to
   the module or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/raid-cache/` or `src/shared/`
@@ -85,12 +89,9 @@ lines the home page shows. The manifest accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=raid-cache` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./disk-scheduling.html`, `./filesystem.html`, `./page-replacement.html` and `./io-techniques.html`, all missing
-  in `sims/raid-cache/`. A simdeck build target should link `../../index.html` and `../<id>/index.html` (simdeck
-  folders: `page-replacement` exists; `disk-scheduling`, `filesystem`, `io-techniques` are wave-1 tasks), or hide
-  links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

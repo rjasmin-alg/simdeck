@@ -8,6 +8,10 @@ imports (COMMON §12); `sim.test.js` is `sims/raid-cache/sim.test.js` with this 
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/syscalls.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `42ae7428243b17c52c2e79a81b642af500bb90a9f080362ecb5fde1e11de886f`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/syscalls.html`, built 2026-09-30 10:09 from
   `src/modules/syscalls/` (ossimulator HEAD `ce83949`; last change to the module `d3cc7ee`, 2026-09-30 09:36; to
   the module or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/syscalls/` or `src/shared/`
@@ -83,13 +87,9 @@ accepts them as `{ "preset": "read-11-steps", "query": "scenario=read-11-steps",
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=syscalls` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./interrupts.html`, `./processes.html` (also `?scenario=mini-shell`, `?scenario=io-wait`),
-  `./filesystem.html`, `./journey.html` (also `?scenario=read-miss`), `./interrupts.html?scenario=timer` and
-  `./drivers.html`, all missing in `sims/syscalls/`. A simdeck build target should link `../../index.html` and
-  `../<id>/index.html` (simdeck folders: `interrupts` and `processes` exist; `filesystem`, `drivers` and
-  `os-call-journey` are wave-1 tasks), or hide links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

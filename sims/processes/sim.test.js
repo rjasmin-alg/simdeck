@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'processes';
-// sha256 of ossimulator's dist-single/processes.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'ed0794d4cda364c39de0d9136465334370226366e322df0bca9d8ed003c07d7c';
+// sha256 of ossimulator's dist-simdeck/processes.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'e25d09c2431abffcbfd28ab3e94b9c2e2ec5af0c62646dad77f644452b6109f6';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['stallings-trace', 'suspend-memory', 'fork-zombie', 'orphan', 'mini-shell'];
 

@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'scheduling';
-// sha256 of ossimulator's dist-single/scheduling.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '6607c9acb5b6a76d099b54698cf78754df5a34be5717bc2f479b79f21d360a09';
+// sha256 of ossimulator's dist-simdeck/scheduling.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'c295d9f5f657d08f5a91f727d9aebe66a739a7064b973e17563df26a90e9ef93';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = [
   'compare-fcfs-rr4-srt', 'rr-quantum', 'stallings-spn', 'stallings-srt', 'stallings-hrrn', 'stallings-fb1', 'starvation', 'aging',

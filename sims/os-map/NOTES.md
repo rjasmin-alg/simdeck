@@ -8,6 +8,10 @@ re-imported. Done the same way as `sims/interrupts/` and the other ossimulator i
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/os-map.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `0b3f393edf8c70414bdc8ca4ee8b037093de21e64795d1862e292192c9f1bb3c`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/index.html`, built 2026-09-30 10:09 (ossimulator HEAD `ce83949`;
   last change to `src/map`, `src/index.html` or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/` was
   newer than the build, so it was not rebuilt.
@@ -97,14 +101,11 @@ at all (the module sims have their own lines).
 
 ## Defects for ossimulator
 
-- **"Otvori simulator" points outside the folder** (as the navigation links in the other ossimulator imports).
-  Every module's panel button links `./<module>.html` (`./interrupts.html`, `./processes.html`, …,
-  `./journey.html`), none of which exist in `sims/os-map/`. In simdeck it should link `../<simdeck id>/index.html`
-  (ids differ for `sync` → `synchronization` and `journey` → `os-call-journey`), and hide the button for modules
-  simdeck does not have (`drivers` today). This is the whole point of the map in simdeck, so `status` stays `wip`
-  while it stands (COMMON §12).
-- The map marks modules "u izradi" from ossimulator's own status, which need not match simdeck's `status`
-  *(check)* after a simdeck-target build.
+- ~~"Otvori simulator" points outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Each of the 16 module panels (`?m=<module>`) links its simdeck
+  folder, and the header's "simdeck" link opens the simdeck home (`../../index.html`); all clicked on the built site.
+- ~~"u izradi" badges~~: with f41eda4 all 16 modules are `ready` in ossimulator, and no panel shows the badge. If
+  simdeck drops a page, map it to `null` in ossimulator's `src/shared/simdeck.json` and re-import.
 
 ## Shared requests
 

@@ -11,8 +11,8 @@ const crypto = require('node:crypto');
 
 const ID = 'os-call-journey';
 const MODULE = 'journey';
-// sha256 of ossimulator's dist-single/journey.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '51531567861cee9f6b6e36d7f024244aad54870087eed089076db53fcb41c8be';
+// sha256 of ossimulator's dist-simdeck/os-call-journey.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'dec9b694516e79b29711c9dc3e3476f1475e476f5b7c8674b25a34985f2d086e';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['read-miss', 'page-fault'];
 

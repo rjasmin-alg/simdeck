@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'raid-cache';
-// sha256 of ossimulator's dist-single/raid-cache.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '7ca741b63dfb546242cd7ea232ff2d8d8e316e5032256d9bbe4c302a55a1bd6c';
+// sha256 of ossimulator's dist-simdeck/raid-cache.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'e6ce6808dc1fe50fa4c67b06122a895b9cc31cb8f31579037ad59e36bc56a9c1';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['raid5-layout', 'raid5-reconstruct', 'raid5-small-write', 'raid6-double-failure', 'cache-dead-burst'];
 

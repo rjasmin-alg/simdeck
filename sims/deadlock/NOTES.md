@@ -8,6 +8,10 @@ imports (COMMON §12); `sim.test.js` is `sims/synchronization/sim.test.js` with 
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/deadlock.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `712676bb9dc327d324bc978093c4e2600ec191269fcbc3e9fd1d27d1fd3e0b8e`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/deadlock.html`, built 2026-09-30 10:09 from `src/modules/deadlock/`
   (ossimulator HEAD `ce83949`; last change to the module `3de35fd`, 2026-09-30 07:45; to the module or
   `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/deadlock/` or `src/shared/` was newer than
@@ -80,12 +84,9 @@ on the owner about how many preset lines the home page shows. The manifest accep
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=deadlock` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./sync.html` (also `?scenario=pc-bounded-deadlock`), `./processes.html`, `./scheduling.html?scenario=starvation`
-  and `./threads.html`, all missing in `sims/deadlock/`. A simdeck build target should link `../../index.html`
-  and `../<id>/index.html?scenario=…` (simdeck folders: `synchronization`, `processes`, `scheduling`), or hide
-  links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

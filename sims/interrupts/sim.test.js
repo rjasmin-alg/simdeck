@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'interrupts';
-// sha256 of ossimulator's dist-single/interrupts.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '03af0e9d619ff4ac56feec45081287a89043bd8f8598774384ba58e4e7cec1ca';
+// sha256 of ossimulator's dist-simdeck/interrupts.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '3d78e6bb22db8d6bae46ba3a55660bfface00dbb01c1f4060762229244696808';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['stallings-sequential', 'stallings', 'cascade', 'burst', 'sync'];
 

@@ -8,6 +8,10 @@ copy**. A defect goes into ossimulator, and the build is re-imported. Done the s
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/address-translation.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `c4067e53023b7fb251635c034f0ba2f0c2c896734522264995b9b4369ad5df39`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/address-translation.html`, built 2026-09-30 10:09 from
   `src/modules/address-translation/` (ossimulator HEAD `ce83949`; last change to the module `650a064`, to the module
   or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/address-translation/` or `src/shared/` was
@@ -84,12 +88,9 @@ about how many preset lines the home page shows. The manifest accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=address-translation` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./memory-allocation.html`, `./page-replacement.html` (also `?scenario=journey-page-fault`),
-  `./interrupts.html` (also `?scenario=sync`), `./processes.html`, `./journey.html?scenario=page-fault`, all
-  missing in `sims/address-translation/`. A simdeck build target should link `../../index.html` and
-  `../<id>/index.html?scenario=…`, or hide links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

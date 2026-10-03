@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'page-replacement';
-// sha256 of ossimulator's dist-single/page-replacement.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '4c3d2d5f0ba1db0ad7704b8086ce94c44a6fafdfba806788779d7de398ae0d3e';
+// sha256 of ossimulator's dist-simdeck/page-replacement.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '8c9514f08f9f757aae339ceb560e27acce3db4d27df502f753a175c062d5b75b';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['stallings-four-algorithms', 'clock-walkthrough', 'belady-anomaly', 'working-set-window', 'thrashing'];
 

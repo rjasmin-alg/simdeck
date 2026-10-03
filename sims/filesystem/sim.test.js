@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'filesystem';
-// sha256 of ossimulator's dist-single/filesystem.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '4cef97103b14b92396550b2b65c74a38d14cf7a7084de3ff7c75ce99617b57f3';
+// sha256 of ossimulator's dist-simdeck/filesystem.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = 'dc7c2112dde933a7fe69017b7c5d0da70d9133cdd1d9262623f5f6a2b954d27b';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['allocation-compare', 'contiguous-defrag', 'inode-levels'];
 

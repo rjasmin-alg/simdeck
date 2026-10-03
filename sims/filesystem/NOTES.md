@@ -8,6 +8,10 @@ imports (COMMON §12).
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/filesystem.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `dc7c2112dde933a7fe69017b7c5d0da70d9133cdd1d9262623f5f6a2b954d27b`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/filesystem.html`, built 2026-09-30 10:09 from
   `src/modules/filesystem/` (ossimulator HEAD `ce83949`; last change to the module `a8a8ef8`, 2026-09-30 08:55; to
   the module or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/modules/filesystem/` or `src/shared/`
@@ -83,13 +87,9 @@ lines the home page shows. The manifest accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=filesystem` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./disk-scheduling.html`, `./disk-scheduling.html?scenario=journey-read`, `./raid-cache.html`, `./syscalls.html`,
-  `./syscalls.html?scenario=read-11-steps`, `./drivers.html`, `./drivers.html?scenario=journey-read`,
-  `./journey.html`, `./journey.html?scenario=read-miss`, `./memory-allocation.html`, all missing in
-  `sims/filesystem/`. A simdeck build target should link `../../index.html` and `../<id>/index.html`, or hide links
-  to pages simdeck does not have. `status` stays `wip` while this stands (COMMON §12).
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

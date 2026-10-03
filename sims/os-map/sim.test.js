@@ -11,8 +11,8 @@ const crypto = require('node:crypto');
 
 const ID = 'os-map';
 const MODULE = 'index';
-// sha256 of ossimulator's dist-single/index.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '88d18ac73f82130bc87da05d1fab701698edb775ee23decdf0746ed9511671f2';
+// sha256 of ossimulator's dist-simdeck/os-map.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '0b3f393edf8c70414bdc8ca4ee8b037093de21e64795d1862e292192c9f1bb3c';
 // Module ids the index entries may open with ?m=<id> to focus one module (NOTES.md, "Deep links").
 const DEEP_LINKS = [
   'interrupts', 'processes', 'scheduling', 'memory-allocation', 'address-translation',

@@ -8,6 +8,10 @@ ossimulator imports (COMMON §12).
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/disk-scheduling.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `2ef26b6c361f4b32b90c527e464b12aa2fa1d2dc9cbd730ab25926c1a046e382`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/disk-scheduling.html`, built 2026-09-30 10:09 from
   `src/modules/disk-scheduling/` (ossimulator HEAD `ce83949`; last change to the module `1f623cb`, 2026-09-30 08:48;
   to the module or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/` was newer than the build, so it was
@@ -78,13 +82,9 @@ accepts them as `{ "preset": "hdd-vs-ssd", "query": "scenario=hdd-vs-ssd", … }
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=disk-scheduling` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./drivers.html`, `./raid-cache.html`, `./filesystem.html`, `./drivers.html?scenario=journey-read`,
-  `./filesystem.html?scenario=journey-read`, `./journey.html?scenario=read-miss`, `./io-techniques.html`, all
-  missing in `sims/disk-scheduling/`. A simdeck build target should link `../../index.html` and
-  `../<id>/index.html`, or hide links to pages simdeck does not have. `status` stays `wip` while this stands
-  (COMMON §12).
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

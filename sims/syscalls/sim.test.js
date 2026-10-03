@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'syscalls';
-// sha256 of ossimulator's dist-single/syscalls.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '931ede153ff734a7a31d32ebbc99efb3c301bed83cf78b25f4ab5f77c07c8033';
+// sha256 of ossimulator's dist-simdeck/syscalls.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '42ae7428243b17c52c2e79a81b642af500bb90a9f080362ecb5fde1e11de886f';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['read-11-steps', 'read-blocking', 'privileged'];
 

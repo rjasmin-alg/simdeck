@@ -7,6 +7,10 @@ into ossimulator, and the build is re-imported.
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/interrupts.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `3d78e6bb22db8d6bae46ba3a55660bfface00dbb01c1f4060762229244696808`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/interrupts.html`, built 2026-09-30 10:09 from
   `src/modules/interrupts/` (ossimulator HEAD `ce83949`, last change to the module `9cdf062`). Nothing in `src/`
   was newer than the build, so it was not rebuilt.
@@ -68,10 +72,9 @@ how many preset lines the home page shows. The manifest already accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder.** The single-file build links "Natrag na kartu" to `./index.html`
-  (in simdeck that is the page itself) and "Povezano" to `./scheduling.html`, `./io-techniques.html`, … (missing
-  in `sims/interrupts/`). A simdeck build target should link `../../index.html` and `../<id>/index.html`, or hide
-  links to pages simdeck does not have.
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

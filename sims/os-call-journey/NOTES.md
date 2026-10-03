@@ -8,6 +8,10 @@ and the other ossimulator imports (COMMON §12).
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/os-call-journey.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `dec9b694516e79b29711c9dc3e3476f1475e476f5b7c8674b25a34985f2d086e`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/journey.html`, built 2026-09-30 10:09 from `src/modules/journey/`
   (ossimulator HEAD `ce83949`; last change to the module or `src/shared` `e59e014`, 2026-09-30 10:06). Nothing in
   `src/modules/journey/` or `src/shared/` was newer than the build, so it was not rebuilt.
@@ -80,18 +84,9 @@ shows. The manifest accepts them as `{ "preset": "page-fault", "query": "scenari
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=journey` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./syscalls.html`, `./filesystem.html`, `./drivers.html`, `./disk-scheduling.html`, `./io-techniques.html`,
-  `./interrupts.html`, `./scheduling.html`, `./processes.html`, `./address-translation.html`,
-  `./page-replacement.html`, `./raid-cache.html` and scenario links into them (`filesystem.html?scenario=journey-read`,
-  `disk-scheduling.html?scenario=journey-read`, `io-techniques.html?scenario=journey-dma`,
-  `address-translation.html?scenario=journey-page-fault`, `page-replacement.html?scenario=journey-page-fault`,
-  `drivers.html?scenario=journey-read`, `processes.html?scenario=io-wait`, `syscalls.html?scenario=read-blocking`,
-  `interrupts.html?scenario=sync`, `scheduling.html?scenario=stallings-rr4`), all missing in
-  `sims/os-call-journey/`. A simdeck build target should link `../../index.html` and `../<id>/index.html` (note the
-  simdeck ids differ for some modules, e.g. `journey` is `os-call-journey`), or hide links to pages simdeck does
-  not have. `status` stays `wip` while this stands (COMMON §12).
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

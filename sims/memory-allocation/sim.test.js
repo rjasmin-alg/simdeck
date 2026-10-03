@@ -10,8 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ID = 'memory-allocation';
-// sha256 of ossimulator's dist-single/memory-allocation.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'a5f2c19408007bb556ddf1ef4ecd1dfe414bdc6c488b88f38061896d19de158a';
+// sha256 of ossimulator's dist-simdeck/memory-allocation.html as imported (NOTES.md, "Import").
+const BUILD_SHA256 = '62dda21c500b15f4dba574a561ba1f8a79d616f55baae5257f0e21ed55a5590e';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['fixed-equal', 'placement-differs', 'dynamic-stallings', 'buddy-stallings'];
 

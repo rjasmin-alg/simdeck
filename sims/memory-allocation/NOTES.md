@@ -8,6 +8,10 @@ the other ossimulator imports (COMMON §12).
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/memory-allocation.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `62dda21c500b15f4dba574a561ba1f8a79d616f55baae5257f0e21ed55a5590e`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/memory-allocation.html`, built 2026-09-30 10:09 from
   `src/modules/memory-allocation/` (ossimulator HEAD `ce83949`; last change to the module `175db7e`, to the module
   or `src/shared` `be6fb14`, 2026-09-30 10:05). Nothing in `src/` was newer than the build, so it was not rebuilt.
@@ -80,11 +84,9 @@ about how many preset lines the home page shows. The manifest accepts them as
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=memory-allocation` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./address-translation.html`, `./page-replacement.html`, `./filesystem.html`, `./processes.html`, all missing
-  in `sims/memory-allocation/`. A simdeck build target should link `../../index.html` and `../<id>/index.html`, or
-  hide links to pages simdeck does not have. `status` stays `wip` while this stands (COMMON §12).
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 

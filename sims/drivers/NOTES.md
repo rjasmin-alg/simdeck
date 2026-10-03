@@ -8,6 +8,10 @@ imports (COMMON §12).
 
 ## Import
 
+- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/drivers.html`, from ossimulator's
+  `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
+  sha256 `dd96ed28fd9671bd20f18d14cf27e40eefde03040aa60d4c664374c4bb2d00de`. The entries below describe the first import,
+  from `dist-single/`.
 - Source: `~/projects/ossimulator/dist-single/drivers.html`, built 2026-09-30 10:09 from `src/modules/drivers/`
   (ossimulator HEAD `ce83949`; last change to the module `12efe85`, 2026-09-30 09:14). Nothing in `src/` was newer
   than the build, so it was not rebuilt.
@@ -74,12 +78,9 @@ the owner about how many preset lines the home page shows. The manifest accepts 
 
 ## Defects for ossimulator
 
-- **Navigation links point outside the folder** (as in the other ossimulator imports). "Natrag na kartu" links
-  `./index.html?m=drivers` (in simdeck that is the page itself); "Povezano" and the theory links go to
-  `./io-techniques.html`, `./interrupts.html`, `./disk-scheduling.html`, `./syscalls.html`, `./processes.html`,
-  `./scheduling.html`, `./filesystem.html`, `./journey.html?scenario=read-miss` and scenario links into these, all
-  missing in `sims/drivers/`. A simdeck build target should link `../../index.html` and `../<id>/index.html`, or
-  hide links to pages simdeck does not have. `status` stays `wip` while this stands (COMMON §12).
+- ~~Navigation links point outside the folder~~: fixed in ossimulator f41eda4 (simdeck build target,
+  `dist-simdeck/`), re-imported in t-0094. Checked on the built site from `file://`: every in-page link opens an
+  existing simdeck page, none points back at the page itself.
 
 ## Shared requests
 
