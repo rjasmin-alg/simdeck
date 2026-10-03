@@ -4,7 +4,11 @@
 // The output is plain static files with relative links, so the folder works on any web server, at
 // any path, or straight from a USB stick (file://).
 //
-//   index.html                  home: course links, then every finished simulator by topic, one search box
+//   index.html                  home: every finished simulator as a tile, by topic, one search box and a selection;
+//                               ?set=a,b is the lecture view of a set and &print=1 its handout (site/index.js)
+//   thumbs/<id>-light.webp      the tiles' pictures, copied from the thumbnail cache (npm run thumbs) when it has
+//                               the sim's current build; without one a tile shows a placeholder
+//   fonts/*.woff2               the kit's font, for the home page
 //   courses/<id>/index.html     one page per course file (the "playlist" students get)
 //   licences/index.html         simdeck's licence and source, and every third-party part (kit, sims' "credits")
 //   licences/*.txt              the licence texts (LICENSE, the kit fonts' OFL)
@@ -14,15 +18,16 @@
 // Unfinished (status "wip") entries are not published. Editing happens in the admin app
 // (scripts/admin.mjs), never on the published site.
 //
-// Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts]
+// Usage: node scripts/build.mjs [--root <dir>] [--out <dir>] [--drafts] [--thumbs <cache dir>]
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, copyFileSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRepo, validate, metaFor } from '../lib/manifest.mjs';
 import { checkModels, MODELS_DIR } from '../lib/models.mjs';
+import { thumbKey, cacheDir } from '../lib/thumbs.mjs';
 import {
-  renderCourse, renderIndexList, renderLicences, licenceLine, sourceHref, isPublic, escapeHtml, bi, biStr, loc, STR, LANGS,
-  LICENCE_TEXT, LICENCES_PAGE,
+  renderCourse, renderIndexList, renderChips, renderLicences, licenceLine, sourceHref, isPublic, escapeHtml, biStr, loc, STR, LANGS,
+  LICENCE_TEXT, LICENCES_PAGE, homeEntries, group, countStr, thumbHref, parseSet, setParam, plural,
 } from '../site/core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -119,6 +124,39 @@ export function buildNative(html, entry, { simDir, kitDir, modelsDir, site = {} 
   return { html: out, errors };
 }
 
+/**
+ * The kit's colour tokens and fonts for the site's own pages (kit/kit.css is the one source): the light tokens on
+ * :root, the dark ones when the OS asks for dark (the kit itself switches by data-theme, which the site's pages leave
+ * to the OS), and the @font-face rules with their fonts/ URLs as they are (the build copies kit/fonts/ next to them).
+ */
+export function kitTokens(kitCss) {
+  const block = (name) => {
+    const m = kitCss.match(new RegExp(`/\\* tokens:${name} \\*/([\\s\\S]*?)/\\* end tokens \\*/`));
+    if (!m) throw new Error(`kit/kit.css: no "tokens:${name}" block`);
+    return m[1].trim().replace(/\s+/g, ' ');
+  };
+  const fonts = [...kitCss.matchAll(/@font-face\s*\{[^}]*\}/g)].map((m) => m[0].replace(/\s+/g, ' ')).join('\n');
+  const light = block('light'), dark = block('dark');
+  return `${fonts}
+:root { ${light} color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ${dark} color-scheme: dark; } }
+:root[data-theme="dark"] { ${dark} color-scheme: dark; }
+`;
+}
+
+/** The home page's words its script needs (the rest are in the page as HTML), in both languages. */
+const PAGE_STR_KEYS = ['sims', 'lecture', 'handout', 'print', 'copyLink', 'copied', 'add', 'remove', 'up', 'down',
+  'allSimsBack', 'lectureHint', 'enterOpens', 'openAt', 'toolLeftOut', 'unknown'];
+
+/**
+ * The home page's script: site/index.js after its words and the set-link functions of site/core.mjs, inlined as
+ * they are, so the page reads ?set= with the code the tests cover.
+ */
+export function pageScript(indexJs) {
+  const str = Object.fromEntries(LANGS.map((l) => [l, Object.fromEntries(PAGE_STR_KEYS.map((k) => [k, STR[l][k]]))]));
+  return `var STR = ${scriptJson(str)};\n${parseSet};\n${setParam};\n${plural};\n${indexJs.replace(/<\/script/gi, '<\\/script')}`;
+}
+
 /** Refuses to empty a folder that has files but no stamp: --out might be a USB stick's root. */
 function prepareOut(out) {
   if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, STAMP))) {
@@ -131,7 +169,7 @@ function prepareOut(out) {
 }
 
 /** drafts: also publish "wip" entries (for the admin's preview). */
-export function build({ root, out, log = console.log, drafts = false }) {
+export function build({ root, out, log = console.log, drafts = false, thumbs = cacheDir(root) }) {
   const repo = loadRepo(root);
   const { entries: all, courses, errors, warnings } = validate(repo);
   const entries = drafts ? all : all.filter(isPublic);
@@ -161,33 +199,55 @@ export function build({ root, out, log = console.log, drafts = false }) {
     writeFileSync(p, content);
   };
 
+  // A thumbnail is used only if it was shot from this very build of the sim (lib/thumbs.mjs).
+  const haveThumb = new Set();
   for (const { e, html } of pages) {
     write(`sims/${e.id}/index.html`, html);
+    const cached = join(thumbs, thumbKey(html, 'light'));
+    if (existsSync(cached)) {
+      mkdirSync(join(out, 'thumbs'), { recursive: true });
+      copyFileSync(cached, join(out, thumbHref(e.id)));
+      haveThumb.add(e.id);
+    }
   }
+  mkdirSync(join(out, 'fonts'), { recursive: true });
+  for (const f of readdirSync(join(kitDir, 'fonts')).filter((f) => f.endsWith('.woff2'))) copyFileSync(join(kitDir, 'fonts', f), join(out, 'fonts', f));
 
-  const ctx = { site, vocab: repo.vocab, entries, courses };
+  const ctx = { site, vocab: repo.vocab, entries, courses, thumbs: haveThumb };
   const langJs = read(join(SITE, 'lang.js'));
   // The switch names the language it switches to, in that language; site/lang.js shows the right one.
   const langSwitch = `<button type="button" class="lang-switch" data-lang-switch>${LANGS.map((l) => {
     const to = LANGS.find((x) => x !== l);
     return `<span data-l="${l}" lang="${to}">${escapeHtml(STR[to].langName)}</span>`;
   }).join('')}</button>`;
-  const list = courses.length
-    ? `<p class="courses">${biStr('courses')}: ${courses.map((c) => `<a data-lang-link href="courses/${encodeURIComponent(c.id)}/index.html">${bi(c.title)}</a>`).join(' · ')}</p>`
-    : '';
+  // The home page names no courses (owner, 2026-10-03): it is grouped by topic only. Course pages are reached by
+  // their own (short) addresses.
+  const groups = group(homeEntries(ctx, drafts), repo.vocab);
+  const listed = groups.reduce((n, g) => n + g.items.length, 0);
   write('index.html', fill(read(join(SITE, 'index.html')), {
     LANG: site.lang,
     TITLE: escapeHtml(site.title),
     LANGJS: langJs,
     SWITCH: langSwitch,
-    COURSES: list,
+    SITE_URL: escapeHtml(site.siteUrl ?? ''),
+    TAGLINE: biStr('tagline'),
+    COUNT: `${countStr('sims', listed)} · ${countStr('topicsN', groups.length)}`,
     SEARCH: escapeHtml(STR[site.lang]?.search ?? STR.hr.search),
     SEARCH_HR: escapeHtml(STR.hr.search),
     SEARCH_EN: escapeHtml(STR.en.search),
+    TOPICS_NAV: escapeHtml(`${STR.hr.topicsNav} / ${STR.en.topicsNav}`),
+    CHIPS: renderChips(groups, repo.vocab),
     NONE: biStr('noMatch'),
-    CSS: read(join(SITE, 'index.css')),
+    TRAY_LABEL: escapeHtml(`${STR.hr.tray} / ${STR.en.tray}`),
+    TRAY: biStr('tray'),
+    TRAY_EMPTY: biStr('trayEmpty'),
+    LECTURE: biStr('lecture'),
+    HANDOUT: biStr('handout'),
+    COPY: biStr('copyLink'),
+    CLEAR: biStr('clear'),
+    CSS: kitTokens(read(join(kitDir, 'kit.css'))) + read(join(SITE, 'index.css')),
     LIST: renderIndexList(ctx, drafts),
-    SCRIPT: read(join(SITE, 'index.js')),
+    SCRIPT: pageScript(read(join(SITE, 'index.js'))),
     FOOTER: licenceLine(site, 0),
   }));
 
@@ -222,7 +282,7 @@ export function build({ root, out, log = console.log, drafts = false }) {
     BODY: renderLicences(ctx, 1),
   }));
 
-  log(`built ${pages.length} sims, ${courses.length} course pages → ${relative(process.cwd(), out) || out}`);
+  log(`built ${pages.length} sims (${haveThumb.size} with a thumbnail), ${courses.length} course pages → ${relative(process.cwd(), out) || out}`);
   return { ok: true, errors, warnings, entries, courses };
 }
 
@@ -233,7 +293,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   const root = arg('--root', resolve(HERE, '..'));
   const out = arg('--out', join(root, 'dist'));
-  const r = build({ root, out, drafts: process.argv.includes('--drafts') });
+  const r = build({ root, out, drafts: process.argv.includes('--drafts'), thumbs: arg('--thumbs', cacheDir(root)) });
   for (const w of [...new Set(r.warnings)]) console.warn(`warning: ${w}`);
   for (const e of r.errors) console.error(`error: ${e}`);
   process.exit(r.ok ? 0 : 1);

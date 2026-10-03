@@ -51,6 +51,19 @@ test('back link goes back in history only from the index or a course page', () =
   assert.equal(kit.cameFromSite('file:///repo/courses/os/index.html', 'file:///repo/index.html'), true);
 });
 
+test('back link returns to the lecture set the home page stored, only on this site\'s index with ?set=', () => {
+  const back = 'https://materijali.online/simdeck/index.html?lang=hr';
+  const set = 'https://materijali.online/simdeck/index.html?set=vlan,stp:broadcast-storm#2';
+  assert.equal(kit.setReturn(set, back, 'en'), 'https://materijali.online/simdeck/index.html?set=vlan%2Cstp%3Abroadcast-storm&lang=en#2');
+  assert.equal(kit.setReturn(set, back, null), set, 'the stored address as it is when the sim has one language');
+  assert.equal(kit.setReturn('https://materijali.online/simdeck/?set=a', back, null), 'https://materijali.online/simdeck/?set=a', 'the folder URL');
+  for (const no of [null, '', 'not a url', 'https://materijali.online/simdeck/index.html', 'https://materijali.online/simdeck/index.html?q=set',
+    'https://example.org/simdeck/index.html?set=a', 'https://materijali.online/other/index.html?set=a',
+    'https://materijali.online/simdeck/courses/x/index.html?set=a']) assert.equal(kit.setReturn(no, back, 'hr'), null, String(no));
+  // Unbuilt or from a USB stick: file:// has no referrer, so this is the only way back to the set.
+  assert.equal(kit.setReturn('file:///usb/simdeck/index.html?set=a#1', 'file:///usb/simdeck/index.html', 'hr'), 'file:///usb/simdeck/index.html?set=a&lang=hr#1');
+});
+
 // ── stylesheet rules ──
 
 const tokenBlock = (marker) => {

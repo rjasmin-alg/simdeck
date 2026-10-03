@@ -11,9 +11,30 @@ export const STR = {
     levels: { intro: 'uvod', core: 'osnovno', advanced: 'napredno' },
     noneYet: 'Još nema objavljenih simulatora.',
     courseEmpty: 'Simulatori za ovaj kolegij su u pripremi.',
-    courses: 'Kolegiji',
-    search: 'Traži simulator… ( / )',
-    noMatch: 'Ništa ne odgovara.',
+    search: 'Traži simulator, pojam ili naredbu…',
+    noMatch: 'Ništa ne odgovara. Pokušajte kraću riječ, ili hrvatski ili engleski naziv.',
+    tagline: 'Mali simulatori za velike ideje računarstva, svaki za jedan pojam. Otvorite bilo koji: strelica → vodi dalje.',
+    sims: ['simulator', 'simulatora', 'simulatora'],
+    topicsN: ['područje', 'područja', 'područja'],
+    stepsN: ['korak', 'koraka', 'koraka'],
+    topicsNav: 'Područja',
+    tray: 'Odabir',
+    trayEmpty: 'Označite simulatore znakom + i složite ih za predavanje.',
+    lecture: 'Predavanje',
+    handout: 'Izroček',
+    copyLink: 'Kopiraj poveznicu',
+    copied: 'Poveznica je kopirana',
+    clear: 'Isprazni',
+    add: 'Dodaj u odabir',
+    remove: 'Makni iz odabira',
+    up: 'Pomakni gore',
+    down: 'Pomakni dolje',
+    allSimsBack: '← Svi simulatori',
+    lectureHint: '← → odabir · Enter otvara · 1–9 skok · P izroček',
+    enterOpens: 'Enter ↵ otvara simulator',
+    openAt: 'Cijeli popis na',
+    toolLeftOut: 'Alat za predavača, nije na izročku',
+    unknown: 'Nepoznato u poveznici, preskočeno',
     allSims: '← svi simulatori',
     print: 'Ispiši',
     langName: 'Hrvatski',
@@ -32,9 +53,30 @@ export const STR = {
     levels: { intro: 'intro', core: 'core', advanced: 'advanced' },
     noneYet: 'No simulators published yet.',
     courseEmpty: 'The simulators for this course are in preparation.',
-    courses: 'Courses',
-    search: 'Find a simulator… ( / )',
-    noMatch: 'Nothing matches.',
+    search: 'Find a simulator, a concept or a command…',
+    noMatch: 'Nothing matches. Try a shorter word, or the Croatian or English name.',
+    tagline: 'Small simulators for the big ideas of computing, one concept each. Open any of them: the → key takes it from there.',
+    sims: ['simulator', 'simulators'],
+    topicsN: ['topic', 'topics'],
+    stepsN: ['step', 'steps'],
+    topicsNav: 'Topics',
+    tray: 'Selection',
+    trayEmpty: 'Mark simulators with + and line them up for a lecture.',
+    lecture: 'Lecture',
+    handout: 'Handout',
+    copyLink: 'Copy link',
+    copied: 'Link copied',
+    clear: 'Clear',
+    add: 'Add to the selection',
+    remove: 'Remove from the selection',
+    up: 'Move up',
+    down: 'Move down',
+    allSimsBack: '← All simulators',
+    lectureHint: '← → choose · Enter opens · 1–9 jump · P handout',
+    enterOpens: 'Enter ↵ opens the simulator',
+    openAt: 'The whole list at',
+    toolLeftOut: 'Lecturer tool, not on the handout',
+    unknown: 'Unknown in the link, skipped',
     allSims: '← all simulators',
     print: 'Print',
     langName: 'English',
@@ -349,22 +391,140 @@ function hostLabel(e) {
 }
 
 /**
- * The published home page's list: every public entry, grouped by topic, as static HTML, each followed by its preset
- * entries (sim.json "entries"), one line each. Each item carries its folded search words in data-s for the page's one
- * small filter script; a preset entry's words include its host's, so "stp" finds the STP presets too.
+ * The plural form of a count: forms are [one, few, many] in Croatian (1 / 2–4 / 5+, but 11–14 take "many") and
+ * [one, other] in English.
+ */
+export function plural(lang, n, forms) {
+  if (lang === 'en') return n === 1 ? forms[0] : forms[1];
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return forms[0];
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return forms[1];
+  return forms[2];
+}
+
+/** "38 simulatora" / "38 simulators": a count with the site's plural forms STR[lang][key], in both languages. */
+export function countStr(key, n) {
+  return bi(Object.fromEntries(LANGS.map((l) => [l, `${n} ${plural(l, n, STR[l][key])}`])));
+}
+
+/**
+ * Each topic's colour: one of the kit's series colours --c1…--c8. tags.json has more topics than the kit has
+ * colours, so some share one; the topic's label always goes with it. A topic not listed here takes its place in
+ * tags.json, round the eight.
+ */
+export const TOPIC_ACCENTS = {
+  networks: 1, os: 2, storage: 3, architecture: 4, distributed: 5, radio: 6, theory: 7, classroom: 8,
+  'linux-admin': 3, security: 2, 'windows-admin': 1, internet: 6,
+};
+
+export function topicAccent(key, vocab) {
+  const n = TOPIC_ACCENTS[key] ?? (Math.max(0, Object.keys(vocab?.topics ?? {}).indexOf(key)) % 8) + 1;
+  return `var(--c${n})`;
+}
+
+/** Where the build puts a sim's thumbnail (scripts/thumbs.mjs makes them; light only for now). */
+export function thumbHref(id) {
+  return `thumbs/${id}-light.webp`;
+}
+
+/** The most sims a ?set= link carries. */
+export const SET_MAX = 30;
+
+/**
+ * Reads a ?set= value ("vlan,cephsim:three-racks"): ids in order, without repeats, at most `max`. A preset is written
+ * "<sim>:<preset>" in the link ("#" would end the query) and means a course file's "<sim>#<preset>". `known` has
+ * .has(id) (a Map or a Set). Returns { items: [ids], skipped: [what the link named but the site lacks] }.
+ * Written without anything from outside the function: the build inlines it into the page script as it is.
+ */
+export function parseSet(str, known, max = 30) {
+  const items = [];
+  const skipped = [];
+  const seen = new Set();
+  for (const raw of String(str ?? '').split(',')) {
+    const id = raw.trim().replace(':', '#');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    if (!known.has(id)) skipped.push(id);
+    else if (items.length < max) items.push(id);
+  }
+  return { items, skipped };
+}
+
+/** The ?set= value for a list of ids: "<sim>#<preset>" is written "<sim>:<preset>". Inlined into the page script too. */
+export function setParam(ids) {
+  return ids.map((id) => String(id).replace('#', ':')).join(',');
+}
+
+/** The address of a set (a lecture) on the published site, for a link to share. */
+export function setUrl(ids, site) {
+  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}?set=${setParam(ids)}`;
+}
+
+/** The words a list item is found by, folded, in one string. */
+function wordsOf(e, vocab) {
+  const f = searchFields(e, vocab);
+  return [f.title, f.id, f.tags, f.topic, f.text];
+}
+const flat = (words) => escapeHtml(words.join(' ').replace(/\s+/g, ' ').trim());
+
+/**
+ * What the page script needs to show an item in the selection, the lecture view and the handout, as attributes and
+ * hidden spans, so the page carries no data blob: id, class, topic, the absolute address, the link, and the title,
+ * concept and summary in both languages.
+ */
+function itemData(e, ctx) {
+  return `data-id="${escapeHtml(e.id)}" data-class="${escapeHtml(e.class)}" data-topic="${escapeHtml(e.topic)}" data-url="${escapeHtml(entryAbsUrl(e, ctx.site))}"`;
+}
+
+/**
+ * One tile on the home page: the screenshot (or a placeholder in the topic's colour), title and concept, class and
+ * steps, up to two preset chips and "+N" for the rest, and + to add it to the selection. The summary is in the page
+ * for the lecture view and the handout, hidden on the tile. `i` is the tile's place on the page: the first ones load
+ * their picture at once, the rest lazily.
+ */
+export function renderTile(e, ctx, i = 0) {
+  const vocab = ctx.vocab;
+  const presets = presetItems(e);
+  const pic = ctx.thumbs?.has(e.id)
+    ? `<img src="${escapeHtml(thumbHref(e.id))}" alt="" width="560" height="350"${i < 10 ? '' : ' loading="lazy"'}>`
+    : `<span class="ph" aria-hidden="true">${escapeHtml(loc(e.title, 'hr').slice(0, 1))}</span>`;
+  const steps = e.class === 'stepper' && e.steps ? ` · ${countStr('stepsN', e.steps)}` : '';
+  const chips = presets.map((p, k) => `<li class="preset${k >= 2 ? ' more' : ''}" ${itemData(p, ctx)} data-s="${flat([...wordsOf(p, vocab), normalise(p.preset)])}"><a data-lang-link href="${escapeHtml(entryHref(p, 0))}" class="t-title">${bi(p.title)}</a>`
+    + `<span class="t-concept" hidden>${bi(p.concept)}</span>${p.summary ? `<span class="t-summary" hidden>${bi(p.summary)}</span>` : ''}`
+    + `<button type="button" class="pick pick-sm" data-pick="${escapeHtml(p.id)}" aria-pressed="false"><span aria-hidden="true"></span></button></li>`).join('');
+  const more = presets.length > 2 ? `<li class="more-btn"><button type="button" data-more>+${presets.length - 2}</button></li>` : '';
+  return `<article class="tile" ${itemData(e, ctx)} data-s="${flat(wordsOf(e, vocab))}" style="--tc:${topicAccent(e.topic, vocab)}">`
+    + `<a class="tile-link" data-lang-link href="${escapeHtml(entryHref(e, 0))}"><span class="pic">${pic}</span>`
+    + `<span class="tile-text"><h3 class="t-title">${bi(e.title)}${langBadge(e)}</h3><span class="t-concept">${bi(e.concept)}</span>`
+    + `<span class="t-summary" hidden>${bi(e.summary)}</span></span></a>`
+    + `<p class="tile-meta">${bi(STR.hr.classes[e.class] ? { hr: STR.hr.classes[e.class], en: STR.en.classes[e.class] } : e.class)}${steps}</p>`
+    + (chips ? `<ul class="presets">${chips}${more}</ul>` : '')
+    + `<button type="button" class="pick" data-pick="${escapeHtml(e.id)}" aria-pressed="false"><span aria-hidden="true"></span></button></article>`;
+}
+
+/** The topics that have public entries, in tags.json order, with their counts: the home page's chips. */
+export function renderChips(groups, vocab) {
+  return groups.map((g) => `<a class="chip" href="#t-${escapeHtml(g.key)}" data-chip="${escapeHtml(g.key)}" style="--tc:${topicAccent(g.key, vocab)}"><span class="dot"></span>${bi(g.label)} <small>${g.items.length}</small></a>`).join('');
+}
+
+/** The entries the home page lists: finished ones (every one with drafts), in title order. */
+export function homeEntries(ctx, drafts = false) {
+  return search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '', {}, ctx.site?.lang ?? 'hr');
+}
+
+/**
+ * The published home page's list: every public sim as a tile, on one shelf per topic (tags.json order), as static
+ * HTML. A sim's preset entries (sim.json "entries") are chips on its tile, each with its own link and +. The tile and
+ * each chip carry their folded search words in data-s for the page script, which shows a tile when its own words or
+ * a chip's (with the tile's) match, so "storm" finds the STP tile and its broadcast-storm chip. ctx.thumbs is the set
+ * of ids that have a thumbnail.
  */
 export function renderIndexList(ctx, drafts = false) {
-  const list = search(drafts ? ctx.entries : ctx.entries.filter(isPublic), ctx.vocab, '', {}, ctx.site?.lang ?? 'hr');
+  const list = homeEntries(ctx, drafts);
   if (!list.length) return `<p class="empty">${biStr('noneYet')}</p>`;
-  const wordsOf = (e) => {
-    const f = searchFields(e, ctx.vocab);
-    return [f.title, f.id, f.tags, f.topic, f.text];
-  };
-  const line = (e, words) => `<li${e.host ? ' class="h-preset"' : ''} data-s="${escapeHtml(words.join(' ').replace(/\s+/g, ' ').trim())}">${hostLabel(e)}<a data-lang-link href="${escapeHtml(entryHref(e, 0))}">${bi(e.title)}</a>${langBadge(e)} <span>${bi(e.concept)}</span></li>`;
+  let i = 0;
   return group(list, ctx.vocab)
-    .map((g) => `<section><h2>${bi(g.label)}</h2><ul>${g.items.map((e) => {
-      const host = wordsOf(e);
-      return line(e, host) + presetItems(e).map((p) => line(p, [...wordsOf(p), normalise(p.preset), ...host])).join('');
-    }).join('')}</ul></section>`)
+    .map((g) => `<section class="topic" id="t-${escapeHtml(g.key)}" data-topic="${escapeHtml(g.key)}" style="--tc:${topicAccent(g.key, ctx.vocab)}"><h2><span class="dot"></span><span class="t-topic">${bi(g.label)}</span> <small>${g.items.length}</small></h2>`
+      + `<div class="grid">${g.items.map((e) => renderTile(e, ctx, i++)).join('')}</div></section>`)
     .join('\n');
 }

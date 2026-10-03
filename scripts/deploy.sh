@@ -8,7 +8,11 @@
 #
 # What goes up:
 #   - if package.json on main has a "build" script: npm run build in the export, then dist/ (the site frame's
-#     build uses Node's standard library only, so no npm ci: Playwright is a dev tool for checks, not for the build);
+#     build uses Node's standard library only, so no npm ci in the export);
+#   - before that, if main has a "thumbs" script: npm run thumbs, the tiles' screenshots (Playwright, from this
+#     checkout's node_modules: run npm ci once). They are cached in .cache/thumbs/ here, keyed by each built sim's
+#     sha256, so only changed sims are shot again; the build copies the matching ones into dist/thumbs/.
+#     SIMDECK_THUMBS=0 skips the step, and the tiles show placeholders;
 #   - otherwise the export itself, minus what is not for students (docs/, scripts/, tests, kit tooling, package files).
 #   If the result has no index.html yet (the site frame is not built), a minimal list of the native sims is generated.
 #   - source.tar.gz: the same main commit as a git archive (AGPL-3.0-or-later §13: every page links it while the
@@ -47,8 +51,23 @@ mkdir "$WORK/src" "$WORK/stage"
 git archive "$COMMIT" | tar -x -C "$WORK/src"
 
 if [[ -f "$WORK/src/package.json" ]] && node -e 'process.exit(require(process.argv[1]).scripts?.build ? 0 : 1)' "$WORK/src/package.json"; then
+  THUMBS="$ROOT/.cache/thumbs"
+  if node -e 'process.exit(require(process.argv[1]).scripts?.thumbs ? 0 : 1)' "$WORK/src/package.json"; then
+    if [[ "${SIMDECK_THUMBS:-1}" == "0" ]]; then
+      echo "── thumbnails skipped (SIMDECK_THUMBS=0): the tiles show placeholders"
+    elif [[ ! -d "$ROOT/node_modules/playwright" ]]; then
+      echo "no Playwright in $ROOT/node_modules for the thumbnails: run npm ci (or SIMDECK_THUMBS=0 for placeholders)" >&2
+      exit 1
+    else
+      echo "── thumbnails (npm run thumbs, cache ${THUMBS#"$ROOT"/})"
+      # The export has no node_modules: borrow this checkout's (same repo, same lock file) for Playwright.
+      ln -s "$ROOT/node_modules" "$WORK/src/node_modules"
+      (cd "$WORK/src" && npm run thumbs -- --cache "$THUMBS")
+      rm "$WORK/src/node_modules"
+    fi
+  fi
   echo "── build (npm run build)"
-  (cd "$WORK/src" && npm run build)
+  (cd "$WORK/src" && npm run build -- --thumbs "$THUMBS")
   rsync -a --exclude='.simdeck-site' "$WORK/src/dist/" "$WORK/stage/"
 else
   echo "── no build script on $REF: publishing the static tree"

@@ -42,11 +42,11 @@ test('a course page lists a preset entry, and its link opens the sim paused at t
     p.on('pageerror', (e) => errors.push(String(e)));
     const url = (f) => pathToFileURL(join(out, f)).href;
 
-    // The home page lists the entry as its own line under its sim, and the search finds it.
+    // The home page shows the entry as a chip on its sim's tile, and the search finds it.
     await p.goto(url('index.html'));
-    assert.equal(await p.locator('li.h-preset a[href*="sims/demo/index.html?preset=carry"]').count(), 1);
+    assert.equal(await p.locator('.tile[data-id="demo"] li.preset a[href*="sims/demo/index.html?preset=carry"]').count(), 1);
     await p.fill('#q', 'carry');
-    assert.ok(await p.locator('li.h-preset').isVisible());
+    assert.ok(await p.locator('li.preset[data-id="demo#carry"]').isVisible());
 
     // The course page lists it; following the link opens the sim at the preset, paused, in the course's language.
     await p.goto(url('courses/demo/index.html'));

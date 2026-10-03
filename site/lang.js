@@ -14,12 +14,14 @@
   var lang = [new URLSearchParams(window.location.search).get('lang'), stored, fallback].filter(function (l) { return LANGS.indexOf(l) >= 0; })[0] || 'hr';
   html.lang = lang; // before the body paints: no flash of the other language
 
+  // A set link (?set=vlan,cephsim:three-racks) keeps its commas and colons readable: both are fine in a query.
+  function readable(qs) { return qs.replace(/%2C/gi, ',').replace(/%3A/gi, ':'); }
   function withLang(href, l) {
     var i = href.indexOf('?');
     var base = i < 0 ? href : href.slice(0, i);
     var q = new URLSearchParams(i < 0 ? '' : href.slice(i + 1));
     q.set('lang', l);
-    return base + '?' + q.toString();
+    return base + '?' + readable(q.toString());
   }
   function apply(l) {
     html.lang = l;
@@ -30,7 +32,7 @@
     });
     var u = new URLSearchParams(window.location.search);
     if (l === fallback) u.delete('lang'); else u.set('lang', l);
-    var qs = u.toString();
+    var qs = readable(u.toString());
     try { window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) { /* file:// in some browsers */ }
   }
   document.addEventListener('DOMContentLoaded', function () {

@@ -44,6 +44,9 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
   to the simdeck home page.
 - **Croatian and English everywhere** (owner, 2026-10-01): every sim, the home page and the course pages, each in
   one file that carries both languages and switches (docs/sim-ui.md §9; §2.1, §3 here).
+- **Home page** (owner, 2026-10-03; mockups in the coordinator's library, t-0067): mockup A's home page (topic shelves
+  of screenshot tiles, chips, search, a selection bar along the bottom) with mockup B's lecture view (a numbered
+  agenda beside a big preview, `?set=`). **No course names on the home page**; it is grouped by topic only (§3.1).
 
 ## 1. Layout
 
@@ -60,12 +63,15 @@ tags.json                  the controlled vocabulary: topics and tags
 site.json                  site title, UI language, public URL, source link, server paths short addresses must avoid
 LICENSE                    AGPL-3.0-or-later, the whole of simdeck (docs/tasks/w0/licence.md)
 site/                      templates for the published pages (home, course page, licences) and core.mjs
-  core.mjs                 search, grouping, links, renderers (both languages), nginx rules; build and admin
+  core.mjs                 search, grouping, links, renderers (both languages), set links, nginx rules; build and admin
+  index.js                 the home page's script: search, chips, selection, lecture view, handout (inlined)
   lang.js                  the published pages' language switch (inlined into home and course pages)
 admin/                     the admin app's page, script and styles
 lib/manifest.mjs           loads and validates every manifest source (read side)
 lib/store.mjs              validated writes for the admin (write side)
 scripts/build.mjs          builds the published site
+scripts/thumbs.mjs         npm run thumbs: screenshots of the sims for the home page's tiles, into .cache/thumbs/
+lib/thumbs.mjs             the thumbnails' cache key (shared by thumbs.mjs and the build)
 scripts/admin.mjs          the admin's local server
 scripts/check.mjs          validates without building
 scripts/short-links.mjs    prints the nginx rules for short course addresses (used by deploy.sh)
@@ -76,12 +82,15 @@ kit/                       the sim UI kit, template and page check (kit thread, 
 models/                    model code shared by several sims (models/README.md; inlined at build when a page includes it)
 lib/models.mjs             checks the shared models and finds the ones a page includes
 dist/                      default build output, not committed
+.cache/thumbs/             the thumbnail cache (npm run thumbs), not committed
 ```
 
 The published folder:
 
 ```
-index.html                 home: course links, then every finished simulator by topic, one search box
+index.html                 home: every finished simulator as a tile, by topic; ?set= is a lecture view, &print=1 its handout
+thumbs/<id>-light.webp     the tiles' screenshots, when the thumbnail cache has the sim's current build
+fonts/*.woff2              the kit's font (Atkinson Hyperlegible), for the home page
 courses/<id>/index.html    one page per course
 licences/index.html        simdeck's licence and source, the kit's third-party parts, every sim's "credits"
 licences/AGPL-3.0.txt      LICENSE; licences/OFL-1.1.txt, the kit fonts' licence
@@ -116,7 +125,7 @@ admin read them all together.
 | `languages` | no | the **single-language exception**: `["hr"]` or `["en"]` for a page not translated yet; left out when the page has both (the rule). `<html lang>` must be one of the page's languages | counted as an exception; a language badge on home and course pages in the other language's view |
 | `steps` | steppers | positive integer | demo length; the contract check compares it with the page (§7) |
 | `aliases` | no | `{ "hr": [...], "en": [...] }`, either list optional: extra search words, synonyms, commands (`fdisk`) | search only (both languages are searched) |
-| `entries` | no | preset entries: `[{ "preset": "<id>", "title": { "hr", "en" }, "concept": { "hr", "en" }, "summary"?: { "hr", "en" }, "query"?: "scenario=<id>" }]`. `preset` is a kebab-case id unique in the sim; `title` ≤ 60 and `concept` ≤ 80 chars, `summary` ≤ 160. The link opens `sims/<id>/index.html?preset=<preset>` (a kit page), or `?<query>` when the entry gives one (an ossimulator page: `scenario=<id>`; no `lang`, the site adds it). The preset id (or the query's first value) must be written, quoted, in the sim's `.js` or `.html` files; the gate also opens each one (§6) | its own line on the home page, under its sim (§3.1); a course file names it `"<sim>#<preset>"` (§3.2) |
+| `entries` | no | preset entries: `[{ "preset": "<id>", "title": { "hr", "en" }, "concept": { "hr", "en" }, "summary"?: { "hr", "en" }, "query"?: "scenario=<id>" }]`. `preset` is a kebab-case id unique in the sim; `title` ≤ 60 and `concept` ≤ 80 chars, `summary` ≤ 160. The link opens `sims/<id>/index.html?preset=<preset>` (a kit page), or `?<query>` when the entry gives one (an ossimulator page: `scenario=<id>`; no `lang`, the site adds it). The preset id (or the query's first value) must be written, quoted, in the sim's `.js` or `.html` files; the gate also opens each one (§6) | a chip on its sim's tile on the home page (§3.1); a course file names it `"<sim>#<preset>"` (§3.2) |
 | `related` | no | ids | reserved for "see also"; checked |
 | `origin` | no | where a copy came from (`single-page-labs/x.html`, `ossimulator/scheduling`) | provenance |
 | `asset_review` | no | `true` when assets need the GPL audit (playbook §10.7 step 6) | release audit |
@@ -210,26 +219,61 @@ language button switches without a reload and remembers the choice; links to sim
 
 ### 3.1 Home page (`index.html`)
 
-- **Title** and the **language button**, then **links to every course page**.
+Mockup A's home page with mockup B's lecture view (owner, 2026-10-03). The tiles are static HTML from
+`site/core.mjs` (`renderIndexList`, `renderTile`); one inlined script (`site/index.js`) does the rest, and builds
+the selection, the lecture view and the handout **from the tiles already in the page**: no data blob.
+
+- **Header:** the site's name, a one-line description (`STR.tagline`), the counts ("79 simulatora · 8 područja",
+  with Croatian plural forms, `plural()`), and the language button. **No course names or links** (owner decision):
+  course pages are reached by their own (short) addresses.
+- **A sticky bar** with the search box and one **chip per topic** (its colour, label and count). A chip jumps to its
+  shelf, and the chip of the shelf in view is marked. On a phone the chips scroll sideways.
 - **One search box:**
   - focused on load, and `/` focuses it again;
   - every word must match, and case and Croatian diacritics are ignored;
   - it searches title, id, concept, summary, tag labels and aliases, topic, and the sim's aliases, **in both
-    languages**, whichever the page shows.
-    The build writes these words into each item, so the page's script only shows and hides list items.
-  - `Enter` opens the first match and `Esc` clears the search. In class: `/`, `dhcp`, Enter.
-- **Every finished simulator, grouped by topic:** one line each, with title and concept, followed by its
-  **preset entries** (`sim.json` `entries`, §2.1): one line each, indented, named "*sim title* › *entry title*",
-  linked to open the sim at that preset. An entry is searched by its own title, concept, summary and preset id and
-  by its sim's words, so `stp` finds the STP presets and `storm` finds the broadcast storm. An unfinished sim's
-  entries are not published either.
-- **Tools** are listed under their topic (e.g. "Alati za nastavu"), because the lecturer opens them in
-  class. They never appear on course pages.
-- **`wip` sims are not published at all:** no list item and no page.
+    languages**, whichever the page shows. The build writes these words into each tile (`data-s`), so the script
+    only shows and hides tiles, and hides the shelves left empty; "n / N" shows how many match.
+  - `Enter` opens the first match whose title has every word, else the first match; `Esc` clears. In class: `/`,
+    `dhcp`, Enter.
+- **Every finished simulator, one shelf per topic** (`tags.json` order), five tiles to a row at 1920 (four, three,
+  then one column on a phone). A tile has the sim's screenshot (§5, or a placeholder in the topic's colour), title,
+  concept, class (and steps for a stepper), and **+** to add it to the selection.
+  - **Topic colours** are the kit's series colours `--c1…--c8` (`TOPIC_ACCENTS` in `core.mjs`); with more topics than
+    colours, some share one, and the label always goes with the colour. A topic not listed takes its place in
+    `tags.json`, round the eight.
+- **Preset entries** (`sim.json` `entries`, §2.1) are chips on their sim's tile, each with its own link (the sim at
+  that preset) and its own +. Two show; the rest are behind "+N". A chip is found by its own title, concept, summary
+  and preset id together with its sim's words (so "stp storm" works); a matching chip is marked, and shown even when
+  it was behind "+N". An unfinished sim's entries are not published either.
+- **Tools** are listed under their topic (e.g. "Alati za nastavu"), because the lecturer opens them in class. They
+  are never on course pages or handouts.
+- **`wip` sims are not published at all:** no tile and no page.
 - **Nothing finished yet:** the home page says "Još nema objavljenih simulatora." / "No simulators published yet."
-  instead of an empty list.
+- **The selection** (+ on a tile or a preset chip): a bar along the bottom once something is picked, with
+  **▶ Predavanje** (the lecture view), **Izroček** (the handout), **Kopiraj poveznicu** (the set's address on
+  `site.json` `siteUrl`, or this page's own from `file://`) and Isprazni. The title opens the ordered list (↑ ↓ ✕).
+  It is kept per browser (`localStorage` `simdeck.tray`); the shareable form is the `?set=` link. On a phone the bar
+  keeps only its title and ▶ until opened.
+- **Lecture view, `?set=vlan,nat,cephsim:three-racks`:** a numbered agenda on the left and a big preview of the
+  current sim on the right (screenshot, title, concept, summary). ←/→, ↑/↓, PgUp/PgDn (a clicker) and 1–9 move,
+  Home/End go to the ends, **Enter** opens the sim, P opens the handout, L switches the language, and "← Svi
+  simulatori" goes home. The link is read by `parseSet` (`core.mjs`, inlined into the page as it is): order kept,
+  repeats dropped, at most 30, unknown ids named above the agenda rather than hidden. A preset is written
+  `<sim>:<preset>` in the link (`#` would end the query) and means a course file's `<sim>#<preset>`. The current sim
+  is in the hash (`#3`), so the browser's Back from a sim lands on it; `?title=` names the set.
+- **Back from a sim to the set:** the lecture view keeps its address in `sessionStorage` (`simdeck.set`); the kit's
+  "← Popis" goes there instead of home when the visitor came from a set (kit `setReturn`, §7), also from `file://`,
+  which sends no referrer. Over http the referrer is the index, and the kit goes back in history as before. Opening
+  the plain home page forgets the set.
+- **Handout, `?set=…&print=1`** (Izroček, or P in the lecture view): one A4 page with each sim's thumbnail,
+  title, concept, summary and address, and the set's own address at the top. Tools are left off it and named on
+  screen. Printing the lecture view prints the handout too. About eight sims fit one page. No QR code (owner's call,
+  `docs/tasks/OPEN.md`).
+- **Look:** the kit's colour tokens and font (`kitTokens` in `scripts/build.mjs` reads them from `kit/kit.css`;
+  the font files are copied to `fonts/`). Light and dark follow the OS. At 1920×1080 the first screen shows the
+  search, the chips and the first shelf.
 - Opens in `site.json` `lang`.
-- No filters, toggles, stored state or data blobs. Those are admin features.
 
 ### 3.2 Course pages: the playlists (`courses/<id>/index.html`)
 
@@ -335,7 +379,7 @@ same-origin JSON from the admin's own page.
 
 ## 5. Build
 
-`node scripts/build.mjs [--out <dir>] [--drafts]` (or `npm run build`; the admin's Objavi does the
+`node scripts/build.mjs [--out <dir>] [--drafts] [--thumbs <cache dir>]` (or `npm run build`; the admin's Objavi does the
 same). `npm run check` validates only, and `npm test` runs the unit tests.
 
 1. Load and validate every manifest source (§6) and the shared models (`lib/models.mjs`). Any error stops the
@@ -353,6 +397,21 @@ same). `npm run check` validates only, and `npm test` runs the unit tests.
      Ordinary `<a href>` links are allowed.
 4. Write the home page and the course pages, the licences page and the licence texts (§3.4). Each built sim
    also gets the `#simdeck-site` block with its licence and source links (§3.3).
+5. **Thumbnails:** for each built sim, look in the thumbnail cache (`--thumbs <dir>`, default `.cache/thumbs/`) for
+   the file named by the built sim's sha256 (`lib/thumbs.mjs` `thumbKey`); if it is there, copy it to
+   `thumbs/<id>-light.webp` and give the tile an `<img>`, else the tile shows a placeholder. The build itself never
+   shoots: that is `npm run thumbs` (below), so the build stays free of Playwright.
+
+**Thumbnails, `npm run thumbs`** (`scripts/thumbs.mjs`): builds the site into a temp folder and shoots each sim
+whose built file is not in the cache yet. A shot: the built page from `file://`, every network request blocked,
+1920×1080, light, Croatian, reduced motion; a stepper at `?step=ceil(0.6·steps)` (step 0 is often an empty scene);
+cropped to the kit's stage (`[data-sd-stage]`; the kit's header, panel and transport look the same on every sim), or
+the whole first screen for a page without the kit; cut to 16:10 from the top left, 560×350 WebP, quality 0.78
+(encoded by the browser, so nothing but Playwright is needed). About 0.9 s a sim and 15 KB a thumbnail; a run with a
+warm cache takes under a second. A kit change changes every built sim, so every one is shot again, which is right.
+`THUMBS_VERSION` in `lib/thumbs.mjs` does the same when the recipe changes. Options: `--only id,id`, `--force`,
+`--drafts`, `--prune` (delete cache files no current sim uses), `--cache <dir>`. `scripts/deploy.sh` runs it
+before the build (docs/deploy.md). Light thumbnails only, for now.
 
 `--drafts` (used by the admin's preview) also includes `wip` sims.
 
@@ -364,7 +423,7 @@ A built sim is about 130 KB (kit CSS and JS, fonts, the page and its model). The
 `npm run check:page -- dist/sims/<id>/index.html`, passes on the built file as on the source.
 
 **Tooling: Node ≥ 22.12 (the kit's floor) and its standard library.** The build, the check and the admin need no
-packages. The only dev dependency is the kit's Playwright, for page checks. The build takes well under a
+packages. The only dev dependency is the kit's Playwright, for page checks and `npm run thumbs`. The build takes well under a
 second, and the admin server is about a hundred lines on `node:http`.
 
 **Departure from playbook §10.9**, which recommends Vite + vite-plugin-singlefile:
@@ -472,14 +531,14 @@ listed at the end for the kit.
 5. **The index is `<site root>/index.html`**, which matches the template's back link (`../../index.html` from
    `sims/<id>/`) and `INDEX` in `new-sim.sh`, both unbuilt (repo root) and built (`dist/`).
 6. **Back link.** The kit goes back in history when the visitor came from the index, and otherwise follows the link to
-   the home page.
+   the home page, or to the lecture set the home page left in `sessionStorage` (§3.1; kit `setReturn`, t-0095).
 7. **Deep links.** The kit opens `?preset=<id>&step=<n>`. A preset entry (`sim.json` `entries`, §2.1) is linked
    from the home page and from course files (`"<sim>#<preset>"`) as `?preset=<id>`, or as the entry's own `query`;
    no kit change was needed.
 8. **Steps.** `sim.json` `steps` is what the frame records; the kit compares it with what the page mounts.
 9. **Offline.** The build refuses network loads; the kit bundles its fonts, so built sims are complete files.
-10. **Look.** The home and course pages keep their own small CSS (`site/index.css`, `site/course.css`). They
-    could take the kit's tokens and font later; not needed for the frame to work.
+10. **Look.** The home page takes the kit's tokens and font (§3.1). The course and licences pages keep their own
+    small CSS (`site/course.css`); they could take them later.
 
 **For the kit to change (not edited from the frame):**
 - **Template `#simdeck-meta` placeholder:** replace `courses`, `kind`, `path` and `"tags": ["template"]` with the

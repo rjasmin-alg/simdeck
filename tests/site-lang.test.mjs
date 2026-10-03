@@ -29,10 +29,10 @@ test('home and course pages switch between Croatian and English', { skip }, asyn
     assert.equal(await p.evaluate(() => document.documentElement.lang), 'hr');
     assert.ok(await visible('Računalne mreže'));
     assert.ok(!(await visible('Computer networks')));
-    assert.equal(await p.getAttribute('#q', 'placeholder'), 'Traži simulator… ( / )');
-    // A title in two language spans looks like any other title (the list's own span styles must not reach it).
-    const looks = await p.evaluate(() => [...document.querySelectorAll('li[data-s] > a')].map((a) => {
-      const el = a.querySelector('span:not([hidden])') || a;
+    assert.equal(await p.getAttribute('#q', 'placeholder'), 'Traži simulator, pojam ili naredbu…');
+    // A title in two language spans looks like any other title (the tile's own span styles must not reach it).
+    const looks = await p.evaluate(() => [...document.querySelectorAll('.tile h3')].map((h) => {
+      const el = h.querySelector('span[lang]:not(.h-lang)') || h;
       return `${getComputedStyle(el).fontSize} ${getComputedStyle(el).color}`;
     }));
     assert.equal(new Set(looks).size, 1, looks.join(' | '));
@@ -41,8 +41,8 @@ test('home and course pages switch between Croatian and English', { skip }, asyn
     assert.equal(await p.evaluate(() => document.documentElement.lang), 'en');
     assert.ok(await visible('Computer networks'));
     assert.ok(!(await visible('Računalne mreže')));
-    assert.equal(await p.getAttribute('#q', 'placeholder'), 'Find a simulator… ( / )');
-    assert.match(await p.getAttribute('a[href*="sims/dhcp-dora"]', 'href'), /\?lang=en$/, 'sim links follow the switch');
+    assert.equal(await p.getAttribute('#q', 'placeholder'), 'Find a simulator, a concept or a command…');
+    assert.match(await p.getAttribute('.tile-link[href*="sims/dhcp-dora"]', 'href'), /\?lang=en$/, 'sim links follow the switch');
     await p.fill('#q', 'name resolution');
     assert.ok(await visible('DNS: name resolution'), 'search in English');
 

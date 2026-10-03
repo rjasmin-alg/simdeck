@@ -66,6 +66,27 @@
     }
   }
 
+  /**
+   * Where the back link goes when the visitor came from a lecture set on the home page (index.html?set=…#3): the
+   * address the lecture view keeps in sessionStorage ("simdeck.set"), if it is this site's index (the back link's
+   * target, also as its folder URL) on the same origin and carries ?set=; with ?lang= set to `lang` when given, so
+   * the way back stays in the sim's language. Otherwise null, and the back link goes home. It works from file://,
+   * where there is no referrer.
+   */
+  function setReturn(stored, backHref, lang) {
+    try {
+      if (!stored) return null;
+      var u = new URL(stored);
+      var back = new URL(backHref);
+      if (u.origin !== back.origin || !u.searchParams.has('set')) return null;
+      if (u.pathname !== back.pathname && u.pathname !== back.pathname.replace(/[^/]*$/, '')) return null;
+      if (lang) u.searchParams.set('lang', lang);
+      return u.href;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ── languages (pure) ──
 
   /** Every simdeck page exists in these languages (docs/sim-ui.md §9). */
@@ -150,7 +171,7 @@
   }
 
   var core = {
-    version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt, cameFromSite: cameFromSite,
+    version: VERSION, rng: rng, defaultsOf: defaultsOf, stepsOf: stepsOf, stateAt: stateAt, cameFromSite: cameFromSite, setReturn: setReturn,
     LANGS: LANGS, pluralIndex: pluralIndex, format: format, checkStrings: checkStrings, expandTerms: expandTerms,
     glossaryIndex: glossaryIndex, textWords: textWords
   };
@@ -600,9 +621,15 @@
         var bu = el.back.getAttribute('href').split('?')[0];
         el.back.setAttribute('href', bu + '?lang=' + i18n.lang);
       }
+      // Opened from a lecture set (the home page's ?set= view): the link goes back to that set, at the same sim.
+      var stored = null;
+      try { stored = window.sessionStorage.getItem('simdeck.set'); } catch (e) { /* storage off: the link goes home */ }
+      var toSet = setReturn(stored, el.back.href, bilingual ? i18n.lang : null);
+      if (toSet) el.back.setAttribute('href', toSet);
       el.back.addEventListener('click', function (e) {
         // Opened from the index or a course page: go back in history, so the visitor returns to where they came
-        // from (a student to their course page) and the index keeps its search. Otherwise follow the link home.
+        // from (a student to their course page, a lecturer to the set) and the index keeps its search. Otherwise
+        // follow the link: home, or the lecture set from sessionStorage.
         if (cameFromSite(document.referrer, el.back.href) && window.history.length > 1) {
           e.preventDefault();
           window.history.back();

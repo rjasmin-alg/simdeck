@@ -17,9 +17,15 @@ Rules the script enforces:
   branches cannot go up by accident. `SIMDECK_REF=<ref>` is accepted only with `--dry-run`.
 - main has a `build` script (the site frame, `docs/site-structure.md`), so the script runs `npm run build` in the
   export and publishes `dist/`: the home page, the course pages, and each finished sim as one self-contained file.
-  There is no `npm ci`: the build uses Node's standard library only, and Playwright is needed for checks, not
-  for publishing. (Without a build script it would publish the static tree, and generate a stop-gap list if there
+  There is no `npm ci` in the export: the build uses Node's standard library only. Playwright is needed for the
+  thumbnails (next point), and comes from this checkout. (Without a build script it would publish the static tree, and generate a stop-gap list if there
   were no `index.html`; both are fallbacks from before the frame.)
+- **Thumbnails** (the home page's tiles, `docs/site-structure.md` §5): before the build, the script runs
+  `npm run thumbs` in the export, with this checkout's `node_modules` (Playwright; run `npm ci` once) and this
+  checkout's cache, `.cache/thumbs/`. The cache is keyed by each built sim's sha256, so a deploy shoots only the sims
+  that changed (about 0.9 s each; a kit change shoots them all, about 70 s for 79 sims). The build then copies the
+  matching thumbnails into `dist/thumbs/`. Without Playwright the deploy stops and says so; `SIMDECK_THUMBS=0
+  npm run deploy` publishes without thumbnails, and the tiles show placeholders in their topic's colour.
 - **Source archive (AGPL-3.0 §13).** Every page links "Izvorni kod / Source code" (`docs/site-structure.md`
   §3.3). While the site sits behind basic auth, the deploy writes `/simdeck/source.tar.gz` with `git archive` from
   the same `main` commit it publishes, so the source offered is always the source served. Once there is a public

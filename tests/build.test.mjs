@@ -5,7 +5,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildNative, build, scriptJson } from '../scripts/build.mjs';
+import { buildNative, build, scriptJson, kitTokens, pageScript } from '../scripts/build.mjs';
+import { thumbKey } from '../lib/thumbs.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const entry = { id: 'x', title: 'X </script>', concept: 'c', class: 'stepper', lang: 'hr', steps: 3 };
@@ -95,9 +96,68 @@ test('the real repository builds every page, and only finished ones', () => {
     assert.doesNotMatch(index, /\{\{\w+\}\}/, 'all template variables filled');
     assert.doesNotMatch(index, /application\/json/, 'no data blob: the home page is plain HTML');
     assert.doesNotMatch(index, /(src|href)="\//, 'no root-absolute links: the folder can move');
+    assert.doesNotMatch(index, /courses\//, 'the home page names no courses (owner, 2026-10-03)');
+    assert.match(index, /<body data-site-url="https:\/\/materijali\.online\/simdeck\/">/, 'the address "copy link" shares');
+    assert.equal((index.match(/<article class="tile" /g) ?? []).length, r.entries.length, 'one tile per finished sim');
+    assert.equal((index.match(/class="chip" /g) ?? []).length, new Set(r.entries.map((e) => e.topic)).size, 'one chip per topic in use');
+    for (const f of ['atkinson-hyperlegible-latin-400-normal.woff2', 'atkinson-hyperlegible-latin-ext-700-normal.woff2']) assert.ok(existsSync(join(out, 'fonts', f)), f);
+    assert.match(index, /url\('fonts\/atkinson-hyperlegible-latin-400-normal\.woff2'\)/, 'the kit\'s font, from the copy next to the page');
   } finally {
     rmSync(dirname(out), { recursive: true, force: true });
   }
+});
+
+test('thumbnails: a cached one is used only when it was shot from this build of the sim; else a placeholder', () => {
+  const d = mkdtempSync(join(tmpdir(), 'simdeck-thumbs-'));
+  const out = join(d, 'site');
+  const cache = join(d, 'cache');
+  try {
+    // First build without a cache: every tile has a placeholder, and no thumbs/ folder.
+    let r = build({ root: ROOT, out, log: () => {}, thumbs: cache });
+    assert.ok(r.ok, r.errors.join());
+    let index = readFileSync(join(out, 'index.html'), 'utf8');
+    assert.doesNotMatch(index, /<img src="thumbs\//);
+    assert.match(index, /<article class="tile" data-id="vlan"[^]*?<span class="ph" aria-hidden="true">V<\/span>/);
+    assert.ok(!existsSync(join(out, 'thumbs')));
+    // A thumbnail keyed by vlan's built file is copied as thumbs/vlan-light.webp; a stale key for nat is not.
+    mkdirSync(cache);
+    writeFileSync(join(cache, thumbKey(readFileSync(join(out, 'sims', 'vlan', 'index.html'), 'utf8'))), 'webp');
+    writeFileSync(join(cache, thumbKey('an older build of nat')), 'webp');
+    r = build({ root: ROOT, out, log: () => {}, thumbs: cache });
+    index = readFileSync(join(out, 'index.html'), 'utf8');
+    assert.equal(readFileSync(join(out, 'thumbs', 'vlan-light.webp'), 'utf8'), 'webp');
+    assert.ok(!existsSync(join(out, 'thumbs', 'nat-light.webp')));
+    assert.match(index, /<article class="tile" data-id="vlan"[^>]*>[^]*?<img src="thumbs\/vlan-light\.webp" alt="" width="560" height="350"/);
+    assert.match(index, /<article class="tile" data-id="nat"[^]*?<span class="ph"/);
+    assert.notEqual(thumbKey('a'), thumbKey('b'));
+    assert.equal(thumbKey('a'), thumbKey('a'));
+    assert.match(thumbKey('a'), /^[0-9a-f]{64}-light\.webp$/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('kitTokens: the kit\'s light tokens on :root, the dark ones when the OS asks, and its fonts', () => {
+  const css = readFileSync(join(ROOT, 'kit', 'kit.css'), 'utf8');
+  const t = kitTokens(css);
+  assert.match(t, /^@font-face \{[^}]*url\('fonts\/atkinson/m);
+  assert.match(t, /:root \{ --bg: #fbfaf6;[^}]*--c8: #4b5567; color-scheme: light; \}/);
+  assert.match(t, /@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{ --bg: #0d1626;/);
+  assert.throws(() => kitTokens('body {}'), /tokens:light/);
+});
+
+test('pageScript: the page\'s words and core.mjs\'s set-link functions are inlined in front of site/index.js', () => {
+  const js = pageScript('/* page */ x("</script>")');
+  assert.match(js, /^var STR = \{"hr":\{"sims":\["simulator","simulatora","simulatora"\]/);
+  assert.match(js, /\nfunction parseSet\(str, known, max = 30\) \{/);
+  assert.match(js, /\nfunction setParam\(ids\) \{/);
+  assert.match(js, /\nfunction plural\(lang, n, forms\) \{/);
+  assert.doesNotMatch(js, /<\/script/i, 'cannot close its script element');
+  // The inlined functions run on their own, as they do in the page.
+  const run = new Function(`${js.replace(/\/\* page \*\/.*$/s, '')}; return { parseSet, setParam, plural };`)();
+  assert.deepEqual(run.parseSet('a,b:c,a,x', new Set(['a', 'b#c'])), { items: ['a', 'b#c'], skipped: ['x'] });
+  assert.equal(run.setParam(['a', 'b#c']), 'a,b:c');
+  assert.equal(run.plural('hr', 22, ['a', 'b', 'c']), 'b');
 });
 
 test('the real repository also builds with drafts (the admin preview), so every sim page is exercised', () => {
@@ -157,7 +217,7 @@ test('home and course pages carry both languages, the switch and the language sc
     assert.match(index, /data-lang-switch/);
     assert.match(index, /simdeck\.lang/, 'site/lang.js is inlined');
     assert.match(index, /<span data-l="hr" lang="hr">Računalne mreže<\/span><span data-l="en" lang="en">Computer networks<\/span>/);
-    assert.match(index, /data-en="Find a simulator… \( \/ \)"/);
+    assert.match(index, /data-en="Find a simulator, a concept or a command…"/);
     assert.match(index, /html\[lang="hr"\] \[data-l="en"\]/, 'the CSS hides the other language');
     const course = readFileSync(join(out, 'courses', 'linux-essentials', 'index.html'), 'utf8');
     assert.match(course, /<span data-l="hr" lang="hr">Mreža<\/span><span data-l="en" lang="en">Networking<\/span>/);

@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalise, search, group, entryHref, presetItems, refMap, entryAbsUrl, shortUrl, shortLinkRules, renderCourse, courseItems, renderIndexList, isPublic, bi, loc,
-  sourceHref, licenceLine, renderLicences, LICENCE } from '../site/core.mjs';
+  sourceHref, licenceLine, renderLicences, LICENCE, plural, countStr, topicAccent, TOPIC_ACCENTS, parseSet, setParam, setUrl, SET_MAX, renderTile, renderChips,
+  STR } from '../site/core.mjs';
 
 const two = (hr, en = hr) => ({ hr, en });
 const vocab = {
@@ -133,15 +134,77 @@ test('course pages: both languages, sims linked in the course language, a badge 
   assert.match(html, /https:\/\/m\.o\/simdeck\/sims\/dns\/\?lang=en/, 'printed URL in English names the language');
 });
 
-test('the home list shows finished entries only, by topic, with folded search words', () => {
+test('the home list shows finished entries only, as tiles on one shelf per topic, with folded search words', () => {
   const html = renderIndexList({ site, vocab, entries });
   assert.ok(!html.includes('Nedovršen'), 'wip left out');
   assert.match(html, /Odabir studenta/, 'tools are listed on the home page');
   assert.ok(html.indexOf('Računalne mreže') < html.indexOf('Pohrana'), 'tags.json topic order');
-  assert.match(html, /<h2><span data-l="hr" lang="hr">Pohrana<\/span><span data-l="en" lang="en">Storage<\/span><\/h2>/, 'topic labels in both');
+  assert.match(html, /<section class="topic" id="t-storage" data-topic="storage" style="--tc:var\(--c3\)"><h2><span class="dot"><\/span><span class="t-topic"><span data-l="hr" lang="hr">Pohrana<\/span><span data-l="en" lang="en">Storage<\/span><\/span> <small>2<\/small><\/h2>/, 'topic labels in both, with the count');
   assert.match(html, /data-s="[^"]*name resolution/, 'both languages are searchable');
   assert.match(html, /data-s="[^"]*razlucivanje/, 'diacritics folded in search words');
+  assert.equal((html.match(/<article class="tile" /g) ?? []).length, 5);
   assert.equal(isPublic(entries[5]), false);
+});
+
+test('a tile: what the selection, the lecture view and the handout read from it, and a placeholder without a thumbnail', () => {
+  const dns = entries[0];
+  const t = renderTile(dns, { site, vocab }, 0);
+  assert.match(t, /^<article class="tile" data-id="dns" data-class="stepper" data-topic="networks" data-url="https:\/\/m\.o\/simdeck\/sims\/dns\/" data-s="[^"]+" style="--tc:var\(--c1\)">/);
+  assert.match(t, /<a class="tile-link" data-lang-link href="sims\/dns\/index.html"><span class="pic"><span class="ph" aria-hidden="true">D<\/span><\/span>/);
+  assert.match(t, /<h3 class="t-title"><span data-l="hr" lang="hr">DNS: razlučivanje imena<\/span>/);
+  assert.match(t, /<span class="t-concept"><span data-l="hr" lang="hr">Rekurzivni resolver/);
+  assert.match(t, /<span class="t-summary" hidden>/, 'the summary is there for the handout, not shown');
+  assert.match(t, /<button type="button" class="pick" data-pick="dns" aria-pressed="false">/);
+  assert.doesNotMatch(t, /class="presets"/, 'no presets, no chip list');
+  const withThumb = renderTile(dns, { site, vocab, thumbs: new Set(['dns']) }, 0);
+  assert.match(withThumb, /<img src="thumbs\/dns-light\.webp" alt="" width="560" height="350">/, 'the first tiles load at once');
+  assert.match(renderTile(dns, { site, vocab, thumbs: new Set(['dns']) }, 12), /<img [^>]*loading="lazy">/, 'the rest lazily');
+  assert.match(renderTile(entries[3], { site, vocab }), /<h3 class="t-title">LVM <span class="h-lang" data-l="hr"/, 'single-language badge');
+  assert.match(renderTile(entries[0], { site, vocab }), /korak po korak<\/span><span data-l="en" lang="en">step by step/);
+  assert.match(renderTile({ ...entries[0], steps: 12 }, { site, vocab }), /12 koraka<\/span><span data-l="en" lang="en">12 steps/, 'a stepper says how many steps');
+});
+
+test('topic chips: one per shelf, in its colour, with its count', () => {
+  const groups = group(entries.filter(isPublic), vocab);
+  const html = renderChips(groups, vocab);
+  assert.equal(html, '<a class="chip" href="#t-networks" data-chip="networks" style="--tc:var(--c1)"><span class="dot"></span><span data-l="hr" lang="hr">Računalne mreže</span><span data-l="en" lang="en">Computer networks</span> <small>3</small></a>'
+    + '<a class="chip" href="#t-storage" data-chip="storage" style="--tc:var(--c3)"><span class="dot"></span><span data-l="hr" lang="hr">Pohrana</span><span data-l="en" lang="en">Storage</span> <small>2</small></a>');
+});
+
+test('topic accents: the kit\'s eight series colours; an unlisted topic takes its place in tags.json', () => {
+  assert.equal(topicAccent('networks', vocab), 'var(--c1)');
+  assert.equal(topicAccent('classroom', vocab), 'var(--c8)');
+  assert.ok(Object.values(TOPIC_ACCENTS).every((n) => n >= 1 && n <= 8));
+  const v = { topics: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'new'].map((k) => [k, {}])) };
+  assert.equal(topicAccent('new', v), 'var(--c2)', 'tenth topic: round the eight');
+  assert.equal(topicAccent('unknown', v), 'var(--c1)');
+});
+
+test('plural forms: Croatian 1 / 2–4 / 5+ (11–14 are "many"), English 1 / other', () => {
+  const hr = ['simulator', 'simulatora', 'simulatora'];
+  const f = ['one', 'few', 'many'];
+  assert.deepEqual([1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111, 0].map((n) => plural('hr', n, f)),
+    ['one', 'few', 'few', 'many', 'many', 'many', 'many', 'one', 'few', 'many', 'one', 'many', 'many']);
+  assert.deepEqual([0, 1, 2].map((n) => plural('en', n, ['one', 'other'])), ['other', 'one', 'other']);
+  assert.equal(countStr('sims', 21), '<span data-l="hr" lang="hr">21 simulator</span><span data-l="en" lang="en">21 simulators</span>');
+  assert.equal(plural('hr', 38, hr), 'simulatora');
+  for (const l of ['hr', 'en']) for (const k of ['sims', 'topicsN', 'stepsN']) assert.equal(STR[l][k].length, l === 'hr' ? 3 : 2, `${l} ${k}`);
+});
+
+test('set links: order kept, repeats dropped, unknown ids named, at most 30; "host:preset" is a course file\'s "host#preset"', () => {
+  const known = refMap([stp, ...entries]);
+  assert.deepEqual(parseSet('dns,stp:broadcast-storm,lvm', known), { items: ['dns', 'stp#broadcast-storm', 'lvm'], skipped: [] });
+  assert.deepEqual(parseSet('lvm,dns,lvm, dns ,,', known), { items: ['lvm', 'dns'], skipped: [] }, 'repeats and blanks dropped');
+  assert.deepEqual(parseSet('nope,dns,stp:nope', known), { items: ['dns'], skipped: ['nope', 'stp#nope'] });
+  assert.deepEqual(parseSet('', known), { items: [], skipped: [] });
+  assert.deepEqual(parseSet(null, known), { items: [], skipped: [] });
+  const many = new Set(Array.from({ length: 40 }, (_, i) => `s${i}`));
+  assert.equal(parseSet([...many].join(','), many).items.length, SET_MAX);
+  assert.equal(SET_MAX, 30);
+  assert.equal(setParam(['dns', 'stp#broadcast-storm']), 'dns,stp:broadcast-storm');
+  assert.deepEqual(parseSet(setParam(['stp#belady', 'dns']), known).items, ['stp#belady', 'dns'], 'round trip');
+  assert.equal(setUrl(['dns', 'stp#belady'], site), 'https://m.o/simdeck/?set=dns,stp:belady');
+  assert.equal(setUrl(['dns'], { siteUrl: 'https://m.o/simdeck' }), 'https://m.o/simdeck/?set=dns');
 });
 
 test('empty states: no finished sims on the home page, none on a course page', () => {
@@ -208,17 +271,23 @@ test('preset entries: links open the preset (kit ?preset=, or the entry\'s own q
   assert.deepEqual(presetItems({ ...stp, entries: [null, { title: 'x' }] }), [], 'malformed items are left to the manifest check');
 });
 
-test('preset entries: one line each on the home page, under their sim, searchable by their own words and the sim\'s', () => {
-  const html = renderIndexList({ site, vocab, entries: [stp, entries[0]] });
-  const lines = html.match(/<li[^>]*>.*?<\/li>/g);
-  const at = (re) => lines.findIndex((l) => re.test(l));
-  assert.equal(at(/sims\/stp\/index.html\?preset=broadcast-storm"/), at(/sims\/stp\/index.html"/) + 1, 'right under the sim');
-  assert.equal(at(/sims\/stp\/index.html\?scenario=fifo-belady"/), at(/sims\/stp\/index.html"/) + 2);
-  const storm = lines[at(/preset=broadcast-storm/)];
-  assert.match(storm, /^<li class="h-preset" data-s="[^"]*oluja razasiljanja[^"]*broadcast storm/, 'its own title, both languages, folded');
-  assert.match(storm, /data-s="[^"]*petlja bez stp-a/, 'its concept');
-  assert.match(storm, /data-s="[^"]*\bstp\b[^"]*stablo bez petlji/, 'the host sim\'s words');
-  assert.match(storm, /<span class="h-host">STP ›<\/span> <a data-lang-link href="sims\/stp\/index.html\?preset=broadcast-storm">/, 'names its sim first');
+test('preset entries: chips on their sim\'s tile, two shown and "+N" for the rest, each with its link, words and +', () => {
+  const four = { ...stp, entries: [...stp.entries, { preset: 'p3', title: 'Treći', concept: 'c' }, { preset: 'p4', title: 'Četvrti', concept: 'c' }] };
+  const html = renderIndexList({ site, vocab, entries: [four, entries[0]] });
+  const tile = html.match(/<article class="tile" data-id="stp"[^]*?<\/article>/)[0];
+  const chips = tile.match(/<li class="preset[^"]*"[^>]*>.*?<\/li>/g);
+  assert.equal(chips.length, 4);
+  assert.match(chips[0], /^<li class="preset" data-id="stp#broadcast-storm" data-class="stepper" data-topic="networks" data-url="https:\/\/m\.o\/simdeck\/sims\/stp\/\?preset=broadcast-storm" data-s="[^"]*oluja razasiljanja[^"]*broadcast storm/);
+  assert.match(chips[0], /data-s="[^"]*petlja bez stp-a/, 'its concept');
+  assert.match(chips[0], /<a data-lang-link href="sims\/stp\/index.html\?preset=broadcast-storm" class="t-title">/);
+  assert.match(chips[0], /<button type="button" class="pick pick-sm" data-pick="stp#broadcast-storm"/);
+  assert.match(chips[1], /href="sims\/stp\/index.html\?scenario=fifo-belady"/, 'the entry\'s own query');
+  assert.match(chips[1], /<span class="t-summary" hidden><span data-l="hr" lang="hr">Više okvira\./);
+  assert.match(chips[2], /^<li class="preset more"/, 'the third and later are behind "+N"');
+  assert.match(tile, /<li class="more-btn"><button type="button" data-more>\+2<\/button><\/li>/);
+  assert.doesNotMatch(renderIndexList({ site, vocab, entries: [stp] }), /more-btn/, 'two presets: no "+N"');
+  // The tile's own words are its own: the page script matches a chip by its words with the tile's.
+  assert.doesNotMatch(tile.match(/^<article[^>]*>/)[0], /oluja/);
   const wip = renderIndexList({ site, vocab, entries: [{ ...stp, status: 'wip' }] });
   assert.doesNotMatch(wip, /preset=/, 'an unfinished sim\'s entries are not published either');
 });
