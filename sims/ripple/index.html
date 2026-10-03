@@ -1,0 +1,168 @@
+<b>Brujanje 50 Hz / 100 Hz</b>
+<p>
+Ovdje možeš poslušati zvukove brujanja na frekvencijama $\qty{50}{\hertz}$ i $\qty{100}{\hertz}$.
+</p>
+
+<div class="d-flex gap-2 flex-wrap">
+<button type="button" class="btn btn-primary" onclick="playRippleTone(50)">
+    Reproduciraj 50 Hz
+</button>
+
+<button type="button" class="btn btn-primary" onclick="playRippleTone(100)">
+    Reproduciraj 100 Hz
+</button>
+
+<button type="button" class="btn btn-secondary" onclick="stopTone()">
+    Zaustavi
+</button>
+</div>
+
+<p id="toneStatus" class="mt-3 mb-0 text-muted">
+Nema aktivnog zvuka.
+</p>
+
+<script>
+  let audioContext = null;
+  let sourceNode = null;
+  let gainNode = null;
+
+  function ensureAudioContext() {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    if (audioContext.state === "suspended") {
+      audioContext.resume();
+    }
+  }
+
+  function smoothstep(x) {
+    x = Math.max(0, Math.min(1, x));
+    return x * x * (3 - 2 * x);
+  }
+
+  function rippleShape(phase) {
+    /*
+      phase: 0 ... 1
+
+      Modell:
+      - Start unten
+      - relativ schneller, weicher Anstieg
+      - abgerundeter Scheitel
+      - langsamer, nahezu linearer Abfall
+
+      Das ist keine exakte Netzteil-Simulation, sondern eine gut hörbare
+      Näherung an die im Bild gezeigte Restwelligkeit.
+    */
+
+    const chargePart = 0.36; // Anteil der Periode für den Anstieg
+
+    if (phase < chargePart) {
+      const x = phase / chargePart;
+
+      // schneller Anstieg mit weicher Rundung
+      return -1 + 2 * smoothstep(x);
+    } else {
+      const x = (phase - chargePart) / (1 - chargePart);
+
+      // langsamer Abfall, leicht geglättet
+      return 1 - 2 * x;
+    }
+  }
+
+  function createRippleBuffer(frequency) {
+    const sampleRate = audioContext.sampleRate;
+
+    /*
+      1 Sekunde Buffer:
+      Bei 50 Hz enthält er 50 Perioden,
+      bei 100 Hz enthält er 100 Perioden.
+      Dadurch läuft der Loop sauber.
+    */
+    const duration = 1.0;
+    const length = Math.round(sampleRate * duration);
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    let sum = 0;
+
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      const phase = (t * frequency) % 1;
+      const value = rippleShape(phase);
+
+      data[i] = value;
+      sum += value;
+    }
+
+    /*
+      Gleichanteil entfernen.
+      Eine echte Ausgangsspannung hätte z. B. 12 V DC plus kleine Welligkeit.
+      Lautsprecher sollen aber nur den hörbaren Wechselanteil bekommen.
+    */
+    const mean = sum / length;
+
+    let maxAbs = 0;
+
+    for (let i = 0; i < length; i++) {
+      data[i] -= mean;
+      maxAbs = Math.max(maxAbs, Math.abs(data[i]));
+    }
+
+    // Normalisieren
+    if (maxAbs > 0) {
+      for (let i = 0; i < length; i++) {
+        data[i] /= maxAbs;
+      }
+    }
+
+    return buffer;
+  }
+
+  function playRippleTone(frequency) {
+    ensureAudioContext();
+    stopTone(false);
+
+    const buffer = createRippleBuffer(frequency);
+
+    sourceNode = audioContext.createBufferSource();
+    gainNode = audioContext.createGain();
+
+    sourceNode.buffer = buffer;
+    sourceNode.loop = true;
+
+    // moderate Lautstärke mit kurzem Fade-in gegen Knackser
+    gainNode.gain.setValueAtTime(0.0, audioContext.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.2, audioContext.currentTime + 0.03);
+
+    sourceNode.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    sourceNode.start();
+
+    document.getElementById("toneStatus").textContent =
+      frequency + " Hz oblikovano brujanje aktivno.";
+  }
+
+  function stopTone(updateStatus = true) {
+    if (sourceNode && gainNode && audioContext) {
+      const now = audioContext.currentTime;
+
+      try {
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.linearRampToValueAtTime(0.0, now + 0.03);
+        sourceNode.stop(now + 0.04);
+      } catch (e) {
+        // Falls bereits gestoppt
+      }
+
+      sourceNode = null;
+      gainNode = null;
+    }
+
+    if (updateStatus) {
+      document.getElementById("toneStatus").textContent = "Nema aktivnog zvuka.";
+    }
+  }
+</script>
