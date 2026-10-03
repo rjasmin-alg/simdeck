@@ -34,6 +34,14 @@ Rules and expected numbers: `SPEC.md`.
 - **Chart**: lanes C, A, (B) with lifelines; one row per message or event note; message name near the sender,
   receiver reactions ("no record, silent", "frees .150", "late, ignored", "on its way") near the receiver. When the
   rows do not fit, the oldest are dropped and "↑ N earlier rows" says so (on a phone the page scrolls instead).
+- **On the kit view since kit 0.4.0** (task `kit-sequence-chart`, 2026-10-03): the lane cards' frame, mark and name,
+  lifelines, arrows, tips, ✕, message chips, receiver words, notes, the time column and the dropping of old rows are
+  drawn by `Simdeck.sequence` (`docs/sim-ui.md` §11); the page keeps the card bodies, the field card, the lease bar
+  and the `none` legend swatch, and decides which lanes are down in each row. Differences a student would not notice:
+  the lifelines and arrows sit at the card centres (they were at column centres of the area without gaps, up to 8 px
+  off), the time column is 0.8rem further from the first lifeline, a word at a receiver one lane from the sender
+  that is not the outermost lane (A, from C, with B shown) sits beyond A instead of before it, and the broadcast
+  legend swatch is the kit's (its dashes show).
 - **Field card** shows the first message sent in this step, or the one delivered in it ("from an earlier step"):
   ports, broadcast/unicast, ciaddr/yiaddr/chaddr, flag B, options 50/51/54/1/3/6, and under OFFER/ACK to a client
   without an address the BROADCAST-flag note (rule 5).

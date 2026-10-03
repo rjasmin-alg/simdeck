@@ -1,7 +1,8 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.3.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; changes in
+the template. Kit version **0.4.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
+sequence chart view K1, §11; changes in
 `kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
@@ -9,12 +10,14 @@ kit/
   kit.css          tokens, layout, controls (one file, ~17 KB)
   kit.js           step controller, controls, transport, header tools, shortcuts, languages (one classic script, ~47 KB)
   topology.js      view K2: topology with moving packets (§10; a classic script, ~19 KB, linked only by pages that draw one)
+  sequence.js      view K1: message sequence chart (§11; a classic script, ~15 KB, linked only by pages that draw one)
   glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
   template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
   new-sim.sh       copies the template into a new sim folder
   kit.test.js      tests for the kit's pure core and stylesheet rules
   topology.test.js tests for view K2's geometry, spec checks and stylesheet rules
+  sequence.test.js tests for view K1's lane geometry, tie-breaks, spec checks and stylesheet rules
   CHANGELOG.md     one line per kit change
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
   tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
@@ -369,8 +372,8 @@ settled each one as follows.
   manifest, the model tests, the build, `check-page.mjs` on the built file, the token check and the scope check,
   and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
 - Drawing helpers come as **kit views**, each extracted from a pilot sim once it works, then checked against two
-  later consumers before its API is frozen: K2 topology (§10, 0.3.0). K1 sequence chart, K3 block grid and K4 rule
-  table follow the same way (`docs/tasks/w0/kit-*.md`).
+  later consumers before its API is frozen: K2 topology (§10, 0.3.0), K1 sequence chart (§11, 0.4.0). K3 block grid
+  and K4 rule table follow the same way (`docs/tasks/w0/kit-*.md`).
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.
 
@@ -573,3 +576,127 @@ The API was frozen after drawing two later sims with different needs on it (scre
 
 `raft` (five servers in a ring, partitions as `down` links, crashed servers as `down` nodes, vote requests to all as
 one packet per link, messages in flight across a step as `mid`) needs nothing more.
+
+## 11. View K1: message sequence chart (`kit/sequence.js`, 0.4.0)
+
+Parties as lanes with a card on top and a lifeline down; one row per message or event, time running down; the
+message of this step highlighted. Extracted from the pilot `sims/dhcp-dora/`; built for the protocol pages
+(`tcp-retransmit`, `tls-handshake`, `oauth-flow`, `win-kerberos`, `smtp-dialogue` and the other consumers in
+`docs/tasks/w0/kit-sequence-chart.md`).
+
+```html
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>     <!-- after kit.js; the build inlines it like the kit -->
+```
+
+```js
+render: function (c) {
+  var chart = Simdeck.sequence({
+    dir: c.dir,
+    lanes: [
+      { id: 'C', c: 1, shape: 'square', name: t('client'), tags: data('democli1'), body: [/* the page's card body */] },
+      { id: 'A', c: 2, name: t('serverA'), state: srv.up ? null : 'down', tags: badge, body: [...] }
+    ],
+    rows: [
+      { from: 'C', to: ['A', 'B'], label: 'DHCPDISCOVER', c: 1, line: 'dashed', time: '0 s' },
+      { from: 'A', to: 'C', label: 'DHCPOFFER', c: 2, line: 'dashed', time: '0 s', re: { C: t('stFlight') }, changed: true },
+      { kind: 'note', lane: 'A', text: t('noteDown', { srv: 'A' }), k: 'fill', time: '290 s' },
+      { from: 'C', to: 'A', label: 'DHCPREQUEST', c: 1, lost: ['A'], time: '300 s', cause: data('T1'), down: ['A'] }
+    ],
+    timers: [{ lane: 'C', from: 3, to: 6, label: 'RTO 1 s', end: 'expired' }],
+    empty: t('chartEmpty'),
+    earlier: function (n) { return t.n('earlier', n); }
+  });
+  c.stage.replaceChildren(h('div', { class: 'dh' }, chart, fieldCard, leaseBar));
+  chart.fit();   // drop the oldest rows that do not fit (it also refits on resize)
+}
+```
+
+**How it draws.** All HTML, no SVG: the lane cards sit in a grid of equal columns with one gap
+(`--sd-seq-gap`, 0.8rem), and every lifeline, arrow, tip, ✕, label and timer is placed at `calc()` positions of the
+same lane area, so lifelines run through the card centres and text is 1:1 at any screen size. The view holds no
+words: every text comes from the page through `t`. A bare string for `label`, `fields` and `time` is data
+(`translate="no"`: message names, sequence numbers, times); pass a node for a translated word.
+
+### `Simdeck.sequence(spec)` → element
+
+| Field | Meaning |
+|---|---|
+| `lanes[]` | `{ id, mark, c, shape, name, tags, body, state, changed }`, 2 to 6 of them, left to right |
+| `rows[]` | messages `{ from, to, label, c, fields, place, line, weight, lock, muted, drop, lost, re, time, cause, seen, changed, down }` or notes `{ kind: 'note', lane, text, k, time, cause, changed, down }` |
+| `timers[]` | `{ lane, from, to, label, end, side }` |
+| `eve` | `{ title, width }`: the "what an eavesdropper sees" column (default width 14rem) |
+| `dir` | `ctx.dir`: changed cards and labels pop in only on `'forward'` (never under reduced motion) |
+| `timeWidth`, `gap` | the time column (default 7.2rem, 4.6rem on a phone) and the gap between lanes |
+| `earlier(n)`, `empty` | the "↑ n earlier rows" text when the oldest rows are dropped, and the text of an empty chart |
+
+**Lanes.** The kit draws the card: a mark (`mark`, default the id; `null` for none) in series colour `c` (1–8),
+round or `shape: 'square'`, then `name` (bold, translated) and `tags` (any nodes on the same line: a host name, an
+up/down badge), then `body` (any nodes under it: the party's state, a table). `state: 'down'` dashes the card,
+`'active'` gives it a thick ink border; `changed` gives it the kit's changed mark. Give every card the same kind of
+body so they keep one height.
+
+**Messages.** One row each; `to` is an id or a list (a broadcast to several). The arrow runs from the sender's
+lifeline to the farthest receiver with a tip at every receiver. `label` is the chip (the message name), on the side of
+the receivers next to the sender (receivers on both sides: towards the farthest; equally far: right), or centred
+over the arrow with `place: 'mid'` (a long name on a short arrow). `fields` is a short line beside the chip (the fields
+that matter: `seq 1500 len 500`, `state, code_challenge`); a longer field list belongs in the page's own card.
+`c` colours the chip. `line: 'dashed' | 'dotted'` (a broadcast, a retransmission, a front-channel redirect),
+`weight: 'thin'` (an ACK), `lock: true` (encrypted: a double line and a lock on the chip), `muted: true` (context
+drawn grey, such as the TCP handshake under TLS). `lost: [ids]` puts ✕ instead of the tip at those receivers (the
+receiver is down); `drop: true` stops the arrow half way in ✕ (lost on the wire; one receiver). `re: { id: text }`
+is a short word at a receiver ("no record, silent", "late, ignored", "on its way"); it sits inside the arrow, outside
+the receiver on a one-lane arrow to a lane that is not the outermost (where the chip already fills the gap), and
+past the ✕ of a dropped message. `changed` marks the message of this step (highlighted chip, bold time).
+
+**Notes** are events on one lane (a server goes down, a lease expires, an option changes): a dashed box centred on the
+lifeline, `k: 'fill'` inverted (a failure), `k: 'solid'` a plain border.
+
+**Time column.** `time` (data) and `cause`, a small boxed word under it (`T1`, `retry`, `expiry`, `dup 1`); a
+string `cause` is a word, a node is placed as given (`data('T1')` for a name that is not language).
+
+**Down lanes.** `down: [ids]` on a row draws those lanes' lifelines dotted in that row. The page decides from its
+model (the pilot: from the "goes down" note on, not in the note's own row).
+
+**Timers** run beside a lane's lifeline over rows `from`…`to` (row indices; no `to`: still running, to the last row)
+as a striped bar, on the left of the lifeline or `side: 'r'`. `label` sits at its start (RTO 1 s, T1, "code 60 s");
+`end: 'expired'` ends it in a cap and ✕, `end: 'stopped'` in a double cap; no `end` leaves it open. When the start row
+is dropped by `fit`, the label moves to the first row still shown.
+
+**Eavesdropper.** With `eve`, a column to the right of the lanes has the title `eve.title` and, in each row, `seen`:
+what a passive observer reads of that message. A row with `lock` is hatched there and shows the lock. A page with a
+"what the browser / app / IdP sees" switch fills `seen` from the chosen viewer and changes the title.
+
+**Fit.** The list shows as many rows as fit its box: `chart.fit()` after the chart is in the page (and again on every
+resize) drops the oldest rows, keeps at least two, and puts `earlier(n)` on top. Checked at 1920×1080 with the panel
+open: three lanes with full cards (the pilot, 17 rows), two lanes with a timer and a side panel, two charts side by side
+with an eavesdropper column each, and six lanes with a timer on the right. Six lanes leave about 190 px per lane: keep
+chips to the message name, put the rest in `fields` or the page's card. A chip longer than its arrow spills over the
+neighbouring lane; use `place: 'mid'` or a shorter name.
+
+**Phone and portrait.** The lane cards stack, the time column narrows, rows grow (receiver words go under the arrow),
+notes wrap, the eavesdropper cell goes under its row, and the list stops dropping rows (the page scrolls; a page puts
+its stage at `height: auto` as the pilot does). Long chips are clipped at the side, never scrolling the page.
+
+**Legend swatches** for the arrows: `{ shape: 'line' }` and `{ shape: 'dash' }` (kit 0.3.0).
+
+**Spec checks.** `Simdeck.sequence.checkSpec(spec)` (pure, also under node: `require('kit/sequence.js')`) lists a
+lane count outside 2–6, duplicate or unknown lanes, messages to nobody or to the sender, a drop with several
+receivers, `lost` at a lane that is not a receiver, unknown `line`, `place` or row kind, and timers outside the rows;
+the view logs them on the console, which the page check fails. The geometry (`laneAt`, `midway`, `between`, `css`)
+and the tie-breaks (`labelSide`, `reSide`, `timerPart`) are exported for tests.
+
+### Checked against two consumers (sketched, not built)
+
+The API was frozen after drawing two later sims with different needs on it, plus a six-lane fit check (sketch page
+and screenshots: `library/k1-consumer-sketch.html` and `library/k1-sketch-*.png` in the thread t-0101 report):
+
+- **`tcp-retransmit`**: two lanes; segments with `fields` (`len 500`), a segment lost on the wire (`drop`, the word
+  past the ✕), thin ACKs (`weight`), a duplicate ACK (`cause: 'dup 1'`), a retransmission (`line: 'dashed'`), the
+  RTO as a timer that expires, then a doubled RTO still running; the send window and buffers are page panels beside the
+  chart. This sketch added the drop word placement and put notes above timers.
+- **`tls-handshake`**: two charts side by side (TLS 1.2 and 1.3), each with an eavesdropper column (`eve`, `seen`),
+  the TCP handshake greyed (`muted`), encrypted flights (`lock`), and the shorter run waiting with a note. This
+  sketch added `place: 'mid'` for long flight names and a narrow `timeWidth`.
+- **`oauth-flow`** (fit): six lanes, front-channel redirects dashed, tokens locked, a stolen code refused (`lost`), the
+  code's lifetime as a timer on the right. This sketch moved receiver words outside on one-lane arrows.
