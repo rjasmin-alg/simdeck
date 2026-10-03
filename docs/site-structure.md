@@ -251,7 +251,7 @@ the selection, the lecture view and the handout **from the tiles already in the 
 - **`wip` sims are not published at all:** no tile and no page.
 - **Nothing finished yet:** the home page says "Još nema objavljenih simulatora." / "No simulators published yet."
 - **The selection** (+ on a tile or a preset chip): a bar along the bottom once something is picked, with
-  **▶ Predavanje** (the lecture view), **Izroček** (the handout), **Kopiraj poveznicu** (the set's address on
+  **▶ Predavanje** (the lecture view), **Handout** (the handout), **Kopiraj poveznicu** (the set's address on
   `site.json` `siteUrl`, or this page's own from `file://`) and Isprazni. The title opens the ordered list (↑ ↓ ✕).
   It is kept per browser (`localStorage` `simdeck.tray`); the shareable form is the `?set=` link. On a phone the bar
   keeps only its title and ▶ until opened.
@@ -266,7 +266,7 @@ the selection, the lecture view and the handout **from the tiles already in the 
   "← Popis" goes there instead of home when the visitor came from a set (kit `setReturn`, §7), also from `file://`,
   which sends no referrer. Over http the referrer is the index, and the kit goes back in history as before. Opening
   the plain home page forgets the set.
-- **Handout, `?set=…&print=1`** (Izroček, or P in the lecture view): one A4 page with each sim's thumbnail,
+- **Handout, `?set=…&print=1`** (Handout, or P in the lecture view): one A4 page with each sim's thumbnail,
   title, concept, summary and address, and the set's own address at the top. Tools are left off it and named on
   screen. Printing the lecture view prints the handout too. About eight sims fit one page. No QR code (owner's call,
   `docs/tasks/OPEN.md`).
