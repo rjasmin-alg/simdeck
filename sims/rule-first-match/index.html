@@ -1,0 +1,437 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- rule-first-match: requests go through a rule list one row per step. The first row that matches in every column
+     decides (pg_hba.conf: its method is checked next, with no fall-through); a request that matches nothing meets the
+     implicit deny / "no entry" at the end. Pilot of kit view K4 (rule table with the matching row). Model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="rule-first-match">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odlučuje prvi pogodak · simdeck</title>
+<meta name="description" content="Zahtjevi kroz pg_hba.conf, ACL na usmjerniku i filtar bez stanja, redak po redak: prvi pogodak odlučuje, nižim se ne vraća, a što ne pogodi ništa, odbija se.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "rule-first-match",
+  "title": {
+    "hr": "Odlučuje prvi pogodak",
+    "en": "First match wins"
+  },
+  "concept": {
+    "hr": "Čita se odozgo, odlučuje prvo pravilo koje odgovara, na kraju skrivena zabrana",
+    "en": "Read top down, the first matching rule decides, an implicit deny ends the list"
+  },
+  "summary": {
+    "hr": "Zahtjevi kroz pg_hba.conf, ACL na usmjerniku i filtar bez stanja, redak po redak: prvi pogodak odlučuje, nižim se ne vraća, a što ne pogodi ništa, odbija se.",
+    "en": "Requests through pg_hba.conf, a router ACL and a stateless filter, row by row: the first match decides, nothing falls through, and no match means deny."
+  },
+  "tags": [
+    "firewall"
+  ],
+  "class": "stepper",
+  "steps": 12
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="rule-first-match"]; colours only from kit tokens.
+   Layout (K4): the request queue on the left, the rule table on the right (pointer, #, match columns, action, mark),
+   the tally under both. */
+[data-sim="rule-first-match"] .rf {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 3.4fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 2cqh 1.4cqw;
+  height: 100%;
+  padding: 2.5cqh 1.5cqw;
+  font-size: 1.05rem;
+}
+[data-sim="rule-first-match"] .rf h2 { margin: 0 0 0.4rem; font-size: 1em; font-weight: 700; }
+[data-sim="rule-first-match"] .rf-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.8rem 0.6rem; min-width: 0; }
+[data-sim="rule-first-match"] [translate="no"] { font-family: var(--mono); }
+
+/* queue */
+[data-sim="rule-first-match"] .rf-queue { grid-row: 1 / span 2; display: flex; flex-direction: column; gap: 0.6rem; align-self: start; }
+[data-sim="rule-first-match"] .rf-card {
+  padding: 0.35rem 0.6rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.5rem solid var(--sw, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  line-height: 1.35;
+}
+[data-sim="rule-first-match"] .rf-card.rf-cur { border-color: var(--ink); border-width: 0.22rem 0.22rem 0.22rem 0.5rem; border-left-color: var(--sw, var(--line)); }
+[data-sim="rule-first-match"] .rf-card.rf-wait { color: var(--muted); }
+[data-sim="rule-first-match"] .rf-card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; font-weight: 700; margin-bottom: 0.15rem; }
+[data-sim="rule-first-match"] .rf-card div { overflow-wrap: anywhere; }
+[data-sim="rule-first-match"] .rf-card [translate="no"] { font-size: 0.92em; }
+[data-sim="rule-first-match"] .rf-dir { font-size: var(--fs-sm); font-style: italic; }
+[data-sim="rule-first-match"] .rf-num { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.3rem; border-radius: 0.8rem; font-weight: 700; font-family: var(--sans); }
+[data-sim="rule-first-match"] .rf-badge { padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
+
+/* outcome marks: a symbol and a word, coloured */
+[data-sim="rule-first-match"] .rf-out { font-weight: 700; white-space: nowrap; }
+[data-sim="rule-first-match"] .rf-out[data-ok="true"] { color: var(--ok); }
+[data-sim="rule-first-match"] .rf-out[data-ok="false"] { color: var(--danger); }
+
+/* the rule table */
+[data-sim="rule-first-match"] .rf-tbox { display: flex; flex-direction: column; min-height: 0; }
+[data-sim="rule-first-match"] .rf-scroll { overflow-x: auto; min-width: 0; }
+[data-sim="rule-first-match"] .rf-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 0.93em; }
+[data-sim="rule-first-match"] .rf-table th { text-align: left; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; padding: 0 0.5rem 0.2rem; border-bottom: var(--line-w) solid var(--line); white-space: nowrap; }
+[data-sim="rule-first-match"] .rf-table td { padding: 0.25rem 0.4rem; border-bottom: var(--line-w) solid var(--line); background: var(--bg); white-space: nowrap; vertical-align: middle; }
+[data-sim="rule-first-match"] .rf-table td.rf-ptr, [data-sim="rule-first-match"] .rf-table th.rf-ptr { background: transparent; border-bottom-color: transparent; width: 2.9rem; padding: 0 0.3rem 0 0; text-align: right; }
+[data-sim="rule-first-match"] .rf-table td.rf-no { font-weight: 700; }
+[data-sim="rule-first-match"] .rf-flag { display: table; margin-top: 0.1rem; font-size: var(--fs-sm); font-weight: 700; font-family: var(--sans); white-space: nowrap; }
+[data-sim="rule-first-match"] .rf-flag[data-k="shadow"] { padding: 0 0.3rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); color: var(--ink); }
+[data-sim="rule-first-match"] .rf-flag[data-k="fix"] { padding: 0 0.3rem; background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="rule-first-match"] .rf-flag[data-k="was"] { color: var(--muted); font-weight: 400; }
+[data-sim="rule-first-match"] .rf-act { font-weight: 700; }
+[data-sim="rule-first-match"] .rf-table td.rf-mark { min-width: 7rem; white-space: normal; }
+/* a field that did not match: struck through, with a cross */
+[data-sim="rule-first-match"] .rf-miss { text-decoration: line-through; text-decoration-thickness: 0.14em; text-decoration-color: var(--danger); }
+[data-sim="rule-first-match"] .rf-miss::before { content: '✕ '; color: var(--danger); text-decoration: none; display: inline-block; }
+/* the matching row: thick ink outline */
+[data-sim="rule-first-match"] tr.rf-match td:not(.rf-ptr) { border-top: 0.22rem solid var(--ink); border-bottom: 0.22rem solid var(--ink); font-weight: 700; }
+[data-sim="rule-first-match"] tr.rf-match td.rf-no { border-left: 0.22rem solid var(--ink); }
+[data-sim="rule-first-match"] tr.rf-match td:last-child { border-right: 0.22rem solid var(--ink); }
+/* not evaluated: greyed and hatched */
+[data-sim="rule-first-match"] tr.rf-skip td:not(.rf-ptr) { color: var(--muted); }
+[data-sim="rule-first-match"] tr.rf-skip td:not(.rf-ptr) { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 18%, transparent) 0.35em 0.5em); }
+/* the implicit last row */
+[data-sim="rule-first-match"] tr.rf-implicit td:not(.rf-ptr) { font-style: italic; color: var(--muted); background-color: var(--panel); }
+[data-sim="rule-first-match"] tr.rf-implicit.rf-hit td:not(.rf-ptr) { color: var(--ink); border-top: 0.22rem solid var(--ink); border-bottom: 0.22rem solid var(--ink); }
+[data-sim="rule-first-match"] td.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="rule-first-match"] td.sd-changed .rf-out { color: var(--on-hl); }
+[data-sim="rule-first-match"] .rf-why { display: block; font-size: var(--fs-sm); font-weight: 400; white-space: normal; }
+
+/* tally */
+[data-sim="rule-first-match"] .rf-tally { grid-column: 2; }
+[data-sim="rule-first-match"] .rf-tally ol { display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="rule-first-match"] .rf-tally li { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+[data-sim="rule-first-match"] .rf-tally li.sd-changed { padding: 0 0.4rem; background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="rule-first-match"] .rf-tally li.sd-changed .rf-out { color: var(--on-hl); }
+[data-sim="rule-first-match"] .rf-tally .rf-empty { color: var(--muted); }
+
+/* legend swatches (the kit has round, hollow, hl) */
+[data-sim="rule-first-match"] .sd-swatch[data-shape] { position: relative; background: var(--bg); }
+[data-sim="rule-first-match"] .sd-swatch[data-shape]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="no"]::after { content: '–'; }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="match"] { border-width: 0.22rem; }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="match"]::after { content: '▶'; font-size: 0.6em; }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="skip"] { border-color: var(--muted); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="shadow"] { border-style: dashed; }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="shadow"]::after { content: '⚠'; font-size: 0.7em; }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="outcome"]::after { content: '✓'; color: var(--ok); }
+[data-sim="rule-first-match"] .sd-swatch[data-shape="hl"] { background: var(--hl); }
+
+/* Phone and portrait: the stage grows with its content; queue above the table; the table scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="rule-first-match"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="rule-first-match"] .rf { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+  [data-sim="rule-first-match"] .rf-tally { grid-column: auto; }
+  [data-sim="rule-first-match"] .rf-queue { grid-row: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+  [data-sim="rule-first-match"] .rf-queue h2 { grid-column: 1 / -1; }
+  [data-sim="rule-first-match"] .rf-table td, [data-sim="rule-first-match"] .rf-table th { padding-left: 0.3rem; padding-right: 0.3rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Odlučuje prvi pogodak</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = ['1', '2', '5'];
+  var COLS = {
+    pg: [['type', 'colType'], ['db', 'colDb'], ['user', 'colUser'], ['addr', 'colAddr']],
+    acl: [['proto', 'colProto'], ['src', 'colSrc'], ['srcPort', 'colSrcPort'], ['dst', 'colDst'], ['dstPort', 'colDstPort']]
+  };
+  var OUT_WORD = { permit: 'outPermit', deny: 'outDeny', accept: 'outAccept', reject: 'outReject' };
+  var OK = { permit: true, accept: true, deny: false, reject: false };
+
+  /** Data (rule text, addresses, numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function list(items) {
+    items = items.slice();
+    if (items.length === 1) return items[0];
+    var last = items.pop();
+    var head = items.reduce(function (acc, it) { return acc === null ? it : t('listMore', { a: acc, b: it }); }, null);
+    return t('list2', { a: head, b: last });
+  }
+  /** A field of a rule row as text: /32 hosts lose the length, local rows have no address. */
+  function cellText(key, v) {
+    if (v === null) return '';
+    if ((key === 'src' || key === 'dst') && /\/32$/.test(v)) return v.replace(/\/32$/, '');
+    return String(v);
+  }
+  function outcomeNode(outcome) {
+    return h('span', { class: 'rf-out', dataset: { ok: String(OK[outcome]) } }, (OK[outcome] ? '✓ ' : '✕ ') + t(OUT_WORD[outcome]));
+  }
+  function whyText(m, req) {
+    if (m.why === 'name') return h('span', null, t.parts(m.ok ? 'whyNameOk' : 'whyName', { os: data(req.fields.osUser), user: data(req.fields.user) }));
+    if (m.why === 'password') return t('whyPassword');
+    return t(m.why === 'trust' ? 'whyTrust' : 'whyReject');
+  }
+  function pktText(f) { return f.src + ':' + f.srcPort + ' → ' + f.dst + ':' + f.dstPort; }
+  function resultOf(s, req) { return s.results.filter(function (r) { return r.req === req.id; })[0] || null; }
+
+  function renderQueue(c) {
+    var s = c.state, fwd = c.dir === 'forward';
+    var box = h('section', { class: 'rf-box rf-queue' }, h('h2', null, t('queueTitle')));
+    s.requests.forEach(function (q, i) {
+      var f = q.fields, res = resultOf(s, q);
+      var cur = i === s.cur, wait = i > s.cur;
+      var head = h('div', { class: 'rf-card-h' },
+        h('span', { class: 'rf-num sd-fill', dataset: { c: COLOUR[(q.n - 1) % 3] } }, String(q.n)),
+        h('span', null, t('reqN', { n: q.n })),
+        res ? h('span', { class: (cur && s.phase === 'decided' && fwd ? 'sd-anim-in' : null) }, outcomeNode(res.outcome))
+          : cur ? h('span', { class: 'rf-badge' }, t('now')) : null);
+      var lines;
+      if (s.kind === 'pg') {
+        lines = [
+          h('div', null, f.type === 'local' ? rich('cardSocket') : t.parts('cardTcp', { addr: data(f.addr) })),
+          h('div', null, t.parts('cardUser', { user: data(f.user) })),
+          h('div', null, t.parts('cardDb', { db: data(f.db) })),
+          h('div', null, t.parts('cardOs', { os: data(f.osUser) }))
+        ];
+      } else {
+        lines = [
+          q.dir ? h('div', { class: 'rf-dir' }, t(q.dir === 'out' ? 'dirOut' : q.dir === 'reply' ? 'dirReply' : 'dirUnsolicited')) : null,
+          h('div', null, data(f.proto + ' ' + f.src + ':' + f.srcPort)),
+          h('div', null, data('→ ' + f.dst + ':' + f.dstPort))
+        ];
+      }
+      box.append(h('div', { class: 'rf-card' + (cur ? ' rf-cur' : '') + (wait ? ' rf-wait' : ''), dataset: { c: COLOUR[(q.n - 1) % 3] } }, head, lines));
+    });
+    return box;
+  }
+
+  function renderTable(c) {
+    var s = c.state, fwd = c.dir === 'forward';
+    var cols = COLS[s.kind];
+    var req = s.cur >= 0 ? s.requests[s.cur] : null;
+    var matchRow = s.marks.indexOf('match');
+    var implicitHit = s.phase === 'decided' && s.outcome && s.outcome.reason === 'implicit';
+    var rowNow = req ? s.row : -1;
+    var chip = function () {
+      return req ? h('span', { class: 'rf-num sd-fill' + (fwd ? ' sd-anim-in' : ''), dataset: { c: COLOUR[(req.n - 1) % 3] } }, req.n + ' ▸') : null;
+    };
+
+    var head = h('tr', null, h('th', { class: 'rf-ptr' }), h('th', null, t('colNo')),
+      cols.map(function (col) { return h('th', null, t(col[1])); }),
+      h('th', null, t(s.kind === 'pg' ? 'colMethod' : 'colAction')),
+      h('th', null, req ? t('colMark', { n: req.n }) : t('colMarkNone')));
+
+    var rows = s.rules.map(function (r, i) {
+      var tested = s.test && s.test.row === i;
+      var mark = s.marks[i];
+      var skip = req && matchRow >= 0 && i > matchRow;
+      var cls = [mark === 'match' ? 'rf-match' : '', skip ? 'rf-skip' : '', s.shadow[i] >= 0 ? 'rf-shadowed' : ''].join(' ').trim();
+      var no = h('td', { class: 'rf-no' }, data(r.label),
+        r.fixed ? h('span', { class: 'rf-flag', dataset: { k: 'fix' } }, t('fixTag')) : null,
+        r.was ? h('span', { class: 'rf-flag', dataset: { k: 'was' } }, t('wasLabel', { r: r.was })) : null);
+      var cells = cols.map(function (col) {
+        var miss = tested && !s.test.fields[col[0]];
+        return h('td', null, data(cellText(col[0], r.match[col[0]]), miss ? 'rf-miss' : null));
+      });
+      var markCell;
+      var now = i === rowNow && s.row < s.rules.length;
+      if (mark === 'no') markCell = '–';
+      else if (mark === 'match') {
+        var res = s.phase === 'decided' ? s.outcome : null;
+        markCell = [h('span', { style: { whiteSpace: 'nowrap' } }, '▶ ' + t('markMatch')), res ? ' ' : null, res ? outcomeNode(res.outcome) : null,
+          res && s.method ? h('span', { class: 'rf-why' }, whyText(s.method, req)) : null];
+      } else if (skip) markCell = t('markSkip');
+      else markCell = '';
+      return h('tr', { class: cls || null },
+        h('td', { class: 'rf-ptr' }, now ? chip() : null),
+        no, cells,
+        h('td', { class: 'rf-act' }, data(r.action)),
+        h('td', { class: 'rf-mark' + (now ? ' sd-changed' : '') + (now && fwd ? ' sd-anim-in' : '') }, markCell,
+          s.shadow[i] >= 0 ? h('span', { class: 'rf-flag', dataset: { k: 'shadow' } }, '⚠ ' + t('shadowOf', { r: s.rules[s.shadow[i]].label })) : null));
+    });
+
+    var impNow = req && s.row >= s.rules.length;
+    rows.push(h('tr', { class: 'rf-implicit' + (implicitHit ? ' rf-hit' : '') + (req && matchRow >= 0 ? ' rf-skip' : '') },
+      h('td', { class: 'rf-ptr' }, impNow ? chip() : null),
+      h('td', { class: 'rf-no' }, ''),
+      h('td', { colspan: String(cols.length) }, t(s.kind === 'pg' ? 'implicitPg' : 'implicitAcl')),
+      h('td', { class: 'rf-act' }, data(s.implicit)),
+      h('td', { class: 'rf-mark' + (impNow ? ' sd-changed' : '') + (impNow && fwd ? ' sd-anim-in' : '') },
+        implicitHit ? outcomeNode(s.outcome.outcome) : req && matchRow >= 0 ? t('markSkip') : '')));
+
+    return h('section', { class: 'rf-box rf-tbox' }, h('h2', null, t('tableTitle')),
+      h('div', { class: 'rf-scroll' }, h('table', { class: 'rf-table' }, h('thead', null, head), h('tbody', null, rows))));
+  }
+
+  function renderTally(c) {
+    var s = c.state, fwd = c.dir === 'forward';
+    var box = h('section', { class: 'rf-box rf-tally' }, h('h2', null, t('tallyTitle')));
+    if (!s.results.length) { box.append(h('p', { class: 'rf-empty', style: { margin: '0' } }, t('tallyEmpty'))); return box; }
+    box.append(h('ol', null, s.results.map(function (r, i) {
+      var q = s.requests.filter(function (x) { return x.id === r.req; })[0];
+      var last = i === s.results.length - 1 && s.phase === 'decided' && c.prev && c.prev.results.length < s.results.length;
+      return h('li', { class: last ? 'sd-changed' + (fwd ? ' sd-anim-in' : '') : null },
+        h('span', { class: 'rf-num sd-fill', dataset: { c: COLOUR[(q.n - 1) % 3] } }, String(q.n)),
+        h('span', null, '→'),
+        h('span', null, r.row >= 0 ? t.parts('tallyRow', { r: data(r.label) }) : t('tallyImplicit')),
+        r.method ? data(r.method) : null,
+        h('span', null, '→'),
+        outcomeNode(r.outcome));
+    })));
+    return box;
+  }
+
+  function fixCaption(s, p) {
+    var f = L.sceneOf(p).fix, fixed = s.rules.filter(function (r) { return r.fixed; })[0];
+    if (!fixed) return [];
+    if (f.op === 'edit') return rich('fixEdit', { r: data(fixed.label), m: data(fixed.action) });
+    if (f.op === 'add') return rich('fixAdd', { r: data(fixed.label) });
+    var top = s.rules.indexOf(fixed) === 0;
+    return rich(top ? 'fixMoveTop' : 'fixMoveEnd', { was: data(fixed.was), r: data(fixed.label) });
+  }
+  function shadowCaption(s) {
+    var dead = [];
+    s.shadow.forEach(function (by, i) { if (by >= 0) dead.push({ i: i, by: by }); });
+    if (!dead.length) return [];
+    var sameBy = dead.every(function (d) { return d.by === dead[0].by; });
+    if (dead.length > 1 && sameBy) {
+      return rich('capShadowMany', { rs: data(list(dead.map(function (d) { return s.rules[d.i].label; }))), by: data(s.rules[dead[0].by].label) });
+    }
+    var out = [];
+    dead.forEach(function (d) { out = out.concat(rich('capShadow', { r: data(s.rules[d.i].label), by: data(s.rules[d.by].label) })); });
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['pg-hba', t('scenePg')], ['pg-hba-append', t('scenePgAppend')], ['router-acl', t('sceneAcl')],
+          ['stateless-reply', t('sceneStateless')], ['permit-any-top', t('sceneTop')]] },
+      { key: 'request', type: 'choice', label: t('request'), resets: true, options: [['all', t('reqAll')], [1, '1'], [2, '2'], [3, '3']] },
+      { key: 'fix', type: 'toggle', label: t('fix'), hint: t('fixHint') },
+      { key: 'mode', type: 'choice', label: t('mode'), resets: true, options: [['row', t('modeRow')], ['request', t('modeReq')]] }
+    ],
+
+    presets: [
+      { id: 'pg-hba', label: t('presetPg'), params: { scene: 'pg-hba' }, hint: t('presetPgHint') },
+      { id: 'pg-hba-append', label: t('presetPgAppend'), params: { scene: 'pg-hba-append' }, hint: t('presetPgAppendHint') },
+      { id: 'router-acl', label: t('presetAcl'), params: { scene: 'router-acl' }, hint: t('presetAclHint') },
+      { id: 'stateless-reply', label: t('presetStateless'), params: { scene: 'stateless-reply' }, hint: t('presetStatelessHint') },
+      { id: 'permit-any-top', label: t('presetTop'), params: { scene: 'permit-any-top' }, hint: t('presetTopHint') }
+    ],
+
+    legend: [
+      { shape: 'no', label: t('legNo') },
+      { shape: 'match', label: t('legMatch') },
+      { shape: 'skip', label: t('legSkip') },
+      { shape: 'shadow', label: t('legShadow') },
+      { shape: 'outcome', label: t('legOutcome') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'rf' }, renderQueue(c), renderTable(c), renderTally(c)));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      var req = s.cur >= 0 ? s.requests[s.cur] : null;
+      var Q = req ? data(req.n) : null;
+      var out = [];
+      if (s.phase === 'start') {
+        out.push(t.n('capStart', s.requests.length));
+        out = out.concat(rich('capStartRule'), fixCaption(s, p), shadowCaption(s));
+        return out;
+      }
+      var r = s.row >= 0 && s.row < s.rules.length ? s.rules[s.row] : null;
+      if (s.phase === 'nomatch') {
+        var miss = COLS[s.kind].filter(function (col) { return !s.test.fields[col[0]]; }).map(function (col) { return t(col[1]); });
+        out = out.concat(rich('capNo', { q: Q, r: data(r.label), fields: list(miss) }));
+        out = out.concat(s.row + 1 < s.rules.length ? rich('capNext', { r: data(s.rules[s.row + 1].label) }) : rich('capLast'));
+        return out;
+      }
+      if (s.phase === 'match') return rich('capMatchPg', { q: Q, r: data(r.label), m: data(r.action) });
+      var o = s.outcome;
+      if (o.reason === 'implicit') {
+        out = out.concat(s.kind === 'pg' ? rich('capImplicitPg', { q: Q }) : rich('capImplicitAcl', { pkt: data(pktText(req.fields)) }));
+        if (p.scene === 'stateless-reply' && req.dir === 'reply') out = out.concat(rich('noteReplyAlone'));
+        return out;
+      }
+      if (o.reason === 'action') out = out.concat(rich('capAction', { q: Q, r: data(r.label), a: h('b', null, data(r.action)) }));
+      else out = out.concat(rich(o.reason === 'method-ok' ? 'capMethodOk' : 'capMethodFail', { r: data(r.label), m: data(s.method.method), why: whyText(s.method, req) }));
+      var later = L.laterMatch(s.kind, s.rules, req, s.row);
+      if (later && later.outcome !== o.outcome) {
+        var key = { permit: 'capLaterPermit', deny: 'capLaterDeny', accept: 'capLaterAccept', reject: 'capLaterReject' }[later.outcome];
+        out = out.concat(rich(key, { r: data(later.label) }));
+      }
+      if (p.scene === 'stateless-reply' && p.fix && req.dir === 'unsolicited') out = out.concat(rich('noteWide'));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
