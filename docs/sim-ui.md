@@ -1,17 +1,21 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.2.0** (0.2.0 adds the languages, §9), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
+the template. Kit version **0.3.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; changes in
+`kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
 kit/
   kit.css          tokens, layout, controls (one file, ~17 KB)
   kit.js           step controller, controls, transport, header tools, shortcuts, languages (one classic script, ~47 KB)
+  topology.js      view K2: topology with moving packets (§10; a classic script, ~19 KB, linked only by pages that draw one)
   glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
   template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
   new-sim.sh       copies the template into a new sim folder
   kit.test.js      tests for the kit's pure core and stylesheet rules
+  topology.test.js tests for view K2's geometry, spec checks and stylesheet rules
+  CHANGELOG.md     one line per kit change
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
   tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
 ```
@@ -364,7 +368,9 @@ settled each one as follows.
 - The full contract check exists: `npm run gate -- <id>` (`scripts/gate.mjs`, wave-0 `contract-check`) runs the
   manifest, the model tests, the build, `check-page.mjs` on the built file, the token check and the scope check,
   and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
-- Canvas/SVG drawing helpers (lanes, arrows, chunks). Add them additively once two real sims need the same thing.
+- Drawing helpers come as **kit views**, each extracted from a pilot sim once it works, then checked against two
+  later consumers before its API is frozen: K2 topology (§10, 0.3.0). K1 sequence chart, K3 block grid and K4 rule
+  table follow the same way (`docs/tasks/w0/kit-*.md`).
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.
 
@@ -449,3 +455,121 @@ other language's view, and the kit shows no switch (its table has one language).
   and with the explanation open. Key caps, `<code>` and anything inside `translate="no"` (data such as host names
   or addresses) are exempt. It also checks that `L` keeps the step and that the choice is remembered.
 - `tests/check-page.test.mjs` proves both checks fail on a broken copy of the template.
+
+## 10. View K2: topology with moving packets (`kit/topology.js`, 0.3.0)
+
+Nodes and links with the packet of this step on the wire, its headers beside the drawing, and a table under any
+node. Extracted from the pilot `sims/arp-local-remote/`; built for the network, replication and consensus pages
+(`stp`, `traceroute`, `raft`, `vrrp-failover`, `packet-journey` and the other consumers in
+`docs/tasks/w0/kit-topology.md`).
+
+```html
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>     <!-- after kit.js; the build inlines it like the kit -->
+```
+
+```js
+render: function (c) {
+  c.stage.replaceChildren(Simdeck.topology({
+    cols: 5, rows: ['auto', '4.2rem', 'auto'], dir: c.dir,
+    nodes: [
+      { id: 'A', kind: 'host', col: 0, row: 0, c: 1, lines: [{ text: '192.168.1.10', kind: 'addr' }, { text: mac, kind: 'sub' }],
+        badges: [{ text: t('sends'), k: 'fill' }], state: 'active',
+        table: Simdeck.topology.table({ title: t('arpTable'), rows: [...], empty: t('empty') }, c.dir), tableRow: 2 },
+      { id: 'R', kind: 'router', col: 3, row: 0, c: 4, lines: [...] },
+      { id: 'cloud', kind: 'cloud', col: 4, row: 0, name: t('cloud') }
+    ],
+    links: [{ id: 'lan', bus: ['A', 'B', 'C', 'R'], row: 1 }, { id: 'wan', a: 'R', b: 'cloud' }],
+    packets: [{ from: 'A', to: ['B', 'C', 'R'], label: t('laneReq'), c: 1, cast: 'broadcast' }]
+  }));
+}
+```
+
+**How it draws.** Cards are HTML in a CSS grid of `cols` equal columns. After layout (and on every resize, through a
+`ResizeObserver`) the view measures the cards and draws links, the bus, arrows and crosses in an SVG **without a
+`viewBox`**, in CSS pixels, so a line is as thick and a label as large as the rem says at any screen size. Every text
+(names, addresses, badges, port labels, packet chips) is HTML. The view holds no words: every label comes from the
+page through `t`, so the language checks see them like any other page text. Data (addresses, MACs, ids) is written
+with `translate="no"`.
+
+### `Simdeck.topology(spec)` → element
+
+| Field | Meaning |
+|---|---|
+| `cols`, `rows` | grid columns (default: enough for the nodes); `rows` is a list of CSS track sizes, default `auto` each |
+| `gap` | CSS column gap (default `1.2cqw`); a chain of many nodes wants more, or an empty column between linked nodes |
+| `dir` | `ctx.dir`: packets move, and new badges and rows pop, only on `'forward'` (never under reduced motion) |
+| `nodes[]` | `{ id, kind, col, row, span, mark, c, name, lines, badges, extra, state, changed, align, table, tableRow }` |
+| `links[]` | `{ id, a, b, state, active, style, ends: { a, b } }`, or a bus `{ id, bus: [ids], row, state }` |
+| `packets[]` | `{ from, to, label, c, cast, chip, arrow, move, drop, mid, at }` |
+
+**Nodes.** `kind` is `host` (round mark), `router` (rounded square), `switch` (wide), `server` (tall), `ap` (ringed)
+or `cloud` (a dashed pill with `name` and no mark): the shape carries the kind in grayscale. `mark` is the text in the
+mark (default the id), `c` its series colour (1–8). `name` is a bold line (translated), `lines` are
+`{ text, kind: 'addr' | 'sub' | 'role' }` (bold data, small muted data, small muted words; a bare string is `addr`;
+`null` entries are skipped). `badges` are `{ text, k: 'solid' | 'fill' | 'dashed' | 'muted', anim }`: give
+`badges: []` to every node of a page that uses them, so the cards keep one height. `extra` is any node appended to the
+card (STP's per-port roles, a TTL field). `state`: `active` (thick ink border: it acts in this step), `down` (dashed,
+hatched, muted: a failed node). `changed` gives the card the kit's changed mark. `align` overrides the card's
+`align-self` (cards stretch to the row; a cloud is centred).
+
+**Tables beside a node.** `table` is any node, placed under the card in the same column: in row `tableRow` when
+given (the pilot keeps the tables in row 2, under the bus lane), else in the next row. `Simdeck.topology.table({ title,
+rows, empty, foot }, dir)` builds the usual one (ARP, MAC, route table, best BPDU): rows `{ cells, note, c, mark }`,
+cells are data, `note` a word after them ("novo"), `c` the colour of the left bar (the owner of the entry), `mark`
+`new` (the changed mark), `refreshed` (dashed ink border) or `hit` (thick ink border: the lookup found it). `foot` is
+any node under the rows.
+
+**Links.** A link joins the centres of two cards and runs behind them. `state`: `up`, `off` (dashed and muted:
+present but not forwarding, an STP-blocked or standby link), `down` (dashed, muted and a red cross in the middle: cut
+or failed). `active: true` draws it in ink (the path in use); `style: 'dashed'` for a link that is dashed by nature (a
+wireless association). `ends: { a, b }` put a small label near each end (a port number, an STP role `R`/`D`/`✕`, an
+interface address). A **bus** is a shared segment: a lane row `row` in the grid (give it a fixed height in `rows`,
+4.2rem in the pilot), a thick line along its bottom from the first to the last node, and a stub up to each node.
+
+**Packets.** One entry per packet on the wire in this step; several at once are fine (a flood, BPDUs on every link,
+Raft's votes). The route is found from the spec: the bus when sender and every receiver sit on one (a broadcast to
+several needs a bus), else the direct link between `from` and `to`; a packet without one is a spec error. On a bus the
+arrow runs along the lane with a head at every receiver and a chip per receiver above it; on a link the arrow runs
+**beside** the link, on the left of travel, so the link's own state stays visible and a reply passes on the other
+side. `label` is the chip's text (`chip: false` keeps the arrows without one, as the pilot does while everyone
+"hears"); `c` its colour; `cast: 'broadcast'` dashes the arrow; `arrow: false` shows the chip alone; `move: false`
+places it without the move; `drop: true` ends the arrow in a cross at the receiver (a probe dying of TTL, a frame on a
+blocked port); `mid: true` stops it half way (in flight across a step, or lost in a partition); `at` is where the chip
+stops on a link, as a share of the way (default 0.6, clear of the end labels).
+
+**Headers.** `Simdeck.topology.headers(layers, dir)` is the card of the packet in flight, outermost first: `[{ title,
+fields: [[label, value, { changed }]], body, dashed, c }]`, each next layer drawn inside the one before
+(frame ⊃ packet ⊃ segment ⊃ data) with a left bar in its colour. A string value is data (monospace, `translate="no"`);
+a node or array is placed as given. `dashed` marks a broadcast frame. Put it in its own box next to the drawing (the
+pilot's "Okvir na žici"); the drawing's chip names the packet, the card shows its headers.
+
+**Phone and portrait.** The drawing (links, lanes, packets) is hidden and the nodes become a list, each card with its
+table under it; the headers card and the caption carry the packet. Nothing scrolls sideways.
+
+**Fit.** Checked at 1920×1080 with the panel open: five columns with tables (the pilot), a triangle of three switches
+with two hosts, and a chain of six nodes in eleven columns (one empty column between linked nodes). Seven or more
+nodes in one row need short labels or two rows. Legend swatches for the arrows: `{ shape: 'dash' }` (broadcast) and
+`{ shape: 'line' }` (unicast), in the kit since 0.3.0.
+
+**Spec checks.** `Simdeck.topology.checkSpec(spec)` (pure, also under node: `require('kit/topology.js')`) lists
+duplicate ids, unknown kinds, nodes outside the grid, links to unknown nodes and packets without a route; the view
+logs them on the console, which the page check fails. The geometry helpers (`edgePoint`, `beside`, `routeOf`, …) are
+exported for tests.
+
+### Checked against two consumers (sketched, not built)
+
+The API was frozen after drawing two later sims with different needs on it (screenshots of the sketch:
+`library/k2-consumer-sketch-stp-traceroute-*.png` in the thread t-0100 report):
+
+- **`stp`**: a triangle of switches, a host and a server; a mesh, not a bus. Needs port labels at each link end (role
+  `R`/`D`/`✕`: `ends`), a blocked link that stays visible while BPDUs pass it (`state: 'off'`, packets beside the
+  link), a broken link (`state: 'down'`), BPDUs on several links in one step, one dropped on a blocked port (`drop`),
+  and a best-BPDU table per switch (`table`). This sketch moved packets off the link line and the chip to `at`.
+- **`traceroute`**: a chain A — R1 … R4 — S. Needs the probe dying at a router (`drop`), the Time Exceeded reply
+  travelling back on the other side of the same link (`beside`), the TTL shown in a header field on the router
+  (`extra` with `headers`), a silent router (`state` plus a badge), and room for chips between cards (`gap`, or an
+  empty column between linked nodes).
+
+`raft` (five servers in a ring, partitions as `down` links, crashed servers as `down` nodes, vote requests to all as
+one packet per link, messages in flight across a step as `mid`) needs nothing more.

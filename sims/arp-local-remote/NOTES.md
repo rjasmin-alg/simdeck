@@ -31,9 +31,13 @@ view **K2: topology with moving packets**. Rules and expected numbers: `SPEC.md`
   results are highlighted (yellow, bold, underlined). On a phone the bits are hidden and only the dotted decimals stay.
 - **K2 layout**: five equal columns (A, B, C, R, cloud); a lane over the bus carries the frame of the step: a dashed
   arrow with a head at every listener for the broadcast, a solid one for unicast; a chip labelled
-  "zahtjev/odgovor/ping" moves from sender to receiver on a forward step (CSS animation of `left`, off under reduced
-  motion). Positions are `(column + 0.5) × 20 %`. Kept in the page; the reusable part for later path pages is the
-  model's scene and the column/lane CSS.
+  "zahtjev/odgovor/ping" moves from sender to receiver on a forward step (CSS animation, off under reduced motion).
+- **On the kit view since kit 0.3.0** (task `kit-topology`, 2026-10-03): the topology, the ARP tables and the frame
+  card's headers are drawn by `Simdeck.topology`, `.table` and `.headers` (`docs/sim-ui.md` §10); the page keeps the
+  decision box, A's lookup line under its table and the `row`/`tick` legend swatches. Differences a student would not
+  notice: the stubs and arrows sit at the card centres (they were at column centres, a few pixels off), the cloud is
+  centred in its row instead of bottom-aligned (so the link to R is level), the frame card's rows are a little tighter,
+  the dashes of broadcast arrows are SVG dashes, and the broadcast legend swatch now shows its dashes.
 - **Model is promotable**: `sim.js` exports `and`, `bits`, `maskIp`, `decide`, `hear`, `learn`, `NETS` as pure functions
   over plain data with no strings.
 - **Legend swatches** `dash`, `line`, `row`, `tick` are page CSS on `.sd-swatch[data-shape]` (the kit has round,

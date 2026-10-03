@@ -41,6 +41,12 @@ tags.json, courses/, site.json  vocabulary, course playlists, site settings
 docs/catalogue.md the catalogue every task comes from; docs/tasks/ these tasks
 ```
 
+**Kit views.** A task file that names a kit view draws with it instead of its own drawing: **K2, topology with
+moving packets** (nodes, links, a bus, packets per step with their headers, link and node failure, a table beside
+each node) is `kit/topology.js`, `Simdeck.topology(spec)` (`docs/sim-ui.md` §10; pilot `sims/arp-local-remote/`).
+The page links `../../kit/topology.js` after `kit.js`. If the view lacks something your sim needs, draw that part
+in the page and write the request in `NOTES.md` under "Shared requests"; the kit owner adds it.
+
 ## 3. The contract (every page)
 
 From `docs/design-notes-simdeck.md`, playbook §10.2 and `docs/sim-ui.md`:
