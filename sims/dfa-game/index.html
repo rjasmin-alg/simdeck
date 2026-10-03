@@ -1,988 +1,703 @@
 <!doctype html>
-<html lang="hr">
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- DFA classroom game: adopted from single-page-labs/dfa-classroom-game.html into the simdeck kit (docs/sim-ui.md).
+     A tool (lecturer-only): no steps. The game model is in sim.js, the words in strings.js; this page keeps the
+     session (role, room, name) and passes the game between tabs of one browser over a broadcast channel, with the
+     original's messages (STATE, JOIN_PLAYER, ACTION, REQUEST_STATE, HELLO). The session and the game are kept in
+     sessionStorage so a language switch (which reloads the page) keeps them. -->
+<html lang="hr" data-sim="dfa-game">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DFA Classroom Game</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel2: #1f2937;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --line: #475569;
-      --accent: #38bdf8;
-      --good: #22c55e;
-      --bad: #ef4444;
-      --warn: #f59e0b;
-      --violet: #a78bfa;
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DFA igra za razred · simdeck</title>
+<meta name="description" content="Razred u rundama gradi deterministički konačni automat za zadani jezik.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
 
-    * { box-sizing: border-box; }
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dfa-game",
+  "class": "tool",
+  "title": { "hr": "DFA igra za razred", "en": "DFA classroom game" },
+  "concept": { "hr": "Razred u rundama gradi deterministički konačni automat za zadani jezik", "en": "A class builds a deterministic finite automaton for a given language in rounds" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
 
-    body {
-      margin: 0;
-      background: radial-gradient(circle at top, #1e293b, #0f172a 45%, #020617 100%);
-      color: var(--text);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.45;
-    }
+<style>
+/* Page CSS: every selector starts with [data-sim="dfa-game"]; colours only from kit tokens. */
+[data-sim="dfa-game"] .dg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 34%);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  height: 100%;
+  padding: 0.8rem;
+}
+[data-sim="dfa-game"] .dg-task {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 1rem;
+  padding: 0.5rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: var(--fs-lg);
+}
+[data-sim="dfa-game"] .dg-label { color: var(--muted); font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+[data-sim="dfa-game"] .dg-word { font-family: var(--mono); font-weight: 700; }
+[data-sim="dfa-game"] .dg-pills { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; align-items: baseline; }
+[data-sim="dfa-game"] .dg-pill {
+  padding: 0 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: 1rem;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+[data-sim="dfa-game"] .dg-graph {
+  position: relative;
+  min-height: 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+[data-sim="dfa-game"] .dg-graph svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+[data-sim="dfa-game"] .dg-edge { fill: none; stroke: var(--ink); stroke-width: 2; }
+[data-sim="dfa-game"] .dg-arrowhead { fill: var(--ink); }
+[data-sim="dfa-game"] .dg-edgetext { fill: var(--ink); font-family: var(--mono); font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-width: 5; stroke-linejoin: round; }
+[data-sim="dfa-game"] .dg-node { fill: var(--bg); stroke: var(--c1); stroke-width: 3; cursor: grab; }
+[data-sim="dfa-game"] .dg-node.is-accept { stroke: var(--c3); stroke-width: 4; }
+[data-sim="dfa-game"] .dg-inner { fill: none; stroke: var(--c3); stroke-width: 2.5; pointer-events: none; }
+[data-sim="dfa-game"] .dg-nodetext { fill: var(--ink); font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+[data-sim="dfa-game"] .dg-empty { fill: var(--muted); text-anchor: middle; }
+[data-sim="dfa-game"] .dg-side { display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; }
+[data-sim="dfa-game"] .dg-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+[data-sim="dfa-game"] .dg-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.25rem 0.7rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="dfa-game"] .dg-val { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="dfa-game"] .dg-val.is-ok { color: var(--ok); }
+[data-sim="dfa-game"] .dg-val.is-bad { color: var(--danger); }
+[data-sim="dfa-game"] .dg-val.is-warn { color: var(--muted); font-family: var(--sans); font-size: var(--fs-md); font-weight: 400; }
+[data-sim="dfa-game"] .dg-sec { display: flex; flex-direction: column; gap: 0.25rem; min-height: 0; }
+[data-sim="dfa-game"] .dg-sec h3 { margin: 0; }
+[data-sim="dfa-game"] .dg-players { display: flex; flex-wrap: wrap; gap: 0.35rem; max-height: 6.5rem; overflow: auto; font-size: var(--fs-md); }
+[data-sim="dfa-game"] .dg-player .dg-name { font-weight: 700; }
+[data-sim="dfa-game"] .dg-player {
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.05rem 0.55rem;
+  border: var(--line-w) dashed var(--line);
+  border-radius: var(--radius-sm);
+}
+[data-sim="dfa-game"] .dg-player.is-done { border-style: solid; border-color: var(--ok); }
+[data-sim="dfa-game"] .dg-player.is-me { box-shadow: inset 0.3rem 0 0 var(--accent); }
+[data-sim="dfa-game"] .dg-player b { color: var(--muted); font-weight: 400; }
+[data-sim="dfa-game"] .dg-player.is-done b { color: var(--ok); font-weight: 700; }
+[data-sim="dfa-game"] .dg-tests-sec { flex: 3 1 0; }
+[data-sim="dfa-game"] .dg-log-sec { flex: 2 1 0; }
+[data-sim="dfa-game"] .dg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="dfa-game"] .dg-tests { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+[data-sim="dfa-game"] .dg-tests th { position: sticky; top: 0; background: var(--panel); color: var(--muted); text-align: left; font-weight: 700; }
+[data-sim="dfa-game"] .dg-tests th, [data-sim="dfa-game"] .dg-tests td { padding: 0.05rem 0.5rem; border-bottom: 1px solid var(--line); }
+[data-sim="dfa-game"] .dg-tests td:first-child { font-family: var(--mono); }
+[data-sim="dfa-game"] .dg-tests .is-ok { color: var(--ok); }
+[data-sim="dfa-game"] .dg-tests .is-bad { color: var(--danger); font-weight: 700; }
+[data-sim="dfa-game"] .dg-tests tr.is-counter td { background: var(--hl); color: var(--on-hl); }
+[data-sim="dfa-game"] .dg-log { margin: 0; padding: 0.2rem 0.5rem; list-style: none; font-size: var(--fs-sm); }
+[data-sim="dfa-game"] .dg-log time { font-family: var(--mono); color: var(--muted); margin-right: 0.4rem; }
+[data-sim="dfa-game"] .dg-d { font-family: var(--mono); font-weight: 700; }
 
-    header, main {
-      max-width: 1500px;
-      margin: 0 auto;
-      padding: 22px;
-    }
+[data-sim="dfa-game"] .dg-form label { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; font-weight: 700; }
+[data-sim="dfa-game"] .dg-form input,
+[data-sim="dfa-game"] .dg-form textarea,
+[data-sim="dfa-game"] .dg-form select {
+  width: 100%;
+  min-height: var(--hit);
+  padding: 0.2rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 400;
+}
+[data-sim="dfa-game"] .dg-form textarea { min-height: 5rem; resize: vertical; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="dfa-game"] .dg-form ::placeholder { color: var(--muted); opacity: 1; }
+[data-sim="dfa-game"] .dg-row { display: flex; gap: 0.5rem; }
+[data-sim="dfa-game"] .dg-row > * { flex: 1 1 0; min-width: 0; }
+[data-sim="dfa-game"] .dg-row .sd-btn { padding: 0 0.5rem; }
+[data-sim="dfa-game"] .dg-who { margin: 0; }
+[data-sim="dfa-game"] .dg-who b { font-weight: 700; }
+[data-sim="dfa-game"] .dg-who .is-presenter { color: var(--ok); }
+[data-sim="dfa-game"] .dg-who .is-player { color: var(--accent); }
+[data-sim="dfa-game"] .dg-turn { margin: 0; }
+[data-sim="dfa-game"] .dg-details > summary { cursor: pointer; min-height: 1.8rem; font-weight: 700; }
+[data-sim="dfa-game"] .dg-details[open] > summary { margin-bottom: 0.4rem; }
+[data-sim="dfa-game"] .dg-details > div { display: flex; flex-direction: column; gap: 0.45rem; }
+[data-sim="dfa-game"] .dg-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+[data-sim="dfa-game"] .dg-actions .sd-btn { flex: 1 1 auto; padding: 0 0.5rem; }
 
-    h1 { margin: 0 0 6px; font-size: clamp(28px, 4vw, 44px); }
-    h2 { margin: 0 0 12px; font-size: 22px; }
-    h3 { margin: 16px 0 8px; font-size: 17px; }
-    p { color: var(--muted); margin-top: 0; }
+/* Legend swatches drawn like the diagram: a ring for a state, an arrow for the start, a double ring for accepting. */
+[data-sim="dfa-game"] .sd-swatch[data-shape='ring'],
+[data-sim="dfa-game"] .sd-swatch[data-shape='double'] { border: 3px solid var(--sw); border-radius: 50%; background: var(--bg); }
+[data-sim="dfa-game"] .sd-swatch[data-shape='double'] { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 4px var(--sw); }
+[data-sim="dfa-game"] .sd-swatch[data-shape='arrow'] {
+  width: 1.6em;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+  clip-path: polygon(0 42%, 62% 42%, 62% 15%, 100% 50%, 62% 85%, 62% 58%, 0 58%);
+}
 
-    .app {
-      display: grid;
-      grid-template-columns: 370px minmax(0, 1fr) 410px;
-      gap: 16px;
-    }
-
-    @media (max-width: 1220px) {
-      .app { grid-template-columns: 1fr; }
-    }
-
-    .panel {
-      background: color-mix(in srgb, var(--panel) 88%, transparent);
-      border: 1px solid #334155;
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 18px 50px rgba(0,0,0,.22);
-    }
-
-    label {
-      display: block;
-      color: var(--muted);
-      font-size: 13px;
-      margin: 10px 0 4px;
-    }
-
-    input, select, textarea, button {
-      font: inherit;
-    }
-
-    input, select, textarea {
-      width: 100%;
-      border: 1px solid #475569;
-      border-radius: 10px;
-      background: #020617;
-      color: var(--text);
-      padding: 9px 10px;
-    }
-
-    textarea { min-height: 90px; resize: vertical; }
-
-    button {
-      border: 1px solid #475569;
-      border-radius: 11px;
-      background: #0f172a;
-      color: var(--text);
-      padding: 9px 11px;
-      cursor: pointer;
-    }
-
-    button:hover { border-color: var(--accent); }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #00111f; font-weight: 700; }
-    button.good { background: rgba(34,197,94,.12); border-color: var(--good); color: #bbf7d0; }
-    button.danger { border-color: #7f1d1d; color: #fecaca; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-
-    .row { display: flex; gap: 8px; align-items: center; }
-    .row > * { flex: 1; }
-    .row > .small { flex: 0 0 105px; }
-
-    .pillbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .pill {
-      border: 1px solid #475569;
-      border-radius: 999px;
-      padding: 5px 9px;
-      background: #020617;
-      color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
-    }
-    .pill.accept { border-color: var(--good); color: #bbf7d0; }
-    .pill.start { border-color: var(--accent); color: #bae6fd; }
-    .pill.me { border-color: var(--violet); color: #ddd6fe; }
-
-    .canvasBox {
-      min-height: 640px;
-      background: #020617;
-      border: 1px solid #334155;
-      border-radius: 16px;
-      overflow: hidden;
-      position: relative;
-    }
-
-    svg { width: 100%; height: 640px; display: block; }
-
-    .edge { stroke: #64748b; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
-    .edgeText { fill: #e5e7eb; font-size: 14px; font-weight: 650; paint-order: stroke; stroke: #020617; stroke-width: 5; stroke-linejoin: round; }
-    .node { fill: #111827; stroke: var(--accent); stroke-width: 3; cursor: grab; }
-    .node.accept { stroke: var(--good); stroke-width: 5; }
-    .node.start { filter: drop-shadow(0 0 9px rgba(56,189,248,.65)); }
-    .nodeText { fill: #f8fafc; font-weight: 750; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
-
-    .statusGrid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-
-    .card {
-      border: 1px solid #334155;
-      border-radius: 13px;
-      background: var(--panel2);
-      padding: 10px;
-    }
-
-    .labelSmall { color: var(--muted); font-size: 12px; }
-    .big { font-size: 22px; font-weight: 800; word-break: break-word; }
-    .ok { color: var(--good); }
-    .bad { color: var(--bad); }
-    .warn { color: var(--warn); }
-    .violet { color: var(--violet); }
-
-    .players {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 7px;
-      margin-top: 8px;
-    }
-
-    .player {
-      border: 1px solid #334155;
-      border-radius: 11px;
-      background: #020617;
-      padding: 8px;
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .player.done { border-color: var(--good); }
-    .player.me { outline: 2px solid var(--violet); }
-
-    .log {
-      max-height: 250px;
-      overflow: auto;
-      background: #020617;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
-      white-space: pre-wrap;
-    }
-
-    .tests {
-      max-height: 260px;
-      overflow: auto;
-      display: grid;
-      gap: 6px;
-    }
-
-    .testrow {
-      display: grid;
-      grid-template-columns: 1fr 68px 68px;
-      gap: 6px;
-      align-items: center;
-      border: 1px solid #334155;
-      border-radius: 10px;
-      background: #020617;
-      padding: 7px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
-    }
-
-    .sectionLine { border-top: 1px solid #334155; margin: 14px 0; }
-    .hidden { display: none !important; }
-    .muted { color: var(--muted); }
-    code { background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 1px 5px; }
-
-    .banner {
-      border: 1px solid #475569;
-      border-radius: 14px;
-      padding: 12px;
-      background: rgba(56, 189, 248, .08);
-      margin-bottom: 14px;
-      color: #dbeafe;
-    }
-  </style>
+/* Phone and portrait: one column; the graph gets a fixed share of the width, the lists grow with the page. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dfa-game"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dfa-game"] .dg { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  [data-sim="dfa-game"] .dg-graph { height: max(18rem, 75vw); }
+  [data-sim="dfa-game"] .dg-pills { margin-left: 0; }
+  [data-sim="dfa-game"] .dg-tests-sec, [data-sim="dfa-game"] .dg-log-sec { flex: none; }
+  [data-sim="dfa-game"] .dg-scroll { flex: none; max-height: 16rem; }
+  [data-sim="dfa-game"] .dg-row { flex-wrap: wrap; }
+}
+</style>
 </head>
 <body>
-  <header>
-    <h1>DFA Classroom Game</h1>
-    <p>Kolaborativna igra za izgradnju determinističkog konačnog automata. Radi kao jedna HTML stranica. Više tabova/prozora se sinkronizira preko BroadcastChannel API-ja; za više fizičkih računala isti protokol se kasnije prebaci na WebSocket.</p>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DFA igra za razred</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
   </header>
 
-  <main class="app">
-    <section class="panel">
-      <h2>Sesija</h2>
-      <div class="banner">
-        <strong>Način rada:</strong> za lokalni test otvori isti HTML u više tabova. Jedan tab pokreni kao presenter, ostale kao igrače u istoj sobi.
-      </div>
-
-      <label>Soba</label>
-      <input id="roomName" value="dfa-room" />
-
-      <label>Moje ime</label>
-      <input id="myName" value="Igrač" />
-
-      <div class="row">
-        <button class="primary" id="joinPresenter">Uđi kao presenter</button>
-        <button id="joinPlayer">Uđi kao igrač</button>
-      </div>
-
-      <div class="statusGrid" style="margin-top: 10px;">
-        <div class="card"><div class="labelSmall">Uloga</div><div class="big" id="roleLabel">nije spojeno</div></div>
-        <div class="card"><div class="labelSmall">Identitet</div><div class="big" id="identityLabel">—</div></div>
-      </div>
-
-      <div class="sectionLine"></div>
-
-      <h2>Presenter</h2>
-      <label>Presenter šifra</label>
-      <input id="presenterCode" type="password" value="dfa" />
-
-      <label>Tip zadatka</label>
-      <select id="taskType">
-        <option value="exact">Prihvati točno riječ</option>
-        <option value="ends">Završava s riječju</option>
-        <option value="contains">Sadrži riječ</option>
-        <option value="evenSymbol">Paran broj simbola</option>
-      </select>
-
-      <label>Ciljna riječ / simbol</label>
-      <input id="target" value="banana" />
-
-      <div class="row">
-        <div>
-          <label>Očekivani broj igrača</label>
-          <input id="playerCount" type="number" min="1" max="80" value="6" />
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel dg-form">
+      <div class="sd-group" role="group" aria-labelledby="dg-session-title">
+        <h2 class="sd-group-title" id="dg-session-title" data-t="sessionTitle"></h2>
+        <p class="sd-hint" data-t="mode"></p>
+        <div class="dg-row">
+          <label><span data-t="room"></span><input id="dg-room" autocomplete="off" maxlength="40" translate="no"></label>
+          <label><span data-t="myName"></span><input id="dg-name" autocomplete="off" maxlength="40" translate="no"></label>
         </div>
-        <div>
-          <label>Abeceda</label>
-          <input id="alphabetInput" value="a,b,n" />
+        <div class="dg-row">
+          <button type="button" class="sd-btn sd-btn--primary" id="dg-join-presenter" data-t="joinPresenter"></button>
+          <button type="button" class="sd-btn" id="dg-join-player" data-t="joinPlayer"></button>
         </div>
+        <p class="dg-who"><span data-t="role"></span>: <b id="dg-role"></b> · <span data-t="identity"></span>: <b id="dg-identity" translate="no"></b></p>
       </div>
 
-      <button class="primary" id="startGame">Pokreni / resetiraj igru</button>
-
-      <div class="sectionLine"></div>
-
-      <h3>Zadatak</h3>
-      <div class="card" id="taskText"></div>
-
-      <h3>Abeceda</h3>
-      <div class="pillbar" id="alphabetPills"></div>
-
-      <h3>Stanja</h3>
-      <div class="pillbar" id="statePills"></div>
-
-      <div class="sectionLine"></div>
-      <div class="row">
-        <button id="validateNow">Validiraj</button>
-        <button id="autoLayout">Auto layout</button>
-      </div>
-      <button class="danger" id="clearDfa" style="margin-top: 8px; width: 100%;">Očisti automat</button>
-
-      <div class="sectionLine"></div>
-      <h3>Export / import stanja</h3>
-      <textarea id="stateJson" spellcheck="false" placeholder="Ovdje ide JSON stanja igre."></textarea>
-      <div class="row">
-        <button id="exportState">Export</button>
-        <button id="importState">Import</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Automat</h2>
-      <div class="canvasBox">
-        <svg id="dfaSvg" viewBox="0 0 900 640" aria-label="DFA canvas"></svg>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Runda</h2>
-      <div class="statusGrid">
-        <div class="card"><div class="labelSmall">Runda</div><div class="big" id="roundNo">0</div></div>
-        <div class="card"><div class="labelSmall">Odigrano</div><div class="big" id="turnProgress">0 / 0</div></div>
-        <div class="card"><div class="labelSmall">Validacija</div><div class="big" id="validationStatus">nije pokrenuto</div></div>
-        <div class="card"><div class="labelSmall">Counterexample</div><div class="big" id="counterExample">—</div></div>
+      <div class="sd-group" role="group" aria-labelledby="dg-move-title">
+        <h2 class="sd-group-title" id="dg-move-title" data-t="moveTitle"></h2>
+        <p class="dg-turn sd-hint" id="dg-turn"></p>
+        <label><span data-t="action"></span><select id="dg-action"></select></label>
+        <div id="dg-fields" class="dg-row"></div>
+        <button type="button" class="sd-btn sd-btn--primary" id="dg-submit" data-t="submit"></button>
       </div>
 
-      <h3>Igrači</h3>
-      <div class="players" id="players"></div>
-
-      <div class="sectionLine"></div>
-
-      <h2>Potez</h2>
-      <div class="card" id="turnNotice">Spoji se kao igrač ili presenter.</div>
-
-      <label>Akcija</label>
-      <select id="actionType">
-        <option value="ADD_STATE">Dodaj stanje</option>
-        <option value="ADD_SYMBOL">Dodaj simbol</option>
-        <option value="ADD_TRANSITION">Dodaj prijelaz</option>
-        <option value="SET_START">Postavi početno stanje</option>
-        <option value="TOGGLE_ACCEPT">Uključi/isključi prihvatljivo stanje</option>
-        <option value="REMOVE_STATE">Ukloni stanje</option>
-        <option value="REMOVE_TRANSITION">Ukloni prijelaz</option>
-      </select>
-
-      <div id="actionFields"></div>
-      <button class="primary" id="submitAction">Predaj potez</button>
-
-      <div class="sectionLine"></div>
-
-      <h3>Testovi</h3>
-      <div class="tests" id="tests"></div>
-
-      <h3>Dnevnik</h3>
-      <div class="log" id="log"></div>
-    </section>
+      <div class="sd-group" role="group" aria-labelledby="dg-presenter-title">
+        <h2 class="sd-group-title" id="dg-presenter-title" data-t="presenterTitle"></h2>
+        <details class="dg-details" id="dg-setup">
+          <summary data-t="newGame"></summary>
+          <div>
+            <label><span data-t="taskType"></span><select id="dg-task-type"></select></label>
+            <div class="dg-row">
+              <label><span data-t="target"></span><input id="dg-target" autocomplete="off" maxlength="12" translate="no"></label>
+              <label><span data-t="alphabet"></span><input id="dg-alphabet" autocomplete="off" maxlength="40" translate="no"></label>
+            </div>
+            <label><span data-t="playerCount"></span><input id="dg-players" type="number" min="1" max="80"></label>
+            <button type="button" class="sd-btn sd-btn--primary" id="dg-start" data-t="startGame"></button>
+          </div>
+        </details>
+        <div class="dg-actions">
+          <button type="button" class="sd-btn" id="dg-validate" data-t="validate"></button>
+          <button type="button" class="sd-btn" id="dg-layout" data-t="layout"></button>
+          <button type="button" class="sd-btn" id="dg-clear" data-t="clear"></button>
+        </div>
+        <details class="dg-details">
+          <summary data-t="exportTitle"></summary>
+          <div>
+            <textarea id="dg-json" spellcheck="false" translate="no"></textarea>
+            <div class="dg-row">
+              <button type="button" class="sd-btn" id="dg-export" data-t="export"></button>
+              <button type="button" class="sd-btn" id="dg-import" data-t="import"></button>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
   </main>
 
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-(() => {
-  const $ = id => document.getElementById(id);
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings); // picks the language; every visible word goes through t
+  var KEY = 'simdeck.dfa-game';
+  var $ = function (id) { return document.getElementById(id); };
+  var data = function (s, cls) { return h('span', { class: cls || 'dg-d', translate: 'no' }, String(s)); };
 
-  const client = {
-    id: localStorage.getItem('dfaClientId') || crypto.randomUUID(),
-    name: 'Igrač',
-    role: 'none',
-    room: 'dfa-room',
-    channel: null,
-    lastSeen: {}
+  // ---- session: this tab's id, name, role and room; the game. sessionStorage keeps them across the reload a language
+  // switch does, and gives every tab its own id (the original kept the id in localStorage, which all tabs of a browser
+  // share, so every tab had the same id and ignored the others' messages). It may be unavailable: then a fresh start.
+  function stored() { try { return JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
+  function newId() {
+    try { return crypto.randomUUID(); } catch (e) { /* not a secure context */ }
+    var a = new Uint32Array(4);
+    try { crypto.getRandomValues(a); } catch (e) { a = [Date.now(), Math.random() * 1e9, performance.now() * 1e3, 7]; }
+    return Array.prototype.map.call(a, function (x) { return (x >>> 0).toString(16); }).join('-');
+  }
+  var saved = stored();
+  var client = {
+    id: typeof saved.id === 'string' ? saved.id : newId(),
+    name: typeof saved.name === 'string' ? saved.name : '',
+    role: saved.role === 'presenter' || saved.role === 'player' ? saved.role : 'none',
+    room: typeof saved.room === 'string' && saved.room ? saved.room : 'dfa-room',
+    channel: null
   };
-  localStorage.setItem('dfaClientId', client.id);
+  var game;
+  try { game = saved.game ? L.sanitize(saved.game) : L.empty(); } catch (e) { game = L.empty(); }
+  var note = null; // a local message for the caption: [key, vars]
+  var sim;
 
-  const game = {
-    presenterCode: 'dfa',
-    presenterId: null,
-    taskType: 'exact',
-    target: 'banana',
-    alphabet: ['a', 'b', 'n'],
-    expectedPlayers: 6,
-    players: [],
-    actions: {},
-    round: 0,
-    dfa: emptyDfa(),
-    validation: null,
-    log: []
-  };
-
-  function emptyDfa() {
-    return {
-      states: [],
-      alphabet: [],
-      start: null,
-      accept: [],
-      delta: {},
-      positions: {}
-    };
+  function save() {
+    try { sessionStorage.setItem(KEY, JSON.stringify({ id: client.id, name: client.name, role: client.role, room: client.room, game: game })); }
+    catch (e) { /* unavailable */ }
   }
 
-  function publicGameState() {
-    return JSON.parse(JSON.stringify(game));
+  function now() {
+    return new Date().toLocaleTimeString(Simdeck.lang === 'hr' ? 'hr-HR' : 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  function applyPublicState(state) {
-    Object.assign(game, state);
-    renderAll(false);
-  }
-
-  function connectRoom() {
-    const room = $('roomName').value.trim() || 'dfa-room';
-    client.room = room;
+  // ---- the channel between tabs: the original's protocol ----
+  function connect() {
     if (client.channel) client.channel.close();
-    client.channel = new BroadcastChannel('dfa-game-' + room);
-    client.channel.onmessage = ev => handleMessage(ev.data);
+    client.channel = null;
+    try {
+      client.channel = new BroadcastChannel('dfa-game-' + client.room);
+      client.channel.onmessage = function (e) { receive(e.data); };
+    } catch (e) { /* no channel: the tab plays alone */ }
+  }
+  function send(type, payload) {
+    if (!client.channel) return;
+    try { client.channel.postMessage({ type: type, from: client.id, name: client.name, role: client.role, payload: payload || {}, ts: Date.now() }); }
+    catch (e) { /* closed */ }
+  }
+  function broadcast() { if (client.role === 'presenter') send('STATE', game); }
+
+  /** A model result: log its events with the time, keep it, tell the other tabs (presenter), redraw. */
+  function commit(result, msg) {
+    game = result.events && result.events.length ? L.record(result.game, result.events, now()) : result.game;
+    note = msg || null;
+    save();
+    broadcast();
+    sim.render();
   }
 
-  function send(type, payload = {}) {
-    if (!client.channel) connectRoom();
-    client.channel.postMessage({ type, from: client.id, name: client.name, role: client.role, payload, ts: Date.now() });
-  }
-
-  function handleMessage(msg) {
+  function receive(msg) {
     if (!msg || msg.from === client.id) return;
-    client.lastSeen[msg.from] = Date.now();
-
-    if (msg.type === 'HELLO') {
-      if (client.role === 'presenter') send('STATE', publicGameState());
-      return;
-    }
-
+    var name = typeof msg.name === 'string' && msg.name ? msg.name : t('defaultName');
+    if (msg.type === 'HELLO' || msg.type === 'REQUEST_STATE') { broadcast(); return; }
     if (msg.type === 'STATE') {
-      applyPublicState(msg.payload);
+      try { game = L.sanitize(msg.payload); } catch (e) { return; }
+      note = null;
+      save();
+      sim.render();
       return;
     }
+    if (client.role !== 'presenter') return;
+    if (msg.type === 'JOIN_PLAYER') commit(L.join(game, msg.from, name));
+    else if (msg.type === 'ACTION' && msg.payload && typeof msg.payload === 'object') commit(L.submit(game, msg.from, name, msg.payload));
+  }
 
-    if (msg.type === 'JOIN_PLAYER') {
-      if (client.role !== 'presenter') return;
-      upsertPlayer({ id: msg.from, name: msg.name || 'Igrač' });
-      log(`${msg.name || msg.from} se spojio kao igrač.`);
-      send('STATE', publicGameState());
-      renderAll(true);
-      return;
+  // ---- form ----
+  var room = $('dg-room'), myName = $('dg-name'), actionSel = $('dg-action'), fields = $('dg-fields');
+  room.value = client.room;
+  myName.value = client.name || t('defaultName');
+  L.ACTIONS.forEach(function (a) { actionSel.append(h('option', { value: a }, t('act_' + a))); });
+  L.TASKS.forEach(function (k) { $('dg-task-type').append(h('option', { value: k }, t('opt_' + k))); });
+  $('dg-task-type').value = game.taskType;
+  $('dg-target').value = game.target;
+  $('dg-alphabet').value = game.alphabet.join(',');
+  $('dg-players').value = String(game.expectedPlayers);
+  $('dg-json').placeholder = t('jsonPlaceholder');
+  if (client.role === 'presenter' && game.round === 0) $('dg-setup').open = true;
+
+  function join(role) {
+    client.room = room.value.trim() || 'dfa-room';
+    room.value = client.room;
+    client.name = myName.value.trim() || t(role === 'presenter' ? 'defaultPresenter' : 'defaultName');
+    myName.value = client.name;
+    client.role = role;
+    connect();
+    var msg = [role === 'presenter' ? 'note_joinedPresenter' : 'note_joinedPlayer', { room: client.room }];
+    if (role === 'presenter') {
+      var g = JSON.parse(JSON.stringify(game));
+      g.presenterId = client.id;
+      if (g.round === 0) $('dg-setup').open = true;
+      commit({ game: g, events: [{ key: 'isPresenter', vars: { name: client.name } }] }, msg);
+    } else {
+      send('JOIN_PLAYER');
+      send('REQUEST_STATE');
+      commit({ game: game, events: [] }, msg);
     }
-
-    if (msg.type === 'ACTION') {
-      if (client.role !== 'presenter') return;
-      receiveAction(msg.from, msg.name || msg.from, msg.payload);
-      send('STATE', publicGameState());
-      return;
-    }
-
-    if (msg.type === 'REQUEST_STATE') {
-      if (client.role === 'presenter') send('STATE', publicGameState());
-    }
   }
 
-  function joinPresenter() {
-    connectRoom();
-    client.name = $('myName').value.trim() || 'Presenter';
-    client.role = 'presenter';
-    game.presenterId = client.id;
-    game.presenterCode = $('presenterCode').value || 'dfa';
-    log(`${client.name} je presenter.`);
-    send('STATE', publicGameState());
-    renderAll(true);
-  }
-
-  function joinPlayer() {
-    connectRoom();
-    client.name = $('myName').value.trim() || 'Igrač';
-    client.role = 'player';
-    send('JOIN_PLAYER');
-    send('REQUEST_STATE');
-    renderAll(false);
-  }
-
-  function upsertPlayer(player) {
-    if (!game.players.find(p => p.id === player.id)) game.players.push(player);
-    else game.players = game.players.map(p => p.id === player.id ? { ...p, ...player } : p);
-  }
-
-  function cleanSymbol(s) { return String(s ?? '').trim(); }
-  function parseAlphabet(s) { return [...new Set(String(s || '').split(',').map(x => x.trim()).filter(Boolean))]; }
-
-  function log(msg) {
-    const stamp = new Date().toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    game.log.unshift(`[${stamp}] ${msg}`);
-    game.log = game.log.slice(0, 100);
-  }
-
-  function describeTask() {
-    const t = game.target;
-    if (game.taskType === 'exact') return `Konstruiraj DFA koji prihvaća točno riječ: "${t}".`;
-    if (game.taskType === 'ends') return `Konstruiraj DFA koji prihvaća sve riječi koje završavaju s: "${t}".`;
-    if (game.taskType === 'contains') return `Konstruiraj DFA koji prihvaća sve riječi koje sadrže podniz: "${t}".`;
-    if (game.taskType === 'evenSymbol') return `Konstruiraj DFA koji prihvaća riječi s parnim brojem pojavljivanja simbola: "${t}".`;
-    return '';
-  }
-
-  function oracle(input) {
-    const t = game.target;
-    if (game.taskType === 'exact') return input === t;
-    if (game.taskType === 'ends') return input.endsWith(t);
-    if (game.taskType === 'contains') return input.includes(t);
-    if (game.taskType === 'evenSymbol') return [...input].filter(c => c === t).length % 2 === 0;
+  function presenterOnly() {
+    if (client.role === 'presenter') return true;
+    note = ['note_presenterOnly'];
+    sim.render();
     return false;
   }
 
-  function runDfa(dfa, input) {
-    if (!dfa.start || !dfa.states.includes(dfa.start)) return { ok: false, path: [], reason: 'nema početnog stanja' };
-    let state = dfa.start;
-    const path = [state];
-    for (const ch of input) {
-      if (!dfa.alphabet.includes(ch)) return { ok: false, path, reason: `simbol ${ch} nije u abecedi` };
-      const next = dfa.delta[state]?.[ch];
-      if (!next) return { ok: false, path, reason: `nedostaje prijelaz δ(${state}, ${ch})` };
-      state = next;
-      path.push(state);
-    }
-    return { ok: dfa.accept.includes(state), path, reason: dfa.accept.includes(state) ? 'accept' : 'reject' };
+  // The move fields: rebuilt only when the action or the automaton's states or symbols change, so a name being typed
+  // survives the other tabs' messages (the original rebuilt them on every message).
+  var fieldsKey = '';
+  function stateSelect(id, label) {
+    var sel = h('select', { id: id, translate: 'no' }, game.dfa.states.map(function (s) { return h('option', { value: s }, s); }));
+    return h('label', null, h('span', null, t(label)), sel);
+  }
+  function symbolSelect() {
+    var syms = game.dfa.alphabet.length ? game.dfa.alphabet : game.alphabet;
+    return h('label', null, h('span', null, t('symbol')),
+      h('select', { id: 'dg-f-symbol', translate: 'no' }, syms.map(function (s) { return h('option', { value: s }, s); })));
+  }
+  function renderFields() {
+    var type = actionSel.value;
+    var key = JSON.stringify([type, game.dfa.states, game.dfa.alphabet, game.alphabet, Simdeck.lang]);
+    if (key === fieldsKey) return;
+    var keep = {};
+    Array.prototype.forEach.call(fields.querySelectorAll('select'), function (s) { keep[s.id] = s.value; });
+    fieldsKey = key;
+    var out = [];
+    if (type === 'ADD_STATE') out.push(h('label', null, h('span', null, t('stateName')), h('input', { id: 'dg-f-state', value: 'q' + game.dfa.states.length, maxlength: '12', autocomplete: 'off', translate: 'no' })));
+    else if (type === 'ADD_SYMBOL') out.push(h('label', null, h('span', null, t('symbol')), h('input', { id: 'dg-f-sym', maxlength: '1', autocomplete: 'off', translate: 'no' })));
+    else if (type === 'ADD_TRANSITION') out.push(stateSelect('dg-f-from', 'fromState'), symbolSelect(), stateSelect('dg-f-to', 'toState'));
+    else if (type === 'REMOVE_TRANSITION') out.push(stateSelect('dg-f-from', 'fromState'), symbolSelect());
+    else out.push(stateSelect('dg-f-state-sel', 'state'));
+    fields.replaceChildren.apply(fields, out);
+    Object.keys(keep).forEach(function (id) {
+      var s = $(id);
+      if (s && Array.prototype.some.call(s.options, function (o) { return o.value === keep[id]; })) s.value = keep[id];
+    });
+  }
+  function readAction() {
+    var type = actionSel.value;
+    var v = function (id) { var e = $(id); return e ? e.value : ''; };
+    if (type === 'ADD_STATE') return { type: type, state: v('dg-f-state').trim() };
+    if (type === 'ADD_SYMBOL') return { type: type, symbol: v('dg-f-sym').trim() };
+    if (type === 'ADD_TRANSITION') return { type: type, from: v('dg-f-from'), symbol: v('dg-f-symbol'), to: v('dg-f-to') };
+    if (type === 'REMOVE_TRANSITION') return { type: type, from: v('dg-f-from'), symbol: v('dg-f-symbol') };
+    return { type: type, state: v('dg-f-state-sel') };
   }
 
-  function allStrings(alphabet, maxLen) {
-    const out = [''];
-    function rec(prefix, depth) {
-      if (depth === 0) return;
-      for (const ch of alphabet) {
-        const s = prefix + ch;
-        out.push(s);
-        rec(s, depth - 1);
-      }
-    }
-    rec('', maxLen);
-    return out;
-  }
-
-  function generateTests() {
-    const a = game.alphabet.length ? game.alphabet : ['a', 'b'];
-    const target = game.target;
-    const base = new Set(['', target, target + target, target.slice(0, -1), target + (a[0] || ''), (a[0] || '') + target, 'banana', 'banan', 'bananaa', 'ana', 'bandana', 'nana']);
-    for (const s of allStrings(a, Math.min(4, Math.max(2, target.length)))) base.add(s);
-    if (target.length <= 8) {
-      base.add(target);
-      base.add(target.slice(1));
-      base.add(target + target[0]);
-    }
-    return [...base].filter(s => [...s].every(ch => a.includes(ch))).slice(0, 240);
-  }
-
-  function validateDfa() {
-    const tests = generateTests();
-    const rows = [];
-    let pass = true;
-    let counter = null;
-
-    for (const input of tests) {
-      const expected = oracle(input);
-      const actualRun = runDfa(game.dfa, input);
-      const actual = actualRun.ok;
-      const ok = expected === actual;
-      rows.push({ input, expected, actual, ok, reason: actualRun.reason });
-      if (!ok && !counter) {
-        pass = false;
-        counter = { input, expected, actual, reason: actualRun.reason };
-      }
-    }
-
-    game.validation = { pass, counter, rows };
-    return game.validation;
-  }
-
-  function ensureState(name) {
-    if (!name) throw new Error('Prazan naziv stanja.');
-    if (!game.dfa.states.includes(name)) {
-      game.dfa.states.push(name);
-      game.dfa.delta[name] = game.dfa.delta[name] || {};
-      const n = game.dfa.states.length;
-      const angle = -Math.PI / 2 + (n - 1) * Math.PI * 2 / Math.max(6, n);
-      game.dfa.positions[name] = { x: 450 + Math.cos(angle) * 285, y: 320 + Math.sin(angle) * 230 };
-    }
-  }
-
-  function applyAction(playerName, action) {
-    const dfa = game.dfa;
-    const type = action.type;
-
-    if (type === 'ADD_STATE') {
-      ensureState(action.state);
-      log(`${playerName}: dodaje stanje ${action.state}`);
-    }
-
-    if (type === 'ADD_SYMBOL') {
-      const sym = cleanSymbol(action.symbol);
-      if (!sym) throw new Error('Prazan simbol.');
-      if (sym.length !== 1) throw new Error('Za MVP simbol mora biti jedan znak.');
-      if (!dfa.alphabet.includes(sym)) dfa.alphabet.push(sym);
-      if (!game.alphabet.includes(sym)) game.alphabet.push(sym);
-      log(`${playerName}: dodaje simbol ${sym}`);
-    }
-
-    if (type === 'ADD_TRANSITION') {
-      const from = action.from;
-      const symbol = cleanSymbol(action.symbol);
-      const to = action.to;
-      if (!from || !to || !symbol) throw new Error('Prijelaz mora imati stanje, simbol i odredište.');
-      if (symbol.length !== 1) throw new Error('Simbol mora biti jedan znak.');
-      ensureState(from);
-      ensureState(to);
-      if (!dfa.alphabet.includes(symbol)) dfa.alphabet.push(symbol);
-      if (!game.alphabet.includes(symbol)) game.alphabet.push(symbol);
-      dfa.delta[from] = dfa.delta[from] || {};
-      dfa.delta[from][symbol] = to;
-      log(`${playerName}: δ(${from}, ${symbol}) = ${to}`);
-    }
-
-    if (type === 'SET_START') {
-      ensureState(action.state);
-      dfa.start = action.state;
-      log(`${playerName}: početno stanje je ${action.state}`);
-    }
-
-    if (type === 'TOGGLE_ACCEPT') {
-      ensureState(action.state);
-      if (dfa.accept.includes(action.state)) {
-        dfa.accept = dfa.accept.filter(s => s !== action.state);
-        log(`${playerName}: ${action.state} više nije prihvatljivo`);
-      } else {
-        dfa.accept.push(action.state);
-        log(`${playerName}: ${action.state} je prihvatljivo`);
-      }
-    }
-
-    if (type === 'REMOVE_STATE') {
-      const s = action.state;
-      dfa.states = dfa.states.filter(x => x !== s);
-      dfa.accept = dfa.accept.filter(x => x !== s);
-      if (dfa.start === s) dfa.start = null;
-      delete dfa.delta[s];
-      delete dfa.positions[s];
-      for (const from of Object.keys(dfa.delta)) {
-        for (const sym of Object.keys(dfa.delta[from])) {
-          if (dfa.delta[from][sym] === s) delete dfa.delta[from][sym];
-        }
-      }
-      log(`${playerName}: uklanja stanje ${s}`);
-    }
-
-    if (type === 'REMOVE_TRANSITION') {
-      const from = action.from;
-      const symbol = cleanSymbol(action.symbol);
-      if (dfa.delta[from]) delete dfa.delta[from][symbol];
-      log(`${playerName}: uklanja δ(${from}, ${symbol})`);
-    }
-  }
-
-  function receiveAction(playerId, playerName, action) {
-    if (!game.players.find(p => p.id === playerId)) upsertPlayer({ id: playerId, name: playerName });
-    if (game.actions[playerId]) {
-      log(`${playerName}: potez odbijen, već je odigrao ovu rundu.`);
-      return;
-    }
-    game.actions[playerId] = { playerName, action };
-    log(`${playerName}: potez predan (${action.type})`);
-    finishRoundIfReady();
-    renderAll(true);
-  }
-
-  function finishRoundIfReady() {
-    const required = Math.max(game.expectedPlayers, game.players.length);
-    const actionCount = Object.keys(game.actions).length;
-    if (required > 0 && actionCount >= required) {
-      const entries = Object.entries(game.actions);
-      for (const [, item] of entries) {
-        try { applyAction(item.playerName, item.action); }
-        catch (e) { log(`${item.playerName}: akcija odbijena: ${e.message}`); }
-      }
-      game.actions = {};
-      game.round++;
-      validateDfa();
-      log(`Završena runda ${game.round - 1}; počinje runda ${game.round}.`);
-    }
+  function submitMove() {
+    if (client.role === 'none') { note = ['note_connectFirst']; sim.render(); return; }
+    if (game.round < 1) { note = ['note_notStarted']; sim.render(); return; }
+    if (Object.prototype.hasOwnProperty.call(game.actions, client.id)) { note = ['note_alreadyPlayed']; sim.render(); return; }
+    var action = readAction();
+    if (L.NEEDS_STATE.indexOf(action.type) >= 0 && game.dfa.states.length === 0) { note = ['note_needState']; sim.render(); return; }
+    if (client.role === 'presenter') { commit(L.submit(game, client.id, client.name, action)); return; }
+    send('ACTION', action);
+    var g = JSON.parse(JSON.stringify(game));
+    g.actions[client.id] = { playerName: client.name, action: action };
+    commit({ game: g, events: [{ key: 'sent', vars: { name: client.name, type: action.type } }] });
   }
 
   function startGame() {
-    if (client.role !== 'presenter') {
-      alert('Samo presenter može pokrenuti igru.');
-      return;
-    }
-    const code = $('presenterCode').value;
-    if (code !== game.presenterCode && game.round !== 0) {
-      alert('Pogrešna presenter šifra.');
-      return;
-    }
-    game.presenterCode = code || 'dfa';
-    game.presenterId = client.id;
-    game.taskType = $('taskType').value;
-    game.target = $('target').value.trim();
-    if (!game.target) { alert('Ciljna riječ/simbol ne smije biti prazan.'); return; }
-    game.alphabet = parseAlphabet($('alphabetInput').value);
-    if (game.taskType === 'evenSymbol' && game.target.length !== 1) {
-      alert('Za “paran broj simbola” cilj mora biti jedan znak.');
-      return;
-    }
-    for (const ch of game.target) if (!game.alphabet.includes(ch)) game.alphabet.push(ch);
-
-    game.expectedPlayers = Math.max(1, Math.min(80, Number($('playerCount').value) || 1));
-    game.actions = {};
-    game.round = 1;
-    game.dfa = emptyDfa();
-    game.dfa.alphabet = [...game.alphabet];
-    game.validation = null;
-    game.log = [];
-    log(`Nova igra: ${describeTask()}`);
-    send('STATE', publicGameState());
-    renderAll(true);
+    if (!presenterOnly()) return;
+    var r = L.start(game, client.id, {
+      taskType: $('dg-task-type').value, target: $('dg-target').value,
+      alphabet: $('dg-alphabet').value, expectedPlayers: $('dg-players').value
+    });
+    if (r.error) { note = ['why_' + r.error]; sim.render(); return; }
+    $('dg-alphabet').value = r.game.alphabet.join(',');
+    $('dg-players').value = String(r.game.expectedPlayers);
+    $('dg-setup').open = false;
+    commit(r);
   }
 
-  function actionFieldsHtml(type) {
-    const states = game.dfa.states;
-    const symbols = game.dfa.alphabet.length ? game.dfa.alphabet : game.alphabet;
-    const stateOptions = states.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-    const symbolOptions = symbols.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  // Buttons never keep focus on click, as the kit's own (docs/sim-ui.md §3).
+  Array.prototype.forEach.call(document.querySelectorAll('.dg-form .sd-btn'), function (b) {
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  });
+  $('dg-join-presenter').addEventListener('click', function () { join('presenter'); });
+  $('dg-join-player').addEventListener('click', function () { join('player'); });
+  $('dg-submit').addEventListener('click', submitMove);
+  actionSel.addEventListener('change', function () { renderFields(); sim.render(); });
+  $('dg-start').addEventListener('click', startGame);
+  $('dg-validate').addEventListener('click', function () { if (presenterOnly()) commit(L.check(game), ['note_validated']); });
+  $('dg-layout').addEventListener('click', function () { if (presenterOnly()) commit(L.layout(game), ['note_layout']); });
+  $('dg-clear').addEventListener('click', function () {
+    if (presenterOnly() && window.confirm(t('confirmClear'))) commit(L.clear(game));
+  });
+  $('dg-export').addEventListener('click', function () { $('dg-json').value = JSON.stringify(game, null, 2); note = ['note_exported']; sim.render(); });
+  $('dg-import').addEventListener('click', function () {
+    var g;
+    try { g = L.sanitize(JSON.parse($('dg-json').value)); } catch (e) { note = ['note_badJson']; sim.render(); return; }
+    commit({ game: g, events: [{ key: 'imported', vars: {} }] });
+  });
 
-    if (type === 'ADD_STATE') return `<label>Naziv stanja</label><input id="fieldState" value="q${states.length}" />`;
-    if (type === 'ADD_SYMBOL') return `<label>Simbol</label><input id="fieldSymbol" maxlength="1" value="" />`;
-    if (type === 'ADD_TRANSITION') return `
-      <div class="row"><div><label>Iz stanja</label><select id="fieldFrom">${stateOptions}</select></div><div><label>Simbol</label><select id="fieldSymbolSelect">${symbolOptions}</select></div></div>
-      <label>U stanje</label><select id="fieldTo">${stateOptions}</select>`;
-    if (type === 'SET_START' || type === 'TOGGLE_ACCEPT' || type === 'REMOVE_STATE') return `<label>Stanje</label><select id="fieldStateSelect">${stateOptions}</select>`;
-    if (type === 'REMOVE_TRANSITION') return `<div class="row"><div><label>Iz stanja</label><select id="fieldFrom">${stateOptions}</select></div><div><label>Simbol</label><select id="fieldSymbolSelect">${symbolOptions}</select></div></div>`;
-    return '';
+  // ---- stage ----
+  var svgNs = 'http://www.w3.org/2000/svg';
+  function s(tag, attrs, text) {
+    var el = document.createElementNS(svgNs, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, String(attrs[k])); });
+    if (text != null) el.textContent = text;
+    return el;
   }
-
-  function getActionFromForm() {
-    const type = $('actionType').value;
-    if (type === 'ADD_STATE') return { type, state: $('fieldState').value.trim() };
-    if (type === 'ADD_SYMBOL') return { type, symbol: $('fieldSymbol').value.trim() };
-    if (type === 'ADD_TRANSITION') return { type, from: $('fieldFrom').value, symbol: $('fieldSymbolSelect').value, to: $('fieldTo').value };
-    if (type === 'SET_START' || type === 'TOGGLE_ACCEPT' || type === 'REMOVE_STATE') return { type, state: $('fieldStateSelect').value };
-    if (type === 'REMOVE_TRANSITION') return { type, from: $('fieldFrom').value, symbol: $('fieldSymbolSelect').value };
-    return { type };
-  }
-
-  function submitAction() {
-    if (client.role === 'none') { alert('Prvo se spoji kao igrač ili presenter.'); return; }
-    if (game.round < 1) { alert('Igra nije pokrenuta.'); return; }
-    const playerId = client.id;
-    const playerName = client.name;
-    if (game.actions[playerId]) { alert('Već si odigrao ovu rundu.'); return; }
-    const action = getActionFromForm();
-
-    if (client.role === 'presenter') {
-      receiveAction(playerId, playerName, action);
-      send('STATE', publicGameState());
-    } else {
-      send('ACTION', action);
-      game.actions[playerId] = { playerName, action };
-      log(`${playerName}: potez poslan presenteru (${action.type})`);
-      renderAll(false);
-    }
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  }
-
-  function renderAll(broadcast) {
-    renderSummary();
-    renderPlayers();
-    renderActionPanel();
-    renderTests();
-    renderSvg();
-    $('log').textContent = game.log.join('\n');
-    if (broadcast && client.role === 'presenter') send('STATE', publicGameState());
-  }
-
-  function renderSummary() {
-    $('roleLabel').textContent = client.role === 'none' ? 'nije spojeno' : client.role;
-    $('roleLabel').className = 'big ' + (client.role === 'presenter' ? 'ok' : client.role === 'player' ? 'violet' : 'warn');
-    $('identityLabel').textContent = client.role === 'none' ? '—' : client.name;
-
-    $('taskText').textContent = describeTask();
-    $('roundNo').textContent = game.round;
-    const required = Math.max(game.expectedPlayers, game.players.length);
-    $('turnProgress').textContent = `${Object.keys(game.actions).length} / ${required}`;
-    const v = game.validation;
-    $('validationStatus').textContent = !v ? 'nije pokrenuto' : (v.pass ? 'PASS' : 'FAIL');
-    $('validationStatus').className = 'big ' + (!v ? 'warn' : (v.pass ? 'ok' : 'bad'));
-    $('counterExample').textContent = !v || v.pass ? '—' : JSON.stringify(v.counter.input);
-    $('counterExample').className = 'big ' + (!v || v.pass ? '' : 'bad');
-
-    $('alphabetPills').innerHTML = game.dfa.alphabet.map(s => `<span class="pill">${escapeHtml(s)}</span>`).join('') || '<span class="muted">prazno</span>';
-    $('statePills').innerHTML = game.dfa.states.map(s => {
-      const cls = ['pill'];
-      if (s === game.dfa.start) cls.push('start');
-      if (game.dfa.accept.includes(s)) cls.push('accept');
-      return `<span class="${cls.join(' ')}">${escapeHtml(s)}</span>`;
-    }).join('') || '<span class="muted">nema stanja</span>';
-
-    $('startGame').disabled = client.role !== 'presenter';
-    $('validateNow').disabled = client.role !== 'presenter';
-    $('clearDfa').disabled = client.role !== 'presenter';
-  }
-
-  function renderPlayers() {
-    const all = [...game.players];
-    if (client.role === 'presenter' && !all.find(p => p.id === client.id)) all.unshift({ id: client.id, name: client.name + ' (presenter)' });
-    $('players').innerHTML = all.map(p => {
-      const done = !!game.actions[p.id];
-      const me = p.id === client.id;
-      return `<div class="player ${done ? 'done' : ''} ${me ? 'me' : ''}"><span>${escapeHtml(p.name)}${me ? ' <span class="violet">(ja)</span>' : ''}</span><strong>${done ? 'gotov' : 'čeka'}</strong></div>`;
-    }).join('') || '<span class="muted">Nema spojenih igrača.</span>';
-  }
-
-  function renderActionPanel() {
-    const type = $('actionType').value;
-    $('actionFields').innerHTML = actionFieldsHtml(type);
-    const noStatesActions = ['ADD_TRANSITION', 'SET_START', 'TOGGLE_ACCEPT', 'REMOVE_STATE', 'REMOVE_TRANSITION'];
-    const alreadyPlayed = !!game.actions[client.id];
-    $('submitAction').disabled = client.role === 'none' || game.round < 1 || alreadyPlayed || (noStatesActions.includes(type) && game.dfa.states.length === 0);
-    $('turnNotice').textContent = client.role === 'none'
-      ? 'Spoji se kao igrač ili presenter.'
-      : alreadyPlayed
-        ? 'Tvoj potez za ovu rundu je predan. Čekaju se ostali.'
-        : 'Možeš predati jedan potez u ovoj rundi.';
-  }
-
-  function renderTests() {
-    const v = game.validation || validateDfa();
-    const rows = v.rows.slice(0, 80);
-    $('tests').innerHTML = rows.map(r => `<div class="testrow" title="${escapeHtml(r.reason)}">
-      <span>${r.input === '' ? 'ε' : escapeHtml(r.input)}</span>
-      <span class="${r.expected ? 'ok' : 'bad'}">${r.expected ? 'yes' : 'no'}</span>
-      <span class="${r.ok ? 'ok' : 'bad'}">${r.actual ? 'yes' : 'no'}</span>
-    </div>`).join('');
-  }
-
-  function edgeKey(from, to) { return `${from}→${to}`; }
-
-  function groupedEdges() {
-    const groups = new Map();
-    for (const from of game.dfa.states) {
-      const trans = game.dfa.delta[from] || {};
-      for (const sym of Object.keys(trans)) {
-        const to = trans[sym];
-        const key = edgeKey(from, to);
-        if (!groups.has(key)) groups.set(key, { from, to, symbols: [] });
-        groups.get(key).symbols.push(sym);
-      }
-    }
-    return [...groups.values()];
-  }
-
-  function renderSvg() {
-    const svg = $('dfaSvg');
-    const dfa = game.dfa;
-    const defs = `<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b" /></marker></defs>`;
-    let html = defs;
-
-    for (const e of groupedEdges()) {
-      const a = dfa.positions[e.from];
-      const b = dfa.positions[e.to];
-      if (!a || !b) continue;
-      if (e.from === e.to) {
-        html += `<path class="edge" d="M ${a.x - 22} ${a.y - 32} C ${a.x - 70} ${a.y - 92}, ${a.x + 70} ${a.y - 92}, ${a.x + 22} ${a.y - 32}" />`;
-        html += `<text class="edgeText" x="${a.x}" y="${a.y - 82}" text-anchor="middle">${escapeHtml(e.symbols.join(','))}</text>`;
-      } else {
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const r = 36;
-        const x1 = a.x + dx / len * r;
-        const y1 = a.y + dy / len * r;
-        const x2 = b.x - dx / len * r;
-        const y2 = b.y - dy / len * r;
-        const mx = (x1 + x2) / 2;
-        const my = (y1 + y2) / 2;
-        const curve = 30;
-        const nx = -dy / len * curve;
-        const ny = dx / len * curve;
-        html += `<path class="edge" d="M ${x1} ${y1} Q ${mx + nx} ${my + ny} ${x2} ${y2}" />`;
-        html += `<text class="edgeText" x="${mx + nx}" y="${my + ny - 8}" text-anchor="middle">${escapeHtml(e.symbols.join(','))}</text>`;
-      }
-    }
-
-    if (dfa.start && dfa.positions[dfa.start]) {
-      const p = dfa.positions[dfa.start];
-      html += `<line class="edge" x1="${p.x - 95}" y1="${p.y}" x2="${p.x - 42}" y2="${p.y}" />`;
-      html += `<text class="edgeText" x="${p.x - 102}" y="${p.y - 10}" text-anchor="middle">start</text>`;
-    }
-
-    for (const s of dfa.states) {
-      const p = dfa.positions[s] || { x: 100, y: 100 };
-      const cls = ['node'];
-      if (dfa.accept.includes(s)) cls.push('accept');
-      if (dfa.start === s) cls.push('start');
-      html += `<circle class="${cls.join(' ')}" data-state="${escapeHtml(s)}" cx="${p.x}" cy="${p.y}" r="36" />`;
-      if (dfa.accept.includes(s)) html += `<circle cx="${p.x}" cy="${p.y}" r="29" fill="none" stroke="#22c55e" stroke-width="2" />`;
-      html += `<text class="nodeText" x="${p.x}" y="${p.y}">${escapeHtml(s)}</text>`;
-    }
-
-    if (!dfa.states.length) {
-      html += `<text x="450" y="315" text-anchor="middle" fill="#9ca3af" font-size="22">Dodaj prvo stanje.</text>`;
-    }
-
-    svg.innerHTML = html;
+  var ui = null;
+  function build(stage) {
+    ui = {
+      task: h('span'), pills: h('span', { class: 'dg-pills' }),
+      round: h('span', { class: 'dg-val' }), progress: h('span', { class: 'dg-val' }),
+      valid: h('span', { class: 'dg-val' }), counter: h('span', { class: 'dg-val', translate: 'no' }),
+      players: h('div', { class: 'dg-players' }), tests: h('div', { class: 'dg-scroll' }), log: h('div', { class: 'dg-scroll' }),
+      svg: s('svg', { role: 'img' }), graph: h('div', { class: 'dg-graph' })
+    };
+    ui.graph.append(ui.svg);
+    var card = function (label, val) { return h('div', { class: 'dg-card' }, h('span', { class: 'dg-label' }, t(label)), val); };
+    stage.replaceChildren(h('div', { class: 'dg' },
+      h('div', { class: 'dg-task' }, h('span', { class: 'dg-label' }, t('task')), ui.task, ui.pills),
+      ui.graph,
+      h('div', { class: 'dg-side' },
+        h('div', { class: 'dg-stats' }, card('round', ui.round), card('progress', ui.progress), card('validation', ui.valid), card('counter', ui.counter)),
+        h('div', { class: 'dg-sec' }, h('h3', { class: 'dg-label' }, t('players')), ui.players),
+        h('div', { class: 'dg-sec dg-tests-sec' }, h('h3', { class: 'dg-label' }, t('tests')), ui.tests),
+        h('div', { class: 'dg-sec dg-log-sec' }, h('h3', { class: 'dg-label' }, t('log')), ui.log))));
+    if (window.ResizeObserver) new ResizeObserver(function () { drawGraph(); }).observe(ui.graph);
     setupDrag();
   }
 
+  function word(w) { return w === '' ? t('emptyWord') : w; }
+
+  // The automaton, drawn 1:1 in CSS pixels (the viewBox is the box's own size) so its text is never scaled down;
+  // positions live in the original's 900 × 640 space and are scaled to the box.
+  var geo = { sx: 1, sy: 1 };
+  function drawGraph() {
+    if (!ui) return;
+    var w = Math.max(1, ui.graph.clientWidth), hgt = Math.max(1, ui.graph.clientHeight);
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    var sx = w / L.W, sy = hgt / L.H, k = Math.min(sx, sy);
+    geo = { sx: sx, sy: sy };
+    var R = Math.max(1.3 * rem, Math.min(2.6 * rem, 36 * k));
+    var fs = Math.max(16, rem);
+    var dfa = game.dfa;
+    var svg = ui.svg;
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + hgt);
+    svg.setAttribute('aria-label', t('stage'));
+    var out = [s('defs', {})];
+    var mk = s('marker', { id: 'dg-arrow', markerWidth: 10, markerHeight: 10, refX: 9, refY: 3, orient: 'auto', markerUnits: 'strokeWidth' });
+    mk.append(s('path', { d: 'M0,0 L0,6 L9,3 z', class: 'dg-arrowhead' }));
+    out[0].append(mk);
+    var P = function (st) { var p = dfa.positions[st] || { x: 100, y: 100 }; return { x: p.x * sx, y: p.y * sy }; };
+    L.edges(dfa).forEach(function (e) {
+      if (!dfa.positions[e.from] || !dfa.positions[e.to]) return;
+      var a = P(e.from), b = P(e.to), label = e.symbols.join(',');
+      if (e.from === e.to) {
+        var q = R / 36;
+        out.push(s('path', { class: 'dg-edge', 'marker-end': 'url(#dg-arrow)',
+          d: 'M ' + (a.x - 22 * q) + ' ' + (a.y - 30 * q) + ' C ' + (a.x - 70 * q) + ' ' + (a.y - 95 * q) + ', ' + (a.x + 70 * q) + ' ' + (a.y - 95 * q) + ', ' + (a.x + 22 * q) + ' ' + (a.y - 30 * q) }));
+        out.push(s('text', { class: 'dg-edgetext', x: a.x, y: Math.max(fs, a.y - 84 * q), 'text-anchor': 'middle', 'font-size': fs, translate: 'no' }, label));
+        return;
+      }
+      var dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+      var x1 = a.x + dx / len * R, y1 = a.y + dy / len * R, x2 = b.x - dx / len * (R + 2), y2 = b.y - dy / len * (R + 2);
+      var mx = (x1 + x2) / 2, my = (y1 + y2) / 2, curve = 30 * Math.max(0.8, k);
+      var nx = -dy / len * curve, ny = dx / len * curve;
+      out.push(s('path', { class: 'dg-edge', 'marker-end': 'url(#dg-arrow)', d: 'M ' + x1 + ' ' + y1 + ' Q ' + (mx + nx) + ' ' + (my + ny) + ' ' + x2 + ' ' + y2 }));
+      out.push(s('text', { class: 'dg-edgetext', x: mx + nx, y: my + ny - 0.4 * fs, 'text-anchor': 'middle', 'font-size': fs, translate: 'no' }, label));
+    });
+    if (dfa.start && dfa.positions[dfa.start]) {
+      var p = P(dfa.start);
+      out.push(s('line', { class: 'dg-edge', 'marker-end': 'url(#dg-arrow)', x1: p.x - R - 2.6 * rem, y1: p.y, x2: p.x - R - 2, y2: p.y }));
+      out.push(s('text', { class: 'dg-edgetext', x: p.x - R - 1.6 * rem, y: p.y - 0.6 * fs, 'text-anchor': 'middle', 'font-size': fs }, t('start')));
+    }
+    dfa.states.forEach(function (st) {
+      var p = P(st), acc = dfa.accept.indexOf(st) >= 0;
+      out.push(s('circle', { class: 'dg-node' + (acc ? ' is-accept' : ''), 'data-state': st, cx: p.x, cy: p.y, r: R }));
+      if (acc) out.push(s('circle', { class: 'dg-inner', cx: p.x, cy: p.y, r: R - 0.3 * rem }));
+      out.push(s('text', { class: 'dg-nodetext', x: p.x, y: p.y, 'font-size': fs * 1.1, translate: 'no' }, st));
+    });
+    if (!dfa.states.length) out.push(s('text', { class: 'dg-empty', x: w / 2, y: hgt / 2, 'font-size': fs * 1.1 }, t('noStates')));
+    svg.replaceChildren.apply(svg, out);
+  }
+
+  // Drag a state (any tab; the presenter's positions are what the others see). The capture is on the svg, which stays.
+  var dragging = null;
   function setupDrag() {
-    const svg = $('dfaSvg');
-    let dragging = null;
-
-    function toSvgPoint(evt) {
-      const pt = svg.createSVGPoint();
-      pt.x = evt.clientX;
-      pt.y = evt.clientY;
-      return pt.matrixTransform(svg.getScreenCTM().inverse());
-    }
-
-    svg.querySelectorAll('circle[data-state]').forEach(node => {
-      node.addEventListener('pointerdown', evt => {
-        dragging = node.dataset.state;
-        node.setPointerCapture(evt.pointerId);
-      });
+    var svg = ui.svg;
+    svg.addEventListener('pointerdown', function (e) {
+      var st = e.target && e.target.getAttribute && e.target.getAttribute('data-state');
+      if (st == null) return;
+      dragging = st;
+      try { svg.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      e.preventDefault();
     });
-
-    svg.onpointermove = evt => {
-      if (!dragging) return;
-      const p = toSvgPoint(evt);
-      game.dfa.positions[dragging] = { x: Math.max(45, Math.min(855, p.x)), y: Math.max(45, Math.min(595, p.y)) };
-      renderSvg();
-      if (client.role === 'presenter') send('STATE', publicGameState());
-    };
-
-    svg.onpointerup = () => { dragging = null; };
-    svg.onpointerleave = () => { dragging = null; };
-  }
-
-  function autoLayout() {
-    if (client.role !== 'presenter') return;
-    const n = game.dfa.states.length;
-    if (!n) return;
-    game.dfa.states.forEach((s, i) => {
-      const angle = -Math.PI / 2 + i * Math.PI * 2 / n;
-      game.dfa.positions[s] = { x: 450 + Math.cos(angle) * 305, y: 320 + Math.sin(angle) * 235 };
+    svg.addEventListener('pointermove', function (e) {
+      if (dragging === null) return;
+      var r = svg.getBoundingClientRect();
+      game = L.move(game, dragging, (e.clientX - r.left) / geo.sx, (e.clientY - r.top) / geo.sy).game;
+      drawGraph();
     });
-    renderAll(true);
+    var stop = function () { if (dragging === null) return; dragging = null; save(); broadcast(); };
+    svg.addEventListener('pointerup', stop);
+    svg.addEventListener('pointercancel', stop);
   }
 
-  function clearDfa() {
-    if (client.role !== 'presenter') return;
-    if (!confirm('Očistiti trenutni automat?')) return;
-    game.dfa = emptyDfa();
-    game.dfa.alphabet = [...game.alphabet];
-    game.actions = {};
-    game.validation = null;
-    log('Automat očišćen.');
-    renderAll(true);
-  }
-
-  function exportState() {
-    $('stateJson').value = JSON.stringify(publicGameState(), null, 2);
-  }
-
-  function importState() {
-    try {
-      const state = JSON.parse($('stateJson').value);
-      applyPublicState(state);
-      log('Stanje uvezeno iz JSON-a.');
-      if (client.role === 'presenter') send('STATE', publicGameState());
-      renderAll(false);
-    } catch (e) {
-      alert('Neispravan JSON: ' + e.message);
+  /** A log line or event as parts: data (names, states, symbols) in translate="no", codes worded. */
+  function eventParts(key, vars) {
+    var v = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var x = vars[k];
+      if (k === 'taskType') return;
+      if (k === 'type') v[k] = t('act_' + x);
+      else if (k === 'why') v[k] = t('why_' + x);
+      else if (k === 'done' || k === 'next') v[k] = String(x);
+      else v[k] = data(x);
+    });
+    if (key === 'newGame') {
+      var d = L.describe({ taskType: vars.taskType, target: vars.target });
+      v.task = h('span', null, t.parts(d.key, { target: data(vars.target) }));
     }
+    return t.parts('ev_' + key, v);
   }
 
-  $('joinPresenter').onclick = joinPresenter;
-  $('joinPlayer').onclick = joinPlayer;
-  $('startGame').onclick = startGame;
-  $('submitAction').onclick = submitAction;
-  $('actionType').onchange = renderActionPanel;
-  $('validateNow').onclick = () => { if (client.role === 'presenter') { validateDfa(); renderAll(true); } };
-  $('autoLayout').onclick = autoLayout;
-  $('clearDfa').onclick = clearDfa;
-  $('exportState').onclick = exportState;
-  $('importState').onclick = importState;
+  function renderStage() {
+    var d = L.describe(game);
+    ui.task.replaceChildren.apply(ui.task, game.round > 0
+      ? t.parts(d.key, { target: data(game.target, 'dg-word') })
+      : [t('notStartedYet')]);
+    var alpha = game.dfa.alphabet.length ? game.dfa.alphabet : game.alphabet;
+    ui.pills.replaceChildren.apply(ui.pills, [h('span', { class: 'dg-label' }, t('alphabet'))].concat(alpha.length
+      ? alpha.map(function (a) { return h('span', { class: 'dg-pill', translate: 'no' }, a); })
+      : [h('span', null, t('emptyAlphabet'))]));
 
-  connectRoom();
-  renderAll(false);
+    ui.round.textContent = String(game.round);
+    ui.progress.textContent = Object.keys(game.actions).length + ' / ' + L.required(game);
+    var v = game.validation;
+    ui.valid.textContent = !v ? t('notRun') : (v.pass ? '✓ ' + t('pass') : '✗ ' + t('fail'));
+    ui.valid.className = 'dg-val ' + (!v ? 'is-warn' : v.pass ? 'is-ok' : 'is-bad');
+    ui.counter.textContent = !v || v.pass ? '—' : (v.counter.input === '' ? t('emptyWord') : '"' + v.counter.input + '"');
+    ui.counter.className = 'dg-val' + (!v || v.pass ? '' : ' is-bad');
+
+    var all = game.players.slice();
+    if (client.role === 'presenter' && !all.some(function (p) { return p.id === client.id; })) all.unshift({ id: client.id, name: client.name, presenter: true });
+    ui.players.replaceChildren.apply(ui.players, all.length ? all.map(function (p) {
+      var done = Object.prototype.hasOwnProperty.call(game.actions, p.id), me = p.id === client.id;
+      return h('span', { class: 'dg-player' + (done ? ' is-done' : '') + (me ? ' is-me' : '') },
+        h('span', null, p.presenter ? t.parts('asPresenter', { name: data(p.name, 'dg-name') }) : data(p.name, 'dg-name'), me ? ' ' + t('me') : null),
+        h('b', null, done ? '✓ ' + t('done') : t('waiting')));
+    }) : [h('span', { class: 'sd-hint' }, t('noPlayers'))]);
+
+    // The tests shown are the stored validation's, or a fresh check that is not stored (the original stored it, so
+    // the status card said FAIL before anyone pressed Validate).
+    var rows = (v || L.validate(game)).rows;
+    var counterInput = v && !v.pass ? v.counter.input : null;
+    var shown = rows.slice(0, 80);
+    var yn = function (b) { return t(b ? 'yes' : 'no'); };
+    var reasonText = function (r) { return t('reason_' + r.code, { sym: r.sym || '', from: r.from || '' }); };
+    var table = h('table', { class: 'dg-tests' },
+      h('thead', null, h('tr', null, h('th', null, t('colWord')), h('th', null, t('colExpected')), h('th', null, t('colActual')))),
+      h('tbody', null, shown.map(function (r) {
+        return h('tr', { class: r.input === counterInput ? 'is-counter' : null, title: reasonText(r.reason) },
+          h('td', { translate: 'no' }, word(r.input)),
+          h('td', null, yn(r.expected)),
+          h('td', { class: r.ok ? 'is-ok' : 'is-bad' }, (r.ok ? '✓ ' : '✗ ') + yn(r.actual)));
+      })));
+    ui.tests.replaceChildren(table);
+    if (rows.length > shown.length) ui.tests.append(h('p', { class: 'sd-hint' }, t.n('moreTests', rows.length - shown.length)));
+
+    ui.log.replaceChildren(h('ul', { class: 'dg-log' }, game.log.map(function (l) {
+      return h('li', null, h('time', { translate: 'no' }, l.at), eventParts(l.key, l.vars));
+    })));
+    drawGraph();
+  }
+
+  function renderPanel() {
+    var role = $('dg-role');
+    role.textContent = t(client.role === 'presenter' ? 'rolePresenter' : client.role === 'player' ? 'rolePlayer' : 'roleNone');
+    role.className = client.role === 'presenter' ? 'is-presenter' : client.role === 'player' ? 'is-player' : '';
+    $('dg-identity').textContent = client.role === 'none' ? '—' : client.name;
+    renderFields();
+    var played = Object.prototype.hasOwnProperty.call(game.actions, client.id);
+    var needState = L.NEEDS_STATE.indexOf(actionSel.value) >= 0 && game.dfa.states.length === 0;
+    $('dg-turn').textContent = t(client.role === 'none' ? 'turnConnect' : game.round < 1 ? 'turnNotStarted' : played ? 'turnDone' : 'turnOpen');
+    // aria-disabled, not disabled: the button keeps focus and a click says why in the caption (playbook §9)
+    $('dg-submit').setAttribute('aria-disabled', String(client.role === 'none' || game.round < 1 || played || needState));
+    ['dg-start', 'dg-validate', 'dg-layout', 'dg-clear'].forEach(function (id) {
+      $(id).setAttribute('aria-disabled', String(client.role !== 'presenter'));
+    });
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [],
+    legend: [
+      { c: 1, shape: 'ring', label: t('legendState') },
+      { shape: 'arrow', label: t('legendStart') },
+      { c: 3, shape: 'double', label: t('legendAccept') }
+    ],
+    render: function (c) {
+      if (!ui) build(c.stage);
+      renderStage();
+      renderPanel();
+    },
+    caption: function () {
+      if (note) return note[1] ? t.parts(note[0], { room: data(note[1].room) }) : t(note[0]);
+      if (game.log.length) return eventParts(game.log[0].key, game.log[0].vars);
+      return t(client.role === 'none' ? 'turnConnect' : game.round < 1 ? 'turnNotStarted' : 'turnOpen');
+    }
+  });
+
+  // A tab that was in a game before the reload rejoins its room: the presenter sends its game, a player asks for it.
+  if (client.role !== 'none') {
+    connect();
+    if (client.role === 'presenter') broadcast(); else send('REQUEST_STATE');
+  }
+  window.addEventListener('pagehide', function () { save(); });
 })();
 </script>
 </body>
