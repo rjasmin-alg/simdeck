@@ -1,0 +1,475 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- dedup-chunking: one file cut into chunks at a fixed size (top) and by a rolling hash of its content (bottom), each
+     chunk's hash kept in a store. After one byte is inserted or deleted the file is cut again, one chunk per step:
+     every fixed chunk after the edit is new, the content-defined ones match again once the window has passed it.
+     Pilot of kit view K3 (block grid). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="dedup-chunking">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deduplikacija: odsječci stalne duljine i po sadržaju · simdeck</title>
+<meta name="description" content="Ista datoteka odsječena na stalnu duljinu i kliznim sažetkom: nakon umetanja ili brisanja bajta usporedi koliko se odsječaka nađe u spremištu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dedup-chunking",
+  "title": {
+    "hr": "Deduplikacija: odsječci stalne duljine i po sadržaju",
+    "en": "Deduplication: fixed vs content-defined chunks"
+  },
+  "concept": {
+    "hr": "Umetnut bajt pomiče sve fiksne odsječke; granice po sadržaju vraćaju se same",
+    "en": "An inserted byte shifts every fixed chunk; rolling-hash boundaries resynchronise"
+  },
+  "summary": {
+    "hr": "Ista datoteka odsječena na stalnu duljinu i kliznim sažetkom: nakon umetanja ili brisanja bajta usporedi koliko se odsječaka nađe u spremištu.",
+    "en": "One file cut at a fixed size and by a rolling hash: insert or delete a byte and compare how many chunks are found in the store again."
+  },
+  "tags": [
+    "deduplication"
+  ],
+  "class": "stepper",
+  "steps": 19
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="dedup-chunking"]; colours only from kit tokens.
+   Layout (K3 block grid): two method rows, each a byte strip (one cell per byte, chunk outlines over the cells, a
+   band of chunk numbers under them), a chunk table with one column per chunk, and the method's chunk store. */
+[data-sim="dedup-chunking"] .dc {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6cqh;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="dedup-chunking"] [translate="no"] { font-family: var(--mono); }
+[data-sim="dedup-chunking"] .dc-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 0.8rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="dedup-chunking"] .dc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.9rem; }
+[data-sim="dedup-chunking"] .dc-head h2 { margin: 0; font-size: 1.1em; }
+[data-sim="dedup-chunking"] .dc-set, [data-sim="dedup-chunking"] .dc-ver { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="dedup-chunking"] .dc-count { margin-left: auto; font-weight: 700; padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="dedup-chunking"] .dc-count.dc-hit { background: var(--hl); color: var(--on-hl); }
+
+/* the byte strip: N equal columns; row 1 the window bracket (CDC), row 2 the bytes, row 3 the chunk numbers */
+[data-sim="dedup-chunking"] .dc-scroll { overflow-x: auto; min-width: 0; padding: 0.5rem 0.4rem 0.1rem; }
+[data-sim="dedup-chunking"] .dc-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  grid-template-rows: auto 2.5rem auto;
+  row-gap: 0.15rem;
+}
+[data-sim="dedup-chunking"] .dc-cell {
+  grid-row: 2;
+  display: grid;
+  place-items: center;
+  font-size: 1.15rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  min-width: 0;
+}
+[data-sim="dedup-chunking"] .dc-cell.dc-sp { color: var(--muted); }
+/* NEW: solid series fill; same: a light tint, hatched (the kit's .sd-fill / .sd-soft .sd-hatch, restated over .dc-cell) */
+[data-sim="dedup-chunking"] .dc-cell.sd-fill, [data-sim="dedup-chunking"] .dc-chip.sd-fill { background: var(--sw); color: var(--on-series); }
+[data-sim="dedup-chunking"] .dc-cell.sd-soft {
+  background-color: color-mix(in srgb, var(--sw) 16%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 22%, transparent) 0.35em 0.5em);
+}
+/* the inserted byte: thick underline; a deleted byte: a thick bar where it was */
+[data-sim="dedup-chunking"] .dc-cell.dc-ins { font-weight: 700; box-shadow: inset 0 -0.3rem 0 var(--ink); }
+[data-sim="dedup-chunking"] .dc-cell.dc-del { box-shadow: inset 0.3rem 0 0 var(--ink); }
+/* step 2 of a delete: only the gap is marked, not the byte after it */
+[data-sim="dedup-chunking"] .dc-cell.dc-del-now { position: relative; z-index: 3; box-shadow: inset 0.3rem 0 0 var(--ink), inset 0.75rem 0 0 var(--hl); }
+[data-sim="dedup-chunking"] .dc-cell.sd-changed { position: relative; z-index: 3; background: var(--hl); color: var(--on-hl); }
+[data-sim="dedup-chunking"] .dc-chunk {
+  grid-row: 2;
+  position: relative;
+  z-index: 2;
+  border: 0.18rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+[data-sim="dedup-chunking"] .dc-chunk[data-m="cdc"] { border-style: dashed; }
+[data-sim="dedup-chunking"] .dc-chunk.sd-changed { z-index: 2; }
+[data-sim="dedup-chunking"] .dc-num {
+  grid-row: 3;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+[data-sim="dedup-chunking"] .dc-num.dc-now { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="dedup-chunking"] .dc-win {
+  grid-row: 1;
+  height: 1.5rem;
+  border: 0.2rem solid var(--ink);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.2rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+}
+[data-sim="dedup-chunking"] .dc-win-pad { grid-row: 1; height: 1.5rem; }
+
+/* the chunk table: one column per chunk */
+[data-sim="dedup-chunking"] .dc-table { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; font-size: 0.9rem; }
+[data-sim="dedup-chunking"] .dc-table th { text-align: left; color: var(--muted); font-weight: 700; padding: 0.05rem 0.5rem 0.05rem 0; width: 6.2rem; white-space: nowrap; }
+[data-sim="dedup-chunking"] .dc-table td { text-align: center; padding: 0.05rem 0.15rem; border-left: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+[data-sim="dedup-chunking"] .dc-table td.dc-now:not(.dc-st) { background: var(--hl); color: var(--on-hl); }
+[data-sim="dedup-chunking"] .dc-table td.dc-st { font-weight: 700; border-radius: var(--radius-sm); border: var(--line-w) solid var(--panel); }
+[data-sim="dedup-chunking"] .dc-table td.dc-st.dc-now { outline: max(3px, 0.15rem) solid var(--ink); outline-offset: -0.2rem; }
+[data-sim="dedup-chunking"] .dc-empty { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+
+/* the store */
+[data-sim="dedup-chunking"] .dc-store { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.35rem; font-size: var(--fs-sm); }
+[data-sim="dedup-chunking"] .dc-store b { margin-right: 0.3rem; }
+[data-sim="dedup-chunking"] .dc-chip { padding: 0 0.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); line-height: 1.4; }
+[data-sim="dedup-chunking"] .dc-chip.sd-fill { border-color: var(--sw); }
+[data-sim="dedup-chunking"] .dc-chip.dc-now { box-shadow: 0 0 0 0.2rem var(--hl); border-color: var(--ink); }
+
+/* legend swatches (the kit has round, hollow, hl) */
+[data-sim="dedup-chunking"] .sd-swatch[data-shape] { position: relative; background: var(--bg); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="fixed"] { border: 0.18rem solid var(--ink); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="cdc"] { border: 0.18rem dashed var(--ink); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="same"] { background: color-mix(in srgb, var(--c1) 16%, var(--bg)); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="same"]::after { content: '='; color: var(--ink); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="new"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="new"]::after { content: '+'; color: var(--on-series); }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="win"] { border: 0.18rem solid var(--ink); border-bottom: none; background: transparent; }
+[data-sim="dedup-chunking"] .sd-swatch[data-shape="hl"] { background: var(--hl); }
+
+/* Phone and portrait: the stage grows with its content; the strip scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dedup-chunking"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dedup-chunking"] .dc { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="dedup-chunking"] .dc-row { flex: none; }
+  [data-sim="dedup-chunking"] .dc-strip { grid-template-columns: repeat(var(--n), 1.05rem); width: max-content; }
+  [data-sim="dedup-chunking"] .dc-tscroll { overflow-x: auto; }
+  [data-sim="dedup-chunking"] .dc-table { width: max-content; min-width: 100%; }
+  [data-sim="dedup-chunking"] .dc-table td { min-width: 3.2rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Deduplikacija: odsječci stalne duljine i po sadržaju</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C = '1';                                   // series colour of a chunk; same/NEW also differ by pattern and badge
+
+  /** Data (bytes, offsets, sums, hashes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** A byte as drawn: a space is a dot. */
+  function shown(ch) { return ch === ' ' ? '·' : ch; }
+  function bytes(s) { return s.split('').map(shown).join(''); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+  function textOf(s, txt, c) { return txt.slice(c.start, c.start + c.len); }
+
+  /** What each row shows at this step: which text, which chunks, which of them were decided now. */
+  function view(s, key) {
+    var m = s[key];
+    var edited = s.phase !== 'start' && s.phase !== 'original';
+    var txt = edited ? s.edited : s.original;
+    var chunks = [];
+    if (s.phase === 'original') chunks = m.orig;
+    else if (s.phase === 'fixed' || s.phase === 'cdc' || s.phase === 'totals') chunks = m.edited;
+    var now = s.phase === key ? s.last : s.phase === 'original' ? m.orig.map(function (c, i) { return i; }) : [];
+    var waiting = edited && !chunks.length;
+    return { m: m, txt: txt, chunks: chunks, now: now, edited: edited, waiting: waiting };
+  }
+
+  function renderStrip(c, key, v) {
+    var s = c.state, fwd = c.dir === 'forward';
+    var n = v.txt.length;
+    var owner = [];                                   // byte → chunk index
+    v.chunks.forEach(function (ch, i) { for (var b = ch.start; b < ch.start + ch.len; b++) owner[b] = i; });
+    var editMark = v.edited && s.edit.kind !== 'none';
+    var kids = [];
+    // row 1: the rolling window at the current cut (CDC), or an empty pad of the same height
+    var win = null;
+    if (key === 'cdc' && s.phase === 'cdc' && s.last.length) {
+      var lastCh = v.chunks[s.last[s.last.length - 1]];
+      if (lastCh.win) win = lastCh.win;
+    }
+    if (key === 'cdc') {
+      kids.push(win ? h('div', { class: 'dc-win' + (fwd ? ' sd-anim-in' : ''), style: { gridColumn: (win[0] + 1) + ' / span ' + (win[1] - win[0] + 1) } }, t('winLabel'))
+        : h('div', { class: 'dc-win-pad', style: { gridColumn: '1 / -1' } }));
+    }
+    for (var i = 0; i < n; i++) {
+      var ch = v.txt[i], ci = owner[i], chunk = ci === undefined ? null : v.chunks[ci];
+      var cls = ['dc-cell'];
+      if (ch === ' ') cls.push('dc-sp');
+      if (chunk) cls.push(chunk.status === 'new' ? 'sd-fill' : 'sd-soft sd-hatch');
+      var isIns = editMark && s.edit.kind === 'insert' && i >= s.edit.at && i < s.edit.at + s.edit.text.length;
+      var isDel = editMark && s.edit.kind === 'delete' && i === s.edit.at;
+      if (isIns) cls.push('dc-ins');
+      if (isDel) cls.push('dc-del');
+      if (isIns && s.phase === 'edit') cls.push('sd-changed');
+      if (isDel && s.phase === 'edit') cls.push('dc-del-now');
+      kids.push(h('div', { class: cls.join(' '), dataset: chunk ? { c: C } : null, style: { gridColumn: String(i + 1) } }, shown(ch)));
+    }
+    v.chunks.forEach(function (chk, idx) {
+      var isNow = v.now.indexOf(idx) >= 0 && s.phase !== 'original';
+      var col = (chk.start + 1) + ' / span ' + chk.len;
+      kids.push(h('div', { class: 'dc-chunk' + (isNow ? ' sd-changed' : ''), dataset: { m: key }, style: { gridColumn: col } }));
+      kids.push(h('div', { class: 'dc-num' + (isNow ? ' dc-now' + (fwd ? ' sd-anim-in' : '') : ''), style: { gridColumn: col } }, String(idx + 1)));
+    });
+    return h('div', { class: 'dc-scroll' }, h('div', { class: 'dc-strip', translate: 'no', style: { '--n': String(n) } }, kids));
+  }
+
+  function renderTable(c, key, v) {
+    var s = c.state, p = c.params;
+    if (!v.chunks.length) return h('p', { class: 'dc-empty' }, t(v.waiting ? 'tableWait' : 'tableEmpty'));
+    var now = function (i) { return v.now.indexOf(i) >= 0 && s.phase !== 'original'; };
+    // one column per chunk the run will have, so the columns keep their width as the chunks come in
+    var total = s.phase === 'original' ? v.chunks.length : L.finalChunks(s, key).length;
+    var row = function (head, cell) {
+      var tds = [];
+      for (var i = 0; i < total; i++) tds.push(i < v.chunks.length ? cell(v.chunks[i], i) : h('td', null));
+      return h('tr', null, h('th', null, t(head)), tds);
+    };
+    var rows = [
+      row('thNo', function (ch, i) { return h('td', { class: now(i) ? 'dc-now' : null }, data(i + 1)); }),
+      row('thStart', function (ch, i) { return h('td', { class: now(i) ? 'dc-now' : null }, data(ch.start)); }),
+      row('thLen', function (ch, i) { return h('td', { class: now(i) ? 'dc-now' : null }, data(ch.len)); })
+    ];
+    if (p.showHash) rows.push(row('thHash', function (ch, i) { return h('td', { class: now(i) ? 'dc-now' : null }, data(ch.hash.slice(0, 4))); }));
+    rows.push(row('thStatus', function (ch, i) {
+      var isNew = ch.status === 'new';
+      return h('td', { class: 'dc-st ' + (isNew ? 'sd-fill' : 'sd-soft sd-hatch') + (now(i) ? ' dc-now' : ''), dataset: { c: C } },
+        (isNew ? '+ ' : '= ') + t(isNew ? 'stNew' : 'stSame'));
+    }));
+    return h('div', { class: 'dc-tscroll' }, h('table', { class: 'dc-table' }, h('tbody', null, rows)));
+  }
+
+  function renderStore(c, key, v) {
+    var s = c.state, p = c.params, m = v.m;
+    var head = h('b', null, t('store') + ':');
+    if (!m.store.length) return h('div', { class: 'dc-store' }, head, h('span', null, t('storeEmpty')));
+    var nOrig = s.phase === 'start' ? 0 : L.dedup(m.orig, []).store.length;
+    var fresh = [];
+    if (s.phase === key) s.last.forEach(function (i) { if (v.chunks[i].status === 'new') fresh.push(v.chunks[i].hash); });
+    var chips = !p.showHash ? [] : m.store.map(function (hs, i) {
+      var added = i >= nOrig;
+      return h('span', { class: 'dc-chip' + (added ? ' sd-fill' : '') + (fresh.indexOf(hs) >= 0 ? ' dc-now' : ''), dataset: added ? { c: C } : null, translate: 'no' }, hs.slice(0, 4));
+    });
+    return h('div', { class: 'dc-store' }, head, h('span', null, t.n('storeCount', m.store.length)), chips);
+  }
+
+  function counter(c, key, v) {
+    var s = c.state, m = v.m;
+    if (s.phase === 'start') return h('span', { class: 'dc-count' }, t('cntNone'));
+    if (!v.edited || v.waiting) return h('span', { class: 'dc-count' }, t.n('cntOrig', m.orig.length, { b: m.origBytes }));
+    var tot = L.totals(m);
+    return h('span', { class: 'dc-count' + (s.phase === 'totals' ? ' dc-hit' : '') }, t('cntReuse', { k: tot.same, n: tot.n, b: tot.newBytes }));
+  }
+
+  function renderRow(c, key) {
+    var s = c.state, v = view(s, key);
+    var set = key === 'fixed' ? t('rowFixedSet', { s: s.size }) : t('rowCdcSet', { d: s.size, w: s.window, min: s.min, max: s.max });
+    return h('section', { class: 'dc-row', dataset: { m: key } },
+      h('div', { class: 'dc-head' },
+        h('h2', null, t(key === 'fixed' ? 'rowFixed' : 'rowCdc')),
+        h('span', { class: 'dc-set' }, set),
+        h('span', { class: 'dc-ver' }, t(v.edited ? 'verEdited' : 'verOrig')),
+        counter(c, key, v)),
+      renderStrip(c, key, v),
+      renderTable(c, key, v),
+      renderStore(c, key, v));
+  }
+
+  // ── captions ──
+
+  function capOriginal(s) {
+    var out = rich('capOriginal', { nf: t.n('chunksN', s.fixed.orig.length), nc: t.n('chunksN', s.cdc.orig.length), bf: s.fixed.origBytes, bc: s.cdc.origBytes });
+    [s.fixed, s.cdc].forEach(function (m) {
+      m.orig.forEach(function (ch) { if (ch.status === 'same') out = out.concat(sp(rich('capOrigDup', { x: data(bytes(textOf(s, s.original, ch))) }))); });
+    });
+    return out;
+  }
+  /** The edited byte in a caption: a space is drawn as a dot, so say what it is. */
+  function byteNode(ch) { return ch === ' ' ? h('span', null, data(shown(ch)), ' (' + t('spaceWord') + ')') : data(ch); }
+  function capEdit(s) {
+    var e = s.edit, out;
+    if (e.kind === 'insert') out = rich('capInsert', { at: data(e.at), b: byteNode(e.text) });
+    else if (e.kind === 'delete') out = rich('capDelete', { at: data(e.at), b: byteNode(e.text) });
+    else out = rich('capNoEdit');
+    return out.concat(sp(rich('capEditNext')));
+  }
+  /** After the edit: does chunk ch sit wholly behind it (shifted content)? */
+  function behindEdit(s, ch) {
+    if (s.edit.kind === 'none') return false;
+    return s.edit.kind === 'delete' ? ch.start >= s.edit.at : ch.start > s.edit.at;  // a delete leaves a gap before `at`
+  }
+
+  function capFixed(s, p) {
+    var m = s.fixed, idx = s.last;
+    if (idx.length > 1) {
+      var same = 0, nw = 0, shifted = false;
+      idx.forEach(function (i) { var ch = m.edited[i]; if (ch.status === 'same') same++; else { nw++; if (behindEdit(s, ch)) shifted = true; } });
+      var out = rich('capFixedGroup', { a: data(idx[0] + 1), b: data(idx[idx.length - 1] + 1), same: data(same), nw: data(nw) });
+      return shifted ? out.concat(sp(rich('capFixedGroupShift'))) : out;
+    }
+    var i = idx[0], ch = m.edited[i];
+    var v = { i: data(i + 1), from: data(ch.start), to: data(ch.start + ch.len - 1), h: data(ch.hash.slice(0, 4)) };
+    if (ch.status === 'same') return rich(p.showHash ? 'capFixedSame' : 'capFixedSameNoHash', v);
+    if (behindEdit(s, ch) && ch.start < s.original.length) return rich('capFixedShift', v);
+    return rich('capFixedEdit', v);
+  }
+
+  /** The first `same` chunk right after a new one, after the edit: the boundary is found again. */
+  function resync(s, i) {
+    var m = s.cdc, ch = m.edited[i];
+    if (s.edit.kind === 'none' || ch.status !== 'same' || ch.cut !== 'hash' || i === 0 || m.edited[i - 1].status !== 'new' || !behindEdit(s, ch)) return null;
+    var rest = L.finalChunks(s, 'cdc').slice(i).every(function (x) { return x.status === 'same'; });
+    return rich(rest ? 'capResyncAll' : 'capResync', { txt: data(bytes(textOf(s, s.edited, ch))) });
+  }
+
+  function capCdc(s) {
+    var m = s.cdc, idx = s.last, out;
+    if (idx.length > 1) {
+      var same = 0, nw = 0, rs = null;
+      idx.forEach(function (i) { if (m.edited[i].status === 'same') same++; else nw++; rs = rs || resync(s, i); });
+      out = rich('capCdcGroup', { a: data(idx[0] + 1), b: data(idx[idx.length - 1] + 1), same: data(same), nw: data(nw) });
+      return rs ? out.concat(sp(rs)) : out;
+    }
+    var i = idx[0], ch = m.edited[i];
+    var v = { i: data(i + 1), sum: data(ch.sum), d: data(s.size), pos: data(ch.start + ch.len - 1), max: data(s.max) };
+    out = rich(ch.cut === 'hash' ? 'capCdcHash' : ch.cut === 'max' ? 'capCdcMax' : 'capCdcEnd', v);
+    if (ch.ignored.length) out = out.concat(sp(rich('capCdcIgnored', { pos: data(ch.ignored[0]), min: data(s.min) })));
+    var r = resync(s, i);
+    if (r) return out.concat(sp(r));
+    return out.concat(sp(ch.status === 'same' ? rich('capCdcSame') : rich('capCdcNew', { len: data(ch.len) })));
+  }
+
+  function capTotals(s) {
+    var f = L.totals(s.fixed), k = L.totals(s.cdc);
+    var out = rich('capTotals', { fs: data(f.same), fn: data(f.n), fb: data(f.newBytes), cs: data(k.same), cn: data(k.n), cb: data(k.newBytes) });
+    var synced = s.cdc.edited[s.cdc.edited.length - 1].status === 'same';
+    return out.concat(sp(rich(s.edit.kind === 'none' ? 'capTotalsNone' : synced ? 'capTotalsShift' : 'capTotalsNoSync')));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'size', type: 'choice', label: t('size'), resets: true, options: [[4, '4'], [8, '8'], [16, '16']] },
+      { key: 'window', type: 'choice', label: t('window'), resets: true, options: [[3, '3'], [4, '4'], [5, '5']] },
+      { key: 'edit', type: 'select', label: t('edit'), resets: true,
+        options: [['prepend', t('editPrepend')], ['insert', t('editInsert')], ['delete', t('editDelete')], ['none', t('editNone')]] },
+      { key: 'showHash', type: 'toggle', label: t('showHash'), hint: t('showHashHint') }
+    ],
+
+    presets: [
+      { id: 'prepend', label: t('presetPrepend'), params: { edit: 'prepend' }, hint: t('presetPrependHint') },
+      { id: 'insert-middle', label: t('presetInsert'), params: { edit: 'insert' }, hint: t('presetInsertHint') },
+      { id: 'delete-middle', label: t('presetDelete'), params: { edit: 'delete' }, hint: t('presetDeleteHint') },
+      { id: 'no-edit', label: t('presetNone'), params: { edit: 'none' }, hint: t('presetNoneHint') },
+      { id: 'small-chunks', label: t('presetSmall'), params: { edit: 'prepend', size: 4 }, hint: t('presetSmallHint') }
+    ],
+
+    legend: [
+      { shape: 'fixed', label: t('legFixed') },
+      { shape: 'cdc', label: t('legCdc') },
+      { shape: 'same', label: t('legSame') },
+      { shape: 'new', label: t('legNew') },
+      { shape: 'win', label: t('legWindow') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'dc' }, renderRow(c, 'fixed'), renderRow(c, 'cdc')));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      if (s.phase === 'start') return rich('capStart', { n: data(s.original.length) });
+      if (s.phase === 'original') return capOriginal(s);
+      if (s.phase === 'edit') return capEdit(s);
+      if (s.phase === 'fixed') return capFixed(s, p);
+      if (s.phase === 'cdc') return capCdc(s);
+      return capTotals(s);
+    }
+  });
+})();
+</script>
+</body>
+</html>
