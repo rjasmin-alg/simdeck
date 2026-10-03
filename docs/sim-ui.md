@@ -1,8 +1,8 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.4.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
-sequence chart view K1, §11; changes in
+the template. Kit version **0.5.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
+sequence chart view K1, §11; 0.5.0 the rule table view K4, §12; changes in
 `kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
@@ -11,6 +11,7 @@ kit/
   kit.js           step controller, controls, transport, header tools, shortcuts, languages (one classic script, ~47 KB)
   topology.js      view K2: topology with moving packets (§10; a classic script, ~19 KB, linked only by pages that draw one)
   sequence.js      view K1: message sequence chart (§11; a classic script, ~15 KB, linked only by pages that draw one)
+  ruletable.js     view K4: rule table with the matching row (§12; a classic script, ~13 KB, linked only by pages that draw one)
   glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
   template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
@@ -18,6 +19,7 @@ kit/
   kit.test.js      tests for the kit's pure core and stylesheet rules
   topology.test.js tests for view K2's geometry, spec checks and stylesheet rules
   sequence.test.js tests for view K1's lane geometry, tie-breaks, spec checks and stylesheet rules
+  ruletable.test.js tests for view K4's evaluation modes, tie-breaks, spec checks and stylesheet rules
   CHANGELOG.md     one line per kit change
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
   tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
@@ -372,8 +374,8 @@ settled each one as follows.
   manifest, the model tests, the build, `check-page.mjs` on the built file, the token check and the scope check,
   and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
 - Drawing helpers come as **kit views**, each extracted from a pilot sim once it works, then checked against two
-  later consumers before its API is frozen: K2 topology (§10, 0.3.0), K1 sequence chart (§11, 0.4.0). K3 block grid
-  and K4 rule table follow the same way (`docs/tasks/w0/kit-*.md`).
+  later consumers before its API is frozen: K2 topology (§10, 0.3.0), K1 sequence chart (§11, 0.4.0), K4 rule table
+  (§12, 0.5.0). K3 block grid follows the same way (`docs/tasks/w0/kit-block-grid.md`).
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.
 
@@ -700,3 +702,141 @@ and screenshots: `library/k1-consumer-sketch.html` and `library/k1-sketch-*.png`
   sketch added `place: 'mid'` for long flight names and a narrow `timeWidth`.
 - **`oauth-flow`** (fit): six lanes, front-channel redirects dashed, tokens locked, a stolen code refused (`lost`), the
   code's lifetime as a timer on the right. This sketch moved receiver words outside on one-lane arrows.
+
+## 12. View K4: rule table with the matching row (`kit/ruletable.js`, 0.5.0)
+
+An ordered rule list, the request being evaluated, the row compared in this step highlighted, the deciding row
+outlined, rows never read hatched, and an implicit default row at the end. Three **evaluation modes** (first match,
+most specific, deny wins) decide which rows are read and which wins, so a page can put the same rows side by side in
+two modes and show the contrast of catalogue §5.1. Extracted from the pilot `sims/rule-first-match/`; built for the
+22 consumers in `docs/tasks/w0/kit-rule-table.md` (`win-gpo-precedence`, `win-ntfs-share-effective`,
+`win-dhcp-scope-options`, `lnx-pam-stack`, `dmz-matrix`, …).
+
+```html
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>    <!-- after kit.js; the build inlines it like the kit -->
+```
+
+```js
+render: function (c) {
+  var s = c.state, req = s.requests[s.cur];
+  var table = Simdeck.ruleTable({
+    dir: c.dir,
+    mode: 'first',                                   // 'first' | 'specific' | 'deny'
+    title: t('tableTitle'),
+    columns: [{ key: 'src', label: t('colSrc') }, { key: 'dstPort', label: t('colDstPort') }],
+    actionLabel: t('colAction'), markLabel: t('colMark', { n: req.n }),
+    rows: s.rules.map(function (r, i) {
+      return { no: r.label, cells: { src: r.src, dstPort: r.port }, action: r.action, effect: r.action === 'deny' ? 'deny' : 'allow',
+        hit: s.result[i],                            // true, false, or null (not compared yet)
+        miss: i === s.row ? s.failedColumns : [],    // struck through with ✕
+        tags: r.fixed ? [{ k: 'hl', text: t('fixTag') }] : null,
+        note: s.shadow[i] >= 0 ? [{ k: 'dashed', text: '⚠ ' + t('shadowOf', { r: s.rules[s.shadow[i]].label }) }] : null };
+    }),
+    implicit: { text: t('implicitAcl'), action: 'deny', effect: 'deny' },
+    at: s.row,                                       // the row compared in this step; rows.length = the implicit row
+    subject: { mark: req.n, c: 1 },                  // the request's chip in the pointer column
+    done: s.phase === 'decided',
+    outcome: function (i) { return Simdeck.ruleTable.verdict(s.outcome.ok, t(s.outcome.ok ? 'outPermit' : 'outDeny')); },
+    words: { win: t('markMatch'), skip: t('markSkip') }
+  });
+  c.stage.replaceChildren(h('div', { class: 'rf' }, queue, table, tally));
+}
+```
+
+**How it draws.** One HTML table (no SVG, text 1:1): a pointer column, `#`, the match columns, the action, the
+`extra` columns, and the mark column that says what each row did for this request. The view holds no words: headers,
+title, marks and the implicit row's text come from the page through `t`. A bare string or number in `no`, `cells`
+and `action` is data (`translate="no"`, monospace: rule text, addresses, ports, method names); pass a node for a
+translated word (a level name, "allow").
+
+### `Simdeck.ruleTable(spec)` → element
+
+| Field | Meaning |
+|---|---|
+| `mode` | `'first'` (default), `'specific'` or `'deny'`; see below |
+| `title`, `columns[]`, `extra[]` | the heading; the match columns `{ key, label, wrap }` between `#` and the action; more columns after the action (a "verdict so far", a source) |
+| `noLabel`, `actionLabel`, `markLabel` | the headers of `#` (default `#`), the action column and the mark column ("request 3") |
+| `rows[]` | `{ no, cells, action, effect, rank, hit, miss, tags, note, why, mark }`, top to bottom |
+| `implicit` | `{ text, action, effect }`: the implicit last row (implicit deny, "no entry", "not configured"); leave it out for none |
+| `at` | the row compared in this step (an index; `rows.length` is the implicit row; −1 none), or `'all'` for an explorer: every row read, no pointer |
+| `subject` | `{ mark, c }`: the chip of the request in the pointer column at `at` (series colour `c`) |
+| `done`, `outcome(i)` | the decision is made: `outcome(i)` (a node, or a function of the winning row's index, `rows.length` for the implicit row) goes in the winner's mark cell, followed by its `why` |
+| `words` | `{ hit, win, beaten, skip }`: the words after the mark symbols (no match is "–" alone) |
+| `dir` | `ctx.dir`: the chip and the changed mark cell pop in only on `'forward'` (never under reduced motion) |
+| `changed` | `false` to leave the mark cell at `at` unhighlighted (it has the kit's changed mark by default) |
+| `bare`, `stickyMark`, `className` | no box around the table; keep the mark column in view when a wide table scrolls; an extra class |
+
+**Rows.** `no` is the row's number or name, with `tags` under it (`[{ k: 'hl' | 'dashed' | 'muted', text }]` or
+nodes: a fix, "was 30", "Enforced", "↧ inherited"). `cells` maps column keys to values. `hit` is the row's match
+result for this request: `true`, `false`, or `null` while it has not been compared; the model decides it, the view
+only reads it. `miss` lists the columns that did not match (struck through in `--danger` with ✕); give it on the row
+being compared. `effect` (`'allow'` / `'deny'`) is used by the deny-wins mode, `rank` (a number, higher is more
+specific) by most specific. `note` goes under the mark (a shadowed-rule warning), `why` under the outcome of the
+winning row. `mark` overrides the computed mark for that row (below).
+
+**Marks**, each a symbol and a shape as well as a colour (`Simdeck.ruleTable.evaluate`, pure):
+
+| Mark | Drawn | Meaning |
+|---|---|---|
+| `pending` | empty | not read yet |
+| `no` | "–" (the compared row: failing fields ✕ struck) | read, does not match |
+| `hit` | ▷ `words.hit`, thin ink outline | matches, still in the running (most specific, deny wins, before `done`) |
+| `win` | ▶ `words.win`, thick ink outline, bold, then the outcome | decides |
+| `beaten` | ▽ `words.beaten`, dashed outline, grey, action struck through | matched but lost |
+| `skip` | `words.skip`, grey and hatched | never read (below the first match), or the implicit row when a row won |
+
+**Modes.** `'first'`: read top down; the first row with `hit: true` at or above `at` wins at once and every row below
+it is `skip`; with none, the implicit row wins when `at` reaches it. `'specific'`: every row is read; when `done`, the
+matching row with the highest `rank` wins and the other matches are `beaten`; **tie-break: equal ranks, the earlier
+row wins** (a page with "last applied wins", such as GPO processing order, gives later rows higher ranks).
+`'deny'`: every row is read; when `done`, every matching deny row wins and the matching allows are `beaten`; with no
+matching deny every matching allow wins (allows add up); a row without `effect` counts as allow. In `specific` and
+`deny` the implicit row wins when `done` with no match. Rows below `at` are not read in any mode.
+
+**A rule of the page's own** (PAM control flags, an NTFS canonical order with explicit before inherited, a matrix):
+give each row its `mark` and leave `hit` null; the view draws the marks it is given (any mode), and `extra` holds a
+running column such as "verdict so far". `lnx-pam-stack` asked for a fourth "control flags" mode; this is the answer
+until a second page needs the same rule.
+
+**Implicit row.** Italic on the panel colour, its text spanning the match columns, its action bold. It is the
+pointer's last stop in first-match mode (`at: rows.length`).
+
+**Outcome.** `Simdeck.ruleTable.verdict(ok, text)` is ✓ or ✕ with the word in `--ok` or `--danger` (on the highlight
+it turns to `--on-hl`); use it in the page's own queue and tally too, so the outcome looks the same everywhere.
+
+**Legend swatches** for the marks: `{ shape: 'rt-no' }`, `'rt-hit'`, `'rt-win'`, `'rt-beaten'`, `'rt-skip'`,
+`'rt-warn'` (a dashed box with ⚠, for a shadowed-rule note) and `'rt-verdict'` (✓); the kit's `'hl'` is "changed".
+
+**Fit.** At 1920×1080 with the panel open, a table beside a 16rem column holds about six data columns of short
+values plus the mark column; 10 rows and the implicit row fit with room for a box under it (the GPO sketch). Long
+values: give the column `wrap: true`. When the table is wider than its box it scrolls sideways inside it (never the
+page); with `stickyMark` the mark column stays in view. Keep the words in `words` to one or two short words.
+
+**Phone and portrait.** The table keeps its columns and scrolls sideways in its box; padding narrows. A page puts
+its stage at `height: auto` as the pilot does.
+
+**Spec checks.** `Simdeck.ruleTable.checkSpec(spec)` (pure, also under node: `require('kit/ruletable.js')`) lists an
+unknown mode, no columns, duplicate or unknown column keys, a `hit` that is not true/false/null, unknown `effect` or
+`mark`, `miss` on a row that is not a "no", a matching row without `rank` in most-specific mode, and an `at` past the
+last row (or at the implicit row with no implicit row); the view logs them on the console, which the page check fails.
+
+### Checked against consumers (sketched, not built)
+
+The API was frozen after drawing three later sims with different needs on it, plus a ten-row fit check (sketch page
+and screenshots: `library/k4-consumer-sketch.html` and `library/k4-sketch-*.png` in the thread t-0102 report):
+
+- **`win-ntfs-share-effective`**: the share ACL for ivan asking for Change, in `deny` mode (Pripravnici's deny wins
+  over two allows, both `beaten`), beside the same rows in `first` mode (Everyone Read decides, the rest `skip`): the
+  §5.1 contrast on one screen. A token card on the left; `tags` for "↧ inherited". This sketch added `stickyMark`
+  (on a phone the mark column scrolled out of view).
+- **`win-dhcp-scope-options`**: one table per option, rows = levels with `rank`, in `specific` mode; the reservation
+  beats the scope (its value struck through), an option set nowhere falls to the implicit "not sent". An explorer has
+  no pointer: this sketch added `at: 'all'`. Four option tables do not fit at once; the page shows one option, or all
+  options as one table.
+- **`lnx-pam-stack`**: control flags are not one of the modes; every row's `mark` comes from the page (the failed
+  `required` decides, the `sufficient` success is `beaten` with a note, the last line ran), with a "verdict so far"
+  `extra` column. It showed that long data in an extra column pushes the mark column out of the box: hence `wrap`
+  and `stickyMark`.
+- **`win-gpo-precedence`** (fit): ten GPOs in processing order in `specific` mode with ranks = order and the Enforced
+  link ranked highest; three values `beaten`, the implicit "not configured" row hatched.

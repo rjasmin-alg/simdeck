@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
-   simdeck kit 0.4.0: step controller, controls, transport, header tools and shortcuts for native simulators.
+   simdeck kit 0.5.0: step controller, controls, transport, header tools and shortcuts for native simulators.
    A classic script (not a module) so a page opens straight from file:// with no build. Load it in <head>: it sets the
    theme before first paint, then the page calls Simdeck.mount(def) at the end of <body>.
    The pure part (rng, stateAt, defaultsOf, stepsOf) touches no DOM, so node tests can require() this file.
@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
 
-  var VERSION = '0.4.0';
+  var VERSION = '0.5.0';
   var hasDom = typeof document !== 'undefined';
 
   // ── pure core ──

@@ -45,7 +45,13 @@ view **K4: rule table with the matching row**. Rules and expected numbers: `SPEC
 - **K4 layout:** queue (spans the full height) | rule table (pointer column with the request's number chip, #, match
   columns, action, mark) over the tally. Rows below the match are hatched and greyed with "ne čita se"; the implicit
   row is the last, italic. On a phone the queue goes on top and the table scrolls inside its box. Reusable for later
-  K4 pages: the model's `matchRule`/`covers`/`shadowed`/`applyFix` and the `.rf-table` CSS.
+  K4 pages: the model's `matchRule`/`covers`/`shadowed`/`applyFix`; the table is the kit's (below).
+- **On the kit view since kit 0.5.0** (task `kit-rule-table`, 2026-10-04): the rule table (pointer chip, #, match
+  columns with the failing fields struck, action, mark column, the winning row's outline, hatched unread rows, the
+  implicit row, the fix/was/shadow tags) and the ✓/✕ outcome are drawn by `Simdeck.ruleTable` in mode `first`
+  (`docs/sim-ui.md` §12); the legend uses the kit's `rt-*` swatches. The page keeps the request queue and the tally
+  and maps its model's marks to `hit`. Screenshots before and after (50 states: 1920×1080 light and dark, 375×812,
+  both languages, every preset, request mode) are pixel-identical.
 - **Model is promotable:** pure functions over plain data, no strings (`SCENES` holds data only).
 
 ## Deviations from the task
