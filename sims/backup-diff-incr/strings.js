@@ -80,7 +80,7 @@
         'Na kraju se disk vraća na odabrani dan: koje kopije za to trebaju?',
       capWriteSun: 'Nedjelja: na disk su upisani podaci, blokovi A–H.',
       capWrite: ['{day}: promijenjen je blok {list}.', '{day}: promijenjeni su blokovi {list}.', '{day}: promijenjeni su blokovi {list}.'],
-      capTwice: 'Blok {i} pisan je dvaput, {a} pa {b}: na disku je samo zadnji sadržaj, {b}.',
+      capTwice: 'Blok {i} pisan je dvaput, {a} pa {b}: na disku je samo zadnji sadržaj, {c}.',
       capFullSun: 'Nedjelja navečer: [[full backup]], razina 0. Sprema svih osam blokova, jer [[snapshot file]] još ne ' +
         'postoji, pa se sve smatra novim.',
       capIncr: ['{day}, {kind}: sprema se samo blok {list}, jer je od {prev} samo on promijenjen.',
@@ -112,8 +112,11 @@
       capCostIncr: 'Prirasne se jeftino prave (spremljeno blokova {s}), a skupo vraćaju: treba cijeli niz, redom.',
       capCostDiff: 'Diferencijalne se skuplje prave (spremljeno blokova {s}), a jeftino vraćaju: potpuna i jedna kopija.',
       capCostFull: 'Potpuna svake noći najskuplja je (spremljeno blokova {s}), a oporavak treba samo jednu kopiju.',
-      capVerdict: 'Jedna je skupa da se napravi i jeftina da se vrati, druga obrnuto: prirasne {sa} spremljenih blokova i {na} kopija ' +
-        'za oporavak, diferencijalne {sb} i {nb}.',
+      capVerdict: 'Prirasne: spremljeno blokova {sa}, kopija za oporavak {na}. Diferencijalne: {sb} i {nb}. Prirasne se jeftino prave i ' +
+        'skupo vraćaju, diferencijalne obrnuto.',
+      capVerdictSame: 'Za oporavak na {day} obje trebaju jednako kopija: razlika u oporavku raste što je dan kasniji.',
+      capStopped: '{lane}: oporavak je stao, stanje: {state}.',
+      capCostShort: 'Ovdje je niz još kratak; što je dan kasniji, to je dulji, a oporavak skuplji.',
       capGap: 'Kopija od {lost} nedostaje, a oporavak je treba: tu staje.',
       capGapReached: ['Vraćeno je stanje od {reached}, a ne od {target}: blok {list} nije isti.', 'Vraćeno je stanje od {reached}, a ne od {target}: blokovi {list} nisu isti.',
         'Vraćeno je stanje od {reached}, a ne od {target}: blokovi {list} nisu isti.'],
@@ -205,13 +208,13 @@
       capStart: 'A disk of eight blocks, 0–7. From Sunday to Thursday the data changes, and every night a [[backup]] is taken. ' +
         'At the end the disk is restored to a chosen day: which sets does that need?',
       capWriteSun: 'Sunday: the data is written to the disk, blocks A–H.',
-      capWrite: ['{day}: block {list} is changed.', '{day}: blocks {list} are changed.'],
-      capTwice: 'Block {i} is written twice, {a} then {b}: the disk holds only the last content, {b}.',
+      capWrite: ['{day}: block {list} was changed.', '{day}: blocks {list} were changed.'],
+      capTwice: 'Block {i} was written twice, {a} then {b}: the disk holds only the last content, {c}.',
       capFullSun: 'Sunday night: a [[full backup]], level 0. It stores all eight blocks: the [[snapshot file]] does not ' +
         'exist yet, so everything counts as new.',
       capIncr: ['{day}, {kind}: only block {list} is stored, because only it has changed since {prev}.',
         '{day}, {kind}: only blocks {list} are stored, because only they have changed since {prev}.'],
-      capIncrNeed: ['Restoring {day} will need {n} set, the whole chain from Sunday.', 'Restoring {day} will need all {n} sets, the whole chain from Sunday.'],
+      capIncrNeed: ['Restoring {day} will need {n} set, the whole chain from Sunday.', 'Restoring {day} will need {n} sets, the whole chain from Sunday.'],
       capDiff: ['{day}, {kind}: block {list}, everything changed since Sunday\'s full backup.',
         '{day}, {kind}: blocks {list}, everything changed since Sunday\'s full backup.'],
       capDiffAgain: ['Block {list} was stored the night before already, and is stored again.', 'Blocks {list} were stored the night before already, and are stored again.'],
@@ -231,8 +234,11 @@
       capCostIncr: 'Incremental is cheap to make (blocks stored {s}) and expensive to restore: it needs the whole chain, in order.',
       capCostDiff: 'Differential costs more to make (blocks stored {s}) and little to restore: the full and one set.',
       capCostFull: 'A full backup every night costs the most (blocks stored {s}); a restore needs one set.',
-      capVerdict: 'One is expensive to make and cheap to restore, the other the reverse: incremental {sa} blocks stored and {na} sets ' +
-        'to restore, differential {sb} and {nb}.',
+      capVerdict: 'Incremental: blocks stored {sa}, sets to restore {na}. Differential: {sb} and {nb}. Incremental is cheap to make and ' +
+        'expensive to restore, differential the reverse.',
+      capVerdictSame: 'Restoring {day} takes as many sets either way: the gap in restore cost grows the later the day.',
+      capStopped: '{lane}: the restore stopped, state: {state}.',
+      capCostShort: 'Here the chain is still short; the later the day, the longer it gets and the more a restore costs.',
       capGap: '{lost}\'s set is missing and the restore needs it: it stops here.',
       capGapReached: ['The restored disk is {reached}\'s state, not {target}\'s: block {list} differs.', 'The restored disk is {reached}\'s state, not {target}\'s: blocks {list} differ.'],
       capGapNothing: 'Nothing is restored.',

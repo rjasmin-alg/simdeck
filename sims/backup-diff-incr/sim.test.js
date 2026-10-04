@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Tests for backup-diff-incr's model (rules: SPEC.md). Run: node --test sims/backup-diff-incr/
+// Tests for backup-diff-incr's model (rules: SPEC.md). Run: node --test sims/backup-diff-incr/sim.test.js
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -143,6 +143,7 @@ test('rule 6: in differential and full mode only the lost day itself is unrestor
   assert.equal(full.ok, false);
   assert.equal(full.applied, 0);
   assert.equal(full.reached, null);
+  assert.deepEqual(full.wrong, [0, 1, 2, 3, 4, 5, 6, 7]);   // nothing restored: every block differs
   assert.equal(full.newest, 2);
   assert.equal(lane({ mode: 'full', lose: 3 }).restore.ok, true);
   assert.equal(logic.newestRestorable('incr', 4, 3), 2);

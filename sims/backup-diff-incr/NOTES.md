@@ -71,7 +71,7 @@ None. `kit/` and `models/` unchanged.
 
 ## Checks
 
-- `node --test sims/backup-diff-incr/sim.test.js`: 16 tests pass. Every rule broken once (8 mutants: double write
+- `node --test sims/backup-diff-incr/sim.test.js`: 16 tests pass; `npm test` (1748) and `npm run check` pass. Every rule broken once (8 mutants: double write
   keeps the first content, Sunday not full, incremental from since-full, differential from since-last, differential
   plan = whole chain, oldest wins, the gap skipped, newest restorable ignores the loss): all killed.
 - `npm run gate -- backup-diff-incr`: pass (61/61 browser checks). Screenshots looked at: the gate's 1920×1080 light,
@@ -80,6 +80,25 @@ None. `kit/` and `models/` unchanged.
   differential with the target's own set lost, full with the target's set lost, phone mid-compare.
 - Phone: the lane grids scroll sideways inside their box (the kit's K3 phone behaviour), the page does not.
 
+## Review
+
+A fresh reviewer read the diff against `SPEC.md` and the task. Their own reference model, written from the rules
+alone, matched the sim on every count in all 96 combinations of mode × restoreDay × lose × compare. They ran 28
+mutants of `sim.js`: 24 were killed. Of the 4 survivors, two are equivalent; one only changes `sinceFull` at step 1,
+which the page hides; the last changed `wrong` when nothing is restored, and a new assertion now covers it.
+
+They found these caption defects, all fixed:
+- The double-write caption lost its first value: one node was used for two placeholders.
+- In compare, a lane whose restore had stopped at a gap was later shown as "done, waiting". It now reads "the restore
+  stopped, state: …".
+- The compare verdict claimed a difference when both lanes needed the same number of sets (restore to Monday). It
+  also had a Croatian case error ("2 kopija"). It now gives the numbers without a counted noun, and has its own
+  sentence when the counts are equal.
+- The incremental cost caption overclaimed when the chain was only 2 sets long. It now has a "chain still short"
+  variant.
+- English wording fixes: "all 2 sets", and "is changed" changed to "was changed". In compare, Croatian text after the
+  lane name now starts in lower case.
+
 ## Time
 
-Start 2026-10-04 09:54 CEST.
+Start 2026-10-04 09:54 CEST, done 10:16 CEST (about 22 minutes, plus the review).
