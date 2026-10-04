@@ -1,42 +1,445 @@
 <!doctype html>
-<html lang="hr">
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- dns-resolution: the stub resolver asks the recursive resolver once (rd); the resolver walks root → .hr → grafo.hr
+     with iterative queries, caches every RRset for its TTL, and a second lookup later starts from what is still cached.
+     A stepper, one message per step. Drawn with kit view K1 (message sequence chart, kit/sequence.js): five lanes, the
+     chips name the message kind, the fields its flags and TTL. Beside the chart the message card (flags, question, the
+     records it carries) and the resolver's cache. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="dns-resolution">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DNS: razlučivanje imena</title>
+<title>DNS: razrješavanje imena · simdeck</title>
+<meta name="description" content="Korak po korak: upit za www.grafo.hr kroz rekurzivni rezolver do mjerodavnog poslužitelja, pa ponovno iz predmemorije dok TTL vrijedi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dns-resolution",
+  "title": {
+    "hr": "DNS: razrješavanje imena",
+    "en": "DNS: name resolution"
+  },
+  "concept": {
+    "hr": "Rezolver pita korijen, .hr i mjerodavni poslužitelj; računalo pita jednom",
+    "en": "The resolver asks the root, TLD and authoritative servers; the host asks once"
+  },
+  "summary": {
+    "hr": "Korak po korak: upit za www.grafo.hr kroz rekurzivni rezolver do mjerodavnog poslužitelja, pa ponovno iz predmemorije dok TTL vrijedi.",
+    "en": "Step by step: a query for www.grafo.hr through the recursive resolver to the authoritative server, then again from the cache while the TTL lasts."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
 <style>
-  /* Placeholder only: the real look comes from the kit. */
-  body { font: 24px/1.4 system-ui, sans-serif; margin: 2rem; }
-  .step { font-size: 40px; margin: 2rem 0; }
+/* Page CSS: every selector starts with [data-sim="dns-resolution"]; colours only from kit tokens.
+   Layout: left the K1 chart; right the message card on top and the resolver's cache under it. */
+[data-sim="dns-resolution"] .dn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="dns-resolution"] .dn > .sd-seq { grid-column: 1; grid-row: 1 / 3; }
+[data-sim="dns-resolution"] .dn-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+  min-height: 0;
+}
+[data-sim="dns-resolution"] .dn-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="dns-resolution"] .dn-mono { font-family: var(--mono); }
+[data-sim="dns-resolution"] .dn-muted { color: var(--muted); font-weight: 400; }
+[data-sim="dns-resolution"] .dn-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="dns-resolution"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* the final answers drawn bold (K1 has thin and normal; NOTES.md, "Shared requests") */
+[data-sim="dns-resolution"] .sd-seq-arrow[data-weight="bold"] { border-top-width: 0.5rem; top: calc(1.95rem - 0.12rem); }
+/* the aa badge on a chip's fields */
+[data-sim="dns-resolution"] .dn-aa {
+  display: inline-block;
+  padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+/* legend swatches the kit lacks: dotted (referral), bold (answer), aa badge, negative entry */
+[data-sim="dns-resolution"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.3rem, transparent 0.3rem 0.55rem); }
+[data-sim="dns-resolution"] .sd-swatch[data-shape="bold"] { height: 0.55rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="dns-resolution"] .sd-swatch[data-shape="aa"] { background: var(--ink); border-color: var(--ink); }
+[data-sim="dns-resolution"] .sd-swatch[data-shape="neg"] { position: relative; background: var(--bg); }
+[data-sim="dns-resolution"] .sd-swatch[data-shape="neg"]::after { content: '⊘'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.85em; line-height: 1; color: var(--ink); }
+
+/* message card */
+[data-sim="dns-resolution"] .dn-msg { grid-column: 2; grid-row: 1; font-size: 0.9rem; }
+[data-sim="dns-resolution"] .dn-chip { padding: 0 0.4rem; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 1.05rem; }
+[data-sim="dns-resolution"] .dn-flags { display: flex; flex-wrap: wrap; gap: 0.3rem 0.45rem; margin: 0.15rem 0 0.3rem; align-items: center; }
+[data-sim="dns-resolution"] .dn-flag { padding: 0 0.3rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); font-family: var(--mono); color: var(--muted); text-decoration: line-through; }
+[data-sim="dns-resolution"] .dn-flag[data-on] { border-style: solid; border-color: var(--ink); color: var(--ink); text-decoration: none; font-weight: 700; }
+[data-sim="dns-resolution"] .dn-flag[data-on][data-f="aa"] { background: var(--ink); color: var(--bg); }
+[data-sim="dns-resolution"] .dn-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.5rem; margin: 0; }
+[data-sim="dns-resolution"] .dn-kv dt { color: var(--muted); }
+[data-sim="dns-resolution"] .dn-kv dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="dns-resolution"] .dn-note { margin: 0.35rem 0 0; padding: 0.15rem 0.45rem; border-left: 0.3rem solid var(--ink); font-size: var(--fs-sm); }
+
+/* cache */
+[data-sim="dns-resolution"] .dn-cache { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; overflow: hidden; }
+[data-sim="dns-resolution"] .dn-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; min-height: 0; }
+[data-sim="dns-resolution"] .dn-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.5rem;
+  padding: 0.05rem 0.4rem 0.2rem;
+  border: var(--line-w) solid var(--line);
+  border-left-width: 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="dns-resolution"] .dn-row-name { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="dns-resolution"] .dn-row-name .dn-type { font-weight: 400; margin-left: 0.4rem; }
+[data-sim="dns-resolution"] .dn-row-ttl { font-family: var(--mono); text-align: right; white-space: nowrap; }
+[data-sim="dns-resolution"] .dn-row-data { grid-column: 1 / 3; font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="dns-resolution"] .dn-bar { grid-column: 1 / 3; height: 0.4rem; margin-top: 0.15rem; border: 1px solid var(--line); background: var(--bg); }
+[data-sim="dns-resolution"] .dn-bar > span { display: block; height: 100%; background: var(--c2); }
+[data-sim="dns-resolution"] .dn-row[data-hint] { border-style: dashed; }
+[data-sim="dns-resolution"] .dn-row[data-hint] .dn-row-ttl { font-family: var(--sans); color: var(--muted); white-space: normal; }
+[data-sim="dns-resolution"] .dn-row[data-neg] .dn-bar > span { background: repeating-linear-gradient(45deg, var(--ink) 0 0.2rem, var(--bg) 0.2rem 0.4rem); }
+[data-sim="dns-resolution"] .dn-row[data-expired] { border-style: dashed; color: var(--muted); }
+[data-sim="dns-resolution"] .dn-row[data-expired] .dn-row-name { text-decoration: line-through; }
+[data-sim="dns-resolution"] .dn-row[data-expired] .dn-row-ttl { font-family: var(--sans); }
+[data-sim="dns-resolution"] .dn-row.sd-changed { background: var(--hl); color: var(--on-hl); outline: var(--line-w) solid var(--ink); }
+[data-sim="dns-resolution"] .dn-row.sd-changed .dn-row-data, [data-sim="dns-resolution"] .dn-row.sd-changed .dn-row-ttl { color: var(--on-hl); }
+[data-sim="dns-resolution"] .dn-row[data-how="used"] { border-left-color: var(--ink); }
+[data-sim="dns-resolution"] .dn-neg { margin-right: 0.3rem; }
+[data-sim="dns-resolution"] .dn-glue { font-family: var(--sans); white-space: nowrap; }
+
+/* Phone and portrait: the stage grows with its content; the cards go under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dns-resolution"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dns-resolution"] .dn { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="dns-resolution"] .dn > .sd-seq, [data-sim="dns-resolution"] .dn-msg, [data-sim="dns-resolution"] .dn-cache { grid-column: 1; grid-row: auto; }
+  [data-sim="dns-resolution"] .sd-presets { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
-<a id="back" href="../../index.html">← simdeck</a>
-<h1 id="title"></h1>
-<p>Korak <span id="n">0</span> / <span id="total"></span></p>
-<p class="step" id="text">Pritisni → za prvi korak.</p>
-<p>→ / PgDn naprijed · ← / PgUp natrag · Home ili R ispočetka</p>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: razrješavanje imena</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-  // Placeholder stepper. The kit's controller replaces all of this; only the meta read stays.
-  const meta = JSON.parse(document.getElementById('simdeck-meta')?.textContent ?? '{}');
-  const STEPS = ['Klijent pita resolver za www.example.hr', 'Resolver pita root poslužitelj', 'Root upućuje na .hr TLD',
-    'TLD upućuje na autoritativni poslužitelj za example.hr', 'Autoritativni vraća A zapis', 'Resolver kešira i odgovara klijentu'];
-  let n = 0;
-  document.getElementById('title').textContent = meta.title ?? document.title;
-  document.getElementById('total').textContent = STEPS.length;
-  const show = () => {
-    document.getElementById('n').textContent = n;
-    document.getElementById('text').textContent = n ? STEPS[n - 1] : 'Pritisni → za prvi korak.';
-  };
-  addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === 'PageDown') n = Math.min(n + 1, STEPS.length);
-    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') n = Math.max(n - 1, 0);
-    else if (e.key === 'Home' || e.key === 'r' || e.key === 'R') n = 0;
-    else return;
-    e.preventDefault();
-    show();
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { S: '1', R: '2', root: '3', tld: '4', auth: '5' };
+  var MARK = { S: 'S', R: 'R', root: '.', tld: 'hr', auth: 'g' };
+
+  /** Data (names, addresses, types, flags, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'dn-mono' : cls || null }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sec(v) { return t('sec', { v: v }); }
+  function secData(v) { return data(sec(v), ''); }
+  function advText(v) { return v === 86400 ? t('day') : sec(v); }
+
+  /** The host behind a lane: its address, or the server asked in that zone. */
+  function serverOf(lane) {
+    return { root: 'a.root-servers.net', tld: 'a.ns.hr', auth: 'ns1.grafo.hr' }[lane];
+  }
+  /** Server name → address, from the fixed hierarchy (root hints and the glue of both delegations). */
+  var IP = (function () {
+    var z = L.zones(L.defaults), out = {};
+    [z['.'].glue, z['.'].cuts.hr.glue, z.hr.cuts['grafo.hr'].glue].forEach(function (g) { Object.keys(g).forEach(function (k) { out[k] = g[k]; }); });
+    return out;
+  })();
+  function addrOf(lane, m) {
+    if (lane === 'S' || lane === 'R') return L.HOSTS[lane].ip;
+    var name = (m && m.server) || serverOf(lane);
+    return name + ' ' + IP[name];
+  }
+
+  // ── lanes ──
+  var LANE_KEYS = { S: ['laneS', 'roleS'], R: ['laneR', 'roleR'], root: ['laneRoot', 'roleRoot'], tld: ['laneTld', 'roleTld'], auth: ['laneAuth', 'roleAuth'] };
+  function lanes(c) {
+    var cur = c.state.msgs[c.state.msgs.length - 1];
+    var fresh = c.prev && c.state.msgs.length > c.prev.msgs.length;
+    return L.LANES.map(function (id) {
+      var k = LANE_KEYS[id];
+      var host = id === 'S' || id === 'R' ? L.HOSTS[id].ip : IP[serverOf(id)];
+      var active = fresh && cur && (cur.from === id || cur.to === id);
+      return { id: id, mark: MARK[id], c: COLOUR[id], shape: id === 'S' ? 'square' : null, name: id === 'auth' ? data(t(k[0]), '') : t(k[0]),
+        state: active ? 'active' : null,
+        body: [h('div', { class: 'dn-sub' }, rich(k[1])), h('div', { class: 'dn-sub' }, data(host))] };
+    });
+  }
+
+  // ── chart rows ──
+  function chipOf(m) {
+    if (m.kind === 'nxdomain') return 'NXDOMAIN';
+    return h('span', null, t({ query: 'kQuery', referral: 'kReferral', answer: 'kAnswer' }[m.kind]));
+  }
+  function fieldsOf(m) {
+    if (m.kind === 'query') return m.rd ? data('rd', '') : null;
+    if (m.kind === 'referral') return data('NS ' + m.zone, '');
+    var flag = m.aa ? h('span', { class: 'dn-aa', translate: 'no' }, 'aa') : data('ra', '');
+    return h('span', { translate: 'no' }, flag, ' ' + sec(m.ttl));
+  }
+  function rows(c) {
+    var s = c.state, out = [], bold = [];
+    s.msgs.forEach(function (m) {
+      if (m.lookup === 2 && m.from === 'S') {
+        out.push({ kind: 'note', lane: 'S', text: t('noteLater', { adv: advText(c.params.advance) }), k: 'solid', time: sec(m.t), changed: m.n === c.n });
+      }
+      if (m.kind === 'answer' || m.kind === 'nxdomain') bold.push(out.length);
+      out.push({ from: m.from, to: m.to, label: chipOf(m), c: COLOUR[m.from], fields: fieldsOf(m), line: m.kind === 'referral' ? 'dotted' : null,
+        time: sec(m.t), changed: m.n === c.n });
+    });
+    return { rows: out, bold: bold };
+  }
+  function renderChart(c) {
+    var r = rows(c);
+    var chart = Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: r.rows,
+      timeWidth: '5.6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+    var rowEls = chart.querySelectorAll('.sd-seq-row');
+    r.bold.forEach(function (i) { var a = rowEls[i] && rowEls[i].querySelector('.sd-seq-arrow'); if (a) a.dataset.weight = 'bold'; });
+    return chart;
+  }
+
+  // ── message card ──
+  function renderMsg(c) {
+    var s = c.state, m = s.msgs[s.msgs.length - 1];
+    var box = h('section', { class: 'dn-box dn-msg' });
+    if (!m) { box.append(h('h2', null, t('msgNone'))); return box; }
+    var fresh = c.n === m.n;
+    box.append(h('h2', null, t('msgTitle', { n: m.n }), ' ',
+      h('b', { class: 'dn-chip sd-fill' + (fresh && c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { c: COLOUR[m.from] } }, chipOf(m))));
+    var flags = h('div', { class: 'dn-flags' });
+    var on = [];
+    ['rd', 'ra', 'aa'].forEach(function (f) {
+      flags.append(h('span', { class: 'dn-flag', dataset: m[f] ? { on: '', f: f } : { f: f }, translate: 'no' }, f));
+      if (m[f]) on.push(t({ rd: 'flagRd', ra: 'flagRa', aa: 'flagAa' }[f]));
+    });
+    flags.append(h('span', { class: 'dn-sub' }, on.length ? on.join(', ') : t('flagsNone')));
+    box.append(flags);
+    var kv = [
+      h('dt', null, t('msgFrom')), h('dd', null, data(addrOf(m.from, m), '')),
+      h('dt', null, t('msgTo')), h('dd', null, data(addrOf(m.to, m), '')),
+      h('dt', null, t('msgQ')), h('dd', null, data(m.q.name + ' A', ''))
+    ];
+    if (m.kind === 'answer') kv.push(h('dt', null, t('msgAns')), h('dd', null, data(m.rr.name + ' A ' + m.rr.data[0] + ' · TTL ' + sec(m.rr.ttl), '')));
+    if (m.kind === 'referral') {
+      kv.push(h('dt', null, t('msgNs')), h('dd', null, m.ns.map(function (n) { return h('div', null, data(m.zone + ' NS ' + n, '')); })));
+      kv.push(h('dt', null, rich('msgGlue')), h('dd', null, m.glue.map(function (g) { return h('div', null, data(g.name + ' A ' + g.ip, '')); }),
+        h('div', null, data('TTL ' + sec(m.ttl), ''))));
+    }
+    if (m.kind === 'nxdomain') {
+      kv.push(h('dt', null, data('rcode', '')), h('dd', null, data('NXDOMAIN', ''), ' ', h('span', { class: 'dn-sub' }, t('msgNeg'))));
+      if (m.soa) kv.push(h('dt', null, t('msgSoa')), h('dd', null, data(m.soa.zone + ' SOA · TTL ' + m.soa.ttl + ' · MINIMUM ' + m.soa.minimum, '')));
+    }
+    box.append(h('dl', { class: 'dn-kv' }, kv));
+    if (m.fromCache) box.append(h('p', { class: 'dn-note' }, t('msgCache')));
+    return box;
+  }
+
+  // ── cache ──
+  function renderCache(c) {
+    var s = c.state;
+    var touched = {};
+    // a glue address marks the NS row it belongs to
+    var glueOf = {};
+    s.cache.forEach(function (e) { if (e.type === 'NS') e.data.forEach(function (n) { glueOf[L.keyOf(n, 'A')] = L.keyOf(e.name, 'NS'); }); });
+    if (c.n > 0) s.touched.forEach(function (x) { var k = glueOf[x.key] || x.key; if (!touched[k]) touched[k] = x.how; });
+    var box = h('section', { class: 'dn-box dn-cache' },
+      h('h2', null, t('cacheTitle'), h('span', { class: 'dn-muted' }, t.parts('cacheAt', { t: data(sec(s.t), '') }))));
+    var list = h('ul', { class: 'dn-rows' });
+    s.cache.forEach(function (e) {
+      if (e.type === 'A' && (e.hint || e.glue)) return; // addresses of name servers: counted in their NS row
+      var key = L.keyOf(e.name, e.type);
+      var how = touched[key];
+      var expired = !L.valid(e, s.t);
+      var leftNow = L.left(e, s.t);
+      var ttlCell = e.hint ? t('cacheHint') : expired ? t('cacheExpired') : data(sec(leftNow) + ' / ' + sec(e.ttl), '');
+      var ds = {};
+      if (e.hint) ds.hint = '';
+      if (e.negative) ds.neg = '';
+      if (expired) ds.expired = '';
+      if (how) ds.how = how;
+      var name = h('span', { class: 'dn-row-name' }, e.negative ? h('span', { class: 'dn-neg', 'aria-hidden': 'true' }, '⊘') : null,
+        data(e.name, ''), e.negative ? null : data(e.type, 'dn-type'));
+      var body = e.negative ? h('span', { class: 'dn-row-data' }, t('cacheNx')) : h('span', { class: 'dn-row-data' }, data(e.data.join(', '), ''),
+        e.type === 'NS' ? [' ', h('span', { class: 'dn-glue' }, rich('cacheGlue', { n: e.data.length }))] : null);
+      var bar = e.hint ? null : h('div', { class: 'dn-bar' }, h('span', { style: { width: (expired ? 0 : Math.round(leftNow / e.ttl * 1000) / 10) + '%' } }));
+      list.append(h('li', { class: 'dn-row' + (how ? ' sd-changed' + (how === 'added' && c.dir === 'forward' ? ' sd-anim-in' : '') : ''), dataset: ds },
+        name, h('span', { class: 'dn-row-ttl' }, ttlCell), body, bar));
+    });
+    box.append(list);
+    return box;
+  }
+
+  // ── captions ──
+  function q(name) { return h('b', { translate: 'no' }, name); }
+  function lookupCaption(s, parts) {
+    // the resolver's cache check after the stub's query (rule 1, steps (1) and (2))
+    var m = s.msgs[s.msgs.length - 1];
+    var neg = L.find(s.cache, m.q.name, 'NXDOMAIN'), pos = L.find(s.cache, m.q.name, 'A');
+    var hit = L.cachedAnswer(s.cache, m.q.name, 'A', s.t);
+    if (!hit && pos && !L.valid(pos, s.t)) parts.push(' ', t.parts('capExpired', { name: q(m.q.name) }));
+    if (!hit && neg && !L.valid(neg, s.t)) parts.push(' ', t.parts('capExpiredNeg', { name: q(m.q.name) }));
+    if (hit) {
+      parts.push(' ', hit.negative ? t.parts('capHitNeg', { name: q(m.q.name), left: secData(L.left(hit.entry, s.t)) })
+        : t.parts('capHit', { left: secData(L.left(hit.entry, s.t)) }));
+    } else if (s.target && s.target.zone !== '.') {
+      var ns = L.find(s.cache, s.target.zone, 'NS');
+      parts.push(' ', t.parts('capMissZone', { zone: q(s.target.zone), left: secData(L.left(ns, s.t)), server: q(s.target.server) }));
+    } else parts.push(' ', t('capMissRoot'));
+    return parts;
+  }
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    if (c.first) return t.parts('capStart', { name: q(L.fqdn(p.name)) });
+    var m = s.msgs[s.msgs.length - 1];
+    var parts;
+    if (m.from === 'S') {
+      parts = m.lookup === 1 ? rich('capStub', { n: n, name: q(m.q.name), r: data(L.HOSTS.R.ip, '') })
+        : rich('capStubAgain', { n: n, adv: advText(p.advance), name: q(m.q.name) });
+      return lookupCaption(s, parts);
+    }
+    if (m.from === 'R' && m.to !== 'S') {
+      parts = t.parts('capAsk', { n: n, server: q(m.server) });
+      // every zone here has two NS (rule 8): said once, at the first server the run asks
+      if (s.msgs.filter(function (x) { return x.from === 'R' && x.to !== 'S'; }).length === 1) parts.push(' ', t('capAskFirst'));
+      return parts;
+    }
+    if (m.kind === 'referral') {
+      parts = m.from === 'root' ? rich('capReferralRoot', { n: n }) : rich('capReferral', { n: n, server: q(m.server), zone: q(m.zone) });
+      parts.push(' ', t.parts('capReferralCached', { ttl: secData(m.ttl) }));
+      return parts;
+    }
+    if (m.to === 'R' && m.kind === 'answer') return t.parts('capAnswer', { n: n, server: q(m.server), ip: q(m.rr.data[0]), ttl: secData(m.ttl) });
+    if (m.to === 'R' && m.kind === 'nxdomain') {
+      return t.parts('capNxAuth', { n: n, server: q(m.server), name: q(m.q.name), soa: secData(m.soa.ttl), min: secData(m.soa.minimum), ttl: secData(m.ttl) });
+    }
+    // the resolver's reply to the stub
+    var o = s.outcome[s.outcome.length - 1];
+    if (m.fromCache) {
+      parts = m.kind === 'nxdomain' ? t.parts('capReplyCacheNx', { n: n, adv: advText(p.advance), left: secData(m.ttl) })
+        : t.parts('capReplyCache', { n: n, adv: advText(p.advance), left: secData(m.ttl) });
+    } else {
+      parts = m.kind === 'nxdomain' ? t.parts('capReplyNx', { n: n }) : t.parts('capReply', { n: n, ip: q(m.rr.data[0]), ttl: secData(m.ttl) });
+      parts.push(' ', t.n('capOnce', o.out));
+    }
+    if (o.lookup === 2) parts.push(' ', t('capCompare', { a: s.outcome[0].msgs, b: o.msgs }));
+    return parts;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'name', type: 'choice', label: t('name'), resets: true, options: [['www', t('nWww')], ['mail', t('nMail')], ['nema', t('nNema')]] },
+      { key: 'again', type: 'choice', label: t('again'), resets: true, options: [['same', t('againSame')], ['www', t('nWww')], ['mail', t('nMail')], ['nema', t('nNema')]] },
+      { key: 'advance', type: 'choice', label: t('advance'), options: [[60, '+' + sec(60)], [3600, '+' + sec(3600)], [86400, '+' + t('day')]] },
+      { key: 'ttlA', type: 'range', label: t('ttlA'), min: 60, max: 86400, step: 60, format: sec },
+      { key: 'ttlNS', type: 'range', label: t('ttlNS'), min: 3600, max: 172800, step: 3600, format: sec },
+      { type: 'button', label: t('repeat'), hint: t('repeatHint'), key: 'w', run: function (sim) { sim.go(L.firstDone(sim.params) + 1); } }
+    ],
+
+    presets: [
+      { id: 'cold', label: t('presetCold'), hint: t('presetColdHint'), params: { name: 'www', again: 'same', advance: 60 } },
+      { id: 'warm', label: t('presetWarm'), hint: t('presetWarmHint'), params: { name: 'www', again: 'same', advance: 60 }, step: 8 },
+      { id: 'same-zone', label: t('presetSameZone'), hint: t('presetSameZoneHint'), params: { name: 'www', again: 'mail', advance: 60 }, step: 8 },
+      { id: 'ttl-expired', label: t('presetExpired'), hint: t('presetExpiredHint'), params: { name: 'www', again: 'same', advance: 3600 }, step: 8 },
+      { id: 'nxdomain', label: t('presetNx'), hint: t('presetNxHint'), params: { name: 'nema', again: 'same', advance: 60 } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legendQuery') },
+      { shape: 'dot', label: t('legendReferral') },
+      { shape: 'bold', label: t('legendAnswer') },
+      { shape: 'aa', label: t('legendAa') },
+      { shape: 'neg', label: t('legendNeg') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'dn' }, chart, renderMsg(c), renderCache(c)));
+      chart.fit();
+    },
+
+    caption: caption
   });
-  show();
+})();
 </script>
 </body>
 </html>
