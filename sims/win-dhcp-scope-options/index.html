@@ -1,0 +1,394 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dhcp-scope-options: an explorer. Left, the DHCP server as nested boxes (server options ⊃ scope ⊃ reservations)
+     and the chosen client; right, what the client gets per option (value, level, the levels it beat, what the client
+     still has until it renews) and, for one option, the levels as a rule table in most-specific mode (kit view K4,
+     kit/ruletable.js, docs/sim-ui.md §12). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dhcp-scope-options">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHCP: scope, rezervacije i prednost opcija · simdeck</title>
+<meta name="description" content="Postavi opcije na svakoj razini i obnovi zakup: za svaku opciju posebno pobjeđuje najspecifičnija razina, a klijent je dobiva tek obnovom.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dhcp-scope-options",
+  "title": {
+    "hr": "DHCP: scope, rezervacije i prednost opcija",
+    "en": "DHCP scopes, reservations and option precedence"
+  },
+  "concept": {
+    "hr": "Isključenja, rezervacije i razine opcija: pobjeđuje najspecifičnija",
+    "en": "Exclusions, reservations and option levels: the most specific wins"
+  },
+  "summary": {
+    "hr": "Postavi opcije na svakoj razini i obnovi zakup: za svaku opciju posebno pobjeđuje najspecifičnija razina, a klijent je dobiva tek obnovom.",
+    "en": "Set options at each level and renew a client: for each option the most specific level wins, and the client gets it only when it renews."
+  },
+  "tags": [
+    "dhcp"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dhcp-scope-options"]; colours only from kit tokens.
+   Layout: the server boxes and the client card on the left; the effective options and the rule table on the right. */
+[data-sim="win-dhcp-scope-options"] .wd {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  gap: 1.4cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (same in amdahl and multicore-mesi; shared request in NOTES.md). */
+[data-sim="win-dhcp-scope-options"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-dhcp-scope-options"] .wd-col { display: flex; flex-direction: column; gap: 1.4cqh; min-width: 0; min-height: 0; }
+[data-sim="win-dhcp-scope-options"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-dhcp-scope-options"] h2, [data-sim="win-dhcp-scope-options"] h3 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-dhcp-scope-options"] .wd-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.7rem 0.5rem; min-width: 0; }
+
+/* level boxes: Server ⊃ Scope ⊃ Reservations, each with its colour, glyph and name */
+[data-sim="win-dhcp-scope-options"] .wd-lvl { border: 0.2rem solid var(--sw); border-radius: var(--radius); background: var(--bg); padding: 0.25rem 0.5rem 0.35rem; min-width: 0; }
+[data-sim="win-dhcp-scope-options"] .wd-col > .wd-lvl, [data-sim="win-dhcp-scope-options"] .wd-client { font-size: 0.93em; }
+[data-sim="win-dhcp-scope-options"] .wd-lvl .wd-lvl { margin-top: 0.35rem; }
+[data-sim="win-dhcp-scope-options"] .wd-lvl-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; font-weight: 700; margin-bottom: 0.1rem; }
+[data-sim="win-dhcp-scope-options"] .wd-glyph { color: var(--sw); }
+[data-sim="win-dhcp-scope-options"] .wd-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.6rem; margin: 0; }
+[data-sim="win-dhcp-scope-options"] .wd-rows dt { color: var(--muted); white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+[data-sim="win-dhcp-scope-options"] .wd-off { color: var(--muted); font-style: italic; }
+[data-sim="win-dhcp-scope-options"] .wd-tag { display: inline-block; padding: 0 0.35rem; border: var(--line-w) solid var(--sw, var(--ink)); border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+
+/* client card */
+[data-sim="win-dhcp-scope-options"] .wd-client { border-left: 0.5rem solid var(--ink); }
+[data-sim="win-dhcp-scope-options"] .wd-big { font-size: 1.25em; font-weight: 700; }
+
+/* effective options */
+[data-sim="win-dhcp-scope-options"] .wd-eff table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.93em; }
+[data-sim="win-dhcp-scope-options"] .wd-eff th { text-align: left; font-size: var(--fs-sm); color: var(--muted); padding: 0 0.4rem 0.15rem; border-bottom: var(--line-w) solid var(--line); white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-eff td { padding: 0.15rem 0.4rem; border-bottom: var(--line-w) solid var(--line); background: var(--bg); vertical-align: middle; }
+[data-sim="win-dhcp-scope-options"] .wd-eff tr.wd-focus td { border-top: 0.2rem solid var(--ink); border-bottom: 0.2rem solid var(--ink); }
+[data-sim="win-dhcp-scope-options"] .wd-eff tr.wd-focus td:first-child { border-left: 0.2rem solid var(--ink); }
+[data-sim="win-dhcp-scope-options"] .wd-eff tr.wd-focus td:last-child { border-right: 0.2rem solid var(--ink); }
+[data-sim="win-dhcp-scope-options"] .wd-opt {
+  display: inline-flex; align-items: baseline; gap: 0.4rem; min-height: var(--hit); padding: 0 0.4rem; margin-left: -0.4rem;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+[data-sim="win-dhcp-scope-options"] .wd-opt:hover { background: var(--panel); }
+[data-sim="win-dhcp-scope-options"] .wd-opt:focus-visible { outline: 0.2rem solid var(--focus); }
+[data-sim="win-dhcp-scope-options"] .wd-ptr { width: 1em; font-weight: 700; }
+[data-sim="win-dhcp-scope-options"] .wd-val { font-weight: 700; white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-none { color: var(--muted); font-style: italic; font-weight: 400; }
+[data-sim="win-dhcp-scope-options"] .wd-struck { display: block; color: var(--muted); font-weight: 400; text-decoration: line-through; text-decoration-thickness: 0.12em; white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-optcell { white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-chip { display: inline-flex; align-items: baseline; gap: 0.25rem; padding: 0 0.4rem; border: var(--line-w) solid var(--sw); border-radius: 1rem; font-weight: 700; white-space: nowrap; }
+[data-sim="win-dhcp-scope-options"] .wd-struck .wd-chip { font-weight: 400; }
+[data-sim="win-dhcp-scope-options"] .wd-stale { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0 0.35rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-dhcp-scope-options"] .wd-eff td.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-dhcp-scope-options"] .wd-eff td.sd-changed .wd-none { color: var(--on-hl); }
+
+/* rule table */
+[data-sim="win-dhcp-scope-options"] .wd .sd-rt { flex: 0 1 auto; }
+
+/* Phone and portrait: one column, the stage grows with its content; the tables scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dhcp-scope-options"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dhcp-scope-options"] .wd { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+[data-sim="win-dhcp-scope-options"] .wd-col { gap: 0.8rem; }
+  [data-sim="win-dhcp-scope-options"] .wd-eff { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DHCP: scope, rezervacije i prednost opcija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var LEVEL_C = { server: '1', serverClass: '1', scope: '6', scopeClass: '6', reservation: '3' };
+  var GLYPH = { server: '■', serverClass: '■', scope: '◆', scopeClass: '◆', reservation: '●' };
+  var NAME_KEY = { laptop: 'nameLaptop', printer: 'namePrinter', phone: 'namePhone' };
+  var PRESET_KEY = {
+    'server-and-scope': 'presetServerScope', 'scope-overrides': 'presetScopeOverrides', reservation: 'presetReservation',
+    'class-option': 'presetClassOption', 'change-needs-renew': 'presetChangeNeedsRenew'
+  };
+
+  /** Data (addresses, codes, MACs, class names) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function list(items) {
+    if (items.length === 1) return items[0];
+    var head = items.slice(0, -1).reduce(function (acc, it) { return acc === null ? it : h('span', null, t.parts('listMore', { a: acc, b: it })); }, null);
+    return h('span', null, t.parts('list2', { a: head, b: items[items.length - 1] }));
+  }
+  function clientName(s) { return t(NAME_KEY[s.client.name]); }
+  function octet(addr) { return Number(String(addr).split('.')[3]); }
+
+  /** A value as the client sees it: 051 in days, the rest as written. */
+  function valueText(code, v) { return code === '051' ? t.n('days', v / L.DAY) : String(v); }
+  function valueNode(code, v) { return v === null ? h('span', { class: 'wd-none' }, t('notSent')) : code === '051' ? h('span', null, valueText(code, v)) : data(v); }
+  function optLabel(code) { return [data(code), ' ', h('span', null, t('opt' + code))]; }
+  function chip(level) {
+    return h('span', { class: 'wd-chip', dataset: { c: LEVEL_C[level] } }, h('span', { class: 'wd-glyph', 'aria-hidden': 'true' }, GLYPH[level]),
+      h('span', null, rich('lvl_' + level)));
+  }
+
+  // ── left: the server as nested level boxes ──
+  function optionRows(opts, classOpts) {
+    var rows = [];
+    L.CODES.forEach(function (code) {
+      if (Object.prototype.hasOwnProperty.call(opts, code)) rows.push(h('dt', null, data(code)), h('dd', null, valueNode(code, opts[code])));
+    });
+    (classOpts || []).forEach(function (c) {
+      rows.push(h('dt', null, data(c.code)), h('dd', null, valueNode(c.code, c.value), ' ',
+        h('span', { class: 'wd-tag' }, t.parts('classTag', { cls: data(c.class) }))));
+    });
+    return rows.length ? h('dl', { class: 'wd-rows' }, rows) : h('div', { class: 'wd-off' }, t('noOptions'));
+  }
+  function serverBox(s) {
+    var sc = s.scope, res = sc.reservations[0];
+    var leased = s.leases.filter(function (l) { return l.ip; }).map(function (l) {
+      return h('span', { style: { whiteSpace: 'nowrap' } }, t(NAME_KEY[l.name]), ' ', data(l.ip));
+    });
+    var leasedNodes = [];
+    leased.forEach(function (n, i) { if (i) leasedNodes.push(', '); leasedNodes.push(n); });
+    return h('section', { class: 'wd-lvl', dataset: { c: '1' } },
+      h('h2', { class: 'wd-lvl-h' }, h('span', { class: 'wd-glyph', 'aria-hidden': 'true' }, '■'), data('DHCP1'), h('span', null, t('boxServer'))),
+      optionRows(s.server.options, s.server.classOptions),
+      h('section', { class: 'wd-lvl', dataset: { c: '6' } },
+        h('h3', { class: 'wd-lvl-h' }, h('span', { class: 'wd-glyph', 'aria-hidden': 'true' }, '◆'), h('span', null, rich('boxScope', { subnet: data(sc.subnet) }))),
+        h('dl', { class: 'wd-rows' },
+          h('dt', null, t('range')), h('dd', null, data(sc.range[0] + '–' + sc.range[1])),
+          h('dt', null, t('exclusionRow')), h('dd', null, sc.exclusions.length ? data(sc.exclusions.map(function (x) { return x[0] + '–' + x[1]; }).join(', ')) : h('span', { class: 'wd-off' }, t('noExclusion'))),
+          h('dt', null, t('leasedRow')), h('dd', null, leasedNodes),
+          h('dt', null, t('nextFree')), h('dd', null, s.nextFree ? data(s.nextFree) : h('span', { class: 'wd-off' }, t('poolEmpty')))),
+        optionRows(sc.options, sc.classOptions),
+        h('section', { class: 'wd-lvl', dataset: { c: '3' } },
+          h('h3', { class: 'wd-lvl-h' }, h('span', { class: 'wd-glyph', 'aria-hidden': 'true' }, '●'), h('span', null, t('boxReservations'))),
+          h('div', null, t.parts('boxReservation', { name: t('namePrinter'), mac: data(res.mac), ip: data(res.ip) })),
+          optionRows(res.options))));
+  }
+
+  function clientCard(s) {
+    var c = s.client;
+    var stale = s.stale.indexOf('ip') >= 0;
+    return h('section', { class: 'wd-box wd-client' },
+      h('h2', null, t('clientTitle', { name: clientName(s) })),
+      h('dl', { class: 'wd-rows' },
+        h('dt', null, t('mac')), h('dd', null, data(c.mac)),
+        h('dt', null, t('vendorClass')), h('dd', null, c.vendorClass ? data(c.vendorClass) : h('span', { class: 'wd-off' }, t('noClass'))),
+        h('dt', null, t('address')), h('dd', null,
+          stale ? h('span', { class: 'wd-stale' }, '⚠', data(s.has.ip), h('span', null, t('staleTag')), '→') : null, ' ',
+          h('span', { class: 'wd-big' }, data(s.offer || '—')), ' ',
+          h('span', { class: 'wd-tag', dataset: { c: c.reserved ? '3' : '6' } }, t(c.reserved ? 'reservedTag' : 'dynamicTag')))));
+  }
+
+  // ── right: what the client gets, and the rule table for one option ──
+  function effTable(s, p, changed) {
+    var name = clientName(s);
+    return h('section', { class: 'wd-box wd-eff' },
+      h('h2', null, t('effTitle', { name: name })),
+      h('table', null,
+        h('thead', null, h('tr', null, h('th', null, t('colOption')), h('th', null, t('colValue')), h('th', null, t('colHas')))),
+        h('tbody', null, s.effective.map(function (e) {
+          var focus = e.code === p.focus;
+          var has = s.has.options[e.code];
+          var isStale = s.stale.indexOf(e.code) >= 0;
+          return h('tr', { class: focus ? 'wd-focus' : null },
+            h('td', { class: 'wd-optcell' }, h('button', { type: 'button', class: 'wd-opt', 'aria-pressed': focus ? 'true' : 'false',
+              'aria-label': t('showInTable', { opt: e.code }), onclick: function () { window.simdeck.set({ focus: e.code }); } },
+              h('span', { class: 'wd-ptr', 'aria-hidden': 'true' }, focus ? '▶' : ''), optLabel(e.code))),
+            h('td', { class: 'wd-val' + (changed.indexOf(e.code) >= 0 ? ' sd-changed' : '') }, valueNode(e.code, e.value), e.level ? ' ' : null, e.level ? chip(e.level) : null,
+              e.overridden.map(function (o) { return h('span', { class: 'wd-struck' }, valueNode(e.code, o.value), ' ', chip(o.level)); })),
+            h('td', null, isStale ? h('span', { class: 'wd-stale' }, '⚠', valueNode(e.code, has), h('span', null, t('staleTag'))) : valueNode(e.code, has)));
+        }))));
+  }
+
+  function ruleTable(s, p) {
+    var code = p.focus, rows = s.ladders[code], name = clientName(s);
+    return RT({
+      mode: 'specific',
+      title: h('span', null, t.parts('rtTitle', { opt: h('span', null, optLabel(code)) })),
+      columns: [{ key: 'level', label: t('colLevel') }, { key: 'cls', label: t('colClass') }],
+      actionLabel: t('colVal'),
+      markLabel: name,
+      rows: rows.map(function (r, i) {
+        var note = null;
+        if (r.miss.indexOf('cls') >= 0) note = [{ k: 'dashed', text: t('noteClass', { cls: r.cls }) }];
+        if (r.miss.indexOf('level') >= 0) note = [{ k: 'dashed', text: t('noteRes', { name: t('namePrinter') }) }];
+        return {
+          no: i + 1,
+          cells: { level: chip(r.level), cls: r.cls === null ? '—' : r.cls },
+          action: r.value === null ? '—' : (code === '051' ? h('span', null, valueText(code, r.value)) : r.value),
+          rank: r.rank,
+          hit: r.hit,
+          miss: r.miss,
+          note: note
+        };
+      }),
+      implicit: { text: t('implicit'), action: '—' },
+      at: 'all',
+      done: true,
+      outcome: function (i) { return i < rows.length ? RT.verdict(true, t('outSent')) : RT.verdict(false, t('outNotSent')); },
+      words: { hit: t('wordHit'), win: t('wordWin'), beaten: t('wordBeaten') },
+      stickyMark: true
+    });
+  }
+
+  // "Changed" marks the options whose effective value or level changed with the last param change (not a focus change).
+  // Renders while the page loads (preset, then the URL's params) mark nothing.
+  var last = { key: null, state: null, changed: [] }, loaded = false;
+  setTimeout(function () { loaded = true; }, 0);
+  function changedFor(s, p) {
+    var q = Object.assign({}, p); delete q.focus;
+    var key = JSON.stringify(q);
+    if (key !== last.key) {
+      last.changed = loaded && last.state ? L.changedCodes(last.state, s) : [];
+      last.key = key; last.state = s;
+    }
+    return last.changed;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'client', type: 'choice', label: t('client'),
+        options: [['laptop', t('nameLaptop')], ['printer', t('namePrinter')], ['phone', t('namePhone')]] },
+      { key: 'scope006', type: 'toggle', label: t('scope006') },
+      { key: 'resOption003', type: 'toggle', label: t('resOption003') },
+      { key: 'exclusion', type: 'toggle', label: t('exclusion') },
+      { key: 'classNtp', type: 'toggle', label: t('classNtp') },
+      { key: 'focus', type: 'choice', label: t('focus'), options: L.CODES.map(function (c) { return [c, c]; }), visible: function () { return false; } },
+      { key: 'held', type: 'range', label: t('held'), min: 0, max: 15, visible: function () { return false; } },
+      { type: 'button', label: t('renew'), hint: t('renewHint'), key: 'o', run: function (sim) { sim.set({ held: L.renewMask(sim.params) }); } }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'rt-beaten', label: t('legBeaten') },
+      { shape: 'rt-no', label: t('legNo') },
+      { shape: 'rt-warn', label: t('legStale') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params;
+      var changed = changedFor(s, p);
+      c.stage.replaceChildren(h('div', { class: 'wd' },
+        h('div', { class: 'wd-col' }, serverBox(s), clientCard(s)),
+        h('div', { class: 'wd-col' }, effTable(s, p, changed), ruleTable(s, p))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      var code = p.focus, name = clientName(s);
+      var e = s.effective.filter(function (x) { return x.code === code; })[0];
+      var rows = s.ladders[code];
+      var classRow = rows.filter(function (r) { return r.cls !== null && r.value !== null; })[0];
+      var resRow = rows.filter(function (r) { return r.level === 'reservation'; })[0];
+      var out = [];
+      function add(parts) { if (out.length) out.push(' '); out = out.concat(parts); }
+      if (s.client.reserved) add(rich('capResHas', { ip: data(s.offer) }));
+      if (e.value === null) {
+        if (classRow && !classRow.applies) add(rich('capClassNo', { opt: data(code), cls: data(classRow.cls), name: name }));
+        else add(rich('capNone', { opt: data(code), name: name }));
+      } else {
+        var vars = { opt: data(code), at: h('span', null, rich('at_' + e.level)), name: name, v: h('b', null, valueNode(code, e.value)) };
+        if (e.overridden.length) {
+          vars.lo = list(e.overridden.slice().reverse().map(function (o) { return h('span', null, rich('at_' + o.level)); }));
+          vars.win = h('span', null, rich('win_' + e.level));
+          add(rich('capBeat', vars));
+        } else add(rich('capOnly', vars));
+        if (e.level === 'scopeClass' || e.level === 'serverClass') {
+          var plain = e.level === 'scopeClass' ? 'scope' : 'server';
+          add(rich('capClassYes', { name: name, cls: data(classRow.cls) }));
+          if (e.overridden.some(function (o) { return o.level === plain; })) add(rich('capClassBeats'));
+        }
+      }
+      if (resRow.value !== null && !resRow.applies) add(rich('capResOther', { opt: data(code) }));
+      if (s.stale.length) {
+        var now = {};
+        s.effective.forEach(function (x) { now[x.code] = x.value; });
+        var items = s.stale.map(function (k) {
+          if (k === 'ip') return h('span', null, t.parts('staleItem', { what: t('staleAddr'), old: data(s.has.ip), now: data(s.offer) }));
+          return h('span', null, t.parts('staleItem', { what: data(k), old: valueNode(k, s.has.options[k]), now: valueNode(k, now[k]) }));
+        });
+        add(rich(items.length === 1 ? 'capStale1' : 'capStale', { name: name, list: list(items), t1: t.n('days', s.t1 / L.DAY), lease: t.n('days', s.scope.lease / L.DAY) }));
+      }
+      if (!s.client.reserved && s.stale.indexOf('ip') < 0 && s.nextFree && octet(s.nextFree) < octet(s.offer)) {
+        add(rich('capKeep', { name: name, ip: data(s.offer), free: data(s.nextFree) }));
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
