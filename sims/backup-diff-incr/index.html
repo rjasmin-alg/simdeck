@@ -1,0 +1,398 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- backup-diff-incr: a disk of eight blocks changes from Sunday to Thursday and is backed up every night (full on
+     Sunday, then incremental, differential or full); then the disk is restored to a chosen day, one set per step,
+     oldest first, and compared with that day's disk. A lost set breaks an incremental chain from that day on.
+     Drawn on kit view K3 (block grid). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="backup-diff-incr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prirasna i diferencijalna kopija · simdeck</title>
+<meta name="description" content="Disk se mijenja od nedjelje do četvrtka uz noćne kopije; vrati ga na četvrtak i vidi koliko kopija oporavak treba i što se dogodi kad jedna nestane.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "backup-diff-incr",
+  "title": {
+    "hr": "Prirasna i diferencijalna kopija",
+    "en": "Incremental vs differential backup"
+  },
+  "concept": {
+    "hr": "Što koja kopija sprema i koje kopije treba oporavak",
+    "en": "What each backup stores, and what a restore needs"
+  },
+  "summary": {
+    "hr": "Disk se mijenja od nedjelje do četvrtka uz noćne kopije; vrati ga na četvrtak i vidi koliko kopija oporavak treba i što se dogodi kad jedna nestane.",
+    "en": "A disk changes from Sunday to Thursday with a backup every night; restore Thursday and see how many sets it takes, and what one lost set costs."
+  },
+  "tags": [
+    "backup"
+  ],
+  "class": "stepper",
+  "steps": 17
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="backup-diff-incr"]; colours only from kit tokens.
+   Layout: the disk as one kit block grid (K3, kit/blockgrid.js) on top; under it one grid per lane (two side by side
+   when comparing): a row per night's set, then the restored disk, with the restore counters as the grid's foot. */
+[data-sim="backup-diff-incr"] .bd {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="backup-diff-incr"] .bd-lanes { display: flex; gap: 1.2cqw; flex: 1 1 auto; min-height: 0; }
+[data-sim="backup-diff-incr"] .bd-lane { flex: 1 1 0; min-width: 0; }
+[data-sim="backup-diff-incr"] .bd-lane .sd-bg-grid { --bg-row-gap: 0.1rem; }
+[data-sim="backup-diff-incr"] .bd-lane .sd-bg-sub { line-height: 1; }
+[data-sim="backup-diff-incr"] .bd-rest { color: var(--muted); }
+[data-sim="backup-diff-incr"] .bd-rest[data-on] { color: var(--ink); }
+[data-sim="backup-diff-incr"] .bd-ok { color: var(--ok); font-weight: 700; }
+[data-sim="backup-diff-incr"] .bd-bad { color: var(--danger); font-weight: 700; }
+
+/* legend: an empty slot (a block the set does not store) */
+[data-sim="backup-diff-incr"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
+
+/* Phone and portrait: the stage grows with its content; lanes stack; grids scroll inside their box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="backup-diff-incr"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="backup-diff-incr"] .bd { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="backup-diff-incr"] .bd-lanes { flex-direction: column; gap: 0.8rem; }
+  [data-sim="backup-diff-incr"] .bd-lane { flex: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prirasna i diferencijalna kopija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { incr: '1', diff: '2', full: '3' };   // series colour per lane; lanes also differ by title and place
+  var BLOCK_IDS = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  function days(key) { return t(key).split('|'); }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function nom(d) { return days('daysNom')[d]; }
+  function gen(d) { return days('daysGen')[d]; }
+  function acc(d) { return days('daysAcc')[d]; }
+  function short(d) { return days('daysShort')[d]; }
+  /** Data (block numbers, content labels) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** "0, 1, 3, 4 i 6": the last two joined by the word "and". */
+  function joinList(items) {
+    if (items.length < 2) return items.join('');
+    return items.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + items[items.length - 1];
+  }
+  function blocksList(idx) { return data(joinList(idx.map(String))); }
+  function sp(parts) { return [' '].concat(parts); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule, for terms the glossary lacks). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function richN(key, n, vars) { return rich(key, Object.assign({ n: n }, vars || {})); }
+
+  function laneName(mode) { return t(mode === 'incr' ? 'laneIncr' : mode === 'diff' ? 'laneDiff' : 'laneFull'); }
+  function laneShort(mode) { return t(mode === 'incr' ? 'lnIncr' : mode === 'diff' ? 'lnDiff' : 'lnFull'); }
+  function tag(set) { return t(set.day === 0 ? 'tagLevel0' : set.kind === 'incr' ? 'tagIncr' : set.kind === 'diff' ? 'tagDiff' : 'tagFull'); }
+  /** The kind of a night's set as a term: first mention on the first night of that kind, later mentions after. */
+  function kindTerm(kind, day) {
+    if (kind === 'incr') return Simdeck.term('incremental backup', { later: day > 1 });
+    if (kind === 'diff') return h('span', null, rich(day > 1 ? 'termDiffLater' : 'termDiff'));
+    return Simdeck.term('full backup', { later: day > 0 });
+  }
+  function storedIdx(set) { return Object.keys(set.blocks).map(Number).sort(function (a, b) { return a - b; }); }
+
+  // ── stage ──
+
+  function diskGrid(c) {
+    var s = c.state;
+    var restoring = s.phase === 'target' || s.phase === 'restore';
+    var disk = restoring ? s.history[s.target] : s.disk;
+    var day = restoring ? s.target : s.day;
+    var meta = s.phase === 'start' ? [t('diskEmpty')] : [t(restoring ? 'diskTarget' : 'diskToday', { day: nom(day) })];
+    var count = s.phase === 'start' || restoring ? null
+      : { text: t('cntChanged', { a: s.changed.sinceLast.length, b: s.day === 0 ? 0 : s.changed.sinceFull.length }) };
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('diskTitle'), meta: meta, count: count,
+      colLabels: BLOCK_IDS.map(String),
+      rows: [{
+        id: 'disk', label: h('span', null, day >= 0 ? short(day) : '·'),
+        cells: disk.map(function (b, i) {
+          return { text: b, now: s.phase === 'write' && s.written.indexOf(i) >= 0 };
+        })
+      }]
+    });
+  }
+
+  function laneGrid(c, k) {
+    var s = c.state, l = s.lanes[k], r = l.restore, col = COLOUR[l.mode];
+    var rows = [];
+    for (var d = 0; d < L.DAYS; d++) {
+      var set = l.sets[d];
+      var lost = set && s.lost === d;
+      var nowSet = set && s.phase === 'backup' && s.day === d;
+      rows.push({
+        id: 'd' + d,
+        label: h('span', null, short(d)),
+        aside: set ? h('span', { class: lost ? 'bd-bad' : null }, lost ? t('tagLost') : tag(set)) : '',
+        cells: BLOCK_IDS.map(function (i) {
+          if (!set) return null;                      // the night has not come yet
+          if (!(i in set.blocks)) return {};          // not stored: an empty slot
+          return { text: set.blocks[i], kind: lost ? 'bad' : 'fill', c: col, now: nowSet };
+        })
+      });
+    }
+    var aside = '';
+    if (r && r.done) {
+      aside = r.ok ? h('span', { class: 'bd-ok' }, '✓ ' + t('asideOk'))
+        : h('span', { class: 'bd-bad' }, r.reached === null ? t('asideNothing') : t('asideGap', { day: short(r.reached) }));
+    }
+    rows.push({
+      id: 'rest', label: h('span', null, t('rowRest')), aside: aside,
+      cells: BLOCK_IDS.map(function (i) {
+        if (!r) return null;
+        if (r.result[i] === null) return {};
+        var stale = r.done && r.wrong.indexOf(i) >= 0;
+        return { text: r.result[i], sub: h('span', null, short(r.from[i])), kind: stale ? 'dead' : 'soft', c: col, now: r.now.indexOf(i) >= 0 };
+      })
+    });
+    // the set applied in this step: one arrow down its first block's column (lines pass under the cells)
+    var links = [];
+    if (r && r.step === 'apply') links.push({ from: { row: 'd' + r.plan[r.applied - 1], cell: r.now[0] }, to: { row: 'rest', cell: r.now[0] }, now: true });
+    var meta = h('span', { class: 'bd-rest', dataset: r ? { on: 'true' } : null },
+      r ? t('restLine', { a: r.applied, b: r.plan.length, r: r.read }) : t('restNone'));
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'bd-lane',
+      title: laneName(l.mode),
+      meta: [meta],
+      count: { text: t.n('cntStored', l.stored), hl: s.phase === 'backup' },
+      cellHeight: '2.8rem',
+      rows: rows, links: links
+    });
+  }
+
+  // ── captions ──
+
+  function capWrite(s) {
+    if (s.day === 0) return t.parts('capWriteSun');
+    var out = t.parts('capWrite', { n: s.written.length, day: cap(nom(s.day)), list: blocksList(s.written) });
+    s.twice.forEach(function (i) {
+      out = out.concat(sp(t.parts('capTwice', { i: data(i), a: data(L.label(i, s.ver[i] - 1)), b: data(L.label(i, s.ver[i])) })));
+    });
+    return out;
+  }
+
+  function capNight(s) {
+    var d = s.day;
+    if (d === 0) return t.parts('capFullSun');
+    if (s.lanes.length > 1) {
+      var sz = s.lanes.map(function (l) { return storedIdx(l.sets[d]).length; });
+      return t.parts('capCmpNight', { day: cap(nom(d)), a: sz[0], b: sz[1], sa: s.lanes[0].stored, sb: s.lanes[1].stored });
+    }
+    var l = s.lanes[0], set = l.sets[d], idx = storedIdx(set), out;
+    var v = { day: cap(nom(d)), kind: kindTerm(set.kind, d), list: blocksList(idx) };
+    if (set.kind === 'incr') {
+      out = richN('capIncr', idx.length, Object.assign(v, { prev: gen(d - 1) }));
+      return out.concat(sp(t.parts('capIncrNeed', { n: d + 1, day: acc(d) })));
+    }
+    if (set.kind === 'diff') {
+      out = richN('capDiff', idx.length, v);
+      if (d >= 2) {
+        var again = storedIdx(l.sets[d - 1]).filter(function (i) { return i in set.blocks; });
+        if (again.length) out = out.concat(sp(t.parts('capDiffAgain', { n: again.length, list: blocksList(again) })));
+      }
+      return out.concat(sp(t.parts('capDiffNeed', { day: acc(d) })));
+    }
+    return rich('capFullNight', { day: cap(nom(d)), kind: kindTerm('full', d), target: acc(d) });
+  }
+
+  function capTarget(s) {
+    var out = t.parts('capTarget', { day: acc(s.target) });
+    s.lanes.forEach(function (l) {
+      var plan = l.restore.plan;
+      out = out.concat(sp(t.parts(l.mode === 'incr' ? 'planN' : 'planOnly',
+        { n: plan.length, lane: laneShort(l.mode), days: joinList(plan.map(nom)) })));
+    });
+    if (s.lost !== null) out = out.concat(sp(t.parts('capLostSet', { lost: gen(s.lost) })));
+    return out;
+  }
+
+  function capApply(c, k) {
+    var s = c.state, l = s.lanes[k], r = l.restore;
+    var d = r.plan[r.applied - 1], set = l.sets[d];
+    var v = { day: cap(nom(d)), kind: tag(set), list: blocksList(r.now) };
+    var out = r.now.length === BLOCK_IDS.length ? t.parts('capApplyAll', v) : t.parts('capApply', Object.assign({ n: r.now.length }, v));
+    var before = c.prev.lanes[k].restore.result;
+    var newer = r.now.filter(function (i) { return before[i] !== null && before[i] !== r.result[i]; });
+    if (newer.length) {
+      var chg = newer.map(function (i) { return before[i] + ' → ' + r.result[i]; }).join(', ');
+      out = out.concat(sp(t.parts('capNewer', { n: newer.length, list: blocksList(newer), chg: data(chg) })));
+    }
+    return out;
+  }
+
+  /** What a restore that skipped the missing set would hand back wrongly, as if it were current (rule 6). */
+  function skipWrong(l, r, lost) {
+    var res = [null, null, null, null, null, null, null, null];
+    r.plan.forEach(function (d) {
+      if (d === lost) return;
+      storedIdx(l.sets[d]).forEach(function (i) { res[i] = l.sets[d].blocks[i]; });
+    });
+    return res;
+  }
+
+  function capGap(s, k, alone) {
+    var l = s.lanes[k], r = l.restore;
+    var out = t.parts('capGap', { lost: gen(s.lost) });
+    if (r.reached === null) out = out.concat(sp(t.parts('capGapNothing')));
+    else out = out.concat(sp(t.parts('capGapReached', { n: r.wrong.length, reached: gen(r.reached), target: gen(r.target), list: blocksList(r.wrong) })));
+    if (l.mode === 'incr' && r.plan.indexOf(s.lost) < r.plan.length - 1) {
+      var res = skipWrong(l, r, s.lost), target = s.history[r.target];
+      var old = BLOCK_IDS.filter(function (i) { return res[i] !== target[i]; });
+      if (old.length) out = out.concat(sp(t.parts('capGapSkip', { n: old.length, list: blocksList(old), old: data(joinList(old.map(function (i) { return res[i]; }))) })));
+    }
+    if (r.newest !== r.reached) out = out.concat(sp(r.newest >= 0 ? t.parts('capGapNewest', { day: nom(r.newest) }) : t.parts('capGapNone')));
+    if (l.mode === 'incr' && r.target > s.lost) out = out.concat(sp(t.parts('capGapChain', { from: gen(s.lost), to: gen(r.target) })));
+    if (alone && l.mode === 'incr' && r.target !== s.lost) {
+      out = out.concat(sp(t.parts('capGapDiffHint', { lost: acc(s.lost), target: acc(r.target), targetGen: gen(r.target) })));
+    }
+    return out;
+  }
+
+  function capCompare(s, k, alone) {
+    var l = s.lanes[k], r = l.restore;
+    var out = t.parts('capOk', { n: r.applied, day: gen(r.target), r: r.read });
+    if (alone) out = out.concat(sp(t.parts(l.mode === 'incr' ? 'capCostIncr' : l.mode === 'diff' ? 'capCostDiff' : 'capCostFull', { s: l.stored })));
+    return out;
+  }
+
+  function capRestore(c) {
+    var s = c.state, alone = s.lanes.length === 1, out = [];
+    s.lanes.forEach(function (l, k) {
+      var r = l.restore, part;
+      if (r.step === 'apply') part = capApply(c, k);
+      else if (r.step === 'gap') part = capGap(s, k, alone);
+      else if (r.step === 'compare') part = capCompare(s, k, alone);
+      else part = t.parts('capWait', { lane: laneShort(l.mode) });
+      if (!alone && r.step) part = [laneShort(l.mode) + ': '].concat(part);
+      out = out.concat(out.length ? sp(part) : part);
+    });
+    if (!alone && c.last && s.lanes.every(function (l) { return l.restore.ok; })) {
+      var a = s.lanes[0], b = s.lanes[1];
+      out = out.concat(sp(t.parts('capVerdict', { sa: a.stored, na: a.restore.applied, sb: b.stored, nb: b.restore.applied })));
+    }
+    return out;
+  }
+
+  var dayChoices = [1, 2, 3, 4].map(function (d) { return [d, short(d)]; });
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'select', label: t('mode'), resets: true,
+        options: [['incr', t('modeIncr')], ['diff', t('modeDiff')], ['full', t('modeFull')]] },
+      { key: 'compare', type: 'toggle', label: t('compare'), hint: t('compareHint'), resets: true },
+      { key: 'restoreDay', type: 'choice', label: t('restoreDay'), resets: true, options: dayChoices },
+      { key: 'lose', type: 'choice', label: t('lose'), resets: true, options: [[0, t('loseNone')]].concat(dayChoices.slice(0, 3)) }
+    ],
+
+    presets: [
+      { id: 'week-incremental', label: t('presetIncr'), params: { mode: 'incr' }, hint: t('presetIncrHint') },
+      { id: 'week-differential', label: t('presetDiff'), params: { mode: 'diff' }, hint: t('presetDiffHint') },
+      { id: 'full-nightly', label: t('presetFull'), params: { mode: 'full' }, hint: t('presetFullHint') },
+      { id: 'lost-tuesday', label: t('presetLost'), params: { mode: 'incr', lose: 2 }, hint: t('presetLostHint') },
+      { id: 'compare', label: t('presetCompare'), params: { compare: true }, hint: t('presetCompareHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: 1, label: t('legStored') },
+      { shape: 'slot', label: t('legSlot') },
+      { shape: 'bg-soft', c: 1, label: t('legRestored') },
+      { shape: 'bg-link', label: t('legLink') },
+      { shape: 'bg-bad', label: t('legLost') },
+      { shape: 'bg-dead', label: t('legStale') }
+    ],
+
+    render: function (c) {
+      var lanes = c.state.lanes.map(function (l, k) { return laneGrid(c, k); });
+      c.stage.replaceChildren(h('div', { class: 'bd' }, diskGrid(c), h('div', { class: 'bd-lanes' }, lanes)));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (s.phase === 'start') return t.parts('capStart');
+      if (s.phase === 'write') return capWrite(s);
+      if (s.phase === 'backup') return capNight(s);
+      if (s.phase === 'target') return capTarget(s);
+      return capRestore(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
