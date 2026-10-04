@@ -1,0 +1,509 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-kerberos: ana on PC07 opens \\fs01\projects. AS exchange (pre-authentication, a TGT locked with the krbtgt
+     key), TGS exchange (a service ticket locked with FS01$'s key), AP exchange (FS01 opens the ticket itself). Every
+     request carries the client's time; more than 5 minutes off the receiver's clock fails with KRB_AP_ERR_SKEW.
+     A stepper, one message or one check per step. Drawn with kit view K1 (message sequence chart, kit/sequence.js):
+     three lanes whose cards hold each party's clock and keys. Beside the chart the message card (each ticket as a box
+     with a padlock naming the key that locks it, each authenticator as a small clock card) and PC07's ticket cache.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-kerberos">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kerberos: karte i satovi · simdeck</title>
+<meta name="description" content="Korak po korak: ana otvara \\fs01\projects. Karte su zaključane ključem koji ana nema; sat PC07 koji odstupa više od 5 minuta ruši prijavu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-kerberos",
+  "title": {
+    "hr": "Kerberos: karte i satovi",
+    "en": "Kerberos: tickets and clocks"
+  },
+  "concept": {
+    "hr": "AS daje TGT, TGS kartu za uslugu, AP otvara mapu; razlika satova to ruši",
+    "en": "AS gives a TGT, TGS a service ticket, AP opens the share; clock skew breaks it"
+  },
+  "summary": {
+    "hr": "Korak po korak: ana otvara \\\\fs01\\projects. Karte su zaključane ključem koji ana nema; sat PC07 koji odstupa više od 5 minuta ruši prijavu.",
+    "en": "Step by step: ana opens \\\\fs01\\projects. Tickets are locked with keys ana does not hold; a PC07 clock more than 5 minutes off breaks the logon."
+  },
+  "tags": [
+    "kerberos"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-kerberos"]; colours only from kit tokens.
+   Layout: left the K1 chart; right the message card on top and PC07's ticket cache under it. */
+[data-sim="win-kerberos"] .kb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-kerberos"] .kb > .sd-seq { grid-column: 1; grid-row: 1 / 3; }
+[data-sim="win-kerberos"] .kb-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+  min-height: 0;
+}
+[data-sim="win-kerberos"] .kb-box h2 { margin: 0 0 0.35rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-kerberos"] .kb-mono { font-family: var(--mono); }
+[data-sim="win-kerberos"] .kb-muted { color: var(--muted); font-weight: 400; }
+[data-sim="win-kerberos"] .kb-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="win-kerberos"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* lane cards: role, clock, keys */
+[data-sim="win-kerberos"] .kb-line { display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; align-items: center; font-size: var(--fs-sm); line-height: 1.3; margin-top: 0.15rem; }
+[data-sim="win-kerberos"] .kb-clock { font-family: var(--mono); font-weight: 700; color: var(--ink); }
+[data-sim="win-kerberos"] .kb-skew { font-family: var(--mono); padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-kerberos"] .kb-skew[data-bad] { background: var(--ink); color: var(--bg); font-weight: 700; }
+[data-sim="win-kerberos"] .kb-half { padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="win-kerberos"] .kb-half[data-on] { border-style: solid; border-color: var(--ink); color: var(--ink); font-weight: 700; background: var(--bg); }
+/* a key: a pill with a ring on its left (drawn in CSS) */
+[data-sim="win-kerberos"] .kb-key {
+  display: inline-flex; align-items: center; gap: 0.2rem;
+  padding: 0 0.35rem 0 0.25rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+[data-sim="win-kerberos"] .kb-key::before { content: ''; width: 0.5em; height: 0.5em; border: 0.14em solid currentColor; border-radius: 50%; flex: none; }
+[data-sim="win-kerberos"] .kb-key[data-session] { border-style: dashed; }
+[data-sim="win-kerberos"] .kb-key[data-used] { border-color: var(--ink); border-width: 0.18rem; font-weight: 700; }
+[data-sim="win-kerberos"] .kb-key.sd-changed { background: var(--hl); color: var(--on-hl); }
+/* a padlock with the name of the key that locks it */
+[data-sim="win-kerberos"] .kb-lock { display: inline-flex; align-items: baseline; gap: 0.1rem; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-kerberos"] .kb-lock .sd-seq-lock { margin-top: 0; }
+/* a check: a diamond */
+[data-sim="win-kerberos"] .kb-dia { display: inline-block; width: 0.6em; height: 0.6em; margin: 0 0.4em 0 0.1em; border: 0.14em solid currentColor; transform: rotate(45deg); vertical-align: 0.05em; }
+[data-sim="win-kerberos"] .kb-dia[data-ok] { background: currentColor; }
+
+/* message card */
+[data-sim="win-kerberos"] .kb-msg { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; overflow: hidden; }
+[data-sim="win-kerberos"] .kb-chip { padding: 0 0.4rem; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 1.05rem; }
+[data-sim="win-kerberos"] .kb-items { display: flex; flex-direction: column; gap: 0.4rem; min-height: 0; }
+[data-sim="win-kerberos"] .kb-ticket {
+  border: 0.22rem solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 0.2rem 0.5rem 0.3rem;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="win-kerberos"] .kb-ticket[data-what="part"] { border-width: var(--line-w); }
+[data-sim="win-kerberos"] .kb-ticket.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-kerberos"] .kb-ticket.sd-changed .kb-sub { color: var(--on-hl); }
+[data-sim="win-kerberos"] .kb-thead { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; font-size: 1rem; }
+[data-sim="win-kerberos"] .kb-thead b { font-weight: 700; }
+[data-sim="win-kerberos"] .kb-ticket ul { margin: 0.1rem 0 0; padding-left: 1.1rem; }
+[data-sim="win-kerberos"] .kb-auth {
+  display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline;
+  border: var(--line-w) dashed var(--ink);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 0.15rem 0.5rem;
+  font-size: var(--fs-sm);
+}
+/* a clock face: a ring with two hands */
+[data-sim="win-kerberos"] .kb-face { position: relative; display: inline-block; width: 0.9em; height: 0.9em; border: 0.13em solid currentColor; border-radius: 50%; vertical-align: -0.1em; box-sizing: border-box; }
+[data-sim="win-kerberos"] .kb-face::before { content: ''; position: absolute; left: 50%; bottom: 50%; width: 0.1em; height: 0.3em; margin-left: -0.05em; background: currentColor; }
+[data-sim="win-kerberos"] .kb-face::after { content: ''; position: absolute; left: 50%; top: 50%; width: 0.25em; height: 0.1em; margin-top: -0.05em; background: currentColor; }
+[data-sim="win-kerberos"] .kb-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.5rem; margin: 0; font-size: var(--fs-sm); }
+[data-sim="win-kerberos"] .kb-kv dt { color: var(--muted); }
+[data-sim="win-kerberos"] .kb-kv dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="win-kerberos"] .kb-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="win-kerberos"] .kb-checks li { display: flex; gap: 0.4rem; align-items: baseline; }
+[data-sim="win-kerberos"] .kb-checks li[data-bad] { font-weight: 700; text-decoration: underline; text-decoration-style: wavy; }
+[data-sim="win-kerberos"] .kb-verdict { font-weight: 700; padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-kerberos"] .kb-verdict[data-bad] { background: var(--ink); color: var(--bg); }
+[data-sim="win-kerberos"] .kb-note { margin: 0.35rem 0 0; padding: 0.15rem 0.45rem; border-left: 0.3rem solid var(--ink); font-size: var(--fs-sm); }
+
+/* cache */
+[data-sim="win-kerberos"] .kb-cache { grid-column: 2; grid-row: 2; align-self: start; }
+[data-sim="win-kerberos"] .kb-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="win-kerberos"] .kb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.5rem;
+  padding: 0.05rem 0.4rem 0.15rem;
+  border: var(--line-w) solid var(--line);
+  border-left-width: 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="win-kerberos"] .kb-row-name { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="win-kerberos"] .kb-row-exp { font-family: var(--mono); text-align: right; white-space: nowrap; }
+[data-sim="win-kerberos"] .kb-row-data { grid-column: 1 / 3; color: var(--muted); }
+[data-sim="win-kerberos"] .kb-row[data-expired] { border-style: dashed; color: var(--muted); }
+[data-sim="win-kerberos"] .kb-row[data-expired] .kb-row-name { text-decoration: line-through; }
+[data-sim="win-kerberos"] .kb-row[data-expired] .kb-row-exp { font-family: var(--sans); }
+[data-sim="win-kerberos"] .kb-row.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-kerberos"] .kb-row.sd-changed .kb-row-data { color: var(--on-hl); }
+
+/* legend swatches the kit lacks: ticket, authenticator, check, key */
+[data-sim="win-kerberos"] .sd-swatch[data-shape="ticket"] { border-width: 0.2rem; border-color: var(--ink); background: var(--bg); }
+[data-sim="win-kerberos"] .sd-swatch[data-shape="auth"] { border-style: dashed; border-color: var(--ink); background: var(--bg); position: relative; }
+[data-sim="win-kerberos"] .sd-swatch[data-shape="auth"]::after { content: ''; position: absolute; inset: 22%; border: 0.12rem solid var(--ink); border-radius: 50%; }
+[data-sim="win-kerberos"] .sd-swatch[data-shape="check"] { width: 0.75em; height: 0.75em; transform: rotate(45deg) scale(0.85); border-color: var(--ink); background: var(--bg); }
+[data-sim="win-kerberos"] .sd-swatch[data-shape="key"] { border-radius: 50%; border-width: 0.15rem; border-color: var(--ink); background: transparent; }
+
+/* Phone and portrait: the stage grows with its content; the cards go under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-kerberos"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-kerberos"] .kb { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-kerberos"] .kb > .sd-seq, [data-sim="win-kerberos"] .kb-msg, [data-sim="win-kerberos"] .kb-cache { grid-column: 1; grid-row: auto; }
+  [data-sim="win-kerberos"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kerberos: karte i satovi</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { pc: '1', kdc: '2', fs: '3' };
+  var MARK = { pc: 'P', kdc: 'K', fs: 'F' };
+
+  /** Data (names, SPNs, times, codes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'kb-mono' : cls || null }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function two(v) { return (v < 10 ? '0' : '') + v; }
+  /** Seconds since midnight of the logon day → "HH:MM:SS", with "+N d" past midnight. */
+  function clock(sec) {
+    var d = Math.floor(sec / 86400), r = sec - d * 86400;
+    var s = two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)) + ':' + two(r % 60);
+    return d ? s + ' ' + t('plusDays', { d: d }) : s;
+  }
+  /** A skew in seconds → "+4 min", "−7 min", "0 min". */
+  function skewText(sec) {
+    var m = Math.round(sec / 60);
+    return t('min', { v: (m > 0 ? '+' : m < 0 ? '−' : '') + Math.abs(m) });
+  }
+  function q(text) { return h('b', { translate: 'no' }, text); }
+
+  // ── keys ──
+  var SESSION = { skTgs: 'skTgs', skFs: 'skFs' };
+  function keyLabel(k) { return SESSION[k] ? t(k) : data(k, ''); }
+  function lock(k) { return h('span', { class: 'kb-lock' }, h('span', { class: 'sd-seq-lock', 'aria-hidden': 'true' }), keyLabel(k)); }
+  /** Who can open something locked with key k. */
+  var OPENS = { krbtgt: 'whoKdc', ana: 'whoPcKdc', 'FS01$': 'whoFsKdc', skTgs: 'whoPcKdc', skFs: 'whoPcFs' };
+  function keysLine(c, lane) {
+    var s = c.state, e = c.n > 0 ? s.log[s.log.length - 1] : null;
+    var used = (e && e.used && e.used[lane]) || [], added = (e && e.added && e.added[lane]) || [];
+    return h('div', { class: 'kb-line' }, s.keys[lane].map(function (k) {
+      var ds = {};
+      if (SESSION[k]) ds.session = '';
+      if (used.indexOf(k) >= 0) ds.used = '';
+      var isNew = added.indexOf(k) >= 0;
+      return h('span', { class: 'kb-key' + (isNew ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''), dataset: ds },
+        keyLabel(k), k === 'ana' && lane === 'pc' ? h('span', { class: 'kb-sub' }, t('fromPassword')) : null);
+    }));
+  }
+
+  // ── lanes ──
+  function lanes(c) {
+    var s = c.state, e = c.n > 0 ? s.log[s.log.length - 1] : null;
+    return L.LANES.map(function (id) {
+      var role = { pc: 'rolePc', kdc: 'roleKdc', fs: 'roleFs' }[id];
+      var name = { pc: 'lanePc', kdc: 'laneKdc', fs: 'laneFs' }[id];
+      var active = e && (e.kind === 'check' ? e.at === id : e.from === id || e.to === id);
+      var roleLine = [h('span', { class: 'kb-sub' }, t(role))];
+      if (id === 'kdc') {
+        ['as', 'tgs'].forEach(function (half) {
+          roleLine.push(h('span', { class: 'kb-half', dataset: e && e.half === half && active ? { on: '' } : {} }, t(half === 'as' ? 'halfAs' : 'halfTgs')));
+        });
+      }
+      var clockLine = [h('span', { class: 'kb-sub' }, t('clock')), data(clock(s.clocks[id]), 'kb-clock')];
+      if (id === 'pc') {
+        var sk = s.clocks.pc - s.clocks.kdc;
+        clockLine.push(h('span', { class: 'kb-skew', translate: 'no', dataset: L.skewOk(s.clocks.pc, s.clocks.kdc) ? {} : { bad: '' } }, skewText(sk)));
+      }
+      return { id: id, mark: MARK[id], c: COLOUR[id], shape: id === 'pc' ? 'square' : null, name: t(name), state: active ? 'active' : null,
+        body: [h('div', { class: 'kb-line' }, roleLine), h('div', { class: 'kb-line' }, clockLine), keysLine(c, id)] };
+    });
+  }
+
+  // ── chart rows ──
+  function fieldsOf(e) {
+    // the error's number only: the name is in the message card and the caption (a long name runs over the lanes)
+    if (e.name === 'KRB-ERROR') return data(String(e.code), '');
+    if (e.name === 'AS-REQ') return h('span', null, data('ana', ''), ' ', h('span', { class: 'kb-face', 'aria-hidden': 'true' }));
+    if (e.name === 'TGS-REQ') return h('span', null, lock('krbtgt'), ' ', data('+ SPN', ''));
+    if (e.name === 'AP-REP') return h('span', null, t('fAccess'));
+    var tk = e.carries && e.carries.filter(function (x) { return x.type === 'ticket'; })[0];
+    return tk ? lock(tk.lock) : null;
+  }
+  function timeOf(s, e) {
+    var lane = e.kind === 'check' ? e.at : e.from;
+    return clock(s.clocks[lane]);
+  }
+  function rows(c) {
+    var s = c.state, out = [];
+    s.log.forEach(function (e) {
+      var changed = e.n === c.n;
+      if (e.kind === 'check') {
+        var text = [h('span', { class: 'kb-dia', dataset: e.ok ? { ok: '' } : {}, 'aria-hidden': 'true' }),
+          t.parts(e.at === 'fs' && e.ok ? 'noteFsOk' : e.ok ? 'noteCheckOk' : 'noteCheckBad', { skew: data(skewText(e.skew), '') })];
+        out.push({ kind: 'note', lane: e.at, text: h('span', null, text), k: e.ok ? 'solid' : 'fill', time: timeOf(s, e), changed: changed });
+        return;
+      }
+      out.push({ from: e.from, to: e.to, label: e.name, c: COLOUR[e.from], fields: fieldsOf(e), line: e.name === 'KRB-ERROR' ? 'dashed' : null,
+        time: timeOf(s, e), changed: changed });
+      if (e.ntlm) out.push({ kind: 'note', lane: 'pc', text: t('noteNtlm'), k: 'solid', time: timeOf(s, e), changed: changed });
+    });
+    return out;
+  }
+  function renderChart(c) {
+    var chart = Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '6.4rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+    return chart;
+  }
+
+  // ── message card ──
+  function ticketBox(x, changed) {
+    var title = x.type === 'part' ? t('part') : t(x.what === 'tgt' ? 'tgt' : 'st');
+    var items = [];
+    (x.holds || []).forEach(function (k) {
+      items.push(h('li', null, t({ skTgs: 'holdsSkTgs', skFs: 'holdsSkFs', pac: 'holdsPac', time: 'holdsTime' }[k])));
+    });
+    if (x.spn && x.type === 'ticket') items.push(h('li', null, data(x.spn, '')));
+    if (x.expires !== undefined) items.push(h('li', null, t.parts('validTo', { t: data(clock(x.expires), '') })));
+    if (x.renewTill !== undefined) items.push(h('li', null, t.parts('renewTo', { t: data(clock(x.renewTill), '') })));
+    return h('div', { class: 'kb-ticket' + (changed ? ' sd-changed' : ''), dataset: { what: x.type } },
+      h('div', { class: 'kb-thead' }, h('b', null, title), lock(x.lock)),
+      items.length ? h('ul', null, items) : null,
+      h('div', { class: 'kb-sub' }, t('opens', { who: t(OPENS[x.lock]) })));
+  }
+  function authCard(x) {
+    return h('div', { class: 'kb-auth' }, h('b', null, t('auth')),
+      h('span', null, h('span', { class: 'kb-face', 'aria-hidden': 'true' }), ' ', data(clock(x.time), '')), lock(x.lock));
+  }
+  function checkList(e) {
+    var li = [];
+    function row(ok, content) {
+      li.push(h('li', { dataset: ok ? {} : { bad: '' } }, h('span', { class: 'kb-dia', dataset: ok ? { ok: '' } : {}, 'aria-hidden': 'true' }), h('span', null, content)));
+    }
+    var skewOk = e.error !== 'KRB_AP_ERR_SKEW' && (e.at !== 'kdc' || e.ok);
+    var skewLine = t.parts(skewOk ? 'checkSkewOk' : 'checkSkewBad', { skew: data(skewText(e.skew), '') });
+    row(true, t.parts(e.at === 'kdc' ? 'checkOpenTime' : 'checkOpenTicket', { key: lock(e.at === 'kdc' ? 'ana' : 'FS01$') }));
+    row(skewOk, skewLine);
+    if (e.at === 'fs') {
+      if (e.error !== 'KRB_AP_ERR_SKEW') { row(!e.error, t('checkReplay')); row(true, t('checkToken')); }
+    }
+    return h('ul', { class: 'kb-checks' }, li);
+  }
+  function renderMsg(c) {
+    var s = c.state, e = s.log[s.log.length - 1];
+    var box = h('section', { class: 'kb-box kb-msg' });
+    if (!e) { box.append(h('h2', null, t('msgNone'))); return box; }
+    var fresh = c.n === e.n;
+    var head = e.kind === 'check' ? h('b', { class: 'kb-chip sd-fill', dataset: { c: COLOUR[e.at] } }, t('msgCheck'))
+      : h('b', { class: 'kb-chip sd-fill' + (fresh && c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { c: COLOUR[e.from] }, translate: 'no' }, e.name);
+    box.append(h('h2', null, t('msgTitle', { n: e.n }), ' ', head,
+      e.kind === 'check' ? h('span', { class: 'kb-verdict', dataset: e.ok ? {} : { bad: '' } }, t(e.ok ? 'checkOk' : 'checkBad')) : null));
+    var items = h('div', { class: 'kb-items' });
+    if (e.kind === 'check') items.append(checkList(e));
+    if (e.name === 'AS-REQ') items.append(h('dl', { class: 'kb-kv' }, h('dt', null, t('user')), h('dd', null, data('ana@QUILLMOOR.EXAMPLE', ''))));
+    (e.carries || []).forEach(function (x) {
+      if (x.type === 'ticket' || x.type === 'part') items.append(ticketBox(x, fresh && x.fresh));
+      else if (x.type === 'auth') items.append(authCard(x));
+      else if (x.type === 'spn') items.append(h('dl', { class: 'kb-kv' }, h('dt', null, t('spn')), h('dd', null, data(x.spn, ''))));
+    });
+    if (e.name === 'KRB-ERROR') {
+      items.append(h('dl', { class: 'kb-kv' }, h('dt', null, t('errCode')), h('dd', null, data(e.error + ' (' + e.code + ')', ''))));
+      if (e.ntlm) items.append(h('p', { class: 'kb-note' }, t('noteNtlm')));
+    }
+    if (e.fromCache) items.append(h('p', { class: 'kb-note' }, t('fromCache')));
+    box.append(items);
+    return box;
+  }
+
+  // ── PC07's ticket cache ──
+  function renderCache(c) {
+    var s = c.state, now = s.clocks.kdc, e = c.n > 0 ? s.log[s.log.length - 1] : null;
+    var box = h('section', { class: 'kb-box kb-cache' },
+      h('h2', null, t('cacheTitle'), h('span', { class: 'kb-muted' }, t.parts('cacheAt', { t: data(clock(now), '') }))));
+    var list = h('ul', { class: 'kb-rows' });
+    var rowsOut = [];
+    if (s.cache.tgt) rowsOut.push({ name: 'krbtgt/QUILLMOOR.EXAMPLE', lock: 'krbtgt', tk: s.cache.tgt, label: t('tgt'), isNew: e && e.issued === 'tgt' });
+    Object.keys(s.cache.st).sort().forEach(function (spn) {
+      rowsOut.push({ name: spn, lock: 'FS01$', tk: s.cache.st[spn], label: t('st'), isNew: e && e.issued === 'st' && e.spn === spn });
+    });
+    if (!rowsOut.length) list.append(h('li', { class: 'kb-sub' }, t('cacheNone')));
+    rowsOut.forEach(function (r) {
+      var expired = !L.valid(r.tk, now);
+      list.append(h('li', { class: 'kb-row' + (r.isNew ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''), dataset: expired ? { expired: '' } : {} },
+        h('span', { class: 'kb-row-name' }, data(r.name, '')),
+        h('span', { class: 'kb-row-exp' }, expired ? t('cacheExpired') : data(clock(r.tk.expires), '')),
+        h('span', { class: 'kb-row-data' }, r.label, ' · ', lock(r.lock))));
+    });
+    box.append(list);
+    return box;
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    if (c.first) {
+      var parts;
+      if (s.start === 'as-req') {
+        parts = s.cache.tgt ? t.parts(p.cached ? 'capStartRenewAll' : 'capStartRenewTgt', { unc: q(s.unc), h: t('hours', { v: p.hoursLater }) })
+          : t.parts('capStartAs', { unc: q(s.unc) });
+      } else if (s.start === 'tgs-req') parts = t.parts('capStartTgs', { unc: q(s.unc), h: t('hours', { v: p.hoursLater }) });
+      else parts = t.parts('capStartAp', { unc: q(s.unc), spn: q(s.spn), exp: q(clock(s.cache.st[s.spn].expires)) });
+      return parts;
+    }
+    var e = s.log[s.log.length - 1];
+    var m = Math.abs(Math.round(e.skew / 60));
+    switch (e.name || e.at) {
+      case 'AS-REQ': return rich('capAsReq', { n: n, time: q(clock(s.clocks.pc)) });
+      case 'kdc':
+        if (e.ok) return t.parts('capAsOk', { n: n, skew: q(skewText(e.skew)) });
+        return t.parts(e.skew > 0 ? 'capAsBadAhead' : 'capAsBadBehind', { n: n, m: q(String(m)) });
+      case 'AS-REP': return rich('capAsRep', { n: n });
+      case 'TGS-REQ': return rich('capTgsReq', { n: n, time: q(clock(s.clocks.pc)), spn: q(s.spn) });
+      case 'TGS-REP': {
+        var st = e.carries[0], out = t.parts('capTgsRep', { n: n, skew: q(skewText(e.skew)), spn: q(s.spn), exp: q(clock(st.expires)) });
+        if (st.expires < s.clocks.kdc + L.POLICY.stLife) out.push(t('capTgsCapped'));
+        return out;
+      }
+      case 'AP-REQ': {
+        var a = rich('capApReq', { n: n, time: q(clock(s.clocks.pc)) });
+        if (e.fromCache) a.push(t('capApCached'));
+        return a;
+      }
+      case 'fs':
+        if (e.ok) return t.parts('capApOk', { n: n, skew: q(skewText(e.skew)) });
+        return t.parts('capApBad', { n: n, m: q(String(m)) });
+      case 'AP-REP': return t.parts('capApRep', { n: n, unc: q(s.unc) });
+      case 'KRB-ERROR': {
+        var prev = s.log[s.log.length - 2];
+        if (prev && prev.name === 'TGS-REQ') {
+          if (e.error === 'KRB_AP_ERR_SKEW') return t.parts('capTgsSkew', { n: n, m: q(String(m)) });
+          return rich('capTgsUnknown', { n: n, spn: q(s.spn) });
+        }
+        var key = e.from === 'fs' ? 'capErrFs' : s.cache.tgt ? 'capErrAsRenew' : 'capErrAs';
+        return t.parts(key, { n: n, code: q(e.error) });
+      }
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'skewMin', type: 'range', label: t('skewMin'), min: -10, max: 10, step: 1, format: function (v) { return skewText(v * 60); } },
+      { key: 'byName', type: 'toggle', label: t('byName') },
+      { key: 'cached', type: 'toggle', label: t('cached') },
+      { key: 'hoursLater', type: 'range', label: t('hoursLater'), min: 0, max: 12, step: 1, format: function (v) { return t('hours', { v: v }); } }
+    ],
+
+    presets: [
+      { id: 'open-share', label: t('presetOpen'), hint: t('presetOpenHint'), params: {} },
+      { id: 'skew-7', label: t('presetSkew7'), hint: t('presetSkew7Hint'), params: { skewMin: 7 } },
+      { id: 'skew-4', label: t('presetSkew4'), hint: t('presetSkew4Hint'), params: { skewMin: 4 } },
+      { id: 'cached', label: t('presetCached'), hint: t('presetCachedHint'), params: { cached: true, hoursLater: 2 } },
+      { id: 'by-ip', label: t('presetByIp'), hint: t('presetByIpHint'), params: { byName: false } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legendMsg') },
+      { shape: 'dash', label: t('legendErr') },
+      { shape: 'ticket', label: t('legendTicket') },
+      { shape: 'auth', label: t('legendAuth') },
+      { shape: 'check', label: t('legendCheck') },
+      { shape: 'key', label: t('legendKey') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'kb' }, chart, renderMsg(c), renderCache(c)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
