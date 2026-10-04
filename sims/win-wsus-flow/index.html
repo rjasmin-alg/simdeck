@@ -1,0 +1,504 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-wsus-flow: one update (KB-A) steps from Microsoft Update to WSUS-HQ (upstream), over the WAN to WSUS-BR
+     (downstream, replica or autonomous), and to the clients PC-HQ1 and PC-BR1, which pull on their own schedule.
+     A stepper, one event per step (sync, approval, server download, scan, client download, install, report).
+     Drawn with kit view K2 (topology, kit/topology.js): each server card holds its M/A/C slots, each client card its
+     five-stage strip; the clock and a day ruler above, the event log beside.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-wsus-flow">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WSUS: kako zakrpa stiže do klijenta · simdeck</title>
+<meta name="description" content="Korak po korak kroz dvije lokacije: zakrpa KB-A putuje sinkronizacijom, odobrenjem i preuzimanjem; replika i samostalni poslužitelj, klijenti koji sami pitaju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-wsus-flow",
+  "title": {
+    "hr": "WSUS: kako zakrpa stiže do klijenta",
+    "en": "WSUS: how an update reaches a client"
+  },
+  "concept": {
+    "hr": "Središnji WSUS → podružnica → klijent: sinkronizacija, odobrenje, preuzimanje",
+    "en": "Microsoft Update → upstream WSUS → downstream → client: sync, approval, download"
+  },
+  "summary": {
+    "hr": "Korak po korak kroz dvije lokacije: zakrpa KB-A putuje sinkronizacijom, odobrenjem i preuzimanjem; replika i samostalni poslužitelj, klijenti koji sami pitaju.",
+    "en": "Step by step across two sites: KB-A travels by sync, approval and download; a replica versus an autonomous branch server, and clients that pull on their own."
+  },
+  "tags": [
+    "updates"
+  ],
+  "class": "stepper",
+  "steps": 16
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-wsus-flow"]; colours only from kit tokens.
+   Layout: the clock and day ruler on top; under it the K2 drawing (left) and the event log (right). */
+[data-sim="win-wsus-flow"] .ws {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-wsus-flow"] .ws-mono { font-family: var(--mono); }
+[data-sim="win-wsus-flow"] .ws-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="win-wsus-flow"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* clock and ruler: HQ events above the line, branch events below it */
+[data-sim="win-wsus-flow"] .ws-clock { grid-column: 1 / 3; display: flex; gap: 1.2rem; align-items: center; }
+[data-sim="win-wsus-flow"] .ws-now { display: flex; flex-direction: column; min-width: 9rem; }
+[data-sim="win-wsus-flow"] .ws-now b { font-size: var(--fs-xl); line-height: 1.1; white-space: nowrap; }
+[data-sim="win-wsus-flow"] .ws-ruler { position: relative; flex: 1; height: 4.4rem; margin: 0 1.2rem 0 2.6rem; }
+[data-sim="win-wsus-flow"] .ws-axis { position: absolute; left: 0; right: 0; top: 1.9rem; height: 0.2rem; background: var(--ink); }
+[data-sim="win-wsus-flow"] .ws-day { position: absolute; top: 1.2rem; width: 0; height: 1.6rem; border-left: var(--line-w) dashed var(--muted); }
+[data-sim="win-wsus-flow"] .ws-day span { position: absolute; top: 1.8rem; left: 0.25rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="win-wsus-flow"] .ws-row-label { position: absolute; left: -2.6rem; font-size: var(--fs-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="win-wsus-flow"] .ws-tick { position: absolute; width: 0.75rem; height: 0.75rem; margin-left: -0.375rem; border: var(--line-w) solid var(--ink); }
+[data-sim="win-wsus-flow"] .ws-tick[data-site="hq"] { top: 0.7rem; }
+[data-sim="win-wsus-flow"] .ws-tick[data-site="br"] { top: 2.55rem; border-radius: 50%; }
+[data-sim="win-wsus-flow"] .ws-tick.sd-changed { width: 1rem; height: 1rem; margin-left: -0.5rem; }
+[data-sim="win-wsus-flow"] .ws-tick[data-site="hq"].sd-changed { top: 0.55rem; }
+[data-sim="win-wsus-flow"] .ws-mark { position: absolute; top: 0.2rem; height: 3.6rem; width: 0; border-left: 0.25rem solid var(--accent); margin-left: -0.125rem; }
+
+/* the drawing */
+[data-sim="win-wsus-flow"] .ws-topo { grid-column: 1; grid-row: 2; min-height: 0; align-self: start; }
+[data-sim="win-wsus-flow"] .ws-topo.ws-bulk .sd-topo-path { stroke-width: 0.75rem; }
+[data-sim="win-wsus-flow"] .ws-topo .sd-topo-card { font-size: 1rem; }
+[data-sim="win-wsus-flow"] .ws-extra { grid-column: 1 / -1; min-width: 0; }
+/* M / A / C slots of a server */
+[data-sim="win-wsus-flow"] .ws-slots { display: flex; gap: 0.35rem; margin: 0.35rem 0 0.2rem; }
+[data-sim="win-wsus-flow"] .ws-slot {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 3.2rem; padding: 0.1rem 0.3rem;
+  border: var(--line-w) dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  line-height: 1.15;
+}
+[data-sim="win-wsus-flow"] .ws-slot b { font-size: 1.15rem; font-family: var(--mono); }
+[data-sim="win-wsus-flow"] .ws-slot span { font-size: var(--fs-sm); }
+[data-sim="win-wsus-flow"] .ws-slot[data-has] { border-style: solid; border-color: var(--ink); }
+[data-sim="win-wsus-flow"] .ws-slot.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-wsus-flow"] .ws-info { display: flex; flex-direction: column; gap: 0.05rem; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-wsus-flow"] .ws-info .ws-bad { font-weight: 700; text-decoration: underline wavy; }
+[data-sim="win-wsus-flow"] .ws-mode { align-self: start; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="win-wsus-flow"] .ws-mode[data-mode="autonomous"] { border-style: dashed; }
+/* five-stage strip of a client */
+[data-sim="win-wsus-flow"] .ws-strip { margin: 0.3rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.12rem; }
+[data-sim="win-wsus-flow"] .ws-strip li {
+  display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; gap: 0 0.4rem; align-items: center;
+  padding: 0 0.3rem; border-radius: var(--radius-sm); font-size: var(--fs-sm); line-height: 1.35; color: var(--muted);
+}
+[data-sim="win-wsus-flow"] .ws-strip li[data-done] { color: var(--ink); }
+[data-sim="win-wsus-flow"] .ws-strip li.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-wsus-flow"] .ws-box { width: 0.9rem; height: 0.9rem; border: var(--line-w) dashed var(--muted); border-radius: 0.15rem; }
+[data-sim="win-wsus-flow"] li[data-done] .ws-box { border: var(--line-w) solid var(--ink); background: var(--ink); }
+[data-sim="win-wsus-flow"] .ws-strip .ws-when { font-family: var(--mono); }
+[data-sim="win-wsus-flow"] .ws-seen { grid-column: 2 / 4; font-weight: 700; }
+
+/* event log */
+[data-sim="win-wsus-flow"] .ws-log {
+  grid-column: 2; grid-row: 2; align-self: start; max-height: 100%; overflow: hidden;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.6rem;
+}
+[data-sim="win-wsus-flow"] .ws-log h2 { margin: 0 0 0.3rem; font-size: 1em; }
+[data-sim="win-wsus-flow"] .ws-log ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="win-wsus-flow"] .ws-log li {
+  display: grid; grid-template-columns: 1.6rem 5.2rem minmax(0, 1fr); gap: 0 0.35rem;
+  padding: 0 0.25rem; border-left: 0.3rem solid transparent; font-size: var(--fs-sm); line-height: 1.3;
+}
+[data-sim="win-wsus-flow"] .ws-log li[data-site="hq"] { border-left-color: var(--c1); }
+[data-sim="win-wsus-flow"] .ws-log li[data-site="br"] { border-left-color: var(--c2); border-left-style: dotted; }
+[data-sim="win-wsus-flow"] .ws-log li.sd-changed { background: var(--hl); color: var(--on-hl); }
+/* the changed outline is drawn outside the row: keep the neighbours clear of it */
+[data-sim="win-wsus-flow"] .ws-log li.sd-changed, [data-sim="win-wsus-flow"] .ws-strip li.sd-changed { margin: 0.25rem 0; }
+[data-sim="win-wsus-flow"] .ws-log .ws-n { font-family: var(--mono); text-align: right; }
+[data-sim="win-wsus-flow"] .ws-log li.ws-more { display: block; color: var(--muted); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-wsus-flow"] .sd-swatch[data-shape="ws-has"] { border: var(--line-w) solid var(--ink); background: var(--bg); position: relative; }
+[data-sim="win-wsus-flow"] .sd-swatch[data-shape="ws-has"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; color: var(--ink); }
+[data-sim="win-wsus-flow"] .sd-swatch[data-shape="ws-thick"] { height: 0.65rem; border: 0; border-radius: 0; background: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the log goes under the drawing (K2 lists the nodes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-wsus-flow"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-wsus-flow"] .ws { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-wsus-flow"] .ws-clock, [data-sim="win-wsus-flow"] .ws-topo, [data-sim="win-wsus-flow"] .ws-log { grid-column: 1; grid-row: auto; }
+  [data-sim="win-wsus-flow"] .ws-clock { flex-direction: column; align-items: stretch; }
+  [data-sim="win-wsus-flow"] .ws-ruler { flex: none; margin: 0 0.4rem 0 2.6rem; }
+  [data-sim="win-wsus-flow"] .ws-log { max-height: none; }
+  [data-sim="win-wsus-flow"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">WSUS: kako zakrpa stiže do klijenta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SITE_C = { hq: '1', br: '2' };
+  var NAME = { HQ: 'WSUS-HQ', BR: 'WSUS-BR', MU: 'Microsoft Update' };
+  var RULER = 96;   // the ruler runs Tue 19:00 → Sat 19:00
+
+  /** Data (names, times, sizes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'ws-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** "sri 09:30" / "Wed 09:30": the day is a word, the time data. */
+  function when(tt) { var c = L.clockOf(tt); return h('span', null, t('d' + c.day), ' ', data(c.hm, '')); }
+  function whenB(tt) { var c = L.clockOf(tt); return h('b', null, t('d' + c.day), ' ', data(c.hm, '')); }
+  function size(s) { return q(s.update.sizeMB + ' MB'); }
+  /** t.parts, with a node that fills two placeholders cloned (a DOM node can stand in one place only). */
+  function P(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || p.nodeType === 3) return p;
+      var dup = seen.indexOf(p) >= 0;
+      seen.push(p);
+      return dup ? p.cloneNode(true) : p;
+    });
+  }
+  /** Parts with *term* (or *=term*) turned into <em lang="en">. */
+  function rich(key, vars) {
+    var out = [];
+    P(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*=?([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function clientOf(s, id) { return s.clients.filter(function (c) { return c.id === id; })[0]; }
+  /** The site an event belongs to, for the ruler and the log. */
+  function siteOf(s, e) {
+    if (e.kind === 'sync' || e.kind === 'approve' || e.kind === 'content') return e.who === 'BR' ? 'br' : 'hq';
+    return clientOf(s, e.who).site;
+  }
+
+  // ── clock and ruler ──
+  function renderClock(c) {
+    var s = c.state;
+    var ruler = h('div', { class: 'ws-ruler', 'aria-hidden': 'true' },
+      h('span', { class: 'ws-row-label', style: { top: '0.45rem' }, translate: 'no' }, 'HQ'),
+      h('span', { class: 'ws-row-label', style: { top: '2.3rem' }, translate: 'no' }, 'BR'),
+      h('div', { class: 'ws-axis' }));
+    for (var d = 1; d <= 4; d++) {
+      var tt = d * 24 - 19;   // midnights: Wed 00:00 is t = 5
+      ruler.append(h('div', { class: 'ws-day', style: { left: (tt / RULER * 100) + '%' } }, h('span', null, t('d' + d))));
+    }
+    s.log.forEach(function (e) {
+      ruler.append(h('span', { class: 'ws-tick' + (e.n === c.n ? ' sd-changed' : ''), dataset: { site: siteOf(s, e) },
+        style: { left: (Math.min(e.t, RULER) / RULER * 100) + '%' } }));
+    });
+    ruler.append(h('span', { class: 'ws-mark', style: { left: (Math.min(s.t, RULER) / RULER * 100) + '%' } }));
+    return h('div', { class: 'ws-clock' }, h('div', { class: 'ws-now' }, h('span', { class: 'ws-sub' }, t('clockNow')), whenB(s.t)), ruler);
+  }
+
+  // ── servers ──
+  function slot(letter, name, has, changed) {
+    return h('span', { class: 'ws-slot' + (changed ? ' sd-changed' : ''), dataset: has ? { has: '' } : {}, title: t(name) },
+      h('b', null, t(letter)), h('span', null, has ? '✓' : '—'));
+  }
+  function serverExtra(c, id) {
+    var s = c.state, v = s.servers[id], pv = c.prev ? c.prev.servers[id] : v;
+    var approved = L.approvedFor(v, L.GROUP), pApproved = L.approvedFor(pv, L.GROUP);
+    var info = [];
+    if (id === 'HQ') {
+      var sel = v.products.indexOf(s.update.product) >= 0;
+      info.push(h('span', { class: sel ? null : 'ws-bad' }, P(sel ? 'products' : 'productsNone', { p: data(s.update.product, '') })));
+    } else {
+      info.push(h('span', { class: 'ws-mode', dataset: { mode: v.mode } }, t(v.mode === 'replica' ? 'modeReplica' : 'modeAutonomous')));
+    }
+    info.push(h('span', null, approved ? P('approvedFor', { g: data(L.GROUP, '') }) : t('notApproved')));
+    var reps = Object.keys(v.reports).sort();
+    info.push(h('span', null, t('statusOf'), ' ', reps.length ? data(reps.map(function (r) { return r + ' ✓'; }).join(', '), '') : t('statusNone')));
+    return h('div', { class: 'ws-extra' },
+      h('div', { class: 'ws-slots' },
+        slot('slotM', 'slotMName', v.meta, v.meta !== pv.meta),
+        slot('slotA', 'slotAName', approved, approved !== pApproved),
+        slot('slotC', 'slotCName', v.content, v.content !== pv.content)),
+      h('div', { class: 'ws-info' }, info));
+  }
+
+  // ── clients ──
+  var STAGES = [['scanned', 'stScanned'], ['detected', 'stDetected'], ['downloaded', 'stDownloaded'], ['installed', 'stInstalled'], ['reported', 'stReported']];
+  var RANK = { idle: 0, detected: 2, downloaded: 3, installed: 4, reported: 5 };
+  function reached(cl) { return Math.max(RANK[cl.state], cl.scanT !== null ? 1 : 0); }
+  function stageTime(cl, i) { return [cl.scanT, cl.detectT, cl.dlT, cl.installT, cl.reportT][i]; }
+  function clientExtra(c, cl) {
+    var pcl = c.prev ? clientOf(c.prev, cl.id) : cl;
+    var now = reached(cl), before = reached(pcl);
+    var e = c.n > 0 ? c.state.last : null;
+    var scanChanged = !!e && e.kind === 'scan' && e.who === cl.id;
+    var items = STAGES.map(function (st, i) {
+      var done = now > i, changed = (done && before <= i) || (i === 0 && scanChanged && c.n > 0);
+      var tt = done ? stageTime(cl, i) : null;
+      return h('li', { class: changed ? 'sd-changed' : null, dataset: done ? { done: '' } : {} },
+        h('span', { class: 'ws-box', 'aria-hidden': 'true' }), h('span', null, t(st[1])), tt != null ? when(tt) : h('span'));
+    });
+    if (cl.state === 'idle' && cl.seen && cl.seen !== 'approved') {
+      items.splice(1, 0, h('li', { dataset: { done: '' } }, h('span'), h('span', { class: 'ws-seen' }, t(cl.seen === 'absent' ? 'seenAbsent' : 'seenNotApproved'))));
+    }
+    return h('ol', { class: 'ws-strip ws-extra' }, items);
+  }
+
+  // ── packets of this step ──
+  function packetsOf(s, e) {
+    if (!e) return [];
+    var out = [];
+    if (e.kind === 'sync' && e.who === 'HQ') {
+      out.push(e.outcome === 'new' ? { from: 'MU', to: 'HQ', label: t('pkMeta'), c: 1 } : { from: 'MU', to: 'HQ', label: t('pkSkipped'), c: 1, drop: true });
+    } else if (e.kind === 'sync') {
+      var gm = e.got.indexOf('meta') >= 0, ga = e.got.indexOf('approval') >= 0;
+      if (gm || ga) out.push({ from: 'HQ', to: 'BR', label: t(gm && ga ? 'pkMetaApproval' : gm ? 'pkMeta' : 'pkApproval'), c: 1 });
+      else if (e.notInherited) out.push({ from: 'HQ', to: 'BR', label: t('pkNoApproval'), c: 1, drop: true });
+      else if (!(e.rolled && e.rolled.length)) out.push({ from: 'HQ', to: 'BR', label: t('pkEmpty'), c: 1, drop: true });
+      if (e.rolled && e.rolled.length) out.push({ from: 'BR', to: 'HQ', label: t('pkStatus'), c: 2 });
+    } else if (e.kind === 'content') {
+      out.push({ from: e.from, to: e.who, label: s.update.sizeMB + ' MB', c: e.who === 'HQ' ? 1 : 2, bulk: true });
+    } else if (e.kind === 'scan') {
+      out.push({ from: e.who, to: e.server, label: t('pkScan'), c: SITE_C[clientOf(s, e.who).site] });
+    } else if (e.kind === 'download') {
+      out.push({ from: e.server, to: e.who, label: s.update.sizeMB + ' MB', c: SITE_C[clientOf(s, e.who).site], bulk: true });
+    } else if (e.kind === 'report') {
+      out.push({ from: e.who, to: e.server, label: t('pkReport'), c: SITE_C[clientOf(s, e.who).site] });
+    }
+    return out;
+  }
+
+  /** The role line of a server: "upstream · syncs daily at 03:00". */
+  function role(key, v) {
+    return h('span', null, t(key), ' · ', P('syncDaily', { t: data((v.syncHour < 10 ? '0' : '') + v.syncHour + ':00', '') }));
+  }
+  function renderTopo(c) {
+    var s = c.state, e = c.n > 0 ? s.last : null;
+    var br1 = clientOf(s, 'PC-BR1'), toHq = br1.server === 'HQ';
+    var active = function (id) { return e && (e.kind === 'approve' || e.kind === 'install') && e.who === id ? 'active' : null; };
+    var nodes = [
+      { id: 'MU', kind: 'cloud', col: 0, row: 0, name: data(NAME.MU, ''),
+        lines: [{ text: s.update.id + ' · ' + s.update.sizeMB + ' MB', kind: 'addr' }, { text: t('released', { t: t('d0') + ' 19:00' }), kind: 'role' }] },
+      { id: 'HQ', kind: 'server', col: 1, span: 2, row: 0, mark: 'HQ', c: 1, name: data(NAME.HQ, ''), lines: [{ text: role('roleUp', s.servers.HQ), kind: 'role' }],
+        extra: serverExtra(c, 'HQ'), state: active('HQ') },
+      { id: 'WAN', kind: 'cloud', col: 3, row: 0, name: data('WAN', ''), align: 'start' },
+      { id: 'BR', kind: 'server', col: 4, span: 2, row: 0, mark: 'BR', c: 2, name: data(NAME.BR, ''), lines: [{ text: role('roleDown', s.servers.BR), kind: 'role' }],
+        extra: serverExtra(c, 'BR'), state: active('BR') }
+    ];
+    s.clients.forEach(function (cl) {
+      nodes.push({ id: cl.id, kind: 'host', col: cl.site === 'hq' ? 1 : 4, span: 2, row: 2, mark: cl.site === 'hq' ? 'H1' : 'B1', c: Number(SITE_C[cl.site]),
+        name: data(cl.id, ''),
+        lines: [{ text: t('clientServer', { srv: NAME[cl.server] }), kind: 'role' },
+          { text: t('nextScan', { t: t('d' + L.clockOf(cl.nextScan).day) + ' ' + L.clockOf(cl.nextScan).hm }), kind: 'role' }],
+        extra: clientExtra(c, cl), state: active(cl.id) });
+    });
+    var links = [
+      { id: 'mu', a: 'MU', b: 'HQ' },
+      { id: 'wan', a: 'HQ', b: 'BR' },
+      { id: 'lan-hq', a: 'HQ', b: 'PC-HQ1' },
+      { id: 'lan-br', a: 'BR', b: 'PC-BR1', state: toHq ? 'off' : 'up' }
+    ];
+    if (toHq) links.push({ id: 'hq-br1', a: 'HQ', b: 'PC-BR1' });
+    var packets = packetsOf(s, e);
+    var bulk = packets.some(function (p) { return p.bulk; });
+    return Simdeck.topology({
+      className: 'ws-topo' + (bulk ? ' ws-bulk' : ''),
+      cols: 6, rows: ['auto', '3.4rem', 'auto'], dir: c.dir,
+      nodes: nodes, links: links,
+      packets: packets.map(function (p) { return { from: p.from, to: p.to, label: p.label, c: p.c, drop: p.drop, at: p.from === 'HQ' && p.to === 'BR' || p.from === 'BR' && p.to === 'HQ' ? 0.3 : null }; })
+    });
+  }
+
+  // ── event log ──
+  function logText(s, e) {
+    var pc = function (key) { return [data(e.who, ''), ' ', t(key)]; };
+    switch (e.kind) {
+      case 'sync':
+        if (e.who === 'HQ') return t(e.outcome === 'new' ? 'logSyncHqNew' : 'logSyncHqSkipped');
+        if (e.rolled && e.rolled.length && !e.got.length) return t('logSyncBrRollup');
+        if (e.got.length === 2) return t('logSyncBrMetaApproval');
+        if (e.got[0] === 'meta') return t('logSyncBrMeta');
+        if (e.got[0] === 'approval') return t('logSyncBrApproval');
+        if (e.notInherited) return t('logSyncBrNotInherited');
+        return t(e.outcome === 'empty' ? 'logSyncBrEmpty' : 'logSyncBrNothing');
+      case 'approve': {
+        var k = { approved: 'Br', replica: 'BrReplica', noMeta: 'BrNoMeta', already: 'BrAlready' }[e.outcome];
+        if (e.who === 'HQ') return t(e.outcome === 'approved' ? 'logApproveHq' : 'logApproveHqNoMeta');
+        return t('logApprove' + k);
+      }
+      case 'content': return t(e.who === 'HQ' ? 'logContentHq' : 'logContentBr');
+      case 'scan': return pc({ detected: 'logScanDetected', notApproved: 'logScanNotApproved', absent: 'logScanAbsent', approved: 'logScanDetected' }[e.outcome]);
+      case 'download': return pc(e.wan ? 'logDownloadWan' : 'logDownload');
+      case 'install': return pc('logInstall');
+      case 'report': return pc('logReport');
+    }
+    return '';
+  }
+  function renderLog(c) {
+    var s = c.state;
+    var list = h('ol', null, s.log.map(function (e) {
+      var cl = L.clockOf(e.t);
+      return h('li', { class: e.n === c.n ? 'sd-changed' : null, dataset: { site: siteOf(s, e) } },
+        data(e.n + '.', 'ws-n'), h('span', null, t('d' + cl.day), ' ', data(cl.hm)), h('span', null, logText(s, e)));
+    }));
+    return h('section', { class: 'ws-log' }, h('h2', null, t('logTitle')), s.log.length ? list : h('p', { class: 'ws-sub' }, t('logEmpty')));
+  }
+
+  /** Drop the oldest log rows that do not fit, and say how many (the newest row is always shown). */
+  function fitLog(box) {
+    var ol = box.querySelector('ol');
+    if (!ol) return;
+    var dropped = 0;
+    while (box.scrollHeight > box.clientHeight + 1 && ol.children.length > (dropped ? 2 : 1)) {
+      ol.removeChild(dropped ? ol.children[1] : ol.firstChild);
+      if (!dropped) ol.prepend(h('li', { class: 'ws-more' }));
+      dropped++;
+    }
+    if (dropped) ol.firstChild.textContent = t.n('earlier', dropped);
+  }
+
+  // ── captions ──
+  function eventCaption(s, e) {
+    var kb = q(s.update.id), g = q(L.GROUP);
+    var cl = e.who && e.who.indexOf('PC-') === 0 ? clientOf(s, e.who) : null;
+    var pc = cl ? q(cl.id) : null, srv = e.server ? q(NAME[e.server]) : null;
+    switch (e.kind) {
+      case 'sync':
+        if (e.who === 'HQ') return rich(e.outcome === 'new' ? 'capSyncHqNew' : 'capSyncHqSkipped', { kb: kb });
+        if (e.rolled && e.rolled.length && !e.got.length) return P('capSyncBrRollup', { pcs: q(e.rolled.join(', ')) });
+        var gm = e.got.indexOf('meta') >= 0, ga = e.got.indexOf('approval') >= 0, out;
+        if (gm && ga) out = rich('capSyncBrMetaApproval', { kb: kb });
+        else if (gm) out = rich(e.mode === 'replica' ? 'capSyncBrMeta' : e.notInherited ? 'capSyncBrMetaNotInherited' : 'capSyncBrMetaAuto', { kb: kb });
+        else if (ga) out = rich('capSyncBrApproval', {});
+        else if (e.notInherited) out = rich('capSyncBrNotInherited', { kb: kb });
+        else out = P(e.outcome === 'empty' ? 'capSyncBrEmpty' : 'capSyncBrNothing', { kb: kb });
+        if (e.rolled && e.rolled.length) out = out.concat([' ']).concat(P('capSyncBrRollup', { pcs: q(e.rolled.join(', ')) }));
+        return out;
+      case 'approve':
+        if (e.who === 'HQ') return P(e.outcome !== 'approved' ? 'capApproveHqNoMeta' : s.servers.HQ.contentT !== null && s.servers.HQ.contentT <= e.t ? 'capApproveHqHas' : 'capApproveHq', { kb: kb, g: g });
+        if (e.outcome === 'replica') return rich('capApproveBrReplica', { kb: kb });
+        if (e.outcome === 'approved') return P(s.servers.HQ.content ? 'capApproveBr' : 'capApproveBrFetch', { kb: kb, g: g });
+        return P(e.outcome === 'noMeta' ? 'capApproveBrNoMeta' : 'capApproveBrAlready', { kb: kb });
+      case 'content': return P(e.who === 'HQ' ? 'capContentHq' : clientOf(s, 'PC-BR1').server === 'BR' ? 'capContentBr' : 'capContentBrUnused', { kb: kb, size: size(s) });
+      case 'scan':
+        return P({ detected: 'capScanDetected', notApproved: 'capScanNotApproved', absent: 'capScanAbsent', approved: 'capScanDetected' }[e.outcome],
+          { pc: pc, srv: srv, kb: kb });
+      case 'download': return P(e.wan ? 'capDownloadWan' : 'capDownload', { pc: pc, srv: srv, kb: kb, size: size(s) });
+      case 'install': return P('capInstall', { pc: pc, kb: kb });
+      case 'report': {
+        var r = P('capReport', { pc: pc, srv: srv, kb: kb });
+        if (e.server === 'BR') r.push(t(s.servers.BR.mode === 'replica' ? 'capReportReplica' : 'capReportAuto'));
+        return r;
+      }
+    }
+    return [];
+  }
+  function endNote(s) {
+    var kb = q(s.update.id), br = s.servers.BR, br1 = clientOf(s, 'PC-BR1');
+    if (!s.servers.HQ.meta) return P('capEndNotSynced', {});
+    if (s.clients.every(function (cl) { return cl.state === 'reported'; })) return P('capEndDone', { kb: kb });
+    if (br1.server === 'BR' && br.mode === 'autonomous' && !L.approvedFor(br, L.GROUP)) return P('capEndWaiting', { kb: kb });
+    return [];
+  }
+  function caption(c) {
+    var s = c.state;
+    if (c.first) return P('capStart', { t: whenB(0), kb: q(s.update.id) });
+    var out = P('capStep', { n: c.n, t: whenB(s.last.t) }).concat(eventCaption(s, s.last));
+    if (c.last) out = out.concat(endNote(s));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['replica', t('modeReplica')], ['autonomous', t('modeAutonomous')]] },
+      { key: 'upstreamProducts', type: 'toggle', label: t('upstreamProducts') },
+      { key: 'branchPointsToHQ', type: 'toggle', label: t('branchPointsToHQ') },
+      { key: 'approveAt', type: 'choice', label: t('approveAt'), hint: t('approveHint'), options: [[14, t('approveWed9')], [8.5, t('approveWed0330')]] },
+      // brAt (in the model's defaults, no control of its own): the step after which the branch admin approves
+      { type: 'button', label: t('brApprove'), hint: t('brApproveHint'), key: 'a', run: function (sim) { sim.set({ brAt: sim.n }); } }
+    ],
+
+    presets: [
+      { id: 'replica-two-sites', label: t('presetReplica'), hint: t('presetReplicaHint'), params: {} },
+      { id: 'autonomous-waits', label: t('presetAutonomous'), hint: t('presetAutonomousHint'), params: { mode: 'autonomous' } },
+      { id: 'replica-cant-approve', label: t('presetCantApprove'), hint: t('presetCantApproveHint'), params: { brAt: 2 }, step: 2 },
+      { id: 'not-synced', label: t('presetNotSynced'), hint: t('presetNotSyncedHint'), params: { upstreamProducts: false } },
+      { id: 'client-points-to-hq', label: t('presetToHq'), hint: t('presetToHqHint'), params: { branchPointsToHQ: true } }
+    ],
+
+    legend: [
+      { shape: 'ws-has', label: t('legendSlot') },
+      { shape: 'hollow', label: t('legendSlotNo') },
+      { shape: 'line', label: t('legendThin') },
+      { shape: 'ws-thick', label: t('legendThick') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var log = renderLog(c);
+      c.stage.replaceChildren(h('div', { class: 'ws' }, renderClock(c), renderTopo(c), log));
+      fitLog(log);
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
