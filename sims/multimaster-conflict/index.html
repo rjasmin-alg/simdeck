@@ -1,0 +1,506 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- multimaster-conflict: two masters accept writes locally and replicate them asynchronously; a partition queues the
+     messages; at the heal each side resolves the conflict by last-writer-wins, version vectors or the AD-style
+     per-attribute rule. A stepper, one event per step. Drawn with kit view K1 (message sequence chart, kit/sequence.js):
+     lanes M1 and M2 (DC1 and DC2 in the AD preset) with their clock and copy of the record in the lane cards, writes as
+     notes on a lane, replication messages as arrows, the partition as a wall the page adds between the two lifelines
+     (NOTES.md, "Shared requests"). Beside the chart the resolution box. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="multimaster-conflict">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replikacija s više glavnih poslužitelja: sukob · simdeck</title>
+<meta name="description" content="Upiši na obje strane razdvojene mreže, spoji je i vidi koji upis ostaje po pravilu zadnjeg upisa, vektorima inačica ili po atributu, i što se gubi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "multimaster-conflict",
+  "title": {
+    "hr": "Replikacija s više glavnih poslužitelja: sukob",
+    "en": "Multi-master replication with a conflict"
+  },
+  "concept": {
+    "hr": "Istodobni upisi na dva glavna poslužitelja: zadnji upis, inačice, što se gubi",
+    "en": "Concurrent writes on two masters: last-writer-wins, versions, what is lost"
+  },
+  "summary": {
+    "hr": "Upiši na obje strane razdvojene mreže, spoji je i vidi koji upis ostaje po pravilu zadnjeg upisa, vektorima inačica ili po atributu, i što se gubi.",
+    "en": "Write on both sides of a partition, heal it, and see which write stays under last-writer-wins, version vectors or per attribute, and what is lost."
+  },
+  "tags": [
+    "replication"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="multimaster-conflict"]; colours only from kit tokens.
+   Layout: the K1 chart on the left (lane cards with clock and record on top, one row per event), the resolution box
+   on the right. */
+[data-sim="multimaster-conflict"] .mm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 25rem);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1.2cqh 1.4cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="multimaster-conflict"] .mm-mono { font-family: var(--mono); }
+[data-sim="multimaster-conflict"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* lane cards: the clock and the copy of the record */
+[data-sim="multimaster-conflict"] .mm-clock { padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="multimaster-conflict"] .mm-clock[data-skew] { border-color: var(--ink); border-style: dashed; font-weight: 700; }
+[data-sim="multimaster-conflict"] .mm-rec { display: grid; gap: 0.25rem; margin-top: 0.3rem; min-height: 4.1rem; align-content: start; }
+[data-sim="multimaster-conflict"] .mm-line {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem;
+  padding: 0 0.35rem; border: var(--line-w) solid transparent; border-radius: var(--radius-sm);
+}
+[data-sim="multimaster-conflict"] .mm-line.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="multimaster-conflict"] .mm-line[data-sib] { border-color: var(--ink); box-shadow: 0.22rem 0.22rem 0 0 var(--bg), 0.22rem 0.22rem 0 var(--line-w) var(--ink); margin-right: 0.3rem; }
+[data-sim="multimaster-conflict"] .mm-val { font-family: var(--mono); font-weight: 700; }
+[data-sim="multimaster-conflict"] .mm-meta { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="multimaster-conflict"] .mm-tag { padding: 0 0.3rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="multimaster-conflict"] .mm-empty { padding: 0 0.35rem; border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); color: var(--muted); justify-self: start; }
+
+/* chart extras: the write dot, the partition wall, a queued message stopping at the wall (no ✕), centred notes */
+[data-sim="multimaster-conflict"] .mm-dot { display: inline-block; width: 0.75em; height: 0.75em; margin-right: 0.35em; border-radius: 50%; background: currentColor; vertical-align: -0.05em; }
+[data-sim="multimaster-conflict"] .mm-wall {
+  position: absolute; top: 0; bottom: 0; width: 1rem; transform: translateX(-50%);
+  border-left: var(--line-w) solid var(--ink); border-right: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(45deg, var(--ink) 0 0.14rem, var(--bg) 0.14rem 0.42rem);
+}
+[data-sim="multimaster-conflict"] .sd-seq-row[data-queued] .sd-seq-x { visibility: hidden; }
+[data-sim="multimaster-conflict"] .sd-seq-row[data-queued] .sd-seq-re { font-weight: 700; }
+[data-sim="multimaster-conflict"] .mm-x { font-weight: 700; margin-left: 0.3em; }
+
+/* resolution box */
+[data-sim="multimaster-conflict"] .mm-box {
+  align-self: start; max-height: 100%; overflow: hidden; min-width: 0;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.75rem 0.65rem;
+}
+[data-sim="multimaster-conflict"] .mm-box.sd-changed { border-color: var(--ink); border-width: 0.22rem; }
+[data-sim="multimaster-conflict"] .mm-box h2 { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.2rem 0.6rem; margin: 0 0 0.4rem; font-size: 1.1em; }
+[data-sim="multimaster-conflict"] .mm-box h2 small { font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="multimaster-conflict"] .mm-box h3 { margin: 0.5rem 0 0.2rem; font-size: 1em; font-family: var(--mono); }
+[data-sim="multimaster-conflict"] .mm-box p { margin: 0.3rem 0 0; }
+[data-sim="multimaster-conflict"] .mm-rule { font-size: var(--fs-sm); font-style: italic; }
+[data-sim="multimaster-conflict"] .mm-hint { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multimaster-conflict"] .mm-foot { font-weight: 700; }
+[data-sim="multimaster-conflict"] .mm-q { display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; margin: 0.25rem 0 0; padding: 0.15rem 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="multimaster-conflict"] .mm-q[data-queued] { border-style: dashed; }
+[data-sim="multimaster-conflict"] .mm-ver {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 0.5rem; align-items: center;
+  margin: 0.3rem 0 0; padding: 0.25rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+}
+[data-sim="multimaster-conflict"] .mm-ver .sd-seq-mark { grid-row: 1 / span 2; }
+[data-sim="multimaster-conflict"] .mm-ver .mm-val { font-size: 1.05em; overflow-wrap: anywhere; }
+[data-sim="multimaster-conflict"] .mm-ver .mm-meta { grid-column: 2 / span 2; }
+[data-sim="multimaster-conflict"] .mm-st { justify-self: end; padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="winner"], [data-sim="multimaster-conflict"] .mm-ver[data-st="kept"] { border: 0.24rem solid var(--ink); }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="lost"] { border-style: dashed; color: var(--muted); }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="lost"] .mm-val { text-decoration: line-through; text-decoration-thickness: 0.15em; color: var(--ink); }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="lost"] .mm-st { color: var(--danger); }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="lost"]::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top right, transparent calc(50% - 0.07rem), var(--danger) calc(50% - 0.07rem) calc(50% + 0.07rem), transparent calc(50% + 0.07rem));
+}
+[data-sim="multimaster-conflict"] .mm-ver[data-st="sib"] { border-color: var(--ink); box-shadow: 0.3rem 0.3rem 0 0 var(--panel), 0.3rem 0.3rem 0 var(--line-w) var(--ink); margin-right: 0.35rem; }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="over"] { border-style: dotted; color: var(--muted); }
+[data-sim="multimaster-conflict"] .mm-ver[data-st="over"] .mm-val { color: var(--ink); }
+
+/* legend swatches of this page (the kit has round, hollow, hl, dash, line) */
+[data-sim="multimaster-conflict"] .sd-swatch[data-shape="mm-dot"] { border-radius: 50%; background: var(--ink); width: 0.8em; height: 0.8em; }
+[data-sim="multimaster-conflict"] .sd-swatch[data-shape="mm-wall"] { width: 0.8em; background: repeating-linear-gradient(45deg, var(--ink) 0 0.1em, var(--bg) 0.1em 0.3em); }
+[data-sim="multimaster-conflict"] .sd-swatch[data-shape="mm-win"] { background: var(--bg); border-width: 0.22rem; }
+[data-sim="multimaster-conflict"] .sd-swatch[data-shape="mm-lost"] { border-style: dashed; background: linear-gradient(to top right, transparent calc(50% - 0.1em), var(--danger) calc(50% - 0.1em) calc(50% + 0.1em), transparent calc(50% + 0.1em)), var(--bg); }
+[data-sim="multimaster-conflict"] .sd-swatch[data-shape="mm-sib"] { background: var(--bg); box-shadow: 0.2em 0.2em 0 0 var(--bg), 0.2em 0.2em 0 2px var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the box goes under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="multimaster-conflict"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="multimaster-conflict"] .mm { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="multimaster-conflict"] .mm-box { max-height: none; }
+  [data-sim="multimaster-conflict"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Replikacija s više glavnih poslužitelja: sukob</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var Q = Simdeck.sequence;
+  var COLOUR = { M1: '1', M2: '2' };
+  var FIELDS = { lww: ['x'], vv: ['x'], ad: ['telephoneNumber', 'title'] };
+
+  /** Data (values, clock readings, vectors, attribute and server names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'mm-mono' : cls || null }, text); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  // ── formatting ──
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  /** A clock reading: seconds after 10:00:00 as hh:mm:ss. */
+  function clock(sec) {
+    var v = 36000 + sec, hh = Math.floor(v / 3600), mm = Math.floor(v / 60) % 60, ss = ((v % 60) + 60) % 60;
+    return pad(hh) + ':' + pad(mm) + ':' + pad(ss);
+  }
+  function nodeName(s, side) { return s.strategy === 'ad' ? (side === 'M1' ? 'DC1' : 'DC2') : side; }
+  function vvText(s, vv) { return '{' + L.NODES.map(function (n) { return nodeName(s, n) + ':' + (vv[n] || 0); }).join(', ') + '}'; }
+  function valueNode(v) { return typeof v === 'string' && v.charAt(0) === '@' ? h('span', null, t('v_' + v.slice(1))) : data(String(v), ''); }
+  /** "x = 20", "telephoneNumber = 555-0303", "title = assistant professor" (the attribute name is data, the title a word). */
+  function what(field, value) { return h('span', { class: 'mm-val' }, data(field + ' = ', ''), valueNode(value)); }
+  function realTime(sec) { return data(sec + ' s', ''); }
+  /** What the active rule reads: the stamp and origin (LWW), the vector (VV), version · stamp · origin (AD). */
+  function metaText(s, v) {
+    if (s.strategy === 'vv') return vvText(s, v.vv);
+    if (s.strategy === 'ad') return 'v' + v.version + ' · ' + clock(v.stamp) + ' · ' + nodeName(s, v.origin);
+    return clock(v.stamp) + ' · ' + nodeName(s, v.origin);
+  }
+  function stratName(s) { return t({ lww: 'stratLww', vv: 'stratVv', ad: 'stratAd' }[s.strategy]); }
+  function mark(s, side) { return h('span', { class: 'sd-seq-mark sd-fill', dataset: { c: COLOUR[side] }, translate: 'no' }, nodeName(s, side)); }
+
+  // ── lane cards ──
+  function recordBody(c, side) {
+    var s = c.state, rec = s.copies[side].fields, prev = c.prev ? c.prev.copies[side].fields : null;
+    var names = FIELDS[s.strategy].filter(function (f) { return rec[f]; });
+    if (!names.length) return h('div', { class: 'mm-rec' }, h('span', { class: 'mm-empty' }, t('empty')));
+    var lines = [];
+    names.forEach(function (f) {
+      var changed = !!prev && JSON.stringify(prev[f]) !== JSON.stringify(rec[f]);
+      var vs = L.versionsOf(rec[f]);
+      vs.forEach(function (v) {
+        lines.push(h('div', { class: 'mm-line' + (changed ? ' sd-changed' + (c.dir === 'forward' && !Simdeck.reducedMotion() ? ' sd-anim-in' : '') : ''), dataset: vs.length > 1 ? { sib: '' } : {} },
+          what(f, v.value), h('span', { class: 'mm-meta', translate: 'no' }, metaText(s, v)),
+          vs.length > 1 ? h('span', { class: 'mm-tag' }, t('sib')) : null));
+      });
+    });
+    return h('div', { class: 'mm-rec' }, lines);
+  }
+  function lanes(c) {
+    var s = c.state;
+    return L.NODES.map(function (side) {
+      var off = s.clocks[side].offset;
+      var skew = off < 0 ? t('skewSlow', { n: -off }) : off > 0 ? t('skewFast', { n: off }) : null;
+      var tag = h('span', { class: 'mm-clock', dataset: off ? { skew: '' } : {} }, t('clock'), ' ', data(clock(s.t + off), ''), skew ? h('span', null, ' (', skew, ')') : null);
+      return { id: side, mark: nodeName(s, side), c: COLOUR[side], name: t(s.strategy === 'ad' ? 'dc' : 'master'), tags: tag, body: recordBody(c, side) };
+    });
+  }
+
+  // ── chart rows ──
+  /** The chip of a replication message: the value (AD: the value alone, the attribute is in the lane cards and the
+      box), and beside it what the rule reads, without the origin (the arrow starts at it). */
+  function chartMeta(s, v) {
+    if (s.strategy === 'vv') return vvText(s, v.vv);
+    if (s.strategy === 'ad') return 'v' + v.version + ' · ' + clock(v.stamp);
+    return clock(v.stamp);
+  }
+  function msgLabel(s, ev) {
+    var fs = Object.keys(ev.change);
+    if (fs.length > 1) return { label: 'ana', fields: null };
+    var v = ev.change[fs[0]];
+    if (s.strategy === 'ad') return { label: typeof v.value === 'string' && v.value.charAt(0) === '@' ? valueNode(v.value) : String(v.value), fields: chartMeta(s, v) };
+    return { label: 'x = ' + v.value, fields: chartMeta(s, v) };
+  }
+  var RE = { applied: 'reApplied', kept: 'reKept', siblings: 'reSiblings', same: 'reSame' };
+  function rowsOf(c) {
+    var s = c.state, rows = [], walled = [], centred = [], queued = [];
+    var partAt = null;
+    s.events.forEach(function (ev) {
+      var changed = ev.step === c.n && c.n > 0;
+      var time = realTime(ev.t);
+      if (ev.kind === 'partition') partAt = ev.step;
+      var wall = partAt !== null && ev.kind !== 'heal';
+      var push = function (r, opts) {
+        rows.push(r);
+        walled.push(wall);
+        centred.push(!!(opts && opts.centre));
+        queued.push(!!(opts && opts.queued));
+      };
+      if (ev.kind === 'create') {
+        var txt = s.strategy === 'ad' ? h('span', null, h('span', { class: 'mm-dot', 'aria-hidden': 'true' }), t('noteUser'), ' ', data('ana', ''))
+          : h('span', null, h('span', { class: 'mm-dot', 'aria-hidden': 'true' }), what(ev.fields[0].field, ev.fields[0].value));
+        push({ kind: 'note', lane: ev.side, text: txt, k: 'solid', time: time, changed: false });
+      } else if (ev.kind === 'partition' || ev.kind === 'heal' || ev.kind === 'resolve') {
+        var key = { partition: 'notePart', heal: 'noteHeal', resolve: 'noteResolve' }[ev.kind];
+        push({ kind: 'note', lane: 'M1', text: t(key), k: ev.kind === 'partition' ? 'fill' : 'solid', time: time, changed: changed }, { centre: true });
+        if (ev.kind === 'heal') partAt = null;
+      } else if (ev.kind === 'write') {
+        var note = h('span', null, h('span', { class: 'mm-dot', 'aria-hidden': 'true' }), what(ev.field, ev.value), data(' · ' + clock(ev.stamp), ''),
+          ev.accepted ? null : h('span', { class: 'mm-x' }, '✕ ', t('noteRejected')));
+        push({ kind: 'note', lane: ev.side, text: note, k: 'solid', time: time, changed: changed });
+        if (ev.queued) {
+          var w = s.writes.filter(function (x) { return x.wid === ev.wid; })[0];
+          var ch = {}; ch[ev.field] = w.v;
+          var lb = msgLabel(s, { change: ch });
+          var re = {}; re[ev.side === 'M1' ? 'M2' : 'M1'] = t('reQueued');
+          push({ from: ev.side, to: ev.side === 'M1' ? 'M2' : 'M1', label: lb.label, fields: null, c: COLOUR[ev.side], line: 'dashed', drop: true, re: re, time: null, changed: changed }, { queued: true });
+        }
+      } else if (ev.kind === 'deliver') {
+        var lb2 = msgLabel(s, ev);
+        var outs = Object.keys(ev.outcomes).map(function (f) { return ev.outcomes[f].outcome; });
+        var re2 = {}; re2[ev.to] = t(RE[outs.indexOf('siblings') >= 0 ? 'siblings' : outs.indexOf('applied') >= 0 ? 'applied' : outs[0]]);
+        push({ from: ev.from, to: ev.to, label: lb2.label, fields: lb2.fields, c: COLOUR[ev.from], re: re2, time: time, changed: changed });
+      }
+    });
+    return { rows: rows, walled: walled, centred: centred, queued: queued };
+  }
+  function chart(c) {
+    var r = rowsOf(c);
+    var el = Q({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: r.rows,
+      timeWidth: '3.4rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+    // The partition wall between the two lifelines, notes centred on it, and queued messages that stop at it (the ✕
+    // of K1's dropped message is hidden: the message is held, not lost). Positions from K1's own geometry.
+    var mid = Q.css(Q.midway(Q.laneAt(0, 2), Q.laneAt(1, 2)), 'var(--sd-seq-gap)', 2);
+    el.querySelectorAll('.sd-seq-row').forEach(function (row, i) {
+      var lane = row.querySelector('.sd-seq-lane');
+      if (r.walled[i]) lane.prepend(h('span', { class: 'mm-wall', 'aria-hidden': 'true', style: { left: mid } }));
+      if (r.centred[i]) { var n = lane.querySelector('.sd-seq-note'); if (n) n.style.left = mid; }
+      if (r.queued[i]) row.dataset.queued = '';
+    });
+    return el;
+  }
+
+  // ── resolution box ──
+  var ST = { winner: 'stWinner', kept: 'stKept', lost: 'stLost', sib: 'stSib', over: 'stOver' };
+  function ruleKey(s, rule) { return s.strategy === 'ad' && rule === 'stamp' ? 'rule_adstamp' : 'rule_' + rule; }
+  function writeById(s, wid) { return s.writes.filter(function (w) { return w.wid === wid; })[0]; }
+  function box(c) {
+    var s = c.state, res = s.result;
+    var changed = !!c.prev && JSON.stringify(c.prev.result) !== JSON.stringify(res) && !!res;
+    var head = h('h2', null, h('span', null, t('boxTitle'), res && res.round === 2 ? h('small', null, ' · ', t('boxRound2')) : null),
+      h('small', null, t('boxRule'), ': ', stratName(s)));
+    var body = [];
+    if (res) {
+      res.fields.forEach(function (f) {
+        if (s.strategy === 'ad' || res.fields.length > 1) body.push(h('h3', { translate: 'no' }, f.field));
+        body.push(h('p', { class: 'mm-rule' }, t(f.overwritten.length && !f.lost.length ? 'rule_order' : ruleKey(s, f.rule))));
+        f.writes.forEach(function (wid) {
+          var w = writeById(s, wid);
+          var st = f.lost.indexOf(wid) >= 0 ? 'lost' : f.overwritten.indexOf(wid) >= 0 ? 'over' : f.siblings ? 'sib' : f.winner === wid ? 'winner' : 'kept';
+          body.push(h('div', { class: 'mm-ver', dataset: { st: st } },
+            mark(s, w.side), what(w.field, w.value), h('span', { class: 'mm-st' }, st === 'lost' ? '✕ ' : st === 'winner' || st === 'kept' ? '✓ ' : '', t(ST[st])),
+            h('span', { class: 'mm-meta' }, t.parts('wroteAt', { t: realTime(w.t) }), ' · ', data(metaText(s, w.v), ''))));
+        });
+      });
+      var foot = null;
+      if (res.intended != null) foot = res.got != null ? t('footInc', { intended: res.intended, got: res.got }) : t('footIncVv', { intended: res.intended });
+      else if (res.siblings) foot = t('footChoose');
+      else if (res.lost.length) foot = t('footSilent');
+      else if (res.round === 2) foot = t('footBoth');
+      if (res.lost.length && res.intended != null && s.strategy !== 'vv') body.push(h('p', { class: 'mm-foot' }, t('footSilent')));
+      if (foot) body.push(h('p', { class: 'mm-foot' }, foot));
+    } else {
+      var queuedAny = s.pending.some(function () { return s.partitioned; });
+      if (s.pending.length) {
+        body.push(h('p', null, t(queuedAny ? 'boxQueue' : 'boxFlight')));
+        s.pending.forEach(function (m) {
+          var f = Object.keys(m.change)[0], v = m.change[f];
+          body.push(h('div', { class: 'mm-q', dataset: s.partitioned ? { queued: '' } : {} },
+            data(nodeName(s, m.from) + ' → ' + nodeName(s, m.to), ''), what(f, v.value), data(metaText(s, v), '')));
+        });
+      } else body.push(h('p', null, t('boxNothing')));
+      body.push(h('p', { class: 'mm-hint' }, t('boxWait')));
+    }
+    return h('section', { class: 'mm-box' + (changed ? ' sd-changed' + (c.dir === 'forward' && !Simdeck.reducedMotion() ? ' sd-anim-in' : '') : '') }, head, body);
+  }
+
+  function render(c) {
+    var el = chart(c);
+    c.stage.replaceChildren(h('div', { class: 'mm' }, el, box(c)));
+    el.fit();
+  }
+
+  // ── captions ──
+  function byWid(s, wid) { return writeById(s, wid); }
+  function whyVars(s, rule, inc, loc, to) {
+    if (rule === 'new') return { to: data(nodeName(s, to), '') };
+    if (rule === 'stamp' || rule === 'adstamp') return { a: data(clock(inc.stamp), ''), b: data(clock(loc.stamp), '') };
+    if (rule === 'origin' || rule === 'guid') return { o: data(nodeName(s, inc.origin), '') };
+    if (rule === 'version') return { a: data(String(inc.version), ''), b: data(String(loc.version), '') };
+    if (rule === 'dominates') return { a: data(vvText(s, inc.vv), ''), b: data(vvText(s, loc.vv), '') };
+    return {};
+  }
+  function deliverCaption(c, ev) {
+    var s = c.state;
+    var f = Object.keys(ev.change)[0], inc = ev.change[f];
+    var out = ev.outcomes[f], locs = L.versionsOf(c.prev.copies[ev.to].fields[f]), loc = locs[0];
+    var rule = s.strategy === 'ad' && out.rule === 'stamp' ? 'adstamp' : out.rule;
+    var base = { to: data(nodeName(s, ev.to), ''), from: data(nodeName(s, ev.from), ''), what: what(f, inc.value) };
+    var parts;
+    if (out.outcome === 'applied') parts = rich('capApplied', Object.assign(base, { why: h('span', null, t.parts('why_' + rule, whyVars(s, rule, inc, loc, ev.to))) }));
+    else if (out.outcome === 'kept') {
+      parts = rich('capKept', Object.assign(base, { mine: what(f, loc.value),
+        why: h('span', null, t.parts('whyLost_' + rule, rule === 'dominates' ? { a: data(vvText(s, inc.vv), ''), b: data(vvText(s, loc.vv), '') } : whyVars(s, rule, inc, loc, ev.to))) }));
+    } else if (out.outcome === 'siblings') parts = rich('capSiblings', Object.assign(base, { a: data(vvText(s, inc.vv), ''), b: data(vvText(s, loc.vv), '') }));
+    else parts = rich('capSame', base);
+    if (s.result && c.prev && !c.prev.result) parts = parts.concat(' ', resolveCaption(c));
+    return parts;
+  }
+  function resolveCaption(c) {
+    var s = c.state, res = s.result, f = res.fields[0];
+    var skew = -s.clocks.M2.offset;
+    if (!f) return rich('capResNone');
+    if (res.round === 2 && !res.lost.length) return rich('capResAd2');
+    var ws = f.writes.map(function (wid) { return byWid(s, wid); });
+    var W = function (w) { return what(w.field, w.value); };
+    if (f.rule === 'single') return rich('capResSingle', { win: W(ws[0]) });
+    if (!res.lost.length && !f.siblings) return rich('capResOrder', { win: W(byWid(s, f.winner)), old: W(byWid(s, f.overwritten[0])) });
+    if (f.siblings) {
+      if (res.intended != null) return rich('capResIncVv', { a: W(ws[0]), b: W(ws[1]), intended: data(String(res.intended), '') });
+      return rich('capResVv', { a: data(vvText(s, ws[0].v.vv), ''), b: data(vvText(s, ws[1].v.vv), '') });
+    }
+    var win = byWid(s, f.winner), lost = byWid(s, res.lost[0]);
+    if (res.intended != null) {
+      if (ws[0].read !== ws[1].read) return rich('capResIncOrder', { side: data(nodeName(s, lost.side), ''), read: data(String(lost.read), ''), value: data(String(lost.value), ''), got: data(String(res.got), ''), intended: data(String(res.intended), '') });
+      return rich('capResInc', { base: data(String(ws[0].read), ''), got: data(String(res.got), ''), intended: data(String(res.intended), '') });
+    }
+    if (s.strategy === 'ad') {
+      var key = f.rule === 'version' ? 'capResAdVer' : f.rule === 'guid' ? 'capResAdGuid' : 'capResAd';
+      var out = rich(key, { attr: data(f.field, ''), win: W(win), lost: W(lost) });
+      if (res.laterLost) out = out.concat(' ', rich('capResAdSkew', { n: skew }));
+      return out;
+    }
+    if (res.laterLost) return rich('capResSkew', { n: skew, lost: W(lost) });
+    return rich('capResLww', { win: W(win), lost: W(lost) });
+  }
+  function caption(c) {
+    var s = c.state, ev = s.last;
+    if (!ev) {
+      return s.strategy === 'ad' ? rich('capStartAd', { what: data('ana', '') })
+        : rich('capStart', { what: what('x', s.copies.M1.fields.x.value) });
+    }
+    var nm = function (side) { return data(nodeName(s, side), ''); };
+    if (ev.kind === 'deliver' && ev.initial) return rich(s.strategy === 'ad' ? 'capReplAd' : 'capRepl', { from: nm('M1'), to: nm('M2'), what: s.strategy === 'ad' ? data('ana', '') : what('x', ev.change.x.value) });
+    if (ev.kind === 'partition') return rich('capPart', { a: nm('M1'), b: nm('M2') });
+    if (ev.kind === 'heal') return rich('capHeal');
+    if (ev.kind === 'deliver') return deliverCaption(c, ev);
+    if (ev.kind === 'resolve') return resolveCaption(c);
+    // a write
+    var w = byWid(s, ev.wid), off = s.clocks[ev.side].offset;
+    var vars = { side: nm(ev.side), t: realTime(ev.t), stamp: data(clock(ev.stamp), ''), what: what(ev.field, ev.value) };
+    var out;
+    if (s.strategy === 'ad') out = rich('capWriteAd', Object.assign(vars, { attr: data(ev.field, ''), value: valueNode(ev.value), ver: data(String(w.v.version), '') }));
+    else if (ev.inc) out = rich('capWriteInc', Object.assign(vars, { read: data(String(ev.read), ''), value: data(String(ev.value), '') }));
+    else if (s.strategy === 'vv') out = rich('capWriteVv', vars);
+    else out = rich('capWrite', vars);
+    if (off && s.strategy !== 'vv') out = out.concat(' ', rich(off < 0 ? 'capSkewSlow' : 'capSkewFast', { side: nm(ev.side), n: Math.abs(off) }));
+    if (s.strategy === 'vv') out = out.concat(' ', rich('capVv', { side: nm(ev.side), vv: data(vvText(s, w.v.vv), '') }));
+    if (!ev.accepted) out = out.concat(' ', rich('capRejected', { side: nm(ev.side), stored: data(clock(byWid(s, w.beatenBy) ? byWid(s, w.beatenBy).stamp : L.versionsOf(c.prev.copies[ev.side].fields[ev.field])[0].stamp), '') }));
+    out = out.concat(' ', rich(ev.queued ? 'capQueued' : 'capFlight', { other: nm(ev.side === 'M1' ? 'M2' : 'M1') }));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'strategy', type: 'choice', label: t('strategy'), resets: true,
+        options: [['lww', t('stratLww')], ['vv', t('stratVv')], ['ad', t('stratAd')]] },
+      { key: 'skewM2', type: 'choice', label: t('skewM2'), options: [[0, '0 s'], [-4, '−4 s'], [4, '+4 s']] },
+      { key: 'partition', type: 'toggle', label: t('partition'), resets: true },
+      { key: 'writers', type: 'choice', label: t('writers'), resets: true, options: [['both', t('wBoth')], ['M1', t('wM1')], ['M2', t('wM2')]] },
+      { key: 'inc', type: 'toggle', label: t('inc'), resets: true,
+        disabled: function (p) { return p.strategy === 'ad' ? t('incOff') : false; } },
+      { type: 'button', label: t('heal'), run: function (sim) {
+          var pl = L.plan(sim.params), i = pl.map(function (a) { return a.do; }).indexOf('heal');
+          if (i < 0) i = pl.map(function (a) { return a.do; }).indexOf('deliver');
+          if (i >= 0) sim.go(i + 1);
+        } }
+    ],
+
+    presets: [
+      { id: 'lww-skew', label: t('presetSkew'), params: { strategy: 'lww', skewM2: -4, inc: false, partition: true, writers: 'both' }, hint: t('presetSkewHint') },
+      { id: 'lww-synced', label: t('presetSynced'), params: { strategy: 'lww', skewM2: 0, inc: false, partition: true, writers: 'both' }, hint: t('presetSyncedHint') },
+      { id: 'version-vectors', label: t('presetVv'), params: { strategy: 'vv', skewM2: 0, inc: false, partition: true, writers: 'both' }, hint: t('presetVvHint') },
+      { id: 'ad-attribute', label: t('presetAd'), params: { strategy: 'ad', skewM2: 0, inc: false, partition: true, writers: 'both' }, hint: t('presetAdHint') },
+      { id: 'lost-increment', label: t('presetInc'), params: { strategy: 'lww', skewM2: 0, inc: true, partition: true, writers: 'both' }, hint: t('presetIncHint') }
+    ],
+
+    legend: [
+      { shape: 'mm-dot', label: t('legWrite') },
+      { shape: 'line', label: t('legMsg') },
+      { shape: 'dash', label: t('legQueued') },
+      { shape: 'mm-wall', label: t('legWall') },
+      { shape: 'mm-win', label: t('legWinner') },
+      { shape: 'mm-lost', label: t('legLost') },
+      { shape: 'mm-sib', label: t('legSib') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
