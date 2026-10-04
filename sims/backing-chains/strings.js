@@ -26,7 +26,7 @@
 
       // params
       format: 'Format',
-      ending: 'Srednji sloj s1 na kraju',
+      ending: 'Srednji sloj na kraju',
       endNone: 'ništa',
       endCommit: 'spoji',
       endStream: 'povuci',
@@ -46,7 +46,7 @@
       presetVhdx: 'Kontrolne točke (VHDX)',
       presetVhdxHint: 'Brisanje kontrolne točke spaja njezin AVHDX.',
       presetVmdk: 'Delta-datoteke (VMDK)',
-      presetVmdkHint: 'Brisanje snimke konsolidira njezinu datoteku.',
+      presetVmdkHint: 'Brisanje snimke spaja njezinu datoteku u roditelja.',
 
       // legend
       legChanged: 'promijenjen u ovom koraku',
@@ -59,11 +59,11 @@
 
       // format words
       snap_qcow2: '*snapshot* (snimka)',
-      snapLater_qcow2: 'Nova snimka',
+      snapLater_qcow2: 'još jedan *snapshot*',
       snap_vhdx: '[[checkpoint]]',
-      snapLater_vhdx: 'Nova kontrolna točka',
+      snapLater_vhdx: 'još jedan [[=checkpoint]]',
       snap_vmdk: '*snapshot* (snimka)',
-      snapLater_vmdk: 'Nova snimka',
+      snapLater_vmdk: 'još jedan *snapshot*',
       two_qcow2: 'dvije snimke',
       two_vhdx: 'dvije kontrolne točke',
       two_vmdk: 'dvije snimke',
@@ -71,8 +71,8 @@
       what_vmdk: 'snimke',
       what_qcow2: 'snimke',
       commitHead_qcow2: 'Spajanje prema dolje (*commit*) sloja {L} u {P}.',
-      commitHead_vhdx: 'Prva kontrolna točka se briše: Hyper-V spaja (*merge*) {L} u {P}.',
-      commitHead_vmdk: 'Prva snimka se briše: njezina datoteka {L} konsolidira se (*consolidate*) u {P}.',
+      commitHead_vhdx: 'Prvi [[=checkpoint]] se briše: Hyper-V spaja (*merge*) {L} u {P}.',
+      commitHead_vmdk: 'Prvi *snapshot* se briše: njegova datoteka {L} spaja se (*merge*) u {P}.',
       termOverlay: '*overlay* (prekrivni sloj)',
       termOverlayLater: '*overlay*',
       termBacking: '*backing file* (pozadinska datoteka)',
@@ -82,11 +82,11 @@
 
       // captions
       capStart: 'Početak: VM piše izravno u {base}. Zauzeti su blokovi 0–3 (A–D), a 4–7 nikad nisu pisani.',
-      capSnap: '{what}: {old} postaje samo za čitanje. Nad njim nastaje {new}, prazan {overlay}, a {old} je njegova ' +
+      capSnap: 'Uzima se {what}: {old} postaje samo za čitanje. Nad njim nastaje {new}, prazan {overlay}, a {old} mu je ' +
         '{backing}. Ništa se ne kopira: {new} ima 0 blokova, a VM vidi isto.',
       capBuild: 'Lanac u jednom koraku: {two} i četiri upisa. VM piše u {s2}; {s1} i {base} samo se čitaju. Svaki sloj ' +
         'ima samo blokove upisane dok je bio aktivan.',
-      capWrite: 'VM piše blok {b} = {v}. Upis ide samo u aktivni sloj {file}; niži slojevi se ne mijenjaju ({cow}).',
+      capWrite: 'VM piše blok {b} = {v}. Upis ide samo u aktivni sloj {file}; niži slojevi se ne mijenjaju: {cow}.',
       capHides: 'Stari {old} u {lower} ostaje, samo je sakriven.',
       capCommitCopy: ['Korak 1 od 3: {n} blok iz {L} kopira se u {P}: {list}.', 'Korak 1 od 3: {n} bloka iz {L} kopiraju se u {P}: {list}.',
         'Korak 1 od 3: {n} blokova iz {L} kopira se u {P}: {list}.'],
@@ -94,8 +94,8 @@
         'Blokovi {list} u {P} se prepisuju ({chg}): vrijede blokovi iz {L}.'],
       capSame: 'VM vidi isto.',
       capRepoint: 'Korak 2 od 3: {C} se preusmjerava na {P}, koji postaje njegova pozadinska datoteka. {L} više nitko ne čita.',
-      capRemove: 'Korak 3 od 3: {L} se uklanja. Lanac je kraći za jednu datoteku, a VM vidi isto.',
-      capNotLost: 'Brisanjem {what} podaci nisu nestali: spojeni su u {P}.',
+      capRemove: 'Korak 3 od 3: {L} izlazi iz lanca. Lanac je kraći za jednu datoteku, a VM vidi isto.',
+      capNotLost: 'VM nije izgubio ništa: upisi nakon {what} spojeni su u {P}. Nestao je samo povratak na stanje {what} (blok 1 = B).',
       capStreamHead: 'Povlačenje prema gore (*stream*) sloja {L} u {C}.',
       capStreamCopy: ['Korak 1 od 3: u {C} se kopira {n} blok iz {L}, onaj kojeg {C} nema: {list}.',
         'Korak 1 od 3: u {C} se kopiraju {n} bloka iz {L}, oni kojih {C} nema: {list}.',
@@ -106,13 +106,17 @@
       capDelete: 'Datoteka {L} obrisana je bez spajanja. {C} se na nju oslanja, pa je lanac prekinut: slika se ne može ' +
         'otvoriti i VM se ne pokreće. Blokovi {list} iz {L} su izgubljeni.',
       capByHand: 'Brisanje {what} spojilo bi podatke; ovdje je obrisana sama datoteka.',
+      capFollowMiss: 'Blok {b} niz lanac: {file} ga nema, pa bi čitanje palo na njegovu pozadinsku datoteku {next}.',
+      capFollowFail: 'Blok {b} pao bi na {file}, a te datoteke više nema: čitanje ne može uspjeti. Sama baza i dalje daje ' +
+        'A B C D, ali ono što je upisano u {L} i {C} nije dostupno.',
+      capStreamOnly: 'Kontrolne točke i snimke u formatima VHDX i VMDK brišu se samo spajanjem prema dolje: ovo je operacija ' +
+        'formata qcow2, prikazana na ovim datotekama.',
       capReadMiss: 'Čitanje bloka {b}: {file} ga nema, pa čitanje pada na njegovu pozadinsku datoteku {next}.',
       capReadHit: 'Čitanje bloka {b}: {file} ga ima, {v}.',
       capVisited: ['Pregledan je {n} sloj.', 'Pregledana su {n} sloja.', 'Pregledano je {n} slojeva.'],
-      capReadOlder: 'Niži slojevi imaju starije sadržaje ({old}), ali čitanje do njih ne dolazi.',
+      capReadOlder: ['Niži sloj ima stariji sadržaj ({old}), ali čitanje do njega ne dolazi.', 'Niži slojevi imaju starije sadržaje ({old}), ali čitanje do njih ne dolazi.',
+        'Niži slojevi imaju starije sadržaje ({old}), ali čitanje do njih ne dolazi.'],
       capReadZero: 'Čitanje bloka {b}: ni {file} ga nema, a ispod nema ničega: blok se čita kao nule.',
-      capReadFail: 'Čitanje bloka {b} pada na {file}, a te datoteke više nema: čitanje ne uspijeva. Sama baza i dalje daje ' +
-        'A B C D, ali ono što je upisano u {L} i {C} nije dostupno.',
 
       explain: '<p>Disk virtualnog stroja može biti <b>lanac datoteka</b>. Na dnu je osnovna slika, a svaka snimka ' +
         '(<em lang="en">snapshot</em>) dodaje prazan prekrivni sloj (<em lang="en">overlay</em>) kojemu je dotadašnji vrh ' +
@@ -120,14 +124,15 @@
         'zauzima, a niži slojevi se ne mijenjaju.</p>' +
         '<p><b>Čitanje pada kroz lanac:</b> kreće od aktivnog sloja i ide prema dnu dok ne nađe sloj koji ima taj blok. ' +
         'Ako ga nema nijedan, blok se čita kao nule.</p>' +
-        '<p><b>Spajanje</b> srednjeg sloja u njegovu pozadinsku datoteku (<em lang="en">commit</em>, <em lang="en">merge</em>, ' +
-        '<em lang="en">consolidate</em>) kopira njegove blokove dolje, preusmjeri dijete i ukloni sloj. ' +
+        '<p><b>Spajanje</b> srednjeg sloja u njegovu pozadinsku datoteku (<em lang="en">commit</em>, <em lang="en">merge</em>)' +
+        ' kopira njegove blokove dolje, preusmjeri dijete i ukloni sloj. ' +
         '<b>Povlačenje</b> (<em lang="en">stream</em>) kopira prema gore samo blokove koje dijete nema. U oba slučaja VM vidi ' +
-        'isto. Spajanje se odbija ako donji sloj ima još jedno dijete: tom bi se djetetu promijenio disk.</p>' +
+        'isto. Spajanje se ne smije raditi ako donji sloj ima još jedno dijete: tom bi se djetetu promijenio disk, a pozadinska ' +
+        'datoteka ne zna tko se na nju oslanja.</p>' +
         '<p>Datoteka obrisana <b>bez spajanja</b> prekida lanac: svaki sloj iznad nje ostaje bez podloge, a slika se ne može ' +
-        'otvoriti. Zato brisanje kontrolne točke ili snimke u upravitelju spaja podatke, a ne briše ih.</p>' +
-        '<p>Česte zablude: snimka nije kopija diska (prazan je sloj koji raste); brisanje snimke ne briše njezine podatke ' +
-        '(spaja ih); snimka nije sigurnosna kopija, jer nestaje s osnovnom slikom.</p>'
+        'otvoriti. Zato brisanje kontrolne točke ili snimke u upravitelju spaja upise nastale nakon nje, a ne briše ih.</p>' +
+        '<p>Česte zablude: snimka nije kopija diska (prazan je sloj koji raste); brisanje snimke ne briše upise nastale nakon nje ' +
+        '(oni se spajaju dolje, nestaje samo povratak na nju); snimka nije sigurnosna kopija, jer nestaje s osnovnom slikom.</p>'
     },
     en: {
       stage: 'Disk image chain',
@@ -146,7 +151,7 @@
       fmt_vmdk: 'VMDK',
 
       format: 'Format',
-      ending: 'Middle layer s1 at the end',
+      ending: 'Middle layer at the end',
       endNone: 'none',
       endCommit: 'merge',
       endStream: 'stream',
@@ -165,7 +170,7 @@
       presetVhdx: 'Checkpoints (VHDX)',
       presetVhdxHint: 'Deleting a checkpoint merges its AVHDX.',
       presetVmdk: 'Delta files (VMDK)',
-      presetVmdkHint: 'Deleting a snapshot consolidates its file.',
+      presetVmdkHint: 'Deleting a snapshot merges its file into the parent.',
 
       legChanged: 'changed in this step',
       legBlock: 'block allocated in a layer',
@@ -175,12 +180,12 @@
       legMissing: 'file missing',
       legUnreach: 'unreachable (chain broken)',
 
-      snap_qcow2: 'Snapshot',
-      snapLater_qcow2: 'Another snapshot',
-      snap_vhdx: '[[checkpoint]]',
-      snapLater_vhdx: 'Another checkpoint',
-      snap_vmdk: 'Snapshot',
-      snapLater_vmdk: 'Another snapshot',
+      snap_qcow2: 'a snapshot',
+      snapLater_qcow2: 'another snapshot',
+      snap_vhdx: 'a [[checkpoint]]',
+      snapLater_vhdx: 'another [[=checkpoint]]',
+      snap_vmdk: 'a snapshot',
+      snapLater_vmdk: 'another snapshot',
       two_qcow2: 'two snapshots',
       two_vhdx: 'two checkpoints',
       two_vmdk: 'two snapshots',
@@ -189,7 +194,7 @@
       what_qcow2: 'the snapshot',
       commitHead_qcow2: 'Commit (merge down) of {L} into {P}.',
       commitHead_vhdx: 'The first checkpoint is deleted: Hyper-V merges {L} into {P}.',
-      commitHead_vmdk: 'The first snapshot is deleted: its file {L} is consolidated into {P}.',
+      commitHead_vmdk: 'The first snapshot is deleted: its file {L} is merged into {P}.',
       termOverlay: 'overlay',
       termOverlayLater: 'overlay',
       termBacking: 'backing file',
@@ -198,19 +203,19 @@
       termCowLater: 'copy-on-write',
 
       capStart: 'Start: the VM writes straight to {base}. Blocks 0–3 are allocated (A–D); 4–7 were never written.',
-      capSnap: '{what}: {old} becomes read-only. On top of it comes {new}, an empty {overlay}, with {old} as its ' +
+      capSnap: 'Take {what}: {old} becomes read-only. On top of it comes {new}, an empty {overlay}, with {old} as its ' +
         '{backing}. Nothing is copied: {new} holds 0 blocks and the VM sees the same.',
       capBuild: 'The chain in one step: {two} and four writes. The VM writes to {s2}; {s1} and {base} are only read. Each ' +
         'layer holds only the blocks written while it was active.',
       capWrite: 'The VM writes block {b} = {v}. The write goes only to the active layer {file}; the layers below never ' +
-        'change ({cow}).',
+        'change: {cow}.',
       capHides: 'The old {old} in {lower} stays, only hidden.',
       capCommitCopy: ['Step 1 of 3: {n} block of {L} is copied into {P}: {list}.', 'Step 1 of 3: {n} blocks of {L} are copied into {P}: {list}.'],
       capOverwrite: ['Block {list} in {P} is overwritten ({chg}): the block from {L} wins.', 'Blocks {list} in {P} are overwritten ({chg}): the blocks from {L} win.'],
       capSame: 'What the VM sees has not changed.',
       capRepoint: 'Step 2 of 3: {C} is re-pointed to {P}, which becomes its backing file. Nothing reads {L} any more.',
-      capRemove: 'Step 3 of 3: {L} is removed. The chain is one file shorter, and the VM sees the same.',
-      capNotLost: 'Deleting {what} lost no data: it was merged into {P}.',
+      capRemove: 'Step 3 of 3: {L} leaves the chain. The chain is one file shorter, and the VM sees the same.',
+      capNotLost: 'The VM lost nothing: the writes made after {what} were merged into {P}. Only the way back to {what} (block 1 = B) is gone.',
       capStreamHead: 'Stream (pull up) of {L} into {C}.',
       capStreamCopy: ['Step 1 of 3: {n} block of {L} is copied into {C}, the one {C} lacks: {list}.',
         'Step 1 of 3: {n} blocks of {L} are copied into {C}, the ones {C} lacks: {list}.'],
@@ -219,28 +224,31 @@
       capDelete: 'The file {L} is deleted without a merge. {C} backs on it, so the chain is broken: the image cannot be ' +
         'opened and the VM does not start. Blocks {list} of {L} are lost.',
       capByHand: 'Deleting {what} would have merged the data; here the file itself was deleted.',
+      capFollowMiss: 'Follow block {b} down the chain: {file} does not have it, so a read would fall through to its backing file {next}.',
+      capFollowFail: 'Block {b} would fall through to {file}, and that file is gone: no read can succeed. Base alone still ' +
+        'gives A B C D, but what was written to {L} and {C} is out of reach.',
+      capStreamOnly: 'VHDX checkpoints and VMDK snapshots are only ever merged down: this is the qcow2 operation, shown on ' +
+        'these files.',
       capReadMiss: 'Read block {b}: {file} does not have it, so the read falls through to its backing file {next}.',
       capReadHit: 'Read block {b}: {file} has it, {v}.',
       capVisited: ['Layers visited: {n}.', 'Layers visited: {n}.'],
-      capReadOlder: 'Lower layers hold older contents ({old}), but the read never gets there.',
+      capReadOlder: ['A lower layer holds an older value ({old}), but the read never gets there.', 'Lower layers hold older values ({old}), but the read never gets there.'],
       capReadZero: 'Read block {b}: {file} does not have it either, and there is nothing below: the block reads as zeros.',
-      capReadFail: 'Read block {b} falls through to {file}, and that file is gone: the read fails. Base alone still gives ' +
-        'A B C D, but what was written to {L} and {C} is out of reach.',
 
       explain: '<p>A virtual machine\'s disk can be a <b>chain of files</b>. The base image sits at the bottom, and each ' +
         'snapshot adds an empty overlay whose backing file is the old top. The VM writes only to the top, active layer: ' +
         'a written block is allocated there, and the layers below never change.</p>' +
         '<p><b>A read falls through the chain:</b> it starts at the active layer and goes down until a layer has the ' +
         'block. If none has it, the block reads as zeros.</p>' +
-        '<p><b>Committing</b> a middle layer into its backing file (commit, merge, consolidate) copies its blocks down, ' +
+        '<p><b>Committing</b> a middle layer into its backing file (commit, merge) copies its blocks down, ' +
         're-points the child and removes the layer. <b>Streaming</b> copies up only the blocks the child lacks. Either way ' +
-        'the VM sees the same disk. A commit is refused when the lower layer has another child: that child\'s disk would ' +
-        'change under it.</p>' +
+        'the VM sees the same disk. A commit must not be done when the lower layer has another child: that child\'s disk ' +
+        'would change under it, and a backing file does not know who backs on it.</p>' +
         '<p>A file deleted <b>without a merge</b> breaks the chain: every layer above it loses its footing and the image ' +
-        'cannot be opened. That is why deleting a checkpoint or snapshot in the manager merges the data rather than ' +
-        'deleting it.</p>' +
+        'cannot be opened. That is why deleting a checkpoint or snapshot in the manager merges the writes made after ' +
+        'it rather than deleting them.</p>' +
         '<p>Common mistakes: a snapshot is not a copy of the disk (it is an empty layer that grows); deleting a snapshot ' +
-        'does not delete its data (it merges it); a snapshot is not a backup, because it dies with its base image.</p>'
+        'does not delete the writes made after it (they merge down; only the way back to it is gone); a snapshot is not a backup, because it dies with its base image.</p>'
     }
   };
 

@@ -222,7 +222,7 @@
       var o = norm(p);
       return {
         format: o.format, layers: baseLayers(o.format), active: 'base', snaps: 0,
-        probe: null, broken: [], phase: 'start', op: null, changed: [], repointed: null, copied: [], kept: [], removed: null, log: []
+        probe: null, broken: [], phase: 'start', op: null, changed: [], repointed: null, copied: [], kept: [], log: []
       };
     },
 
@@ -230,7 +230,7 @@
     step: function (s, n, p) {
       var o = norm(p), op = script(p)[n - 1];
       var out = clone(s);
-      out.op = op; out.changed = []; out.repointed = null; out.copied = []; out.kept = []; out.removed = null;
+      out.op = op; out.changed = []; out.repointed = null; out.copied = []; out.kept = [];
       if (op.op !== 'read') out.probe = null;
       if (op.op === 'build' || op.op === 'snapshot' || op.op === 'write') {
         (op.op === 'build' ? BUILD : [op]).forEach(function (b) {
@@ -257,7 +257,6 @@
           out.layers = repoint(out.layers, L, l.backing);
         } else {
           out.layers = remove(out.layers, L);
-          out.removed = L;
         }
         out.log.push(op.op + ' ' + op.phase);
         return out;

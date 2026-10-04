@@ -140,6 +140,7 @@ test('rule 8: deleting a backing file without a merge breaks every layer above i
   assert.deepEqual(s.broken, ['s2']);
   assert.equal(layer(s, 's1').missing, true);
   assert.deepEqual(layer(s, 's1').lost, { 1: 'B1', 4: 'E1' });
+  assert.deepEqual(layer(s, 's1').blocks, {});
   assert.equal(logic.opens(s.layers, 's2'), false);
   assert.equal(logic.opens(s.layers, 'base'), true);
   assert.deepEqual(logic.view(s.layers, 'base').map((x) => x.v || 0), ['A', 'B', 'C', 'D', 0, 0, 0, 0]);
@@ -160,10 +161,11 @@ test('rule 9: VHDX and VMDK end the same as qcow2 commit; only the names change'
   assert.deepEqual(v.layers.map((l) => l.file), ['disk.vhdx', 'disk_4b7d.avhdx']);
   assert.deepEqual(m.layers.map((l) => l.file), ['disk.vmdk', 'disk-000002.vmdk']);
   assert.deepEqual(layer(end({ format: 'vmdk' }), 's1').file, 'disk-000001.vmdk');
+  assert.deepEqual(layer(end({ format: 'vhdx' }), 's1').file, 'disk_9c1e.avhdx');
   assert.deepEqual(strip(end({ ending: 'commit', compact: true })), strip(q));
 });
 
-test('steps: the preset counts of SPEC.md, every combination within 20', () => {
+test('steps: the preset counts of SPEC.md, every combination within 15', () => {
   const n = (o) => logic.steps(P(o));
   assert.equal(n({}), 15);
   assert.equal(n({ ending: 'commit', compact: true }), 7);
@@ -173,7 +175,7 @@ test('steps: the preset counts of SPEC.md, every combination within 20', () => {
   assert.equal(n({ format: 'vmdk', ending: 'commit' }), 12);
   assert.equal(n({ compact: true }), 10);
   for (const format of logic.FORMATS) for (const ending of logic.ENDINGS) for (const compact of [false, true]) {
-    assert.ok(n({ format, ending, compact }) <= 20);
+    assert.ok(n({ format, ending, compact }) <= 15);
     assert.equal(n({ format, ending, compact }), n({ ending, compact }), 'format changes no count');
   }
   assert.deepEqual(end({}).log, ['snapshot', 'write 1', 'write 4', 'snapshot', 'write 1', 'write 2', 'read 0', 'read 1', 'read 4', 'read 5']);

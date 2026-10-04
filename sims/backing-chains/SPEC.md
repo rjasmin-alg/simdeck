@@ -40,7 +40,8 @@ Ids: `base`, `s1` (the overlay the first snapshot created), `s2` (the second). F
    It holds 0 blocks: a snapshot is not a copy. Source: `qemu-img create -b`, QEMU "Disk Images" *(check)*.
 4. **Commit (merge down) of L into its backing P**, three steps: *copy* every block of L into P (overwriting),
    *re-point* L's child to P, *remove* L. Invariant: the view from the active layer is the same after each phase.
-   qcow2 calls it commit, VHDX merge, VMDK consolidate. Source: `qemu-img commit`, QEMU "Live Block Operations"
+   qcow2 calls it commit; deleting a VHDX checkpoint or a VMDK snapshot merges (consolidate is the separate repair of
+   leftover delta files, not shown). Source: `qemu-img commit`, QEMU "Live Block Operations"
    (block-commit) *(check)*.
 5. **Stream (pull up) of L into its child C**, three steps: *copy* the blocks of L that C lacks into C, *re-point* C
    to L's backing, *remove* L. Same invariant; P is not touched. Source: QEMU "Live Block Operations" (block-stream),
@@ -48,7 +49,9 @@ Ids: `base`, `s1` (the overlay the first snapshot created), `s2` (the second). F
 6. **Tie-breaks.** In commit, L's block wins over P's (base block 1 `B` → `B1`). In stream, C's own block wins over
    L's (s2 keeps `B2`, s1's `B1` is not copied).
 7. **Commit into a layer with another child is refused** (`commitRefused` → `'branch'`): the other child would see
-   P change under it. Committing the base (no backing) is refused too (`'base'`). Derived. No preset branches the
+   P change under it. Committing the base (no backing) is refused too (`'base'`). Derived. A real qcow2 backing file
+   does not record who backs on it, so the format itself refuses nothing: the commit would silently change the other
+   child. The page therefore says the commit *must not be done*, not that it is refused. No preset branches the
    chain; the rule is in the model and its tests only.
 8. **Deleting a backing file without a merge breaks every layer above it** (`broken` = all descendants). A read that
    falls through to the missing file fails; the image does not open at all (`opens` false), so the VM does not start.

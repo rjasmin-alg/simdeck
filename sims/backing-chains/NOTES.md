@@ -105,8 +105,31 @@ a shelf of six or more.
 
 ## Review
 
-See the report; filled in after the fresh review.
+A fresh reviewer read the sim against `SPEC.md` and the task. They wrote their own reference model from the rules,
+and it matched the sim at every step of all 24 format × ending × compact combinations (layers, probe, file names) and
+on every preset number. They ran 44 mutants of `sim.js`, and every flipped tie-break and every broken rule was
+caught. Of the survivors, three were equivalent (one is now removed: the unused `removed` field). Two were real
+gaps, now tested: the VHDX `s1` file name, and a deleted file's blocks being cleared (the page counter depends on
+it). The step bound in the tests was also tightened from 20 to 15.
+
+Fixed from the review:
+- Captions began with a lowercase term ("snapshot (snimka): …"); they now read "Uzima se *snapshot* (snimka): …" /
+  "Take a snapshot: …". The hr term rule is now kept on later mentions too (*checkpoint*, *snapshot*).
+- Nested parentheses around *copy-on-write* (kopiranje pri pisanju); hr „a {old} je njegova *backing file*" → „a
+  {old} mu je *backing file*".
+- "Lower layers hold older contents" with one lower layer: now a plural form on the count.
+- The broken chain: the steps after "the image does not open" no longer say "Read block 4"; they now say "follow
+  block 4 down the chain" and "would fall through".
+- Stream on VHDX/VMDK claimed an operation those managers do not offer: the caption now says it is the qcow2
+  operation, shown on these files.
+- Facts:
+  - "A commit is refused into a branch" → "must not be done" (a backing file does not know who backs on it).
+  - "Deleting the checkpoint lost no data" → "the VM lost nothing; the writes after it were merged; only the way
+    back to it (block 1 = B) is gone". The explanation's misconception line is fixed the same way.
+  - VMDK "consolidate" → "merge" (consolidate is the separate repair of leftover deltas).
+  - "s1 is removed" → "leaves the chain" (commit does not delete the file).
+- "Middle layer s1" → "Middle layer" (with VHDX/VMDK there is no s1 on the stage).
 
 ## Time
 
-Start 2026-10-04 10:22 CEST.
+Start 2026-10-04 10:22 CEST, done 10:45 CEST (about 23 minutes, including the review and its fixes).
