@@ -1,0 +1,359 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- backing-chains: a virtual disk of eight blocks as a chain of image files (base, s1, s2). Snapshots add empty
+     overlays, writes go to the active layer only, reads fall down the chain; then the middle layer is committed,
+     streamed or its file deleted, which breaks the layer above it. Drawn on kit view K3 (block grid).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="backing-chains">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanci slika diska · simdeck</title>
+<meta name="description" content="Snimke kao prazni slojevi nad osnovnom slikom: piši, čitaj kroz lanac, spoji ili povuci srednji sloj, ili mu obriši datoteku i prekini lanac.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "backing-chains",
+  "title": {
+    "hr": "Lanci slika diska",
+    "en": "Backing chains"
+  },
+  "concept": {
+    "hr": "Čitanje pada kroz lanac, spajanje i prekinuta karika",
+    "en": "Reads fall through the chain, merging, and a broken link"
+  },
+  "summary": {
+    "hr": "Snimke kao prazni slojevi nad osnovnom slikom: piši, čitaj kroz lanac, spoji ili povuci srednji sloj, ili mu obriši datoteku i prekini lanac.",
+    "en": "Snapshots as empty layers over a base image: write, read through the chain, commit or stream the middle layer, or delete its file and break the chain."
+  },
+  "tags": [
+    "snapshots"
+  ],
+  "class": "stepper",
+  "steps": 15,
+  "entries": [
+    {
+      "preset": "vhdx-checkpoints"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="backing-chains"]; colours only from kit tokens.
+   Layout: one kit block grid (K3, kit/blockgrid.js): what the VM sees on top, then the layers, active on top and the
+   base at the bottom, each row labelled with its file; arrows to the backing file and the read probe. */
+[data-sim="backing-chains"] .bc {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="backing-chains"] .bc .sd-bg-grid { --bg-row-gap: 1.6rem; }
+/* a file name sits over the backing arrows that start at it or pass it (a re-pointed link skips a row) */
+[data-sim="backing-chains"] .sd-bg-label > * { position: relative; padding: 0.1rem 0.2rem; background: var(--panel); }
+[data-sim="backing-chains"] .bc-role { color: var(--muted); }
+[data-sim="backing-chains"] .bc-role[data-on] { color: var(--ink); font-weight: 700; }
+[data-sim="backing-chains"] .bc-bad { color: var(--danger); font-weight: 700; }
+[data-sim="backing-chains"] .bc-gone { color: var(--muted); text-decoration: line-through; }
+[data-sim="backing-chains"] .bc-to { color: var(--muted); }
+
+/* legend: an empty slot (an unallocated block) */
+[data-sim="backing-chains"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="backing-chains"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="backing-chains"] .bc { height: auto; padding: 0.5rem; }
+  [data-sim="backing-chains"] .bc .sd-bg-grid { --bg-row-gap: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Lanci slika diska</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { base: '1', s1: '2', s2: '3' };      // series colour per layer; rows also differ by label and place
+  var IDS = ['s2', 's1', 'base'];                     // top to bottom
+  var BLOCK_IDS = [0, 1, 2, 3, 4, 5, 6, 7];
+  /** In the view row's small line: the part of the file name that tells the layers apart. */
+  var SHORT = {
+    qcow2: { base: 'base', s1: 's1', s2: 's2' },
+    vhdx: { base: 'vhdx', s1: '9c1e', s2: '4b7d' },
+    vmdk: { base: 'vmdk', s1: '000001', s2: '000002' }
+  };
+
+  /** Data (block numbers, contents, file names) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function file(s, id) { return data(L.FILES[s.format][id]); }
+  function fv(key, s) { return t(key + '_' + s.format); }
+  function find(s, id) { return s.layers.filter(function (l) { return l.id === id; })[0] || null; }
+  function idx(blocks) { return Object.keys(blocks).map(Number).sort(function (a, b) { return a - b; }); }
+  function sp(parts) { return [' '].concat(parts); }
+  function joinList(items) { return items.join(', '); }
+  /** Caption parts: t.parts with every node placeholder cloned where it lands (a placeholder may appear twice, and a
+      node can stand in one place only), and *English term* turned into <em lang="en"> (the Croatian term rule, for terms
+      the glossary lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+        });
+      });
+    });
+    return out;
+  }
+  function term(key, later) { return h('span', null, rich(later ? key + 'Later' : key)); }
+
+  // ── stage ──
+
+  function render(c) {
+    var s = c.state, p = c.params;
+    var opens = L.opens(s.layers, s.active);
+    var vw = L.view(s.layers, s.active);
+    var rows = [];
+    var probe = s.probe;
+    if (p.showView) {
+      rows.push({
+        id: 'view', label: h('span', null, t('viewRow')),
+        aside: opens ? '' : h('span', { class: 'bc-bad' }, '✕ ' + t('viewNoOpen')),
+        cells: vw.map(function (x, b) {
+          if (!opens) return { text: '?', kind: 'bad' };
+          if (x.v === null) return { text: '0', dim: true, sub: '·' };
+          return { text: x.v, sub: SHORT[s.format][x.from], kind: 'soft', c: COLOUR[x.from],
+            now: !!(probe && probe.result === 'hit' && probe.block === b) };
+        })
+      });
+    }
+    IDS.forEach(function (id) {
+      var l = find(s, id);
+      var everMade = id === 'base' || s.snaps >= Number(id.slice(1));
+      if (!everMade) return;
+      var name = L.FILES[s.format][id];
+      if (!l) {                                         // removed by commit or stream: an empty band keeps its place
+        rows.push({ id: id, label: h('span', { class: 'bc-gone', translate: 'no' }, name),
+          aside: h('span', { class: 'bc-role' }, t('roleRemoved')), cells: BLOCK_IDS.map(function () { return null; }) });
+        return;
+      }
+      var broken = s.broken.indexOf(id) >= 0;
+      var role = l.missing ? h('span', { class: 'bc-bad' }, '✕ ' + t('roleMissing'))
+        : broken ? h('span', { class: 'bc-bad' }, '✕ ' + t('roleBroken'))
+        : id === s.active ? h('span', { class: 'bc-role', dataset: { on: 'true' } }, t('roleActive'))
+        : h('span', { class: 'bc-role' }, t('roleRO'));
+      var aside = l.backing ? h('span', null, role, h('span', { class: 'bc-to' }, ' → '), file(s, l.backing)) : role;
+      var changed = s.changed.filter(function (x) { return x.layer === id; }).map(function (x) { return x.b; });
+      rows.push({
+        id: id, label: l.missing ? h('span', { class: 'bc-gone', translate: 'no' }, name) : name, aside: aside,
+        cells: BLOCK_IDS.map(function (b) {
+          var at = !!(probe && probe.block === b && probe.at === id);
+          if (l.missing) return { text: l.lost[b] || '', kind: 'bad', now: at };
+          if (!(b in l.blocks)) return { now: at };
+          return { text: l.blocks[b], kind: broken ? 'dead' : 'fill', c: COLOUR[id], now: at || changed.indexOf(b) >= 0 };
+        })
+      });
+    });
+    // backing arrows from each layer's label; the read probe down one column
+    var links = [];
+    s.layers.forEach(function (l) {
+      if (!l.backing) return;
+      var target = find(s, l.backing);
+      links.push({ from: { row: l.id }, to: { row: l.backing }, broken: !!(target && target.missing),
+        now: !!(s.repointed && s.repointed.child === l.id) });
+    });
+    if (probe) {
+      var path = (p.showView ? ['view'] : []).concat(probe.path);
+      for (var k = 1; k < path.length; k++) {
+        links.push({ from: { row: path[k - 1], cell: probe.block }, to: { row: path[k], cell: probe.block },
+          now: k === path.length - 1, broken: probe.result === 'fail' && k === path.length - 1 });
+      }
+    }
+    var total = s.layers.reduce(function (n, l) { return n + idx(l.blocks).length; }, 0);
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [fv('fmt', s), t.n('files', s.layers.filter(function (l) { return !l.missing; }).length)],
+      count: { text: t.n('cntAlloc', total), hl: s.phase === 'commit-copy' || s.phase === 'stream-copy' },
+      colLabels: BLOCK_IDS.map(String),
+      cellHeight: '3rem',
+      rows: rows, links: links
+    });
+    c.stage.replaceChildren(h('div', { class: 'bc' }, grid));
+  }
+
+  // ── captions ──
+
+  function capSnap(s) {
+    var first = s.snaps === 1, id = s.active, old = find(s, id).backing;
+    var what = h('span', null, rich(first ? 'snap_' + s.format : 'snapLater_' + s.format));
+    return rich('capSnap', { what: what, old: file(s, old), new: file(s, id),
+      overlay: term('termOverlay', !first), backing: term('termBacking', !first) });
+  }
+
+  function capWrite(s) {
+    var op = s.op, l = find(s, s.active);
+    var out = rich('capWrite', { b: data(op.b), v: data(op.v), file: file(s, s.active), cow: term('termCow', s.log.length > 2) });
+    var below = L.readPath(s.layers, l.backing, op.b);
+    if (below.hit) out = out.concat(sp(rich('capHides', { old: data(below.value), lower: file(s, below.hit) })));
+    return out;
+  }
+
+  function capCommit(c) {
+    var s = c.state, prev = c.prev, ph = s.phase.split('-')[1];
+    var P = 'base', C = 's2', Lid = 's1';
+    var v = { L: file(s, Lid), P: file(s, P), C: file(s, C) };
+    if (s.op.op === 'stream') {
+      if (ph === 'copy') {
+        var own = s.kept.map(function (b) { return find(s, C).blocks[b]; });
+        var out = rich('capStreamHead', v).concat(sp(rich('capStreamCopy', Object.assign({ n: s.copied.length, list: data(joinList(s.copied)) }, v))));
+        if (s.kept.length) out = out.concat(sp(rich('capStreamKept', Object.assign({ n: s.kept.length, list: data(joinList(s.kept)), own: data(joinList(own)) }, v))));
+        return out.concat(sp(rich('capBaseSame', v)), sp(rich('capSame')));
+      }
+      return rich(ph === 'repoint' ? 'capRepoint' : 'capRemove', ph === 'repoint' ? { C: v.C, P: v.P, L: v.L } : v);
+    }
+    if (ph === 'copy') {
+      var before = find(prev, P).blocks, after = find(s, P).blocks;
+      var over = s.copied.filter(function (b) { return b in before; });
+      var o = rich('commitHead_' + s.format, v).concat(sp(rich('capCommitCopy', Object.assign({ n: s.copied.length, list: data(joinList(s.copied)) }, v))));
+      if (over.length) {
+        var chg = over.map(function (b) { return before[b] + ' → ' + after[b]; }).join(', ');
+        o = o.concat(sp(rich('capOverwrite', Object.assign({ n: over.length, list: data(joinList(over)), chg: data(chg) }, v))));
+      }
+      return o.concat(sp(rich('capSame')));
+    }
+    if (ph === 'repoint') return rich('capRepoint', v);
+    var r = rich('capRemove', v);
+    if (s.format !== 'qcow2') r = r.concat(sp(rich('capNotLost', { what: fv('what', s), P: v.P })));
+    return r;
+  }
+
+  function capDelete(s) {
+    var l = find(s, 's1');
+    var out = rich('capDelete', { L: file(s, 's1'), C: file(s, 's2'), list: data(joinList(idx(l.lost))) });
+    if (s.format !== 'qcow2') out = out.concat(sp(rich('capByHand', { what: fv('what', s) })));
+    return out;
+  }
+
+  function capRead(s) {
+    var q = s.probe, at = q.at, l = find(s, at);
+    var v = { b: data(q.block), file: file(s, at) };
+    if (q.result === null) return rich('capReadMiss', Object.assign({ next: file(s, l.backing) }, v));
+    if (q.result === 'fail') return rich('capReadFail', Object.assign({ L: file(s, 's1'), C: file(s, 's2') }, v));
+    var out = rich(q.result === 'hit' ? 'capReadHit' : 'capReadZero', Object.assign({ v: data(q.value) }, v));
+    if (q.result === 'hit' && l.backing) {
+      var older = [], id = l.backing;
+      while (id) { var x = find(s, id); if (q.block in x.blocks) older.push(x.blocks[q.block]); id = x.backing; }
+      if (older.length) out = out.concat(sp(rich('capReadOlder', { old: data(joinList(older)) })));
+    }
+    return out.concat(sp(rich('capVisited', { n: q.path.length })));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'format', type: 'choice', label: t('format'),
+        options: [['qcow2', 'qcow2'], ['vhdx', 'VHDX'], ['vmdk', 'VMDK']] },
+      { key: 'ending', type: 'choice', label: t('ending'), resets: true,
+        options: [['none', t('endNone')], ['commit', t('endCommit')], ['stream', t('endStream')], ['delete', t('endDelete')]] },
+      { key: 'compact', type: 'toggle', label: t('compact'), resets: true },
+      { key: 'showView', type: 'toggle', label: t('showView') }
+    ],
+
+    presets: [
+      { id: 'read-through', label: t('presetRead'), params: {}, hint: t('presetReadHint') },
+      { id: 'commit-middle', label: t('presetCommit'), params: { ending: 'commit', compact: true }, hint: t('presetCommitHint') },
+      { id: 'stream-middle', label: t('presetStream'), params: { ending: 'stream', compact: true }, hint: t('presetStreamHint') },
+      { id: 'broken-link', label: t('presetBroken'), params: { ending: 'delete', compact: true }, hint: t('presetBrokenHint') },
+      { id: 'vhdx-checkpoints', label: t('presetVhdx'), params: { format: 'vhdx', ending: 'commit' }, hint: t('presetVhdxHint') },
+      { id: 'vmdk-delta', label: t('presetVmdk'), params: { format: 'vmdk', ending: 'commit' }, hint: t('presetVmdkHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: 2, label: t('legBlock') },
+      { shape: 'slot', label: t('legFree') },
+      { shape: 'bg-soft', c: 2, label: t('legView') },
+      { shape: 'bg-link', label: t('legLink') },
+      { shape: 'bg-bad', label: t('legMissing') },
+      { shape: 'bg-dead', label: t('legUnreach') }
+    ],
+
+    render: render,
+
+    caption: function (c) {
+      var s = c.state;
+      if (s.phase === 'start') return rich('capStart', { base: file(s, 'base') });
+      if (s.phase === 'build') return rich('capBuild', { two: fv('two', s), base: file(s, 'base'), s1: file(s, 's1'), s2: file(s, 's2') });
+      if (s.phase === 'snapshot') return capSnap(s);
+      if (s.phase === 'write') return capWrite(s);
+      if (s.phase === 'delete') return capDelete(s);
+      if (s.phase === 'read') return capRead(s);
+      return capCommit(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
