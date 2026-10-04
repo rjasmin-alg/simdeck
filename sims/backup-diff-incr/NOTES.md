@@ -80,6 +80,14 @@ None. `kit/` and `models/` unchanged.
   differential with the target's own set lost, full with the target's set lost, phone mid-compare.
 - Phone: the lane grids scroll sideways inside their box (the kit's K3 phone behaviour), the page does not.
 
+## Status left at wip
+
+Everything in COMMON.md §8 holds, but `status: "ready"` makes `npm test` fail in `tests/landing.test.mjs` ("home at
+1920×1080 …: first shelf's tiles end at … 1277"). This would be the sixth ready `storage` sim, the first shelf on the
+home page wraps to a second row of tiles, and that row ends below 1080 px. The test (site frame) assumes the first
+shelf fits one row. With `wip` the test passes. Setting `ready` is one line once the site handles a shelf of six or
+more (cap or scroll the shelf, or check only its first row).
+
 ## Review
 
 A fresh reviewer read the diff against `SPEC.md` and the task. Their own reference model, written from the rules
