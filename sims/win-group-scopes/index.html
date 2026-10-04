@@ -1,0 +1,511 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-group-scopes: an explorer. Top, two domains of one forest as bands with users and groups as pills (the border
+     shows the scope) and "is member of" arrows, an invalid one drawn broken with ✕; bottom, the tested user's result
+     and the share's ACL as a rule table (kit view K4, kit/ruletable.js, docs/sim-ui.md §12). Model: sim.js; rules:
+     SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-group-scopes">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opsezi grupa i AGDLP · simdeck</title>
+<meta name="description" content="Složi grupe dviju domena za dijeljenu mapu i testiraj korisnika: nedopušteno članstvo ili ACE vidi se s razlogom, a valjani put s oznakom AGDLP.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-group-scopes",
+  "title": {
+    "hr": "Opsezi grupa i AGDLP",
+    "en": "Group scopes and AGDLP"
+  },
+  "concept": {
+    "hr": "Globalna, lokalna grupa domene, univerzalna: tko je član, gdje se koristi",
+    "en": "Global, domain local, universal: who can be a member, where it can be used"
+  },
+  "summary": {
+    "hr": "Složi grupe dviju domena za dijeljenu mapu i testiraj korisnika: nedopušteno članstvo ili ACE vidi se s razlogom, a valjani put s oznakom AGDLP.",
+    "en": "Nest groups of two domains for a file share and test a user: a membership or ACE that is not allowed shows its reason, a valid path its AGDLP label."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-group-scopes"]; colours only from kit tokens.
+   Layout: the forest diagram on top; the test result and the ACL rule table under it. */
+[data-sim="win-group-scopes"] .gs {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (same in win-dhcp-scope-options; shared request in NOTES.md). */
+[data-sim="win-group-scopes"] .sd-ctl[hidden] { display: none; }
+/* Seven controls and five presets: slightly tighter spacing than the kit's so the panel fits at 1920×1080. */
+[data-sim="win-group-scopes"] .sd-group { gap: 0.4rem; }
+[data-sim="win-group-scopes"] .sd-presets { gap: 0.25rem; }
+[data-sim="win-group-scopes"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-group-scopes"] h2 { margin: 0 0 0.2rem; font-size: 1em; font-weight: 700; }
+[data-sim="win-group-scopes"] .gs-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.7rem 0.5rem; min-width: 0; }
+
+/* forest diagram: two domain bands, five columns, wires drawn in an SVG over it */
+[data-sim="win-group-scopes"] .gs-diagwrap { grid-column: 1 / -1; min-height: 0; min-width: 0; }
+[data-sim="win-group-scopes"] .gs-diag {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 0;
+  height: 100%;
+  min-height: 15rem;
+}
+[data-sim="win-group-scopes"] .gs-band {
+  grid-column: 1 / -1;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.15rem 0.6rem;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  text-align: right;
+}
+[data-sim="win-group-scopes"] .gs-band b { color: var(--ink); }
+[data-sim="win-group-scopes"] .gs-cell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; padding: 1.7rem 0.4rem 0.4rem; min-width: 0; }
+[data-sim="win-group-scopes"] .gs-wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+[data-sim="win-group-scopes"] .gs-wires path { fill: none; stroke: var(--ink); stroke-width: 2.5; }
+[data-sim="win-group-scopes"] .gs-wires path.gs-bad { stroke: var(--danger); stroke-dasharray: 9 7; }
+[data-sim="win-group-scopes"] .gs-wires path.gs-on { stroke: var(--accent); stroke-width: 6; }
+[data-sim="win-group-scopes"] .gs-wires path.gs-halo { stroke: var(--hl); stroke-width: 14; stroke-linecap: round; }
+[data-sim="win-group-scopes"] .gs-wires .gs-head { fill: var(--ink); }
+[data-sim="win-group-scopes"] .gs-wires .gs-head-bad { fill: var(--danger); }
+[data-sim="win-group-scopes"] .gs-wires .gs-head-on { fill: var(--accent); }
+[data-sim="win-group-scopes"] .gs-wires circle { fill: var(--bg); stroke: var(--danger); stroke-width: 2.5; }
+[data-sim="win-group-scopes"] .gs-wires text { fill: var(--danger); font-family: var(--sans); font-size: 1rem; font-weight: 700; }
+
+/* nodes: a user, a group pill (border = scope), the share */
+[data-sim="win-group-scopes"] .gs-node {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+  max-width: 100%; padding: 0.25rem 0.7rem; border-radius: 2rem; background: var(--bg); text-align: center;
+}
+[data-sim="win-group-scopes"] .gs-name { font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="win-group-scopes"] .gs-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-group-scopes"] .gs-G { border: 0.2rem solid var(--c1); }
+[data-sim="win-group-scopes"] .gs-DL { border: 0.2rem dashed var(--c3); }
+[data-sim="win-group-scopes"] .gs-U { border: 0.45rem double var(--c4); }
+[data-sim="win-group-scopes"] .gs-user { border: var(--line-w) solid var(--ink); border-radius: var(--radius); }
+[data-sim="win-group-scopes"] .gs-node.gs-onpath { outline: 0.25rem solid var(--accent); outline-offset: 0.15rem; }
+[data-sim="win-group-scopes"] .gs-node.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-group-scopes"] .gs-node.sd-changed .gs-sub { color: var(--on-hl); }
+[data-sim="win-group-scopes"] .gs-ace { display: inline-flex; gap: 0.25rem; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="win-group-scopes"] .gs-ace.gs-bad { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+[data-sim="win-group-scopes"] .gs-node.sd-changed .gs-ace.gs-bad { color: var(--on-hl); }
+[data-sim="win-group-scopes"] .gs-share { border: var(--line-w) solid var(--ink); border-radius: var(--radius); padding: 0.3rem 0.6rem; background: var(--bg); min-width: 0; }
+[data-sim="win-group-scopes"] .gs-share .gs-name { display: block; }
+[data-sim="win-group-scopes"] .gs-res { display: block; font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-group-scopes"] .gs-share.sd-changed, [data-sim="win-group-scopes"] .gs-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-group-scopes"] .sd-changed .sd-rt-verdict, [data-sim="win-group-scopes"] .sd-changed .gs-sub, [data-sim="win-group-scopes"] .sd-changed .gs-muted { color: var(--on-hl); }
+[data-sim="win-group-scopes"] .gs-result { border-radius: var(--radius-sm); padding: 0.1rem 0.3rem; margin: 0 -0.3rem; }
+
+/* test card */
+[data-sim="win-group-scopes"] .gs-path { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.4rem; }
+[data-sim="win-group-scopes"] .gs-path .gs-step { font-weight: 700; white-space: nowrap; }
+[data-sim="win-group-scopes"] .gs-label { display: inline-block; padding: 0 0.5rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-weight: 700; }
+[data-sim="win-group-scopes"] .gs-label.gs-other { border-style: dashed; }
+[data-sim="win-group-scopes"] .gs-testbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+[data-sim="win-group-scopes"] .gs-testbar h2 { margin: 0; }
+[data-sim="win-group-scopes"] .gs-tbtn { min-height: var(--hit); padding: 0 0.7rem; border: var(--line-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+[data-sim="win-group-scopes"] .gs-tbtn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+[data-sim="win-group-scopes"] .gs-tbtn[aria-pressed="true"] .gs-sub { color: var(--on-accent); }
+[data-sim="win-group-scopes"] .gs-tbtn:focus-visible { outline: 0.2rem solid var(--focus); }
+[data-sim="win-group-scopes"] .gs-muted { color: var(--muted); font-style: italic; }
+[data-sim="win-group-scopes"] .gs-probs { margin: 0.3rem 0 0; padding: 0; list-style: none; }
+[data-sim="win-group-scopes"] .gs-probs li { display: flex; gap: 0.4rem; align-items: baseline; }
+[data-sim="win-group-scopes"] .gs-x { flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 1.5em; height: 1.5em; border: var(--line-w) solid var(--danger); border-radius: 50%; color: var(--danger); font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="win-group-scopes"] .gs .sd-rt { min-width: 0; }
+
+/* legend swatches of our own: the three borders and the tested path */
+[data-sim="win-group-scopes"] .sd-swatch[data-shape='gs-G'] { background: transparent; border: 0.2rem solid var(--c1); border-radius: 1rem; }
+[data-sim="win-group-scopes"] .sd-swatch[data-shape='gs-DL'] { background: transparent; border: 0.2rem dashed var(--c3); border-radius: 1rem; }
+[data-sim="win-group-scopes"] .sd-swatch[data-shape='gs-U'] { background: transparent; border: 0.4rem double var(--c4); border-radius: 1rem; }
+[data-sim="win-group-scopes"] .sd-swatch[data-shape='gs-bad'] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--danger) 0 0.3em, transparent 0.3em 0.5em); }
+[data-sim="win-group-scopes"] .sd-swatch[data-shape='gs-path'] { height: 0.45rem; border: 0; border-radius: 0; background: var(--accent); }
+
+/* Phone and portrait: one column; the diagram keeps its width and scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-group-scopes"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-group-scopes"] .gs { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="win-group-scopes"] .gs-diagwrap { overflow-x: auto; }
+  [data-sim="win-group-scopes"] .gs-diag { width: 46rem; height: 20rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Opsezi grupa i AGDLP</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var SHARE = '\\\\hq-fs01\\projects';
+
+  var PRESET_KEY = {
+    'agdlp': 'presetAgdlp', 'global-cross-domain-member': 'presetCross', 'dl-on-foreign-acl': 'presetForeignAcl',
+    'dl-into-global': 'presetDlIntoG', 'agudlp': 'presetAgudlp'
+  };
+  /** Where each node sits: [column 1–5, domain band]. B follows its domain. */
+  var COL = { ana: 1, ivo: 1, A: 2, C: 2, U: 3, B: 4 };
+  var ROW = { brk: 1, quillmoor: 2 };
+
+  /** Data (names, domains, paths) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function find(s, id) { return L.find(s, id); }
+  function nameOf(s, id) { var x = find(s, id); return x ? x.name : id; }
+  function domOf(s, id) { var x = find(s, id); return x ? x.domain : '?'; }
+  function right(r) { return h('span', null, rich('right_' + r)); }
+  function pathNode(s, path) {
+    var out = [];
+    path.forEach(function (id, i) { if (i) out.push(t('pathSep')); out.push(h('b', { translate: 'no' }, nameOf(s, id))); });
+    return h('span', null, out);
+  }
+  function edgeKey(e) { return e.child + '>' + e.parent; }
+
+  /** The problems (invalid edges, then invalid ACEs), numbered for the ✕ marks. */
+  function problemsOf(s) {
+    var out = [];
+    s.edges.forEach(function (e) { if (!e.valid) out.push({ kind: 'edge', e: e, key: edgeKey(e) }); });
+    s.aces.forEach(function (a, i) { if (!a.valid) out.push({ kind: 'ace', a: a, i: i, key: 'ace' + i }); });
+    out.forEach(function (p, i) { p.n = i + 1; });
+    return out;
+  }
+
+  // ── diagram ──
+  function nodeEl(s, x, extra) {
+    var r = s.access[s.testUser];
+    var onPath = s.tested && r.granted && r.path.indexOf(x.id) >= 0;
+    var aces = [];
+    s.aces.forEach(function (a) {
+      if (a.principal !== x.id) return;
+      aces.push(h('span', { class: 'gs-ace' + (a.valid ? '' : ' gs-bad') }, a.valid ? null : '✕', h('span', null, t.parts('aceBadge', { right: right(a.right) }))));
+    });
+    var isUser = x.kind === 'user';
+    return h('div', {
+      class: 'gs-node ' + (isUser ? 'gs-user' : 'gs-' + x.scope) + (onPath ? ' gs-onpath' : '') + (extra.changed ? ' sd-changed' : ''),
+      dataset: { node: x.id }
+    },
+      h('span', { class: 'gs-name', translate: 'no' }, x.name),
+      h('span', { class: 'gs-sub' }, isUser ? t('userTag') : t('scope_' + x.scope)),
+      aces);
+  }
+
+  function shareEl(s, changed) {
+    var body;
+    if (!s.tested) body = h('span', { class: 'gs-res gs-muted' }, t('notTested'));
+    else body = s.users.map(function (u) {
+      var r = s.access[u.id];
+      return h('span', { class: 'gs-res' }, r.granted ? RT.verdict(true, '') : RT.verdict(false, ''), ' ',
+        r.granted ? t.parts('granted', { user: data(u.name), rights: h('span', null, r.rights.map(function (x, i) { return h('span', null, i ? ', ' : '', right(x)); })) })
+          : t.parts('denied', { user: data(u.name) }));
+    });
+    return h('div', { class: 'gs-share' + (changed ? ' sd-changed' : ''), dataset: { node: 'share' } },
+      h('span', { class: 'gs-sub' }, t('shareTitle')), h('span', { class: 'gs-name', translate: 'no' }, SHARE), body);
+  }
+
+  function diagram(s, ch) {
+    var cells = [];
+    ['brk', 'quillmoor'].forEach(function (d) {
+      cells.push(h('div', { class: 'gs-band', style: { gridRow: String(ROW[d]) } },
+        h('b', { translate: 'no' }, L.DOMAINS[d]), ' · ', t(d === s.resDomain ? 'bandResource' : 'bandAccount')));
+    });
+    s.users.concat(s.groups).forEach(function (x) {
+      if (!COL[x.id]) return;
+      cells.push(h('div', { class: 'gs-cell', style: { gridColumn: String(COL[x.id]), gridRow: String(ROW[x.domain]) } },
+        nodeEl(s, x, { changed: ch.groups.indexOf(x.id) >= 0 })));
+    });
+    cells.push(h('div', { class: 'gs-cell', style: { gridColumn: '5', gridRow: String(ROW[s.resDomain]) } }, shareEl(s, ch.access && s.tested)));
+    var svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('class', 'gs-wires');
+    svg.setAttribute('aria-hidden', 'true');
+    cells.push(svg);
+    return h('div', { class: 'gs-diag' }, cells);
+  }
+
+  /** Draw the membership arrows once the nodes are laid out (and again when the stage resizes). */
+  var lastDraw = null;
+  function drawWires() {
+    if (!lastDraw) return;
+    var s = lastDraw.s, ch = lastDraw.ch, probs = lastDraw.probs;
+    var diag = document.querySelector('[data-sim="win-group-scopes"] .gs-diag');
+    if (!diag) return;
+    var svg = diag.querySelector('.gs-wires');
+    var box = diag.getBoundingClientRect();
+    var r = s.access[s.testUser];
+    var onPath = {};
+    if (s.tested && r.granted) for (var i = 1; i < r.path.length; i++) onPath[r.path[i - 1] + '>' + r.path[i]] = true;
+    function rectOf(id) {
+      var el = diag.querySelector('[data-node="' + id + '"]');
+      if (!el) return null;
+      var b = el.getBoundingClientRect();
+      return { l: b.left - box.left, r: b.right - box.left, y: b.top - box.top + b.height / 2 };
+    }
+    function el(name, attrs) {
+      var n = document.createElementNS(SVG, name);
+      Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+      return n;
+    }
+    var halos = [], lines = [], marks = [];
+    s.edges.forEach(function (e) {
+      var a = rectOf(e.child), b = rectOf(e.parent);
+      if (!a || !b) return;
+      var x1 = a.r, y1 = a.y, x2 = b.l - 2, y2 = b.y;
+      var dx = Math.max(30, (x2 - x1) / 2);
+      var d = 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' + (x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
+      var key = edgeKey(e);
+      if (ch.edges.indexOf(key) >= 0) halos.push(el('path', { d: d, class: 'gs-halo' }));
+      var cls = !e.valid ? 'gs-bad' : onPath[key] ? 'gs-on' : '';
+      lines.push(el('path', { d: d, class: cls }));
+      // arrow head at the parent
+      var hs = onPath[key] ? 13 : 10;
+      lines.push(el('polygon', { points: x2 + ',' + y2 + ' ' + (x2 - hs) + ',' + (y2 - hs * 0.6) + ' ' + (x2 - hs) + ',' + (y2 + hs * 0.6),
+        class: !e.valid ? 'gs-head-bad' : onPath[key] ? 'gs-head-on' : 'gs-head' }));
+      if (!e.valid) {
+        var p = probs.filter(function (q) { return q.key === key; })[0];
+        var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        marks.push(el('circle', { cx: mx, cy: my, r: 15 }));
+        var tx = el('text', { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+        tx.textContent = '✕' + (p ? p.n : '');
+        marks.push(tx);
+      }
+    });
+    svg.replaceChildren.apply(svg, halos.concat(lines, marks));
+  }
+  var observed = null;
+  function watch(stage) {
+    if (observed === stage || typeof ResizeObserver === 'undefined') return;
+    observed = stage;
+    new ResizeObserver(function () { drawWires(); }).observe(stage);
+  }
+
+  // ── the test card and the ACL ──
+  function testCard(s, probs, changed) {
+    var r = s.access[s.testUser], u = nameOf(s, s.testUser);
+    var result;
+    if (!s.tested) result = h('div', { class: 'gs-muted' }, t('notTested'));
+    else if (r.granted) {
+      result = h('div', null,
+        h('div', { class: 'gs-path' }, RT.verdict(true, t('outGranted')), h('b', null, right(s.aces[r.ace].right)),
+          h('span', { class: 'gs-sub' }, '(' + t.n('hops', r.hops) + ')'),
+          h('span', { class: 'gs-label' + (r.label === 'other' ? ' gs-other' : '') }, t('label_' + r.label))),
+        h('div', { class: 'gs-path' }, r.path.map(function (id, i) {
+          return h('span', { class: 'gs-step', translate: 'no' }, (i ? '→ ' : '') + nameOf(s, id));
+        }), h('span', { class: 'gs-step' }, '→ ', right(s.aces[r.ace].right))));
+    } else result = h('div', { class: 'gs-path' }, RT.verdict(false, t('noAccess')), h('span', { class: 'gs-muted' }, '— ' + t('noPath')));
+    return h('section', { class: 'gs-box gs-test' },
+      h('div', { class: 'gs-testbar' }, h('h2', null, t('testWith')), s.users.map(function (x) {
+        var dom = x.domain === 'brk' ? 'brk' : 'quillmoor';
+        var on = s.tested && x.id === s.testUser;
+        return h('button', { type: 'button', class: 'gs-tbtn', 'aria-pressed': on ? 'true' : 'false', 'aria-label': t('testUserBtn', { user: x.name }),
+          onclick: function () { window.simdeck.set({ userDomain: dom, tested: true }); } }, '▶ ', data(x.name), h('span', { class: 'gs-sub', translate: 'no' }, ' ' + dom));
+      })),
+      h('div', { class: 'gs-result' + (changed ? ' sd-changed' : '') }, result),
+      h('h2', { style: { marginTop: '0.5rem' } }, t('problemsTitle')),
+      probs.length ? h('ul', { class: 'gs-probs' }, probs.map(function (p) {
+        var line = p.kind === 'edge'
+          ? t.parts('problemEdge', { child: data(nameOf(s, p.e.child)), parent: data(nameOf(s, p.e.parent)), why: t('why_' + p.e.reason) })
+          : t.parts('problemAce', { principal: data(nameOf(s, p.a.principal)), why: t('why_' + p.a.reason) });
+        return h('li', null, h('span', { class: 'gs-x', 'aria-hidden': 'true' }, '✕' + p.n), h('span', null, line));
+      })) : h('div', { class: 'gs-muted' }, t('noProblems')));
+  }
+
+  function aclTable(s) {
+    var r = s.access[s.testUser];
+    var paths = s.tested ? L.chainsFrom(s.edges, s.testUser) : {};
+    return RT({
+      mode: 'deny',
+      title: h('span', null, t.parts('rtTitle', { share: data(SHARE) })),
+      columns: [{ key: 'who', label: t('colPrincipal') }, { key: 'dom', label: t('colDomain') }, { key: 'scope', label: t('colScope'), wrap: true }],
+      actionLabel: t('colRight'),
+      markLabel: t('markFor', { user: nameOf(s, s.testUser) }),
+      rows: s.aces.map(function (a, i) {
+        var x = find(s, a.principal) || { name: a.principal, domain: '?', kind: 'user' };
+        var reached = !!paths[a.principal];
+        var note = null;
+        if (!a.valid) note = [{ k: 'dashed', text: '⚠ ' + t('invalidNote') }];
+        else if (s.tested && reached) {
+          var p = paths[a.principal];
+          note = [{ k: 'muted', text: p.length === 1 ? t('directNote') : t.n('viaNote', p.length - 1) }];
+        }
+        return {
+          no: i + 1,
+          cells: { who: x.name, dom: x.domain, scope: h('span', null, x.kind === 'user' ? t('accountScope') : t('scope_' + x.scope)) },
+          action: right(a.right),
+          effect: 'allow',
+          hit: s.tested ? (a.valid && reached) : null,
+          miss: s.tested && !a.valid ? ['who'] : [],
+          note: note
+        };
+      }),
+      implicit: { text: t('implicit'), action: '—', effect: 'deny' },
+      at: 'all',
+      done: s.tested,
+      outcome: function (i) { return i < s.aces.length ? RT.verdict(true, t('outGranted')) : RT.verdict(false, t('outDenied')); },
+      words: { win: t('wordWin') },
+      stickyMark: true
+    });
+  }
+
+  // "Changed" marks the groups, edges and result changed by the last param change. Renders while the page loads mark nothing.
+  var last = { key: null, state: null, ch: L.changes(null, null) }, loaded = false;
+  setTimeout(function () { loaded = true; }, 0);
+  function changesFor(s, p) {
+    var key = JSON.stringify(p);
+    if (key !== last.key) {
+      last.ch = loaded && last.state ? L.changes(last.state, s) : L.changes(null, null);
+      last.key = key; last.state = s;
+    }
+    return last.ch;
+  }
+
+  /** The problem that matters for the tested user: one on the way from the user, else the first. */
+  function keyProblem(s, probs) {
+    var reached = s.access[s.testUser].reached;
+    var mine = probs.filter(function (p) { return p.kind === 'edge' ? reached.indexOf(p.e.child) >= 0 : reached.indexOf(p.a.principal) >= 0; });
+    return mine[0] || probs[0] || null;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'scopeA', type: 'choice', label: t('scopeA'), options: [['G', t('optG')], ['DL', t('optDL')], ['U', t('optU')]] },
+      { key: 'scopeB', type: 'choice', label: t('scopeB'), options: [['G', t('optG')], ['DL', t('optDL')], ['U', t('optU')]] },
+      { key: 'bInBrk', type: 'toggle', label: t('bInBrk') },
+      { key: 'aInB', type: 'toggle', label: t('aInB') },
+      { key: 'viaU', type: 'toggle', label: t('viaU') },
+      { key: 'aclPrincipal', type: 'choice', label: t('aclPrincipal'), options: [['B', t('optGroupB')], ['A', t('optGroupA')], ['user', t('optUser')]] },
+      { key: 'userDomain', type: 'choice', label: t('userDomain'), options: [['brk', 'ana'], ['quillmoor', 'ivo']], visible: function () { return false; } },
+      { key: 'tested', type: 'toggle', label: t('tested'), visible: function () { return false; } }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    keys: [{ key: 't', label: t('testHint'), run: function (sim) { sim.set({ tested: true }); } }],
+
+    legend: [
+      { shape: 'gs-G', label: t('legG') },
+      { shape: 'gs-DL', label: t('legDL') },
+      { shape: 'gs-U', label: t('legU') },
+      { shape: 'line', label: t('legEdge') },
+      { shape: 'gs-bad', label: t('legBroken') },
+      { shape: 'gs-path', label: t('legPath') },
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params;
+      var ch = changesFor(s, p);
+      var probs = problemsOf(s);
+      c.stage.replaceChildren(h('div', { class: 'gs' },
+        h('div', { class: 'gs-diagwrap' }, diagram(s, ch)),
+        testCard(s, probs, ch.access && s.tested),
+        aclTable(s)));
+      lastDraw = { s: s, ch: ch, probs: probs };
+      drawWires();
+      watch(c.stage);
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      var probs = problemsOf(s);
+      var out = [];
+      function add(parts) { if (out.length) out.push(' '); out = out.concat(parts); }
+      var u = data(nameOf(s, s.testUser));
+      var kp = keyProblem(s, probs);
+      if (!s.tested) add(t.parts('capUntested', { user: u }));
+      if (s.testUser === 'ivo' && !c.params.viaU) add(rich('capIvoAdded', { group: data(nameOf(s, 'A')) }));
+      if (kp && kp.kind === 'edge') {
+        add(rich('cap_' + kp.e.reason, { child: data(nameOf(s, kp.e.child)), parent: data(nameOf(s, kp.e.parent)),
+          cdom: data(domOf(s, kp.e.child)), pdom: data(domOf(s, kp.e.parent)) }));
+      } else if (kp) {
+        add(rich('cap_' + kp.a.reason, { principal: data(nameOf(s, kp.a.principal)), pdom: data(domOf(s, kp.a.principal)), rdom: data(s.resDomain) }));
+      }
+      if (s.tested) {
+        var r = s.access[s.testUser];
+        if (r.granted) {
+          var key = r.label === 'agdlp' ? 'capAgdlp' : r.label === 'agudlp' ? 'capAgudlp' : 'capOther';
+          add(rich(key, { path: pathNode(s, r.path), right: right(s.aces[r.ace].right) }));
+        } else add(t.parts('capDenied', { user: u }));
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
