@@ -58,7 +58,7 @@ async function open(opts = {}) {
 const shot = (page, name, o = {}) => (SHOTS ? page.screenshot({ path: join(SHOTS, `${name}.png`), ...o }) : null);
 const visibleIds = (page) => page.$$eval('.tile:not([hidden])', (ts) => ts.map((t) => t.dataset.id));
 
-test('home at 1920×1080: search, the chips and the first shelf on the first screen, light and dark', { skip }, async () => {
+test('home at 1920×1080: search, the chips and the first row of the first shelf on the first screen, light and dark', { skip }, async () => {
   for (const colorScheme of ['light', 'dark']) {
     const { ctx, page, errors } = await open({ colorScheme });
     await page.goto(home());
@@ -67,8 +67,10 @@ test('home at 1920×1080: search, the chips and the first shelf on the first scr
     assert.ok((await box('#q')).y + (await box('#q')).height < 1080);
     assert.ok((await box('#chips')).y + (await box('#chips')).height < 1080);
     const shelf = page.locator('.topic').first();
-    const tiles = await shelf.locator('.tile').evaluateAll((ts) => ts.map((t) => t.getBoundingClientRect().bottom));
-    assert.ok(tiles.every((b) => b <= 1080), `first shelf's tiles end at ${tiles.join(', ')}`);
+    // Shelves wrap as topics grow; the first screen must show the first shelf's first row, not the whole shelf.
+    const rects = await shelf.locator('.tile').evaluateAll((ts) => ts.map((t) => { const r = t.getBoundingClientRect(); return [r.top, r.bottom]; }));
+    const firstRow = rects.filter(([top]) => top === rects[0][0]).map(([, bottom]) => bottom);
+    assert.ok(firstRow.length > 0 && firstRow.every((b) => b <= 1080), `first shelf's first row ends at ${firstRow.join(', ')}`);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'q', 'search focused on load');
     const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     assert.equal(bg, colorScheme === 'dark' ? 'rgb(13, 22, 38)' : 'rgb(251, 250, 246)', 'the kit\'s --bg, following the OS');
