@@ -1,0 +1,466 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ntfs-share-effective: an explorer. Left, the chosen user's token (SIDs) and the result card (share, NTFS and
+     effective rights as chips R X W M F, with the ACE that decided each); right, the share's ACL and the folder's NTFS
+     ACL as rule tables (kit view K4, kit/ruletable.js, docs/sim-ui.md §12) with the page's own marks: NTFS is read in
+     canonical order and the first ACE that mentions a right decides it; on the share allows add up and a deny wins.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ntfs-share-effective">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Efektivni pristup: NTFS i dijeljenje · simdeck</title>
+<meta name="description" content="Postavi dozvole dijeljenja i NTFS dozvole mape i provjeri korisnike lokalno i preko mreže: preko mreže vrijedi strože od dvaju, pravo po pravo.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ntfs-share-effective",
+  "title": {
+    "hr": "Efektivni pristup: NTFS i dijeljenje",
+    "en": "Effective access: NTFS plus share"
+  },
+  "concept": {
+    "hr": "Strože od dvaju pobjeđuje, zabrana je jača od dozvole, grupe se zbrajaju",
+    "en": "The stricter of the two wins; deny beats allow; groups add up"
+  },
+  "summary": {
+    "hr": "Postavi dozvole dijeljenja i NTFS dozvole mape i provjeri korisnike lokalno i preko mreže: preko mreže vrijedi strože od dvaju, pravo po pravo.",
+    "en": "Set share and NTFS permissions on a folder, then test users locally and over the network: over the network the stricter of the two applies, right by right."
+  },
+  "tags": [
+    "permissions"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ntfs-share-effective"]; colours only from kit tokens.
+   Layout: the token and the result on the left; the share ACL and the NTFS ACL on the right. */
+[data-sim="win-ntfs-share-effective"] .ns {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.4fr);
+  gap: 1.4cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (same in win-dhcp-scope-options; shared request in NOTES.md). */
+[data-sim="win-ntfs-share-effective"] .sd-ctl[hidden] { display: none; }
+/* Tighter panel gaps (as win-group-scopes) so six presets and five settings fit at 1920×1080. */
+[data-sim="win-ntfs-share-effective"] .sd-group { gap: 0.4rem; }
+[data-sim="win-ntfs-share-effective"] .sd-presets { gap: 0.25rem; }
+[data-sim="win-ntfs-share-effective"] .ns-col { display: flex; flex-direction: column; gap: 1.2cqh; min-width: 0; min-height: 0; }
+[data-sim="win-ntfs-share-effective"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-ntfs-share-effective"] h2 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-ntfs-share-effective"] .ns-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.7rem 0.5rem; min-width: 0; }
+[data-sim="win-ntfs-share-effective"] .ns-sub { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; white-space: nowrap; }
+
+/* token card */
+[data-sim="win-ntfs-share-effective"] .ns-token { border-left: 0.5rem solid var(--ink); }
+[data-sim="win-ntfs-share-effective"] .ns-sids { width: 100%; border-collapse: collapse; margin-top: 0.2rem; font-size: 0.93em; }
+[data-sim="win-ntfs-share-effective"] .ns-sids td { padding: 0.05rem 0.4rem 0.05rem 0; border-bottom: var(--line-w) solid var(--line); vertical-align: baseline; }
+[data-sim="win-ntfs-share-effective"] .ns-sids tr:last-child td { border-bottom: 0; }
+[data-sim="win-ntfs-share-effective"] .ns-name { font-weight: 700; white-space: nowrap; }
+[data-sim="win-ntfs-share-effective"] .ns-sid { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-ntfs-share-effective"] .ns-kind { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-ntfs-share-effective"] .ns-hit { display: inline-block; margin-left: 0.25rem; padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; }
+
+/* stage pickers (user, path) */
+[data-sim="win-ntfs-share-effective"] .ns-pick { display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; margin-bottom: 0.35rem; }
+[data-sim="win-ntfs-share-effective"] .ns-seg { display: inline-flex; align-items: center; gap: 0; }
+[data-sim="win-ntfs-share-effective"] .ns-seg button {
+  min-height: var(--hit); padding: 0 0.6rem; border: var(--line-w) solid var(--line); margin-left: calc(-1 * var(--line-w));
+  background: var(--bg); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+}
+[data-sim="win-ntfs-share-effective"] .ns-seg button:first-of-type { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+[data-sim="win-ntfs-share-effective"] .ns-seg button:last-of-type { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+[data-sim="win-ntfs-share-effective"] .ns-seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+[data-sim="win-ntfs-share-effective"] .ns-member {
+  min-height: var(--hit); padding: 0 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+}
+[data-sim="win-ntfs-share-effective"] .ns-member[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 0.12rem var(--accent); }
+[data-sim="win-ntfs-share-effective"] .ns-member:focus-visible,
+[data-sim="win-ntfs-share-effective"] .ns-seg button:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; position: relative; }
+
+/* result card: one row per side, chips R X W M F */
+[data-sim="win-ntfs-share-effective"] .ns-res { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.25rem 0.7rem; align-items: center; margin-top: 0.3rem; }
+[data-sim="win-ntfs-share-effective"] .ns-res-l { font-weight: 700; white-space: nowrap; }
+[data-sim="win-ntfs-share-effective"] .ns-res-eff { font-size: 1.1em; }
+[data-sim="win-ntfs-share-effective"] .ns-chips { display: flex; gap: 0.3rem; }
+[data-sim="win-ntfs-share-effective"] .ns-chip {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 2.4rem; padding: 0.05rem 0.2rem;
+  border: 0.15rem solid var(--ink); border-radius: var(--radius-sm); line-height: 1.1;
+}
+[data-sim="win-ntfs-share-effective"] .ns-chip-top { display: inline-flex; gap: 0.25rem; align-items: baseline; }
+[data-sim="win-ntfs-share-effective"] .ns-chip b { font-size: 1.05em; }
+[data-sim="win-ntfs-share-effective"] .ns-chip[data-on="true"] { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+[data-sim="win-ntfs-share-effective"] .ns-chip[data-on="false"] { border-style: dashed; color: var(--muted); }
+[data-sim="win-ntfs-share-effective"] .ns-chip[data-on="false"] b { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="win-ntfs-share-effective"] .ns-chip small { font-size: var(--fs-sm); font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-ntfs-share-effective"] .ns-chip.sd-changed { outline: 0.25rem solid var(--hl); outline-offset: 0.1rem; }
+[data-sim="win-ntfs-share-effective"] .ns-chips.ns-unused { color: var(--muted); font-style: italic; }
+[data-sim="win-ntfs-share-effective"] .ns-res-name { min-width: 0; }
+[data-sim="win-ntfs-share-effective"] .ns-arrow { grid-column: 1 / -1; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="win-ntfs-share-effective"] .ns-db { color: var(--ink); font-size: 1.1rem; }
+[data-sim="win-ntfs-share-effective"] .ns-key { margin-top: 0.3rem; color: var(--muted); font-size: var(--fs-sm); }
+
+/* rule tables */
+[data-sim="win-ntfs-share-effective"] .ns .sd-rt { flex: 0 1 auto; }
+[data-sim="win-ntfs-share-effective"] .ns-off .sd-rt-table { opacity: 0.7; }
+[data-sim="win-ntfs-share-effective"] .sd-rt td.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* Phone and portrait: one column, the stage grows with its content; the tables scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ntfs-share-effective"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ntfs-share-effective"] .ns { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  /* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (same in win-dhcp-scope-options; shared request in NOTES.md). */
+[data-sim="win-ntfs-share-effective"] .sd-ctl[hidden] { display: none; }
+/* Tighter panel gaps (as win-group-scopes) so six presets and five settings fit at 1920×1080. */
+[data-sim="win-ntfs-share-effective"] .sd-group { gap: 0.4rem; }
+[data-sim="win-ntfs-share-effective"] .sd-presets { gap: 0.25rem; }
+[data-sim="win-ntfs-share-effective"] .ns-col { gap: 0.8rem; }
+  [data-sim="win-ntfs-share-effective"] .ns-token { overflow-x: auto; }
+  [data-sim="win-ntfs-share-effective"] .ns-res { grid-template-columns: auto minmax(0, 1fr); }
+  [data-sim="win-ntfs-share-effective"] .ns-res-name { grid-column: 2; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Efektivni pristup: NTFS i dijeljenje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var UNC = '\\\\FS1\\Prodaja', FOLDER = 'D:\\Prodaja', PARENT = 'D:\\';
+  var LETTER = { read: 'R', readExecute: 'X', write: 'W', modify: 'M', full: 'F' };
+  var DISPLAY = { ana: 'uAna', ivan: 'uIvan', marko: 'uMarko' };
+  var PRESET_KEY = {
+    classic: 'presetClassic', 'default-share': 'presetDefaultShare', 'groups-add-up': 'presetGroupsAddUp',
+    'deny-wins': 'presetDenyWins', 'explicit-beats-inherited': 'presetExplicitBeatsInherited', 'deny-everyone-share': 'presetDenyEveryoneShare'
+  };
+
+  /** Data (names, SIDs, paths) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function list(items) {
+    if (items.length === 1) return items[0];
+    var head = items.slice(0, -1).reduce(function (acc, it) { return acc === null ? it : h('span', null, t.parts('listMore', { a: acc, b: it })); }, null);
+    return h('span', null, t.parts('list2', { a: head, b: items[items.length - 1] }));
+  }
+  function letters(levels) { return data(levels.map(function (l) { return LETTER[l]; }).join(' ')); }
+  function userName(s) { return t(DISPLAY[s.who]); }
+
+  /** A permission name in a sentence: with the Croatian in parentheses at its first mention in this caption (`seen`
+      keeps the names already used), in italics alone after that (the term rule). */
+  function phrase(key, plainKey, seen) {
+    var name = t(plainKey);
+    if (seen[name] && t(key).indexOf('*') >= 0) return h('em', { lang: 'en' }, name);
+    seen[name] = true;
+    return h('span', null, rich(key));
+  }
+  /** A level list as words: in the table ("Modify"), or in a sentence when `seen` is given. */
+  function levelWords(names, seen) {
+    if (!names.length) return h('span', null, seen ? t('ph_none') : t('noAccess'));
+    var parts = names.map(function (l) { return seen ? phrase('ph_' + l, 'lv_' + l, seen) : h('span', null, t('lv_' + l)); });
+    return parts.reduce(function (a, b) { return h('span', null, t.parts('plus', { a: a, b: b })); });
+  }
+  /** The share result in the share's own words (Read / Change / Full Control), else as NTFS levels. */
+  function shareWords(e, seen) {
+    if (e.shareName) return seen ? phrase('phs_' + e.shareName, 'sh_' + e.shareName, seen) : h('span', null, t('sh_' + e.shareName));
+    return levelWords(e.name, seen);
+  }
+
+  // ── left: the token ──
+  function tokenCard(s, p, ntfsNo, shareNo) {
+    var rows = s.sids.map(function (x) {
+      var hits = [];
+      s.ntfs.forEach(function (a, i) { if (a.principal === x.name) hits.push(h('span', { class: 'ns-hit' }, t.parts('inNtfs', { n: data(ntfsNo[i]) }))); });
+      if (s.shareEff) s.share.forEach(function (a, i) { if (a.principal === x.name) hits.push(h('span', { class: 'ns-hit' }, t.parts('inShare', { n: data(shareNo[i]) }))); });
+      var kind = x.kind === 'nested' ? t.parts('kNested', { via: data(x.via) }) : t(x.kind === 'user' ? 'kUser' : x.kind === 'group' ? 'kGroup' : 'kWellKnown');
+      return h('tr', null,
+        h('td', null, h('span', { class: 'ns-name' }, data(x.name)), hits),
+        h('td', { class: 'ns-kind' }, kind),
+        h('td', { class: 'ns-sid', title: x.sid }, data(x.sid.replace(/^S-1-5-21-…/, '…'))));
+    });
+    return h('section', { class: 'ns-box ns-token' },
+      h('div', { class: 'ns-pick' },
+        seg('who', t('who'), s.who, [['ana', data('ana')], ['ivan', data('ivan')], ['marko', data('marko')]]),
+        h('button', { type: 'button', class: 'ns-member', 'aria-pressed': p.voditelji ? 'true' : 'false',
+          onclick: function () { window.simdeck.set({ voditelji: !p.voditelji }); },
+          title: t('voditelji'), 'aria-label': t('voditelji') },
+          h('span', { 'aria-hidden': 'true' }, p.voditelji ? '☑ ' : '☐ '), h('span', { 'aria-hidden': 'true' }, t('memberShort'))),
+        seg('path', t('path'), s.path, [['network', t('pathNetwork')], ['local', t('pathLocal')]])),
+      h('h2', null, t.parts('tokenTitle', { user: data(L.DOMAIN + '\\' + s.who) }), ' ',
+        h('span', { class: 'ns-sub' }, s.path === 'network' ? t.parts('tokenNetwork', { unc: data(UNC) }) : t.parts('tokenLocal', { path: data(FOLDER) }))),
+      h('table', { class: 'ns-sids' }, h('tbody', null, rows)));
+  }
+  /** A segmented picker on the stage for a hidden param (the panel would not fit it at 1920×1080). */
+  function seg(key, label, value, options) {
+    return h('div', { class: 'ns-seg', role: 'group', 'aria-label': label },
+      options.map(function (o) {
+        var on = o[0] === value;
+        return h('button', { type: 'button', 'aria-pressed': on ? 'true' : 'false',
+          onclick: function () { var q = {}; q[key] = o[0]; window.simdeck.set(q); } }, o[1]);
+      }));
+  }
+
+  // ── left: the result card ──
+  function chipRow(levels, sub, changed) {
+    return h('div', { class: 'ns-chips' }, L.LEVELS.map(function (l) {
+      var on = !!levels[l];
+      return h('span', { class: 'ns-chip' + (changed.indexOf(l) >= 0 ? ' sd-changed' : ''), dataset: { on: on ? 'true' : 'false' },
+        'aria-label': t(on ? 'chipOn' : 'chipOff', { chip: t('lv_' + l) }) },
+        h('span', { class: 'ns-chip-top' }, h('b', { translate: 'no' }, LETTER[l]), h('span', { 'aria-hidden': 'true' }, on ? '✓' : '✕')),
+        h('small', null, sub(l)));
+    }));
+  }
+  function deciderText(rows, no) {
+    return rows.length ? data(rows.map(function (i) { return '#' + no[i]; }).join(' ')) : data(t('noAce'));
+  }
+  function resultCard(s, ntfsNo, shareNo, ch) {
+    var e = s.effective, grid = [];
+    if (s.shareEff) {
+      grid.push(h('div', { class: 'ns-res-l' }, t('rowShare')),
+        chipRow(s.shareEff.levels, function (l) { return deciderText(s.shareEff.deciders[l], shareNo); }, ch.chips.share),
+        h('div', { class: 'ns-res-name' }, shareWords(s.shareEff)));
+    } else {
+      grid.push(h('div', { class: 'ns-res-l' }, t('rowShare')), h('div', { class: 'ns-chips ns-unused' }, t('shareUnused')), h('div'));
+    }
+    grid.push(h('div', { class: 'ns-res-l' }, t('rowNtfs')),
+      chipRow(s.ntfsEff.levels, function (l) { return deciderText(s.ntfsEff.deciders[l], ntfsNo); }, ch.chips.ntfs),
+      h('div', { class: 'ns-res-name' }, levelWords(s.ntfsEff.name)));
+    var db = { ntfs: 'dbNtfs', share: 'dbShare', same: 'dbSame', both: 'dbBoth' }[s.decidedBy];
+    grid.push(h('div', { class: 'ns-arrow' }, '▼ ', s.shareEff ? t('stricter') : t('localOnly'), db ? ' ' : null, db ? h('span', { class: 'ns-db' }, t(db)) : null));
+    grid.push(h('div', { class: 'ns-res-l ns-res-eff' }, t('rowEff')),
+      chipRow(e.levels, function (l) {
+        var by = e.by[l];
+        return by === 'share' ? t('subShare') : by === 'ntfs' && s.shareEff ? t('subNtfs') : by === 'neither' ? t('subBoth') : '';
+      }, ch.chips.effective),
+      h('div', { class: 'ns-res-name ns-res-eff' }, h('b', null, levelWords(e.name))));
+    return h('section', { class: 'ns-box' },
+      h('h2', null, t.parts('resTitle', { user: data(s.who) })),
+      h('div', { class: 'ns-res' }, grid),
+      h('div', { class: 'ns-key' }, rich('chipKey')));
+  }
+
+  // ── right: the two rule tables ──
+  function typeCell(type) { return h('span', null, t(type === 'deny' ? 'deny' : 'allow')); }
+  /** Like RT.verdict, with the chip letters as data. */
+  function outcomeOf(type, levels) {
+    var ok = type !== 'deny';
+    return h('span', { class: 'sd-rt-verdict', dataset: { ok: String(ok) } }, (ok ? '✓ ' : '✕ ') + t(ok ? 'outGrants' : 'outDenies'),
+      levels.length ? ' ' : null, levels.length ? letters(levels) : null);
+  }
+  function markChanged(table, idx) {
+    var trs = table.querySelectorAll('tbody tr');
+    idx.forEach(function (i) { if (trs[i]) trs[i].lastElementChild.classList.add('sd-changed'); });
+  }
+  function shareTable(s, ch) {
+    var e = s.shareEff;
+    var table = RT({
+      mode: 'deny',
+      title: h('span', null, t.parts('shareTitle', { unc: data(UNC) })),
+      columns: [{ key: 'who', label: t('colPrincipal') }, { key: 'level', label: t('colLevel') }],
+      actionLabel: t('colType'),
+      markLabel: data(s.who),
+      rows: s.share.map(function (a, i) {
+        return {
+          no: i + 1, cells: { who: a.principal, level: h('span', null, t('sh_' + a.level)) }, action: typeCell(a.type), effect: a.type,
+          hit: e ? e.rows[i].match : null, mark: e ? e.rows[i].mark : 'skip'
+        };
+      }),
+      implicit: { text: t('implicitShare'), action: h('span', null, t('noAccess')), effect: 'deny' },
+      at: 'all',
+      done: !!e,
+      outcome: function (i) { return i < s.share.length ? outcomeOf(s.share[i].type, e.rows[i].levels) : RT.verdict(false, t('noAccess')); },
+      words: { win: t('wordWin'), beaten: t('wordBeaten'), skip: t('wordSkip') },
+      stickyMark: true,
+      className: e ? null : 'ns-off'
+    });
+    markChanged(table, ch.share);
+    return table;
+  }
+  function ntfsTable(s, ch) {
+    var e = s.ntfsEff;
+    var table = RT({
+      mode: 'deny',
+      title: h('span', null, t.parts('ntfsTitle', { path: data(FOLDER) })),
+      columns: [{ key: 'who', label: t('colPrincipal') }, { key: 'level', label: t('colLevel') }, { key: 'origin', label: t('colOrigin') }],
+      actionLabel: t('colType'),
+      markLabel: data(s.who),
+      rows: s.ntfs.map(function (a, i) {
+        return {
+          no: i + 1,
+          cells: {
+            who: a.principal, level: h('span', null, t('lv_' + a.rights)),
+            origin: a.inherited ? h('span', null, t.parts('inherited', { from: data(PARENT) })) : h('span', null, t('explicit'))
+          },
+          action: typeCell(a.type), effect: a.type,
+          hit: e.rows[i].match, mark: e.rows[i].mark
+        };
+      }),
+      implicit: { text: t('implicitNtfs'), action: h('span', null, t('noAccess')), effect: 'deny' },
+      at: 'all',
+      done: true,
+      outcome: function (i) { return i < s.ntfs.length ? outcomeOf(s.ntfs[i].type, e.rows[i].levels) : RT.verdict(false, t('noAccess')); },
+      words: { win: t('wordWin'), beaten: t('wordBeaten') },
+      stickyMark: true
+    });
+    markChanged(table, ch.ntfs);
+    return table;
+  }
+
+  // "Changed" marks the rows and chips that changed with the last param change; renders while the page loads mark nothing.
+  var last = { key: null, state: null, changes: L.changes(null, null) }, loaded = false;
+  setTimeout(function () { loaded = true; }, 0);
+  function changesFor(s, p) {
+    var key = JSON.stringify(p);
+    if (key !== last.key) {
+      last.changes = loaded && last.state ? L.changes(last.state, s) : L.changes(null, null);
+      last.key = key; last.state = s;
+    }
+    return last.changes;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      // who and path are picked on the stage (token card); hidden here, kept in the URL and the presets
+      { key: 'who', type: 'choice', label: t('who'), options: [['ana', t('uAna')], ['ivan', t('uIvan')], ['marko', t('uMarko')]], visible: function () { return false; } },
+      { key: 'path', type: 'choice', label: t('path'), options: [['network', t('pathNetwork')], ['local', t('pathLocal')]], visible: function () { return false; } },
+      { key: 'shareEveryone', type: 'choice', label: t('shareEveryone'), options: [['read', t('sh_read')], ['change', t('sh_change')], ['full', t('sh_full')]] },
+      { key: 'shareDenyEveryone', type: 'toggle', label: t('shareDenyEveryone') },
+      { key: 'ntfsProdaja', type: 'choice', label: t('ntfsProdaja'), options: [['read', t('lv_read')], ['modify', t('lv_modify')]] },
+      { key: 'denyPripravnici', type: 'choice', label: t('denyPripravnici'), options: [['none', t('denyNone')], ['explicit', t('denyExplicit')], ['inherited', t('denyInherited')]] },
+      { key: 'explicitAllowIvan', type: 'toggle', label: t('explicitAllowIvan') },
+      { key: 'voditelji', type: 'toggle', label: t('voditelji'), visible: function () { return false; } }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'rt-beaten', label: t('legBeaten') },
+      { shape: 'rt-no', label: t('legNo') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var ch = changesFor(s, c.params);
+      var ntfsNo = s.ntfs.map(function (a, i) { return i + 1; });
+      var shareNo = s.share.map(function (a, i) { return i + 1; });
+      c.stage.replaceChildren(h('div', { class: 'ns' },
+        h('div', { class: 'ns-col' }, tokenCard(s, c.params, ntfsNo, shareNo), resultCard(s, ntfsNo, shareNo, ch)),
+        h('div', { class: 'ns-col' }, shareTable(s, ch), ntfsTable(s, ch))));
+    },
+
+    caption: function (c) {
+      var s = c.state, n = s.ntfsEff, user = userName(s);
+      var out = [];
+      function add(parts) { if (out.length) out.push(' '); out = out.concat(parts); }
+      var seen = {};
+      if (n.implicit) add(rich(s.shareEff ? 'capNone' : 'capNoneLocal', { user: data(s.who) }));
+      else if (s.decidedBy === 'local') add(rich('capLocal', { user: user, eff: levelWords(s.effective.name, seen) }));
+      else {
+        // built in reading order, so the first mention carries the Croatian
+        var vars = { share: shareWords(s.shareEff, seen) };
+        vars.ntfs = levelWords(n.name, seen);
+        vars.user = user;
+        vars.eff = levelWords(s.effective.name, seen);
+        var onlyRead = s.effective.name.length === 1 && (s.effective.name[0] === 'read' || s.effective.name[0] === 'readExecute');
+        if (s.decidedBy === 'share') add(rich(onlyRead ? 'capShareRead' : 'capShare', vars));
+        else if (s.decidedBy === 'ntfs') add(rich('capNtfs', vars));
+        else if (s.decidedBy === 'same') add(rich('capSame', vars));
+        else add(rich('capBoth', vars));
+      }
+      // NTFS: which order rule showed up
+      var deny = s.ntfs.map(function (a, i) { return i; }).filter(function (i) { return s.ntfs[i].type === 'deny' && n.rows[i].match; });
+      deny.forEach(function (i) {
+        var a = s.ntfs[i], r = n.rows[i];
+        if (!a.inherited && r.levels.length) add(rich('capExplicitDeny', { chips: letters(r.levels) }));
+        else if (a.inherited && r.mark === 'beaten') {
+          var by = s.ntfs.map(function (x, j) { return j; }).filter(function (j) { return s.ntfs[j].type === 'allow' && !s.ntfs[j].inherited && n.rows[j].decided.indexOf('w') >= 0; })[0];
+          var who = by === undefined ? null : s.ntfs[by].principal;
+          if (who) add(rich('capExplicitBeats', { for: who === 'ivan' ? t('forIvan') : h('span', null, t.parts('forGroup', { g: data(who) })) }));
+        } else if (a.inherited && r.mark === 'win') add(rich('capInheritedDeny'));
+      });
+      var allows = s.ntfs.map(function (a, i) { return i; }).filter(function (i) { return s.ntfs[i].type === 'allow' && n.rows[i].mark === 'win' && n.rows[i].levels.length; });
+      if (allows.length > 1) {
+        add(rich('capAddUp', { list: list(allows.map(function (i) {
+          return h('span', null, t.parts('addUpItem', { g: data(s.ntfs[i].principal), chips: letters(n.rows[i].levels) }));
+        })) }));
+      }
+      if (s.shareEff && s.share.some(function (a, i) { return a.type === 'deny' && s.shareEff.rows[i].match; })) add(rich('capShareDeny'));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
