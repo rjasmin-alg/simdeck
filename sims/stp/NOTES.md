@@ -65,7 +65,7 @@ strings. The flood supports any scene: more than two inter-switch ports per swit
 four-switch mesh), a `router` node that absorbs broadcasts, and a loop-free tree (the flood ends). A preset task adds
 a `topo` value to `sceneOf` and a layout in `index.html` `layoutOf`. If `storm` lands it replaces `no-stp` (task).
 
-## Term pairs (not in kit/glossary.js; written out in both tables)
+## Term pairs (added to kit/glossary.js with "src": "simdeck" on the owner's request, 2026-10-05; the page still writes them out)
 
 | en | hr |
 |---|---|
@@ -75,7 +75,7 @@ a `topo` value to `sceneOf` and a layout in `index.html` `layoutOf`. If `storm` 
 | root port | korijenski priključak |
 | designated port | određeni priključak |
 | blocking | blokiranje |
-| listening / learning / forwarding | osluškivanje / učenje / prosljeđivanje *(check)* |
+| listening / learning / forwarding | osluškivanje / učenje / prosljeđivanje *(check)*; listening was already in the glossary (uvod-u-linux) |
 | path cost | trošak puta |
 | broadcast storm | *broadcast* oluja (URM ch07) |
 
