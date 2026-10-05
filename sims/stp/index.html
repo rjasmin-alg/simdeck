@@ -1,0 +1,583 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- stp: classic spanning tree on three switches in a triangle (or two switches joined twice). A stepper: one step is
+     a BPDU round, a port-timer stage (+15 s), a cut link or information that ages out, then one broadcast over the
+     finished tree. With STP off the broadcast circles the loop forever. Kit view K2 draws the switches and links;
+     the side table holds each port's role, state and stored BPDU. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="stp">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Razapinjuće stablo (STP) · simdeck</title>
+<meta name="description" content="Tri preklopnika u trokutu razmjenjuju BPDU-ove: najniži ID mosta postaje korijen, jedan priključak blokira. Prekini vezu i gledaj ponovnu konvergenciju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "stp",
+  "title": {
+    "hr": "Razapinjuće stablo (STP)",
+    "en": "Spanning tree (STP)"
+  },
+  "concept": {
+    "hr": "Izbor korijenskog mosta, uloge priključaka i koji priključak blokira petlju",
+    "en": "Root bridge election, port roles, and which port blocks the loop"
+  },
+  "summary": {
+    "hr": "Tri preklopnika u trokutu razmjenjuju BPDU-ove: najniži ID mosta postaje korijen, jedan priključak blokira. Prekini vezu i gledaj ponovnu konvergenciju.",
+    "en": "Three switches in a triangle exchange BPDUs: the lowest bridge ID becomes root, one port blocks. Cut a link and watch the tree reconverge."
+  },
+  "tags": [
+    "switching"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="stp"]; colours only from kit tokens.
+   Layout: the K2 drawing on the left (switch cards, link-end labels with port and role, BPDUs beside the links),
+   the side column on the right (time and timers, then one block per switch: its belief and one row per port). */
+[data-sim="stp"] .stp {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 2cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="stp"] .stp-draw { min-width: 0; min-height: 0; display: flex; }
+[data-sim="stp"] .stp-draw .sd-topo { flex: 1; height: 100%; align-content: stretch; }
+[data-sim="stp"] .stp-side { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; min-height: 0; }
+
+/* time box */
+[data-sim="stp"] .stp-time { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; padding: 0.35rem 0.7rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); }
+[data-sim="stp"] .stp-t { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="stp"] .stp-since { font-weight: 700; padding: 0 0.4rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); }
+[data-sim="stp"] .stp-timers { flex-basis: 100%; font-size: var(--fs-sm); color: var(--muted); }
+
+/* one block per switch */
+[data-sim="stp"] .stp-side h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="stp"] .stp-sw { padding: 0.25rem 0.6rem 0.35rem; border: var(--line-w) solid var(--line); border-left: 0.45rem solid var(--sw, var(--line)); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="stp"] .stp-sw[data-active] { border-color: var(--ink); border-left-color: var(--sw, var(--ink)); }
+[data-sim="stp"] .stp-swhead { display: flex; flex-wrap: wrap; gap: 0 0.7rem; align-items: baseline; }
+[data-sim="stp"] .stp-swhead b { font-size: 1.05em; }
+[data-sim="stp"] .stp-bid { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="stp"] .stp-bel { font-size: var(--fs-sm); }
+[data-sim="stp"] .stp-bel.sd-changed { background: var(--hl); color: var(--on-hl); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="stp"] .stp-sw table { width: 100%; border-collapse: separate; border-spacing: 0 0.12rem; font-size: var(--fs-sm); }
+[data-sim="stp"] .stp-sw th { text-align: left; font-weight: 400; color: var(--muted); padding: 0 0.35rem 0 0; white-space: nowrap; }
+[data-sim="stp"] .stp-sw td { padding: 0 0.35rem 0 0; white-space: nowrap; vertical-align: middle; }
+[data-sim="stp"] .stp-sw td.stp-stored { font-family: var(--mono); white-space: normal; }
+[data-sim="stp"] .stp-sw td.stp-stored small { font-family: var(--sans); color: var(--muted); font-size: 1em; margin-left: 0.3rem; }
+[data-sim="stp"] .stp-sw tr.sd-changed td,
+[data-sim="stp"] .stp-sw td.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="stp"] .stp-sw tr.sd-changed td small,
+[data-sim="stp"] .stp-sw td.sd-changed small { color: var(--on-hl); }
+[data-sim="stp"] .stp-sw tr[data-off] td { color: var(--muted); }
+
+/* role badge: R solid, D outlined, ✕ hatched, – dashed */
+[data-sim="stp"] .stp-role { display: inline-grid; place-items: center; min-width: 1.7em; padding: 0 0.25rem; border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm); font-weight: 700; line-height: 1.35; background: var(--bg); color: var(--ink); }
+[data-sim="stp"] .stp-role[data-r="root"] { background: var(--ink); color: var(--bg); }
+[data-sim="stp"] .stp-role[data-r="blocked"] { border-color: var(--danger); color: var(--danger); background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--danger) 35%, transparent) 0.25em 0.38em); }
+[data-sim="stp"] .stp-role[data-r="disabled"], [data-sim="stp"] .stp-role[data-r="none"] { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+[data-sim="stp"] .stp-state[data-s="forwarding"] { font-weight: 700; }
+[data-sim="stp"] .stp-state[data-s="blocking"] { color: var(--danger); font-weight: 700; }
+
+/* flood counters (STP off) */
+[data-sim="stp"] .stp-count { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 0.2rem 1.2rem; padding: 0.5rem 0.8rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg); }
+[data-sim="stp"] .stp-count dt { color: var(--muted); }
+[data-sim="stp"] .stp-count dd { margin: 0; font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="stp"] .stp-count dd.sd-changed { background: var(--hl); color: var(--on-hl); padding: 0 0.4rem; justify-self: start; }
+[data-sim="stp"] .stp-note { margin: 0; padding: 0.4rem 0.7rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); }
+
+/* the drawing: switch cards a little roomier; link-end labels show port and role */
+[data-sim="stp"] .sd-topo-card[data-kind='switch'] .sd-topo-addr { font-size: var(--fs-sm); }
+[data-sim="stp"] .sd-topo-card[data-kind='cloud'] > b { font-size: var(--fs-sm); }
+[data-sim="stp"] .sd-topo-end { font-family: var(--mono); }
+
+/* legend swatches the kit lacks: role badges and the root star */
+[data-sim="stp"] .sd-swatch[data-shape^="stp-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="stp"] .sd-swatch[data-shape^="stp-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="stp"] .sd-swatch[data-shape="stp-root"] { background: var(--ink); }
+[data-sim="stp"] .sd-swatch[data-shape="stp-root"]::after { content: 'R'; color: var(--bg); }
+[data-sim="stp"] .sd-swatch[data-shape="stp-des"]::after { content: 'D'; }
+[data-sim="stp"] .sd-swatch[data-shape="stp-blk"] { border-color: var(--danger); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 35%, transparent) 0.2em 0.32em); }
+[data-sim="stp"] .sd-swatch[data-shape="stp-blk"]::after { content: '✕'; color: var(--danger); }
+[data-sim="stp"] .sd-swatch[data-shape="stp-star"] { background: var(--ink); border-radius: 1rem; }
+[data-sim="stp"] .sd-swatch[data-shape="stp-star"]::after { content: '★'; color: var(--bg); }
+
+/* the panel: the three priorities share one row */
+[data-sim="stp"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 0.5rem; }
+[data-sim="stp"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="stp"] [data-sd-controls] .sd-group > .sd-ctl[data-key^="prio"] { grid-column: auto; min-width: 0; }
+[data-sim="stp"] [data-sd-controls] .sd-group > .sd-ctl[data-key^="prio"] .sd-select { min-width: 0; width: 100%; }
+
+[data-sim="stp"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="stp"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="stp"] .stp { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="stp"] .stp-draw .sd-topo { height: auto; }
+  [data-sim="stp"] .stp-sw td { white-space: normal; }
+  [data-sim="stp"] .stp-sw td:first-child { white-space: nowrap; }
+  [data-sim="stp"] .stp-sw td.stp-stored { overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Razapinjuće stablo (STP)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { S1: '1', S2: '2', S3: '3', H1: '8', H2: '8', H3: '8' };
+  var PRIOS = [];
+  for (var pr = 4096; pr <= 61440; pr += 4096) PRIOS.push([pr, String(pr)]);
+
+  /** Data (names, BIDs, port numbers, numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function name(text) { return data(text, ''); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  /** Several caption pieces with a space between. */
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Nodes separated by a word ("; ", " i "). */
+  function sepList(nodes, sepKey) {
+    var out = h('span', null);
+    nodes.forEach(function (n, i) { if (i) out.append(t(sepKey)); out.append(n); });
+    return out;
+  }
+
+  // ── names for the data ──
+
+  function nameOfBid(scene, bid) {
+    for (var i = 0; i < scene.nodes.length; i++) if (scene.nodes[i].bid === bid) return scene.nodes[i].id;
+    return bid;
+  }
+  function bidText(n) { return n.prio + '.…:' + n.mac.slice(-2); }
+  function pidText(pid) { return '128.' + (pid - 32768); }
+  function vecText(scene, v) { return t('chipBpdu', { r: nameOfBid(scene, v.root), c: v.cost, b: nameOfBid(scene, v.bridge), p: pidText(v.port) }); }
+  function portName(bridge, port) { return t('portOf', { b: bridge, p: port }); }
+  function lowestBid(scene) {
+    return scene.nodes.filter(function (n) { return n.kind === 'switch'; }).map(function (n) { return n.bid; }).sort()[0];
+  }
+  var SYM = { root: 'symR', designated: 'symD', blocked: 'symX', disabled: 'symOff' };
+  var STATE = { blocking: 'stBlocking', listening: 'stListening', learning: 'stLearning', forwarding: 'stForwarding', disabled: 'stDisabled' };
+
+  // ── the drawing (kit view K2) ──
+
+  function layoutOf(topo) {
+    return topo === 'pair'
+      ? { cols: 9, pos: { H1: [0, 0, 1], S1: [3, 0, 2], L1: [1, 1, 2], L2: [6, 1, 2], S2: [3, 2, 2], H2: [8, 2, 1] } }
+      : { cols: 9, pos: { H1: [0, 0, 1], S1: [3, 0, 2], S2: [0, 2, 2], S3: [5, 2, 2], H3: [8, 2, 1] } };
+  }
+
+  function endText(s, bridge, port) {
+    if (s.mode !== 'stp') return t('endBare', { p: port });
+    var q = L.portAt(s, bridge, port);
+    if (!q || !q.role) return t('endBare', { p: port });
+    return t('endLabel', { p: port, r: t(SYM[q.role]) });
+  }
+
+  function renderTopo(c, scene) {
+    var s = c.state;
+    var lay = layoutOf(scene.topo);
+    var low = lowestBid(scene);
+    var activeB = {};
+    (s.changes || []).forEach(function (ch) { activeB[ch.bridge] = true; });
+    var frameHops = s.phase === 'frame' && s.frame ? s.frame.hops : null;
+    var recv = s.mode === 'flood' ? s.recv : s.frame ? s.frame.recv : {};
+
+    var nodes = scene.nodes.map(function (n) {
+      var P = lay.pos[n.id];
+      var badges = [];
+      if (n.kind === 'switch') {
+        if (s.mode === 'stp') {
+          var br = L.bridgeOf(s, n.id);
+          if (br.root === br.bid) badges.push(br.bid === low && s.phase !== 'power' ? { text: t('bRoot'), k: 'fill' } : { text: t('bClaims'), k: 'dashed' });
+        }
+        return { id: n.id, kind: 'switch', col: P[0], row: P[1], span: P[2], c: COLOUR[n.id],
+          lines: [{ text: bidText(n), kind: 'addr' }], badges: badges, state: activeB[n.id] ? 'active' : null };
+      }
+      var sending = (frameHops && n.id === scene.sender) || (s.mode === 'flood' && s.wave === 1 && n.id === scene.sender);
+      if (sending) badges.push({ text: t('bSends'), k: 'fill' });
+      else if (recv[n.id]) badges.push({ text: t('bGot', { n: recv[n.id] }), k: 'solid' });
+      return { id: n.id, kind: 'host', col: P[0], row: P[1], span: P[2], c: COLOUR[n.id], badges: badges, align: 'center',
+        state: sending ? 'active' : null };
+    });
+    var links = [];
+    var segOf = {};
+    scene.links.forEach(function (l) {
+      var up = s.mode !== 'stp' || s.links.filter(function (x) { return x.id === l.id; })[0].up;
+      var qa = s.mode === 'stp' && l.pa != null ? L.portAt(s, l.a, l.pa) : null;
+      var qb = s.mode === 'stp' && l.pb != null ? L.portAt(s, l.b, l.pb) : null;
+      var blocked = (qa && qa.role === 'blocked') || (qb && qb.role === 'blocked');
+      var fwd = s.mode === 'stp' && [qa, qb].every(function (q) { return !q || q.state === 'forwarding'; });
+      var state = !up ? 'down' : blocked ? 'off' : 'up';
+      var endA = l.pa != null ? endText(s, l.a, l.pa) : null, endB = l.pb != null ? endText(s, l.b, l.pb) : null;
+      if (scene.topo === 'pair' && l.pa != null && l.pb != null) {
+        // two links between the same two switches: each runs through its own segment card (SPEC.md "Scene")
+        nodes.push({ id: l.id, kind: 'cloud', col: lay.pos[l.id][0], row: 1, span: 2, name: l.id, align: 'center' });
+        segOf[l.id] = true;
+        links.push({ id: l.id + 'a', a: l.a, b: l.id, state: state, active: fwd && up, ends: { a: endA } });
+        links.push({ id: l.id + 'b', a: l.id, b: l.b, state: state, active: fwd && up, ends: { b: endB } });
+      } else {
+        links.push({ id: l.id, a: l.a, b: l.b, state: state, active: fwd && up && !blocked, ends: { a: endA, b: endB } });
+      }
+    });
+
+    var packets = [];
+    var via = function (linkId, from, to, base) {
+      if (!segOf[linkId]) { packets.push(Object.assign({ from: from, to: to }, base)); return; }
+      packets.push(Object.assign({ from: from, to: linkId }, base, { drop: false, mid: false }));
+      packets.push(Object.assign({ from: linkId, to: to }, base, { chip: false }));
+    };
+    var showBpdus = s.mode === 'stp' && ['claims', 'round', 'stable', 'cut', 'aged'].indexOf(s.phase) >= 0;
+    if (showBpdus) {
+      s.bpdus.forEach(function (m) {
+        via(m.link, m.from, m.to, { label: vecText(scene, m.vec), c: COLOUR[m.from], drop: m.result === 'ignored' });
+      });
+    }
+    if (frameHops) {
+      frameHops.forEach(function (hp) {
+        via(hp.link, hp.from, hp.to, { label: t('chipFrame', { k: hp.wave + 1 }), cast: 'broadcast', drop: hp.drop, c: '8' });
+      });
+    }
+    if (s.mode === 'flood') {
+      var groups = {};
+      s.frames.forEach(function (f) {
+        var k = f.from + '>' + f.to;
+        if (!groups[k]) groups[k] = { f: f, n: 0 };
+        groups[k].n++;
+      });
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k];
+        packets.push({ from: g.f.from, to: g.f.to, label: t('chipCopies', { n: g.n }), cast: 'broadcast', c: '8' });
+      });
+    }
+    // phone order: H1, S1, the segments, S2, …
+    nodes.sort(function (x, y) { var px = lay.pos[x.id], py = lay.pos[y.id]; return px[1] - py[1] || px[0] - py[0]; });
+    return Simdeck.topology({ cols: lay.cols, rows: ['auto', 'minmax(3rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  // ── the side column ──
+
+  function renderTime(s) {
+    var since = s.cutAt != null && s.t >= s.cutAt ? s.t - s.cutAt : null;
+    return h('div', { class: 'stp-time' },
+      h('span', { class: 'stp-t', translate: 'no' }, t('timeT', { t: s.t })),
+      since != null ? h('span', { class: 'stp-since' }, t('sinceCut', { s: since })) : null,
+      h('span', { class: 'stp-timers' }, t('timers')));
+  }
+
+  function renderSwitches(c, scene) {
+    var s = c.state;
+    var changedPorts = {}, changedStored = {}, changedBridge = {};
+    (s.changes || []).forEach(function (ch) {
+      if (ch.kind === 'bridge') changedBridge[ch.bridge] = true;
+      else changedPorts[ch.key] = true;
+    });
+    (s.bpdus || []).forEach(function (m) { if (m.result === 'stored') changedStored[m.to + ':' + m.toPort] = true; });
+    (s.aged || []).forEach(function (a) { changedStored[a.key] = true; });
+    var out = [h('h2', null, t('sideTitle'))];
+    scene.nodes.forEach(function (n) {
+      if (n.kind !== 'switch') return;
+      var br = L.bridgeOf(s, n.id);
+      var bel = br.root === br.bid ? t('selfRoot')
+        : t('believesRp', { r: nameOfBid(scene, br.root), c: br.cost, p: br.rootPort });
+      var rows = s.ports.filter(function (q) { return q.bridge === n.id; }).map(function (q) {
+        var st = q.stored, stored;
+        if (!st) stored = t('none');
+        else stored = [vecText(scene, st), h('small', null, st.own ? t('ownInfo') : t('ageVal', { s: s.t - st.at }))];
+        var role = q.role || 'none';
+        return h('tr', { class: changedPorts[q.key] ? 'sd-changed' : null, dataset: q.role === 'disabled' ? { off: '1' } : {} },
+          h('td', { translate: 'no' }, 'p' + q.port + ' → ' + q.peer),
+          h('td', null, h('span', { class: 'stp-role', dataset: { r: role } }, q.role ? t(SYM[q.role]) : t('none'))),
+          h('td', null, h('span', { class: 'stp-state', dataset: { s: q.state } }, t(STATE[q.state]))),
+          h('td', { class: 'stp-stored' + (changedStored[q.key] && !changedPorts[q.key] ? ' sd-changed' : ''), translate: 'no' }, stored));
+      });
+      out.push(h('section', { class: 'stp-sw', dataset: Object.assign({ c: COLOUR[n.id] }, changedBridge[n.id] || rows.some(function (r) { return r.classList.contains('sd-changed'); }) ? { active: '1' } : {}) },
+        h('div', { class: 'stp-swhead' }, b(n.id), h('span', { class: 'stp-bid', translate: 'no' }, bidText(n)),
+          h('span', { class: 'stp-bel' + (changedBridge[n.id] ? ' sd-changed' : '') }, bel)),
+        h('table', null,
+          h('thead', null, h('tr', null, h('th', null, t('thPort')), h('th', null, t('thRole')), h('th', null, t('thState')), h('th', null, t('thStored')))),
+          h('tbody', null, rows))));
+    });
+    return out;
+  }
+
+  function renderFloodSide(c, scene) {
+    var s = c.state, prev = c.prev;
+    var hosts = scene.nodes.filter(function (n) { return n.kind === 'host'; });
+    var dl = h('dl', { class: 'stp-count' },
+      h('dt', null, t('inFlight')), h('dd', { translate: 'no' }, String(s.inFlight)),
+      h('dt', null, t('total')), h('dd', { translate: 'no' }, String(s.total)),
+      hosts.map(function (n) {
+        var got = s.recv[n.id] || 0, before = prev && prev.recv ? prev.recv[n.id] || 0 : 0;
+        return [h('dt', null, t('recvBy', { h: n.id })), h('dd', { translate: 'no', class: got !== before ? 'sd-changed' : null }, String(got))];
+      }));
+    return [h('h2', null, t('floodTitle')), dl, h('p', { class: 'stp-note' }, t('noTtl'))];
+  }
+
+  // ── captions ──
+
+  function whyRoot(scene, s, bridge) {
+    var br = L.bridgeOf(s, bridge);
+    var cands = s.ports.filter(function (q) { return q.bridge === bridge && q.stored && !q.stored.own && q.role !== 'disabled'; }).map(function (q) {
+      var st = q.stored;
+      return { port: q.port, root: st.root, cost: st.cost + L.linkOf(scene, q.link).cost, bridge: st.bridge, sport: st.port, own: L.portIdOf(q.port) };
+    }).filter(function (v) { return v.root === br.root; });
+    cands.sort(function (x, y) { return x.cost - y.cost || (x.bridge < y.bridge ? -1 : x.bridge > y.bridge ? 1 : 0) || x.sport - y.sport || x.own - y.own; });
+    var w = cands[0], r = cands[1];
+    var vars = { b: name(bridge), p: data(br.rootPort), c: data(br.cost), r: name(nameOfBid(scene, br.root)) };
+    if (!w || !r) return parts('whyRootOnly', vars);
+    if (w.cost !== r.cost) return parts('whyRootCost', Object.assign(vars, { alt: data(r.cost) }));
+    if (w.bridge !== r.bridge) return parts('whyRootBid', Object.assign(vars, { n: name(nameOfBid(scene, w.bridge)) }));
+    if (w.sport !== r.sport) return parts('whyRootPort', Object.assign(vars, { n: name(nameOfBid(scene, w.bridge)), pid: data(pidText(w.sport)) }));
+    return parts('whyRootOwn', vars);
+  }
+
+  function whyBlocked(scene, s, ch) {
+    var q = L.portAt(s, ch.bridge, ch.port), br = L.bridgeOf(s, ch.bridge);
+    var mine = L.offerOf(br, q), st = q.stored;
+    var vars = { b: name(ch.bridge), p: data(ch.port) };
+    switch (L.decidedBy(mine, st)) {
+      case 'root': return parts('whyBlockRoot', Object.assign(vars, { r: name(nameOfBid(scene, st.root)) }));
+      case 'cost': return parts('whyBlockCost', Object.assign(vars, { c1: data(st.cost), c2: data(mine.cost) }));
+      case 'bridge': return parts('whyBlockBid', Object.assign(vars, { c: data(st.cost), n: name(nameOfBid(scene, st.bridge)) }));
+      default: return parts('whyBlockPort', Object.assign(vars, { pid: data(pidText(st.port)) }));
+    }
+  }
+
+  function blockedList(s) {
+    var bl = s.ports.filter(function (q) { return q.role === 'blocked'; }).map(function (q) { return b(portName(q.bridge, q.port)); });
+    return bl.length ? sepList(bl, 'andSep') : null;
+  }
+
+  /** The role and root-port sentences of this step: blocked ports first, then root ports that changed (max 3). */
+  function reasons(scene, s) {
+    var out = [];
+    (s.changes || []).forEach(function (ch) { if (ch.kind === 'role' && ch.to === 'blocked') out.push(whyBlocked(scene, s, ch)); });
+    (s.changes || []).forEach(function (ch) { if (ch.kind === 'bridge' && ch.rootPort != null) out.push(whyRoot(scene, s, ch.bridge)); });
+    return out.slice(0, 3);
+  }
+
+  function stateList(s, from, to) {
+    var moved = (s.changes || []).filter(function (ch) { return ch.kind === 'state' && ch.from === from && ch.to === to; });
+    var rd = s.ports.filter(function (q) { return q.role === 'root' || q.role === 'designated'; });
+    if (moved.length === rd.length && moved.length > 2) return h('span', null, t('allRD'));
+    return sepList(moved.map(function (ch) { return b(portName(ch.bridge, ch.port)); }), 'andSep');
+  }
+
+  function capStp(c, scene) {
+    var s = c.state;
+    var T = data(s.t);
+    switch (s.phase) {
+      case 'power': return t('capPower');
+      case 'claims': {
+        var list = s.bridges.filter(function (x) { return x.root !== x.bid; }).map(function (x) {
+          return h('span', null, name(x.id), ': ', t('believes', { r: nameOfBid(scene, x.root), c: x.cost }));
+        });
+        var lead = parts('capClaims', { list: sepList(list, 'listSep') });
+        // a tie on the root port (equal cost) is worth saying already at the claims; a switch that has one gets
+        // that sentence instead of the one about its blocked port
+        var extra = [], tied = {};
+        s.bridges.forEach(function (x) {
+          if (x.rootPort != null && extra.length < 2 && tieAt(scene, s, x.id)) { extra.push(whyRoot(scene, s, x.id)); tied[x.id] = true; }
+        });
+        (s.changes || []).forEach(function (ch) { if (ch.kind === 'role' && ch.to === 'blocked' && !tied[ch.bridge] && extra.length < 2) extra.push(whyBlocked(scene, s, ch)); });
+        return join([lead].concat(extra));
+      }
+      case 'round': return join([parts('capRound', { t: T })].concat(reasons(scene, s)));
+      case 'stable': {
+        var bl = blockedList(s);
+        var lead2 = bl ? parts('capStable', { t: T, blocked: bl }) : parts('capStableNone', { t: T });
+        var ign = s.bpdus.filter(function (m) { return m.result === 'ignored' && m.over && !m.over.own; })[0];
+        // after a cut, an ignored BPDU means the tree is not done: it waits for max age
+        return ign ? join([parts('capStableWait', { t: T }), parts('stillIgnored', { b: name(ign.to), n: name(ign.from), a: data(ign.over.age) })]) : lead2;
+      }
+      case 'timer': {
+        var toLearn = (s.changes || []).some(function (ch) { return ch.kind === 'state' && ch.to === 'learning'; });
+        if (toLearn) return parts('capLearning', { t: T, ports: stateList(s, 'listening', 'learning') });
+        var bl2 = blockedList(s);
+        return bl2 ? parts('capForwardingBlocked', { t: T, ports: stateList(s, 'learning', 'forwarding'), blocked: bl2 })
+          : parts('capForwarding', { t: T, ports: stateList(s, 'learning', 'forwarding') });
+      }
+      case 'cut': {
+        var l = L.linkOf(scene, s.cutNow);
+        var out = [parts('capCut', { t: T, l: b(l.a + '–' + l.b) })];
+        var any = false;
+        (s.changes || []).forEach(function (ch) {
+          if (ch.kind !== 'bridge') return;
+          any = true;
+          if ((s.newRoots || []).indexOf(ch.bridge) >= 0) {
+            var ign2 = s.bpdus.filter(function (m) { return m.from === ch.bridge && m.result === 'ignored'; }).map(function (m) { return name(m.to); });
+            out.push(ign2.length ? parts('cutClaim', { b: name(ch.bridge), n: sepList(ign2, 'andSep') }) : parts('cutClaimFree', { b: name(ch.bridge) }));
+          } else if (ch.rootPort != null) {
+            var q = L.portAt(s, ch.bridge, ch.rootPort);
+            out.push(parts('cutAlt', { b: name(ch.bridge), p: b('p' + ch.rootPort), n: name(nameOfBid(scene, q.stored.bridge)), c: data(ch.cost) }));
+          }
+        });
+        if (!any) out.push(t('cutNothing'));
+        return join(out);
+      }
+      case 'aged': {
+        var a = s.aged[0], bridge = a.key.split(':')[0], port = a.key.split(':')[1];
+        var out2 = [parts('capAged', { t: T, s: data(s.t - s.cutAt), b: name(bridge), p: b('p' + port) })];
+        (s.changes || []).forEach(function (ch) {
+          if (ch.kind === 'role' && ch.to === 'designated' && L.portAt(s, ch.bridge, ch.port).state === 'listening') {
+            out2.push(parts('roleToD', { p: b(portName(ch.bridge, ch.port)) }));
+          }
+        });
+        (s.changes || []).forEach(function (ch) {
+          if (ch.kind !== 'bridge' || ch.rootPort == null) return;
+          var listen = L.portAt(s, ch.bridge, ch.rootPort).state === 'listening';
+          out2.push(parts(listen ? 'newRootPortListen' : 'newRootPort', { b: name(ch.bridge), p: data(ch.rootPort), c: data(ch.cost) }));
+        });
+        return join(out2);
+      }
+      case 'frame': {
+        var drops = s.frame.hops.filter(function (hp) { return hp.drop; });
+        var bc = h('i', null, t('wBroadcast'));
+        var lead3 = drops.length ? parts('capFrame', { h: name(scene.sender), bc: bc, from: name(drops[0].from), to: name(drops[0].to) })
+          : parts('capFrameFree', { h: name(scene.sender), bc: bc });
+        var rec = Object.keys(s.frame.recv).map(function (k) { return parts('recvList', { h: name(k), n: h('b', null, t.n('copies', s.frame.recv[k])) }); });
+        return join([lead3].concat(rec));
+      }
+    }
+    return '';
+  }
+
+  /** Whether a bridge's root port won on a tie of cost (only then is the reason worth a sentence at the claims). */
+  function tieAt(scene, s, bridge) {
+    var br = L.bridgeOf(s, bridge);
+    var costs = s.ports.filter(function (q) { return q.bridge === bridge && q.stored && !q.stored.own && q.stored.root === br.root; })
+      .map(function (q) { return q.stored.cost + L.linkOf(scene, q.link).cost; });
+    return costs.filter(function (x) { return x === br.cost; }).length > 1;
+  }
+
+  function capFlood(c, scene) {
+    var s = c.state;
+    var bc = h('i', null, t('wBroadcast'));
+    if (s.wave === 1) return parts('capFlood1', { h: name(scene.sender), bc: bc });
+    var out = [parts('capFlood', { f: b(s.inFlight), total: b(s.total) })];
+    var watch = scene.nodes.filter(function (n) { return n.kind === 'host' && n.id !== scene.sender; })[0];
+    if (s.recv[watch.id]) out.push(parts('floodRecv', { h: name(watch.id), n: b(s.recv[watch.id]) }));
+    if (s.wave >= 4) out.push(t('floodNever'));
+    return join(out);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'stp', type: 'toggle', label: t('pStp'), resets: true },
+      { key: 'prioS1', type: 'select', label: t('pPrio', { s: 'S1' }), options: PRIOS, resets: true, visible: function (p) { return p.stp; } },
+      { key: 'prioS2', type: 'select', label: t('pPrio', { s: 'S2' }), options: PRIOS, resets: true, visible: function (p) { return p.stp; } },
+      { key: 'prioS3', type: 'select', label: t('pPrio', { s: 'S3' }), options: PRIOS, resets: true,
+        visible: function (p) { return p.stp && p.topo === 'triangle'; } },
+      { key: 'cutLink', type: 'choice', label: t('pCut'), resets: true,
+        options: [['none', t('cutNone')], ['S1-S2', 'S1–S2'], ['S1-S3', 'S1–S3'], ['S2-S3', 'S2–S3']],
+        visible: function (p) { return p.stp && p.topo === 'triangle'; } },
+      { key: 'slowLink', type: 'choice', label: t('pSlow'), resets: true, options: [['none', t('slowNone')], ['S1-S3', 'S1–S3']],
+        visible: function (p) { return p.stp && p.topo === 'triangle'; } }
+    ],
+
+    presets: [
+      { id: 'no-stp', label: t('prNoStp'), hint: t('prNoStpHint'), params: { stp: false, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none' } },
+      { id: 'triangle', label: t('prTriangle'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none' } },
+      { id: 'priority', label: t('prPriority'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 4096, cutLink: 'none', slowLink: 'none' } },
+      { id: 'cost-wins', label: t('prCost'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'S1-S3' } },
+      { id: 'port-id', label: t('prPortId'), params: { stp: true, topo: 'pair', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none' } },
+      { id: 'reconverge', label: t('prReconverge'), hint: t('prReconvergeHint'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'S1-S2', slowLink: 'none' } }
+    ],
+
+    legend: [
+      { shape: 'stp-star', label: t('legRootBridge') },
+      { shape: 'stp-root', label: t('legR') },
+      { shape: 'stp-des', label: t('legD') },
+      { shape: 'stp-blk', label: t('legX') },
+      { shape: 'line', label: t('legBpdu') },
+      { shape: 'dash', label: t('legFrame') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params), s = c.state;
+      var side = h('div', { class: 'stp-side' }, s.mode === 'stp' ? [renderTime(s)].concat(renderSwitches(c, scene)) : renderFloodSide(c, scene));
+      c.stage.replaceChildren(h('div', { class: 'stp' }, h('div', { class: 'stp-draw' }, renderTopo(c, scene)), side));
+    },
+
+    caption: function (c) {
+      var scene = L.sceneOf(c.params);
+      if (c.state.mode === 'flood') return c.first ? t('capFloodPre') : capFlood(c, scene);
+      return capStp(c, scene);
+    }
+  });
+})();
+</script>
+</body>
+</html>
