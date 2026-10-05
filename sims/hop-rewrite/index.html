@@ -1,0 +1,475 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- hop-rewrite: one ping from A to B across one or two routers. A stepper: the packet crosses a segment, or one
+     router processes it (strip the frame, look up, TTL − 1, drop at 0, checksum, ARP, new frame). The field strip
+     marks what this hop changed; the history keeps one row per segment. Kit view K2 draws the path. Model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="hop-rewrite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Što se mijenja na svakom skoku · simdeck</title>
+<meta name="description" content="Ping kroz jedan ili dva usmjernika: nov okvir na svakom segmentu, iste IP adrese, TTL − 1 i nov kontrolni zbroj; TTL 0 vraća ICMP Time Exceeded.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "hop-rewrite",
+  "title": {
+    "hr": "Što se mijenja na svakom skoku",
+    "en": "What changes at each hop"
+  },
+  "concept": {
+    "hr": "MAC adrese mijenjaju se po skoku, IP adrese ostaju, TTL pada, zbroj se računa",
+    "en": "MACs change per hop, IPs stay, TTL drops, the checksum is recomputed"
+  },
+  "summary": {
+    "hr": "Ping kroz jedan ili dva usmjernika: nov okvir na svakom segmentu, iste IP adrese, TTL − 1 i nov kontrolni zbroj; TTL 0 vraća ICMP Time Exceeded.",
+    "en": "A ping through one or two routers: a new frame on every segment, the same IP addresses, TTL − 1 and a new checksum; TTL 0 returns ICMP Time Exceeded."
+  },
+  "tags": [
+    "routing"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="hop-rewrite"]; colours only from kit tokens.
+   Layout: the field strip and the node's work on top, the kit's K2 path in the middle (nodes in row 0, a segment
+   label under every link in row 1), the history table at the bottom. */
+[data-sim="hop-rewrite"] .hw {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 2cqh;
+  height: 100%;
+  padding: 2cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="hop-rewrite"] .hw-top { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 1.2cqw; align-items: stretch; }
+[data-sim="hop-rewrite"] .hw-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="hop-rewrite"] .hw-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; }
+[data-sim="hop-rewrite"] .hw-box h2 .hw-new { margin-left: 0.5rem; padding: 0 0.4rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+
+/* field strip: one layer per row (frame, IP header), a left bar in the layer's colour */
+[data-sim="hop-rewrite"] .hw-layer { display: flex; align-items: stretch; gap: 0.4rem; margin-top: 0.3rem; padding-left: 0.5rem; border-left: 0.4rem solid var(--c4); }
+[data-sim="hop-rewrite"] .hw-layer[data-k="ip"] { border-left-color: var(--c3); border-left-style: double; border-left-width: 0.5rem; }
+[data-sim="hop-rewrite"] .hw-ltitle { flex: 0 0 5.5em; align-self: center; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="hop-rewrite"] .hw-cells { display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; }
+[data-sim="hop-rewrite"] .hw-f {
+  display: grid;
+  grid-template-rows: auto auto;
+  padding: 0.1rem 0.45rem 0.15rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  min-width: 0;
+}
+[data-sim="hop-rewrite"] .hw-fl { display: flex; gap: 0.5rem; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="hop-rewrite"] .hw-fv { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="hop-rewrite"] .hw-fv small { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="hop-rewrite"] .hw-f[data-small] .hw-fv { font-size: var(--fs-sm); }
+[data-sim="hop-rewrite"] .hw-same { font-family: var(--mono); font-weight: 700; color: var(--ink); }
+[data-sim="hop-rewrite"] .hw-old { font-family: var(--mono); text-decoration-thickness: 0.12em; }
+[data-sim="hop-rewrite"] .hw-f.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); border-width: 3px; }
+[data-sim="hop-rewrite"] .hw-f.sd-changed .hw-fl,
+[data-sim="hop-rewrite"] .hw-f.sd-changed .hw-fv small { color: var(--on-hl); }
+[data-sim="hop-rewrite"] .hw-f[data-dead] { border-style: dashed; border-color: var(--danger); border-width: 3px; }
+[data-sim="hop-rewrite"] .hw-none { margin: 0.3rem 0 0; color: var(--muted); }
+
+/* the node's work: an ordered list, lines not done muted and struck */
+[data-sim="hop-rewrite"] .hw-work ol { margin: 0; padding-left: 1.6em; font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="hop-rewrite"] .hw-work li[data-st="skip"] { color: var(--muted); text-decoration: line-through; }
+[data-sim="hop-rewrite"] .hw-work li[data-st="stop"],
+[data-sim="hop-rewrite"] .hw-work li[data-st="wait"] { font-weight: 700; }
+[data-sim="hop-rewrite"] .hw-work li[data-st="stop"]::marker { content: '✕ '; color: var(--danger); }
+[data-sim="hop-rewrite"] .hw-work p { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="hop-rewrite"] .hw-work.hw-past { opacity: 0.8; }
+
+/* history: one row per segment, each compared with the row before */
+[data-sim="hop-rewrite"] .hw-hist { min-height: 0; overflow: hidden; }
+[data-sim="hop-rewrite"] .hw-hist table { border-collapse: separate; border-spacing: 0.25rem 0.15rem; width: 100%; font-size: var(--fs-sm); }
+[data-sim="hop-rewrite"] .hw-hist th { text-align: left; font-weight: 700; color: var(--muted); white-space: nowrap; padding: 0 0.3rem; }
+[data-sim="hop-rewrite"] .hw-hist td { padding: 0.05rem 0.3rem; border: var(--line-w) solid transparent; border-radius: var(--radius-sm); font-family: var(--mono); white-space: nowrap; }
+[data-sim="hop-rewrite"] .hw-hist td.hw-seg { font-family: var(--sans); font-weight: 700; }
+[data-sim="hop-rewrite"] .hw-hist td.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); font-weight: 700; }
+[data-sim="hop-rewrite"] .hw-hist td.hw-eq { color: var(--muted); }
+[data-sim="hop-rewrite"] .hw-hist td.hw-eq::after { content: ' ='; color: var(--ink); font-weight: 700; }
+[data-sim="hop-rewrite"] .hw-hist tr[data-now] td.hw-seg { border-color: var(--ink); }
+[data-sim="hop-rewrite"] .hw-hist td.hw-drop { font-family: var(--sans); font-weight: 700; border: var(--line-w) dashed var(--danger); }
+[data-sim="hop-rewrite"] .hw-hist .hw-none { margin: 0; font-size: var(--fs-sm); }
+
+/* topology tweaks: the mark on its own line and the addresses under it at full width (narrow columns); the segment
+   labels are cloud cards in row 1, under the links */
+[data-sim="hop-rewrite"] .sd-topo-card .sd-topo-mark { grid-row: auto; }
+[data-sim="hop-rewrite"] .sd-topo-card .sd-topo-addr,
+[data-sim="hop-rewrite"] .sd-topo-card .sd-topo-sub { grid-column: 1 / -1; white-space: nowrap; }
+[data-sim="hop-rewrite"] .sd-topo-card[data-kind='cloud'] > b { font-size: var(--fs-sm); }
+
+/* legend swatches: "=" and the drop cross (the kit has round, hollow, hl, dash, line) */
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="eq"],
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="x"] { position: relative; background: var(--bg); border-color: var(--line); }
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="eq"]::after,
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="x"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); content: '='; }
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="x"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="x"]::after { content: '✕'; color: var(--danger); }
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="ip"] { border-left: 0.5rem double var(--c3); background: var(--bg); }
+[data-sim="hop-rewrite"] .sd-swatch[data-shape="fr"] { border-left: 0.4rem solid var(--c4); background: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; the strip and the work box stack; the table scrolls inside. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="hop-rewrite"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="hop-rewrite"] .hw { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="hop-rewrite"] .hw-top { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  [data-sim="hop-rewrite"] .hw-layer { flex-direction: column; }
+  [data-sim="hop-rewrite"] .hw-ltitle { flex: none; }
+  [data-sim="hop-rewrite"] .hw-hist { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Što se mijenja na svakom skoku</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { A: '1', R1: '2', R2: '6', B: '5' };
+  var IP_C = '3';
+
+  /** Data (addresses, MACs, node ids) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text)); }
+  /** A MAC as the page shows it: the last octet (SPEC.md "Scene"). */
+  function short(mac) { return '…:' + mac.slice(-2); }
+  /** Who owns a MAC in this scene: "A", "R1 Gi0/1", … */
+  function ownerOf(scene, mac) {
+    for (var i = 0; i < scene.nodes.length; i++) {
+      var n = scene.nodes[i];
+      if (n.mac === mac) return n.id;
+      if (n.ifs) for (var j = 0; j < n.ifs.length; j++) if (n.ifs[j].mac === mac) return n.id + ' ' + n.ifs[j].name;
+    }
+    return '';
+  }
+  function hostPart(ip) { return '.' + ip.split('.')[3]; }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+
+  // ── field strip ──
+
+  /** One field: label, value, and "=" or the old value struck (this hop changed it). */
+  function field(label, value, o) {
+    o = o || {};
+    var mark = o.changed ? h('s', { class: 'hw-old', translate: 'no' }, String(o.old)) : o.same ? h('span', { class: 'hw-same', translate: 'no' }, t('sameMark')) : null;
+    var ds = {};
+    if (o.small) ds.small = '1';
+    if (o.dead) ds.dead = '1';
+    return h('div', { class: 'hw-f' + (o.changed ? ' sd-changed' : ''), dataset: ds },
+      h('span', { class: 'hw-fl' }, h('span', null, label), mark),
+      h('span', { class: 'hw-fv', translate: 'no' }, value, o.sub ? h('small', null, o.sub) : null));
+  }
+  function layer(kind, title, cells) {
+    return h('div', { class: 'hw-layer', dataset: { k: kind } }, h('span', { class: 'hw-ltitle' }, title), h('div', { class: 'hw-cells' }, cells));
+  }
+
+  function renderStrip(c, scene) {
+    var s = c.state, p = c.params;
+    var box = h('section', { class: 'hw-box hw-strip' });
+    var icmp = s.icmp;
+    box.append(h('h2', null, icmp ? t('stripIcmp') : t('stripTitle')));
+    if (icmp) {
+      box.append(
+        layer('frame', t('frameTitle'), [
+          field(t('fDstMac'), short(icmp.dstMac), { sub: ownerOf(scene, icmp.dstMac) }),
+          field(t('fSrcMac'), short(icmp.srcMac), { sub: ownerOf(scene, icmp.srcMac) }),
+          field(t('fType'), '0x0800'),
+          field(t('fFcs'), t('valNew'))]),
+        layer('ip', t('ipTitle'), [
+          field(t('fTtl'), String(icmp.ttl)),
+          field(t('fProto'), '1 (ICMP)'),
+          p.showChecksum ? field(t('fCsum'), t('valNew')) : null,
+          field(t('fSrc'), icmp.src),
+          field(t('fDst'), icmp.dst),
+          field(t('fIcmp'), t('icmpVal'), { small: true })]));
+      return box;
+    }
+    var ch = L.changed(s), ref = s.ref;
+    var cmp = function (k) { return ref ? (ch.indexOf(k) >= 0 ? { changed: true, old: k === 'dstMac' || k === 'srcMac' ? short(ref[k]) : ref[k] } : { same: true }) : {}; };
+    if (s.frame) {
+      var f = s.frame;
+      box.append(layer('frame', t('frameTitle'), [
+        field(t('fDstMac'), short(f.dstMac), Object.assign({ sub: ownerOf(scene, f.dstMac) }, cmp('dstMac'))),
+        field(t('fSrcMac'), short(f.srcMac), Object.assign({ sub: ownerOf(scene, f.srcMac) }, cmp('srcMac'))),
+        field(t('fType'), f.type, ref ? { same: true } : {}),
+        field(t('fFcs'), f.fcs, cmp('fcs'))]));
+    } else {
+      box.append(h('p', { class: 'hw-none' }, s.dropped ? t('frameDropped') : s.held ? t('frameHeld') : t('frameNone')));
+    }
+    var ip = s.ip;
+    box.append(layer('ip', t('ipTitle'), [
+      field(t('fTtl'), String(ip.ttl), Object.assign({ dead: !!s.dropped }, cmp('ttl'))),
+      field(t('fProto'), '1 (ICMP)', ref ? { same: true } : {}),
+      p.showChecksum ? field(t('fCsum'), L.hex4(ip.csum), cmp('csum')) : null,
+      field(t('fSrc'), ip.src, cmp('src')),
+      field(t('fDst'), ip.dst, cmp('dst')),
+      field(t('fOther'), t('otherVal'), Object.assign({ small: true }, ref ? { same: true } : {}))]));
+    return box;
+  }
+
+  // ── the node's work ──
+
+  function renderWork(c) {
+    var s = c.state, p = c.params, w = s.work;
+    var now = w && ['process', 'arrive', 'arpReq', 'arpRep'].indexOf(s.phase) >= 0;
+    var box = h('section', { class: 'hw-box hw-work' + (w && !now ? ' hw-past' : '') });
+    if (!w) {
+      box.append(h('h2', null, t('workIdle')), h('p', null, t(p.showChecksum ? 'workIdleText' : 'workIdleTextNoCsum')));
+      return box;
+    }
+    var items = [];
+    var li = function (st, kids) { items.push(h('li', { dataset: { st: st } }, kids)); };
+    if (w.kind === 'host') {
+      box.append(h('h2', null, t('workHost', { b: w.node })));
+      li('ok', t.parts('rMac', { mac: data(short(s.frame.dstMac)) }));
+      li('ok', t.parts('rIp', { ip: data(s.ip.dst) }));
+      if (p.showChecksum) li('ok', t('rCsum'));
+      li('ok', t.parts('rTtl', { ttl: data(w.ttl) }));
+      li('ok', t('rAccept'));
+    } else {
+      box.append(h('h2', null, t('workRouter', { r: w.node })));
+      li('ok', t.parts('wStrip', { mac: data(short(w.inMac)) }));
+      li('ok', w.lookup.via
+        ? t.parts('wLookupVia', { dst: data(w.lookup.dst), net: data(w.lookup.net), via: data(w.lookup.via), iface: data(w.lookup.iface) })
+        : t.parts('wLookup', { dst: data(w.lookup.dst), net: data(w.lookup.net), iface: data(w.lookup.iface) }));
+      li('ok', t.parts('wTtl', { a: data(w.ttlIn), b: data(w.ttlOut) }));
+      li(w.expired ? 'stop' : 'ok', w.expired ? t('wTtlZero') : t('wTtlOk'));
+      var skip = function (key) { li('skip', [key, ': ', t('wSkipped')]); };
+      if (w.expired) {
+        if (p.showChecksum) skip(t('fCsum'));
+        skip('ARP');
+        skip(t('frameTitle'));
+      } else {
+        if (p.showChecksum) li('ok', t.parts('wCsum', { a: data(w.csumIn), b: data(w.csumOut) }));
+        var nm = w.nextMac || (s.arpMsg && s.arpMsg.kind === 'rep' ? s.arpMsg.senderMac : null);
+        if (w.arp === 'miss' && !nm) li('wait', t.parts('wArpMiss', { ip: data(w.nextHop) }));
+        else li('ok', t.parts(w.arp === 'hit' ? 'wArpHit' : 'wArpLearned', { ip: data(w.nextHop), mac: data(short(nm)) }));
+        if (w.arp === 'miss' && s.phase !== 'cross') li('skip', [t('frameTitle'), ': ', t('wSkipped')]);
+        else li('ok', t.parts('wFrame', { src: data(short(w.egress.mac) + ' ' + w.egress.name), dst: data(short(w.nextMac || nm)) }));
+      }
+    }
+    box.append(h('ol', null, items));
+    return box;
+  }
+
+  // ── history ──
+
+  function renderHistory(c) {
+    var s = c.state, p = c.params;
+    var box = h('section', { class: 'hw-box hw-hist' }, h('h2', null, t('histTitle')));
+    if (!s.history.length) { box.append(h('p', { class: 'hw-none' }, t('histEmpty'))); return box; }
+    var cols = [['dstMac', 'hDstMac'], ['srcMac', 'hSrcMac'], ['src', 'hSrc'], ['dst', 'hDst'], ['ttl', 'hTtl']]
+      .concat(p.showChecksum ? [['csum', 'hCsum']] : [], [['fcs', 'hFcs']]);
+    var head = h('tr', null, h('th', null, t('hSeg')), cols.map(function (k) { return h('th', null, t(k[1])); }));
+    var rows = s.history.map(function (r, i) {
+      var prev = i ? s.history[i - 1] : null;
+      var nowRow = s.phase === 'cross' && i === s.history.length - 1;
+      return h('tr', { dataset: nowRow ? { now: '1' } : {} },
+        h('td', { class: 'hw-seg' }, data(r.segment, ''), ' ', data(r.net, 'hw-net')),
+        cols.map(function (k) {
+          var v = k[0] === 'dstMac' || k[0] === 'srcMac' ? short(r[k[0]]) : String(r[k[0]]);
+          var cls = prev ? (prev[k[0]] !== r[k[0]] ? 'sd-changed' : 'hw-eq') : null;
+          return h('td', { class: cls, translate: 'no' }, v);
+        }));
+    });
+    if (s.dropped) rows.push(h('tr', null, h('td', { class: 'hw-drop', colspan: String(cols.length + 1) }, t('histDropped', { r: s.dropped.at }))));
+    box.append(h('table', null, h('thead', null, head), h('tbody', null, rows)));
+    return box;
+  }
+
+  // ── topology (kit view K2) ──
+
+  var BADGE = { bSends: 'fill', bWorks: 'solid', bHolds: 'dashed', bDrops: 'solid', bAnswers: 'solid', bAccepts: 'solid', bIcmp: 'fill' };
+  function badgesFor(id, s) {
+    var out = [];
+    if (s.phase === 'cross' && s.actor === id && id === 'A') out.push('bSends');
+    if (s.phase === 'process' && s.actor === id) out.push(s.dropped ? 'bDrops' : s.held ? 'bHolds' : 'bWorks');
+    if ((s.phase === 'arpReq') && s.actor === id) out.push('bHolds');
+    if (s.phase === 'arpRep' && s.arpMsg.from === id) out.push('bAnswers');
+    if (s.phase === 'arrive' && s.actor === id) out.push('bAccepts');
+    if (s.phase === 'icmp' && s.icmp.from === id) out.push('bIcmp');
+    return out;
+  }
+
+  function renderTopo(c, scene) {
+    var s = c.state;
+    var two = scene.nodes.length === 4;
+    var COL = two ? { A: 0, R1: 2, R2: 4, B: 6 } : { A: 0, R1: 3, B: 6 };
+    var nodes = scene.nodes.map(function (n) {
+      var badges = badgesFor(n.id, s);
+      return {
+        id: n.id, kind: n.kind, col: COL[n.id], row: 0, c: COLOUR[n.id],
+        lines: n.kind === 'host'
+          ? [{ text: n.ip, kind: 'addr' }, { text: 'MAC ' + short(n.mac), kind: 'sub' }]
+          : [{ text: t('router'), kind: 'role' }].concat(n.ifs.map(function (f) { return { text: f.name + ' ' + short(f.mac), kind: 'sub' }; })),
+        badges: badges.map(function (k) { return { text: t(k), k: BADGE[k] }; }),
+        state: badges.length ? 'active' : null,
+        changed: s.dropped && s.dropped.at === n.id && s.phase === 'process'
+      };
+    });
+    var links = [];
+    scene.nets.forEach(function (net, i) {
+      var k = i + 1, left = scene.nodes[i], right = scene.nodes[i + 1];
+      var span = two ? 1 : 2;
+      nodes.push({ id: 'seg' + k, kind: 'cloud', col: COL[left.id] + 1, span: span, row: 1, name: t('segName', { k: k }),
+        lines: [{ text: net, kind: 'sub' }], align: 'center', state: (s.segment === k && s.phase === 'cross') || (s.segment + 1 === k && (s.phase === 'arpReq' || s.phase === 'arpRep')) ? 'active' : null });
+      links.push({ id: 'l' + k, a: left.id, b: right.id, active: s.segment === k && s.phase === 'cross',
+        ends: { a: left.kind === 'router' ? hostPart(left.ifs[1].ip) : null, b: right.kind === 'router' ? hostPart(right.ifs[0].ip) : null } });
+    });
+    // arpReq/arpRep happen on the segment after the one last crossed
+    links.forEach(function (l, i) { if ((s.phase === 'arpReq' || s.phase === 'arpRep') && i === s.segment) l.active = true; });
+
+    var packets = [];
+    if (s.phase === 'cross') {
+      packets.push({ from: s.actor, to: s.at, label: t('chipPkt', { ttl: s.ip.ttl }), c: IP_C });
+    } else if (s.phase === 'process' && s.dropped) {
+      var i = scene.nodes.map(function (n) { return n.id; }).indexOf(s.at);
+      packets.push({ from: scene.nodes[i - 1].id, to: s.at, drop: true, label: t('chipPkt', { ttl: 0 }), c: IP_C, move: false });
+    } else if (s.phase === 'arpReq' || s.phase === 'arpRep') {
+      packets.push({ from: s.arpMsg.from, to: s.arpMsg.to, label: t(s.arpMsg.kind === 'req' ? 'chipArpReq' : 'chipArpRep'),
+        c: COLOUR[s.arpMsg.from], cast: s.arpMsg.kind === 'req' ? 'broadcast' : 'unicast' });
+    } else if (s.phase === 'icmp') {
+      var path = s.icmp.path;
+      for (var j = 0; j + 1 < path.length; j++) {
+        packets.push({ from: path[j], to: path[j + 1], label: t('chipIcmp'), c: COLOUR[s.icmp.from], chip: j === 0 });
+      }
+    }
+    // path order (A, segment 1, R1, …): the phone layout lists the cards in this order
+    var hosts = nodes.slice(0, scene.nodes.length), segs = nodes.slice(scene.nodes.length), ordered = [];
+    hosts.forEach(function (n, i) { ordered.push(n); if (segs[i]) ordered.push(segs[i]); });
+    return Simdeck.topology({ cols: 7, rows: ['auto', 'auto'], dir: c.dir, nodes: ordered, links: links, packets: packets });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'ttl0', type: 'range', label: t('ttl0'), min: 1, max: 64 },
+      { key: 'routers', type: 'choice', label: t('routers'), options: [[1, '1'], [2, '2']], resets: true },
+      { key: 'coldArp', type: 'toggle', label: t('coldArp'), hint: t('coldArpHint'), resets: true },
+      { key: 'showChecksum', type: 'toggle', label: t('showChecksum'), hint: t('showChecksumHint') }
+    ],
+
+    presets: [
+      { id: 'book', label: t('presetBook'), params: { routers: 1, ttl0: 64, coldArp: false } },
+      { id: 'two-routers', label: t('presetTwo'), params: { routers: 2, ttl0: 64, coldArp: false } },
+      { id: 'ttl-dies', label: t('presetTtl'), params: { routers: 2, ttl0: 2, coldArp: false }, hint: t('presetTtlHint') },
+      { id: 'cold-arp', label: t('presetCold'), params: { routers: 1, ttl0: 64, coldArp: true } }
+    ],
+
+    legend: [
+      { shape: 'fr', label: t('legFrame') },
+      { shape: 'ip', label: t('legIp') },
+      { shape: 'eq', label: t('legSame') },
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'x', label: t('legDrop') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'hw' },
+        h('div', { class: 'hw-top' }, renderStrip(c, scene), renderWork(c)),
+        renderTopo(c, scene),
+        renderHistory(c)));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, scene = L.sceneOf(p), w = s.work;
+      var D = function (v) { return data(v); };
+      switch (s.phase) {
+        case 'start': return parts('capStart', { src: D(scene.src), dst: D(scene.dst) });
+        case 'cross':
+          if (s.segment === 1) return parts('capCross1', { mac: b(short(s.frame.dstMac)), dst: D(s.ip.dst), ttl: D(s.ip.ttl) });
+          return parts('capCross', { k: D(s.segment), net: D(scene.nets[s.segment - 1]), r: data(s.actor, ''), mac: b(short(s.frame.dstMac)) });
+        case 'process':
+          if (s.dropped) return parts('capDrop', { r: data(w.node, ''), a: D(w.ttlIn) });
+          if (s.held) return parts('capHeld', { r: data(w.node, ''), a: D(w.ttlIn), b: D(w.ttlOut), hop: b(w.nextHop) });
+          return parts('capProcess', { r: data(w.node, ''), smac: b(short(s.frame.srcMac)), iface: data(w.egress.name, ''),
+            dmac: b(short(s.frame.dstMac)), next: data(ownerOf(scene, s.frame.dstMac), ''), a: D(w.ttlIn), b: b(w.ttlOut) })
+            .concat(p.showChecksum ? parts('capCsum', { c1: D(w.csumIn), c2: b(w.csumOut) }) : [t('capEnd')]);
+        case 'arpReq':
+          return parts('capArpReq', { r: data(s.actor, ''), k: D(s.segment + 1), hop: b(s.arpMsg.targetIp), asker: D(s.arpMsg.senderIp) });
+        case 'arpRep':
+          return parts('capArpRep', { n: data(s.arpMsg.from, ''), hop: D(s.arpMsg.senderIp), mac: b(short(s.arpMsg.senderMac)), r: data(s.arpMsg.to, '') });
+        case 'arrive': return parts('capArrive', { mac: D(short(s.frame.dstMac)), dst: D(s.ip.dst), ttl: b(s.ip.ttl) });
+        case 'icmp':
+          return parts(s.icmp.path.length > 2 ? 'capIcmp' : 'capIcmpDirect', { r: data(s.icmp.from, ''), src: b(s.icmp.dst), from: D(s.icmp.src) });
+        case 'summary':
+          if (s.dropped) return parts('capSummaryDrop', { r: data(s.dropped.at, '') });
+          return parts('capSummary', { a: D(s.history[0].ttl), b: b(s.history[s.history.length - 1].ttl) });
+      }
+      return '';
+    }
+  });
+})();
+</script>
+</body>
+</html>
