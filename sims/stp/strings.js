@@ -2,7 +2,8 @@
    Every visible string of the stp page, in both languages (docs/sim-ui.md §9). Same keys in hr and en; the page
    looks them up with t(key) from Simdeck.useStrings(window.SimStrings). {name} is a placeholder, an array is plural
    forms (hr: 1 / 2–4 / 5+, en: 1 / other). The title and subtitle come from sim.json (title, concept).
-   The spanning-tree terms are not in kit/glossary.js yet (NOTES.md "Term pairs"), so the pairs are written out. */
+   Croatian: a [[term]] (English term, Croatian in parentheses) at first mention in the legend and the explanation,
+   [[=term]] (English only) after that, in captions and the side table. */
 (function (root) {
   'use strict';
 
@@ -18,12 +19,12 @@
       ageVal: '{s} s',
       none: '—',
       believes: 'korijen {r}, trošak {c}',
-      believesRp: 'korijen {r}, trošak {c}, korijenski priključak p{p}',
+      believesRp: 'korijen {r}, trošak {c}, [[=root port]] p{p}',
       selfRoot: 'sam je korijen',
-      stBlocking: 'blokiranje',
-      stListening: 'osluškivanje',
-      stLearning: 'učenje',
-      stForwarding: 'prosljeđivanje',
+      stBlocking: '[[=blocking]]',
+      stListening: '[[=listening]]',
+      stLearning: '[[=learning]]',
+      stForwarding: '[[=forwarding]]',
       stDisabled: 'isključen',
       symR: 'R',
       symD: 'D',
@@ -64,42 +65,42 @@
       prReconvergeHint: 'Prekid u t = 40 s; S3 čeka da istekne max age (20 s).',
       prNoStpHint: 'Jedan broadcast kruži zauvijek.',
 
-      legRootBridge: 'korijenski most',
-      legR: 'korijenski priključak',
-      legD: 'određeni priključak',
-      legX: 'blokirani priključak',
-      legBpdu: 'BPDU ⟨korijen, trošak, pošiljatelj, priključak⟩',
+      legRootBridge: '[[root bridge]]',
+      legR: '[[root port]]',
+      legD: '[[designated port]]',
+      legX: '[[blocking]]',
+      legBpdu: 'BPDU ⟨korijen, trošak, pošiljatelj, prik.⟩',
       legFrame: 'broadcast okvir',
-      legChanged: 'promijenjeno u ovom koraku',
+      legChanged: 'promjena u koraku',
 
-      capPower: 'Preklopnici su upravo uključeni. Svaki misli da je on korijen, a svi su priključci u blokiranju. Pritisni → za prve BPDU-ove.',
-      capClaims: 't = 0 s: svaki preklopnik na svakom priključku šalje BPDU u kojem tvrdi da je on korijen. Svaki pamti bolji koji čuje: {list}. Priključci R i D počinju osluškivati.',
-      capRound: 't = {t} s: određeni priključci šalju BPDU.',
+      capPower: 'Preklopnici su upravo uključeni. Svaki misli da je on korijen, a svi su priključci u stanju [[=blocking]]. Pritisni → za prve BPDU-ove.',
+      capClaims: 't = 0 s: svaki preklopnik na svakom priključku šalje BPDU u kojem tvrdi da je on korijen. Svaki pamti bolji koji čuje: {list}. Priključci R i D prelaze u [[listening]].',
+      capRound: 't = {t} s: priključci [[=designated port]] šalju BPDU.',
       capStable: 't = {t} s: novi krug BPDU-ova ništa ne mijenja. Stablo je gotovo: {blocked} blokira petlju.',
       capStableNone: 't = {t} s: novi krug BPDU-ova ništa ne mijenja. Nijedan priključak ne blokira: petlje više nema.',
-      capLearning: 't = {t} s: prošlo je 15 s (forward delay). Osluškivanje → učenje: {ports}. Priključak u učenju puni tablicu MAC adresa, ali još ne prosljeđuje okvire.',
-      capForwarding: 't = {t} s: još 15 s. Učenje → prosljeđivanje: {ports}. Okviri sada idu stablom.',
-      capForwardingBlocked: 't = {t} s: još 15 s. Učenje → prosljeđivanje: {ports}. Okviri sada idu stablom; {blocked} ostaje u blokiranju.',
+      capLearning: 't = {t} s: prošlo je 15 s (forward delay). [[=listening]] → [[learning]]: {ports}. Priključak u stanju [[=learning]] puni tablicu MAC adresa, ali još ne prosljeđuje okvire.',
+      capForwarding: 't = {t} s: još 15 s. [[=learning]] → [[forwarding]]: {ports}. Okviri sada idu stablom.',
+      capForwardingBlocked: 't = {t} s: još 15 s. [[=learning]] → [[forwarding]]: {ports}. Okviri sada idu stablom; {blocked} ostaje u stanju [[=blocking]].',
       allRD: 'svi priključci R i D',
       capCut: 't = {t} s: veza {l} je prekinuta.',
-      cutClaim: '{b} je izgubio korijenski priključak i sad tvrdi da je on korijen. {n} taj lošiji BPDU odbacuje: na tom priključku već čuva bolji.',
-      cutClaimFree: '{b} je izgubio korijenski priključak i sad tvrdi da je on korijen.',
-      cutAlt: '{b} je izgubio korijenski priključak, ali na {p} već čuva BPDU od {n}: {p} odmah postaje korijenski (trošak {c}) i počinje osluškivati. Izravni kvar ne čeka max age.',
+      cutClaim: '{b} je izgubio [[=root port]] i sad tvrdi da je on korijen. {n} taj lošiji BPDU odbacuje: na tom priključku već čuva bolji.',
+      cutClaimFree: '{b} je izgubio [[=root port]] i sad tvrdi da je on korijen.',
+      cutAlt: '{b} je izgubio [[=root port]], ali na {p} već čuva BPDU od {n}: {p} odmah postaje [[=root port]] (trošak {c}) i prelazi u [[=listening]]. Izravni kvar ne čeka max age.',
       cutNothing: 'Na toj je vezi bio blokirani priključak: promet ionako nije išao njome, pa se stablo ne mijenja.',
       capAged: 't = {t} s ({s} s od prekida): {b} 20 s nije čuo BPDU koji bi osvježio podatak pohranjen na {p}, pa on istječe (max age).',
-      roleToD: '{p} postaje određeni i počinje osluškivati; prosljeđivat će tek nakon 15 s osluškivanja i 15 s učenja.',
-      newRootPortListen: '{b} uzima p{p} kao novi korijenski priključak (trošak {c}); on počinje osluškivati.',
+      roleToD: '{p} postaje [[=designated port]] i prelazi u [[=listening]]; prosljeđivat će tek nakon 15 s [[=listening]] i 15 s [[=learning]].',
+      newRootPortListen: '{b} uzima p{p} kao novi [[=root port]] (trošak {c}); prelazi u [[=listening]].',
       capStableWait: 't = {t} s: novi krug BPDU-ova ništa ne mijenja, ali stablo još nije gotovo.',
-      newRootPort: '{b} uzima p{p} kao novi korijenski priključak (trošak {c}).',
+      newRootPort: '{b} uzima p{p} kao novi [[=root port]] (trošak {c}).',
       stillIgnored: '{b} i dalje odbacuje lošiji BPDU od {n}: pohranjeni je star {a} s, a istječe nakon 20 s.',
-      whyBlockBid: '{b} na priključku p{p} prima BPDU s istim troškom do korijena ({c}). Odlučuje niži ID mosta: {n} pobjeđuje, priključak na {b} prelazi u blokiranje.',
-      whyBlockCost: '{b} na priključku p{p} čuje bolju ponudu: trošak {c1} prema svojih {c2}. Priključak prelazi u blokiranje.',
-      whyBlockPort: '{b} na priključku p{p} prima BPDU s istim troškom i od istog mosta; odlučuje niži ID priključka pošiljatelja ({pid}). Priključak prelazi u blokiranje.',
-      whyBlockRoot: '{b} na priključku p{p} čuje BPDU s boljim korijenom ({r}). Priključak prelazi u blokiranje.',
-      whyRootOnly: '{b}: korijen {r}, trošak {c}, korijenski priključak p{p}.',
-      whyRootCost: '{b}: korijenski priključak je p{p}, trošak {c} (drugi put košta {alt}).',
-      whyRootBid: '{b}: oba puta koštaju {c}; odlučuje niži ID mosta pošiljatelja ({n}), pa je korijenski priključak p{p}.',
-      whyRootPort: '{b}: isti trošak ({c}), isti pošiljatelj ({n}); odlučuje niži ID priključka pošiljatelja, {pid}, pa je korijenski priključak p{p}, a drugi priključak blokira. Vlastiti brojevi priključaka ovdje ne odlučuju.',
+      whyBlockBid: '{b} na priključku p{p} prima BPDU s istim troškom do korijena ({c}). Odlučuje niži [[bridge ID]]: {n} pobjeđuje, priključak na {b} prelazi u [[=blocking]].',
+      whyBlockCost: '{b} na priključku p{p} čuje bolju ponudu: trošak {c1} prema svojih {c2}. Priključak prelazi u [[=blocking]].',
+      whyBlockPort: '{b} na priključku p{p} prima BPDU s istim troškom i od istog mosta; odlučuje niži ID priključka pošiljatelja ({pid}). Priključak prelazi u [[=blocking]].',
+      whyBlockRoot: '{b} na priključku p{p} čuje BPDU s boljim korijenom ({r}). Priključak prelazi u [[=blocking]].',
+      whyRootOnly: '{b}: korijen {r}, trošak {c}, [[=root port]] p{p}.',
+      whyRootCost: '{b}: [[=root port]] je p{p}, trošak {c} (drugi put košta {alt}).',
+      whyRootBid: '{b}: oba puta koštaju {c}; odlučuje niži [[bridge ID]] pošiljatelja ({n}), pa je [[=root port]] p{p}.',
+      whyRootPort: '{b}: isti trošak ({c}), isti pošiljatelj ({n}); odlučuje niži ID priključka pošiljatelja, {pid}, pa je [[=root port]] p{p}, a drugi priključak blokira. Vlastiti brojevi priključaka ovdje ne odlučuju.',
       whyRootOwn: '{b}: sve je jednako do vlastitog priključka; niži ID priključka odlučuje: p{p}.',
       capFrame: '{h} šalje {bc}. Okvir stiže do svakog preklopnika jednom; kopiju koju {from} šalje prema {to} odbacuje blokirani priključak. Petlje nema.',
       capFrameFree: '{h} šalje {bc}. Okvir stiže do svakog preklopnika jednom i tu staje.',
@@ -108,27 +109,27 @@
       capFlood1: 'STP je isključen. {h} šalje jedan {bc} okvir.',
       capFlood: 'Svaki preklopnik šalje svaku primljenu kopiju na sve ostale priključke. U letu: {f}, ukupno poslano {total}.',
       floodRecv: ['{h} je dosad primio {n} kopiju istog okvira.', '{h} je dosad primio {n} kopije istog okvira.', '{h} je dosad primio {n} kopija istog okvira.'],
-      floodNever: 'Okvir nema TTL, pa ovo nikad ne prestaje: broadcast oluja.',
+      floodNever: 'Okvir nema TTL, pa ovo nikad ne prestaje: [[broadcast storm]].',
       copies: ['{n} kopiju', '{n} kopije', '{n} kopija'],
       listSep: '; ',
       andSep: ' i ',
 
-      explain: '<p><i>Spanning tree protocol</i> (protokol razapinjućeg stabla, STP) od mreže preklopnika s petljom ' +
-        'pravi stablo: na svakoj petlji jedan priključak blokira. Bez toga bi jedan <i>broadcast</i> kružio zauvijek ' +
-        '(<i>broadcast</i> oluja), jer Ethernet okvir nema TTL.</p>' +
+      explain: '<p>STP, [[spanning tree protocol]], od mreže preklopnika s petljom pravi stablo: na svakoj petlji ' +
+        'jedan priključak blokira. Bez toga bi jedan <i>broadcast</i> kružio zauvijek, jer Ethernet okvir nema TTL: ' +
+        'to je [[broadcast storm]].</p>' +
         '<p>Preklopnici razmjenjuju BPDU-ove ⟨ID korijena, trošak do korijena, ID pošiljatelja, ID priključka⟩. ' +
-        '<i>Bridge ID</i> (identifikator mosta) je prioritet (zadano 32768) pa MAC adresa; niži je bolji. BPDU-ovi se ' +
-        'uspoređuju polje po polje, prva razlika odlučuje.</p>' +
-        '<ol><li><i>Root bridge</i> (korijenski most): najniži ID mosta u mreži. Svi su mu priključci određeni.</li>' +
-        '<li><i>Root port</i> (korijenski priključak), jedan po preklopniku: najmanji <i>path cost</i> (trošak puta) do ' +
-        'korijena; kod jednakog troška niži ID mosta pošiljatelja, pa niži ID priključka pošiljatelja (njegov, ne vlastiti).</li>' +
-        '<li><i>Designated port</i> (određeni priključak), jedan po vezi: onaj s najboljim BPDU-om za tu vezu.</li>' +
-        '<li>Svi ostali su u <i>blocking</i> (blokiranju): primaju BPDU-ove, ali ne prosljeđuju okvire.</li></ol>' +
+        '[[bridge ID]] je prioritet (zadano 32768) pa MAC adresa; niži je bolji. BPDU-ovi se uspoređuju polje po polje, ' +
+        'prva razlika odlučuje.</p>' +
+        '<ol><li>[[root bridge]]: najniži [[=bridge ID]] u mreži. Svaki njegov priključak je [[designated port]].</li>' +
+        '<li>[[root port]], jedan po preklopniku: najmanji [[path cost]] do korijena; kod jednakog troška niži ' +
+        '[[=bridge ID]] pošiljatelja, pa niži ID priključka pošiljatelja (njegov, ne vlastiti).</li>' +
+        '<li>[[=designated port]], jedan po vezi: onaj s najboljim BPDU-om za tu vezu.</li>' +
+        '<li>Svi ostali su u stanju [[blocking]]: primaju BPDU-ove, ali ne prosljeđuju okvire.</li></ol>' +
         '<p>Trošak veze (kratke vrijednosti iz 802.1D-1998): 10 Mb/s = 100, 100 Mb/s = 19, 1 Gb/s = 4, 10 Gb/s = 2. ' +
-        'Priključak koji postane R ili D ide kroz osluškivanje (15 s) i učenje (15 s) do prosljeđivanja. Lošiji BPDU ' +
+        'Priključak koji postane R ili D ide kroz [[listening]] (15 s) i [[learning]] (15 s) do [[forwarding]]. Lošiji BPDU ' +
         'na blokiranom priključku zanemaruje se dok pohranjeni ne istekne (max age, 20 s): neizravni kvar traje oko ' +
         '20 + 15 + 15 = 50 s, izravni oko 30 s.</p>' +
-        '<p>Imena S1, S2, S3 na BPDU-ovima stoje umjesto punog ID-a mosta (prioritet.MAC). Klasični STP, ne RSTP.</p>'
+        '<p>Imena S1, S2, S3 na BPDU-ovima stoje umjesto punog [[=bridge ID]] (prioritet.MAC). Klasični STP, ne RSTP.</p>'
     },
     en: {
       stage: 'Switches, links and BPDUs',
@@ -190,7 +191,7 @@
       legRootBridge: 'root bridge',
       legR: 'root port',
       legD: 'designated port',
-      legX: 'blocked port',
+      legX: 'blocking',
       legBpdu: 'BPDU ⟨root, cost, sender, port⟩',
       legFrame: 'broadcast frame',
       legChanged: 'changed in this step',

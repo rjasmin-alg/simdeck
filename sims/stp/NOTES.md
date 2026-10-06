@@ -65,7 +65,13 @@ strings. The flood supports any scene: more than two inter-switch ports per swit
 four-switch mesh), a `router` node that absorbs broadcasts, and a loop-free tree (the flood ends). A preset task adds
 a `topo` value to `sceneOf` and a layout in `index.html` `layoutOf`. If `storm` lands it replaces `no-stp` (task).
 
-## Term pairs (added to kit/glossary.js with "src": "simdeck" on the owner's request, 2026-10-05; the page still writes them out)
+## Term pairs (added to kit/glossary.js with "src": "simdeck" on the owner's request, 2026-10-05)
+
+The Croatian page follows the term rule through the glossary (owner, 2026-10-06): the legend and the explanation give
+the first mention as `[[term]]`, *English* (Croatian); captions and the side table use `[[=term]]`, English only
+(captions in italics; the legend and the table in plain text, which the owner accepts as long as both languages
+appear somewhere on the page). The English page shows the English terms. Two Croatian legend labels were shortened
+so the header stays on one row ("promjena u koraku", "prik.").
 
 | en | hr |
 |---|---|
