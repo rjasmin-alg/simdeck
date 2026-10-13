@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const ID = 'os-map';
 const MODULE = 'index';
 // sha256 of ossimulator's dist-simdeck/os-map.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '0b3f393edf8c70414bdc8ca4ee8b037093de21e64795d1862e292192c9f1bb3c';
+const BUILD_SHA256 = 'a9fdfc5e0c7e10b9d777af4fc74f82859342f2aae473c1209537d7e10eca7a64';
 // Module ids the index entries may open with ?m=<id> to focus one module (NOTES.md, "Deep links").
 const DEEP_LINKS = [
   'interrupts', 'processes', 'scheduling', 'memory-allocation', 'address-translation',
@@ -65,7 +65,8 @@ test('every deep-link module id is in the build\'s module list, and the page rea
   assert.ok(html.includes('.get(`m`)'), '?m= is read');
 });
 
-test('sim.json declares the single-language exception and the origin', () => {
-  assert.deepEqual(entry.languages, ['hr']);
+test('both languages: no single-language exception, and the build reads the kit\'s language key', () => {
+  assert.ok(!('languages' in entry), 'the ossimulator build carries hr and en since 93da8f8');
+  assert.ok(html.includes("'simdeck.lang'"), 'simdeck.lang');
   assert.equal(entry.origin, `ossimulator/${MODULE}`);
 });

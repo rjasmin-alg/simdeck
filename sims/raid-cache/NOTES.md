@@ -8,7 +8,12 @@ imports (COMMON §12); `sim.test.js` is `sims/deadlock/sim.test.js` with this si
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/raid-cache.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/raid-cache.html`, from ossimulator's
+  `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `6c05372152be1b4f369fdda7dd4dc48b073421eed3eca5819691d609d9a26196`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/raid-cache.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `e6ce6808dc1fe50fa4c67b06122a895b9cc31cb8f31579037ad59e36bc56a9c1`. The entries below describe the first import,
   from `dist-single/`.
@@ -30,8 +35,9 @@ imports (COMMON §12); `sim.test.js` is `sims/deadlock/sim.test.js` with this si
   translation (149).
 - Class `explorer`, topic `os`, tags `raid` and `operating-systems`, level `core` (all in `tags.json`). Aliases
   are the `meta.ts` terms ("strip / stripe" split in two; "RAID" left out, since it is in the title).
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -77,7 +83,7 @@ lines the home page shows. The manifest accepts them as
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: dark follows the OS,
   grayscale keeps every state readable (hit/miss cells carry H/M letters and a hatch pattern, the selected disk
   count is inverted, statuses are words), the phone layout is one long column (10362 px) without sideways scroll.
-- Not checked: English (there is none yet); the page in a real lecture on the projector *(check)*.
+- Not checked: a read-through of the English; the page in a real lecture on the projector *(check)*.
 
 ## Observations (not defects)
 

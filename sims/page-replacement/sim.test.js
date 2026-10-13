@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 
 const ID = 'page-replacement';
 // sha256 of ossimulator's dist-simdeck/page-replacement.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = '8c9514f08f9f757aae339ceb560e27acce3db4d27df502f753a175c062d5b75b';
+const BUILD_SHA256 = '0b1ad5533a0877b7e94090d37c973bfc385318f32749f1c5d8f76ffd51bdf31d';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['stallings-four-algorithms', 'clock-walkthrough', 'belady-anomaly', 'working-set-window', 'thrashing'];
 
@@ -58,7 +58,8 @@ test('every deep-link scenario id is in the build', () => {
   assert.ok(!html.includes('id:`no-such-scenario`'));
 });
 
-test('sim.json declares the single-language exception and the origin', () => {
-  assert.deepEqual(entry.languages, ['hr']);
+test('both languages: no single-language exception, and the build reads the kit\'s language key', () => {
+  assert.ok(!('languages' in entry), 'the ossimulator build carries hr and en since 93da8f8');
+  assert.ok(html.includes("'simdeck.lang'"), 'simdeck.lang');
   assert.equal(entry.origin, `ossimulator/${ID}`);
 });

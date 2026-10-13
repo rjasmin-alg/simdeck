@@ -8,7 +8,12 @@ ossimulator imports (COMMON §12).
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/disk-scheduling.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/disk-scheduling.html`, from
+  ossimulator's `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is
+  `?lang=hr|en`, else `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it,
+  and links to other pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `8d8f220e4065112ab4f9668b2a76618c296e8cdcc44f3854ff95f46eaa24b614`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/disk-scheduling.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `2ef26b6c361f4b32b90c527e464b12aa2fa1d2dc9cbd730ab25926c1a046e382`. The entries below describe the first import,
   from `dist-single/`.
@@ -29,12 +34,12 @@ ossimulator imports (COMMON §12).
 - The Croatian summary from `meta.ts` (200 characters) is shortened to fit 160 (158): "ukupna i prosječna duljina
   traženja" becomes "duljina traženja", and "vrijeme pristupa (slijedno i nasumično)" loses the parenthesis. The
   English is a translation (139 characters).
-- English title "Disk scheduling" (the module has no English yet; `w0/ossimulator-english` may choose another, then
-  update `sim.json` and the meta placeholder).
+- English title "Disk scheduling", ossimulator's `title` too.
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases are the seven
   `meta.ts` terms plus the policy names FIFO, N-step-SCAN and LOOK, which are not in the concept line.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -77,7 +82,7 @@ accepts them as `{ "preset": "hdd-vs-ssd", "query": "scenario=hdd-vs-ssd", … }
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: readable in grayscale (the
   selected policy and device are shown inverted and named in the chart header, requests are numbered tracks), the
   phone layout is one long column (≈ 9 800 px) with no sideways scroll.
-- Not checked: English (there is none yet); the other five scenarios' end states *(check)*; the page in a real
+- Not checked: a read-through of the English; the other five scenarios' end states *(check)*; the page in a real
   lecture on the projector *(check)*.
 
 ## Defects for ossimulator

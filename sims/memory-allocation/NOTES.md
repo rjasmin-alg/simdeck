@@ -8,7 +8,12 @@ the other ossimulator imports (COMMON §12).
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/memory-allocation.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/memory-allocation.html`, from
+  ossimulator's `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is
+  `?lang=hr|en`, else `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it,
+  and links to other pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `b8d191fa93247889f96cc75cc174ea6fd3efaf07c0af906e7228a7df997b6d45`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/memory-allocation.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `62dda21c500b15f4dba574a561ba1f8a79d616f55baae5257f0e21ed55a5590e`. The entries below describe the first import,
   from `dist-single/`.
@@ -30,8 +35,9 @@ the other ossimulator imports (COMMON §12).
   (152 characters; "internal and external fragmentation" shortened to "fragmentation" to fit).
 - Class `explorer`, topic `os`, tags `memory` and `operating-systems`, level `core` (all in `tags.json`); aliases
   from the `meta.ts` terms.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Concept
+  now "…first/best/next-fit, buddy", its `subtitle`.
 
 ## Declared exceptions
 
@@ -79,8 +85,8 @@ about how many preset lines the home page shows. The manifest accepts them as
   in 256K with 16K internal fragmentation, E 75K with 53K, merges down to one free 1M block at t=10). Holes are
   hatched, internal fragmentation cross-hatched, every block labelled, so colour is never the only carrier.
 - The phone layout is one long column (≈ 8600 px), no sideways scroll.
-- Not checked: English (there is none yet); `fixed-equal` and `dynamic-stallings` run to the end *(check)*; the
-  page in a real lecture on the projector *(check)*.
+- Not checked: a read-through of the English; `fixed-equal` and `dynamic-stallings` run to the end *(check)*; the page
+  in a real lecture on the projector *(check)*.
 
 ## Defects for ossimulator
 

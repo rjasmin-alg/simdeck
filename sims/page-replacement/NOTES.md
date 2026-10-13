@@ -8,7 +8,12 @@ copy**. A defect goes into ossimulator, and the build is re-imported. Done the s
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/page-replacement.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/page-replacement.html`, from
+  ossimulator's `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is
+  `?lang=hr|en`, else `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it,
+  and links to other pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `0b1ad5533a0877b7e94090d37c973bfc385318f32749f1c5d8f76ffd51bdf31d`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/page-replacement.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `8c9514f08f9f757aae339ceb560e27acce3db4d27df502f753a175c062d5b75b`. The entries below describe the first import,
   from `dist-single/`.
@@ -29,8 +34,9 @@ copy**. A defect goes into ossimulator, and the build is re-imported. Done the s
   Croatian fits the limits unchanged (summary 107 characters). The English is a translation.
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases from the
   `meta.ts` terms.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Summary
+  now its `summary` (121 characters), which fits.
 
 ## Declared exceptions
 
@@ -77,9 +83,9 @@ accepts them as `{ "preset": "belady-anomaly", "query": "scenario=belady-anomaly
   carry H / P / F letters and a hatch for misses, each algorithm has its own marker shape in the comparison and
   the miss curve, and the frames carry "pogodak", "izbačena 4", "kazaljka" labels. The phone layout is one long
   column (≈ 8240 px), no sideways scroll.
-- Not checked: English (there is none yet); the page in a real lecture on the projector *(check)*. In the miss
-  curve the four end labels (OPT, LRU, FIFO, Clock) stack where the lines meet at 5+ frames; readable, but which
-  label belongs to which line is told by the marker shapes, not the label position *(check on the projector)*.
+- Not checked: a read-through of the English; the page in a real lecture on the projector *(check)*. In the miss curve
+  the four end labels (OPT, LRU, FIFO, Clock) stack where the lines meet at 5+ frames; readable, but which label
+  belongs to which line is told by the marker shapes, not the label position *(check on the projector)*.
 
 ## Observations (not defects)
 

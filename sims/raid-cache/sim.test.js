@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 
 const ID = 'raid-cache';
 // sha256 of ossimulator's dist-simdeck/raid-cache.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'e6ce6808dc1fe50fa4c67b06122a895b9cc31cb8f31579037ad59e36bc56a9c1';
+const BUILD_SHA256 = '6c05372152be1b4f369fdda7dd4dc48b073421eed3eca5819691d609d9a26196';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['raid5-layout', 'raid5-reconstruct', 'raid5-small-write', 'raid6-double-failure', 'cache-dead-burst'];
 
@@ -58,7 +58,8 @@ test('every deep-link scenario id is in the build', () => {
   assert.ok(!html.includes('id:`no-such-scenario`'));
 });
 
-test('sim.json declares the single-language exception and the origin', () => {
-  assert.deepEqual(entry.languages, ['hr']);
+test('both languages: no single-language exception, and the build reads the kit\'s language key', () => {
+  assert.ok(!('languages' in entry), 'the ossimulator build carries hr and en since 93da8f8');
+  assert.ok(html.includes("'simdeck.lang'"), 'simdeck.lang');
   assert.equal(entry.origin, 'ossimulator/raid-cache');
 });

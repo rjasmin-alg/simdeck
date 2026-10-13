@@ -7,7 +7,12 @@ into ossimulator, and the build is re-imported.
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/interrupts.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/interrupts.html`, from ossimulator's
+  `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `a896865ada11a4ff9c28b72e55e0c2d7153e61ab73ede08fdaedbe45836ba24f`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/interrupts.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `3d78e6bb22db8d6bae46ba3a55660bfface00dbb01c1f4060762229244696808`. The entries below describe the first import,
   from `dist-single/`.
@@ -25,7 +30,9 @@ into ossimulator, and the build is re-imported.
 - `sim.json` title, concept and summary come from ossimulator's `meta.ts` (`title`, `subtitle`, `summary`). The
   Croatian summary is shortened to fit 160 characters; the English is a translation.
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core`; aliases from the `meta.ts` terms.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4).
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -37,9 +44,8 @@ into ossimulator, and the build is re-imported.
 | `kit` | an adopted page with its own runtime; it never mounts the kit |
 
 `kit` can be waived on adopted pages (`origin` set) since task t-0022; the gate then runs
-`scripts/check-adopted.mjs`, the browser checks that need no kit. Croatian only is the `sim.json` `languages`
-exception; the page's `languages` exception was dropped then, as it waived nothing (the kit-only language checks
-are under `kit`).
+`scripts/check-adopted.mjs`, the browser checks that need no kit, in each language (hr and en since t-0118). The
+page's `languages` exception was dropped then, as it waived nothing (the kit-only language checks are under `kit`).
 
 ## Deep links
 

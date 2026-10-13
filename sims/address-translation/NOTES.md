@@ -8,7 +8,12 @@ copy**. A defect goes into ossimulator, and the build is re-imported. Done the s
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/address-translation.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/address-translation.html`, from
+  ossimulator's `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is
+  `?lang=hr|en`, else `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it,
+  and links to other pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `201c522a6dc4a84b88ebccab158510ec11b67492e14b3b0b1d26c18c95f6531e`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/address-translation.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `c4067e53023b7fb251635c034f0ba2f0c2c896734522264995b9b4369ad5df39`. The entries below describe the first import,
   from `dist-single/`.
@@ -30,8 +35,9 @@ copy**. A defect goes into ossimulator, and the build is re-imported. Done the s
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases from the
   `meta.ts` terms (English *translation lookaside buffer (TLB)* without the parenthesis, since `TLB` is the
   Croatian alias too).
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Summary
+  now its `summary` (152 characters), which fits.
 
 ## Declared exceptions
 
@@ -78,7 +84,7 @@ about how many preset lines the home page shows. The manifest accepts them as
   26623, 5184), 3 TLB hits and 25 ticks match the scenario's expected line; on the timeline TLB misses are
   hatched and every bar carries a label (SPL, PA, HIT, MISS, PTE, D), so colour is never the only carrier. The
   phone layout is one long column (≈ 10 600 px), no sideways scroll.
-- Not checked: English (there is none yet); the page in a real lecture on the projector *(check)*.
+- Not checked: a read-through of the English; the page in a real lecture on the projector *(check)*.
 
 ## Observations (not defects)
 

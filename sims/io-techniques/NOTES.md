@@ -8,7 +8,12 @@ ossimulator imports (COMMON §12).
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/io-techniques.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/io-techniques.html`, from
+  ossimulator's `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is
+  `?lang=hr|en`, else `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it,
+  and links to other pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `28204aaea1d44288c77a869c72e1f7c68233f6882c201f88a4c790be471fad5f`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/io-techniques.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `a18f9adc7a2cfe21a8072675513122421da98ee006b5986ef514ba1f66572803`. The entries below describe the first import,
   from `dist-single/`.
@@ -28,12 +33,12 @@ ossimulator imports (COMMON §12).
   "prekidi", "jedan pored drugog" becomes "jedan uz drugi", and the second sentence ("Drugi način rada uspoređuje
   rad bez međuspremnika te s jednostrukim, dvostrukim i kružnim međuspremnikom.") becomes "drugi način uspoređuje
   rad bez i s međuspremnicima". The English is a translation (145 characters), "buffering schemes" for the list.
-- English title "I/O techniques and buffering" (the module has no English yet; `w0/ossimulator-english` may
-  choose another, then update `sim.json` and the meta placeholder).
+- English title "I/O techniques and buffering", ossimulator's `title` too.
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases from the
   `meta.ts` terms, with PIO and DMA as separate English aliases.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -75,7 +80,7 @@ The manifest accepts them as `{ "preset": "three-techniques", "query": "scenario
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: readable in grayscale
   (each column is named and tagged PIO / INT / DMA, every box has a text label and state), the phone layout is one
   long column (≈ 8 500 px) with no sideways scroll.
-- Not checked: English (there is none yet); the other four scenarios' end states *(check)*; the page in a real
+- Not checked: a read-through of the English; the other four scenarios' end states *(check)*; the page in a real
   lecture on the projector *(check)*.
 
 ## Defects for ossimulator

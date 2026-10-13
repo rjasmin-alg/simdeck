@@ -8,7 +8,12 @@ re-imported. Done the same way as `sims/interrupts/` and the other ossimulator i
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/os-map.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/os-map.html`, from ossimulator's `npm
+  run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `a9fdfc5e0c7e10b9d777af4fc74f82859342f2aae473c1209537d7e10eca7a64`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/os-map.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `0b3f393edf8c70414bdc8ca4ee8b037093de21e64795d1862e292192c9f1bb3c`. The entries below describe the first import,
   from `dist-single/`.
@@ -33,10 +38,12 @@ re-imported. Done the same way as `sims/interrupts/` and the other ossimulator i
   jezgre do hardvera; odaberite modul za sažetak, ključne pojmove i povezane module."). The lead's first sentence
   (course, Stallings 9th ed.) is left out to fit.
 - English title "Operating system map", concept "the operating system in layers", summary a translation (152).
-  `w0/ossimulator-english` may choose others; then update `sim.json` and the meta placeholder.
+  The map has no `meta.ts`; its own heading in English is "Operating system map" too (`src/shared/map/map-page.ts`).
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`). Aliases: map, the
   layer names (user space, kernel) and "operating system layers".
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4).
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -96,7 +103,7 @@ at all (the module sims have their own lines).
   under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: readable in grayscale (layers
   are labelled bands, the system-call band is dashed, wip modules have a dashed "u izradi" badge), the phone
   layout is one column (≈ 2620 px) with each node labelled with its column, no sideways scroll.
-- Not checked: English (there is none yet); the panel as a bottom sheet on the phone *(check)*; the page on the
+- Not checked: a read-through of the English; the panel as a bottom sheet on the phone *(check)*; the page on the
   projector *(check)*.
 
 ## Defects for ossimulator
@@ -106,6 +113,12 @@ at all (the module sims have their own lines).
   folder, and the header's "simdeck" link opens the simdeck home (`../../index.html`); all clicked on the built site.
 - ~~"u izradi" badges~~: with f41eda4 all 16 modules are `ready` in ossimulator, and no panel shows the badge. If
   simdeck drops a page, map it to `null` in ossimulator's `src/shared/simdeck.json` and re-import.
+- **The header's "simdeck" link drops `?lang=`** (found in t-0118, build `93da8f8`): it is the bare
+  `SIMDECK_HOME` (`../../index.html`, `src/shared/map/map-page.ts`), while every link to a module carries `?lang=`.
+  Opened as `os-map/index.html?lang=en` with nothing stored (a course page's English link, the visitor never pressed
+  a switch), the link lands on the home page in Croatian. With a stored choice (`simdeck.lang`) it lands in that
+  language, so the round trip from the home page's switch works. Fix in ossimulator: append `?lang=` there as the
+  module links do, then re-import. Status stays `ready`: the link works, only the language falls back.
 
 ## Shared requests
 

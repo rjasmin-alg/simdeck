@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const ID = 'os-call-journey';
 const MODULE = 'journey';
 // sha256 of ossimulator's dist-simdeck/os-call-journey.html as imported (NOTES.md, "Import").
-const BUILD_SHA256 = 'dec9b694516e79b29711c9dc3e3476f1475e476f5b7c8674b25a34985f2d086e';
+const BUILD_SHA256 = 'e768d0fc6f1def4e10afb833907965cb39b4d3e5d23cbe2880d5c94ae61d8fb3';
 // Scenario ids the index entries should open with ?scenario=<id> (NOTES.md, "Deep links").
 const DEEP_LINKS = ['read-miss', 'page-fault'];
 
@@ -59,7 +59,8 @@ test('every deep-link scenario id is in the build', () => {
   assert.ok(!html.includes('id:`no-such-scenario`'));
 });
 
-test('sim.json declares the single-language exception and the origin', () => {
-  assert.deepEqual(entry.languages, ['hr']);
+test('both languages: no single-language exception, and the build reads the kit\'s language key', () => {
+  assert.ok(!('languages' in entry), 'the ossimulator build carries hr and en since 93da8f8');
+  assert.ok(html.includes("'simdeck.lang'"), 'simdeck.lang');
   assert.equal(entry.origin, `ossimulator/${MODULE}`);
 });

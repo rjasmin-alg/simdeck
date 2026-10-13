@@ -8,7 +8,12 @@ imports (COMMON §12).
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/drivers.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/drivers.html`, from ossimulator's `npm
+  run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `73258a36687f81e12518d661effa10f0fc1410f7539ca44aa34377fe59d9e4c2`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/drivers.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `dd96ed28fd9671bd20f18d14cf27e40eefde03040aa60d4c664374c4bb2d00de`. The entries below describe the first import,
   from `dist-single/`.
@@ -26,12 +31,13 @@ imports (COMMON §12).
 - `sim.json` title and concept are `meta.ts` `title` and `subtitle`; the summary comes from `meta.ts` `summary`.
   The Croatian summary (172 characters) is shortened to 160 by dropping "korisničkog" ("od korisničkog procesa"
   becomes "od procesa"). The English is a translation (147 characters).
-- English title "Device drivers", concept "I/O layers, top and bottom half" (the module has no English yet;
-  `w0/ossimulator-english` may choose other wording, then update `sim.json` and the meta placeholder).
+- English title "Device drivers", concept "I/O layers, top and bottom halves": ossimulator's `title` and `subtitle`
+  (t-0118; the concept said "half" before ossimulator had English).
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases from the
   `meta.ts` terms, with the "top / bottom half" and "blocking / non-blocking" pairs split into separate aliases.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Concept
+  now its `subtitle`.
 
 ## Declared exceptions
 
@@ -73,7 +79,7 @@ the owner about how many preset lines the home page shows. The manifest accepts 
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: readable in grayscale
   (processes are named P1–P3 with a state word, the layers are labelled), and the phone layout is one long
   column (≈ 9 000 px) with no sideways scroll.
-- Not checked: English (there is none yet); the other four scenarios' end states *(check)*; the page on the
+- Not checked: a read-through of the English; the other four scenarios' end states *(check)*; the page on the
   projector in a real lecture *(check)*.
 
 ## Defects for ossimulator

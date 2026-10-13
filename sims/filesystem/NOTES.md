@@ -8,7 +8,12 @@ imports (COMMON §12).
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/filesystem.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/filesystem.html`, from ossimulator's
+  `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `875f05c98f44fa7271baf592924ee48585e5d69e38c79b4eb4351f632ada99a2`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/filesystem.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `dc7c2112dde933a7fe69017b7c5d0da70d9133cdd1d9262623f5f6a2b954d27b`. The entries below describe the first import,
   from `dist-single/`.
@@ -30,14 +35,15 @@ imports (COMMON §12).
   becomes "alokacija", "upravljanja slobodnim prostorom" becomes "vođenja slobodnog prostora", "direktoriji i
   cijena razrješenja putanje" becomes "razrješenje putanje", and "s izravnim i neizravnim blokovima" becomes "s
   neizravnim blokovima". The English is a translation (153 characters).
-- English title "File system" and concept "allocation, free space, inodes" (the module has no English yet;
-  `w0/ossimulator-english` may choose others, then update `sim.json` and the meta placeholder).
+- English title "File system"; concept "allocation, free space, inode", ossimulator's `subtitle` (t-0118; it was
+  "inodes" before ossimulator had English).
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases are the eight
   `meta.ts` terms plus defragmentation and the free list, which the scenarios use. The `meta.ts` Croatian for
   *inode* is a gloss ("zapis o datoteci s pokazivačima na blokove (bez prijevoda)"), so the Croatian alias is
   plain "inode".
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Concept
+  now its `subtitle`.
 
 ## Declared exceptions
 
@@ -81,7 +87,7 @@ lines the home page shows. The manifest accepts them as
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: readable in grayscale (the
   selected method and options are shown inverted, operations are labelled with their key numbers), the phone layout
   is one long column (≈ 10 560 px) with no sideways scroll.
-- Not checked: English (there is none yet); the other two scenarios' end states *(check)*; the block grid in
+- Not checked: a read-through of the English; the other two scenarios' end states *(check)*; the block grid in
   grayscale after a run (files told apart by letter, not only colour) beyond the default screenshot *(check)*; the
   page in a real lecture on the projector *(check)*.
 

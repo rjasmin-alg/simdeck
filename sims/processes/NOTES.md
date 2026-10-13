@@ -7,7 +7,12 @@ into ossimulator, and the build is re-imported. Done the same way as `sims/inter
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/processes.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/processes.html`, from ossimulator's
+  `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `2f69d4f0a2b3e264124235d6700b505c23ef71aecc099e75d7c37da8e446dfbb`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/processes.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `e25d09c2431abffcbfd28ab3e94b9c2e2ec5af0c62646dad77f644452b6109f6`. The entries below describe the first import,
   from `dist-single/`.
@@ -27,8 +32,9 @@ into ossimulator, and the build is re-imported. Done the same way as `sims/inter
   dropped); the English is a translation of the shortened one.
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`); aliases from the
   `meta.ts` terms.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Concept
+  now "Process states, PCB, fork/exec/wait", its `subtitle`.
 
 ## Declared exceptions
 

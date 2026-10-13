@@ -8,7 +8,12 @@ imports (COMMON §12); `sim.test.js` is `sims/synchronization/sim.test.js` with 
 
 ## Import
 
-- **Current import** (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/deadlock.html`, from ossimulator's
+- **Current import** (t-0118, 2026-10-13): `~/projects/ossimulator/dist-simdeck/deadlock.html`, from ossimulator's
+  `npm run build` at `93da8f8` (tag `i18n`): one file with Croatian and English. The language is `?lang=hr|en`, else
+  `localStorage['simdeck.lang']` (the kit's key), else Croatian; the toolbar button switches it, and links to other
+  pages carry `?lang=`. Links unchanged from `f41eda4`. sha256
+  `8be743300bd1c255a5c8e2d9c741a838a8e2a86d539aba91c1ebd800dc427b43`.
+- Previous import (t-0094, 2026-10-03): `~/projects/ossimulator/dist-simdeck/deadlock.html`, from ossimulator's
   `npm run build:simdeck` at `f41eda4` (links laid out for `sims/<folder>/`).
   sha256 `712676bb9dc327d324bc978093c4e2600ec191269fcbc3e9fd1d27d1fd3e0b8e`. The entries below describe the first import,
   from `dist-single/`.
@@ -28,8 +33,9 @@ imports (COMMON §12); `sim.test.js` is `sims/synchronization/sim.test.js` with 
   unchanged; the summary is 158 characters, within the limit. The English is a translation (summary 159).
 - Class `explorer`, topic `os`, tag `operating-systems`, level `core` (all in `tags.json`). Aliases are the
   `meta.ts` terms, plus deadlock detection.
-- `languages: ["hr"]`: the build is Croatian only (single-language exception, COMMON §4). English comes from
-  ossimulator's source (task `w0/ossimulator-english`), then a re-import.
+- No `languages` field (since t-0118): the build carries Croatian and English, so the single-language exception
+  (COMMON §4) is gone. The English title, concept and summary were checked against ossimulator's `meta.ts`. Unchanged,
+  except where `meta.ts` runs past the limits (then the earlier, shorter English stays).
 
 ## Declared exceptions
 
@@ -74,7 +80,7 @@ on the owner about how many preset lines the home page shows. The manifest accep
   waived under `kit`. Screenshots (1920×1080 light, dark, grayscale; 375×812) reviewed: dark follows the OS,
   grayscale keeps every state readable (selected buttons are inverted, statuses are words, P1/P2 are labelled),
   the phone layout is one long column (12410 px) without sideways scroll.
-- Not checked: English (there is none yet); the page in a real lecture on the projector *(check)*.
+- Not checked: a read-through of the English; the page in a real lecture on the projector *(check)*.
 
 ## Observations (not defects)
 
