@@ -1,0 +1,448 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- TCP congestion control: cwnd over 60 RTT rounds for Reno and CUBIC (task docs/tasks/w2/tcp-congestion.md).
+     An explorer: the params drive the chart live; the model is in sim.js (rules in SPEC.md), the words in strings.js.
+     The chart is the catalogue's "small live chart" (§7.2), drawn here in SVG at 1:1 (no kit view exists yet). -->
+<html lang="hr" data-sim="tcp-congestion">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrola zagušenja u TCP-u · simdeck</title>
+<meta name="description" content="Prozor zagušenja kroz vrijeme: slow start, congestion avoidance, AIMD pila, Reno i CUBIC.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tcp-congestion",
+  "class": "explorer",
+  "title": { "hr": "Kontrola zagušenja u TCP-u", "en": "TCP congestion control" },
+  "concept": { "hr": "Slow start, congestion avoidance i AIMD pila; Reno i CUBIC nakon gubitka", "en": "Slow start, congestion avoidance, the AIMD sawtooth; Reno and CUBIC after a loss" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tcp-congestion"]; colours only from kit tokens. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="tcp-congestion"] .sd-ctl[hidden] { display: none; }
+/* The legend wraps in its own box, so the header keeps one row with the tools. */
+[data-sim="tcp-congestion"] .sd-legend { flex: 0 1 43rem; justify-content: flex-end; }
+/* Six presets and the settings in two columns, so the panel fits at 1920×1080 without its own scroll. */
+[data-sim="tcp-congestion"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="tcp-congestion"] .sd-preset { line-height: 1.15; }
+[data-sim="tcp-congestion"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem 0.9rem; align-items: end; }
+[data-sim="tcp-congestion"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="tcp-congestion"] [data-sd-controls] .sd-group > :is([data-key="rtt"], [data-key="capacity"], [data-key="p"], [data-key="iw"], [data-key="timeoutAt"], .tc-reseed) { grid-column: auto; }
+[data-sim="tcp-congestion"] [data-sd-controls] .tc-reseed { order: 1; line-height: 1.15; }
+[data-sim="tcp-congestion"] [data-sd-controls] :is([data-key="iw"], [data-key="timeoutAt"], [data-key="friendly"]) { order: 2; }
+[data-sim="tcp-congestion"] [data-sd-controls] .sd-group > .sd-btn:not(.tc-reseed) { order: 3; }
+[data-sim="tcp-congestion"] [data-sd-controls] .sd-btn[hidden] { display: none; }
+
+[data-sim="tcp-congestion"] .tc {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.6cqh 1.4cqw 1.4cqh;
+}
+[data-sim="tcp-congestion"] .tc-plot { position: relative; min-height: 14rem; }
+[data-sim="tcp-congestion"] .tc-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="tcp-congestion"] .tc-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--muted); }
+[data-sim="tcp-congestion"] .tc-plot .tc-title { fill: var(--ink); font-weight: 700; }
+[data-sim="tcp-congestion"] .tc-grid { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
+[data-sim="tcp-congestion"] .tc-axis { stroke: var(--ink); stroke-width: var(--line-w); }
+[data-sim="tcp-congestion"] .tc-ss { fill: url(#tc-hatch); }
+[data-sim="tcp-congestion"] .tc-hatch-line { stroke: var(--muted); stroke-width: 3; opacity: 0.35; }
+[data-sim="tcp-congestion"] .tc-plot .tc-phase { fill: var(--ink); font-style: italic; }
+[data-sim="tcp-congestion"] .tc-cap { stroke: var(--ink); stroke-width: 5; }
+[data-sim="tcp-congestion"] .tc-plot .tc-cap-label { fill: var(--ink); font-weight: 700; }
+[data-sim="tcp-congestion"] .tc-thresh { fill: none; stroke: var(--sw); stroke-width: 2; stroke-dasharray: 7 5; }
+[data-sim="tcp-congestion"] .tc-line { fill: none; stroke: var(--sw); stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+[data-sim="tcp-congestion"] .tc-line[data-algo="cubic"] { stroke-dasharray: 14 6; }
+[data-sim="tcp-congestion"] .tc-halo { fill: none; stroke: var(--hl); stroke-width: 16; stroke-linejoin: round; stroke-linecap: round; opacity: 0.85;
+  animation: tc-flash 0.6s ease-out; }
+@keyframes tc-flash { from { opacity: 0; stroke-width: 28; } to { opacity: 0.85; stroke-width: 16; } }
+[data-sim="tcp-congestion"] .tc-dup { fill: var(--sw); stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+[data-sim="tcp-congestion"] .tc-to { stroke: var(--danger); stroke-width: 5; stroke-linecap: round; }
+[data-sim="tcp-congestion"] .tc-to-under { stroke: var(--bg); stroke-width: 9; stroke-linecap: round; }
+[data-sim="tcp-congestion"] .tc-plot .tc-end { fill: var(--sw); font-weight: 700; }
+[data-sim="tcp-congestion"] .tc-plot .tc-end-thresh { fill: var(--sw); }
+
+[data-sim="tcp-congestion"] .tc-sum {
+  display: grid;
+  grid-template-columns: max-content repeat(4, minmax(0, auto));
+  justify-content: start;
+  column-gap: 2.2rem;
+  row-gap: 0.15rem;
+  font-size: var(--fs-md);
+}
+[data-sim="tcp-congestion"] .tc-sum > div { display: contents; }
+[data-sim="tcp-congestion"] .tc-sum span { white-space: nowrap; }
+[data-sim="tcp-congestion"] .tc-sum-head span { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="tcp-congestion"] .tc-sum-name { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+[data-sim="tcp-congestion"] .tc-sum-name svg { width: 2.2em; height: 0.8em; overflow: visible; }
+[data-sim="tcp-congestion"] .tc-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+[data-sim="tcp-congestion"] .tc-changed .tc-sum-name { background: var(--hl); color: var(--on-hl); box-shadow: 0 0 0 2px var(--ink); border-radius: var(--radius-sm); padding: 0 0.3rem; }
+
+/* Legend swatches: line styles and marks, so they read in grayscale too. */
+[data-sim="tcp-congestion"] .sd-swatch[data-shape^='tc-'] { position: relative; width: 1.8em; border: 0; border-radius: 0; background: transparent; }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-reno'] { height: 0.3rem; background: var(--c1); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-cubic'] { height: 0.3rem; background: repeating-linear-gradient(90deg, var(--c2) 0 0.55em, transparent 0.55em 0.8em); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-thresh'] { height: 0.15rem; background: repeating-linear-gradient(90deg, var(--ink) 0 0.3em, transparent 0.3em 0.5em); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-cap'] { height: 0.4rem; background: var(--ink); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-dup'],
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-to'] { width: 1.1em; height: 1.1em; }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-dup']::after,
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-to']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-dup']::after { content: '▼'; color: var(--ink); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-to']::after { content: '✕'; color: var(--danger); }
+[data-sim="tcp-congestion"] .sd-swatch[data-shape='tc-slow'] { width: 1.1em; height: 1.1em; border: 2px solid var(--muted);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--muted) 45%, transparent) 0.25em 0.4em); }
+
+/* Phone and portrait: the stage grows with its content; the chart gets a fixed height; the summary stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tcp-congestion"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tcp-congestion"] .tc { height: auto; gap: 0.8rem; padding: 0.6rem; }
+  [data-sim="tcp-congestion"] .tc-plot { height: 20rem; }
+  [data-sim="tcp-congestion"] .tc-sum { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="tcp-congestion"] [data-sd-controls] .sd-group { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="tcp-congestion"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1 !important; }
+  [data-sim="tcp-congestion"] .tc-sum > div { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding: 0.3rem 0; border-top: var(--line-w) solid var(--line); }
+  [data-sim="tcp-congestion"] .tc-sum-head { display: none !important; }
+  [data-sim="tcp-congestion"] .tc-sum span { white-space: normal; }
+  [data-sim="tcp-congestion"] .tc-sum .tc-sum-name { grid-column: 1 / -1; }
+  [data-sim="tcp-congestion"] .tc-sum [data-k]::before { content: attr(data-k) ': '; color: var(--muted); font-family: var(--sans); font-size: var(--fs-sm); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kontrola zagušenja u TCP-u</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var NAMES = { reno: t('legendReno'), cubic: t('legendCubic') };
+  var COLOUR = { reno: '1', cubic: '2' };
+  var sim = null;
+
+  // Numbers in the page's language: a decimal comma in Croatian.
+  function num(x, d) { var s = (+x).toFixed(d); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  function win(x) { return Math.abs(x - Math.round(x)) < 0.05 ? String(Math.round(x)) : num(x, 1); }  // a window in MSS
+  function sec(x) { return num(x, Math.abs(x * 10 - Math.round(x * 10)) < 1e-6 ? 1 : 2) + ' s'; }
+  function ms(v) { return v + ' ms'; }
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+
+  var labels = {
+    'slow-start': 'presetSlow', 'sawtooth': 'presetSaw', 'timeout': 'presetTimeout', 'reno-vs-cubic': 'presetVs',
+    'long-rtt': 'presetLong', 'random-loss': 'presetRandom'
+  };
+
+  // ── which series moved with the last change ("changed" mark) ──
+  var lastKey = {}, changed = {};
+  function trackChanges(st) {
+    Object.keys(lastKey).forEach(function (a) { if (!st.series[a]) { delete lastKey[a]; delete changed[a]; } });
+    Object.keys(st.series).forEach(function (a) {
+      // The curve as drawn in rounds: an RTT change alone moves only the seconds, so Reno does not count as changed.
+      var key = JSON.stringify(st.series[a].map(function (pt) { return [pt.cwnd, pt.ssthresh, pt.event]; }));
+      if (key !== lastKey[a]) { changed[a] = lastKey[a] !== undefined; lastKey[a] = key; }
+    });
+  }
+
+  // ── the chart ──
+  function niceTop(v) { var step = v > 100 ? 20 : 10; return Math.ceil(v / step) * step; }
+  function secondsStep(total) {
+    var steps = [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5];
+    for (var i = 0; i < steps.length; i++) if (total / steps[i] <= 9) return steps[i];
+    return 5;
+  }
+  /** Pushes labels apart vertically so none overlap (sorted by y, at least gap apart, inside [lo, hi]). */
+  function spread(items, gap, lo, hi) {
+    items.sort(function (a, b) { return a.y - b.y || a.order - b.order; });
+    for (var i = 1; i < items.length; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + gap);
+    for (var j = items.length - 1; j >= 0; j--) items[j].y = Math.min(items[j].y, j === items.length - 1 ? hi : items[j + 1].y - gap);
+    items.forEach(function (it) { it.y = Math.max(lo, it.y); });
+    return items;
+  }
+
+  function drawChart(box, st, p) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var fs = Math.max(16, 0.8 * rem);
+    // Narrow (phone): no labels right of the plot (the legend names the lines); axis titles above and below it.
+    var narrow = W < 36 * rem;
+    var pad = { l: 3.2 * rem, r: narrow ? 1 * rem : 7.2 * rem, t: 3.4 * rem, b: narrow ? 2.9 * fs : 2.6 * rem };
+    var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    var algos = Object.keys(st.series), primary = st.series[algos[0]];
+    var top = 10;
+    algos.forEach(function (a) { st.series[a].forEach(function (pt) { top = Math.max(top, pt.cwnd); }); });
+    var yMax = niceTop(Math.max(top, p.capacity) * 1.08);
+    var X = function (r) { return pad.l + (r / L.ROUNDS) * cw; };
+    var Y = function (v) { return pad.t + ch * (1 - v / yMax); };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('chartLabel') });
+    svg.append(s('defs', null,
+      s('pattern', { id: 'tc-hatch', patternUnits: 'userSpaceOnUse', width: 12, height: 12, patternTransform: 'rotate(45)' },
+        s('line', { class: 'tc-hatch-line', x1: 0, y1: 0, x2: 0, y2: 12 })),
+      s('clipPath', { id: 'tc-clip' }, s('rect', { x: pad.l, y: pad.t - 1, width: cw, height: ch + 2 }))));
+
+    // slow-start bands (rounds where any series shown is in slow start), with their label where it fits
+    var runs = [], start = null;
+    primary.forEach(function (pt, i) {
+      var ss = algos.some(function (a) { return st.series[a][i].phase === 'ss'; });
+      if (ss && start === null) start = i;
+      if (!ss && start !== null) { runs.push([start, i]); start = null; }
+    });
+    if (start !== null) runs.push([start, L.ROUNDS]);
+    var avoid = [0, 0], prevEnd = 0;
+    runs.forEach(function (rn) {
+      if (rn[0] - prevEnd > avoid[1] - avoid[0]) avoid = [prevEnd, rn[0]];
+      prevEnd = rn[1];
+      svg.append(s('rect', { class: 'tc-ss', x: X(rn[0]), y: pad.t, width: Math.max(2, X(rn[1]) - X(rn[0])), height: ch }));
+    });
+    if (L.ROUNDS - prevEnd > avoid[1] - avoid[0]) avoid = [prevEnd, L.ROUNDS];
+
+    // grid and axes: rounds below, seconds above, cwnd on the left
+    var yStep = yMax > 100 ? 20 : 10;
+    for (var v = 0; v <= yMax + 1e-9; v += yStep) {
+      svg.append(s('line', { class: 'tc-grid', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) }));
+      svg.append(s('text', { x: pad.l - 0.4 * rem, y: Y(v) + 0.35 * fs, 'text-anchor': 'end' }, String(v)));
+    }
+    for (var r = 0; r <= L.ROUNDS; r += 10) {
+      svg.append(s('line', { class: 'tc-grid', x1: X(r), x2: X(r), y1: pad.t, y2: pad.t + ch }));
+      svg.append(s('text', { x: X(r), y: pad.t + ch + 1.25 * fs, 'text-anchor': 'middle' }, String(r)));
+    }
+    var rtt = p.rtt / 1000, total = L.ROUNDS * rtt, sStep = secondsStep(total);
+    for (var k = 0; k * sStep <= total + 1e-9; k++) {
+      var sx = X(k * sStep / rtt), d = sStep < 0.1 ? 2 : sStep < 1 ? 1 : (sStep % 1 ? 1 : 0);
+      svg.append(s('line', { class: 'tc-axis', x1: sx, x2: sx, y1: pad.t, y2: pad.t - 0.35 * rem }));
+      svg.append(s('text', { x: sx, y: pad.t - 0.55 * rem, 'text-anchor': 'middle' }, num(k * sStep, d)));
+    }
+    svg.append(s('line', { class: 'tc-axis', x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ch }));
+    svg.append(s('line', { class: 'tc-axis', x1: pad.l, x2: pad.l + cw, y1: pad.t + ch, y2: pad.t + ch }));
+    svg.append(s('line', { class: 'tc-axis', x1: pad.l, x2: pad.l + cw, y1: pad.t, y2: pad.t }));
+    svg.append(s('text', { class: 'tc-title', x: pad.l - 0.4 * rem, y: pad.t - 1.95 * fs, 'text-anchor': 'start' }, t('axisCwnd')));
+    if (narrow) {
+      svg.append(s('text', { class: 'tc-title', x: pad.l + cw, y: pad.t - 1.95 * fs, 'text-anchor': 'end' }, t('axisSeconds')));
+      svg.append(s('text', { class: 'tc-title', x: pad.l + cw / 2, y: pad.t + ch + 2.5 * fs, 'text-anchor': 'middle' }, t('axisRounds')));
+    } else {
+      svg.append(s('text', { class: 'tc-title', x: pad.l + cw + 0.6 * rem, y: pad.t - 0.55 * rem }, t('axisSeconds')));
+      svg.append(s('text', { class: 'tc-title', x: pad.l + cw + 0.6 * rem, y: pad.t + ch + 1.25 * fs }, t('axisRounds')));
+    }
+
+    // phase labels: slow start in its first band that is wide enough, congestion avoidance in the widest other stretch
+    var slowLabel = t('phaseSlow'), avoidLabel = t('phaseAvoid'), charW = 0.5 * fs;
+    for (var i = 0; i < runs.length; i++) {
+      var bw = X(runs[i][1]) - X(runs[i][0]);
+      if (bw >= slowLabel.length * charW + 8) {
+        svg.append(s('text', { class: 'tc-phase', x: X(runs[i][0]) + 0.3 * rem, y: pad.t + 1.3 * fs, lang: Simdeck.lang === 'hr' ? 'en' : null }, slowLabel));
+        break;
+      }
+    }
+    if (X(avoid[1]) - X(avoid[0]) >= avoidLabel.length * charW + 8) {
+      svg.append(s('text', { class: 'tc-phase', x: (X(avoid[0]) + X(avoid[1])) / 2, y: pad.t + ch - 0.6 * fs, 'text-anchor': 'middle', lang: Simdeck.lang === 'hr' ? 'en' : null }, avoidLabel));
+    }
+
+    // capacity, ssthresh steps, the series (changed ones over a highlight), then the loss marks
+    var ends = [];
+    svg.append(s('line', { class: 'tc-cap', x1: pad.l, x2: pad.l + cw, y1: Y(p.capacity), y2: Y(p.capacity) }));
+    ends.push({ y: Y(p.capacity), order: 0, cls: 'tc-cap-label', text: t('lineCapacity', { v: p.capacity }) });
+    var g = s('g', { 'clip-path': 'url(#tc-clip)' }), marks = s('g');
+    algos.forEach(function (a, ai) {
+      var pts = st.series[a];
+      var step = pts.map(function (pt, j) { return (j ? 'L' : 'M') + X(pt.r).toFixed(1) + ' ' + Y(pt.ssthresh).toFixed(1) + ' H' + X(Math.min(pt.r + 1, L.ROUNDS)).toFixed(1); }).join(' ');
+      g.append(s('path', { class: 'tc-thresh', 'data-c': COLOUR[a], d: step }));
+      var last = pts[pts.length - 1];
+      if (last.ssthresh <= yMax) ends.push({ y: Y(last.ssthresh), order: 3 + ai, cls: 'tc-end-thresh', c: COLOUR[a], text: t('lineSsthresh') });
+    });
+    algos.forEach(function (a, ai) {
+      var pts = st.series[a];
+      var line = pts.map(function (pt) { return X(pt.r).toFixed(1) + ',' + Y(pt.cwnd).toFixed(1); }).join(' ');
+      if (changed[a]) g.append(s('polyline', { class: 'tc-halo', points: line }));
+      g.append(s('polyline', { class: 'tc-line', 'data-c': COLOUR[a], 'data-algo': a, points: line }));
+      ends.push({ y: Y(pts[pts.length - 1].cwnd), order: 1 + ai, cls: 'tc-end', c: COLOUR[a], text: NAMES[a] });
+      pts.forEach(function (pt) {
+        if (!pt.event) return;
+        var x = X(pt.r), y = Y(pt.cwnd), m = 0.5 * rem;
+        if (pt.event === 'dup') {
+          var ty = y - 0.45 * rem - (ai ? 0.9 * rem : 0);
+          marks.append(s('path', { class: 'tc-dup', 'data-c': COLOUR[a], d: 'M' + (x - m) + ' ' + (ty - 1.1 * m) + ' L' + (x + m) + ' ' + (ty - 1.1 * m) + ' L' + x + ' ' + ty + ' Z' }));
+        } else {
+          [['tc-to-under'], ['tc-to']].forEach(function (cl) {
+            marks.append(s('path', { class: cl[0], d: 'M' + (x - m) + ' ' + (y - m) + ' L' + (x + m) + ' ' + (y + m) + ' M' + (x + m) + ' ' + (y - m) + ' L' + (x - m) + ' ' + (y + m) }));
+          });
+        }
+      });
+    });
+    svg.append(g, marks);
+    if (!narrow) spread(ends, 1.15 * fs, pad.t + 0.4 * fs, pad.t + ch + 0.4 * fs).forEach(function (it) {
+      svg.append(s('text', { class: it.cls, 'data-c': it.c || null, x: pad.l + cw + 0.6 * rem, y: it.y + 0.35 * fs }, it.text));
+    });
+    box.replaceChildren(svg);
+  }
+
+  // ── the summary under the chart ──
+  function lineKey(a) {
+    return s('svg', { 'aria-hidden': 'true', viewBox: '0 0 40 10' }, s('line', { class: 'tc-line', 'data-c': COLOUR[a], 'data-algo': a, x1: 0, y1: 5, x2: 40, y2: 5 }));
+  }
+  function summaryRow(a, sum) {
+    var lossText = String(sum.losses) + (sum.losses ? ' (▼ ' + sum.dups + (sum.timeouts ? ', ✕ ' + sum.timeouts : '') + ')' : '');
+    var lastText = sum.last ? win(sum.last.from) + ' → ' + win(sum.last.to) : t('sumNone');
+    var back = sum.recover ? (a === 'cubic' ? '≈ ' : '') + t('sumRounds', { n: Math.round(sum.recover.rounds) }) + ' = ' + sec(sum.recover.s)
+      : sum.last && sum.last.kind === 'timeout' ? t('sumSlowAgain') : '—';
+    return h('div', { class: changed[a] ? 'tc-changed' : '' },
+      h('span', { class: 'tc-sum-name', dataset: { c: COLOUR[a] } }, lineKey(a), NAMES[a]),
+      h('span', { class: 'tc-num', dataset: { k: t('sumLosses') } }, lossText),
+      h('span', { class: 'tc-num', dataset: { k: t('sumAvg') } }, num(sum.avgCwnd, 1) + ' MSS'),
+      h('span', { class: 'tc-num', dataset: { k: t('sumLast') } }, lastText),
+      h('span', { class: 'tc-num', dataset: { k: t('sumBack') } }, back));
+  }
+
+  // ── captions: the one thing the current picture shows ──
+  function caption(c) {
+    var st = c.state, p = c.params, algos = Object.keys(st.series), S = st.summary;
+    var b = function (x) { return h('b', null, x); };
+    var a0 = algos[0], s0 = S[a0];
+    var timeoutAt = function (a) { var ser = st.series[a]; for (var i = 0; i < ser.length; i++) if (ser[i].cause === 'timer') return i; return -1; };
+    var ssAfter = function (a, i) { var ser = st.series[a]; return ser[i + 1] ? ser[i + 1].ssthresh : (a === 'cubic' ? Math.max(ser[i].cwnd * L.BETA, 2) : Math.max(Math.floor(ser[i].cwnd / 2), 2)); };
+    // The timeout param: its round, for each series shown.
+    if (p.timeoutAt && timeoutAt(a0) >= 0) {
+      var i0 = timeoutAt(a0);
+      if (algos.length === 2) {
+        var ic = timeoutAt('cubic');
+        return t.parts('captionTimeoutBoth', { r: p.timeoutAt, rfrom: win(st.series.reno[i0].cwnd), rss: b(win(ssAfter('reno', i0))),
+          cfrom: win(st.series.cubic[ic].cwnd), css: b(win(ssAfter('cubic', ic))) });
+      }
+      return t.parts('captionTimeout', { algo: NAMES[a0], r: p.timeoutAt, from: win(st.series[a0][i0].cwnd), ss: b(win(ssAfter(a0, i0))) });
+    }
+    if (p.lossMode === 'random' && p.p > 0) {
+      var base = L.initial(Object.assign({}, p, { lossMode: 'capacity' })).summary[a0];
+      return t.parts('captionRandom', { n: s0.random, c: s0.losses - s0.random, algo: NAMES[a0], avg: b(num(s0.avgCwnd, 1)), base: num(base.avgCwnd, 1) });
+    }
+    if (algos.length === 2 && S.reno.recover && S.cubic.recover) {
+      var both = { rtt: ms(p.rtt), rfrom: win(S.reno.last.from), rto: win(S.reno.last.to), rs: b(sec(S.reno.recover.s)),
+        cfrom: win(S.cubic.last.from), cto: win(S.cubic.last.to), cs: b(sec(S.cubic.recover.s)) };
+      return t.parts(S.cubic.recover.by === 'friendly' ? 'captionBothFriendly' : 'captionBoth', both);
+    }
+    var ser0 = st.series[a0], kCa = -1;
+    for (var j = 0; j < ser0.length; j++) { if (ser0[j].event) break; if (ser0[j].phase === 'ca') { kCa = j; break; } }
+    if (a0 === 'reno' && kCa > 0) return t.parts('captionSlow', { from: win(ser0[0].cwnd), ss: b(win(ser0[kCa].cwnd)), k: kCa });
+    if (s0.recover) {
+      var vars = { from: win(s0.last.from), to: b(win(s0.last.to)), k: Math.round(s0.recover.rounds), s: b(sec(s0.recover.s)) };
+      if (s0.recover.by === 'friendly') {
+        vars.K = sec(L.cubicK(s0.last.from, s0.last.to));
+        return t.parts('captionCubicFriendly', vars);
+      }
+      return t.parts(a0 === 'cubic' ? 'captionCubicDup' : 'captionRenoDup', vars);
+    }
+    return t.parts('captionNoLoss', { cap: p.capacity });
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'algo', type: 'choice', label: t('algo'), options: [['reno', NAMES.reno], ['cubic', NAMES.cubic], ['both', t('algoBoth')]] },
+      { key: 'rtt', type: 'range', label: t('rtt'), min: 10, max: 300, step: 10, format: ms },
+      { key: 'capacity', type: 'range', label: t('capacity'), min: 10, max: 100, step: 1, format: function (v) { return v + ' MSS'; } },
+      { key: 'lossMode', type: 'choice', label: t('lossMode'), options: [['capacity', t('lossCapacity')], ['random', t('lossRandom')]] },
+      { key: 'p', type: 'range', label: t('p'), min: 0, max: 5, step: 0.5, format: function (v) { return (v % 1 ? num(v, 1) : String(v)) + ' %'; },
+        visible: function (q) { return q.lossMode === 'random'; } },
+      { type: 'button', label: t('reseed'), key: 'n', visible: function (q) { return q.lossMode === 'random'; },
+        run: function (x) { x.set({ seed: x.params.seed + 1 }); } },
+      { key: 'seed', type: 'range', label: t('reseed'), min: 1, max: 99999, step: 1, visible: function () { return false; } },
+      { key: 'iw', type: 'choice', label: t('iw'), options: [[1, '1 MSS'], [10, '10 MSS']] },
+      { key: 'timeoutAt', type: 'choice', label: t('timeoutAt'), options: [[0, t('timeoutNone')], [30, t('timeoutRound', { r: 30 })]] },
+      { key: 'friendly', type: 'toggle', label: t('friendly'), hint: t('friendlyHint'), visible: function (q) { return q.algo !== 'reno'; } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'tc-reno', label: t('legendReno') },
+      { shape: 'tc-cubic', label: t('legendCubic') },
+      { shape: 'tc-thresh', label: t('legendSsthresh') },
+      { shape: 'tc-cap', label: t('legendCapacity') },
+      { shape: 'tc-dup', label: t('legendDup') },
+      { shape: 'tc-to', label: t('legendTimeout') },
+      { shape: 'tc-slow', label: t('legendSlow') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var st = c.state;
+      trackChanges(st);
+      var plot = h('div', { class: 'tc-plot' });
+      var head = h('div', { class: 'tc-sum-head' },
+        h('span', null, t('sumAlgo')), h('span', null, t('sumLosses')), h('span', null, t('sumAvg')), h('span', null, t('sumLast')), h('span', null, t('sumBack')));
+      c.stage.replaceChildren(h('div', { class: 'tc' }, plot,
+        h('div', { class: 'tc-sum' }, head, Object.keys(st.series).map(function (a) { return summaryRow(a, st.summary[a]); }))));
+      drawChart(plot, st, c.params);
+    },
+
+    caption: caption
+  });
+
+  // The kit draws action buttons without visible(): the reseed button shows only with random losses.
+  var reseed = Array.prototype.filter.call(document.querySelectorAll('[data-sd-controls] .sd-btn'), function (b) {
+    return b.textContent.indexOf(t('reseed')) === 0;
+  })[0];
+  if (reseed) {
+    reseed.classList.add('tc-reseed');
+    var showReseed = function (c) { reseed.hidden = c.params.lossMode !== 'random'; };
+    sim.on(showReseed);
+    showReseed({ params: sim.params });
+  }
+
+  // The chart is drawn in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var last = '';
+    new ResizeObserver(function (es) {
+      var r = es[0].contentRect, key = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (key !== last) { last = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
+</body>
+</html>
