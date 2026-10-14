@@ -1,0 +1,604 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cert-chain: the chain a server sends, checked by the client against its own trust store and its own clock.
+     Rules and numbers: SPEC.md. Model: sim.js. Words: strings.js. Kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="cert-chain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanac povjerenja i rok valjanosti · simdeck</title>
+<meta name="description" content="Klijent provjerava lanac koji poslužitelj šalje: izdavatelja, potpis i datum po svojem satu, do sidra u svojem spremištu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json (the build replaces it). -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cert-chain",
+  "title": {
+    "hr": "Lanac povjerenja i rok valjanosti",
+    "en": "Chain of trust and expiry"
+  },
+  "concept": {
+    "hr": "Krajnji, posrednički, spremište povjerenja; nedostaje posrednik; satovi isteka",
+    "en": "Leaf, intermediate, root store; a missing intermediate; expiry clocks"
+  },
+  "summary": {
+    "hr": "Klijent provjerava lanac koji poslužitelj šalje: izdavatelja, potpis i datum po svojem satu, do sidra u svojem spremištu. Izlazni status 7, 60 ili 0.",
+    "en": "The client checks the chain the server sends: issuer, signature and date by its own clock, up to an anchor in its own store. Exit status 7, 60 or 0."
+  },
+  "tags": [
+    "tls"
+  ],
+  "class": "stepper",
+  "steps": 14,
+  "entries": [
+    {
+      "preset": "missing-intermediate"
+    },
+    {
+      "preset": "expiry-clocks"
+    },
+    {
+      "preset": "wrong-client-clock"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cert-chain"]; colours only from kit tokens. */
+[data-sim="cert-chain"] .cc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 100%;
+  padding: 0.7rem 0.9rem;
+  /* the drawing grows with the stage; small labels never go under 16 px */
+  font-size: max(1rem, min(2.8cqh, 1.55cqw));
+  --cc-sm: max(16px, 0.8em);
+}
+[data-sim="cert-chain"] .cc-data { font-family: var(--mono); overflow-wrap: anywhere; }
+
+/* sequence strip: one chip per machine state, with its exit status once it has run */
+[data-sim="cert-chain"] .cc-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+[data-sim="cert-chain"] .cc-strip-label { color: var(--muted); font-size: var(--cc-sm); margin-right: 0.2rem; }
+[data-sim="cert-chain"] .cc-chip {
+  display: inline-flex; align-items: baseline; gap: 0.35rem;
+  padding: 0.1rem 0.6rem; border: var(--line-w) dashed var(--line); border-radius: 999px;
+  color: var(--muted); font-size: var(--cc-sm);
+}
+[data-sim="cert-chain"] .cc-chip[data-run] { border-style: solid; color: var(--ink); }
+[data-sim="cert-chain"] .cc-chip[data-now] { border-width: 0.2rem; border-color: var(--accent); }
+[data-sim="cert-chain"] .cc-chip b { font-family: var(--mono); }
+[data-sim="cert-chain"] .cc-chip [data-exit='0'] { color: var(--ok); }
+[data-sim="cert-chain"] .cc-chip [data-bad] { color: var(--danger); }
+[data-sim="cert-chain"] .cc-arrowtxt { color: var(--muted); }
+
+/* the two sides */
+[data-sim="cert-chain"] .cc-main { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 0.9rem; min-height: 0; }
+[data-sim="cert-chain"] .cc-side {
+  display: flex; flex-direction: column; gap: 0.5rem; min-width: 0;
+  padding: 0.5rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="cert-chain"] .cc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; }
+[data-sim="cert-chain"] .cc-head h3 { margin: 0; font-size: 1.2em; }
+[data-sim="cert-chain"] .cc-host { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="cert-chain"] .cc-hosts { font-family: var(--mono); font-size: var(--cc-sm); color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="cert-chain"] .cc-port { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.5rem; border-radius: var(--radius-sm); border: var(--line-w) solid var(--ok); font-size: var(--cc-sm); }
+[data-sim="cert-chain"] .cc-port[data-closed] { border-color: var(--danger); border-style: dashed; }
+[data-sim="cert-chain"] .cc-row { display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="cert-chain"] .cc-row + .cc-row { padding-top: 0.5rem; border-top: var(--line-w) dashed var(--line); }
+[data-sim="cert-chain"] .cc-chain { display: flex; align-items: stretch; gap: 0.3rem; flex-wrap: wrap; }
+
+/* certificate cards: role colour on the left edge AND a role badge, so colour is never alone */
+[data-sim="cert-chain"] .cc-card {
+  flex: 1 1 13rem; min-width: 0; max-width: 21rem;
+  display: flex; flex-direction: column; gap: 0.1rem;
+  padding: 0.35rem 0.6rem 0.4rem 0.8rem;
+  background: var(--bg); border: var(--line-w) solid var(--line); border-left: 0.5rem solid var(--c1); border-radius: var(--radius);
+}
+[data-sim="cert-chain"] .cc-card[data-role='intermediate'] { border-left-color: var(--c2); }
+[data-sim="cert-chain"] .cc-card[data-role='anchor'] { border-left-color: var(--c3); }
+[data-sim="cert-chain"] .cc-card[data-role='self'] { border-left-color: var(--c8); }
+[data-sim="cert-chain"] .cc-card[data-hit] { outline: 0.22rem solid var(--ok); outline-offset: 1px; }
+[data-sim="cert-chain"] .cc-card[data-fail] { border-color: var(--danger); border-width: 0.2rem; border-left-width: 0.5rem; }
+[data-sim="cert-chain"] .cc-card.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-card.sd-changed .cc-meta,
+[data-sim="cert-chain"] .cc-card.sd-changed .cc-file { color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-cardtop { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0 0.4rem; }
+[data-sim="cert-chain"] .cc-role {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0 0.4rem; border-radius: var(--radius-sm); font-size: var(--cc-sm); font-weight: 700;
+  background: var(--c1); color: var(--on-series);
+}
+[data-sim="cert-chain"] .cc-card[data-role='intermediate'] .cc-role { background: var(--c2); }
+[data-sim="cert-chain"] .cc-card[data-role='anchor'] .cc-role { background: var(--c3); }
+[data-sim="cert-chain"] .cc-card[data-role='self'] .cc-role { background: var(--c8); }
+[data-sim="cert-chain"] .cc-file { margin-left: auto; font-family: var(--mono); font-size: var(--cc-sm); color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+[data-sim="cert-chain"] .cc-subject { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; line-height: 1.2; }
+[data-sim="cert-chain"] .cc-meta { font-size: var(--cc-sm); color: var(--muted); overflow-wrap: anywhere; line-height: 1.25; }
+[data-sim="cert-chain"] .cc-meta .cc-data { color: inherit; }
+[data-sim="cert-chain"] .cc-clockline { display: flex; align-items: center; gap: 0.3rem; font-size: var(--cc-sm); font-weight: 700; }
+[data-sim="cert-chain"] .cc-clockline[data-state='expired'],
+[data-sim="cert-chain"] .cc-clockline[data-state='notyet'] { color: var(--danger); }
+[data-sim="cert-chain"] .cc-clockline[data-state='last'] { color: var(--warn); }
+[data-sim="cert-chain"] .cc-card.sd-changed .cc-clockline { color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="cert-chain"] .cc-mark { font-weight: 700; }
+[data-sim="cert-chain"] .cc-mark[data-ok] { color: var(--ok); }
+[data-sim="cert-chain"] .cc-mark[data-bad] { color: var(--danger); }
+[data-sim="cert-chain"] .cc-card.sd-changed .cc-mark { color: var(--on-hl); }
+
+/* signature arrows: from a certificate to the one that signed it */
+[data-sim="cert-chain"] .cc-arrow {
+  flex: 0 0 auto; align-self: center;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  min-width: 3.6rem; font-size: var(--cc-sm); color: var(--muted); text-align: center;
+}
+[data-sim="cert-chain"] .cc-arrow-line { font-size: 1.6rem; line-height: 1; color: var(--ink); }
+[data-sim="cert-chain"] .cc-arrow[data-pending] .cc-arrow-line { color: var(--line); }
+[data-sim="cert-chain"] .cc-arrow[data-out] .cc-arrow-line { color: var(--ok); }
+[data-sim="cert-chain"] .cc-arrow[data-bad] .cc-arrow-line { color: var(--danger); }
+
+/* the client: clock and store */
+[data-sim="cert-chain"] .cc-clock { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+[data-sim="cert-chain"] .cc-clock .cc-ico { width: 1.6rem; height: 1.6rem; }
+[data-sim="cert-chain"] .cc-clockdate { font-family: var(--mono); font-weight: 700; font-size: 1.2em; }
+[data-sim="cert-chain"] .cc-clock[data-off] .cc-clockdate { color: var(--danger); text-decoration: underline wavy; text-underline-offset: 0.2em; }
+[data-sim="cert-chain"] .cc-clock.sd-changed { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); padding: 0 0.3rem; }
+[data-sim="cert-chain"] .cc-clock.sd-changed .cc-clockdate,
+[data-sim="cert-chain"] .cc-clock.sd-changed .cc-meta { color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-store { display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="cert-chain"] .cc-store .cc-card { max-width: none; flex: 0 0 auto; }
+[data-sim="cert-chain"] .cc-storehead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; }
+[data-sim="cert-chain"] .cc-storehead b { font-size: 1em; }
+[data-sim="cert-chain"] .cc-ghost {
+  padding: 0.35rem 0.6rem; border: 0.2rem dashed var(--danger); border-radius: var(--radius);
+  background: var(--bg); font-size: var(--cc-sm);
+}
+[data-sim="cert-chain"] .cc-ghost .cc-subject { font-size: 1em; }
+[data-sim="cert-chain"] .cc-ghost.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* checks and the result */
+[data-sim="cert-chain"] .cc-bottom { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 0.9rem; flex: 1 1 auto; min-height: 0; }
+[data-sim="cert-chain"] .cc-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="cert-chain"] .cc-checks-title { color: var(--muted); font-size: var(--cc-sm); margin: 0 0 0.15rem; }
+[data-sim="cert-chain"] .cc-check { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); line-height: 1.3; }
+[data-sim="cert-chain"] .cc-check-n { font-family: var(--mono); color: var(--muted); min-width: 1.2em; text-align: right; }
+[data-sim="cert-chain"] .cc-check-m { font-weight: 700; min-width: 1.1em; }
+[data-sim="cert-chain"] .cc-check[data-ok] .cc-check-m { color: var(--ok); }
+[data-sim="cert-chain"] .cc-check[data-bad] .cc-check-m { color: var(--danger); }
+[data-sim="cert-chain"] .cc-check[data-bad] { font-weight: 700; }
+[data-sim="cert-chain"] .cc-empty { color: var(--muted); }
+[data-sim="cert-chain"] .cc-result {
+  display: flex; flex-direction: column; gap: 0.15rem; align-self: start;
+  padding: 0.45rem 0.7rem; border: 0.2rem solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="cert-chain"] .cc-result[data-exit='0'] { border-color: var(--ok); }
+[data-sim="cert-chain"] .cc-result[data-exit='60'],
+[data-sim="cert-chain"] .cc-result[data-exit='7'] { border-color: var(--danger); border-style: double; border-width: 0.35rem; }
+[data-sim="cert-chain"] .cc-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-result.sd-changed .cc-meta { color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-exit { display: flex; align-items: baseline; gap: 0.5rem; }
+[data-sim="cert-chain"] .cc-exit b { font-family: var(--mono); font-size: 2.2rem; line-height: 1; }
+[data-sim="cert-chain"] .cc-msg { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="cert-chain"] .cc-fix { font-weight: 700; }
+[data-sim="cert-chain"] .cc-inline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; padding: 0.2rem 0.5rem; border-left: 0.35rem solid var(--ok); background: var(--bg); border-radius: var(--radius-sm); }
+[data-sim="cert-chain"] .cc-inline[data-bad] { border-left: 0.35rem double var(--danger); border-left-width: 0.6rem; }
+[data-sim="cert-chain"] .cc-inline { font-size: 0.9em; }
+[data-sim="cert-chain"] .cc-inline b { font-family: var(--mono); font-size: 1.2em; }
+[data-sim="cert-chain"] .cc-inline.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="cert-chain"] .cc-inline.sd-changed .cc-meta { color: var(--on-hl); }
+
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (NOTES.md, Shared requests). */
+[data-sim="cert-chain"] .sd-panel [hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cert-chain"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cert-chain"] .cc-main,
+  [data-sim="cert-chain"] .cc-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="cert-chain"] .cc-card { max-width: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Lanac povjerenja i rok valjanosti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** The client clock that preset 4 sets: 2028-01-01 at the book's true date 2026-09-05 (UL ch21). */
+  var OFFSET_WRONG_CLOCK = L.dayOf('2028-01-01') - L.BOOK_DAY;
+  /** The client's messages, as the book prints them: data, not language (UL ch21). */
+  var MSG = {
+    connect: 'Could not connect to server',
+    'self-signed': 'self-signed certificate in certificate chain',
+    'unknown-issuer': 'unable to get local issuer certificate',
+    expired: 'certificate has expired',
+    'not-yet-valid': 'certificate is not yet valid',
+    'bad-signature': 'certificate signature failure'
+  };
+  var EVENT_KEY = { openFirewall: 'evOpenFirewall', labCert: 'evLabCert', addAnchor: 'evAddAnchor', expiredCert: 'evExpiredCert', sendIntermediate: 'evSendIntermediate' };
+
+  // ── small pieces ──
+  var svgNs = 'http://www.w3.org/2000/svg';
+  function svgIcon(d, extra) {
+    var s = document.createElementNS(svgNs, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'cc-ico');
+    s.setAttribute('aria-hidden', 'true');
+    d.forEach(function (x) {
+      var el = document.createElementNS(svgNs, x[0]);
+      Object.keys(x[1]).forEach(function (k) { el.setAttribute(k, x[1][k]); });
+      s.appendChild(el);
+    });
+    return s;
+  }
+  function anchorIcon() {
+    return svgIcon([['circle', { cx: 12, cy: 5, r: 2.2 }], ['path', { d: 'M12 7.2V21M7.5 11h9M4 14c0 4 3.6 7 8 7s8-3 8-7' }]]);
+  }
+  function clockIcon() { return svgIcon([['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 7v5l3.5 2.5' }]]); }
+  function data(text, cls) { return h('span', { class: 'cc-data' + (cls ? ' ' + cls : ''), translate: 'no' }, text); }
+  function short(subject) { return subject.replace(/^CN=/, ''); }
+  function signedDays(o) { return (o > 0 ? '+' : o < 0 ? '−' : '') + t.n('days', Math.abs(o)); }
+  function clockState(c, now) {
+    if (now < c.notBefore) return { state: 'notyet', text: t.n('notYet', c.notBefore - now) };
+    var left = c.notAfter - now;
+    if (left > 0) return { state: 'ok', text: t.n('daysLeft', left) };
+    if (left === 0) return { state: 'last', text: t('lastDay') };
+    return { state: 'expired', text: t.n('expiredAgo', -left) };
+  }
+  function find(checks, kind, certId) {
+    return checks.filter(function (k) { return k.kind === kind && k.certId === certId; })[0] || null;
+  }
+  function mark(ok) { return h('span', { class: 'cc-mark', dataset: ok ? { ok: '' } : { bad: '' } }, ok ? '✓' : '✗'); }
+
+  /** One certificate card. role: leaf | intermediate | anchor | self. */
+  function card(s, id, role, opts) {
+    var c = s.certs[id];
+    var o = opts || {};
+    var clk = clockState(c, s.now);
+    var dateCheck = o.dateCheck;
+    var roleText = { leaf: t('roleLeaf'), intermediate: t('roleIntermediate'), anchor: t('roleAnchor'), self: t('roleSelf') }[role];
+    var ds = { role: role };
+    if (o.hit) ds.hit = '';
+    if (o.fail) ds.fail = '';
+    return h('div', { class: 'cc-card' + (o.changed ? ' sd-changed' : ''), dataset: ds },
+      h('div', { class: 'cc-cardtop' },
+        h('span', { class: 'cc-role' }, role === 'anchor' ? anchorIcon() : null, roleText),
+        data(c.file, 'cc-file')),
+      h('div', { class: 'cc-subject', translate: 'no' }, c.subject),
+      h('div', { class: 'cc-meta' }, c.selfSigned ? t('selfIssuer') : [t('issuer') + ': ', data(c.issuer)]),
+      h('div', { class: 'cc-meta' }, data(L.isoOf(c.notBefore) + ' … ' + L.isoOf(c.notAfter))),
+      h('div', { class: 'cc-clockline', dataset: { state: clk.state } }, clockIcon(), clk.text,
+        dateCheck ? mark(dateCheck.ok) : null));
+  }
+
+  function arrow(state, label, out) {
+    var ds = {};
+    if (state === 'pending') ds.pending = '';
+    if (state === 'bad') ds.bad = '';
+    if (out) ds.out = '';
+    return h('div', { class: 'cc-arrow', dataset: ds, 'aria-hidden': 'true' },
+      h('span', { class: 'cc-arrow-line' }, state === 'bad' ? '→ ✗' : state === 'ok' ? '→ ✓' : '→'),
+      h('span', null, label));
+  }
+
+  /** The server side of one connection: endpoints, port, the chain sent with its signature arrows. */
+  function serverRow(s, cn, prevCn, changedCerts, changedPort) {
+    var checks = cn.checks;
+    var chain = [];
+    cn.serverSends.forEach(function (id, i) {
+      var c = s.certs[id];
+      var role = i === 0 ? (c.selfSigned ? 'self' : 'leaf') : (c.selfSigned ? 'self' : 'intermediate');
+      if (s.store.indexOf(id) >= 0) role = 'anchor';
+      var iss = find(checks, 'issuer', id);
+      var anc = find(checks, 'anchor', id);
+      var val = find(checks, 'validity', id) || anc;
+      chain.push(card(s, id, role, {
+        dateCheck: val, changed: changedCerts,
+        fail: (iss && !iss.ok) || (val && !val.ok), hit: !!(anc && anc.ok)
+      }));
+      var next = cn.serverSends[i + 1];
+      if (next && s.certs[next].subject === c.issuer) {
+        chain.push(arrow(iss ? (iss.ok ? 'ok' : 'bad') : 'pending', t('signedBy')));
+      } else if (anc) {
+        chain.push(arrow(anc.ok ? 'ok' : 'bad', t('store'), true));
+      } else if (iss && iss.from === 'store') {
+        chain.push(arrow(iss.ok ? 'ok' : 'bad', t('signedBy'), true));
+      } else if (iss && !iss.ok) {
+        chain.push(arrow('bad', c.selfSigned ? t('selfIssuer') : t('signedBy') + ' ?'));
+      } else if (!c.selfSigned || s.store.indexOf(id) >= 0) {
+        chain.push(arrow('pending', t('signedBy')));
+      }
+    });
+    var hosts = cn.endpoints;
+    return h('div', { class: 'cc-row' },
+      h('div', { class: 'cc-head' },
+        hosts.length === 1 ? data(hosts[0], 'cc-host')
+          : [h('b', null, t.n('endpointsShare', hosts.length)), data(hosts.join(' · '), 'cc-hosts')],
+        h('span', { class: 'cc-port' + (changedPort ? ' sd-changed' : ''), dataset: cn.listening443 ? {} : { closed: '' } },
+          cn.listening443 ? '✓' : '✗', cn.listening443 ? t('portOpen') : t('portClosed'))),
+      h('div', { class: 'cc-chain' }, chain));
+  }
+
+  /** What the client found in its store: hit anchors, and a dashed "?" for an issuer nobody has. */
+  function storeCol(s, changedAnchor, changedClock, newGhost) {
+    var hits = {}, fails = {}, ghosts = [];
+    s.connections.forEach(function (cn) {
+      cn.checks.forEach(function (k) {
+        if (k.kind === 'issuer' && k.ok && k.from === 'store') hits[k.issuerId] = true;
+        if (k.kind === 'anchor') { if (k.ok) hits[k.certId] = true; else fails[k.certId] = true; }
+        if (k.kind === 'issuer' && !k.ok && k.reason === 'unknown-issuer') ghosts.push(s.certs[k.certId].issuer);
+      });
+    });
+    var anchors = s.store.map(function (id) {
+      var anc = null;
+      s.connections.forEach(function (cn) { anc = anc || find(cn.checks, 'anchor', id); });
+      return card(s, id, 'anchor', { hit: !!hits[id], fail: !!fails[id], dateCheck: anc, changed: changedAnchor && id === 'labca' });
+    });
+    var ghostEls = ghosts.filter(function (g, i) { return ghosts.indexOf(g) === i; }).map(function (subject) {
+      return h('div', { class: 'cc-ghost' + (newGhost ? ' sd-changed' : '') },
+        h('div', { class: 'cc-subject', translate: 'no' }, '? ' + subject), h('div', null, t('ghost')));
+    });
+    var off = s.offset !== 0;
+    return h('section', { class: 'cc-side' },
+      h('div', { class: 'cc-head' }, h('h3', null, t('client'))),
+      h('div', { class: 'cc-clock' + (changedClock ? ' sd-changed' : ''), dataset: off ? { off: '' } : {} },
+        clockIcon(), h('span', { class: 'cc-meta' }, t('clientClock')), data(s.nowIso, 'cc-clockdate'),
+        off ? h('span', { class: 'cc-meta' }, t('trueDate', { d: s.trueIso, o: signedDays(s.offset) })) : null),
+      h('div', { class: 'cc-storehead' }, h('b', null, t('store')), h('span', { class: 'cc-meta' }, t('storeNote'))),
+      h('div', { class: 'cc-store' }, anchors, ghostEls));
+  }
+
+  function checkText(s, k) {
+    var cn = k.certId ? data(short(s.certs[k.certId].subject)) : null;
+    var key = k.kind === 'connect' ? 'checkConnect'
+      : k.kind === 'issuer' ? (k.ok ? (k.from === 'store' ? 'checkIssuerStore' : 'checkIssuerSent')
+        : { 'self-signed': 'checkSelf', 'unknown-issuer': 'checkUnknown', 'bad-signature': 'checkBadSig' }[k.reason])
+        : k.kind === 'validity' ? (k.ok ? 'checkValid' : k.reason === 'expired' ? 'checkExpired' : 'checkNotYet')
+          : (k.ok ? 'checkAnchor' : 'checkAnchorBad');
+    return t.parts(key, { cn: cn });
+  }
+
+  function resultBox(r, changed) {
+    if (!r) return h('div', { class: 'cc-result' }, h('span', { class: 'cc-empty' }, '…'));
+    return h('div', { class: 'cc-result' + (changed ? ' sd-changed' : ''), dataset: { exit: String(r.exit) } },
+      h('div', { class: 'cc-exit' }, h('span', { class: 'cc-meta' }, t('exitStatus')), h('b', { translate: 'no' }, String(r.exit))),
+      r.exit === 0 ? h('div', { class: 'cc-fix' }, t('okPage'))
+        : [h('div', { class: 'cc-meta' }, t('message') + ':'), h('div', { class: 'cc-msg', translate: 'no' }, MSG[r.reason]),
+          h('div', { class: 'cc-meta' }, t('alert') + ': ', r.alert ? data(r.alert) : t('noAlert')),
+          r.fix ? h('div', { class: 'cc-fix' }, r.fix === 'client' ? t('fixClient') : t('fixServer')) : null]);
+  }
+
+  function inlineResult(r, changed) {
+    var ds = r.exit === 0 ? {} : { bad: '' };
+    return h('div', { class: 'cc-inline' + (changed ? ' sd-changed' : ''), dataset: ds },
+      h('span', { class: 'cc-meta' }, t('exitStatus')), h('b', { translate: 'no' }, String(r.exit)),
+      r.exit === 0 ? h('span', null, t('okPage'))
+        : [h('span', { class: 'cc-msg', translate: 'no' }, MSG[r.reason]), r.alert ? data(r.alert) : null,
+          r.fix ? h('span', { class: 'cc-fix' }, r.fix === 'client' ? t('fixClient') : t('fixServer')) : null]);
+  }
+
+  function strip(s) {
+    if (s.scenes < 2) return null;
+    var chips = [];
+    for (var i = 0; i < s.scenes; i++) {
+      var hist = s.history[i];
+      var ds = {};
+      if (hist) ds.run = '';
+      if (i === s.scene) ds.now = '';
+      var label = s.story === 'clocks' ? data(L.isoOf(L.SCAN_DAYS[i]).slice(5)) : String(i + 1); // the true dates, MM-DD; the client's date is on its clock
+      chips.push(h('span', { class: 'cc-chip', dataset: ds }, label,
+        hist ? h('b', { translate: 'no' }, hist.map(function (x, j) {
+          return h('span', { dataset: x === 0 ? { exit: '0' } : { bad: '' } }, (j ? ' / ' : '') + x);
+        })) : h('b', { translate: 'no' }, '·')));
+      if (i < s.scenes - 1) chips.push(h('span', { class: 'cc-arrowtxt', 'aria-hidden': 'true' }, '→'));
+    }
+    return h('div', { class: 'cc-strip' }, h('span', { class: 'cc-strip-label' }, t('state')), chips);
+  }
+
+  // ── captions ──
+
+  function describe(s) {
+    var cn = s.connections[0];
+    var lead = cn.serverSends[0];
+    var parts = [];
+    if (!cn.listening443) parts.push(t('descClosed'));
+    parts.push({ pkg: t('descSelf'), www1: t('descLab'), www1old: t('descExpired') }[lead] ||
+      (cn.serverSends.length > 1 ? t('descPublicInt') : t('descPublic')));
+    parts.push(s.store.indexOf('labca') >= 0 ? t('descAnchor') : t('descNoAnchor'));
+    return parts.join('; ') + '.';
+  }
+
+  function checkCaption(s, k, r) {
+    var b = function (x) { return h('b', { translate: 'no' }, String(x)); };
+    var c = k.certId ? s.certs[k.certId] : null;
+    var cn = c ? data(short(c.subject)) : null;
+    var out = [];
+    if (k.kind === 'connect') {
+      if (k.ok) return t.parts('capConnectOk', { certs: t.n('certsN', s.connections[0].serverSends.length) });
+      return t.parts('capConnectFail', { exit: b(7) });
+    }
+    if (k.kind === 'issuer' && k.ok) {
+      return t.parts(k.from === 'store' ? 'capIssuerStore' : 'capIssuerSent', { cn: cn, issuer: data(short(c.issuer)) });
+    }
+    if (k.kind === 'issuer') {
+      if (k.reason === 'self-signed') {
+        out = t.parts('capSelf', { cn: cn, exit: b(r.exit), alert: data(r.alert) });
+        out.push(' ', r.fix === 'client' ? t('capSelfFixClient') : t('capSelfFixServer'));
+        return out;
+      }
+      if (k.reason === 'bad-signature') return t.parts('capBadSig', { cn: cn, issuer: data(short(c.issuer)), alert: data(r.alert) });
+      return t.parts(r.fix === 'server' ? 'capUnknownServer' : 'capUnknownClient', { issuer: data(short(c.issuer)), alert: data(r.alert) });
+    }
+    var dates = { cn: cn, date: data(s.nowIso), from: data(L.isoOf(c.notBefore)), to: data(L.isoOf(c.notAfter)) };
+    if (k.ok && k.kind === 'validity') return t.parts('capValid', Object.assign(dates, { left: clockState(c, s.now).text }));
+    if (k.ok) return t.parts('capAnchor', { cn: cn, exit: b(0) });
+    var vars = Object.assign(dates, { exit: b(r.exit), alert: data(r.alert) });
+    out = k.kind === 'anchor' ? t.parts('capAnchorBad', vars) : t.parts(r.reason === 'expired' ? 'capExpired' : 'capNotYet', vars);
+    if (r.fix) out.push(' ', r.fix === 'client' ? t('capDateFixClient', { o: signedDays(s.offset) }) : t('capDateFixServer'));
+    return out;
+  }
+
+  function clocksCaption(s, first) {
+    var list = [];
+    s.connections.forEach(function (cn) {
+      var lead = s.certs[cn.serverSends[0]];
+      var name = data(short(lead.subject));
+      var r = cn.result;
+      if (r && r.exit !== 0) {
+        var vars = { cn: name, n: cn.endpoints.length, host: data(cn.endpoints[0]), exit: h('b', { translate: 'no' }, String(r.exit)), alert: data(r.alert) };
+        var key = (r.reason === 'not-yet-valid' ? 'clkNotYet' : 'clkExpired') + (cn.endpoints.length > 1 ? '' : 'One');
+        list.push.apply(list, t.parts(key, vars));
+      } else {
+        var left = lead.notAfter - s.now;
+        list.push.apply(list, left === 0 ? t.parts('clkLast', { cn: name }) : t.parts('clkLeft', { cn: name, left: t.n('clkDays', left) }));
+      }
+      list.push(' ');
+    });
+    return t.parts(first ? 'capClocksStart' : 'capClocksStep', { date: data(s.trueIso), list: h('span', null, list) });
+  }
+
+  // ── mount ──
+
+  /** The estate story fixes the servers and the store: only the client's clock is a setting there. */
+  function notEstate(p) { return p.story !== 'clocks'; }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'story', type: 'choice', label: t('state'), visible: function () { return false; },
+        options: [['book', t('presetBook')], ['intermediate', t('presetIntermediate')], ['clocks', t('presetClocks')], ['one', t('presetBuild')]] },
+      { key: 'https443Open', type: 'toggle', label: t('https443Open'), visible: notEstate },
+      { key: 'serverCert', type: 'select', label: t('serverCert'), visible: notEstate,
+        options: [['self', t('certSelf')], ['lab', t('certLab')], ['expired', t('certExpired')], ['public', t('certPublic')]],
+        disabled: function (p) { return p.story === 'intermediate' ? t('offStoryPublic') : p.story === 'book' ? t('offBookCert') : false; } },
+      { key: 'sendIntermediate', type: 'toggle', label: t('sendIntermediate'), visible: notEstate,
+        disabled: function (p) { return p.story === 'book' || (p.story === 'one' && p.serverCert !== 'public') ? t('offOnlyPublic') : false; } },
+      { key: 'anchorInStore', type: 'toggle', label: t('anchorInStore'), visible: notEstate,
+        disabled: function (p) { return p.story === 'intermediate' || (p.story === 'one' && p.serverCert === 'public') ? t('offPublicRoot') : false; } },
+      { key: 'clockOffsetDays', type: 'range', label: t('clockOffsetDays'), min: L.OFFSET_MIN, max: L.OFFSET_MAX, step: 1,
+        format: function (v) { return signedDays(v); } },
+      { type: 'button', label: t('advanceDay'), key: 'd', run: function (sim) {
+          sim.set({ clockOffsetDays: Math.min(L.OFFSET_MAX, sim.params.clockOffsetDays + 1) });
+        } }
+    ],
+
+    presets: [
+      { id: 'book-five-states', label: t('presetBook'), hint: t('presetBookHint'), params: { story: 'book' } },
+      { id: 'missing-intermediate', label: t('presetIntermediate'), hint: t('presetIntermediateHint'), params: { story: 'intermediate', https443Open: true, serverCert: 'public', sendIntermediate: false } },
+      { id: 'expiry-clocks', label: t('presetClocks'), hint: t('presetClocksHint'), params: { story: 'clocks' } },
+      { id: 'wrong-client-clock', label: t('presetWrongClock'), hint: t('presetWrongClockHint'), params: { story: 'one', https443Open: true, serverCert: 'lab', anchorInStore: true, clockOffsetDays: OFFSET_WRONG_CLOCK } },
+      { id: 'build', label: t('presetBuild'), hint: t('presetBuildHint'), params: { story: 'one', https443Open: true, serverCert: 'lab', anchorInStore: false } }
+    ],
+
+    legend: [
+      { c: 1, label: t('legendLeaf') },
+      { c: 2, label: t('legendIntermediate') },
+      { c: 3, shape: 'round', label: t('legendAnchor') },
+      { c: 8, label: t('legendSelf') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.prev;
+      var ch = s.changed;
+      var clocks = s.story === 'clocks';
+      var fwd = c.dir === 'forward';
+      var changedCerts = ch.indexOf('serverCert') >= 0 || ch.indexOf('sendIntermediate') >= 0;
+      var newGhost = false;
+      var cn0 = s.connections[0];
+      if (cn0.newCheck >= 0) {
+        var nk = cn0.checks[cn0.newCheck];
+        newGhost = nk.kind === 'issuer' && !nk.ok && nk.reason === 'unknown-issuer';
+      }
+      var rows = s.connections.map(function (cn, i) {
+        var row = serverRow(s, cn, p && p.connections[i], changedCerts, ch.indexOf('https443Open') >= 0);
+        if (clocks && cn.result) {
+          var before = p && p.connections[i].result;
+          row.append(inlineResult(cn.result, !!before && before.exit !== cn.result.exit));
+        }
+        return row;
+      });
+      var server = h('section', { class: 'cc-side' },
+        h('div', { class: 'cc-head' }, h('h3', null, t('server')), h('span', { class: 'cc-meta' }, t('sends'))), rows);
+      var main = h('div', { class: 'cc-main' }, server, storeCol(s, ch.indexOf('anchorInStore') >= 0, clocks && ch.indexOf('clock') >= 0, newGhost));
+      var bottom = null;
+      if (!clocks) {
+        var items = cn0.checks.map(function (k, i) {
+          var isNew = i === cn0.newCheck;
+          return h('li', { class: 'cc-check' + (isNew ? ' sd-changed' : '') + (isNew && fwd ? ' sd-anim-in' : ''), dataset: k.ok ? { ok: '' } : { bad: '' } },
+            h('span', { class: 'cc-check-n' }, String(i + 1)), h('span', { class: 'cc-check-m' }, k.ok ? '✓' : '✗'), h('span', null, checkText(s, k)));
+        });
+        bottom = h('div', { class: 'cc-bottom' },
+          h('div', null, h('p', { class: 'cc-checks-title' }, s.scenes > 1 ? t('stateOf', { i: s.scene + 1, n: s.scenes }) + ' · ' + t('checks') : t('checks')),
+            items.length ? h('ol', { class: 'cc-checks' }, items) : h('p', { class: 'cc-empty' }, t('notYetRun'))),
+          resultBox(cn0.result, cn0.result && cn0.newCheck === cn0.checks.length - 1));
+      }
+      c.stage.replaceChildren(h('div', { class: 'cc' }, strip(s), main, bottom));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (s.story === 'clocks') return clocksCaption(s, c.first);
+      var cn = s.connections[0];
+      if (!cn.checks.length) {
+        if (s.scenes > 1) return t.parts('capStart', { state: t('stateOf', { i: s.scene + 1, n: s.scenes }), desc: describe(s) });
+        return t.parts('capStartOne', { host: data(cn.endpoints[0]) });
+      }
+      var out = [];
+      if (s.sceneStart) {
+        out.push(h('b', null, t('stateOf', { i: s.scene + 1, n: s.scenes }) + ': '), t(EVENT_KEY[s.event]));
+        if (!s.changed.length) out.push(' ', t('evNoChange'));
+        out.push(' ');
+      }
+      var k = cn.checks[cn.checks.length - 1];
+      return out.concat(checkCaption(s, k, cn.result));
+    }
+  });
+})();
+</script>
+</body>
+</html>
