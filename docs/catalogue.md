@@ -102,7 +102,7 @@ adopted page carries a translation task on top of the kit adaptation. Today's st
 | single-page-labs | of the 20 imported: 9 en, 9 hr, the Marp deck in hr (`lang="POSIX"`), 1 with an hr/en toggle (`radio-cybersecurity.html`) | 19 pages need the other language; the toggle page shows the pattern |
 | URM interactive pages | hr only | all 14 need English |
 | 50ohm applets | hr (translated from de) | all need English; the German original helps, as English 50ohm text doesn't exist |
-| ossimulator | hr only, English terms in italics | English cannot be added to a built bundle: it goes into ossimulator's source (its glossary `docs/POJMOVNIK.md` already pairs every term), then the builds are re-imported (task `ossimulator-english`) |
+| ossimulator | hr and en in one build since `93da8f8` (`?lang=`, else `simdeck.lang`); Croatian keeps the English terms in italics | done: English was written in ossimulator's source (task `ossimulator-english`, its glossary `docs/POJMOVNIK.md` pairs every term) and all 17 builds were re-imported in t-0118 |
 | cephsim, faultline, topologydrafter | en | Croatian is written in the simdeck copy, which is canonical once imported |
 
 **Licence: AGPL-3.0-or-later** (owner, 2026-10-01) for simdeck and for your own code copied into it.
@@ -933,7 +933,7 @@ Other requirements:
     checked in both languages.
   - **Manifest:** `title`, `concept` and `summary` per language (`{hr, en}`), replacing the single `lang`
     field of `sim.json`. Course files pick a language; the course page is generated in it.
-  - **Imported pages in one language** (ossimulator until it has English) declare a `languages`
+  - **Imported pages in one language** (ossimulator did until `93da8f8` added English) declare a `languages`
     exception, so the index can mark them instead of pretending they are bilingual.
 - **Attribution footer** for CC BY imports, in both languages.
 - **Source link** on every page and on the index (AGPL-3.0 §13, see §6), with the licence name.

@@ -11,7 +11,7 @@
 | Priority | P2 |
 | Courses | OS |
 | Topic / tags / level | `os` / `operating-systems` / `core` |
-| Languages | Croatian now; English comes from ossimulator's source (task `ossimulator-english`) |
+| Languages | Croatian and English in one build since ossimulator `93da8f8` (task `ossimulator-english`), re-imported in t-0118 |
 | Licence | AGPL-3.0-or-later |
 | Depends on | wave 0 (foundation) merged; none beyond wave 0 |
 
@@ -39,15 +39,16 @@ Notes from the catalogue: Table 11.2 (stallings-table-11-2), SCAN vs C-SCAN, HDD
    Set `origin` to `ossimulator/disk-scheduling`.
 2. Do not adapt it to the kit: it has its own shared runtime and a full test suite. Add `data-sim="disk-scheduling"` to
    its `<html>`, a `#simdeck-meta` placeholder and a `#simdeck-exceptions` block declaring `kit`, `text-size`
-   (ossimulator's floor is 14 px), `one-screen` (its six-section layout scrolls) and `languages` (until it has
-   English). These are the only edits to the built file.
+   (ossimulator's floor is 14 px) and `one-screen` (its six-section layout scrolls). These are the only edits to
+   the built file.
 3. Write `sim.json`: title, concept and summary from the page's `meta.ts`
    (`/home/rjasmin/projects/ossimulator/src/modules/disk-scheduling/meta.ts`), class `explorer`, topic `os`.
 4. List the scenario deep links that index entries should use: Table 11.2 (stallings-table-11-2), SCAN vs C-SCAN, HDD vs SSD (hdd-vs-ssd). Each opens paused with
    `?scenario=<id>` (put them in `NOTES.md`; the frame does not have per-preset entries yet: see the
    foundation task about presets in the index).
-5. **English** cannot be added to a built bundle. It belongs in ossimulator's source (foundation task
-   `ossimulator-english`); this task only imports the Croatian build.
+5. **English** cannot be added to a built bundle: it is written in ossimulator's source (foundation task
+   `ossimulator-english`, done in `93da8f8`). The build carries both languages (`?lang=`, else `simdeck.lang`), so
+   `sim.json` has no `languages` field (t-0118).
 6. Check that the single file runs from `file://` with the network blocked (ossimulator's own e2e does this).
 7. **ossimulator is the source of truth** (owner, 2026-10-02): never fix this copy. A defect found here goes into
    ossimulator, and the build is re-imported.
