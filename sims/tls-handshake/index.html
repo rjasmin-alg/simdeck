@@ -1,0 +1,404 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- tls-handshake: the TLS 1.2 and TLS 1.3 full handshakes side by side, one flight per step in lockstep, after the TCP
+     handshake; or a client that offers only TLS 1.1 (a local error, or the server's alert 70). Drawn with kit view K1
+     (message sequence chart, kit/sequence.js): two charts, each with client and server lanes and the eavesdropper column;
+     under each the round-trip counter and what the eavesdropper has read. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="tls-handshake">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLS 1.2 i 1.3: rukovanje · simdeck</title>
+<meta name="description" content="Rukovanje TLS-a 1.2 i 1.3 jedno uz drugo, let po let: razmjena ključeva, certifikat i broj krugova do prvog bajta podataka.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tls-handshake",
+  "title": {
+    "hr": "TLS 1.2 i 1.3: rukovanje jedno uz drugo",
+    "en": "TLS 1.2 vs 1.3: the handshakes side by side"
+  },
+  "concept": {
+    "hr": "Razmjena ključeva, certifikat i krugovi: 2 RTT za TLS 1.2, 1 RTT za TLS 1.3",
+    "en": "Key exchange, certificate and round trips: 2 RTT for TLS 1.2, 1 RTT for TLS 1.3"
+  },
+  "summary": {
+    "hr": "Oba rukovanja let po let nakon TCP-a: tko kad ima ključeve, što promatrač čita i kad smije prvi bajt podataka.",
+    "en": "Both handshakes flight by flight after TCP: who holds the keys when, what an eavesdropper reads, when data may go."
+  },
+  "tags": [
+    "tls"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tls-handshake"]; colours only from kit tokens.
+   Layout: compare: two columns (TLS 1.2, TLS 1.3), each a title, a K1 chart and the counter box under it.
+   fail: one chart and the "where is the error from" panel beside it. */
+[data-sim="tls-handshake"] .th {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.6cqh 1.4cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="tls-handshake"] .th-hosts { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="tls-handshake"] .th-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.4cqw; min-height: 0; }
+[data-sim="tls-handshake"] .th-cols[data-fail] { grid-template-columns: minmax(0, 1fr) minmax(0, 22rem); }
+[data-sim="tls-handshake"] .th-col { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.4rem; min-width: 0; min-height: 0; }
+[data-sim="tls-handshake"] .th-coltitle { margin: 0; font-size: 1.15rem; }
+[data-sim="tls-handshake"] .th-mono { font-family: var(--mono); }
+[data-sim="tls-handshake"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* chart rows a little lower than K1's 2.75rem at projector size, so all ten TLS 1.2 rows stay in view */
+@media (min-width: 901px) and (min-aspect-ratio: 1/1) { [data-sim="tls-handshake"] .sd-seq { --sd-seq-row: 2.3rem; } }
+
+/* key chip in a lane card: solid with a key when the side holds the keys, dashed before */
+[data-sim="tls-handshake"] .th-key, [data-sim="tls-handshake"] .th-nokey {
+  display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.15rem; padding: 0 0.4rem;
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); line-height: 1.5;
+}
+[data-sim="tls-handshake"] .th-key { border: 0.2rem solid var(--ink); font-weight: 700; }
+[data-sim="tls-handshake"] .th-key.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="tls-handshake"] .th-nokey { border: 0.2rem dashed var(--line); color: var(--muted); }
+[data-sim="tls-handshake"] .th-keyicon {
+  position: relative; display: inline-block; flex: none; width: 0.55em; height: 0.55em;
+  border: 0.14em solid currentColor; border-radius: 50%; margin-right: 0.55em;
+}
+[data-sim="tls-handshake"] .th-keyicon::after {
+  content: ''; position: absolute; left: 100%; top: 50%; width: 0.6em; height: 0.14em; transform: translateY(-50%);
+  background: currentColor; box-shadow: 0.4em 0.14em 0 -0.02em currentColor;
+}
+
+/* counter box under each chart */
+[data-sim="tls-handshake"] .th-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.7rem 0.45rem;
+  min-width: 0;
+}
+[data-sim="tls-handshake"] .th-ctr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.6rem; margin: 0; align-items: baseline; }
+[data-sim="tls-handshake"] .th-ctr dt { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="tls-handshake"] .th-ctr dd { margin: 0; min-width: 0; }
+[data-sim="tls-handshake"] .th-first { font-weight: 700; }
+[data-sim="tls-handshake"] .th-first.sd-changed { background: var(--hl); color: var(--on-hl); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="tls-handshake"] .th-wait { margin-left: 0.5rem; padding: 0 0.4rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="tls-handshake"] .th-read { display: flex; flex-wrap: wrap; gap: 0.15rem 0.35rem; font-size: var(--fs-sm); }
+[data-sim="tls-handshake"] .th-item { padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="tls-handshake"] .th-item[data-cert] { border-width: 0.2rem; font-weight: 700; }
+[data-sim="tls-handshake"] .th-item[data-hidden] { border-style: dashed; background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em); }
+[data-sim="tls-handshake"] .th-item[data-new] { background: var(--hl); color: var(--on-hl); }
+[data-sim="tls-handshake"] .th-none { color: var(--muted); }
+
+/* fail panel */
+[data-sim="tls-handshake"] .th-fail { align-self: start; }
+[data-sim="tls-handshake"] .th-fail h2 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+[data-sim="tls-handshake"] .th-fail .th-ctr { gap: 0.25rem 0.6rem; }
+[data-sim="tls-handshake"] .th-verdict { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.6rem 0 0; padding: 0.4rem 0.55rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-weight: 700; }
+[data-sim="tls-handshake"] .th-verdict[data-v="pending"] { border-width: var(--line-w); border-style: dashed; font-weight: 400; }
+[data-sim="tls-handshake"] .th-verdict.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="tls-handshake"] .th-vmark { flex: none; display: grid; place-items: center; min-width: 1.6em; height: 1.6em; padding: 0 0.2em; border-radius: var(--radius-sm); border: var(--line-w) solid currentColor; font-weight: 700; line-height: 1; }
+[data-sim="tls-handshake"] .th-verdict[data-v="local"] .th-vmark { border-radius: 50%; }
+[data-sim="tls-handshake"] .th-err { display: block; margin-top: 0.3rem; font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+/* legend swatches of this page (the kit has round, hollow, hl, dash, line) */
+[data-sim="tls-handshake"] .sd-swatch[data-shape="th-lock"] { height: 0.55rem; border: 0; border-top: var(--line-w) solid var(--ink); border-bottom: var(--line-w) solid var(--ink); border-radius: 0; background: transparent; }
+[data-sim="tls-handshake"] .sd-swatch[data-shape="th-tcp"] { height: 0.3rem; border: 0; border-radius: 0; background: var(--muted); }
+[data-sim="tls-handshake"] .sd-swatch[data-shape="th-key"] { border-width: 0.2rem; border-color: var(--ink); background: var(--bg); position: relative; }
+[data-sim="tls-handshake"] .sd-swatch[data-shape="th-key"]::after { content: ''; position: absolute; left: 50%; top: 50%; width: 0.35em; height: 0.35em; transform: translate(-50%, -50%); border: 0.12em solid var(--ink); border-radius: 50%; }
+
+/* Phone and portrait: the stage grows with its content; the columns stack (the kit stacks the lane cards). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tls-handshake"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tls-handshake"] .th { height: auto; padding: 0.4rem; }
+  [data-sim="tls-handshake"] .th-cols, [data-sim="tls-handshake"] .th-cols[data-fail] { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  [data-sim="tls-handshake"] .th-col { display: block; }
+  [data-sim="tls-handshake"] .th-col > * + * { margin-top: 0.4rem; }
+  [data-sim="tls-handshake"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">TLS 1.2 i 1.3: rukovanje jedno uz drugo</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var CLIENT = 'democli1', SERVER = 'www1.lab.example', PORT = '443';   // UL ch21
+  var COLOUR = { C: '1', S: '2' };
+
+  /** Data (message names, host names, cipher suites, error texts, numbers) is not language: the word check skips it. */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'th-mono' : cls || null }, text); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  /** Round trips with a half as ½ (1½ RTT). */
+  function rttText(r) {
+    var whole = Math.floor(r), half = r - whole >= 0.5;
+    return (whole || !half ? String(whole) : '') + (half ? '½' : '');
+  }
+  function ms(v) { return String(Math.round(v)); }
+  function keyIcon() { return h('span', { class: 'th-keyicon', 'aria-hidden': 'true' }); }
+
+  // ── chart ──
+  function keyChip(col, side, n) {
+    var at = col.keysAt[side];
+    if (at == null || at > n) return h('span', { class: 'th-nokey' }, t('keysNone'));
+    return h('span', { class: 'th-key' + (at === n ? ' sd-changed' : '') }, keyIcon(), t('keysYes'));
+  }
+  function lanes(col, n) {
+    return [
+      { id: 'C', mark: null, c: COLOUR.C, shape: 'square', name: t('client'), body: keyChip(col, 'C', n) },
+      { id: 'S', mark: null, c: COLOUR.S, name: t('server'), body: keyChip(col, 'S', n) }
+    ];
+  }
+  var SHORT = { sni: 'sName', versions: 'sVersions', suites: 'sSuites', version: 'sVersion', suite: 'sSuite', cert: 'sCert',
+    shareC: 'sShare', shareS: 'sShare' };
+  /** What the eavesdropper reads of one chart row (its messages). */
+  function seenOf(msgs) {
+    if (msgs[0].enc) return t('sEnc');
+    if (msgs[0].tcp) return data(msgs[0].name, '');
+    if (msgs[0].alert) return data(msgs[0].alert + ' (' + L.ALERT_CODE[msgs[0].alert] + ')', '');
+    var words = [];
+    msgs.forEach(function (x) {
+      x.reads.forEach(function (it) { var w = t(SHORT[it]); if (words.indexOf(w) < 0) words.push(w); });
+      if (x.name === 'ChangeCipherSpec') words.push(t('sCcs'));
+    });
+    return words.join(', ');
+  }
+  /** One chart row per (flight, row) group of messages (sim.js rowsOf). */
+  function rowsFor(col, n, rttMs) {
+    var groups = [];
+    col.msgs.forEach(function (x) {
+      var g = groups[groups.length - 1];
+      if (g && g.flight === x.flight && g.row === x.row) g.msgs.push(x);
+      else groups.push({ flight: x.flight, row: x.row, msgs: [x] });
+    });
+    var timed = {};
+    var rows = groups.map(function (g) {
+      var first = g.msgs[0];
+      var label = first.app ? t('appData') : g.msgs.map(function (x) { return x.name; }).join(', ');
+      var time = timed[g.flight] ? null : ms(L.msOf(first.half, rttMs)) + ' ms';
+      timed[g.flight] = true;
+      var long = (typeof label === 'string' ? label : '').length > 18;
+      return { from: first.from, to: first.to, label: first.app ? h('span', null, label) : label, c: COLOUR[first.from],
+        lock: first.enc, muted: first.tcp, place: long ? 'mid' : null, time: time, changed: first.step === n,
+        seen: seenOf(g.msgs) };
+    });
+    if (col.failed === 'no_protocols_local' && n >= 2) {
+      rows.push({ kind: 'note', lane: 'C', text: t('noteLocal'), k: 'fill', time: ms(L.msOf(2, rttMs)) + ' ms',
+        changed: n === 2, seen: t('sNothing') });
+    }
+    return rows;
+  }
+  function chart(c, col, eve) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(col, c.n),
+      rows: rowsFor(col, c.n, c.params.rttMs),
+      timeWidth: '4.4rem',
+      eve: eve ? { title: t('eveTitle'), width: '10.5rem' } : null,
+      empty: t('chartEmpty'),
+      earlier: function (k) { return t.n('earlier', k); }
+    });
+  }
+
+  // ── counter and what the eavesdropper has read ──
+  function readList(c, col) {
+    var r = col.read, items = [];
+    var newAt = {};
+    col.msgs.forEach(function (x) { if (x.step === c.n) x.reads.forEach(function (it) { newAt[it] = true; }); });
+    function item(key, it, attrs) {
+      var ds = Object.assign({}, attrs || {}, newAt[it] ? { new: '' } : {});
+      items.push(h('span', { class: 'th-item', dataset: ds }, t(key)));
+    }
+    if (r.indexOf('sni') >= 0) item('oName', 'sni');
+    if (r.indexOf('versions') >= 0) item('oOffered', 'versions');
+    if (r.indexOf('version') >= 0) item('oChosen', 'version');
+    var shares = (r.indexOf('shareC') >= 0) + (r.indexOf('shareS') >= 0);
+    if (shares) item(shares === 2 ? 'oShares' : 'oShare', newAt.shareC ? 'shareC' : 'shareS');
+    if (r.indexOf('cert') >= 0) item('oCert', 'cert', { cert: '' });
+    else if (col.msgs.some(function (x) { return x.cert; })) {
+      var fresh = col.msgs.some(function (x) { return x.cert && x.step === c.n; });
+      items.push(h('span', { class: 'th-item', dataset: Object.assign({ hidden: '', cert: '' }, fresh ? { new: '' } : {}) }, t('oCertHidden')));
+    }
+    if (r.indexOf('alert') >= 0) item('oAlert', 'alert');
+    return items.length ? h('span', { class: 'th-read' }, items) : h('span', { class: 'th-none' }, t('obsNothing'));
+  }
+  function counter(c, col, prev) {
+    var rtt = c.params.rttMs, rows = [];
+    rows.push(h('dt', null, t('ctrElapsed')), h('dd', null, data(t('ctrElapsedVal', { rtt: rttText(col.rtt), ms: ms(col.rtt * rtt) }))));
+    var first;
+    if (col.appDataAt != null) {
+      var fresh = !prev || prev.appDataAt == null;
+      first = [h('span', { class: 'th-first' + (fresh && c.n > 0 ? ' sd-changed' : '') },
+        data(t('ctrFirstVal', { ms: ms(col.appDataAt * rtt), k: rttText(col.appDataAt - 1), n: rttText(col.appDataAt) }), '')),
+        col.waiting ? h('span', { class: 'th-wait' }, t('ctrWaiting')) : null];
+    } else first = h('span', { class: 'th-none' }, t('ctrFirstNot'));
+    rows.push(h('dt', null, t('ctrFirst')), h('dd', null, first));
+    if (c.params.suites && col.suite) rows.push(h('dt', null, t('ctrSuite')), h('dd', null, data(col.suite)));
+    if (c.params.attackerView) rows.push(h('dt', null, t('obsTitle')), h('dd', null, readList(c, col)));
+    return h('section', { class: 'th-box' }, h('dl', { class: 'th-ctr' }, rows));
+  }
+
+  // ── fail panel ──
+  function failPanel(c, s) {
+    var forbids = c.params.clientOffers === 'old-forbidden';
+    var v = s.failure === 'no_protocols_local' ? 'local' : s.failure === 'protocol_version' ? 'remote' : 'pending';
+    var changed = !!c.prev && c.prev.failure !== s.failure;
+    var verdict = v === 'pending' ? h('span', null, t('failPending'))
+      : h('span', null, t(v === 'local' ? 'failLocal' : 'failRemote'),
+        h('span', { class: 'th-err', translate: 'no' }, v === 'local' ? 'no protocols available' : 'alert protocol_version (70)'));
+    return h('section', { class: 'th-box th-fail' },
+      h('h2', null, t('failTitle')),
+      h('dl', { class: 'th-ctr' },
+        h('dt', null, t('failWants')), h('dd', null, data('TLS ' + s.wanted.join(', '))),
+        h('dt', null, t('failPolicy')), h('dd', null, t(forbids ? 'polForbids' : 'polAllows')),
+        h('dt', null, t('failServer')), h('dd', null, data('TLS ' + L.SERVER_ACCEPTS.join(', ')))),
+      h('p', { class: 'th-verdict' + (changed ? ' sd-changed' : ''), dataset: { v: v } },
+        h('span', { class: 'th-vmark', 'aria-hidden': 'true', translate: 'no' }, v === 'local' ? t('markC') : v === 'remote' ? t('markS') : '…'),
+        verdict));
+  }
+
+  // ── render ──
+  function render(c) {
+    var s = c.state, eve = !!c.params.attackerView;
+    var hosts = h('p', { class: 'th-hosts', translate: 'no' }, CLIENT + ' → ' + SERVER + ':' + PORT + ' · RTT ' + c.params.rttMs + ' ms');
+    var charts = [], cols;
+    if (s.mode === 'compare') {
+      cols = [['v12', 'TLS 1.2'], ['v13', 'TLS 1.3']].map(function (x) {
+        var col = s[x[0]], ch = chart(c, col, eve);
+        charts.push(ch);
+        return h('div', { class: 'th-col' }, h('h2', { class: 'th-coltitle', translate: 'no' }, x[1]), ch,
+          counter(c, col, c.prev ? c.prev[x[0]] : null));
+      });
+      c.stage.replaceChildren(h('div', { class: 'th' }, hosts, h('div', { class: 'th-cols' }, cols)));
+    } else {
+      var ch = chart(c, s.att, eve);
+      charts.push(ch);
+      c.stage.replaceChildren(h('div', { class: 'th' }, hosts, h('div', { class: 'th-cols', dataset: { fail: '' } },
+        h('div', { class: 'th-col' }, h('h2', { class: 'th-coltitle' }, t('colOld')), ch, counter(c, s.att, c.prev ? c.prev.att : null)),
+        failPanel(c, s))));
+    }
+    charts.forEach(function (x) { x.fit(); });
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, rtt = c.params.rttMs;
+    if (s.mode === 'compare') {
+      switch (c.n) {
+        case 0: return rich('cap0');
+        case 1: return rich('cap1', { ms: data(ms(rtt), '') });
+        case 2: return rich('cap2');
+        case 3: return c.params.suites ? rich('cap3Suites', { s12: data(L.SUITES['1.2']), s13: data(L.SUITES['1.3']) }) : rich('cap3');
+        case 4: return rich('cap4', { ms: data(ms(s.v13.appDataAt * rtt), '') });
+        case 5: return rich('cap5').concat(' ', rich('capCert'));
+        default: return rich('cap6', { ms12: data(ms(s.v12.appDataAt * rtt), ''), ms13: data(ms(s.v13.appDataAt * rtt), ''),
+          d: data(ms((s.v12.appDataAt - s.v13.appDataAt) * rtt), '') });
+      }
+    }
+    var forbids = c.params.clientOffers === 'old-forbidden';
+    if (c.n === 0) return rich(forbids ? 'capF0Local' : 'capF0Alert');
+    if (c.n === 1) return rich('capFTcp', { ms: data(ms(rtt), '') });
+    if (forbids) return rich('capLocal', { err: data('no protocols available') });
+    if (c.n === 2) return rich('capOldCh');
+    return rich('capAlert', { alert: data('protocol_version (70)') });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'clientOffers', type: 'choice', label: t('clientOffers'), hint: t('clientOffersHint'), resets: true,
+        options: [['modern', t('offModern')], ['old-allowed', t('offOldOk')], ['old-forbidden', t('offOldNo')]] },
+      { key: 'rttMs', type: 'range', label: t('rttMs'), min: 10, max: 300, step: 10,
+        format: function (v) { return t('rttFmt', { v: v }); } },
+      { key: 'attackerView', type: 'toggle', label: t('attackerView'), hint: t('attackerViewHint') },
+      { key: 'suites', type: 'toggle', label: t('suites'), hint: t('suitesHint'),
+        disabled: function (p) { return p.clientOffers === 'modern' ? false : t('suitesOff'); } }
+    ],
+
+    presets: [
+      { id: 'side-by-side', label: t('presetSide'), params: { clientOffers: 'modern', suites: false }, hint: t('presetSideHint') },
+      { id: 'book-versions', label: t('presetBook'), params: { clientOffers: 'modern', suites: true }, hint: t('presetBookHint') },
+      { id: 'old-version-local', label: t('presetLocal'), params: { clientOffers: 'old-forbidden' }, hint: t('presetLocalHint') },
+      { id: 'old-version-alert', label: t('presetAlert'), params: { clientOffers: 'old-allowed' }, hint: t('presetAlertHint') }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legPlain') },
+      { shape: 'th-lock', label: t('legLock') },
+      { shape: 'th-key', label: t('legKey') },
+      { shape: 'th-tcp', label: t('legTcp') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
