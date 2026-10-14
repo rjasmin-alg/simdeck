@@ -1,0 +1,621 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-pipes-redirection: stdin, stdout and stderr; the order of > and 2>&1; pipes. A stepper drawn in HTML: the
+     command line, one box per process with its descriptor table, the targets (screen, files, pipe) and a wire per open
+     descriptor. Rules: SPEC.md; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="lnx-pipes-redirection">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tri toka, preusmjeravanje i cjevovod · simdeck</title>
+<meta name="description" content="Ljuska slaže kamo vodi svaki deskriptor, korak po korak: cijevi, pa preusmjeravanja slijeva nadesno, pa ispis redak po redak.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json (the build replaces it). -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-pipes-redirection",
+  "title": {
+    "hr": "Tri toka, preusmjeravanje i cjevovod",
+    "en": "Three streams, redirection and pipes"
+  },
+  "concept": {
+    "hr": "stdin, stdout, stderr; poredak > i 2>&1; cijev nosi samo deskriptor 1",
+    "en": "stdin, stdout, stderr; the order of > and 2>&1; a pipe carries only fd 1"
+  },
+  "summary": {
+    "hr": "Ljuska slaže kamo vodi svaki deskriptor, korak po korak: cijevi, pa preusmjeravanja slijeva nadesno, pa ispis redak po redak.",
+    "en": "The shell sets up where each descriptor points, step by step: pipes, then redirections left to right, then output line by line."
+  },
+  "tags": [
+    "shell"
+  ],
+  "class": "stepper",
+  "steps": 4,
+  "entries": [
+    {
+      "preset": "obrnuto"
+    },
+    {
+      "preset": "cijev-2"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-pipes-redirection"]; colours only from kit tokens.
+   Each descriptor has a colour AND a line style AND its number: 0 dotted, 1 solid, 2 dashed. */
+[data-sim="lnx-pipes-redirection"] { --lp-0: var(--c3); --lp-1: var(--c1); --lp-2: var(--c2); }
+[data-sim="lnx-pipes-redirection"] .lp {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 2.5cqh;
+  height: 100%;
+  padding: 2.5cqh 2.5cqw;
+  font-size: max(1rem, min(3.3cqh, 1.7cqw));
+  line-height: 1.3;
+}
+
+/* the command line */
+[data-sim="lnx-pipes-redirection"] .lp-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3em 0.5em;
+  padding: 0.35em 0.7em;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 1.3em;
+}
+[data-sim="lnx-pipes-redirection"] .lp-prompt { color: var(--muted); }
+[data-sim="lnx-pipes-redirection"] .lp-tok { padding: 0 0.25em; border-radius: var(--radius-sm); }
+[data-sim="lnx-pipes-redirection"] .lp-tok[data-kind='pipe'],
+[data-sim="lnx-pipes-redirection"] .lp-tok[data-kind='redir'] { font-weight: 700; }
+[data-sim="lnx-pipes-redirection"] .lp-tok[data-done] { text-decoration: underline; text-decoration-thickness: 0.12em; text-underline-offset: 0.22em; }
+[data-sim="lnx-pipes-redirection"] .lp-tok.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* the body: processes and pipe on top, files at the right, the screen below; wires drawn over it */
+[data-sim="lnx-pipes-redirection"] .lp-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9cqh 9cqw;
+  min-height: 0;
+}
+[data-sim="lnx-pipes-redirection"] .lp-procs { display: flex; align-items: center; gap: 6cqw; min-width: 0; margin: 0 5.5em 0 3em; z-index: 1; }
+[data-sim="lnx-pipes-redirection"] .lp-files { display: flex; flex-direction: column; gap: 1.2em; justify-self: end; width: min(100%, 24em); z-index: 1; }
+[data-sim="lnx-pipes-redirection"] .lp-body[data-nofiles] .lp-procs { grid-column: 1 / -1; justify-content: space-between; }
+[data-sim="lnx-pipes-redirection"] .lp-screen { grid-column: 1 / -1; z-index: 1; }
+
+[data-sim="lnx-pipes-redirection"] .lp-proc,
+[data-sim="lnx-pipes-redirection"] .lp-file,
+[data-sim="lnx-pipes-redirection"] .lp-screen,
+[data-sim="lnx-pipes-redirection"] .lp-pipe { position: relative; background: var(--bg); border-radius: var(--radius); }
+
+/* a process: its command and its descriptor table; port dots on the edges (0 left, 1 and 2 right) */
+[data-sim="lnx-pipes-redirection"] .lp-proc { --pad: 0.8em; flex: none; padding: 0.5em var(--pad); border: 0.2rem solid var(--ink); min-width: 12em; }
+[data-sim="lnx-pipes-redirection"] .lp-proc[data-state='typed'] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-pipes-redirection"] .lp-proc[data-state='failed'] { border-style: double; border-width: 0.45rem; border-color: var(--danger); }
+[data-sim="lnx-pipes-redirection"] .lp-cmd { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="lnx-pipes-redirection"] .lp-fds { display: grid; gap: 0.15em; margin: 0.35em 0 0.2em; }
+[data-sim="lnx-pipes-redirection"] .lp-fd { position: relative; display: flex; align-items: center; gap: 0.4em; padding: 0.05em 0.25em; border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="lnx-pipes-redirection"] .lp-fd.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-pipes-redirection"] .lp-fd .lp-tgt { font-family: var(--mono); }
+[data-sim="lnx-pipes-redirection"] .lp-fd .lp-none { color: var(--muted); font-style: italic; }
+[data-sim="lnx-pipes-redirection"] .lp-fd.sd-changed .lp-none { color: var(--on-hl); }
+[data-sim="lnx-pipes-redirection"] .lp-port {
+  position: absolute;
+  top: 50%;
+  width: 0.7em;
+  height: 0.7em;
+  margin-top: -0.35em;
+  border: 0.15rem solid var(--ink);
+  border-radius: 50%;
+  background: var(--bg);
+}
+[data-sim="lnx-pipes-redirection"] .lp-port[data-side='l'] { left: calc(-1 * var(--pad) - 0.45em); }
+[data-sim="lnx-pipes-redirection"] .lp-port[data-side='r'] { right: calc(-1 * var(--pad) - 0.45em); }
+[data-sim="lnx-pipes-redirection"] .lp-port[data-open] { background: var(--ink); }
+[data-sim="lnx-pipes-redirection"] .lp-status { color: var(--muted); font-size: max(16px, 0.8em); }
+[data-sim="lnx-pipes-redirection"] .lp-status b { color: var(--ink); }
+
+/* an fd number: a round badge in the descriptor's colour, with its line style as the border */
+[data-sim="lnx-pipes-redirection"] .lp-n {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.45em;
+  height: 1.45em;
+  border: 0.17rem solid var(--lp-c);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: max(16px, 0.8em);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="lnx-pipes-redirection"] [data-fd='0'] { --lp-c: var(--lp-0); }
+[data-sim="lnx-pipes-redirection"] [data-fd='1'] { --lp-c: var(--lp-1); }
+[data-sim="lnx-pipes-redirection"] [data-fd='2'] { --lp-c: var(--lp-2); }
+[data-sim="lnx-pipes-redirection"] .lp-n[data-fd='0'] { border-style: dotted; border-width: 0.22rem; }
+[data-sim="lnx-pipes-redirection"] .lp-n[data-fd='2'] { border-style: dashed; }
+
+/* the pipe: a tube with its two ends and the lines waiting in it */
+[data-sim="lnx-pipes-redirection"] .lp-pipe {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+  flex: 1 1 auto;
+  min-width: 7em;
+  padding: 0.4em 1.1em;
+  border: 0.2rem solid var(--ink);
+  border-radius: 1.6em;
+  background: var(--panel);
+}
+[data-sim="lnx-pipes-redirection"] .lp-pipe[data-ghost] { border-style: dashed; border-color: var(--muted); color: var(--muted); background: var(--bg); }
+[data-sim="lnx-pipes-redirection"] .lp-pipe-name { font-weight: 700; }
+[data-sim="lnx-pipes-redirection"] .lp-pipe .lp-lines { font-size: max(16px, 0.8em); }
+[data-sim="lnx-pipes-redirection"] .lp-pipe .lp-end { position: absolute; top: 50%; width: 0.7em; height: 0.7em; margin-top: -0.35em; border: 0.15rem solid var(--ink); border-radius: 50%; background: var(--ink); }
+[data-sim="lnx-pipes-redirection"] .lp-pipe .lp-end[data-end='w'] { left: -0.45em; }
+[data-sim="lnx-pipes-redirection"] .lp-pipe .lp-end[data-end='r'] { right: -0.45em; }
+[data-sim="lnx-pipes-redirection"] .lp-pipe[data-ghost] .lp-end { background: var(--bg); border-color: var(--muted); }
+
+/* lines of text (in the pipe, a file, on the screen): each marked with the descriptor that wrote it */
+[data-sim="lnx-pipes-redirection"] .lp-lines { display: grid; align-content: start; gap: 0.2em; min-width: 0; }
+[data-sim="lnx-pipes-redirection"] .lp-tl { display: flex; align-items: center; gap: 0.45em; min-width: 0; padding: 0 0.2em; border-radius: var(--radius-sm); font-family: var(--mono); }
+[data-sim="lnx-pipes-redirection"] .lp-tl > span:last-child { overflow-wrap: anywhere; }
+[data-sim="lnx-pipes-redirection"] .lp-tl.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-pipes-redirection"] .lp-empty { color: var(--muted); font-style: italic; }
+
+/* a file */
+[data-sim="lnx-pipes-redirection"] .lp-file { padding: 0.4em 0.7em 0.5em; border: 0.2rem solid var(--ink); border-top-right-radius: 1.1em; }
+[data-sim="lnx-pipes-redirection"] .lp-file[data-absent] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-pipes-redirection"] .lp-file-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-pipes-redirection"] .lp-file .lp-meta { color: var(--muted); font-size: max(16px, 0.8em); }
+
+/* the screen */
+[data-sim="lnx-pipes-redirection"] .lp-screen {
+  display: grid;
+  align-content: start;
+  align-self: stretch;
+  gap: 0.3em;
+  min-height: 7.5em;
+  padding: 0.35em 0.9em 0.6em;
+  border: 0.2rem solid var(--ink);
+  border-top-width: 0.6rem;
+  background: var(--panel);
+}
+[data-sim="lnx-pipes-redirection"] .lp-screen-name { font-weight: 700; }
+
+/* wires: an SVG at 1:1 over the body (no viewBox, so nothing is scaled); the fd numbers are HTML */
+[data-sim="lnx-pipes-redirection"] .lp-wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 0; }
+[data-sim="lnx-pipes-redirection"] .lp-wires path { fill: none; stroke: var(--lp-c); }
+[data-sim="lnx-pipes-redirection"] .lp-wires path.lp-halo { stroke: var(--hl); }
+[data-sim="lnx-pipes-redirection"] .lp-wires marker path { fill: var(--lp-c); stroke: none; }
+[data-sim="lnx-pipes-redirection"] .lp-wlabels { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+[data-sim="lnx-pipes-redirection"] .lp-wlabels .lp-n { position: absolute; transform: translate(-50%, -50%); }
+[data-sim="lnx-pipes-redirection"] .lp-wlabels .lp-n.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* legend swatches: the three wire styles, and the three kinds of target */
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape^='lp-w'] { width: 1.8em; height: 0; border: 0; border-radius: 0; background: none; border-top: 0.22rem solid var(--lp-c); }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-w0'] { --lp-c: var(--lp-0); border-top-style: dotted; border-top-width: 0.3rem; }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-w1'] { --lp-c: var(--lp-1); }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-w2'] { --lp-c: var(--lp-2); border-top-style: dashed; }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-tty'] { background: var(--panel); border-top-width: 0.35rem; }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-file'] { background: var(--bg); border-top-right-radius: 0.5em; }
+[data-sim="lnx-pipes-redirection"] .sd-swatch[data-shape='lp-pipe'] { width: 1.8em; border-radius: 999px; background: var(--panel); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-pipes-redirection"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-pipes-redirection"] .lp { height: auto; font-size: 1rem; gap: 0.8rem; padding: 0.7rem; }
+  [data-sim="lnx-pipes-redirection"] .lp-body { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  [data-sim="lnx-pipes-redirection"] .lp-procs { flex-direction: column; align-items: stretch; gap: 0.8rem; margin: 0; }
+  [data-sim="lnx-pipes-redirection"] .lp-files { justify-self: stretch; width: auto; }
+  [data-sim="lnx-pipes-redirection"] .lp-proc { min-width: 0; }
+  [data-sim="lnx-pipes-redirection"] .lp-cmd, [data-sim="lnx-pipes-redirection"] .lp-fd { white-space: normal; overflow-wrap: anywhere; }
+  /* stacked, the descriptor tables say where each stream goes; the wires would only cross the boxes */
+  [data-sim="lnx-pipes-redirection"] .lp-wires, [data-sim="lnx-pipes-redirection"] .lp-wlabels, [data-sim="lnx-pipes-redirection"] .lp-port, [data-sim="lnx-pipes-redirection"] .lp-end { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tri toka, preusmjeravanje i cjevovod</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var PRESET_KEY = { samo1: 'pSamo1', greska: 'pGreska', sve: 'pSve', obrnuto: 'pObrnuto', cijev: 'pCijev', 'cijev-2': 'pCijev2' };
+  var NOTE_KEY = { samo1: 'nSamo1', greska: 'nGreska', sve: 'nSve', obrnuto: 'nObrnuto', cijev: 'nCijev', 'cijev-2': 'nCijev2' };
+  var NOTE_OP = { samo1: '>', greska: '2>', 'cijev-2': '2>&1' };
+
+  function code(s) { return h('code', { translate: 'no' }, s); }
+  function fdBadge(fd, cls) { return h('span', { class: 'lp-n' + (cls ? ' ' + cls : ''), dataset: { fd: String(fd) }, 'aria-label': t('fdOf', { fd: fd }) }, String(fd)); }
+  function fileOf(target) { return target && target.indexOf('file:') === 0 ? target.slice(5) : null; }
+  function pipeEnd(target) { var m = /^pipe:(\d+):(w|r)$/.exec(target || ''); return m ? { id: Number(m[1]), end: m[2] } : null; }
+
+  /** Where a target is, as words (a node), for captions. */
+  function where(target) {
+    if (target === 'tty') return t('whereTty');
+    var f = fileOf(target);
+    if (f) return h('span', null, t.parts('whereFile', { file: code(f) }));
+    var pe = pipeEnd(target);
+    if (pe) return t(pe.end === 'w' ? 'wherePipeW' : 'wherePipeR');
+    return t('whereNone');
+  }
+  /** A target as the descriptor table shows it. */
+  function targetLabel(target, fd) {
+    if (target === 'tty') return h('span', null, t(fd === '0' ? 'ttyIn' : 'tty'));
+    var f = fileOf(target);
+    if (f) return h('span', { class: 'lp-tgt', translate: 'no' }, f);
+    var pe = pipeEnd(target);
+    if (pe) return h('span', null, t(pe.end === 'w' ? 'pipeW' : 'pipeR'));
+    return h('span', { class: 'lp-none' }, t('notOpen'));
+  }
+  function textLine(l, lit) {
+    return h('div', { class: 'lp-tl' + (lit ? ' sd-changed' : ''), 'aria-label': t('lineFrom', { fd: l.fd }) },
+      l.fd ? fdBadge(l.fd) : null, h('span', { translate: 'no' }, l.text));
+  }
+  function wroteHere(s, target) { return s.wrote && !s.wrote.lost && s.wrote.target === target; }
+  function linesOf(lines, lit, emptyKey) {
+    if (!lines.length) return h('div', { class: 'lp-empty' }, t(emptyKey));
+    return h('div', { class: 'lp-lines' }, lines.map(function (l, i) { return textLine(l, lit && i === lines.length - 1); }));
+  }
+
+  /** Token ids applied by steps 1..n (pipes and redirections), for the underline on the command line. */
+  function appliedTokens(p, n) {
+    var fr = L.frames(p);
+    var out = {};
+    for (var i = 1; i <= n && i < fr.length; i++) if (fr[i].phase === 'pipe' || fr[i].phase === 'redir') out[fr[i].cursor] = true;
+    return out;
+  }
+
+  // ── wires: measured from the laid-out boxes, drawn at 1:1 ──
+
+  var last = null; // the last render's ctx, for redrawing the wires when the stage resizes
+  function center(r, B) { return { x: r.left + r.width / 2 - B.left, y: r.top + r.height / 2 - B.top }; }
+  function bez(a, c1, c2, b, u) {
+    var v = 1 - u;
+    return {
+      x: v * v * v * a.x + 3 * v * v * u * c1.x + 3 * v * u * u * c2.x + u * u * u * b.x,
+      y: v * v * v * a.y + 3 * v * v * u * c1.y + 3 * v * u * u * c2.y + u * u * u * b.y
+    };
+  }
+
+  function drawWires(root, s, labels) {
+    var body = root.querySelector('.lp-body');
+    var svg = root.querySelector('.lp-wires');
+    var lab = root.querySelector('.lp-wlabels');
+    if (!body || !svg || !lab) return;
+    svg.replaceChildren();
+    lab.replaceChildren();
+    if (getComputedStyle(svg).display === 'none') return;
+    var B = body.getBoundingClientRect();
+    var rem = parseFloat(getComputedStyle(body).fontSize) || 16;
+    var defs = document.createElementNS(SVGNS, 'defs');
+    ['0', '1', '2'].forEach(function (fd) {
+      var m = document.createElementNS(SVGNS, 'marker');
+      m.setAttribute('id', 'lp-arrow-' + fd);
+      m.setAttribute('markerUnits', 'userSpaceOnUse');
+      var k = rem * 0.75;
+      m.setAttribute('markerWidth', String(k));
+      m.setAttribute('markerHeight', String(k));
+      m.setAttribute('refX', String(k));
+      m.setAttribute('refY', String(k / 2));
+      m.setAttribute('orient', 'auto');
+      m.dataset.fd = fd;
+      var pth = document.createElementNS(SVGNS, 'path');
+      pth.setAttribute('d', 'M0,0 L' + k + ',' + (k / 2) + ' L0,' + k + ' z');
+      m.append(pth);
+      defs.append(m);
+    });
+    svg.append(defs);
+
+    var screen = root.querySelector('.lp-screen').getBoundingClientRect();
+    var wires = [];
+    s.procs.forEach(function (proc) {
+      var box = root.querySelector('.lp-proc[data-proc="' + proc.id + '"]');
+      ['0', '1', '2'].forEach(function (fd) {
+        var tgt = proc.fds[fd];
+        if (!tgt || !box) return;
+        var port = box.querySelector('.lp-port[data-fd="' + fd + '"]');
+        if (!port) return;
+        wires.push({ proc: proc.id, fd: fd, target: tgt, port: center(port.getBoundingClientRect(), B),
+          changed: s.changed.indexOf(proc.id + ':' + fd) >= 0 });
+      });
+    });
+    // wires arriving at the same file are spread along its left edge, in the order of their ports
+    var perFile = {};
+    wires.forEach(function (w) { var f = fileOf(w.target); if (f) (perFile[f] = perFile[f] || []).push(w); });
+    Object.keys(perFile).forEach(function (f) {
+      var el = root.querySelector('.lp-file[data-file="' + CSS.escape(f) + '"]');
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      var ws = perFile[f].sort(function (a, b) { return a.port.y - b.port.y || a.proc - b.proc; });
+      ws.forEach(function (w, i) { w.end = { x: r.left - B.left, y: r.top - B.top + r.height * (i + 1) / (ws.length + 1) }; w.side = 'l'; });
+    });
+    var ends = {};
+    wires.forEach(function (w) { if (pipeEnd(w.target)) ends[w.target] = (ends[w.target] || 0) + 1; });
+    wires.forEach(function (w) { w.shared = ends[w.target] > 1; });
+    wires.forEach(function (w) {
+      var dx = 2.5 * rem;
+      var a, b, c1, c2;
+      if (w.target === 'tty') {
+        var x = w.fd === '0' ? w.port.x - 2.2 * rem : w.port.x + (w.fd === '1' ? 1.6 : 3.4) * rem;
+        x = Math.min(Math.max(x, screen.left - B.left + rem), screen.right - B.left - rem);
+        var top = { x: x, y: screen.top - B.top };
+        var dy = Math.max((top.y - w.port.y) * 0.55, 2 * rem);
+        if (w.fd === '0') { a = top; c1 = { x: top.x, y: top.y - dy }; b = w.port; c2 = { x: b.x - dx, y: b.y }; }
+        else { a = w.port; c1 = { x: a.x + dx, y: a.y }; b = top; c2 = { x: top.x, y: top.y - dy }; }
+      } else if (w.end) { // a file (fd 0 from a file comes out of its left edge into the port)
+        if (w.fd === '0') { a = w.end; b = w.port; c1 = { x: a.x - dx, y: a.y }; c2 = { x: b.x - dx, y: b.y }; }
+        else { a = w.port; b = w.end; c1 = { x: a.x + Math.max((b.x - a.x) * 0.45, dx), y: a.y }; c2 = { x: b.x - Math.max((b.x - a.x) * 0.45, dx), y: b.y }; }
+      } else {
+        var pe = pipeEnd(w.target);
+        var endEl = pe && root.querySelector('.lp-pipe[data-pipe="' + pe.id + '"] .lp-end[data-end="' + pe.end + '"]');
+        if (!endEl) return;
+        var e = center(endEl.getBoundingClientRect(), B);
+        if (pe.end === 'w') { a = w.port; b = e; } else { a = e; b = w.port; }
+        var k = Math.max(Math.abs(b.x - a.x) * 0.4, rem);
+        c1 = { x: a.x + k, y: a.y }; c2 = { x: b.x - k, y: b.y };
+      }
+      var d = 'M' + a.x + ',' + a.y + ' C' + c1.x + ',' + c1.y + ' ' + c2.x + ',' + c2.y + ' ' + b.x + ',' + b.y;
+      var sw = rem * (w.changed ? 0.26 : 0.17);
+      var dash = w.fd === '0' ? [0.05 * rem, 0.42 * rem] : w.fd === '2' ? [0.7 * rem, 0.4 * rem] : null;
+      if (w.changed) {
+        var halo = document.createElementNS(SVGNS, 'path');
+        halo.setAttribute('class', 'lp-halo');
+        halo.setAttribute('d', d);
+        halo.setAttribute('stroke-width', String(rem * 0.85));
+        halo.setAttribute('stroke-linecap', 'round');
+        svg.append(halo);
+      }
+      var path = document.createElementNS(SVGNS, 'path');
+      path.setAttribute('d', d);
+      path.dataset.fd = w.fd;
+      path.setAttribute('stroke-width', String(sw));
+      if (w.fd === '0') path.setAttribute('stroke-linecap', 'round');
+      if (dash) path.setAttribute('stroke-dasharray', dash.join(' '));
+      path.setAttribute('marker-end', 'url(#lp-arrow-' + w.fd + ')');
+      svg.append(path);
+      if (labels) {
+        // the number sits where the wires are apart: early on wires that share an end; on the way down to the screen,
+        // below where a wire to the right crosses, and staggered between 1 and 2
+        var u = w.shared ? 0.3 : w.target === 'tty' && w.fd !== '0' ? (w.fd === '1' ? 0.62 : 0.74) : 0.5;
+        var m = bez(a, c1, c2, b, u);
+        var badge = fdBadge(w.fd, w.changed ? 'sd-changed' : '');
+        badge.style.left = m.x + 'px';
+        badge.style.top = m.y + 'px';
+        lab.append(badge);
+      }
+    });
+  }
+
+  // ── captions ──
+
+  function redirOf(line, cursor) {
+    var m = /^r(\d+)-(\d+)$/.exec(cursor || '');
+    if (m) return { proc: Number(m[1]), r: line.cmds[Number(m[1])].redirs[Number(m[2])], index: Number(m[2]) };
+    m = /^p(\d+)$/.exec(cursor || ''); // the 2>&1 that |& adds after the command's own redirections
+    if (m) return { proc: Number(m[1]), r: { fd: 2, op: '>&', to: 1, text: '|&' }, index: line.cmds[Number(m[1])].redirs.length };
+    return null;
+  }
+  function tokenText(p, id) {
+    var tk = L.tokensOf(p).filter(function (x) { return x.id === id; })[0];
+    return tk ? tk.text : '';
+  }
+
+  function caption(c) {
+    var p = c.params, s = c.state;
+    var line = L.parse(L.lineText(p));
+    var tok = code(tokenText(p, s.cursor));
+    if (s.phase === 'typed') return t('cTyped');
+    if (s.phase === 'start') return t('cStart');
+    if (s.phase === 'pipe') {
+      var i = Number(s.cursor.slice(1));
+      return t.parts('cPipe', { tok: tok, a: code(s.procs[i].cmd), b: code(s.procs[i + 1].cmd) });
+    }
+    if (s.phase === 'redir') {
+      var rd = redirOf(line, s.cursor);
+      var r = rd.r, proc = s.procs[rd.proc];
+      if (s.error && (!c.prev || !c.prev.error)) {
+        if (s.error.code === 'bad-fd') return t.parts('cBadFd', { tok: tok, m: String(s.error.fd), cmd: code(proc.cmd) });
+        return t.parts('cNoFile', { tok: tok, file: code(s.error.file), cmd: code(proc.cmd) });
+      }
+      if (r.op === '>&') {
+        var parts = t.parts(r.fd === 2 && !p.missing ? 'cDupNoErr' : 'cDup', { tok: tok, n: String(r.fd), m: String(r.to), where: where(proc.fds[String(r.to)]),
+          what: r.fd === 2 ? t('whatErr') : t('whatFd', { n: r.fd }) });
+        if (pipeEnd(proc.fds[String(r.to)])) parts.push(' ', t('cDupPipe'));
+        return parts;
+      }
+      if (r.op === '<') return t.parts('cIn', { tok: tok, fd: String(r.fd), file: code(r.file) });
+      var out = t.parts(r.op === '>>' ? 'cAppend' : 'cOut', { tok: tok, fd: String(r.fd), file: code(r.file) });
+      // an earlier n>&fd on this command copied fd before it moved: n stays (rule 5)
+      line.cmds[rd.proc].redirs.slice(0, rd.index).forEach(function (q) {
+        if (q.op === '>&' && q.to === r.fd && proc.fds[String(q.fd)] !== proc.fds[String(r.fd)]) out.push(' ', t('cKept', { n: q.fd }));
+      });
+      return out;
+    }
+    if (s.phase === 'run') {
+      var w = s.wrote, pr = s.procs[w.proc];
+      var cmd = code(pr.cmd);
+      if (w.lost) return t.parts('cLost', { cmd: cmd, fd: String(w.fd) });
+      var res = [];
+      if (pr.read !== null && (!c.prev || c.prev.procs[w.proc].read === null)) res.push.apply(res, t.parts('cRead', { cmd: code(pr.cmd), lines: t.n('linesN', pr.read) }).concat(' '));
+      res.push.apply(res, t.parts('cWrite', { cmd: cmd, fd: String(w.fd), stream: t(w.fd === 2 ? 'stream2' : 'stream1'), where: where(w.target) }));
+      var pe = pipeEnd(w.target);
+      if (pe && pe.end === 'w') res.push(' ', h('span', null, t.parts('cWritePipe', { b: code(s.procs[s.pipes[pe.id].to].cmd) })));
+      if (w.fd === 2 && w.target === 'tty' && pipeEnd(pr.fds['1'])) res.push(' ', h('span', { class: 'sd-hl' }, t('cBypass')));
+      return res;
+    }
+    // done
+    var done = t.parts('cDone', { tty: s.terminal.length ? t.n('linesN', s.terminal.length) : t('emptyScreen') });
+    Object.keys(s.files).forEach(function (f) {
+      if (s.files[f].created) done.push(' ', h('span', null, t.parts('cDoneFile', { file: code(f), k: t.n('linesN', s.files[f].lines.length) })));
+    });
+    if (!p.missing) done.push(' ', t('nNoError'));
+    else if (NOTE_KEY[p.line]) done.push(' ', h('span', { class: 'sd-hl' }, t.parts(NOTE_KEY[p.line], { op: code(NOTE_OP[p.line] || '') })));
+    return done;
+  }
+
+  // ── the stage ──
+
+  function render(c) {
+    var p = c.params, s = c.state;
+    var tokens = L.tokensOf(p);
+    var applied = appliedTokens(p, c.n);
+    var running = s.phase === 'run' ? s.wrote.proc : -1;
+
+    var lineEl = h('div', { class: 'lp-line', 'aria-label': t('lineLabel') },
+      h('span', { class: 'lp-prompt', 'aria-hidden': 'true' }, '$'),
+      tokens.map(function (tk) {
+        var lit = tk.id === s.cursor || (tk.kind === 'cmd' && (s.phase === 'start' || (s.phase === 'run' && tk.proc === s.wrote.proc)));
+        return h('span', { class: 'lp-tok' + (lit ? ' sd-changed' : ''), translate: 'no', dataset: Object.assign({ kind: tk.kind }, applied[tk.id] ? { done: '' } : {}) }, tk.text);
+      }));
+
+    function procBox(proc) {
+      var state = s.phase === 'typed' ? 'typed' : proc.failed ? 'failed' : '';
+      var status = null;
+      if (s.phase === 'typed') status = t('waiting');
+      else if (proc.failed) status = h('b', null, t('failed'));
+      else if (running === proc.id) status = h('b', null, t('writing'));
+      else if (proc.ran) status = t('finished');
+      var rows = ['0', '1', '2'].map(function (fd) {
+        var changed = s.changed.indexOf(proc.id + ':' + fd) >= 0;
+        return h('div', { class: 'lp-fd' + (changed ? ' sd-changed' : '') + (changed && c.dir === 'forward' ? ' sd-anim-in' : '') },
+          h('span', { class: 'lp-port', dataset: Object.assign({ fd: fd, side: fd === '0' ? 'l' : 'r' }, proc.fds[fd] ? { open: '' } : {}) }),
+          fdBadge(fd), h('span', { 'aria-hidden': 'true' }, fd === '0' ? '←' : '→'), targetLabel(proc.fds[fd], fd));
+      });
+      return h('div', { class: 'lp-proc', dataset: { proc: String(proc.id), state: state } },
+        h('div', { class: 'lp-cmd', translate: 'no' }, proc.cmd),
+        h('div', { class: 'lp-fds' }, rows),
+        h('div', { class: 'lp-status' }, status || ' ',
+          proc.read !== null ? [status ? ' · ' : '', t.n('readN', proc.read)] : null));
+    }
+    function pipeBox(i) {
+      var pipe = s.pipes.filter(function (x) { return x.from === i; })[0];
+      var target = pipe ? 'pipe:' + pipe.id + ':w' : null;
+      return h('div', Object.assign({ class: 'lp-pipe', dataset: Object.assign({ pipe: pipe ? String(pipe.id) : '' }, pipe ? {} : { ghost: '' }) }),
+        h('span', { class: 'lp-end', dataset: { end: 'w' } }), h('span', { class: 'lp-end', dataset: { end: 'r' } }),
+        h('span', { class: 'lp-pipe-name' }, t('pipe')),
+        pipe ? linesOf(pipe.buffer, wroteHere(s, target), 'pipeEmpty') : null);
+    }
+    var procs = [];
+    s.procs.forEach(function (proc, i) {
+      procs.push(procBox(proc));
+      if (i < s.procs.length - 1) procs.push(pipeBox(i));
+    });
+
+    var names = Object.keys(s.files);
+    var files = names.map(function (f) {
+      var file = s.files[f];
+      var opened = s.opened === f;
+      return h('div', { class: 'lp-file' + (opened ? ' sd-changed' : ''), dataset: Object.assign({ file: f }, file.created ? {} : { absent: '' }) },
+        h('div', { class: 'lp-file-name', translate: 'no' }, f),
+        file.created ? linesOf(file.lines, wroteHere(s, 'file:' + f), 'fileEmpty') : h('div', { class: 'lp-empty' }, t('fileAbsent')));
+    });
+
+    var screen = h('div', { class: 'lp-screen' },
+      h('div', { class: 'lp-screen-name' }, t('screen')),
+      s.terminal.length ? linesOf(s.terminal, wroteHere(s, 'tty'), 'emptyScreen') : h('div'));
+
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('class', 'lp-wires');
+    svg.setAttribute('aria-hidden', 'true');
+    var body = h('div', { class: 'lp-body', dataset: names.length ? {} : { nofiles: '' } },
+      svg,
+      h('div', { class: 'lp-procs' }, procs),
+      names.length ? h('div', { class: 'lp-files' }, files) : null,
+      screen,
+      h('div', { class: 'lp-wlabels', 'aria-hidden': 'true' }));
+    c.stage.replaceChildren(h('div', { class: 'lp' }, lineEl, body));
+    last = c;
+    drawWires(c.stage, s, p.labels);
+  }
+
+  var sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'line', type: 'select', label: t('line'), resets: true,
+        options: L.LINE_IDS.map(function (id) { return [id, t(PRESET_KEY[id])]; }) },
+      { key: 'missing', type: 'toggle', label: t('missing'), hint: t('missingHint') },
+      { key: 'labels', type: 'toggle', label: t('labels') }
+    ],
+
+    presets: L.LINE_IDS.map(function (id) { return { id: id, label: t(PRESET_KEY[id]), params: { line: id } }; }),
+
+    legend: [
+      { shape: 'lp-w0', label: t('legend0') },
+      { shape: 'lp-w1', label: t('legend1') },
+      { shape: 'lp-w2', label: t('legend2') },
+      { shape: 'lp-tty', label: t('legendTty') },
+      { shape: 'lp-file', label: t('legendFile') },
+      { shape: 'lp-pipe', label: t('legendPipe') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+
+  // The wires follow the boxes: redraw them when the stage changes size (full screen, panel hidden, fonts loaded).
+  var stage = document.querySelector('[data-sd-stage]');
+  var pending = false;
+  function redraw() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(function () { pending = false; if (last) drawWires(stage, sim.state, sim.params.labels); });
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(redraw).observe(stage);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(redraw);
+})();
+</script>
+</body>
+</html>
