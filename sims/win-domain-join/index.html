@@ -1,0 +1,522 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-domain-join: PC07 joins quillmoor.example. SRV lookup, LDAP ping, the computer object CN=PC07 within the
+     joining user's quota, the machine password p0, the restart and the secure channel. Or: a snapshot of the joined
+     PC07, password changes every 30 days, the revert, the secure channel checked against the object's current and
+     previous password, and the administrator's reset. A stepper, one message or one event per step.
+     Top: a strip with the client (DNS server, LSA secret), the secure channel, the computer object in AD (its
+     password pair) and the joining user (quota) or the administrator; for the revert a day timeline under it.
+     Below: kit view K1 (message sequence chart, kit/sequence.js) with the lanes PC07, DNS and DC01.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-domain-join">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Učlanjenje u domenu · simdeck</title>
+<meta name="description" content="PC07 nalazi DC preko DNS-a, dobiva račun računala i lozinku te gradi sigurni kanal. Snimka vraćena nakon dvije promjene lozinke prekida odnos povjerenja.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-domain-join",
+  "title": {
+    "hr": "Učlanjenje u domenu",
+    "en": "Joining a domain"
+  },
+  "concept": {
+    "hr": "SRV zapis, račun računala i sigurni kanal; vraćena snimka prekida kanal",
+    "en": "SRV lookup, computer account, secure channel; a snapshot revert breaks it"
+  },
+  "summary": {
+    "hr": "PC07 nalazi DC preko DNS-a, dobiva račun računala i lozinku te gradi sigurni kanal. Snimka vraćena nakon dvije promjene lozinke prekida odnos povjerenja.",
+    "en": "PC07 finds a DC by DNS, gets a computer account and a password, and builds a secure channel. A snapshot reverted after two password changes breaks the trust."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-domain-join"]; colours only from kit tokens.
+   Layout: the strip (client, channel, object, user) on top, the timeline (revert) under it, the K1 chart below. */
+[data-sim="win-domain-join"] .dj {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-domain-join"] .dj > .sd-seq { grid-row: 3; min-height: 0; }
+[data-sim="win-domain-join"] .dj-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(9rem, 0.5fr) minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: stretch;
+}
+[data-sim="win-domain-join"] .dj-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-domain-join"] .dj-box[data-active] { border-color: var(--ink); border-width: 0.18rem; }
+[data-sim="win-domain-join"] .dj-box h2 { margin: 0 0 0.25rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: baseline; }
+[data-sim="win-domain-join"] .dj-mono { font-family: var(--mono); }
+[data-sim="win-domain-join"] .dj-sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 400; line-height: 1.3; }
+[data-sim="win-domain-join"] .dj-line { display: flex; flex-wrap: wrap; gap: 0.15rem 0.45rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.35; margin-top: 0.2rem; }
+[data-sim="win-domain-join"] .dj-dn { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="win-domain-join"] .dj-tag { padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="win-domain-join"] .dj-tag[data-k="warn"] { border-style: dashed; }
+[data-sim="win-domain-join"] .dj-none { border-style: dashed; color: var(--muted); }
+[data-sim="win-domain-join"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* machine password chips: label in a box; empty is a dashed dash; matched or not at a channel step */
+[data-sim="win-domain-join"] .dj-pw {
+  display: inline-flex; align-items: baseline; gap: 0.2rem;
+  padding: 0 0.4rem; min-width: 1.8em; justify-content: center;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); font-family: var(--mono); font-weight: 700; font-size: 1rem;
+}
+[data-sim="win-domain-join"] .dj-pw[data-empty] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="win-domain-join"] .dj-pw.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-domain-join"] .dj-pw[data-match="yes"] { border-width: 0.2rem; }
+[data-sim="win-domain-join"] .dj-pw[data-match="no"] { text-decoration: line-through; text-decoration-color: var(--danger); text-decoration-thickness: 0.14em; }
+[data-sim="win-domain-join"] .dj-mk { font-weight: 700; }
+[data-sim="win-domain-join"] .dj-mk[data-k="no"] { color: var(--danger); }
+[data-sim="win-domain-join"] .dj-pair { display: inline-flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; align-items: baseline; }
+
+/* secure channel: none (thin dotted, –), ok (double line, ✓), broken (dashed, ✕ in --danger) */
+[data-sim="win-domain-join"] .dj-ch { display: flex; flex-direction: column; justify-content: center; gap: 0.3rem; text-align: center; }
+[data-sim="win-domain-join"] .dj-ch h2 { justify-content: center; }
+[data-sim="win-domain-join"] .dj-ch-bar { position: relative; height: 1.6rem; margin: 0 0.2rem; }
+[data-sim="win-domain-join"] .dj-ch-bar::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); border-top: 0.15rem dotted var(--muted); }
+[data-sim="win-domain-join"] .dj-ch-bar[data-k="ok"]::before { border-top: 0.5rem double var(--ink); }
+[data-sim="win-domain-join"] .dj-ch-bar[data-k="broken"]::before { border-top: 0.25rem dashed var(--ink); }
+[data-sim="win-domain-join"] .dj-ch-sym { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 0 0.25rem; background: var(--panel); font-weight: 700; font-size: 1.3rem; line-height: 1; }
+[data-sim="win-domain-join"] .dj-ch-bar[data-k="broken"] .dj-ch-sym { color: var(--danger); font-size: 1.6rem; }
+[data-sim="win-domain-join"] .dj-ch-word { font-weight: 700; }
+[data-sim="win-domain-join"] .dj-ch.sd-changed .dj-ch-word { background: var(--hl); color: var(--on-hl); padding: 0 0.3rem; border-radius: var(--radius-sm); align-self: center; }
+[data-sim="win-domain-join"] .dj-ch.sd-changed { outline: 0; box-shadow: none; }
+
+/* quota meter: ten cells, the used ones filled */
+[data-sim="win-domain-join"] .dj-quota { display: inline-flex; gap: 0.12rem; vertical-align: middle; }
+[data-sim="win-domain-join"] .dj-quota span { width: 0.75rem; height: 1rem; border: 0.1rem solid var(--ink); border-radius: 0.1rem; background: var(--bg); box-sizing: border-box; }
+[data-sim="win-domain-join"] .dj-quota span[data-on] { background: var(--ink); }
+[data-sim="win-domain-join"] .dj-quota span[data-new] { background: var(--hl); border-width: 0.18rem; }
+[data-sim="win-domain-join"] .dj-quota[data-full-refused] { outline: 0.18rem solid var(--danger); outline-offset: 0.12rem; }
+
+/* timeline (revert): days 0–90; the snapshot and the changes above the axis, the revert under it */
+[data-sim="win-domain-join"] .dj-tl { padding: 0.3rem 0.9rem 0.35rem; }
+[data-sim="win-domain-join"] .dj-tl h2 { margin-bottom: 0; }
+[data-sim="win-domain-join"] .dj-tl-track { position: relative; height: 5.6rem; margin: 0 1.2rem; }
+[data-sim="win-domain-join"] .dj-tl-axis { position: absolute; left: 0; right: 0; top: 40%; border-top: 0.15rem solid var(--ink); }
+[data-sim="win-domain-join"] .dj-tl-tick { position: absolute; top: 40%; height: 0.6rem; border-left: 0.12rem solid var(--muted); transform: translate(-50%, -50%); }
+[data-sim="win-domain-join"] .dj-tl-num { position: absolute; top: calc(40% + 0.35rem); transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="win-domain-join"] .dj-tl-mark { position: absolute; display: inline-flex; gap: 0.5rem; align-items: center; white-space: nowrap; font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="win-domain-join"] .dj-tl-mark[data-row="up"] { bottom: calc(60% + 0.3rem); }
+[data-sim="win-domain-join"] .dj-tl-mark[data-row="down"] { top: calc(40% + 1.75rem); }
+[data-sim="win-domain-join"] .dj-tl-mark[data-anchor="mid"] { transform: translateX(-50%); }
+[data-sim="win-domain-join"] .dj-tl-mark[data-anchor="end"] { transform: translateX(-100%); }
+[data-sim="win-domain-join"] .dj-tl-mark[data-plan] { color: var(--muted); }
+[data-sim="win-domain-join"] .dj-tl-mark[data-plan] .dj-pw, [data-sim="win-domain-join"] .dj-tl-mark[data-plan] .dj-tl-flag { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+[data-sim="win-domain-join"] .dj-tl-flag { padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-weight: 700; }
+[data-sim="win-domain-join"] .dj-tl-flag.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-domain-join"] .dj-tl-done { position: absolute; left: 0; top: 40%; height: 0.5rem; transform: translateY(-40%); background: var(--ink); border-radius: 0 0.25rem 0.25rem 0; }
+
+/* the K1 view's ✕ in red, as the legend says (with the ✕ shape) */
+[data-sim="win-domain-join"] .sd-seq-x { color: var(--danger); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-domain-join"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.16em, transparent 0.16em 0.36em); }
+[data-sim="win-domain-join"] .sd-swatch[data-shape="double"] { height: 0.5rem; border: 0; border-radius: 0; border-top: 0.13rem solid var(--ink); border-bottom: 0.13rem solid var(--ink); background: transparent; }
+[data-sim="win-domain-join"] .sd-swatch[data-shape="pw"] { border-color: var(--ink); background: var(--bg); position: relative; }
+[data-sim="win-domain-join"] .sd-swatch[data-shape="pw"]::after { content: 'p'; position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 0.75em; line-height: 1; color: var(--ink); }
+[data-sim="win-domain-join"] .sd-swatch[data-shape="broken"] { position: relative; height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.3em, transparent 0.3em 0.48em); overflow: visible; }
+[data-sim="win-domain-join"] .sd-swatch[data-shape="broken"]::after { content: '✕'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--danger); font-weight: 700; font-size: 1rem; line-height: 1; background: var(--panel); padding: 0 0.05rem; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-domain-join"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-domain-join"] .dj { height: auto; grid-template-rows: none; padding: 0.4rem; gap: 0.6rem; }
+  [data-sim="win-domain-join"] .dj > .sd-seq { grid-row: auto; }
+  [data-sim="win-domain-join"] .dj-strip { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-domain-join"] .dj-long { display: none; }
+  [data-sim="win-domain-join"] .dj-tl-track { margin: 0 0.9rem; }
+  [data-sim="win-domain-join"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Učlanjenje u domenu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { cl: '1', dc: '2', dns: '3' };
+
+  /** Data (names, addresses, DNs, accounts, passwords, codes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'dj-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** A long name (DN, SRV name) that may break after each comma or dot. */
+  function breakable(text) {
+    var out = [];
+    String(text).split(/(?<=[,.])/).forEach(function (part, i) { if (i) out.push(h('wbr')); out.push(part); });
+    return out;
+  }
+  function qLong(text) { return h('b', { translate: 'no' }, breakable(text)); }
+  function sub(text) { return h('span', { class: 'dj-sub' }, text); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function acc(name) { return L.NETBIOS + '\\' + name; }
+  function last(c) { return c.n > 0 ? c.state.log[c.state.log.length - 1] : null; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+
+  /** A password chip; `was` is the same slot one step earlier (changed → highlighted); `match` 'yes' | 'no'. */
+  function pw(c, label, was, match) {
+    var ds = {};
+    if (label === null || label === undefined) ds.empty = '';
+    if (match) ds.match = match;
+    var changed = c.prev && was !== undefined && was !== label && label !== null;
+    return h('span', { class: 'dj-pw' + (changed ? ' sd-changed' + anim(c) : ''), translate: 'no', dataset: ds },
+      label === null || label === undefined ? '—' : label,
+      match === 'yes' ? h('span', { class: 'dj-mk', 'aria-hidden': 'true' }, '✓') : null);
+  }
+  function pair(c, now, before, marks) {
+    marks = marks || {};
+    return h('span', { class: 'dj-pair' },
+      sub(t('cur')), pw(c, now.cur, before ? before.cur : undefined, marks.cur),
+      sub(t('prev')), pw(c, now.prev, before ? before.prev : undefined, marks.prev));
+  }
+
+  // ── strip ──
+  function renderClient(c) {
+    var s = c.state, cl = s.client, e = last(c), b = c.prev && c.prev.client;
+    var tags = [h('span', { class: 'dj-tag' }, t(cl.joined ? 'roleMember' : 'roleWorkgroup'))];
+    if (cl.restart) tags.push(h('span', { class: 'dj-tag', dataset: { k: 'warn' } }, t('restartTag')));
+    var active = e && ['srvQuery', 'ping', 'create', 'setPwd', 'restart', 'channel', 'logon', 'snapshot', 'change', 'revert', 'reset', 'fail'].indexOf(e.kind) >= 0;
+    var box = h('section', { class: 'dj-box', dataset: active ? { active: '' } : {} },
+      h('h2', null, data(cl.name, ''), data(cl.ip, 'dj-sub dj-mono'), tags),
+      h('div', { class: 'dj-line' }, sub(t('dnsLine')), data(cl.dns), sub(cl.dns === L.DC.ip ? t('dnsOnDc') : t('dnsPublic'))),
+      h('div', { class: 'dj-line' }, sub(t('lsa')), pair(c, cl.pwd, b && b.pwd)));
+    if (cl.snapshot) box.append(h('div', { class: 'dj-line' }, sub(t('snapLine', { d: cl.snapshot.day })), pw(c, cl.snapshot.pwd.cur)));
+    return box;
+  }
+  function renderChannel(c) {
+    var s = c.state, e = last(c);
+    var k = s.secureChannel;
+    var changed = c.prev && c.prev.secureChannel !== k;
+    var box = h('section', { class: 'dj-box dj-ch' + (changed ? ' sd-changed' : '') },
+      h('h2', null, t('chanTitle')),
+      h('div', { class: 'dj-ch-bar', dataset: { k: k } }, h('span', { class: 'dj-ch-sym', 'aria-hidden': 'true', translate: 'no' }, { none: '–', ok: '✓', broken: '✕' }[k])),
+      h('span', { class: 'dj-ch-word' }, t({ none: 'chanNone', ok: 'chanOk', broken: 'chanBroken' }[k])));
+    if (e && e.kind === 'channel') box.append(sub(t(e.match === 'cur' ? 'matchCur' : e.match === 'prev' ? 'matchPrev' : 'matchNone')));
+    return box;
+  }
+  function renderObject(c) {
+    var s = c.state, o = s.dc.objects.PC07, e = last(c);
+    var bo = c.prev && c.prev.dc.objects.PC07;
+    var active = e && ['ping', 'pong', 'create', 'setPwd', 'channel', 'logon', 'change', 'reset'].indexOf(e.kind) >= 0;
+    var box = h('section', { class: 'dj-box', dataset: active ? { active: '' } : {} }, h('h2', null, data(L.DC.name, ''), h('span', { class: 'dj-sub' }, t('objTitle'))));
+    if (!o) {
+      box.append(h('div', { class: 'dj-line' }, h('span', { class: 'dj-tag dj-none' }, t('objNone')), data('CN=PC07', 'dj-sub dj-mono')));
+      return box;
+    }
+    var marks = {};
+    if (e && e.kind === 'channel') {
+      if (e.match) marks[e.match] = 'yes';
+      else { marks.cur = 'no'; if (o.pwd.prev !== null) marks.prev = 'no'; }
+    }
+    var created = c.prev && !bo;
+    box.append(h('div', { class: 'dj-line' }, h('span', { class: 'dj-dn' + (created ? ' sd-changed' + anim(c) : ''), translate: 'no' }, breakable(o.dn))));
+    box.append(h('div', { class: 'dj-line' }, sub(t('objPwd')), pair(c, o.pwd, bo ? bo.pwd : (c.prev ? { cur: null, prev: null } : undefined), marks)));
+    return box;
+  }
+  function renderUser(c) {
+    var s = c.state, e = last(c), qd = s.dc.quota;
+    if (s.scenario === 'revert') {
+      var on = e && e.kind === 'reset';
+      return h('section', { class: 'dj-box', dataset: on ? { active: '' } : {} },
+        h('h2', null, t('adminTitle')),
+        h('div', { class: 'dj-line' }, data(acc(L.ADMIN)), sub(t('adminLine'))),
+        h('div', { class: 'dj-line' }, data(acc(L.USER)), sub(t('userOrdinary'))));
+    }
+    var was = c.prev ? c.prev.dc.quota.count : qd.count;
+    var refused = e && e.kind === 'create' && !e.ok;
+    var cells = [];
+    for (var i = 0; i < qd.max; i++) {
+      var ds = {};
+      if (i < qd.count) ds.on = '';
+      if (i >= was && i < qd.count) ds['new'] = '';
+      cells.push(h('span', { dataset: ds }));
+    }
+    var meter = h('span', { class: 'dj-quota', 'aria-hidden': 'true', dataset: refused ? { fullRefused: '' } : {} }, cells);
+    return h('section', { class: 'dj-box', dataset: e && e.kind === 'create' ? { active: '' } : {} },
+      h('h2', null, t('userTitle')),
+      h('div', { class: 'dj-line' }, data(acc(L.USER)), sub(t('userOrdinary'))),
+      h('div', { class: 'dj-line' }, sub(t('joinedCount')), meter, data(qd.count + ' / ' + qd.max), refused ? h('span', { class: 'dj-mk', dataset: { k: 'no' }, 'aria-hidden': 'true' }, '✕') : null),
+      h('div', { class: 'dj-line' }, data('ms-DS-MachineAccountQuota = ' + qd.max, 'dj-sub dj-mono')));
+  }
+
+  // ── timeline (revert) ──
+  function renderTimeline(c) {
+    var s = c.state, p = c.params, e = last(c);
+    var MAXD = 90;
+    function x(d) { return (d / MAXD * 100) + '%'; }
+    function anchor(d) { return d <= 8 ? 'start' : d >= 82 ? 'end' : 'mid'; }
+    var track = h('div', { class: 'dj-tl-track' }, h('div', { class: 'dj-tl-axis' }));
+    [0, 30, 60, 90].forEach(function (d) {
+      track.append(h('span', { class: 'dj-tl-tick', style: 'left:' + x(d) }));
+      track.append(h('span', { class: 'dj-tl-num', style: 'left:' + x(d), translate: 'no' }, String(d)));
+    });
+    var done = s.log.filter(function (ev) { return ev.kind === 'change' && !ev.afterRevert; });
+    // the snapshot (day 0) and the due changes before the revert, above the axis; planned ones dashed
+    var snapDone = !!s.client.snapshot;
+    track.append(h('span', { class: 'dj-tl-mark', style: 'left:' + x(0), dataset: Object.assign({ row: 'up', anchor: 'start' }, snapDone ? {} : { plan: '' }) },
+      h('span', { class: 'dj-tl-flag' + (e && e.kind === 'snapshot' ? ' sd-changed' : '') }, t('tlSnap')), pw({ prev: null }, 'p0')));
+    for (var d = 30, k = 1; d <= p.snapshotAge; d += 30, k++) {
+      var ev = done[k - 1];
+      var now = e && e.kind === 'change' && ev && e.n === ev.n;
+      track.append(h('span', { class: 'dj-tl-mark', style: 'left:' + x(d), dataset: Object.assign({ row: 'up', anchor: anchor(d) }, ev ? {} : { plan: '' }) },
+        h('span', { class: 'dj-pw' + (now ? ' sd-changed' : ''), translate: 'no', dataset: ev ? {} : { empty: '' } }, ev ? ev.label : '?')));
+    }
+    var rev = s.client.reverted;
+    track.append(h('span', { class: 'dj-tl-mark', style: 'left:' + x(p.snapshotAge), dataset: Object.assign({ row: 'down', anchor: anchor(p.snapshotAge) }, rev ? {} : { plan: '' }) },
+      h('span', { class: 'dj-tl-flag' + (e && e.kind === 'revert' ? ' sd-changed' : ''), translate: 'no' }, '↶'), h('span', null, t('tlRevert')),
+      // the passwords set on the revert day after the revert (the client's own change, or the admin's reset)
+      s.log.filter(function (x) { return (x.kind === 'change' && x.afterRevert) || x.kind === 'reset'; }).map(function (x) {
+        return h('span', { class: 'dj-pw' + (e && e.n === x.n ? ' sd-changed' : ''), translate: 'no' }, x.label);
+      })));
+    // the days that have passed: a thick bar along the axis
+    track.append(h('span', { class: 'dj-tl-done', style: 'width:' + x(s.day), 'aria-hidden': 'true' }));
+    return h('section', { class: 'dj-box dj-tl' }, h('h2', null, t('tlTitle'), sub([t('tlToday'), ': ', t('dayN', { d: s.day })])), track);
+  }
+
+  // ── chart ──
+  function lanes(c) {
+    var s = c.state, cl = s.client, e = last(c);
+    function on(id) {
+      if (!e) return null;
+      var who = { srvQuery: ['cl', 'dns'], srvAnswer: ['cl', 'dns'], fail: ['cl'], ping: ['cl', 'dc'], pong: ['cl', 'dc'], create: ['cl', 'dc'],
+        setPwd: ['cl', 'dc'], restart: ['cl'], channel: ['cl', 'dc'], logon: e.ok ? ['cl', 'dc'] : ['cl'], snapshot: ['cl'],
+        change: ['cl', 'dc'], revert: ['cl'], reset: ['cl', 'dc'] }[e.kind] || [];
+      return who.indexOf(id) >= 0 ? 'active' : null;
+    }
+    var out = [{ id: 'cl', mark: 'P', c: COLOUR.cl, shape: 'square', name: data(cl.name, ''), state: on('cl'),
+      tags: sub(t('laneClient')), body: [h('div', { class: 'dj-line' }, data(cl.ip))] }];
+    if (s.scenario === 'join') {
+      var pub = cl.dns !== L.DC.ip;
+      out.push({ id: 'dns', mark: 'N', c: COLOUR.dns, name: data('DNS', ''), state: on('dns'),
+        tags: sub(t(pub ? 'dnsPublic' : 'dnsOnDc')), body: [h('div', { class: 'dj-line' }, data(cl.dns))] });
+    }
+    out.push({ id: 'dc', mark: 'D', c: COLOUR.dc, name: data(L.DC.name, ''), state: on('dc'),
+      tags: sub(t('laneDc')), body: [h('div', { class: 'dj-line' }, data(L.DC.ip))] });
+    return out;
+  }
+  function rows(c) {
+    var out = [];
+    c.state.log.forEach(function (e) {
+      var r = null, ch = e.n === c.n;
+      var time = h('span', null, t('dayN', { d: e.day }));
+      switch (e.kind) {
+        case 'srvQuery': r = { from: 'cl', to: 'dns', label: 'SRV?', c: COLOUR.cl, line: 'dotted', fields: data('_ldap._tcp.dc._msdcs', 'dj-long dj-mono') }; break;
+        case 'srvAnswer':
+          r = e.rcode === 'NOERROR'
+            ? { from: 'dns', to: 'cl', label: 'SRV', c: COLOUR.dns, line: 'dotted', fields: data('DC01:' + e.port) }
+            : { from: 'dns', to: 'cl', label: 'NXDOMAIN', c: COLOUR.dns, line: 'dotted', fields: data('✕') };
+          break;
+        case 'fail': r = { kind: 'note', lane: 'cl', text: t('noteNoDc'), k: 'fill' }; break;
+        case 'ping': r = { from: 'cl', to: 'dc', label: 'LDAP ping', c: COLOUR.cl, fields: data('UDP ' + e.port) }; break;
+        case 'pong': r = { from: 'dc', to: 'cl', label: h('span', null, t('pongLabel')), c: COLOUR.dc, fields: data(e.dc + ' · ' + e.netbios) }; break;
+        case 'create':
+          r = { from: 'cl', to: 'dc', label: 'LDAP add', c: COLOUR.cl, fields: data('CN=PC07'),
+            re: { dc: e.ok ? h('span', null, t('reCreated')) : h('span', null, t('reQuota'), ' ', data(e.count + '/' + e.max, '')) } };
+          if (!e.ok) r.lost = ['dc'];
+          break;
+        case 'setPwd': r = { from: 'cl', to: 'dc', label: 'SAMR', c: COLOUR.cl, fields: data(e.label), re: { dc: h('span', null, t('reSet')) } }; break;
+        case 'restart': r = { kind: 'note', lane: 'cl', text: t('noteRestart'), k: 'solid' }; break;
+        case 'channel':
+          r = { from: 'cl', to: 'dc', label: 'Netlogon', c: COLOUR.cl, lock: true, fields: data(e.pwd),
+            re: { dc: e.ok ? h('span', null, '✓ ', t(e.match === 'cur' ? 'matchCur' : 'matchPrev'))
+              : data(e.pwd + ' ∉ {' + e.obj.cur + (e.obj.prev ? ', ' + e.obj.prev : '') + '}') } };
+          if (!e.ok) r.lost = ['dc'];
+          break;
+        case 'logon':
+          r = e.ok ? { from: 'cl', to: 'dc', label: h('span', null, t('logonField')), c: COLOUR.cl, fields: data(e.user), re: { dc: data('✓', '') } }
+            : { kind: 'note', lane: 'cl', text: t('noteTrust'), k: 'fill' };
+          break;
+        case 'snapshot': r = { kind: 'note', lane: 'cl', text: h('span', null, t('noteSnapshot'), ' ', data(e.pwd.cur, '')), k: 'solid' }; break;
+        case 'change': r = { from: 'cl', to: 'dc', label: 'Netlogon', c: COLOUR.cl, lock: true, fields: data(e.from + ' → ' + e.label), re: { dc: h('span', null, t('reSet')) } }; break;
+        case 'revert': r = { kind: 'note', lane: 'cl', text: h('span', null, t('noteRevert'), ' ', data(e.before.cur + ' → ' + e.after.cur, '')), k: 'solid' }; break;
+        case 'reset': r = { from: 'cl', to: 'dc', label: 'SAMR', c: COLOUR.cl, fields: h('span', null, data(e.label), h('span', { class: 'dj-long' }, ' ', sub(t('adminTitle')))), re: { dc: h('span', null, t('reSet')) } }; break;
+      }
+      if (!r) return;
+      r.time = time;
+      r.changed = ch;
+      out.push(r);
+    });
+    return out;
+  }
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── captions ──
+  function known(o) { return o.prev ? o.cur + ', ' + o.prev : o.cur; }
+  function caption(c) {
+    var s = c.state, p = c.params, cl = s.client, n = c.n;
+    var C = q(cl.name), D = q(L.DOMAIN), U = q(acc(L.USER));
+    if (c.first) {
+      if (s.scenario === 'revert') return rich('capStart_revert', { c: C, p: q('p0'), a: q(p.snapshotAge) });
+      var start = rich('capStart_join', { c: C, dns: q(cl.dns), u: U, d: D });
+      if (cl.dns !== L.DC.ip) start.push(t('capStartPublicTail'));
+      if (s.dc.quota.count > 0) start.push(t.n('capStartQuotaTail', s.dc.quota.count, { u: acc(L.USER) }));
+      return start;
+    }
+    var e = last(c), o = s.dc.objects.PC07;
+    switch (e.kind) {
+      case 'srvQuery': return rich('capSrvQuery', { n: n, c: C, dns: q(e.server), q: qLong(e.q) });
+      case 'srvAnswer':
+        if (e.rcode === 'NOERROR') return rich('capSrvAnswer', { n: n, c: C, target: qLong(e.target), ip: q(e.ip) });
+        return rich('capNx', { n: n, d: D });
+      case 'fail': return rich('capFail', { n: n });
+      case 'ping': return rich('capPing', { n: n, d: D });
+      case 'pong': return rich('capPong', { n: n, d: D, nb: q(e.netbios) });
+      case 'create':
+        if (e.ok) return rich('capCreate', { n: n, u: U, dn: qLong(e.dn), k: q(e.count + 1), max: q(e.max) });
+        return rich('capQuota', { n: n, u: U, max: q(e.max), attr: q('ms-DS-MachineAccountQuota') });
+      case 'setPwd': return rich('capSetPwd', { n: n, c: C, p: q(e.label) });
+      case 'restart': return rich('capRestart', { n: n, c: C, d: D });
+      case 'channel':
+        if (s.scenario === 'join') return rich('capChannelJoin', { n: n, p: q(e.pwd) });
+        if (!e.ok) return rich('capChannelBroken', { n: n, c: C, p: q(e.pwd), cur: q(e.obj.cur), prev: q(e.obj.prev) });
+        if (s.result === 'repairing') return rich('capChannelRepaired', { n: n, p: q(e.pwd) });
+        return rich(e.match === 'prev' ? 'capChannelPrev' : 'capChannelCur', { n: n, p: q(e.pwd) });
+      case 'logon': {
+        if (!e.ok) return rich('capLogonRefused', { n: n, u: U });
+        var ok = rich('capLogonOk', { n: n, u: U });
+        if (c.last && s.result === 'ok' && !s.log.some(function (x) { return x.kind === 'change'; })) ok.push(t('capEndQuiet'));
+        return ok;
+      }
+      case 'snapshot': return rich('capSnapshot', { n: n, p: q(e.pwd.cur) });
+      case 'change':
+        if (e.afterRevert) return rich('capChangeAfter', { n: n, c: C, age: q(e.day - (c.prev ? c.prev.client.lastSet : 0)), from: q(e.from), to: q(e.label) });
+        return rich('capChange', { n: n, day: q(e.day), c: C, from: q(e.from), to: q(e.label) });
+      case 'revert': return rich('capRevert', { n: n, day: q(e.day), c: C, p: q(e.after.cur), known: q(known(o.pwd)) });
+      case 'reset': return rich('capReset', { n: n, adm: q(acc(e.by)), c: C, p: q(e.label) });
+      default: return '';
+    }
+  }
+
+  function notJoin(p) { return p.scenario === 'revert' ? t('offJoin') : false; }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'choice', label: t('pScenario'), options: [['join', t('scJoin')], ['revert', t('scRevert')]] },
+      { key: 'dnsServer', type: 'choice', label: t('pDns'), options: [['dc01', t('optDc01')], ['public', t('optPublic')]], disabled: notJoin },
+      { key: 'joinsByUser', type: 'range', label: t('pJoins'), min: 0, max: 10, step: 1, disabled: notJoin },
+      { key: 'snapshotAge', type: 'range', label: t('pAge'), min: 0, max: 90, step: 5,
+        format: function (v) { return t('dayN', { d: v }); }, disabled: function (p) { return p.scenario === 'join' ? t('offRevert') : false; } }
+    ],
+
+    presets: [
+      { id: 'join', label: t('presetJoin'), hint: t('presetJoinHint'), params: {} },
+      { id: 'revert-65-days', label: t('presetRevert65'), hint: t('presetRevert65Hint'), params: { scenario: 'revert', snapshotAge: 65 } },
+      { id: 'revert-35-days', label: t('presetRevert35'), hint: t('presetRevert35Hint'), params: { scenario: 'revert', snapshotAge: 35 } },
+      { id: 'wrong-dns', label: t('presetWrongDns'), hint: t('presetWrongDnsHint'), params: { dnsServer: 'public' } },
+      { id: 'quota', label: t('presetQuota'), hint: t('presetQuotaHint'), params: { joinsByUser: 10 } }
+    ],
+
+    legend: [
+      { shape: 'dot', label: t('legDns') },
+      { shape: 'line', label: t('legLdap') },
+      { shape: 'double', label: t('legNetlogon') },
+      { shape: 'pw', label: t('legPw') },
+      { shape: 'broken', label: t('legBroken') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      var strip = h('div', { class: 'dj-strip' }, renderClient(c), renderChannel(c), renderObject(c), renderUser(c));
+      var parts = [strip];
+      if (c.state.scenario === 'revert') parts.push(renderTimeline(c));
+      parts.push(chart);
+      c.stage.replaceChildren(h('div', { class: 'dj' }, parts));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
