@@ -1,0 +1,539 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-dynamic-update: one client registers its own A record in the AD-integrated zone corp.example. SOA query,
+     an unsigned UPDATE, REFUSED, a security context (TKEY, GSS-TSIG) with the computer account, the UPDATE signed,
+     the answer. The server checks the zone's Dynamic updates setting, then each name's owner (the SID on the record's
+     ACL). A stepper, one message (a query with its answer) or one admin action per step.
+     Left: the zone's setting, its record table with an owner chip per row, the AD computer accounts, and the message
+     card (what this step carries, or the server's check). Right: kit view K1 (message sequence chart,
+     kit/sequence.js) with two lanes, client and DC1. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-dynamic-update">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: sigurno dinamičko ažuriranje · simdeck</title>
+<meta name="description" content="PC1 sam upisuje zapis u zonu: nepotpisano odbijeno, potpisano prihvaćeno. Reinstaliran s novim SID-om ne smije mijenjati svoj stari zapis.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-dynamic-update",
+  "title": {
+    "hr": "DNS: sigurno dinamičko ažuriranje",
+    "en": "DNS: secure dynamic update"
+  },
+  "concept": {
+    "hr": "Klijent sam upisuje svoj zapis; vlasnik zapisa je SID, pa novi račun ne smije",
+    "en": "Clients register their own records; the owner is a SID, so a new account can't"
+  },
+  "summary": {
+    "hr": "PC1 sam upisuje zapis u zonu: nepotpisano odbijeno, potpisano prihvaćeno. Reinstaliran s novim SID-om ne smije mijenjati svoj stari zapis.",
+    "en": "PC1 writes its own record: unsigned refused, signed accepted. Rebuilt with a new SID, it may not change its old record."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-dynamic-update"]; colours only from kit tokens.
+   Layout: left the zone (setting, record table), the accounts and the message card; right the K1 chart. */
+[data-sim="win-dns-dynamic-update"] .du {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dns-dynamic-update"] .du-left { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 0.7rem; min-height: 0; overflow: hidden; }
+[data-sim="win-dns-dynamic-update"] .du > .sd-seq { grid-column: 2; grid-row: 1; }
+[data-sim="win-dns-dynamic-update"] .du-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+  min-height: 0;
+}
+[data-sim="win-dns-dynamic-update"] .du-box h2 { margin: 0 0 0.35rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: baseline; }
+[data-sim="win-dns-dynamic-update"] .du-mono { font-family: var(--mono); }
+[data-sim="win-dns-dynamic-update"] .du-muted { color: var(--muted); font-weight: 400; }
+[data-sim="win-dns-dynamic-update"] .du-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="win-dns-dynamic-update"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* zone setting: three tags, the active one solid */
+[data-sim="win-dns-dynamic-update"] .du-opts { display: flex; flex-wrap: wrap; gap: 0.3rem 0.4rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="win-dns-dynamic-update"] .du-opt { padding: 0 0.4rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .du-opt[data-on] { border-style: solid; border-color: var(--ink); background: var(--ink); color: var(--bg); font-weight: 700; }
+
+/* record table */
+[data-sim="win-dns-dynamic-update"] .du-table { width: 100%; border-collapse: separate; border-spacing: 0 0.3rem; font-size: 1rem; line-height: 1.25; }
+[data-sim="win-dns-dynamic-update"] .du-table th { font-size: var(--fs-sm); }
+[data-sim="win-dns-dynamic-update"] .du-table th { text-align: left; font-weight: 400; color: var(--muted); padding: 0 0.35rem; }
+[data-sim="win-dns-dynamic-update"] .du-table td { padding: 0.3rem 0.35rem; background: var(--bg); border-top: var(--line-w) solid var(--line); border-bottom: var(--line-w) solid var(--line); vertical-align: middle; }
+[data-sim="win-dns-dynamic-update"] .du-table td:first-child { border-left: 0.4rem solid var(--line); border-radius: var(--radius-sm) 0 0 var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="win-dns-dynamic-update"] .du-table td:last-child { border-right: var(--line-w) solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+[data-sim="win-dns-dynamic-update"] .du-table td:nth-child(-n+3) { white-space: nowrap; }
+[data-sim="win-dns-dynamic-update"] .du-table tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-dns-dynamic-update"] .du-table tr.sd-changed .du-sub { color: var(--on-hl); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="target"] td { border-top-style: dashed; border-bottom-style: dashed; border-color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="target"] td:first-child { border-left-color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="target"] td:last-child { border-right-style: dashed; border-right-color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="refused"] td { border-color: var(--ink); border-top-width: 0.2rem; border-bottom-width: 0.2rem; }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="refused"] td:first-child { border-left-color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="refused"] td:last-child { border-right-width: 0.2rem; border-right-color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="removed"] td:not(:last-child) { text-decoration: line-through; }
+[data-sim="win-dns-dynamic-update"] .du-mark { display: inline-flex; flex-wrap: wrap; gap: 0 0.25rem; align-items: baseline; }
+[data-sim="win-dns-dynamic-update"] .du-sym { display: inline-grid; place-items: center; width: 1.2em; height: 1.2em; border: var(--line-w) solid currentColor; border-radius: 50%; font-weight: 700; line-height: 1; font-family: var(--mono); }
+[data-sim="win-dns-dynamic-update"] .du-sym[data-k="no"] { border-radius: var(--radius-sm); background: var(--ink); color: var(--bg); }
+[data-sim="win-dns-dynamic-update"] .sd-changed .du-sym[data-k="no"] { background: var(--on-hl); color: var(--hl); }
+
+/* owner chip: a computer mark and the account; a SID with no account is dashed */
+[data-sim="win-dns-dynamic-update"] .du-owner {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 0.35rem;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+[data-sim="win-dns-dynamic-update"] .du-owner[data-k="sid"] { border-style: dashed; }
+[data-sim="win-dns-dynamic-update"] .du-owner[data-k="none"] { border-style: dotted; border-color: var(--muted); font-family: var(--sans); color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .sd-changed .du-owner[data-k="none"] { color: var(--on-hl); border-color: var(--on-hl); }
+[data-sim="win-dns-dynamic-update"] .du-nw { white-space: nowrap; }
+[data-sim="win-dns-dynamic-update"] .du-pc { position: relative; display: inline-block; width: 0.8em; height: 0.55em; border: 0.12em solid currentColor; border-radius: 0.08em; margin-bottom: 0.2em; box-sizing: border-box; }
+[data-sim="win-dns-dynamic-update"] .du-pc::after { content: ''; position: absolute; left: 25%; right: 25%; top: 100%; height: 0.16em; margin-top: 0.06em; background: currentColor; }
+[data-sim="win-dns-dynamic-update"] .du-sid { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .sd-changed .du-sid { color: var(--on-hl); }
+
+/* accounts */
+[data-sim="win-dns-dynamic-update"] .du-accs { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="win-dns-dynamic-update"] .du-acc { display: inline-flex; gap: 0.35rem; align-items: baseline; padding: 0.05rem 0.45rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-dns-dynamic-update"] .du-acc[data-gone] { border-style: dashed; color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .du-acc[data-gone] .du-mono { text-decoration: line-through; }
+[data-sim="win-dns-dynamic-update"] .du-acc[data-sender] { border-color: var(--ink); border-width: 0.18rem; font-weight: 700; }
+[data-sim="win-dns-dynamic-update"] .du-tag { padding: 0 0.3rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-weight: 400; }
+
+/* lane cards */
+[data-sim="win-dns-dynamic-update"] .du-line { display: flex; flex-wrap: wrap; gap: 0.1rem 0.4rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.3; margin-top: 0.15rem; }
+
+/* message card */
+[data-sim="win-dns-dynamic-update"] .du-msg { flex: none; }
+[data-sim="win-dns-dynamic-update"] .du-chip { padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="win-dns-dynamic-update"] .du-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.15rem 0.6rem; margin: 0; }
+[data-sim="win-dns-dynamic-update"] .du-kv dt { color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .du-kv dd { margin: 0; overflow-wrap: anywhere; }
+[data-sim="win-dns-dynamic-update"] .du-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-dns-dynamic-update"] .du-checks li { display: flex; gap: 0.45rem; align-items: baseline; }
+[data-sim="win-dns-dynamic-update"] .du-checks li[data-bad] { font-weight: 700; }
+[data-sim="win-dns-dynamic-update"] .du-checks li[data-skip] { color: var(--muted); }
+[data-sim="win-dns-dynamic-update"] .du-verdict { font-weight: 700; padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); }
+[data-sim="win-dns-dynamic-update"] .du-verdict[data-bad] { background: var(--ink); color: var(--bg); }
+[data-sim="win-dns-dynamic-update"] .du-lock { display: inline-flex; align-items: baseline; }
+[data-sim="win-dns-dynamic-update"] .du-lock .sd-seq-lock { margin-top: 0; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="signed"] { height: 0.5rem; border: 0; border-radius: 0; border-top: 0.13rem solid var(--ink); border-bottom: 0.13rem solid var(--ink); background: transparent; }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="owner"] { border-color: var(--ink); background: var(--bg); position: relative; }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="owner"]::after { content: ''; position: absolute; inset: 25% 20% 35%; border: 0.1rem solid var(--ink); }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="sid"] { border-style: dashed; border-color: var(--ink); background: var(--bg); }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="ok"], [data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="no"] { position: relative; border-color: var(--ink); background: var(--bg); border-radius: 50%; }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="no"] { border-radius: var(--radius-sm); background: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="ok"]::after, [data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="no"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="ok"]::after { content: '✓'; color: var(--ink); }
+[data-sim="win-dns-dynamic-update"] .sd-swatch[data-shape="no"]::after { content: '✕'; color: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-dynamic-update"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-dynamic-update"] .du { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-dns-dynamic-update"] .du-left, [data-sim="win-dns-dynamic-update"] .du > .sd-seq { grid-column: 1; grid-row: auto; overflow: visible; }
+  [data-sim="win-dns-dynamic-update"] .du-table { font-size: var(--fs-sm); }
+  [data-sim="win-dns-dynamic-update"] .du-table th:nth-child(2), [data-sim="win-dns-dynamic-update"] .du-table td:nth-child(2),
+  [data-sim="win-dns-dynamic-update"] .du-table th:nth-child(5), [data-sim="win-dns-dynamic-update"] .du-table td:nth-child(5) { display: none; }
+  [data-sim="win-dns-dynamic-update"] .du-addr { display: none; }
+  /* each record a small card: name, address and mark on a line, the owner under them */
+  [data-sim="win-dns-dynamic-update"] .du-table thead { display: none; }
+  [data-sim="win-dns-dynamic-update"] .du-table, [data-sim="win-dns-dynamic-update"] .du-table tbody { display: block; }
+  [data-sim="win-dns-dynamic-update"] .du-table tr {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.15rem 0.6rem; align-items: center;
+    margin-bottom: 0.35rem; padding: 0.25rem 0.45rem;
+    border: var(--line-w) solid var(--line); border-left-width: 0.4rem; border-radius: var(--radius-sm); background: var(--bg);
+  }
+  [data-sim="win-dns-dynamic-update"] .du-table td { display: block; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; }
+  [data-sim="win-dns-dynamic-update"] .du-table td:nth-child(4) { grid-column: 1 / -1; grid-row: 2; }
+  [data-sim="win-dns-dynamic-update"] .du-table tr.sd-changed { background: var(--hl); }
+  [data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="target"] { border-style: dashed; border-color: var(--ink); }
+  [data-sim="win-dns-dynamic-update"] .du-table tr[data-mark="refused"] { border-color: var(--ink); border-width: 0.2rem; border-left-width: 0.4rem; }
+  [data-sim="win-dns-dynamic-update"] .du-owner { white-space: normal; }
+  [data-sim="win-dns-dynamic-update"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: sigurno dinamičko ažuriranje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { cl: '1', dc: '2' };
+  var OPT = { none: 'optNone', nonsecureAndSecure: 'optBoth', secureOnly: 'optSecure' };
+
+  /** Data (names, addresses, accounts, SIDs, codes, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'du-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function two(v) { return (v < 10 ? '0' : '') + v; }
+  function hms(sec) { var r = sec % 86400; return two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)) + ':' + two(r % 60); }
+  function hm(sec) { var r = sec % 86400; return two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)); }
+  /** A record's timestamp: "3. dan 10:00" / "day 3 10:00". */
+  function stamp(sec) { return t('dayAt', { d: Math.floor(sec / 86400), t: hm(sec) }); }
+  /** S-1-5-21-…-1104: the domain part shortened, the RID kept. */
+  function shortSid(sid) { return 'S-…-' + String(sid).split('-').pop(); }
+  function account(s, sid) {
+    for (var i = 0; i < s.ad.computers.length; i++) if (s.ad.computers[i].sid === sid) return s.ad.computers[i];
+    return null;
+  }
+  function accName(name) { return 'CORP\\' + name + '$'; }
+  function lock() { return h('span', { class: 'du-lock', 'aria-hidden': 'true' }, h('span', { class: 'sd-seq-lock' })); }
+
+  /** Owner chip: the account and its SID, or a bare SID (no such account), or nobody (created unsigned). */
+  function ownerChip(s, sid) {
+    if (sid === null) return h('span', { class: 'du-owner', dataset: { k: 'none' } }, t('ownerNone'));
+    var a = account(s, sid);
+    if (!a) return h('span', { class: 'du-owner', dataset: { k: 'sid' } }, data(shortSid(sid), ''), h('span', { class: 'du-sub' }, t('ownerUnknown')));
+    return h('span', { class: 'du-owner' }, h('span', { class: 'du-nw' }, h('span', { class: 'du-pc', 'aria-hidden': 'true' }), ' ', data(accName(a.name), '')),
+      data(shortSid(sid), 'du-sid'));
+  }
+  function sym(k) { return h('span', { class: 'du-sym', dataset: { k: k }, 'aria-hidden': 'true', translate: 'no' }, { ok: '✓', no: '✕', add: '+', del: '−', to: '→' }[k]); }
+
+  function last(c) { return c.n > 0 ? c.state.msgs[c.state.msgs.length - 1] : null; }
+
+  // ── zone column ──
+  function renderZone(c) {
+    var s = c.state, e = last(c);
+    var box = h('section', { class: 'du-box' });
+    box.append(h('h2', null, data(s.zone.name, ''), h('span', { class: 'du-muted' }, t('zoneAd'))));
+    box.append(h('div', { class: 'du-opts' }, h('span', { class: 'du-sub' }, t('setting')), L.UPDATES.map(function (u) {
+      return h('span', { class: 'du-opt', dataset: u === s.zone.updates ? { on: '' } : {} }, t(OPT[u]));
+    })));
+    // the rows: the zone now, plus a record removed in this step (from the step before), struck through
+    var marks = {}, rows = s.zone.records.slice();
+    if (e && e.kind === 'update') e.update.adds.map(function (a) { return a.name; }).concat(e.update.deletes).forEach(function (n) { marks[L.key(n)] = 'target'; });
+    if (e && e.kind === 'answer') {
+      e.added.forEach(function (n) { marks[n] = 'added'; });
+      e.updated.forEach(function (n) { marks[n] = 'updated'; });
+      e.removed.forEach(function (n) { marks[n] = 'removed'; });
+      if (e.rcode === 'REFUSED') e.items.forEach(function (it) { if (it.exists && (e.reason !== 'owner' || !it.may)) marks[L.key(it.name)] = 'refused'; });
+    }
+    if (e && e.kind === 'admin') marks[e.deleted] = 'removed';
+    if (c.prev) c.prev.zone.records.forEach(function (r) {
+      if (marks[L.key(r.name)] === 'removed' && !L.find(rows, r.name)) rows.push(r);
+    });
+    rows.sort(function (a, b) { return L.key(a.name) < L.key(b.name) ? -1 : 1; });
+    var anim = c.dir === 'forward' ? ' sd-anim-in' : '';
+    var MARK = { added: ['add', 'markAdded'], updated: ['ok', 'markUpdated'], removed: ['del', 'markRemoved'], refused: ['no', 'markRefused'], target: ['to', 'markTarget'] };
+    var table = h('table', { class: 'du-table' },
+      h('thead', null, h('tr', null, ['colName', 'colType', 'colData', 'colOwner', 'colTime', 'colMark'].map(function (k) { return h('th', null, t(k)); }))),
+      h('tbody', null, rows.map(function (r) {
+        var m = marks[L.key(r.name)];
+        var changed = m && m !== 'target';
+        return h('tr', { class: changed ? 'sd-changed' + anim : null, dataset: m ? { mark: m } : {} },
+          h('td', null, data(r.name, '')),
+          h('td', null, data(r.type)),
+          h('td', null, data(r.data)),
+          h('td', null, ownerChip(m === 'removed' && c.prev ? c.prev : s, r.owner)),
+          h('td', null, data(stamp(r.timestamp), '')),
+          h('td', null, m ? h('span', { class: 'du-mark' }, sym(MARK[m][0]), t(MARK[m][1])) : null));
+      })));
+    box.append(table);
+    return box;
+  }
+
+  function renderAccounts(c) {
+    var s = c.state, cl = s.clients[0], e = last(c);
+    var senderNow = e && (e.kind === 'tkey' || (e.kind === 'update' && e.signed) || (e.kind === 'answer' && e.signed));
+    var list = h('ul', { class: 'du-accs' });
+    if (cl.oldSid) {
+      list.append(h('li', { class: 'du-acc', dataset: { gone: '' } }, data(accName(cl.name)), data(shortSid(cl.oldSid), 'du-sid'), h('span', { class: 'du-tag' }, t('accDeleted'))));
+    }
+    s.ad.computers.forEach(function (a) {
+      var ds = {};
+      if (senderNow && a.sid === cl.sid) ds.sender = '';
+      var tag = null;
+      if (a.sid === cl.sid && cl.reset) tag = h('span', { class: 'du-tag' }, t('accReset'));
+      if (a.sid === cl.sid && cl.renamedFrom) tag = h('span', { class: 'du-tag' }, t.parts('accRenamed', { old: data(cl.renamedFrom, '') }));
+      list.append(h('li', { class: 'du-acc', dataset: ds }, data(accName(a.name)), data(shortSid(a.sid), 'du-sid'), tag));
+    });
+    return h('section', { class: 'du-box' }, h('h2', null, t('accTitle')), list);
+  }
+
+  // ── chart ──
+  function lanes(c) {
+    var s = c.state, cl = s.clients[0], e = last(c);
+    var activeCl = !!e && e.kind !== 'admin', activeDc = !!e;
+    var clBody = [h('div', { class: 'du-line' }, data(cl.ip))];
+    if (cl.domainMember) clBody.push(h('div', { class: 'du-line' }, h('span', { class: 'du-sub' }, t('account')), data(accName(cl.name)), data(shortSid(cl.sid), 'du-sid')));
+    else clBody.push(h('div', { class: 'du-line' }, h('span', { class: 'du-sub' }, t('roleWorkgroup'))));
+    return [
+      { id: 'cl', mark: cl.domainMember ? 'P' : 'L', c: COLOUR.cl, shape: 'square', name: data(cl.name, ''), state: activeCl ? 'active' : null,
+        tags: cl.domainMember ? h('span', { class: 'du-sub' }, t('roleClient')) : null, body: clBody },
+      { id: 'dc', mark: 'D', c: COLOUR.dc, name: data('DC1', ''), state: activeDc ? 'active' : null, tags: h('span', { class: 'du-sub' }, t('roleDc')),
+        body: [h('div', { class: 'du-line' }, data('10.0.0.10')), h('div', { class: 'du-line' }, data('dc1.' + L.ZONE))] }
+    ];
+  }
+  function opsShort(u) {
+    // with a delete (rename) the names only, and on a phone the added name only (the message card has the rest):
+    // the line must stay between the lifelines
+    var out = [];
+    u.adds.forEach(function (a) {
+      out.push((out.length ? ' ' : '') + '+' + a.name);
+      if (!u.deletes.length) out.push(h('span', { class: 'du-addr' }, ' ' + a.data));
+    });
+    u.deletes.forEach(function (n) { out.push(h('span', { class: 'du-addr' }, ' −' + n)); });
+    return h('span', { translate: 'no' }, out);
+  }
+  function rows(c) {
+    var s = c.state, out = [];
+    s.msgs.forEach(function (e) {
+      var ch = e.n === c.n, time = hms(e.t);
+      if (e.kind === 'soa') {
+        out.push({ from: 'cl', to: 'dc', label: 'SOA?', c: COLOUR.cl, fields: data(e.q.split('.')[0], ''), time: time, changed: ch });
+        out.push({ from: 'dc', to: 'cl', label: 'SOA', c: COLOUR.dc, fields: data('dc1', ''), line: 'dashed', time: time, changed: ch });
+      } else if (e.kind === 'update') {
+        out.push({ from: 'cl', to: 'dc', label: 'UPDATE', c: COLOUR.cl, lock: e.signed, fields: opsShort(e.update), time: time, changed: ch });
+      } else if (e.kind === 'answer') {
+        out.push({ from: 'dc', to: 'cl', label: e.rcode, c: COLOUR.dc, line: 'dashed', fields: data(e.rcode === 'NOERROR' ? '✓' : '✕', ''), time: time, changed: ch });
+        if (e.gaveUp) out.push({ kind: 'note', lane: 'cl', text: t('noteGaveUp'), k: 'fill', time: time, changed: ch });
+      } else if (e.kind === 'tkey') {
+        out.push({ from: 'cl', to: 'dc', label: 'TKEY', c: COLOUR.cl, fields: data('GSS-TSIG', ''), time: time, changed: ch });
+        out.push({ from: 'dc', to: 'cl', label: 'TKEY', c: COLOUR.dc, line: 'dashed', fields: data('✓', ''), time: time, changed: ch });
+      } else if (e.kind === 'admin') {
+        out.push({ kind: 'note', lane: 'dc', text: t.parts('noteAdmin', { name: data(e.deleted, '') }), k: 'solid', time: time, changed: ch });
+      }
+    });
+    return out;
+  }
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── message card ──
+  function updateLines(u) {
+    return u.adds.map(function (a) { return h('div', null, t('opAdd'), ' ', data(a.name + ' A ' + a.data)); })
+      .concat(u.deletes.map(function (n) { return h('div', null, t('opDel'), ' ', data(n)); }));
+  }
+  function updateText(u) {
+    var out = [];
+    u.adds.forEach(function (a, i) { if (i) out.push('; '); out.push(t('opAdd'), ' ', data(a.name + ' A ' + a.data, '')); });
+    u.deletes.forEach(function (n) { out.push('; ', t('opDel'), ' ', data(n, '')); });
+    return h('b', null, out);
+  }
+  function checkList(c, e) {
+    var s = c.state, cl = s.clients[0], li = [];
+    var zoneOk = e.reason !== 'zoneNone' && e.reason !== 'unsigned';
+    function row(k, content) { li.push(h('li', { dataset: k === 'no' ? { bad: '' } : k === 'skip' ? { skip: '' } : {} }, k === 'skip' ? null : sym(k), h('span', null, content))); }
+    row(zoneOk ? 'ok' : 'no', t(zoneOk ? 'chkZoneOk' : e.reason === 'zoneNone' ? 'chkZoneNone' : 'chkZoneUnsigned'));
+    if (!zoneOk) { row('skip', t('chkSkipped')); return h('ul', { class: 'du-checks' }, li); }
+    var before = c.prev || s;
+    e.items.forEach(function (it) {
+      var nm = data(it.name, '');
+      if (!e.signed) row('ok', t.parts('chkNoAcl', { name: nm }));
+      else if (!it.exists) row('ok', t.parts('chkNew', { name: nm }));
+      else if (it.owner === null) row('ok', t.parts('chkOpen', { name: nm }));
+      else if (it.may) row('ok', t.parts('chkOwn', { name: nm, owner: ownerChip(before, it.owner) }));
+      else row('no', t.parts('chkNotOwn', { name: nm, owner: ownerChip(before, it.owner), sender: data(shortSid(cl.sid), '') }));
+    });
+    return h('ul', { class: 'du-checks' }, li);
+  }
+  function renderMsg(c) {
+    var s = c.state, e = last(c), cl = s.clients[0];
+    var box = h('section', { class: 'du-box du-msg' });
+    if (!e) { box.append(h('h2', null, t('msgNone'))); return box; }
+    var kind = { soa: 'kSoa', tkey: 'kTkey', admin: 'kAdmin', answer: 'kAnswer' }[e.kind] || (e.signed ? 'kSigned' : 'kUnsigned');
+    var anim = c.dir === 'forward' ? ' sd-anim-in' : '';
+    var from = e.kind === 'answer' || e.kind === 'admin' ? 'dc' : 'cl';
+    var head = [t('msgTitle', { n: e.n }), ' ',
+      h('b', { class: 'du-chip sd-fill' + anim, dataset: { c: COLOUR[from] } }, e.kind === 'update' && e.signed ? lock() : null, t(kind))];
+    if (e.kind === 'answer') head.push(h('span', { class: 'du-verdict', translate: 'no', dataset: e.rcode === 'NOERROR' ? {} : { bad: '' } }, e.rcode));
+    box.append(h('h2', null, head));
+    if (e.kind === 'soa') {
+      box.append(h('dl', { class: 'du-kv' }, h('dt', null, t('asks')), h('dd', null, data(e.q + ' SOA')), h('dt', null, t('primary')), h('dd', null, data(e.primary))));
+    } else if (e.kind === 'update') {
+      box.append(h('dl', { class: 'du-kv' }, h('dt', null, data('UPDATE', '')), h('dd', null, updateLines(e.update)),
+        h('dt', null, t('signature')), h('dd', null, e.signed ? [lock(), data('TSIG · ' + accName(cl.name))] : t('sigNone'))));
+    } else if (e.kind === 'tkey') {
+      box.append(h('dl', { class: 'du-kv' }, h('dt', null, t('account')), h('dd', null, data(e.account), ' ', data(shortSid(e.sid), 'du-sid')),
+        h('dt', null, data('TKEY', '')), h('dd', null, t('tkeyLine'))));
+    } else if (e.kind === 'answer') {
+      box.append(checkList(c, e));
+    } else if (e.kind === 'admin') {
+      box.append(h('ul', { class: 'du-checks' }, h('li', null, sym('del'), h('span', null, t.parts('adminLine', { name: data(e.deleted, ''), data: data(e.data, '') }))),
+        h('li', { dataset: { skip: '' } }, h('span', null, t('adminNext')))));
+    }
+    return box;
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, cl = s.clients[0], n = c.n;
+    var target = s.update.adds[0].name;
+    var before = L.initial(p);
+    var oldRec = L.find(before.zone.records, target);
+    if (c.first) {
+      var start = rich('capStart_' + p.action, { c: q(cl.name), ip: q(cl.ip), zone: q(s.zone.name), name: q(target),
+        old: q(oldRec ? oldRec.data : ''), sid: q(shortSid(cl.sid || '')) });
+      if (p.updates === 'none') start.push(t('capStartNoneTail'));
+      return start;
+    }
+    var e = last(c);
+    var acc = q(accName(cl.name));
+    switch (e.kind) {
+      case 'soa': return rich('capSoa', { n: n, c: q(cl.name), q: q(e.q) });
+      case 'update':
+        if (e.signed) return rich('capSigned', { n: n, acc: acc, sid: q(shortSid(cl.sid)) });
+        return rich(e.round > 1 ? 'capUnsignedAgain' : 'capUnsigned', { n: n, c: q(cl.name), upd: updateText(e.update) });
+      case 'tkey': return rich('capTkey', { n: n, c: q(cl.name), acc: acc });
+      case 'admin': return rich('capAdmin', { n: n, time: q(hm(e.t)), name: q(e.deleted), old: q(e.data) });
+      case 'answer': {
+        var cur = L.find(s.zone.records, target);
+        if (e.rcode === 'NOERROR') {
+          if (!e.signed) {
+            if (p.action === 'rogue') return rich('capHijack', { n: n, name: q(target), ip: q(cl.ip) });
+            var ok = rich('capOkUnsigned', { n: n });
+            // an existing record keeps its owner; if that is another SID, Secure only would refuse this client again
+            if (cur && cur.owner !== null && cur.owner !== cl.sid) ok = ok.concat(rich('capKeepsOwnerTail', { sid: q(shortSid(cur.owner)) }));
+            return ok;
+          }
+          if (e.removed.length) return rich('capOkRename', { n: n, new: q(target), old: q(e.removed[0]), acc: acc });
+          if (e.added.length) return rich('capOkNew', { n: n, name: q(target), acc: acc, sid: q(shortSid(cl.sid)) });
+          var out = rich('capOkOwner', { n: n, name: q(target), sid: q(shortSid(cl.sid)), ip: q(cl.ip) });
+          if (cl.reset) out.push(t('capResetTail'));
+          return out;
+        }
+        if (!e.signed) {
+          var vars = { n: n, c: q(cl.name), name: q(target), data: q(cur ? cur.data : '—') };
+          if (e.reason === 'zoneNone') return rich(e.gaveUp ? 'capGaveUpNone' : 'capRefusedNone1', vars);
+          return e.gaveUp ? rich('capGaveUp', vars) : rich('capRefusedUnsigned', { n: n });
+        }
+        if (e.reason === 'owner') {
+          var r = rich('capRefusedOwner', { n: n, name: q(target), old: q(cur.data), owner: q(shortSid(cur.owner)), sid: q(shortSid(cl.sid)) });
+          if (!p.adminDelete) r.push(t('capFixHint'));
+          return r;
+        }
+        return rich('capRefusedNone2', { n: n });
+      }
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'updates', type: 'choice', label: t('pUpdates'),
+        options: [['none', t('optNone')], ['nonsecureAndSecure', t('optBoth')], ['secureOnly', t('optSecure')]] },
+      { key: 'action', type: 'select', label: t('pAction'),
+        options: [['join', t('actJoin')], ['move', t('actMove')], ['rename', t('actRename')], ['rebuildNew', t('actRebuildNew')],
+          ['rebuildReset', t('actRebuildReset')], ['rogue', t('actRogue')]] },
+      { key: 'adminDelete', type: 'toggle', label: t('pAdmin'), disabled: function (p) { return L.fixPossible(p) ? false : t('pAdminOff'); } }
+    ],
+
+    presets: [
+      { id: 'join', label: t('presetJoin'), hint: t('presetJoinHint'), params: {} },
+      { id: 'move', label: t('presetMove'), hint: t('presetMoveHint'), params: { action: 'move' } },
+      { id: 'rebuild-new-sid', label: t('presetRebuildNew'), hint: t('presetRebuildNewHint'), params: { action: 'rebuildNew' } },
+      { id: 'rebuild-reset', label: t('presetRebuildReset'), hint: t('presetRebuildResetHint'), params: { action: 'rebuildReset' } },
+      { id: 'rename', label: t('presetRename'), hint: t('presetRenameHint'), params: { action: 'rename' } },
+      { id: 'nonsecure-hijack', label: t('presetHijack'), hint: t('presetHijackHint'), params: { updates: 'nonsecureAndSecure', action: 'rogue' } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legUnsigned') },
+      { shape: 'signed', label: t('legSigned') },
+      { shape: 'dash', label: t('legAnswer') },
+      { shape: 'owner', label: t('legOwner') },
+      { shape: 'sid', label: t('legSid') },
+      { shape: 'ok', label: t('legOk') },
+      { shape: 'no', label: t('legNo') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'du' }, h('div', { class: 'du-left' }, renderZone(c), renderAccounts(c), renderMsg(c)), chart));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
