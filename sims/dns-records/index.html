@@ -1,0 +1,422 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- dns-records: an explorer. Left, the zone lab.example as a rule table (kit view K4, kit/ruletable.js,
+     docs/sim-ui.md §12): one row per record, marked by what it does for the query (in the answer, sent along, not
+     matching, not loaded). Right, the query, the status and aa badges, the answer, authority and additional sections,
+     the follow-ups (CNAME chain, MX order, referral), and the zone check.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="dns-records">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: vrste zapisa · simdeck</title>
+<meta name="description" content="Složi malu zonu i pitaj je: nadimak i kanonsko ime, izmjenjivači pošte, NODATA ili NXDOMAIN, delegiranje i zona koja se zbog CNAME-a na vrhu ne učita.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dns-records",
+  "title": {
+    "hr": "DNS: vrste zapisa",
+    "en": "DNS record types"
+  },
+  "concept": {
+    "hr": "A, AAAA, CNAME, MX, TXT i NS odgovaraju različito; CNAME ne smije na vrh zone",
+    "en": "A, AAAA, CNAME, MX, TXT and NS resolve differently; no CNAME at the zone apex"
+  },
+  "summary": {
+    "hr": "Složi malu zonu i pitaj je: nadimak i kanonsko ime, izmjenjivači pošte, NODATA ili NXDOMAIN, delegiranje i zona koja se zbog CNAME-a na vrhu ne učita.",
+    "en": "Build a small zone and query it: alias and canonical name, mail exchangers, NODATA or NXDOMAIN, delegation, and a zone that won't load with a CNAME at its apex."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="dns-records"]; colours only from kit tokens.
+   Layout: the zone table on the left (15 rows with every toggle on); the query, its answer and the zone check on the right. */
+[data-sim="dns-records"] .dr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.4cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+[data-sim="dns-records"] .dr-col { display: flex; flex-direction: column; gap: 1.2cqh; min-width: 0; min-height: 0; }
+[data-sim="dns-records"] [translate="no"] { font-family: var(--mono); }
+[data-sim="dns-records"] h2, [data-sim="dns-records"] h3 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="dns-records"] .dr-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.8rem 0.6rem; min-width: 0; }
+
+/* zone table: data in the zone file's own form, a long SOA wraps */
+[data-sim="dns-records"] .dr .sd-rt { flex: 0 1 auto; }
+[data-sim="dns-records"] .sd-rt-table td.sd-rt-act { white-space: normal; font-weight: 400; }
+[data-sim="dns-records"] .sd-rt-table td.sd-rt-mark .sd-rt-tag { white-space: normal; }
+[data-sim="dns-records"] .dr-tok { white-space: nowrap; }
+[data-sim="dns-records"] .sd-rt-table td { padding-top: 0.18rem; padding-bottom: 0.18rem; }
+[data-sim="dns-records"] .sd-rt-table tr.dr-new td:not(.sd-rt-ptr) { background: var(--hl); color: var(--on-hl); }
+[data-sim="dns-records"] .sd-rt-table tr.dr-new td.sd-rt-no { box-shadow: inset 0.4rem 0 0 var(--ink); }
+[data-sim="dns-records"] .sd-rt-table tr[data-mark='win'] td.sd-rt-act { font-weight: 700; }
+
+/* presets in two columns, so the panel fits at 1920×1080 with seven of them (as amdahl) */
+[data-sim="dns-records"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="dns-records"] .sd-preset { line-height: 1.15; }
+
+/* zone check strip */
+[data-sim="dns-records"] .dr-check ul { list-style: none; margin: 0.2rem 0 0; padding: 0; display: grid; gap: 0.2rem; }
+[data-sim="dns-records"] .dr-check li { display: grid; grid-template-columns: 1.5em minmax(0, 1fr); align-items: baseline; }
+[data-sim="dns-records"] .dr-ico { font-weight: 700; }
+[data-sim="dns-records"] .dr-check li[data-level='ok'] .dr-ico { color: var(--ok); }
+[data-sim="dns-records"] .dr-check li[data-level='warn'] .dr-ico { color: var(--warn); }
+[data-sim="dns-records"] .dr-check li[data-level='error'] .dr-ico { color: var(--danger); }
+[data-sim="dns-records"] .dr-check[data-bad='true'] { border: 0.2rem dashed var(--danger); }
+
+/* the query and its status */
+[data-sim="dns-records"] .dr-q { margin: 0.3rem 0 0.4rem; font-size: 1.25em; font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="dns-records"] .dr-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+[data-sim="dns-records"] .dr-st { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0.1rem 0.6rem; border: 0.2rem solid; border-radius: 1rem; background: var(--bg); font-weight: 700; font-size: 1.1em; }
+[data-sim="dns-records"] .dr-st[data-st='ok'] { color: var(--ok); }
+[data-sim="dns-records"] .dr-st[data-st='nx'] { color: var(--danger); }
+[data-sim="dns-records"] .dr-st[data-st='nodata'] { color: var(--ink); border-style: dashed; }
+[data-sim="dns-records"] .dr-st[data-st='ref'] { color: var(--ink); border-style: double; border-width: 0.3rem; }
+[data-sim="dns-records"] .dr-st .dr-stw { color: var(--ink); font-weight: 400; font-size: 0.85em; }
+[data-sim="dns-records"] .dr-aa { padding: 0.05rem 0.5rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="dns-records"] .dr-aa[data-on='false'] { border-style: dashed; color: var(--muted); font-weight: 400; }
+
+/* answer sections */
+[data-sim="dns-records"] .dr-sec { width: 100%; margin-top: 0.5rem; border-collapse: separate; border-spacing: 0; font-size: 0.93em; }
+[data-sim="dns-records"] .dr-sec th { text-align: left; font-size: var(--fs-sm); color: var(--muted); padding: 0.35rem 0.4rem 0.1rem; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="dns-records"] .dr-sec td { padding: 0.15rem 0.4rem; border-bottom: var(--line-w) solid var(--line); background: var(--bg); white-space: nowrap; }
+[data-sim="dns-records"] .dr-sec td.dr-data, [data-sim="dns-records"] .dr-sec td.dr-own { white-space: normal; }
+[data-sim="dns-records"] .dr-sec tr[data-sec='answer'] td { font-weight: 700; }
+[data-sim="dns-records"] .dr-sec tr.sd-changed { outline: 0; box-shadow: none; }
+[data-sim="dns-records"] .dr-sec tr.sd-changed td { background: var(--hl); color: var(--on-hl); border-top: 0.2rem solid var(--ink); border-bottom: 0.2rem solid var(--ink); }
+[data-sim="dns-records"] .dr-empty { color: var(--muted); font-style: italic; font-weight: 400; }
+
+/* follow-ups */
+[data-sim="dns-records"] .dr-follow ol { margin: 0.2rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.25rem; }
+[data-sim="dns-records"] .dr-follow li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.45rem; }
+[data-sim="dns-records"] .dr-arrow { font-weight: 700; }
+[data-sim="dns-records"] .dr-lbl { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="dns-records"] .dr-first { font-weight: 700; }
+[data-sim="dns-records"] .dr-warn { padding: 0 0.3rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; }
+
+/* Phone and portrait: one column, the stage grows with its content; the tables scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dns-records"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dns-records"] .dr { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="dns-records"] .dr-col { gap: 0.8rem; }
+  [data-sim="dns-records"] .dr-ans { overflow-x: auto; }
+  [data-sim="dns-records"] .dr-sec td { padding-left: 0.25rem; padding-right: 0.25rem; }
+  /* every row has TTL 3600: on a phone the column gives way so the type shows beside the owner */
+  [data-sim="dns-records"] .sd-rt-table [data-col='ttl'] { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: vrste zapisa</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PRESET_KEY = {
+    'ul-zone': 'presetUl', nxdomain: 'presetNx', cname: 'presetCname', mx: 'presetMx', nodata: 'presetNodata',
+    'apex-cname': 'presetApex', delegation: 'presetDeleg'
+  };
+  /** Status badge per answer kind: an icon and a border style as well as a colour, so it reads in grayscale. */
+  var KIND = {
+    answer: { icon: '✓', st: 'ok', word: 'kindAnswer' },
+    outside: { icon: '✓', st: 'ok', word: 'kindAnswer' },
+    nodata: { icon: '∅', st: 'nodata', word: 'kindNodata' },
+    nxdomain: { icon: '✕', st: 'nx', word: 'kindNx' },
+    referral: { icon: '↷', st: 'ref', word: 'kindReferral' },
+    loop: { icon: '✕', st: 'nx', word: 'kindFail' },
+    'too-long': { icon: '✕', st: 'nx', word: 'kindFail' }
+  };
+  var CHECK_KEY = { 'bad-data': 'chkBadData', 'apex-no-soa': 'chkNoSoa', 'apex-no-ns': 'chkNoNs', 'cname-multiple': 'chkCnameMulti',
+    'ttl-differs': 'chkTtl', 'mx-cname': 'chkMxCname' };
+  var CAP_TYPE = { A: 'capA', AAAA: 'capAaaa', TXT: 'capTxt', SOA: 'capSoa', NS: 'capNsApex', CNAME: 'capCnameQ' };
+
+  /** Data (names, addresses, types, codes) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function bare(name) { return name.replace(/\.$/, ''); }
+  /** Record data that wraps only between its fields (an SOA has seven), never inside a name. */
+  function dataWrap(text) {
+    var out = [];
+    String(text).split(' ').forEach(function (tok, i) { if (i) out.push(' '); out.push(h('span', { class: 'dr-tok' }, tok)); });
+    return h('span', { translate: 'no' }, out);
+  }
+  /** A name or record data in the narrow answer table: it may break after a dot, or between fields. */
+  function dotWrap(text) {
+    var out = [];
+    String(text).split(/(\.| )/).forEach(function (bit) {
+      if (!bit) return;
+      out.push(bit);
+      if (bit === '.') out.push(h('wbr'));
+    });
+    return h('span', { translate: 'no' }, out);
+  }
+
+  /** The status chip: icon, code and (unless short) what it means. */
+  function statusNode(a, short) {
+    var k = KIND[a.kind];
+    return h('span', { class: 'dr-st', dataset: { st: k.st } }, k.icon, data(L.statusOf(a)), short ? null : h('span', { class: 'dr-stw' }, t(k.word)));
+  }
+
+  // ── left: the zone as a rule table, then the zone check ──
+  function zoneTable(s, fresh) {
+    var a = s.answer;
+    var used = L.rowsOf(a);
+    // the status goes on the implicit row when nothing is in the answer, else (an alias that ends in NODATA or
+    // NXDOMAIN) on the last answer row
+    var statusAt = a.answer.length && a.kind !== 'answer' ? s.zone.map(function (r) { return r.id; }).indexOf(a.answer[a.answer.length - 1].id) : -1;
+    // names the lookup visited: the query name and every canonical name it restarted at
+    var visited = [s.query.name].concat(s.answer.chain.filter(function (c) { return c.kind === 'cname'; }).map(function (c) { return c.to; }));
+    var notes = {};
+    s.check.forEach(function (c) {
+      if (c.code === 'cname-and-other' || c.code === 'cname-multiple') {
+        s.zone.forEach(function (r) { if (c.rows.indexOf(r.id) >= 0 && r.type === 'CNAME') notes[r.id] = t('noteCname'); });
+      } else if (c.code === 'mx-cname') notes[c.rows[0]] = t('noteMxAlias');
+    });
+    var rows = s.zone.map(function (r, i) {
+      var spec = { no: i + 1, cells: { owner: r.owner, ttl: r.ttl, type: r.type }, action: dataWrap(L.dataText(r)), hit: false };
+      if (s.served.indexOf(r.id) < 0) { spec.mark = 'skip'; spec.hit = null; spec.note = [{ k: 'muted', text: t('notLoaded') }]; }
+      else if (used.answer.indexOf(r.id) >= 0) spec.hit = true;
+      else if (used.authority.indexOf(r.id) >= 0 || used.additional.indexOf(r.id) >= 0) { spec.mark = 'hit'; spec.hit = null; }
+      else if (visited.indexOf(L.absRow(r).owner) >= 0 && s.answer.kind !== 'referral') spec.miss = ['type'];
+      if (notes[r.id]) spec.note = (spec.note || []).concat([{ k: 'dashed', text: notes[r.id] }]);
+      return spec;
+    });
+    var table = RT({
+      mode: 'deny',
+      title: h('span', null, t('zoneTitle'), ' ', data('lab.example')),
+      columns: [{ key: 'owner', label: t('colOwner') }, { key: 'ttl', label: t('colTtl') }, { key: 'type', label: t('colType') }],
+      actionLabel: t('colData'),
+      markLabel: t('colMark'),
+      rows: rows,
+      implicit: { text: t(a.kind === 'referral' ? 'implicitCut' : 'implicit'), action: '—' },
+      at: 'all',
+      done: true,
+      outcome: function (i) { return i === rows.length || i === statusAt ? statusNode(a, true) : null; },
+      words: { win: t('wordWin'), hit: t('wordHit') },
+      stickyMark: true
+    });
+    // Rows the last toggle added: highlighted with an ink bar (a tag under the number would make the row taller).
+    var trs = table.querySelectorAll('tbody tr');
+    s.zone.forEach(function (r, i) {
+      if (fresh.indexOf(r.id) >= 0) { trs[i].classList.add('dr-new'); trs[i].querySelector('.sd-rt-no').setAttribute('aria-label', t('tagNew')); }
+    });
+    return table;
+  }
+
+  function checkStrip(s) {
+    var bad = L.hasError(s.check);
+    var items = s.check.map(function (c) {
+      var ico = c.level === 'ok' ? '✓' : c.level === 'warn' ? '⚠' : '✕';
+      var text;
+      var vars = { owner: data(c.owner), types: data(c.types.join(', ')), type: data(c.types[0] || ''), host: data(c.host || '') };
+      if (c.level === 'ok') text = t.parts('chkOk', { n: s.zone.length, serial: data(s.zone[0].data.serial) });
+      else if (c.code === 'cname-and-other') text = t.parts(c.apex ? 'chkApex' : 'chkCname', vars);
+      else text = t.parts(CHECK_KEY[c.code], vars);
+      return h('li', { dataset: { level: c.level } }, h('span', { class: 'dr-ico', 'aria-hidden': 'true' }, ico), h('span', null, text));
+    });
+    if (bad) items.push(h('li', { dataset: { level: 'error' } }, h('span', { class: 'dr-ico', 'aria-hidden': 'true' }, '⚠'),
+      h('b', null, t('chkNotLoaded'))));
+    return h('section', { class: 'dr-box dr-check', dataset: { bad: String(bad) } }, h('h2', null, t('checkTitle')), h('ul', null, items));
+  }
+
+  // ── right: the query, its status and the answer ──
+  function answerBox(s, fresh) {
+    var a = s.answer;
+    var badges = h('div', { class: 'dr-badges' }, statusNode(a),
+      h('span', { class: 'dr-aa', dataset: { on: String(a.aa) } }, t(a.aa ? 'aaYes' : 'aaNo')));
+    var body = [];
+    function section(key, sec, list) {
+      if (sec !== 'answer' && !list.length) return;
+      body.push(h('tr', null, h('th', { colspan: '5' }, t(key), ' · ', data(list.length))));
+      if (!list.length) body.push(h('tr', null, h('td', { colspan: '5', class: 'dr-empty' }, t('empty'))));
+      list.forEach(function (r, i) {
+        var changed = fresh[sec].indexOf(i) >= 0;
+        body.push(h('tr', { dataset: { sec: sec }, class: changed ? 'sd-changed' : null },
+          h('td', { class: 'dr-own' }, dotWrap(r.owner)), h('td', null, data(r.ttl)), h('td', null, data('IN')), h('td', null, data(r.type)),
+          h('td', { class: 'dr-data' }, dotWrap(L.dataText(r)))));
+      });
+    }
+    section('secAnswer', 'answer', a.answer);
+    section('secAuthority', 'authority', a.authority);
+    section('secAdditional', 'additional', a.additional);
+    return h('section', { class: 'dr-box dr-ans' },
+      h('h2', null, t('queryTitle')),
+      h('div', { class: 'dr-q' }, data(s.query.name + '  IN  ' + s.query.type)),
+      badges,
+      h('table', { class: 'dr-sec' }, h('tbody', null, body)));
+  }
+
+  function followBox(s) {
+    var a = s.answer;
+    if (!a.chain.length) return null;
+    var tries = 0;
+    var items = a.chain.map(function (c) {
+      if (c.kind === 'cname') {
+        return h('li', null, data(c.from), h('span', { class: 'dr-arrow', 'aria-hidden': 'true' }, '→'), data('CNAME'),
+          h('span', { class: 'dr-arrow', 'aria-hidden': 'true' }, '→'), data(c.to));
+      }
+      if (c.kind === 'mx') {
+        tries++;
+        return h('li', { class: tries === 1 ? 'dr-first' : null }, h('span', null, t('followTry', { i: tries })), data(c.host),
+          h('span', { class: 'dr-lbl' }, t('followPref', { pref: c.pref })),
+          h('span', { class: 'dr-arrow', 'aria-hidden': 'true' }, '→'),
+          c.addrs.length ? data(c.addrs.join(', ')) : h('span', { class: 'dr-lbl' }, t('followNoAddr')),
+          c.alias ? h('span', { class: 'dr-warn' }, t('noteMxAlias')) : null);
+      }
+      if (c.kind === 'referral') {
+        return c.ns.map(function (n) {
+          return h('li', { class: 'dr-first' }, h('span', null, t('followAsk')), data(n.host),
+            h('span', { class: 'dr-arrow', 'aria-hidden': 'true' }, '→'),
+            n.addrs.length ? data(n.addrs.join(', ')) : h('span', { class: 'dr-lbl' }, t('followNoAddr')));
+        });
+      }
+      return h('li', null, t('followOutside'));
+    });
+    return h('section', { class: 'dr-box dr-follow' }, h('h2', null, t('followTitle')), h('ol', null, items));
+  }
+
+  // "Changed" marks the zone rows the last param change added and the RRs of each answer section that are new since
+  // the previous render (not on the renders while the page loads: preset, then the URL's params). A row a toggle
+  // removes is gone from the table, so there is nothing to mark; the answer rows show what that removal changed.
+  var last = { key: null, state: null, fresh: [], newRRs: null }, loaded = false;
+  setTimeout(function () { loaded = true; }, 0);
+  function changesFor(s, p) {
+    var key = JSON.stringify(p);
+    if (key !== last.key) {
+      var prev = loaded ? last.state : null;
+      last.fresh = prev ? s.zone.map(function (r) { return r.id; }).filter(function (id) { return !prev.zone.some(function (r) { return r.id === id; }); }) : [];
+      last.newRRs = {};
+      ['answer', 'authority', 'additional'].forEach(function (sec) { last.newRRs[sec] = prev ? L.newRRs(prev.answer, s.answer, sec) : []; });
+      last.key = key; last.state = s;
+    }
+    return last;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'qname', type: 'select', label: t('qname'), options: L.QNAMES.map(function (n) { return [n, n]; }) },
+      { key: 'qtype', type: 'select', label: t('qtype'), options: L.TYPES.map(function (x) { return [x, x]; }) },
+      { key: 'addWww', type: 'toggle', label: t('addWww') },
+      { key: 'mx', type: 'toggle', label: t('mx') },
+      { key: 'delegate', type: 'toggle', label: t('delegate') },
+      { key: 'apexCname', type: 'toggle', label: t('apexCname') }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'rt-win', label: t('legAnswer') },
+      { shape: 'rt-hit', label: t('legAlong') },
+      { shape: 'rt-no', label: t('legNo') },
+      { shape: 'rt-warn', label: t('legWarn') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var ch = changesFor(s, c.params);
+      c.stage.replaceChildren(h('div', { class: 'dr' },
+        h('div', { class: 'dr-col' }, zoneTable(s, ch.fresh)),
+        h('div', { class: 'dr-col' }, answerBox(s, ch.newRRs), followBox(s), checkStrip(s))));
+    },
+
+    caption: function (c) {
+      var s = c.state, a = s.answer, q = s.query;
+      var out = [];
+      function add(parts) { if (out.length) out.push(' '); out = out.concat(parts); }
+      if (s.loaded !== 'zone') {
+        var apex = s.check.some(function (x) { return x.code === 'cname-and-other' && x.apex; });
+        if (apex) add([t('capApex')]);
+        add([t('capLastValid')]);
+        return out;
+      }
+      var cn = a.chain.filter(function (x) { return x.kind === 'cname'; });
+      var name = data(bare(q.name)), type = data(q.type);
+      if (a.kind === 'answer') {
+        if (cn.length) add(t.parts('capCname', { from: data(bare(cn[0].from)), type: type, to: data(bare(cn[cn.length - 1].to)) }));
+        else if (q.type === 'MX') {
+          var first = a.chain[0];
+          add(t.parts('capMx', { host: data(bare(first.host)), pref: data(first.pref) }));
+          if (first.addrs.length) add(t.parts('capMxHost', { addr: data(first.addrs[0]) }));
+        } else {
+          add(t.parts('capAnswer', { n: a.answer.length, name: name, type: type }));
+          if (CAP_TYPE[q.type]) add([t(CAP_TYPE[q.type])]);
+        }
+      } else if (a.kind === 'nodata') {
+        add(cn.length ? t.parts('capCnameNodata', { from: data(bare(cn[0].from)), to: data(bare(cn[cn.length - 1].to)), type: type })
+          : t.parts('capNodata', { name: name, type: type }));
+      } else if (a.kind === 'nxdomain') {
+        add(cn.length ? t.parts('capCnameNx', { from: data(bare(cn[0].from)), to: data(bare(cn[cn.length - 1].to)) })
+          : t.parts('capNx', { name: name }));
+      } else if (a.kind === 'referral') {
+        var ref = a.chain[a.chain.length - 1];
+        add(t.parts('capReferral', { cut: data(bare(ref.cut)), ns: data(ref.ns.map(function (n) { return bare(n.host); }).join(', ')) }));
+      } else if (a.kind === 'outside' && cn.length) {
+        add(t.parts('capOutside', { to: data(bare(cn[cn.length - 1].to)) }));
+      } else add([t('capFail')]);
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
