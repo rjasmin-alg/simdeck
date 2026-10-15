@@ -1,0 +1,501 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-overlayfs-layers: a container's files as a stack of read-only image layers under a writable upper layer, one
+     column per path. Each step runs one command: the lookup goes top-down, the first write copies the whole file up,
+     rm leaves a whiteout, rm -rf + mkdir makes an opaque directory; two containers share the image; an image build saves
+     each RUN as a layer. Drawn on kit view K3 (block grid). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-overlayfs-layers">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slojevi slike i kopiranje naviše · simdeck</title>
+<meta name="description" content="Uredi i briši datoteke u kontejneru: prvo pisanje kopira cijelu datoteku naviše, rm ostavlja oznaku brisanja, a slojevi slike se ne mijenjaju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-overlayfs-layers",
+  "title": {
+    "hr": "Slojevi slike i kopiranje naviše",
+    "en": "Image layers and copy-up"
+  },
+  "concept": {
+    "hr": "Slojevi samo za čitanje, gornji za pisanje, kopiranje naviše, oznake brisanja",
+    "en": "Read-only layers, a writable top, copy-up and whiteouts"
+  },
+  "summary": {
+    "hr": "Uredi i briši datoteke u kontejneru: prvo pisanje kopira cijelu datoteku naviše, rm ostavlja oznaku brisanja, a slojevi slike se ne mijenjaju.",
+    "en": "Edit and delete files in a container: the first write copies the whole file up, rm leaves a whiteout, and the image layers never change."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "stepper",
+  "steps": 5,
+  "entries": [
+    {
+      "preset": "build-rm"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-overlayfs-layers"]; colours only from kit tokens.
+   Layout: the command line on top, then one kit block grid (K3, kit/blockgrid.js): what each container sees, its upper
+   layer, then the image layers from the topmost to the base; one column per path. */
+[data-sim="lnx-overlayfs-layers"] .ov {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.8cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-grid { --bg-row-gap: 0.75rem; justify-content: center; }
+[data-sim="lnx-overlayfs-layers"] .ov[data-rows="6"] .sd-bg-grid { --bg-row-gap: 0.45rem; }
+/* three or four rows: room for larger cells */
+[data-sim="lnx-overlayfs-layers"] .ov[data-rows="3"] .sd-bg-grid,
+[data-sim="lnx-overlayfs-layers"] .ov[data-rows="4"] .sd-bg-grid { --bg-row-gap: 1.1rem; }
+[data-sim="lnx-overlayfs-layers"] .ov[data-rows="3"] .sd-bg-cell,
+[data-sim="lnx-overlayfs-layers"] .ov[data-rows="4"] .sd-bg-cell { font-size: 1.35rem; }
+
+/* the command line: prompt, command, and what it printed */
+[data-sim="lnx-overlayfs-layers"] .ov-cmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 1.2rem;
+  min-height: 2.4rem;
+  padding: 0.25rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-overlayfs-layers"] .ov-cmd code { font-size: 1.3rem; }
+[data-sim="lnx-overlayfs-layers"] .ov-prompt { color: var(--muted); font-weight: 700; }
+[data-sim="lnx-overlayfs-layers"] .ov-out { color: var(--muted); }
+[data-sim="lnx-overlayfs-layers"] .ov-out code { font-size: 1.1rem; }
+
+/* cells: an empty slot (no entry of that name in this layer) is a faint dashed outline the lookup line shows through */
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell:empty { background: transparent; border-style: dashed; border-color: var(--line); }
+/* the container's own entries (upper layer, and the merged cells it serves): white with an ink edge */
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell:has(> .ov-up) { border: 0.15rem solid var(--ink); }
+/* copied up: a double edge */
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell:has(> .ov-cu) { border: 0.3rem double var(--ink); }
+/* opaque directory: a filled corner */
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell:has(> .ov-opq) { position: relative; }
+[data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell:has(> .ov-opq)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+}
+/* a name that vanished from the view in this step */
+[data-sim="lnx-overlayfs-layers"] .ov-gone { text-decoration: line-through; }
+[data-sim="lnx-overlayfs-layers"] .ov-sub { display: inline-flex; gap: 0.5rem; align-items: center; }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]; NOTES.md shared request) */
+[data-sim="lnx-overlayfs-layers"] .sd-ctl[hidden] { display: none; }
+
+/* row labels: a lock for the image's layers, a pencil for the upper layer */
+[data-sim="lnx-overlayfs-layers"] .ov-ico { width: 1em; height: 1em; flex: none; fill: currentColor; }
+[data-sim="lnx-overlayfs-layers"] .ov-lab { display: inline-flex; gap: 0.4rem; align-items: center; }
+[data-sim="lnx-overlayfs-layers"] .ov-lab-none { color: var(--muted); font-weight: 400; }
+
+/* legend swatches */
+[data-sim="lnx-overlayfs-layers"] .sd-swatch[data-shape="ov-up"] { background: var(--bg); border: 0.15rem solid var(--ink); }
+[data-sim="lnx-overlayfs-layers"] .sd-swatch[data-shape="ov-cu"] { background: var(--bg); border: 0.3rem double var(--ink); }
+[data-sim="lnx-overlayfs-layers"] .sd-swatch[data-shape="ov-opq"] { background: linear-gradient(135deg, var(--ink) 45%, var(--bg) 45%); border: 0.15rem solid var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-overlayfs-layers"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-overlayfs-layers"] .ov { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-overlayfs-layers"] .ov-cmd code { font-size: 1rem; }
+  [data-sim="lnx-overlayfs-layers"] .ov-cmd { min-width: 0; overflow-wrap: anywhere; }
+  [data-sim="lnx-overlayfs-layers"] .ov .sd-bg-cell { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Slojevi slike i kopiranje naviše</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var GREY = 8;                                       // image layers: the series grey, solid (read-only)
+  var LINK_OPS = ['read', 'append', 'chmod', 'rm', 'rmrf'];
+  var START = { 'edit-config': 'edit', 'big-file': 'big', 'delete': 'delete', 'two-containers': 'two', 'build-rm': 'build', 'opaque': 'opaque' };
+  var RUN = { install: 'RUN dnf install -y gcc', rmrf: 'RUN rm -rf /var/cache/dnf' };
+
+  // ── small pieces ──
+
+  /** Data (paths, file names, sizes, layer names) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function who(id) { return id === L.BUILD ? 'RUN' : id; }
+  /** Bytes as B, KB or MB (1024-based), one decimal at most, with the page's decimal mark. A small size that is not a
+      whole number of KB stays in bytes (3082 B), so an appended line is not rounded away. */
+  function fmt(n) {
+    var exact = n < 100 * L.KB && n % L.KB !== 0;
+    var u = exact ? ['B', 1] : n >= L.MB ? ['MB', L.MB] : n >= L.KB ? ['KB', L.KB] : ['B', 1];
+    var v = Math.round(n / u[1] * 10) / 10;
+    var s = v % 1 === 0 ? String(v) : v.toFixed(1);
+    return (Simdeck.lang === 'hr' ? s.replace('.', ',') : s) + ' ' + u[0];
+  }
+  function size(n) { return data(fmt(n)); }
+  var NS = 'http://www.w3.org/2000/svg';
+  var ICON = {
+    lock: 'M7 10V7a5 5 0 0 1 10 0v3h1.5v11h-13V10zm2.3 0h5.4V7a2.7 2.7 0 0 0-5.4 0z',
+    pen: 'M3 21l1.2-5.2L15.6 4.4l4 4L8.2 19.8zM17 3l1.6-1.6 4 4L21 7z'
+  };
+  function glyph(name) {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'ov-ico');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', ICON[name]);
+    p.setAttribute('fill-rule', 'evenodd');
+    s.append(p);
+    return s;
+  }
+  function has(list, row, path) { return (list || []).some(function (x) { return x.row === row && x.path === path; }); }
+  /** The topmost image layer that holds a path (where a hidden name still lives). */
+  function holder(s, path) {
+    for (var i = s.layers.length - 1; i >= 0; i--) if (s.layers[i].files[path]) return s.layers[i].id;
+    return null;
+  }
+  function labelOf(path, kind) { var b = L.baseName(path); return kind === 'dir' || kind === 'opaque' ? b + '/' : b; }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands (a node can stand in one place only),
+      *English term* turned into <em lang="en"> (the Croatian term rule, for terms the glossary lacks) and `x` into code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── stage ──
+
+  /** How many container slots the scene ever shows (two-containers: 2), so rows do not come and go. */
+  function slotsOf(p) { return L.frames(p).reduce(function (n, s) { return Math.max(n, s.containers.length); }, 0); }
+
+  function mergedRow(s, p, i, cols) {
+    var c = s.containers[i];
+    if (!c) return { id: 'merged:-' + i, label: h('span', { class: 'ov-lab ov-lab-none' }, t('rowNone')), brackets: [], cells: cols.map(function () { return null; }) };
+    var row = 'merged:' + c.id;
+    var m = L.merged(s, c.id);
+    var changed = s.changed.some(function (x) { return x.row === row; });
+    var brackets = [];
+    if (s.cmd && s.cmd.op === 'ls' && s.cmd.c === c.id && s.result.what === 'list') {
+      var idx = cols.map(function (q, k) { return q.indexOf(s.cmd.path + '/') === 0 ? k : -1; }).filter(function (k) { return k >= 0; });
+      if (idx.length) brackets.push({ from: idx[0], len: idx[idx.length - 1] - idx[0] + 1, label: code('ls ' + s.cmd.path) });
+    }
+    return {
+      id: row, brackets: brackets,
+      label: h('span', { class: 'ov-lab' + (changed ? ' sd-hl' : '') }, t.parts('rowSees', { c: data(who(c.id)) })),
+      cells: cols.map(function (q) {
+        var e = m[q], now = has(s.changed, row, q);
+        var g = (s.gone || []).filter(function (x) { return x.row === row && x.path === q; })[0];
+        if (!e) return g ? { text: h('span', { class: 'ov-gone', translate: 'no' }, labelOf(q, g.kind)), now: true } : {};
+        var up = e.from.indexOf('upper:') === 0;
+        var src = up ? glyph('pen') : data(e.from);
+        var sub = p.showSizes && e.kind === 'file' ? h('span', { class: 'ov-sub' }, src, data(fmt(e.size))) : h('span', { class: 'ov-sub' }, src);
+        var name = h('span', { class: up ? 'ov-up' + (e.kind === 'opaque' ? ' ov-opq' : '') : null, translate: 'no' }, labelOf(q, e.kind));
+        return up ? { text: name, sub: sub, now: now } : { text: name, sub: sub, kind: 'soft', c: GREY, now: now };
+      })
+    };
+  }
+
+  function upperRow(s, p, i, cols) {
+    var c = s.containers[i];
+    if (!c) return { id: 'upper:-' + i, label: h('span', { class: 'ov-lab ov-lab-none' }, glyph('pen'), t('rowNone')), cells: cols.map(function () { return null; }) };
+    var row = 'upper:' + c.id;
+    return {
+      id: row,
+      label: h('span', { class: 'ov-lab' }, glyph('pen'), t.parts('rowUpper', { c: data(who(c.id)) })),
+      aside: p.showSizes ? size(s.bytesUpper[c.id]) : null,
+      cells: cols.map(function (q) {
+        var e = c.upper[q], now = has(s.changed, row, q);
+        if (!e) return {};
+        if (e.kind === 'whiteout') return { text: L.baseName(q), sub: 'wh', kind: 'dead', now: now };
+        if (e.kind === 'dir' || e.kind === 'opaque') {
+          return { text: h('span', { class: 'ov-up' + (e.kind === 'opaque' ? ' ov-opq' : ''), translate: 'no' }, labelOf(q, e.kind)),
+            sub: h('span', null, t(e.kind === 'opaque' ? 'opaque' : 'dir')), now: now };
+        }
+        return { text: h('span', { class: e.copied ? 'ov-cu' : 'ov-up', translate: 'no' }, L.baseName(q)),
+          sub: p.showSizes ? fmt(e.size) : null, now: now };
+      })
+    };
+  }
+
+  function layerRow(s, p, id, cols) {
+    var l = s.layers.filter(function (x) { return x.id === id; })[0];
+    var label = h('span', { class: 'ov-lab' }, glyph('lock'), data(id));
+    if (!l) return { id: id, label: label, aside: h('span', null, t('notYet')), cells: cols.map(function () { return null; }) };
+    return {
+      id: id, label: label,
+      aside: p.showSizes ? size(L.sumFiles(l.files)) : null,
+      cells: cols.map(function (q) {
+        var e = l.files[q], now = has(s.changed, id, q);
+        if (!e) return {};
+        if (e.kind === 'whiteout') return { text: L.baseName(q), sub: 'wh', kind: 'dead', now: now };
+        if (e.kind === 'dir') return { text: labelOf(q, 'dir'), sub: h('span', null, t('dir')), kind: 'fill', c: GREY, now: now };
+        return { text: L.baseName(q), sub: p.showSizes ? fmt(e.size) : null, kind: 'fill', c: GREY, now: now };
+      })
+    };
+  }
+
+  function cmdText(s) {
+    var c = s.cmd;
+    if (!c) return '';
+    if (c.op === 'run' || c.op === 'commit') return RUN[c.op === 'run' ? c.run : (c.layer === 'L2' ? 'install' : 'rmrf')];
+    if (c.op === 'read') return (c.cmd === 'tail' ? 'tail -n 1 ' : 'cat ') + c.path;
+    if (c.op === 'append') return 'echo "' + c.text + '" >> ' + c.path;
+    if (c.op === 'create') return 'echo "' + c.text + '" > ' + c.path;
+    if (c.op === 'chmod') return 'chmod ' + c.mode + ' ' + c.path;
+    if (c.op === 'rmrf') return 'rm -rf ' + c.path;
+    return c.op + ' ' + c.path;
+  }
+
+  function cmdOut(s) {
+    var r = s.result, c = s.cmd;
+    if (!r) return null;
+    if (r.what === 'read' && r.from === 'upper:' + c.c) return h('span', null, t.parts('outReadUp', { size: size(r.size), c: data(c.c) }));
+    if (r.what === 'read') return h('span', null, t.parts('outRead', { size: size(r.size), from: data(r.from) }));
+    if (r.what === 'missing' && c.op === 'read') return code((c.cmd || 'cat') + ': ' + c.path + ': No such file or directory');
+    if (r.what === 'missing' && c.op === 'ls') return code('ls: cannot access \'' + c.path + '\': No such file or directory');
+    if (r.what === 'list') return r.entries.length ? code(r.entries.map(function (e) { return L.baseName(e.path); }).join('  ')) : h('span', null, t('outEmpty'));
+    if (r.what === 'commit') return h('span', null, t.parts('outSaved', { layer: data(r.layer) }));
+    return null;
+  }
+
+  function render(c) {
+    var s = c.state, p = c.params;
+    var cols = L.columns(p);
+    var fr = L.frames(p);
+    var last = fr[fr.length - 1];
+    var n = slotsOf(p);
+    var rows = [];
+    for (var i = 0; i < n; i++) rows.push(mergedRow(s, p, i, cols));
+    for (var j = 0; j < n; j++) rows.push(upperRow(s, p, j, cols));
+    last.layers.slice().reverse().forEach(function (l) { rows.push(layerRow(s, p, l.id, cols)); });
+
+    // the lookup of this step: down one column from what the container sees to the layer that answered
+    var links = [];
+    var lsMiss = s.cmd && s.cmd.op === 'ls' && s.result && s.result.what === 'missing';
+    if (s.lookup && s.cmd && (LINK_OPS.indexOf(s.cmd.op) >= 0 || lsMiss)) {
+      var col = cols.indexOf(s.cmd.path);
+      var path = ['merged:' + s.cmd.c].concat(s.lookup.visited);
+      var miss = s.result && s.result.what === 'missing';
+      for (var k = 1; k < path.length; k++) {
+        var end = k === path.length - 1;
+        links.push({ from: { row: path[k - 1], cell: col }, to: { row: path[k], cell: col }, now: end, broken: end && miss });
+      }
+    }
+
+    var count, meta = [];
+    if (s.scene === 'build-rm') {
+      count = { text: h('span', null, t.parts('cntImage', { size: size(s.imageBytes) })), hl: s.phase === 'build-commit' };
+      if (s.containers[0] && s.containers[0].id === L.BUILD) meta.push(h('span', null, t.parts('metaUpper', { size: size(s.bytesUpper[L.BUILD]) })));
+    } else {
+      var parts = [];
+      s.containers.forEach(function (x, k) {
+        if (k) parts.push(' · ');
+        parts.push.apply(parts, t.parts('cntUpper', { c: data(x.id), size: size(s.bytesUpper[x.id]) }));
+      });
+      var grew = !!(c.prev && s.containers.some(function (x) { return c.prev.bytesUpper[x.id] !== s.bytesUpper[x.id]; }));
+      count = { text: h('span', null, parts), hl: grew };
+      meta.push(h('span', null, t.parts('metaImage', { size: size(s.imageBytes) })));
+    }
+
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'), meta: meta, count: count,
+      colLabels: cols.map(L.dirName),
+      cellHeight: rows.length > 5 ? '2.6rem' : rows.length > 4 ? '2.8rem' : '3.3rem', cellWidth: 'minmax(0, 12rem)', cellWidthPhone: 'minmax(5.5rem, max-content)',
+      rows: rows, links: links
+    });
+    var prompt = s.cmd ? (s.cmd.c !== L.BUILD ? s.cmd.c : null) : (s.containers[0] ? s.containers[0].id : null);
+    var cmd = h('div', { class: 'ov-cmd' },
+      prompt ? h('span', { class: 'ov-prompt', translate: 'no' }, prompt + ' $') : null,
+      s.cmd ? code(cmdText(s)) : null,
+      h('span', { class: 'ov-out' }, cmdOut(s)));
+    c.stage.replaceChildren(h('div', { class: 'ov', dataset: { rows: String(rows.length) } }, cmd, grid));
+  }
+
+  // ── captions ──
+
+  function other(s, id) { var o = s.containers.filter(function (x) { return x.id !== id; })[0]; return o ? o.id : null; }
+
+  function caption(c) {
+    var s = c.state, n = c.n;
+    if (s.phase === 'start') {
+      return rich('capStart_' + START[s.scene], { conf: code('/etc/web/server.conf'), index: code('/var/www/html/index.html'),
+        log: code('/var/log/app.log'), img: size(s.imageBytes), dir: code('/app') });
+    }
+    if (s.phase === 'build-run') {
+      return s.cmd.run === 'install' ? rich('capRunInstall', { bytes: size(s.result.bytes) }) : rich('capRunRm', { dir: code(s.cmd.path) });
+    }
+    if (s.phase === 'build-commit') {
+      return s.result.layer === 'L3' ? rich('capCommitWh', { img: size(s.imageBytes) })
+        : rich('capCommit', { layer: data(s.result.layer), img: size(s.imageBytes) });
+    }
+    if (s.phase === 'build-container') {
+      return rich('capBuildLs', { dir: code(s.cmd.path), seen: size(L.seenBytes(s, s.cmd.c)), img: size(s.imageBytes) });
+    }
+    var r = s.result, cmd = s.cmd, id = cmd.c;
+    var v = { c: data(id), name: code(L.baseName(cmd.path)), dir: code(cmd.path) };
+    var lower = holder(s, cmd.path);
+    var o = other(s, id);
+    var oHas = !!(o && s.containers.filter(function (x) { return x.id === o; })[0].upper[cmd.path]);
+    switch (r.what) {
+      case 'read':
+        if (r.from === 'upper:' + id) return rich('capReadUpper', Object.assign({ from: data(lower) }, v));
+        if (oHas) return rich('capReadOther', Object.assign({ from: data(r.from), e: data(o) }, v));
+        if (s.scene === 'two-containers' && n === 2) return rich('capReadShared', Object.assign({ from: data(r.from) }, v));
+        return rich('capReadLower', Object.assign({ from: data(r.from), up: size(s.bytesUpper[id]) }, v));
+      case 'copyup':
+        if (cmd.op === 'chmod') return rich('capChmod', Object.assign({ copied: size(r.copied), from: data(r.from) }, v));
+        if (oHas) return rich('capCopyUp', v).concat(sp(rich('capOwn', Object.assign({ e: data(o), from: data(r.from) }, v))));
+        if (r.copied >= L.MB) return rich('capCopyUp', v).concat(sp(rich('capWhole', { copied: size(r.copied), added: size(r.added) })));
+        return rich('capCopyUp', v).concat(sp(rich('capCopied', { copied: size(r.copied), added: size(r.added), up: size(s.bytesUpper[id]) })));
+      case 'write':
+        return rich('capWrite', Object.assign({ added: size(r.added), up: size(s.bytesUpper[id]) }, v));
+      case 'new':
+        return rich('capNew', Object.assign({ added: size(r.added) }, v));
+      case 'whiteout': {
+        if (cmd.op === 'rmrf') return rich('capRmrf', v);
+        var held = s.layers.filter(function (l) { return l.id === lower; })[0].files[cmd.path].size;
+        var tail = r.dropped ? rich('capRmDropped', { dropped: size(r.dropped), from: data(lower), size: size(held) })
+          : rich('capRmStill', Object.assign({ from: data(lower), size: size(held) }, v));
+        return rich('capRm', v).concat(sp(tail));
+      }
+      case 'removed':
+        return rich('capRemoved', v);
+      case 'missing':
+        return r.stop === 'whiteout' ? rich('capMissWh', Object.assign({ from: data(lower) }, v)) : rich('capMissNone', v);
+      case 'list': {
+        var list = code(r.entries.map(function (e) { return L.baseName(e.path); }).join(', '));
+        if (s.scene === 'opaque' && r.entries.length) return rich('capLsMerge', Object.assign({ n: r.entries.length, list: list }, v));
+        if (s.scene === 'opaque') {
+          var kept = s.layers.reduce(function (k, l) { return k + Object.keys(l.files).filter(function (q) { return q.indexOf(cmd.path + '/') === 0; }).length; }, 0);
+          return rich('capLsOpaque', Object.assign({ n: kept }, v));
+        }
+        var up = s.containers.filter(function (x) { return x.id === id; })[0].upper;
+        var hidden = Object.keys(up).filter(function (q) { return up[q].kind === 'whiteout' && q.indexOf(cmd.path + '/') === 0; });
+        return rich('capLsHidden', Object.assign({ list: list, hidden: code(hidden.map(L.baseName).join(', ')), from: data(holder(s, hidden[0])) }, v));
+      }
+      case 'opaque':
+        return rich('capOpaque', v);
+    }
+    return '';
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['edit-config', t('pEdit')], ['big-file', t('pBig')], ['delete', t('pDelete')], ['two-containers', t('pTwo')],
+          ['build-rm', t('pBuild')], ['opaque', t('pOpaque')]],
+        visible: function () { return false; } },
+      { key: 'container', type: 'choice', label: t('container'), hint: t('containerHint'), options: [['A', 'A'], ['B', 'B']],
+        visible: function (p) { return p.scene === 'two-containers'; } },
+      { key: 'showSizes', type: 'toggle', label: t('showSizes') }
+    ],
+
+    presets: [
+      { id: 'edit-config', label: t('pEdit'), params: { scene: 'edit-config' }, hint: t('pEditHint') },
+      { id: 'big-file', label: t('pBig'), params: { scene: 'big-file' }, hint: t('pBigHint') },
+      { id: 'delete', label: t('pDelete'), params: { scene: 'delete' }, hint: t('pDeleteHint') },
+      { id: 'two-containers', label: t('pTwo'), params: { scene: 'two-containers' }, hint: t('pTwoHint') },
+      { id: 'build-rm', label: t('pBuild'), params: { scene: 'build-rm' }, hint: t('pBuildHint') },
+      { id: 'opaque', label: t('pOpaque'), params: { scene: 'opaque' }, hint: t('pOpaqueHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: GREY, label: t('legRO') },
+      { shape: 'ov-up', label: t('legUpper') },
+      { shape: 'ov-cu', label: t('legCopied') },
+      { shape: 'bg-dead', label: t('legWh') },
+      { shape: 'ov-opq', label: t('legOpq') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
