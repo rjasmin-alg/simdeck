@@ -26,7 +26,7 @@ test('tie-break: refusal reasons are checked in order unknown → site → not-c
   assert.equal(logic.tryPlace(home, 'ana', 'branch').reason, 'site', 'a site is refused as a site, not as "not a container"');
   assert.equal(logic.tryPlace(home, 'ana', 'brk').reason, 'not-container', 'another domain\'s head: not-container comes before other-domain');
   assert.equal(logic.tryPlace(home, 'ana', 'brkdc01').reason, 'not-container');
-  assert.equal(logic.tryPlace(home, 'ana', 'emb-users').reason, 'other-domain');
+  assert.equal(logic.tryPlace(home, 'ana', 'thf-users').reason, 'other-domain');
 });
 
 test('tie-break: placing an object where it already is succeeds with same; a refusal leaves the placement as it was', () => {
@@ -48,8 +48,8 @@ test('tie-break: GPO order is the domain (link order of gpos.txt), then each OU 
 });
 
 test('trust path: through the forest root; the trusts form a tree, so the path is unique', () => {
-  assert.deepEqual(logic.trustPath('brk', 'emb'), ['brk', 'q', 'emb']);
-  assert.deepEqual(logic.trustPath('emb', 'brk'), ['emb', 'q', 'brk']);
+  assert.deepEqual(logic.trustPath('brk', 'thf'), ['brk', 'q', 'thf']);
+  assert.deepEqual(logic.trustPath('thf', 'brk'), ['thf', 'q', 'brk']);
   assert.deepEqual(logic.trustPath('q', 'q'), ['q']);
   assert.equal(logic.trustPath('q', 'nowhere'), null);
 });
@@ -59,7 +59,7 @@ test('trust path: through the forest root; the trusts form a tree, so the path i
 test('rule 1: Enterprise Admins reach every domain; Domain Admins only their own; the boundary is the forest', () => {
   assert.equal(logic.securityBoundary(), 'forest');
   assert.notEqual(logic.kindOf(logic.securityBoundary()), 'domain');
-  assert.deepEqual(logic.reach('enterprise-admins'), ['q', 'brk', 'emb']);
+  assert.deepEqual(logic.reach('enterprise-admins'), ['q', 'brk', 'thf']);
   assert.deepEqual(logic.reach('domain-admins:brk'), ['brk']);
   assert.deepEqual(logic.reach('domain-admins:q'), ['q']);
   assert.deepEqual(logic.reach('schema-admins'), []);
@@ -81,22 +81,22 @@ test('rule 2: a domain partition: full on its own DCs, partial on the GCs of oth
   assert.deepEqual(brk, [
     { dc: 'dc01', copy: 'partial', readOnly: true },
     { dc: 'brkdc01', copy: 'full', readOnly: false },
-    { dc: 'embdc01', copy: 'partial', readOnly: true }
+    { dc: 'thfdc01', copy: 'partial', readOnly: true }
   ]);
   assert.ok(!brk.some((r) => r.dc === 'rodc01'), 'RODC01 is not a GC, so it holds nothing of brk');
   assert.deepEqual(logic.replicas('domain:q'), [
     { dc: 'dc01', copy: 'full', readOnly: false },
     { dc: 'rodc01', copy: 'full', readOnly: true },
     { dc: 'brkdc01', copy: 'partial', readOnly: true },
-    { dc: 'embdc01', copy: 'partial', readOnly: true }
+    { dc: 'thfdc01', copy: 'partial', readOnly: true }
   ]);
   assert.deepEqual(logic.replicas('domain:nowhere'), []);
 });
 
 test('rule 2: what each DC holds; one password policy per domain, from its own Default Domain Policy', () => {
   assert.deepEqual(logic.partitionsOn('rodc01').map((p) => p.partition), ['schema', 'config', 'domain:q']);
-  assert.deepEqual(logic.partitionsOn('embdc01').map((p) => p.partition + ':' + p.copy),
-    ['schema:full', 'config:full', 'domain:q:partial', 'domain:brk:partial', 'domain:emb:full']);
+  assert.deepEqual(logic.partitionsOn('thfdc01').map((p) => p.partition + ':' + p.copy),
+    ['schema:full', 'config:full', 'domain:q:partial', 'domain:brk:partial', 'domain:thf:full']);
   for (const d of logic.DOMAINS) {
     assert.deepEqual(logic.passwordPolicy(d.id), { domain: d.id, gpo: 'Default Domain Policy' });
     assert.ok(d.gpos.includes('Default Domain Policy'), d.id);
@@ -106,22 +106,22 @@ test('rule 2: what each DC holds; one password policy per domain, from its own D
 
 // ── rule 3: trees and trusts ──
 
-test('rule 3: a tree is a contiguous namespace; brk is a child of quillmoor, emberline a new tree', () => {
+test('rule 3: a tree is a contiguous namespace; brk is a child of quillmoor, thornfell a new tree', () => {
   assert.equal(logic.isContiguous('brk.quillmoor.example', 'quillmoor.example'), true);
-  assert.equal(logic.isContiguous('emberline.example', 'quillmoor.example'), false);
+  assert.equal(logic.isContiguous('thornfell.example', 'quillmoor.example'), false);
   assert.equal(logic.isContiguous('a.brk.quillmoor.example', 'quillmoor.example'), false, 'a grandchild is not a direct child');
   assert.equal(logic.isContiguous('xquillmoor.example', 'quillmoor.example'), false, 'the label boundary matters');
   assert.equal(logic.isContiguous('brkxquillmoor.example', 'quillmoor.example'), false, 'label boundary, long prefix');
   assert.equal(logic.isContiguous('.quillmoor.example', 'quillmoor.example'), false, 'empty label');
   assert.equal(logic.isContiguous('quillmoor.example', 'quillmoor.example'), false, 'a domain is not its own child');
   for (const d of logic.DOMAINS) if (d.parent) assert.ok(logic.isContiguous(d.name, logic.node(d.parent).name), d.id);
-  assert.deepEqual(logic.trees().map((x) => [x.id, x.domains]), [['tree-q', ['q', 'brk']], ['tree-emb', ['emb']]]);
+  assert.deepEqual(logic.trees().map((x) => [x.id, x.domains]), [['tree-q', ['q', 'brk']], ['tree-thf', ['thf']]]);
 });
 
 test('rule 3: parent–child and tree-root trusts come automatically, two-way and transitive', () => {
   assert.deepEqual(logic.trusts(), [
     { a: 'q', b: 'brk', kind: 'parent-child', twoWay: true, transitive: true },
-    { a: 'q', b: 'emb', kind: 'tree-root', twoWay: true, transitive: true }
+    { a: 'q', b: 'thf', kind: 'tree-root', twoWay: true, transitive: true }
   ]);
 });
 
@@ -147,8 +147,8 @@ test('rule 4: an OU lives inside one domain and can carry GPO links', () => {
 
 test('rule 5: GPOs link to site, domain and OU only; never to CN=Users / CN=Computers, the forest or a tree', () => {
   for (const c of logic.CONTAINERS.filter((x) => x.kind === 'container')) assert.equal(logic.canLinkGpo(c.id), false, c.id);
-  for (const id of ['hq', 'branch', 'q', 'brk', 'emb']) assert.equal(logic.canLinkGpo(id), true, id);
-  for (const id of ['forest', 'tree-q', 'tree-emb', 'dc01', 'ana']) assert.equal(logic.canLinkGpo(id), false, id);
+  for (const id of ['hq', 'branch', 'q', 'brk', 'thf']) assert.equal(logic.canLinkGpo(id), true, id);
+  for (const id of ['forest', 'tree-q', 'tree-thf', 'dc01', 'ana']) assert.equal(logic.canLinkGpo(id), false, id);
 });
 
 test('rule 5: an object in CN=Users gets only the domain-linked GPOs; in an OU also the OU links above it', () => {
@@ -193,7 +193,7 @@ test('rule 6: moving within the domain works; to another domain it is refused as
   const r = logic.tryPlace(home, 'ana', 'q-hq');
   assert.deepEqual([r.ok, r.same, r.placed.ana], [true, false, 'q-hq']);
   assert.equal(home.ana, 'q-users', 'tryPlace does not mutate its input');
-  for (const target of ['brk-users', 'brk-computers', 'emb-users', 'emb-computers']) {
+  for (const target of ['brk-users', 'brk-computers', 'thf-users', 'thf-computers']) {
     for (const o of logic.OBJECTS) assert.equal(logic.tryPlace(home, o.id, target).reason, 'other-domain', `${o.id} → ${target}`);
   }
 });
@@ -211,7 +211,7 @@ test('rule 6: a placement param naming another domain or an unknown box falls ba
 });
 
 test('rule 6: the last attempt: a refusal is reported, a matching move is reported, a stale move is ignored', () => {
-  assert.deepEqual(at({ last: 'ana>emb-users' }).attempt, { obj: 'ana', target: 'emb-users', ok: false, reason: 'other-domain' });
+  assert.deepEqual(at({ last: 'ana>thf-users' }).attempt, { obj: 'ana', target: 'thf-users', ok: false, reason: 'other-domain' });
   assert.deepEqual(at({ ana: 'q-hq', last: 'ana>q-hq' }).attempt, { obj: 'ana', target: 'q-hq', ok: true, reason: null });
   assert.equal(at({ last: 'ana>q-hq' }).attempt, null, 'says moved, but ana is still in CN=Users');
   assert.equal(at({ last: 'nobody>q-hq' }).attempt, null);
@@ -221,7 +221,7 @@ test('rule 6: the last attempt: a refusal is reported, a matching move is report
 // ── rule 7: sites are independent of domains ──
 
 test('rule 7: one site holds DCs of several domains, one domain spans several sites; objects never go in a site', () => {
-  assert.deepEqual(logic.domainsInSite('hq'), ['q', 'emb']);
+  assert.deepEqual(logic.domainsInSite('hq'), ['q', 'thf']);
   assert.deepEqual(logic.domainsInSite('branch'), ['q', 'brk']);
   assert.deepEqual(logic.sitesOfDomain('q'), ['hq', 'branch']);
   assert.deepEqual(logic.sitesOfDomain('brk'), ['branch']);
@@ -233,10 +233,10 @@ test('rule 7: one site holds DCs of several domains, one domain spans several si
 
 test('lenses: security lights the forest; replication the forest and each domain; policy 11 lit, 6 grey', () => {
   assert.deepEqual(logic.lensOf('security'), { mode: 'security', nodes: ['forest'], grey: [] });
-  assert.deepEqual(logic.lensOf('replication').nodes, ['forest', 'q', 'brk', 'emb']);
+  assert.deepEqual(logic.lensOf('replication').nodes, ['forest', 'q', 'brk', 'thf']);
   const pol = logic.lensOf('policy');
   assert.equal(pol.nodes.length, 11);
-  assert.deepEqual(pol.grey, ['q-users', 'q-computers', 'brk-users', 'brk-computers', 'emb-users', 'emb-computers']);
+  assert.deepEqual(pol.grey, ['q-users', 'q-computers', 'brk-users', 'brk-computers', 'thf-users', 'thf-computers']);
   assert.deepEqual(logic.lensOf('none'), { mode: 'none', nodes: [], grey: [] });
   assert.deepEqual(logic.lensOf('bogus'), { mode: 'none', nodes: [], grey: [] });
 });

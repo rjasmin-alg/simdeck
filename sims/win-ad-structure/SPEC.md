@@ -15,13 +15,13 @@ confirmed against the vendor's documentation in this session; `NOTES.md` lists t
 |---|---|---|
 | Forest | `quillmoor.example`; forest root domain `quillmoor.example` | task; estate `forest.txt` |
 | Tree 1 | `quillmoor.example` and its child `brk.quillmoor.example` | task (the child domain is invented for the lesson; the estate has one domain) |
-| Tree 2 | `emberline.example` (new tree in the same forest) | task |
+| Tree 2 | `thornfell.example` (new tree in the same forest) | task (it names `emberline.example`; renamed because the DR estate already uses "emberline", and invented examples must not reuse names from other projects, owner 2026-10-15) |
 | OU tree of `quillmoor.example` | `CN=Users` (155 users), `CN=Computers` (159 computers), `OU=Quillmoor` › `OU=Staff` › `OU=HQ` (21 users), `OU=Brackenridge` (44 users); `OU=Quillmoor` › `OU=Workstations` (35 computers), `OU=Servers` (5 computers) | estate `ou-tree.txt` (subset the task names) |
-| `brk`, `emberline` | `CN=Users`, `CN=Computers` only (counts unknown, not shown) | chosen here: a drop target in another domain, for rule 6 |
+| `brk`, `thornfell` | `CN=Users`, `CN=Computers` only (counts unknown, not shown) | chosen here: a drop target in another domain, for rule 6 |
 | GPO links, `quillmoor.example` | domain root: Default Domain Policy, Local Admins - Interactive, Drive Maps, Windows Update - Defer (in that order); `OU=Workstations`: Chirp Autostart; `OU=Servers`: Firewall Off | estate `gpos.txt` |
-| GPO links, `brk`, `emberline` | domain root: Default Domain Policy (every domain gets its own) | Microsoft, chosen here |
+| GPO links, `brk`, `thornfell` | domain root: Default Domain Policy (every domain gets its own) | Microsoft, chosen here |
 | Sites | `HQ` (subnet 10.10.0.0/16), `Branch` (10.20.0.0/16), one site link `HQ–Branch`; no GPO linked to a site | topologydrafter `two-sites` (DC01 10.10.0.10 at HQ, RODC01 10.20.0.10 at the branch); the /16 prefixes are chosen here *(check)* |
-| DCs | `DC01` (quillmoor, HQ, GC), `RODC01` (quillmoor, Branch, read-only, not GC), `BRK-DC01` (brk, Branch, GC), `EMB-DC01` (emberline, HQ, GC) | DC01/RODC01 from `two-sites`; BRK-DC01 and EMB-DC01 added here so each domain has a DC and each site holds DCs of two domains (rule 7) |
+| DCs | `DC01` (quillmoor, HQ, GC), `RODC01` (quillmoor, Branch, read-only, not GC), `BRK-DC01` (brk, Branch, GC), `THF-DC01` (thornfell, HQ, GC) | DC01/RODC01 from `two-sites`; BRK-DC01 and THF-DC01 added here so each domain has a DC and each site holds DCs of two domains (rule 7) |
 | Objects to place | user `ana`, computer `PC07`, group `G-Projects`, all in `quillmoor.example` | task |
 | Default containers | users and groups → `CN=Users`, computers → `CN=Computers` (so that is where all three start) | Microsoft, "Redirect users and computers containers" (2026-02-12) |
 
@@ -40,14 +40,14 @@ screen; the task names the subset.
 2. **Replication.** Schema and configuration replicate to every DC of the forest (4 DCs). A domain partition replicates
    only to the DCs of its own domain (full copy; the RODC holds a read-only full copy), and a **partial** copy goes to
    every GC of the other domains. A domain is also the boundary of Domain Admins and of the one domain password policy
-   (its own Default Domain Policy). Expected: `replicas('domain:brk')` = BRK-DC01 full; DC01 and EMB-DC01 partial;
-   RODC01 none. `replicas('domain:quillmoor')` = DC01 full, RODC01 full read-only, BRK-DC01 and EMB-DC01 partial.
+   (its own Default Domain Policy). Expected: `replicas('domain:brk')` = BRK-DC01 full; DC01 and THF-DC01 partial;
+   RODC01 none. `replicas('domain:quillmoor')` = DC01 full, RODC01 full read-only, BRK-DC01 and THF-DC01 partial.
    `replicas('schema')` = all four. Microsoft: "Active Directory replication concepts".
 3. **Trees and trusts.** A tree is a set of domains with a contiguous DNS namespace: a child's name is a label plus its
-   parent's name (`brk.quillmoor.example` under `quillmoor.example`; `emberline.example` is not, so it is a new tree).
+   parent's name (`brk.quillmoor.example` under `quillmoor.example`; `thornfell.example` is not, so it is a new tree).
    A child domain gets a two-way transitive **parent–child** trust with its parent; a new tree root gets a two-way
-   transitive **tree-root** trust with the forest root. Transitivity: `brk` reaches `emberline` through
-   `quillmoor` (path `brk → quillmoor → emberline`). The forest's trusts form a tree, so there is one path; no
+   transitive **tree-root** trust with the forest root. Transitivity: `brk` reaches `thornfell` through
+   `quillmoor` (path `brk → quillmoor → thornfell`). The forest's trusts form a tree, so there is one path; no
    tie-break is needed. Microsoft: "How domain and forest trusts work".
 4. **An OU** is a container inside one domain that carries GPO links and delegated permissions. It is not a security
    principal (no SID), so it never appears on an ACL: `isPrincipal(OU)` = false, `isPrincipal(user|computer|group)` =
@@ -70,7 +70,7 @@ screen; the task names the subset.
    (that is a migration between domains, not a move). A refused attempt leaves the placement unchanged. Placing an
    object where it already is (compared with the current placement, not the default) succeeds with `same: true`.
 7. **Sites are physical** (subnets and site links) and independent of domains: `HQ` holds DCs of `quillmoor` and
-   `emberline`, `Branch` of `quillmoor` and `brk`; `quillmoor` spans both sites. Objects are not placed in sites.
+   `thornfell`, `Branch` of `quillmoor` and `brk`; `quillmoor` spans both sites. Objects are not placed in sites.
    Microsoft: "Designing the site topology".
 
 ## 3. State and params

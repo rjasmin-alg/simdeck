@@ -14,7 +14,7 @@
   var DOMAINS = [
     { id: 'q', kind: 'domain', name: 'quillmoor.example', parent: null, gpos: ['Default Domain Policy', 'Local Admins - Interactive', 'Drive Maps', 'Windows Update - Defer'] },
     { id: 'brk', kind: 'domain', name: 'brk.quillmoor.example', parent: 'q', gpos: ['Default Domain Policy'] },
-    { id: 'emb', kind: 'domain', name: 'emberline.example', parent: null, gpos: ['Default Domain Policy'] }
+    { id: 'thf', kind: 'domain', name: 'thornfell.example', parent: null, gpos: ['Default Domain Policy'] }
   ];
 
   /** OUs and CN= containers, parents before children (the order the page draws them). parent = a container id or
@@ -30,8 +30,8 @@
     { id: 'q-servers', kind: 'ou', name: 'OU=Servers', domain: 'q', parent: 'q-quillmoor', users: 0, computers: 5, gpos: ['Firewall Off'] },
     { id: 'brk-users', kind: 'container', name: 'CN=Users', domain: 'brk', parent: 'brk', users: null, computers: null, gpos: [] },
     { id: 'brk-computers', kind: 'container', name: 'CN=Computers', domain: 'brk', parent: 'brk', users: null, computers: null, gpos: [] },
-    { id: 'emb-users', kind: 'container', name: 'CN=Users', domain: 'emb', parent: 'emb', users: null, computers: null, gpos: [] },
-    { id: 'emb-computers', kind: 'container', name: 'CN=Computers', domain: 'emb', parent: 'emb', users: null, computers: null, gpos: [] }
+    { id: 'thf-users', kind: 'container', name: 'CN=Users', domain: 'thf', parent: 'thf', users: null, computers: null, gpos: [] },
+    { id: 'thf-computers', kind: 'container', name: 'CN=Computers', domain: 'thf', parent: 'thf', users: null, computers: null, gpos: [] }
   ];
 
   var SITES = [
@@ -44,7 +44,7 @@
     { id: 'dc01', kind: 'dc', name: 'DC01', domain: 'q', site: 'hq', gc: true, rodc: false },
     { id: 'rodc01', kind: 'dc', name: 'RODC01', domain: 'q', site: 'branch', gc: false, rodc: true },
     { id: 'brkdc01', kind: 'dc', name: 'BRK-DC01', domain: 'brk', site: 'branch', gc: true, rodc: false },
-    { id: 'embdc01', kind: 'dc', name: 'EMB-DC01', domain: 'emb', site: 'hq', gc: true, rodc: false }
+    { id: 'thfdc01', kind: 'dc', name: 'THF-DC01', domain: 'thf', site: 'hq', gc: true, rodc: false }
   ];
 
   /** The three objects the student moves; home = where a new object of that kind is created. */

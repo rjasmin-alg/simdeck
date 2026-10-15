@@ -15,8 +15,8 @@ results: `SPEC.md`.
 - **Sites strip** under the forest, apart from it: two rounded strips (HQ, Branch) with their DCs side by side, the
   site link and "sites are physical, apart from the domains" between them.
 - **DCs added.** `two-sites` has DC01 (HQ) and RODC01 (Branch), both of the root domain. `BRK-DC01` (brk, Branch) and
-  `EMB-DC01` (emberline, HQ) were added so each domain has a DC and each site holds DCs of two domains (rule 7).
-  GC on DC01, BRK-DC01, EMB-DC01; RODC01 is not a GC, so it shows that a domain partition goes nowhere but its own
+  `THF-DC01` (thornfell, HQ) were added so each domain has a DC and each site holds DCs of two domains (rule 7).
+  GC on DC01, BRK-DC01, THF-DC01; RODC01 is not a GC, so it shows that a domain partition goes nowhere but its own
   DCs and the GCs.
 - **Objects start in their default containers** (ana and G-Projects in `CN=Users`, PC07 in `CN=Computers`), which
   is where new objects land (Microsoft, "Redirect users and computers containers"). There is no tray: every object
@@ -35,7 +35,7 @@ results: `SPEC.md`.
 - **A group receives no GPO.** Group Policy applies to users and computers only; G-Projects' card and caption say so
   wherever it sits (found by the review; the first version listed GPOs for the group too).
 - **Changing the lens clears the last move's caption**, so the lens's own caption can show.
-- **Every domain has its own Default Domain Policy** (brk and emberline too); the estate's `gpos.txt` lists only
+- **Every domain has its own Default Domain Policy** (brk and thornfell too); the estate's `gpos.txt` lists only
   quillmoor's. That makes "one password policy per domain" concrete.
 - **Lenses:** security outlines the forest (c2) and marks each domain "not a security boundary"; replication hatches
   the forest (schema, configuration), tints each domain in its own series colour with its name, and lists each DC's
@@ -52,8 +52,12 @@ results: `SPEC.md`.
 
 - The OU tree is the subset the task names; the estate's `OU=Domain Controllers`, `Service Accounts`, `Disabled`
   and `Outsourcers` are left out to fit one screen.
-- The child domain `brk.quillmoor.example`, the tree `emberline.example`, their `CN=` containers and the DCs
-  BRK-DC01 / EMB-DC01 are invented for the lesson (the estate has one domain, as `forest.txt` says).
+- The child domain `brk.quillmoor.example`, the tree `thornfell.example`, their `CN=` containers and the DCs
+  BRK-DC01 / THF-DC01 are invented for the lesson (the estate has one domain, as `forest.txt` says). Inventing is
+  fine as long as the names are not reused from other projects (owner, 2026-10-15). The task's `emberline.example`
+  was renamed `thornfell.example` for that reason: the DR estate uses "emberline" as a build workspace name
+  (`student/configs/hq/ci-hq/agent-env.txt`). `brk.quillmoor.example` is simdeck's own invention, shared with
+  `win-group-scopes` and the `win-trusts` task.
 - Subnets 10.10.0.0/16 and 10.20.0.0/16 are chosen from the addresses in `two-sites`.
 - The legend adds "tree" (dotted) to the task's five shapes.
 - The state carries more than the task's `{ lens, selected, placed }`: `held`, `attempt`, `dn`, `gpos`, `lit`.
@@ -83,8 +87,6 @@ results: `SPEC.md`.
 - Drag and drop was tested in Chromium only. Firefox has not always started a drag on a `<button draggable>`;
   click-then-click works everywhere.
 - Microsoft's hr terms for child domain and the parent–child trust ("podređena domena", "roditelj–dijete").
-- Croatian terms (below): Microsoft's hr localisation of "site" may be "web-mjesto"; the page uses "lokacija", as
-  `win-gpo-precedence` does.
 
 ## Term pairs (missing from `kit/glossary.js`; written out in both tables)
 
@@ -94,7 +96,7 @@ results: `SPEC.md`.
 | domain | domena |
 | organizational unit | organizacijska jedinica |
 | container (CN=…) | spremnik |
-| site (AD) | lokacija *(check)* |
+| site (AD) | lokacija (owner, 2026-10-15) |
 | domain controller | kontroler domene |
 | global catalog | globalni katalog |
 | schema / configuration | shema / konfiguracija |
