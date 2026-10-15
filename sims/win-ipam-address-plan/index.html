@@ -1,0 +1,524 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ipam-address-plan: an explorer. Top: the IP address block as a bar, each range a segment as wide as its size
+     (name and prefix inside, or in a callout above when it is narrow), reserve hatched, alignment gaps dotted, ranges
+     that do not fit hanging past the block's end with ✕. Below: IPAM's block → ranges → (sample) addresses as one
+     table, with each range's need (hosts today, with growth) in its row and a button that moves it to the top of the
+     list. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ipam-address-plan">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adresni blok, rasponi i rast · simdeck</title>
+<meta name="description" content="Podijeli adresni blok na raspone za odjele, lokacije i VLAN-ove, dodaj rast i novi odjel, pogledaj kad prostor ne stane i napravi novi plan.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ipam-address-plan",
+  "title": {
+    "hr": "Adresni blok, rasponi i rast",
+    "en": "Address block, ranges and growth"
+  },
+  "concept": {
+    "hr": "Od bloka do raspona i adresa za lokacije i VLAN-ove, s prostorom za rast",
+    "en": "From a block to ranges and addresses for sites and VLANs, with room to grow"
+  },
+  "summary": {
+    "hr": "Podijeli adresni blok na raspone za odjele, lokacije i VLAN-ove, dodaj rast i novi odjel, pogledaj kad prostor ne stane i napravi novi plan.",
+    "en": "Split an address block into ranges for departments, sites and VLANs, add growth and a new department, see it run out and re-plan."
+  },
+  "tags": [
+    "ip-addressing"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ipam-address-plan"]; colours only from kit tokens.
+   Layout: the bar on top, the IPAM table under it, both across the stage. */
+[data-sim="win-ipam-address-plan"] .ip {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  height: 100%; padding: 0.5rem 0.9rem 0.6rem; font-size: 1rem; line-height: 1.25;
+}
+[data-sim="win-ipam-address-plan"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-ipam-address-plan"] [translate="no"] { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ── the block bar ── */
+[data-sim="win-ipam-address-plan"] .ip-barbox { flex: 0 0 auto; overflow-x: auto; overflow-y: hidden; }
+[data-sim="win-ipam-address-plan"] .ip-barin { min-width: 36rem; }
+[data-sim="win-ipam-address-plan"] .ip-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.8rem; }
+[data-sim="win-ipam-address-plan"] .ip-head h2 { margin: 0; font-size: 1.15rem; }
+[data-sim="win-ipam-address-plan"] .ip-note { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-ipam-address-plan"] .ip-overview { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="win-ipam-address-plan"] .ip-ovbar { position: relative; flex: 1 1 auto; height: 0.9rem; border: var(--line-w) solid var(--ink); background: var(--bg); }
+[data-sim="win-ipam-address-plan"] .ip-ovwin { position: absolute; top: -0.35rem; bottom: -0.35rem; left: 0; border: 0.2rem solid var(--ink); border-top: 0; background: color-mix(in srgb, var(--ink) 25%, transparent); }
+[data-sim="win-ipam-address-plan"] .ip-lane { position: relative; height: 3.3rem; }
+[data-sim="win-ipam-address-plan"] .ip-lane[data-lanes="0"] { height: 0.4rem; }
+[data-sim="win-ipam-address-plan"] .ip-lane[data-lanes="1"] { height: 1.85rem; }
+[data-sim="win-ipam-address-plan"] .ip-ticks { position: relative; height: 2.6rem; }
+[data-sim="win-ipam-address-plan"] .ip-bar { position: relative; height: 3.2rem; }
+[data-sim="win-ipam-address-plan"] .ip-blockframe { position: absolute; top: -0.2rem; bottom: -0.2rem; left: 0; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); pointer-events: none; }
+[data-sim="win-ipam-address-plan"] .ip-seg {
+  position: absolute; top: 0; bottom: 0; display: grid; place-items: center; overflow: hidden;
+  border: 1px solid var(--ink); text-align: center; line-height: 1.05; white-space: nowrap;
+}
+[data-sim="win-ipam-address-plan"] .ip-seg.sd-fill { color: var(--on-series); background: var(--sw); }
+[data-sim="win-ipam-address-plan"] .ip-seg.ip-free { background: repeating-linear-gradient(135deg, transparent 0 0.45em, color-mix(in srgb, var(--ink) 30%, transparent) 0.45em 0.62em); color: var(--ink); }
+[data-sim="win-ipam-address-plan"] .ip-seg.ip-gap { background: radial-gradient(circle, var(--ink) 0.09em, transparent 0.13em) 0 0 / 0.45em 0.45em; color: var(--ink); border-style: dotted; border-width: 0.15rem; }
+[data-sim="win-ipam-address-plan"] .ip-seg.ip-over { border: 0.2rem dashed var(--danger); background: var(--bg); color: var(--danger); }
+[data-sim="win-ipam-address-plan"] .ip-seg.ip-over.ip-firstover { border-width: 0.3rem; }
+[data-sim="win-ipam-address-plan"] .ip-seg.sd-changed { background-color: var(--hl); color: var(--on-hl); outline: 0.25rem solid var(--ink); outline-offset: -0.25rem; z-index: 1; }
+[data-sim="win-ipam-address-plan"] .ip-seg.sd-changed.sd-fill { background: var(--sw); color: var(--on-series); box-shadow: inset 0 0 0 0.45rem var(--hl); }
+[data-sim="win-ipam-address-plan"] .ip-lab { padding: 0 0.15rem; font-weight: 700; }
+[data-sim="win-ipam-address-plan"] .ip-lab small { display: block; font-size: 1rem; font-weight: 400; }
+[data-sim="win-ipam-address-plan"] .ip-seg.ip-out .ip-lab { visibility: hidden; }
+[data-sim="win-ipam-address-plan"] .ip-free .ip-lab, [data-sim="win-ipam-address-plan"] .ip-gap .ip-lab { background: var(--bg); border-radius: var(--radius-sm); }
+[data-sim="win-ipam-address-plan"] .ip-call {
+  position: absolute; z-index: 1; display: none; padding: 0 0.3rem; white-space: nowrap; font-weight: 700; font-size: 1rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink);
+}
+[data-sim="win-ipam-address-plan"] .ip-call.ip-on { display: block; }
+[data-sim="win-ipam-address-plan"] .ip-call.ip-callover { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+[data-sim="win-ipam-address-plan"] .ip-call.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ipam-address-plan"] .ip-stem { position: absolute; z-index: 0; display: none; width: 0; border-left: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-address-plan"] .ip-stem.ip-on { display: block; }
+[data-sim="win-ipam-address-plan"] .ip-tick { position: absolute; top: 0; white-space: nowrap; font-size: var(--fs-sm); }
+[data-sim="win-ipam-address-plan"] .ip-tick::before { content: ''; position: absolute; left: var(--x, 0); top: 0; height: 0.4rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-address-plan"] .ip-tick span { display: block; padding-top: 0.4rem; }
+[data-sim="win-ipam-address-plan"] .ip-tick.ip-end span { font-weight: 700; }
+
+/* ── the IPAM table ── */
+[data-sim="win-ipam-address-plan"] .ip-tablebox { flex: 1 1 auto; min-height: 0; overflow: auto; }
+[data-sim="win-ipam-address-plan"] table { border-collapse: collapse; width: 100%; font-size: 1rem; }
+[data-sim="win-ipam-address-plan"] caption { text-align: left; font-weight: 700; font-size: 1.15rem; padding-bottom: 0.2rem; }
+[data-sim="win-ipam-address-plan"] th { text-align: left; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; padding: 0.1rem 0.3rem; border-bottom: var(--line-w) solid var(--ink); white-space: nowrap; }
+[data-sim="win-ipam-address-plan"] td { padding: 0.04rem 0.3rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="win-ipam-address-plan"] td.ip-num, [data-sim="win-ipam-address-plan"] th.ip-num { text-align: right; }
+[data-sim="win-ipam-address-plan"] tr.ip-blockrow td { background: var(--panel); font-weight: 700; border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-address-plan"] tr.ip-blockrow .ip-note { font-weight: 400; }
+[data-sim="win-ipam-address-plan"] .ip-sw { display: inline-block; width: 0.9em; height: 0.9em; margin-right: 0.35rem; vertical-align: -0.1em; border: 1px solid var(--ink); background: var(--sw); }
+[data-sim="win-ipam-address-plan"] .ip-name {
+  display: inline-flex; align-items: center; min-height: 1.75rem; padding: 0 0.35rem; margin: 0; border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm); background: transparent; font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-align: left;
+}
+[data-sim="win-ipam-address-plan"] .ip-name:hover { border-color: var(--line); }
+[data-sim="win-ipam-address-plan"] .ip-name.ip-sel { border-color: var(--ink); }
+[data-sim="win-ipam-address-plan"] .ip-name.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); outline: 0.15rem solid var(--ink); }
+[data-sim="win-ipam-address-plan"] .ip-top {
+  min-width: 1.9rem; min-height: 1.75rem; padding: 0 0.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font: inherit; cursor: pointer;
+}
+[data-sim="win-ipam-address-plan"] .ip-top[aria-pressed="true"] { border-color: var(--ink); background: var(--panel); font-weight: 700; }
+[data-sim="win-ipam-address-plan"] .ip-name:focus-visible, [data-sim="win-ipam-address-plan"] .ip-top:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="win-ipam-address-plan"] tr.ip-unplaced td { color: var(--danger); }
+[data-sim="win-ipam-address-plan"] tr.ip-unplaced .ip-name { color: var(--danger); text-decoration: line-through; }
+[data-sim="win-ipam-address-plan"] .ip-x { font-weight: 700; }
+[data-sim="win-ipam-address-plan"] td [translate="no"] { font-size: 0.9rem; }
+[data-sim="win-ipam-address-plan"] .sd-explain sup { font-size: 0.9em; }
+[data-sim="win-ipam-address-plan"] .ip-badge { display: inline-block; margin-left: 0.3rem; padding: 0 0.35rem; border: var(--line-w) solid var(--warn); border-radius: 0.8rem; font-size: var(--fs-sm); font-family: inherit; }
+[data-sim="win-ipam-address-plan"] .ip-grow { color: var(--muted); }
+[data-sim="win-ipam-address-plan"] .ip-grow.ip-up { color: var(--ink); font-weight: 700; }
+[data-sim="win-ipam-address-plan"] tr.ip-addr td { padding: 0.15rem 0.45rem 0.25rem 2.9rem; background: var(--panel); font-size: var(--fs-sm); white-space: normal; }
+[data-sim="win-ipam-address-plan"] .ip-addrs { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; align-items: baseline; }
+[data-sim="win-ipam-address-plan"] .ip-addrs b { font-weight: 400; color: var(--muted); }
+[data-sim="win-ipam-address-plan"] .ip-sum td { border-bottom: 0; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-ipam-address-plan"] .ip-sum.ip-over td { color: var(--danger); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="win-ipam-address-plan"] .sd-swatch[data-shape='ip-free'] { background: repeating-linear-gradient(135deg, var(--bg) 0 0.18em, var(--ink) 0.18em 0.3em); }
+[data-sim="win-ipam-address-plan"] .sd-swatch[data-shape='ip-gap'] { border-style: dotted; background: radial-gradient(circle, var(--ink) 0.08em, var(--bg) 0.12em) 0 0 / 0.33em 0.33em; }
+[data-sim="win-ipam-address-plan"] .sd-swatch[data-shape='ip-over'] { position: relative; border: 2px dashed var(--danger); background: var(--bg); }
+[data-sim="win-ipam-address-plan"] .sd-swatch[data-shape='ip-over']::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--danger); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ipam-address-plan"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ipam-address-plan"] .ip { height: auto; padding: 0.4rem; }
+  [data-sim="win-ipam-address-plan"] .ip-tablebox { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title"></h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PRESET_KEY = { 'grafo': 'presetGrafo', 'add-nabava': 'presetNabava', 'double-growth': 'presetDouble', 'as-listed': 'presetListed', 'two-sites': 'presetTwo' };
+  var GRAFO_C = { sales: 1, production: 2, management: 3, branch: 4, guests: 5, link: 6, purchasing: 7 };
+  var ALL_IDS = L.GRAFO.concat([L.NABAVA], L.TWO_SITES).map(function (n) { return n.id; });
+
+  // ── words and data ──
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** 63 616: a thin space between thousands from five digits up (four-digit numbers stay whole). */
+  function grouped(n) { return n >= 10000 ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : String(n); }
+  /** A count for t.parts: the kit picks the plural form from its number (Number(n)) and writes its text (String(n)),
+      so large counts keep their thin-space grouping. */
+  function count(n) { return { valueOf: function () { return n; }, toString: function () { return grouped(n); } }; }
+  function isTwo(r) { return /^(zg|st)\d+$/.test(r.id); }
+  function nameText(r) { return isTwo(r) ? r.id.slice(0, 2).toUpperCase() + '-' + r.id.slice(2) : t('n_' + r.id); }
+  function nameNode(r) { return isTwo(r) ? data(nameText(r)) : h('span', null, nameText(r)); }
+  function colourOf(r) { return isTwo(r) ? (r.site === 'zagreb' ? 1 : 2) : GRAFO_C[r.id] || 8; }
+  function siteNode(r) {
+    var site = r.site === 'zagreb' ? data('Zagreb') : r.site === 'split' ? data('Split') : h('span', null, t('s_' + r.site));
+    var vlan = r.vlan != null ? h('span', null, ', ', t('vlan', { v: '' }), data(r.vlan)) : r.id === 'purchasing' ? h('span', null, ', ', t('vlanOpen')) : null;
+    return h('span', null, site, vlan);
+  }
+  /** An address in captions: the last octet (".140") in a /24, the whole address in a larger block. */
+  function addr(s, off) { var v = s.block.base + off; return s.block.prefix >= 24 ? '.' + (v & 255) : L.format(v); }
+  /** A tick under the bar: the last octet in a /24, the last two in a /16 (".7.128"). */
+  function tickText(s, off) { var v = s.block.base + off; return s.block.prefix >= 24 ? '.' + (v & 255) : '.' + ((v >>> 8) & 255) + '.' + (v & 255); }
+  function rangeById(s, id) { for (var i = 0; i < s.ranges.length; i++) if (s.ranges[i].id === id) return s.ranges[i]; return null; }
+
+  // ── "changed by the last param": page memory, not model state ──
+  var memo = null;
+  function changedSet(c) {
+    var p = Object.assign({}, c.params); delete p.sel;
+    var key = JSON.stringify(p);
+    if (memo && memo.key === key) return memo.changed;
+    var now = {};
+    c.state.ranges.forEach(function (r) { now[r.id] = [r.placed, r.start, r.prefix].join(); });
+    var changed = {};
+    if (memo) Object.keys(now).forEach(function (id) { if (memo.ranges[id] !== now[id]) changed[id] = true; });
+    memo = { key: key, ranges: now, changed: changed };
+    return changed;
+  }
+
+  // ── the bar ──
+  function viewOf(s) {
+    if (s.block.size <= 256 || !s.fits) return s.block.size;
+    var v = 256;
+    while (v < s.end) v *= 2;
+    return v * 4 > s.block.size ? s.block.size : v;
+  }
+
+  function bar(s, changed) {
+    var view = viewOf(s);
+    var over = s.order.map(function (id) { return rangeById(s, id); }).filter(function (r) { return !r.placed; });
+    var overSum = over.reduce(function (a, r) { return a + r.total; }, 0);
+    var scale = view + overSum;
+    function pct(x) { return (100 * x / scale).toFixed(3) + '%'; }
+    var segs = [], calls = [], ticks = [];
+
+    function seg(cls, from, len, lab, sub, callText, extra) {
+      var el = h('div', Object.assign({ class: 'ip-seg ' + cls, style: { left: pct(from), width: pct(len) } }, extra || {}),
+        h('span', { class: 'ip-lab' }, lab, sub != null ? h('small', null, sub) : null));
+      var call = h('span', { class: 'ip-call' + (cls.indexOf('ip-over') >= 0 ? ' ip-callover' : '') + (cls.indexOf('sd-changed') >= 0 ? ' sd-changed' : '') }, callText);
+      segs.push(el);
+      calls.push({ seg: el, call: call, stem: h('span', { class: 'ip-stem' }), centre: (from + len / 2) / scale });
+    }
+
+    s.order.forEach(function (id) {
+      var r = rangeById(s, id);
+      if (!r.placed || r.start >= view) return;
+      var ch = changed[r.id] ? ' sd-changed' : '';
+      seg('sd-fill' + ch, r.start, r.total, nameNode(r), data('/' + r.prefix), [nameNode(r), ' ', data('/' + r.prefix)],
+        { dataset: { c: String(colourOf(r)) } });
+      ticks.push({ at: r.start, text: tickText(s, r.start) });
+    });
+    s.free.forEach(function (f) {
+      if (f.from >= view) return;
+      var len = Math.min(f.to, view - 1) - f.from + 1;
+      seg(f.gap ? 'ip-gap' : 'ip-free', f.from, len, data(grouped(f.size) + (f.to >= view ? ' →' : '')), null,
+        data(grouped(f.size)), null);
+      ticks.push({ at: f.from, text: tickText(s, f.from) });
+    });
+    var pos = view;
+    over.forEach(function (r) {
+      var first = r.id === s.firstUnplaced;
+      seg('ip-over' + (first ? ' ip-firstover' : ''), pos, r.total, [h('span', { class: 'ip-x' }, '✕ '), nameNode(r)], data('/' + r.prefix),
+        [h('span', { class: 'ip-x' }, '✕ '), nameNode(r), ' ', data('/' + r.prefix)]);
+      pos += r.total;
+    });
+    ticks.push({ at: view, end: true, text: view === s.block.size ? tickText(s, view - 1) : tickText(s, view - 1) + ' →' });
+
+    var frame = h('div', { class: 'ip-blockframe', style: { width: pct(view) } });
+    var lane = h('div', { class: 'ip-lane' }, calls.map(function (x) { return [x.stem, x.call]; }));
+    var barEl = h('div', { class: 'ip-bar' }, segs, frame);
+    var tickEls = ticks.map(function (k) {
+      return { at: k.at / scale, el: h('div', { class: 'ip-tick' + (k.end ? ' ip-end' : '') }, h('span', { translate: 'no' }, k.text)) };
+    });
+    var tickRow = h('div', { class: 'ip-ticks' }, tickEls.map(function (k) { return k.el; }));
+    var inner = h('div', { class: 'ip-barin' }, lane, barEl, tickRow);
+    inner.layout = function () { layoutBar(lane, barEl, calls, tickRow, tickEls); };
+    return inner;
+  }
+
+  /** Greedy lanes: each item (x = its centre in px, w = its width) goes into the first lane where it clears the
+      previous one; items are clamped inside [0, W]. */
+  function place(items, W, lanes) {
+    var ends = [];
+    for (var k = 0; k < lanes; k++) ends.push(-Infinity);
+    items.sort(function (a, b) { return a.x - b.x; });
+    items.forEach(function (it) {
+      var left = Math.max(0, Math.min(W - it.w, it.x - it.w / 2));
+      var lane = -1;
+      for (var k = 0; k < lanes; k++) if (left >= ends[k] + 6) { lane = k; break; }
+      if (lane < 0) { lane = ends.indexOf(Math.min.apply(null, ends)); left = Math.min(W - it.w, ends[lane] + 6); }
+      ends[lane] = left + it.w;
+      it.left = left; it.lane = lane;
+    });
+  }
+
+  function layoutBar(lane, barEl, calls, tickRow, ticks) {
+    var W = barEl.clientWidth;
+    if (!W) return;
+    var out = [];
+    calls.forEach(function (x) {
+      var lab = x.seg.firstChild;
+      x.seg.classList.remove('ip-out');
+      x.call.classList.remove('ip-on'); x.stem.classList.remove('ip-on');
+      var fits = lab.scrollWidth <= x.seg.clientWidth - 2 && lab.scrollHeight <= x.seg.clientHeight;
+      if (!fits) out.push(x);
+    });
+    out.forEach(function (x) { x.seg.classList.add('ip-out'); x.call.classList.add('ip-on'); });
+    var items = out.map(function (x) { return { x: x.centre * W, w: x.call.offsetWidth, ref: x }; });
+    place(items, W, 2);
+    var used = items.reduce(function (m, it) { return Math.max(m, it.lane + 1); }, 0);
+    lane.dataset.lanes = String(used);            // the lane band is as tall as the callouts need
+    var lh = used ? lane.clientHeight / used : 0;
+    items.forEach(function (it) {
+      var top = (used - 1 - it.lane) * lh;         // lane 0 sits next to the bar
+      it.ref.call.style.left = it.left + 'px';
+      it.ref.call.style.top = top + 'px';
+      it.ref.stem.style.left = it.x + 'px';
+      it.ref.stem.style.top = (top + it.ref.call.offsetHeight) + 'px';
+      it.ref.stem.style.height = Math.max(0, lane.clientHeight - top - it.ref.call.offsetHeight) + 'px';
+      it.ref.stem.classList.add('ip-on');
+    });
+    var tItems = ticks.map(function (k) { return { x: k.at * W, w: k.el.firstChild.offsetWidth, ref: k }; });
+    place(tItems, W, 2);
+    var th = tickRow.clientHeight / 2;
+    tItems.forEach(function (it) {
+      it.ref.el.style.left = it.left + 'px';
+      it.ref.el.style.top = (it.lane * th) + 'px';
+      it.ref.el.style.setProperty('--x', (it.x - it.left) + 'px');
+    });
+  }
+
+  function overview(s, view) {
+    if (view >= s.block.size) return null;
+    var w = (100 * view / s.block.size).toFixed(3) + '%';
+    return h('div', { class: 'ip-overview' },
+      h('span', null, t('wholeBlock'), ' ', data(s.block.name)),
+      h('span', { class: 'ip-ovbar', 'aria-hidden': 'true' }, h('span', { class: 'ip-ovwin', style: { width: w } })));
+  }
+
+  // ── the IPAM table ──
+  function table(s, p, changed) {
+    var sel = p.sel && rangeById(s, p.sel) ? p.sel : s.order[0];
+    var rows = [];
+    rows.push(h('tr', { class: 'ip-blockrow' },
+      h('td', null, ''),
+      h('td', { colspan: '2' }, data(s.block.name), ' ', h('span', { class: 'ip-note' }, t('blockKind'))),
+      h('td', { class: 'ip-num' }, ''),
+      h('td', null, data(L.format(s.block.base) + '/' + s.block.prefix)),
+      h('td', null, data(L.format(L.mask(s.block.prefix)))),
+      h('td', { class: 'ip-num' }, data(grouped(s.block.size))),
+      h('td', { colspan: '2' }, h('span', { class: 'ip-note' }, t('blockUsed', { used: grouped(s.used), free: grouped(s.freeTotal) }))),
+      h('td', null, '')));
+    s.order.forEach(function (id) {
+      var r = rangeById(s, id);
+      var ch = !!changed[r.id];
+      var isFirst = p.first === r.id;
+      var name = h('button', {
+        type: 'button', class: 'ip-name' + (sel === r.id ? ' ip-sel' : '') + (ch ? ' sd-changed' : ''), 'aria-pressed': sel === r.id ? 'true' : 'false',
+        dataset: { sel: r.id }
+      }, h('span', { class: 'ip-sw', dataset: { c: String(colourOf(r)) } }),
+        r.placed ? null : h('span', { class: 'ip-x' }, '✕ '), nameNode(r));
+      var top = h('button', { type: 'button', class: 'ip-top', 'aria-pressed': isFirst ? 'true' : 'false', 'aria-label': t('toTop', { name: nameText(r) }), title: t('toTop', { name: nameText(r) }), dataset: { top: r.id } }, '↑');
+      rows.push(h('tr', { class: r.placed ? '' : 'ip-unplaced' },
+        h('td', null, top),
+        h('td', null, name),
+        h('td', null, siteNode(r)),
+        h('td', { class: 'ip-num' }, data(r.hosts), ' ', h('span', { class: 'ip-grow' + (r.needed > r.hosts ? ' ip-up' : '') }, data('→ ' + r.needed))),
+        h('td', null, r.placed ? data(L.format(r.network) + '/' + r.prefix) : [h('span', { class: 'ip-x' }, '✕ '), data('/' + r.prefix), ' ', t('notPlaced')]),
+        h('td', null, data(L.format(r.mask))),
+        h('td', { class: 'ip-num' }, data(grouped(r.total))),
+        h('td', { class: 'ip-num' }, data(grouped(r.usable))),
+        h('td', null, t(r.managedBy === 'ipam' ? 'm_ipam' : 'm_dhcp')),
+        h('td', { class: 'ip-num' }, data(r.util + ' %'), r.full ? h('span', { class: 'ip-badge' }, t('full')) : null)));
+      if (sel === r.id && r.placed) {
+        rows.push(h('tr', { class: 'ip-addr' }, h('td', { colspan: '10' }, h('div', { class: 'ip-addrs' },
+          h('span', null, t('addrTitle', { name: nameText(r) })),
+          h('span', null, h('b', null, t('aNet')), ' ', data(L.format(r.network))),
+          h('span', null, h('b', null, t('aFirst')), ' ', data(L.format(r.first))),
+          h('span', null, data('…')),
+          h('span', null, h('b', null, t('aLast')), ' ', data(L.format(r.last))),
+          h('span', null, h('b', null, t('aBcast')), ' ', data(L.format(r.broadcast)))))));
+      }
+    });
+    rows.push(h('tr', { class: 'ip-sum' + (s.sum > s.block.size ? ' ip-over' : '') }, h('td', { colspan: '10' },
+      t('sumRow', { sum: grouped(s.sum), space: grouped(s.block.size) }))));
+    return h('table', null,
+      h('caption', null, t('ipamTitle')),
+      h('thead', null, h('tr', null,
+        h('th', { 'aria-label': t('thTop') }, '↑'), h('th', null, t('thRange')), h('th', null, t('thSite')), h('th', { class: 'ip-num' }, t('thHosts'), ' → ', t('thNeeded')),
+        h('th', null, t('thNetwork')), h('th', null, t('thMask')), h('th', { class: 'ip-num' }, t('thTotal')), h('th', { class: 'ip-num' }, t('thUsable')),
+        h('th', null, t('thManaged')), h('th', { class: 'ip-num' }, t('thUtil')))),
+      h('tbody', null, rows));
+  }
+
+  // ── stage clicks: select a range, move a need to the top of the list ──
+  function wire(stage) {
+    if (stage.dataset.wired) return;
+    stage.dataset.wired = '1';
+    stage.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+    stage.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b || !window.simdeck) return;
+      var p = window.simdeck.params;
+      if (b.dataset.sel) window.simdeck.set({ sel: b.dataset.sel });
+      else if (b.dataset.top) window.simdeck.set({ first: p.first === b.dataset.top ? '' : b.dataset.top });
+    });
+  }
+
+  var observer = null, current = null;
+  function hiddenSelect(key) {
+    return { key: key, type: 'select', label: t('hidden'), options: [''].concat(ALL_IDS).map(function (v) { return [v, v || '-']; }), visible: function () { return false; } };
+  }
+
+  // ── captions ──
+  function B(node) { return h('b', null, node); }
+  function freeSentence(s) {
+    if (!s.freeTotal) return [t('capFreeNone')];
+    if (s.free.length === 1) {
+      var f = s.free[0];
+      return t.parts('capFree', { n: count(f.size), from: data(addr(s, f.from)), to: data(addr(s, f.to)) });
+    }
+    var big = s.free.reduce(function (m, x) { return x.size > m.size ? x : m; });
+    return t.parts('capFreeMany', { n: data(grouped(s.freeTotal)), big: data(grouped(big.size)), from: data(addr(s, big.from)), to: data(addr(s, big.to)) });
+  }
+  function from(s, r) { return t.parts('capFrom', { name: B(nameNode(r)), prefix: data('/' + r.prefix), at: data(addr(s, r.start)) }); }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'block', type: 'choice', label: t('block'), options: L.blocks.map(function (b) { return [b, b]; }) },
+      { key: 'growth', type: 'range', label: t('growth'), min: 0, max: 200, step: 25, format: function (v) { return v + ' %'; } },
+      { key: 'twoSites', type: 'toggle', label: t('setTwo') },
+      { key: 'nabava', type: 'choice', label: t('nabava'), options: [['off', t('nabavaOff')], ['add', t('nabavaAdd')], ['plan', t('nabavaPlan')]],
+        disabled: function (p) { return p.twoSites ? t('nabavaOnlyGrafo') : false; } },
+      { key: 'strategy', type: 'choice', label: t('strategy'), options: [['largest', t('stLargest')], ['listed', t('stListed')]] },
+      hiddenSelect('first'),
+      hiddenSelect('sel')
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { c: 1, label: t('legRange') },
+      { shape: 'ip-free', label: t('legFree') },
+      { shape: 'ip-gap', label: t('legGap') },
+      { shape: 'ip-over', label: t('legNoFit') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var changed = changedSet(c);
+      var view = viewOf(s);
+      var b = bar(s, changed);
+      var head = h('div', { class: 'ip-head' },
+        h('h2', null, t('barTitle'), ' ', data(s.block.name)),
+        view < s.block.size ? h('span', { class: 'ip-note' }, t('windowNote', { n: grouped(view), net: L.format(s.block.base) + '/' + (32 - Math.log2(view)), total: grouped(s.block.size) })) : null);
+      // keep keyboard focus on the button that was pressed: the stage is rebuilt on every change
+      var a = document.activeElement, keep = null;
+      if (a && c.stage.contains(a) && a.dataset) keep = a.dataset.sel ? '[data-sel="' + a.dataset.sel + '"]' : a.dataset.top ? '[data-top="' + a.dataset.top + '"]' : null;
+      c.stage.replaceChildren(h('div', { class: 'ip' },
+        h('div', { class: 'ip-barbox' }, head, overview(s, view), b),
+        h('div', { class: 'ip-tablebox' }, table(s, c.params, changed))));
+      wire(c.stage);
+      if (keep) { var el = c.stage.querySelector(keep); if (el) el.focus({ preventScroll: true }); }
+      current = b;
+      b.layout();
+      if (!observer && typeof ResizeObserver === 'function') {
+        observer = new ResizeObserver(function () { if (current && current.isConnected) current.layout(); });
+        observer.observe(c.stage);
+      }
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (current === b) b.layout(); });
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (!s.fits) {
+        var u = rangeById(s, s.firstUnplaced);
+        var v = { sum: data(grouped(s.sum)), space: data(grouped(s.block.size)), name: B(nameNode(u)), prefix: data('/' + u.prefix) };
+        if (s.sum > s.block.size) return t.parts(s.growth ? 'capNoFitSum' : 'capNoFitSumNoGrowth', v);
+        var out = t.parts('capNoFitAlign', v);
+        if (s.strategy === 'listed') out.push(' ', t('capTryLargest'));
+        return out;
+      }
+      var added = s.ranges.filter(function (r) { return r.added && r.placed; })[0];
+      if (added) {
+        var av = { name: B(nameNode(added)), prefix: data('/' + added.prefix), at: data(addr(s, added.start)), cursor: data(addr(s, added.cursor)), size: data(added.total), end: data(addr(s, added.end)) };
+        var first;
+        if (added.start > added.cursor) first = t.parts('capAdd', Object.assign({ n: count(added.start - added.cursor) }, av));
+        else if (added.start === added.cursor) first = t.parts('capAddAligned', av);
+        else first = t.parts('capAddReuse', av);
+        return first.concat([' '], freeSentence(s));
+      }
+      var seq = s.placeOrder.map(function (id) { return rangeById(s, id); });
+      var parts = [t(s.strategy === 'listed' ? 'capListed' : 'capLargest')].concat(from(s, seq[0]));
+      var gaps = s.free.filter(function (f) { return f.gap; });
+      if (gaps.length) {
+        // as listed: the first range, then the largest hole and the range that had to wait behind it
+        var g = gaps.reduce(function (m, x) { return x.size > m.size ? x : m; });
+        var after = s.ranges.filter(function (r) { return r.placed && r.start === g.to + 1; })[0];
+        parts.push('. ');
+        parts = parts.concat(t.parts('capGap', { n: count(g.size), name: B(nameNode(after)), prefix: data('/' + after.prefix), at: data(addr(s, after.start)) }), [' ']);
+        return parts.concat(freeSentence(s));
+      }
+      if (seq.length > 1) parts = parts.concat([', '], from(s, seq[1]));
+      parts.push(seq.length > 2 ? t('capMore') : '. ');
+      return parts.concat(freeSentence(s));
+    }
+  });
+})();
+</script>
+</body>
+</html>
