@@ -1,0 +1,438 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- quorum-split-brain: a cluster of 2–5 nodes in a ring (and an optional witness) is partitioned. A stepper: cut the
+     links (or fail a node), each side counts its votes, each side keeps, starts or stops the service, then the network
+     heals. With quorum ignored every side runs the service and takes its own write, and the copies differ. Kit view K2
+     draws the nodes and links; the side column holds one card per side. Model: sim.js; rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="quorum-split-brain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kvorum i rascjep mozga · simdeck</title>
+<meta name="description" content="Razdvoji grozd od 2 do 5 čvorova i dodaj svjedoka: uslugu smije pokrenuti samo strana s više od pola glasova. Bez kvoruma piše svaka strana.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "quorum-split-brain",
+  "title": {
+    "hr": "Kvorum i rascjep mozga",
+    "en": "Quorum and split-brain"
+  },
+  "concept": {
+    "hr": "Većina drži jednu stranu živom; paran broj čvorova, svjedok i rascjep mozga",
+    "en": "A majority keeps one side alive; even counts, witnesses and split-brain"
+  },
+  "summary": {
+    "hr": "Razdvoji grozd od 2 do 5 čvorova i dodaj svjedoka: uslugu smije pokrenuti samo strana s više od pola glasova. Bez kvoruma piše svaka strana.",
+    "en": "Partition a cluster of 2–5 nodes and add a witness: only a side with more than half the votes may run the service. Ignore quorum and every side writes."
+  },
+  "tags": [
+    "fault-tolerance"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="quorum-split-brain"]; colours only from kit tokens.
+   Layout: the K2 drawing on the left (the scene's name above it), the side column on the right (one card per side:
+   votes, quorum or not, what it does with the service, its data). */
+[data-sim="quorum-split-brain"] .qs {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 2cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="quorum-split-brain"] .qs-draw { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+[data-sim="quorum-split-brain"] .qs-draw .sd-topo { flex: 1; min-height: 0; align-content: stretch; }
+[data-sim="quorum-split-brain"] .qs-scene { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="quorum-split-brain"] .qs-sides { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; min-height: 0; }
+[data-sim="quorum-split-brain"] .qs-sides h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+
+/* one card per side: solid frame with quorum, hatched and dashed without, a coloured left bar for the side */
+[data-sim="quorum-split-brain"] .qs-side { padding: 0.45rem 0.8rem 0.55rem;
+  border: var(--line-w) solid var(--line); border-left: 0.5rem solid var(--sw, var(--line)); border-radius: var(--radius-sm); background-color: var(--bg); }
+[data-sim="quorum-split-brain"] .qs-side[data-q="yes"] { border-color: var(--ink); border-width: 0.22rem 0.22rem 0.22rem 0.5rem; border-left-color: var(--sw, var(--ink)); }
+[data-sim="quorum-split-brain"] .qs-side[data-q="no"] { border-style: dashed; border-left-style: solid; }
+[data-sim="quorum-split-brain"] .qs-side[data-down] { color: var(--muted); }
+/* without quorum the hatch is a frame: the content sits on a plain inner panel */
+[data-sim="quorum-split-brain"] .qs-side.sd-hatch { padding: 0.4rem; }
+[data-sim="quorum-split-brain"] .qs-side.sd-hatch > .qs-in { padding: 0.15rem 0.45rem 0.25rem; background-color: var(--bg); border-radius: var(--radius-sm); }
+[data-sim="quorum-split-brain"] .qs-in { display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="quorum-split-brain"] .qs-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
+[data-sim="quorum-split-brain"] .qs-members { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="quorum-split-brain"] .qs-status { margin-left: auto; padding: 0 0.5rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="quorum-split-brain"] .qs-status[data-q="yes"] { background: var(--ink); color: var(--bg); }
+[data-sim="quorum-split-brain"] .qs-status[data-q="no"] { border-style: dashed; color: var(--danger); border-color: var(--danger); background: var(--bg); }
+[data-sim="quorum-split-brain"] .qs-status[data-q="pending"] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="quorum-split-brain"] .qs-votes { font-size: var(--fs-sm); }
+[data-sim="quorum-split-brain"] .qs-votes b { font-family: var(--mono); font-size: var(--fs-md); }
+[data-sim="quorum-split-brain"] .qs-res { display: flex; align-items: center; gap: 0.4rem; font-weight: 700; }
+[data-sim="quorum-split-brain"] .qs-res[data-off] { font-weight: 400; color: var(--muted); }
+[data-sim="quorum-split-brain"] .qs-res[data-bad] { color: var(--danger); }
+[data-sim="quorum-split-brain"] .qs-data { font-size: var(--fs-sm); }
+[data-sim="quorum-split-brain"] .qs-data span { font-family: var(--mono); font-weight: 700; }
+[data-sim="quorum-split-brain"] .qs-key { flex: none; width: 1.6em; height: 0.8em; }
+[data-sim="quorum-split-brain"] .qs-bang { color: var(--danger); font-weight: 700; font-size: var(--fs-lg); line-height: 1; }
+
+/* the drawing: the witness is a small diamond, centred in its cell */
+[data-sim="quorum-split-brain"] .sd-topo-card[data-id="W"] { justify-self: center; width: max-content; max-width: 100%; }
+[data-sim="quorum-split-brain"] .sd-topo-card[data-id="W"] .sd-topo-mark { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border-radius: 0;
+  min-width: 2.4rem; height: 2.4rem; background: var(--ink); color: var(--bg); }
+[data-sim="quorum-split-brain"] .sd-topo-badge .qs-key { width: 1.4em; height: 0.7em; vertical-align: -0.05em; margin-right: 0.25rem; }
+
+/* legend swatches the kit lacks: witness diamond, side frames, the key, two copies */
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape^="qs-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-witness"] { background: var(--ink); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-q"] { border-width: 0.2rem; }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-nq"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-key"],
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-two"] { border: 0; background: transparent; width: 1.5em; }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-key"]::before,
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-two"]::before { content: ''; position: absolute; left: 0; top: 0.3em; width: 0.4em; height: 0.4em;
+  border: 0.12em solid var(--ink); border-radius: 50%; }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-key"]::after { content: ''; position: absolute; left: 0.62em; top: 0.48em; width: 0.85em; height: 0.3em;
+  border-top: 0.12em solid var(--ink); border-right: 0.12em solid var(--ink); }
+[data-sim="quorum-split-brain"] .sd-swatch[data-shape="qs-two"]::after { content: '!'; position: absolute; left: 0.75em; top: -0.15em; color: var(--danger); font-weight: 700; }
+
+[data-sim="quorum-split-brain"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="quorum-split-brain"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="quorum-split-brain"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="quorum-split-brain"] .qs { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="quorum-split-brain"] .qs-draw .sd-topo { height: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kvorum i rascjep mozga</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+
+  /** Node positions per node count: [col, row] in a 10-column grid, cards span 2, the witness 4 (SPEC.md "Scene": a ring). */
+  var POS = {
+    2: { A: [0, 1], B: [8, 1], W: [3, 2] },
+    3: { A: [0, 0], B: [8, 0], C: [4, 2], W: [3, 1] },
+    4: { A: [0, 0], B: [8, 0], C: [8, 2], D: [0, 2], W: [3, 1] },
+    5: { A: [4, 0], B: [8, 1], C: [6, 2], D: [2, 2], E: [0, 1], W: [3, 1] }
+  };
+
+  /** Data (node ids, numbers, x = 1) is not language: the word check skips translate="no". */
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function mono(text) { return h('span', { translate: 'no' }, String(text)); }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  function keyIcon() {
+    var s = document.createElementNS(SVG, 'svg');
+    s.setAttribute('viewBox', '0 0 24 12');
+    s.setAttribute('class', 'qs-key');
+    s.setAttribute('aria-hidden', 'true');
+    [['circle', { cx: 5, cy: 6, r: 3.6 }], ['path', { d: 'M8.6 6H22.5M18.5 6v4M21.5 6v3' }]].forEach(function (e) {
+      var el = document.createElementNS(SVG, e[0]);
+      Object.keys(e[1]).forEach(function (k) { el.setAttribute(k, e[1][k]); });
+      el.setAttribute('fill', 'none');
+      el.setAttribute('stroke', 'currentColor');
+      el.setAttribute('stroke-width', '2.4');
+      s.append(el);
+    });
+    return s;
+  }
+
+  function sceneOf(p) { return p.scene === 'win' || p.scene === 'ceph' ? p.scene : 'ha'; }
+  function res(p) { return t('res_' + sceneOf(p)); }
+  function resA(p) { return t('resA_' + sceneOf(p)); }
+  function membersText(sd) { return sd.members.join(''); }
+  function upNode(s, id) { return s.nodes.filter(function (x) { return x.id === id; })[0].up; }
+  function counted(sd) { return !!sd.counted; }
+  function qOf(sd) { return !counted(sd) ? 'pending' : sd.quorum ? 'yes' : 'no'; }
+
+  // ── the drawing (kit view K2) ──
+
+  function renderTopo(c) {
+    var s = c.state, p = c.params, prev = c.prev;
+    var pos = POS[s.n];
+    var single = s.phase === 'start' || s.phase === 'heal';
+    var colourOf = function (id) {
+      var i = L.sideOfNode(s.sides, id);
+      return String(single ? 1 : i + 1);
+    };
+    var wasRunning = prev ? prev.resource.runningOn : s.resource.runningOn;
+    var lastWrite = s.phase === 'write' ? s.writes[s.writes.length - 1] : null;
+    var nodes = s.nodes.map(function (nd) {
+      var i = L.sideOfNode(s.sides, nd.id);
+      var sd = s.sides[i];
+      var runs = s.resource.runningOn.indexOf(nd.id) >= 0;
+      var badges = [];
+      if (!nd.up) badges.push({ text: t('bDown'), k: 'muted' });
+      if (runs) badges.push({ text: [keyIcon(), res(p)], k: 'fill' });
+      if (runs && s.writes.length) badges.push({ text: mono('x = ' + (sd.copies ? sd.copies.filter(function (cp) { return cp.node === nd.id; })[0].value : sd.value)), k: 'solid' });
+      var changed = c.n > 0 && ((runs !== (wasRunning.indexOf(nd.id) >= 0)) || (lastWrite && lastWrite.node === nd.id));
+      return { id: nd.id, kind: 'host', col: pos[nd.id][0], row: pos[nd.id][1], span: 2, c: colourOf(nd.id),
+        name: t('node_' + sceneOf(p)), lines: [!single && nd.up ? { text: t('sideN', { k: i + 1 }), kind: 'role' } : null],
+        badges: badges, state: nd.up ? null : 'down', changed: changed, align: 'center' };
+    });
+    var links = s.links.map(function (l) {
+      var dead = !upNode(s, l.a) || !upNode(s, l.b);
+      return { id: l.a + l.b, a: l.a, b: l.b, state: l.up ? 'up' : dead ? 'off' : 'down' };
+    });
+    var packets = [];
+    if (s.phase === 'count') s.links.forEach(function (l) { if (l.up) packets.push({ from: l.a, to: l.b, chip: false, c: colourOf(l.a) }); });
+    if (s.witness) {
+      var w = s.witness;
+      var wSide = w.reach ? L.sideOfNode(s.sides, w.reach) : -1;
+      nodes.push({ id: 'W', kind: 'host', mark: t('wMark'), col: pos.W[0], row: pos.W[1], span: 4, align: 'center',
+        c: wSide >= 0 ? String(single ? 1 : wSide + 1) : null, name: t('wit_' + sceneOf(p)), lines: [],
+        badges: [w.reach ? { text: t('bVote', { k: wSide + 1 }), k: 'solid' } : { text: t('bNoVote'), k: 'muted' }] });
+      s.nodes.forEach(function (nd) {
+        var reach = nd.up && wSide >= 0 && L.sideOfNode(s.sides, nd.id) === wSide;
+        links.push({ id: 'W' + nd.id, a: 'W', b: nd.id, state: reach ? 'up' : nd.up ? 'down' : 'off', style: 'dashed' });
+        if (reach && s.phase === 'count') packets.push({ from: 'W', to: nd.id, chip: false, c: String(wSide + 1) });
+      });
+    }
+    // phone order: A, B, …, then the witness
+    return Simdeck.topology({ cols: 10, rows: ['auto', 'minmax(2rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  // ── the side column ──
+
+  function resLine(s, sd, p) {
+    var r = res(p), ra = resA(p), node = sd.node ? mono(sd.node) : null;
+    var line = function (text, attrs, icon) { return h('div', Object.assign({ class: 'qs-res' }, attrs || {}), icon ? [keyIcon()] : null, text); };
+    if (sd.down) return sd.node ? line(t.parts('actLost', { node: node }), { dataset: { bad: '1' } }) : line(t('actOff'), { dataset: { off: '1' } });
+    var act = s.phase === 'act' || s.phase === 'write' || (s.phase === 'heal') ? sd.act : null;
+    if (act === 'conflict') {
+      var nodes = sd.copies.map(function (cp) { return cp.node; }).join(', ');
+      return h('div', { class: 'qs-res', dataset: { bad: '1' } }, sd.copies.map(function () { return keyIcon(); }), h('span', { class: 'qs-bang', 'aria-hidden': 'true' }, '!'),
+        h('span', null, t.parts('actConflict', { nodes: mono(nodes) })));
+    }
+    if (act === 'start') return line(t.parts('actStart', { ra: ra, node: node }), null, true);
+    if (act === 'stop') return line(t.parts('actStop', { ra: ra, node: node }), { dataset: { off: '1' } });
+    if (act === 'keep' && s.phase !== 'heal') return line(t.parts('actKeep', { ra: ra, node: node }), null, true);
+    if (sd.running) return line(t.parts('running', { r: r, node: node }), null, true);
+    return line(t('actOff'), { dataset: { off: '1' } });
+  }
+
+  function dataLine(sd) {
+    if (sd.down) return h('div', { class: 'qs-data' }, t('dataLost'));
+    if (sd.copies && sd.copies.length > 1 && sd.diverged) {
+      var list = sd.copies.map(function (cp) { return cp.node + ': x = ' + cp.value; }).join(', ');
+      return h('div', { class: 'qs-data' }, t.parts('dataDiff', { list: mono(list) }));
+    }
+    return h('div', { class: 'qs-data' }, t.parts('data', { x: mono('x = ' + sd.value) }));
+  }
+
+  function renderSides(c) {
+    var s = c.state, p = c.params;
+    var single = s.phase === 'start' || s.phase === 'heal';
+    var out = [h('h2', null, t('sidesTitle'))];
+    s.sides.forEach(function (sd, i) {
+      var q = qOf(sd);
+      var cls = 'qs-side' + (counted(sd) && !sd.quorum ? ' sd-hatch' : '') + (s.changed.indexOf(i) >= 0 && c.n > 0 ? ' sd-changed' : '');
+      var ds = { c: sd.down ? '' : String(single ? 1 : i + 1), q: q };
+      if (sd.down) ds.down = '1';
+      out.push(h('section', { class: cls, dataset: ds }, h('div', { class: 'qs-in' },
+        h('div', { class: 'qs-head' },
+          h('b', null, sd.down ? t('failed') : t('sideHead', { k: i + 1 })),
+          h('span', { class: 'qs-members', translate: 'no' }, sd.members.join(' ')),
+          h('span', { class: 'qs-status', dataset: { q: q } }, q === 'pending' ? t('stUncounted') : sd.quorum ? t('stQuorum') : t('stNoQuorum'))),
+        counted(sd) ? h('div', { class: 'qs-votes' }, t.parts('votes', { v: data(sd.votes), n: data(sd.total) }), ' · ',
+          t.parts('needs', { k: data(sd.needed) }), sd.witness ? [' · ', t('plusW')] : null) : null,
+        resLine(s, sd, p),
+        sceneOf(p) === 'ceph' ? null : dataLine(sd))));
+    });
+    return out;
+  }
+
+  // ── captions ──
+
+  function sideName(sd) { return data(membersText(sd)); }
+
+  function capStart(s, p) {
+    var ceph = sceneOf(p) === 'ceph';
+    return t.parts('capStart', { nodes: t.n(ceph ? 'monsN' : 'nodesN', s.n), w: s.witness ? t('andW') : '', r: res(p), a: data('A'),
+      total: data(s.total), needed: data(L.neededOf(s.total)) });
+  }
+
+  function capPartition(s) {
+    var out = [];
+    var down = s.sides.filter(function (sd) { return sd.down; })[0];
+    if (down) {
+      out.push(t.parts('capFail', { node: data(down.members[0]) }));
+      if (s.n > 2) out.push(t('capFailRest'));
+    }
+    else out.push(t.parts('capSplit', { sides: t.n('sidesN', s.sides.length), list: data(s.sides.map(membersText).join(' | ')) }));
+    if (s.witness) out.push(s.witness.reach ? t.parts('capWit', { node: data(s.witness.reach) }) : t.parts('capWitGone', { node: data(s.witness.at) }));
+    return join(out);
+  }
+
+  function capCount(s) {
+    var list = s.sides.map(function (sd) { return membersText(sd) + ' ' + sd.votes; }).join(', ');
+    var out = [t.parts('capCount', { list: data(list), needed: data(L.neededOf(s.total)), total: data(s.total) })];
+    var q = s.sides.filter(function (sd) { return sd.quorum; })[0];
+    out.push(q ? t.parts('oneHas', { m: sideName(q) }) : t('noneHas'));
+    if (q && q.witness && q.votes - 1 < q.needed) out.push(t.parts('witHelped', { v: data(q.votes - 1), total: data(s.total) }));
+    return join(out);
+  }
+
+  function capAct(s, p) {
+    var out = [];
+    var q = s.sides.filter(function (sd) { return sd.quorum; })[0];
+    var lost = s.sides.filter(function (sd) { return sd.act === 'lost'; });
+    lost.forEach(function (sd) { out.push(t.parts('aLost', { node: data(sd.node), r: res(p) })); });
+    if (s.n === 4 && !s.witness && s.policy === 'stop' && s.split === 'AB|CD') {
+      return t.parts('capFour', { q: h('i', { lang: 'en' }, t('wQuorum')), r: res(p) });
+    }
+    if (s.policy === 'ignore' && s.splitBrain) {
+      out.push(t.parts('aIgnore', { ra: resA(p), copies: t.n('copiesN', s.resource.runningOn.length) }));
+      return join(out);
+    }
+    if (!q && s.policy === 'stop') {
+      if (sceneOf(p) === 'ceph') out.push(t('aCeph'));
+      else out.push(t.parts(lost.length || s.sides.some(function (sd) { return sd.down; }) ? 'aNone' : 'aNoneHealthy', { r: res(p) }));
+      return join(out);
+    }
+    s.sides.forEach(function (sd) {
+      var vars = { m: sideName(sd), ra: resA(p), node: sd.node ? data(sd.node) : '' };
+      // quorum ignored with a single live side: it runs without quorum, and the caption says so
+      if (sd.act === 'keep') out.push(t.parts(sd.quorum ? 'aKeep' : 'aKeepIgn', vars));
+      if (sd.act === 'start') {
+        out.push(t.parts(sd.quorum ? 'aStart' : 'aStartIgn', vars));
+        // Ceph monitors do not fence: the lost monitor simply drops out of the quorum
+        if (s.policy === 'stop' && sceneOf(p) !== 'ceph') out.push(t('aFence'));
+      }
+      if (sd.act === 'stop') out.push(t.parts('aStop', vars));
+    });
+    return join(out);
+  }
+
+  function capWrite(s) {
+    var w = s.writes[s.writes.length - 1];
+    return t.parts(s.writes.length === 1 ? 'capWrite1' : 'capWriteN', { m: sideName(s.sides[w.side]), x: data('x = ' + w.value) });
+  }
+
+  function capHeal(s, p) {
+    var sd = s.sides[0];
+    var vars = { m: sideName(sd), v: data(sd.votes), total: data(s.total), node: sd.node ? data(sd.node) : '', r: res(p), ra: resA(p) };
+    if (sd.act === 'conflict') return sd.copies.length === 2 ? t.parts('capHealTwo', { ra: resA(p) }) : t.parts('capHealMany', { copies: t.n('copiesN', sd.copies.length) });
+    // after a node failure no link was cut: the last step sums up instead of healing the network
+    var F = s.split.indexOf('!') >= 0 ? 'F' : '';
+    if (sd.act === 'keep') return t.parts('capHealKeep' + F, vars);
+    if (sd.act === 'start') return t.parts('capHealStart' + F, vars);
+    return t.parts('capHealOff' + F, vars);
+  }
+
+  var SPLIT_PARAMS = [2, 3, 4, 5].map(function (n) {
+    return { key: 'split' + n, type: 'choice', label: t('pSplit'), hint: t('pSplitHint'), resets: true,
+      options: L.SPLITS[n].map(function (sp) { return [sp, t('sp:' + sp)]; }),
+      visible: function (p) { return Number(p.nodes) === n; } };
+  });
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [{ key: 'nodes', type: 'range', label: t('pNodes'), min: 2, max: 5, step: 1, resets: true }].concat(SPLIT_PARAMS, [
+      { key: 'witness', type: 'toggle', label: t('pWitness'), resets: true, visible: function (p) { return p.scene !== 'ceph'; } },
+      { key: 'witnessAt', type: 'choice', label: t('pWitnessAt'), resets: true, options: [['first', t('wFirst')], ['last', t('wLast')]],
+        visible: function (p) { return p.scene !== 'ceph' && p.witness; } },
+      { key: 'policy', type: 'choice', label: t('pPolicy'), resets: true, options: [['stop', t('polStop')], ['ignore', t('polIgnore')]],
+        visible: function (p) { return p.scene !== 'ceph'; } }
+    ]),
+
+    presets: [
+      { id: 'three-nodes', label: t('prThree'), params: { scene: 'ha', nodes: 3, split3: 'AB|C', witness: false, witnessAt: 'first', policy: 'stop' } },
+      { id: 'four-nodes', label: t('prFour'), params: { scene: 'ha', nodes: 4, split4: 'AB|CD', witness: false, witnessAt: 'first', policy: 'stop' } },
+      { id: 'two-plus-witness', label: t('prWitness'), params: { scene: 'win', nodes: 2, split2: 'A|B', witness: true, witnessAt: 'first', policy: 'stop' } },
+      { id: 'five-three-way', label: t('prFive'), params: { scene: 'ha', nodes: 5, split5: 'AB|CD|E', witness: false, witnessAt: 'first', policy: 'stop' } },
+      { id: 'split-brain', label: t('prSplitBrain'), params: { scene: 'ha', nodes: 2, split2: 'A|B', witness: false, witnessAt: 'first', policy: 'ignore' } },
+      { id: 'ceph-mons', label: t('prCeph'), hint: t('prCephHint'), params: { scene: 'ceph', nodes: 3, split3: 'A|B|C', witness: false, witnessAt: 'first', policy: 'stop' } }
+    ],
+
+    legend: [
+      { shape: 'round', c: 1, label: t('lgNode') },
+      { shape: 'qs-witness', label: t('lgWitness') },
+      { shape: 'qs-q', label: t('lgQuorum') },
+      { shape: 'qs-nq', label: t('lgNoQuorum') },
+      { shape: 'qs-key', label: t('lgRes') },
+      { shape: 'qs-two', label: t('lgTwo') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'qs' },
+        h('div', { class: 'qs-draw' }, h('p', { class: 'qs-scene' }, t('scene_' + sceneOf(c.params))), renderTopo(c)),
+        h('div', { class: 'qs-sides' }, renderSides(c))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      switch (s.phase) {
+        case 'start': return capStart(s, p);
+        case 'partition': return capPartition(s);
+        case 'count': return capCount(s);
+        case 'act': return capAct(s, p);
+        case 'write': return capWrite(s);
+        default: return capHeal(s, p);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
