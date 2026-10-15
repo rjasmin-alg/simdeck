@@ -1,0 +1,483 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dc-promotion: a stepper. Two server boxes, DC01 and DC02, whose panels (AD DS database, DNS server, SYSVOL,
+     roles) fill as the promotion goes; a replication column between them; the zones' records under them. One step =
+     one promotion phase on one server. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dc-promotion">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Što radi promocija kontrolera domene · simdeck</title>
+<meta name="description" content="DC01 korak po korak postaje prvi kontroler domene, pa DC02 drugi. Krivi DNS na DC02 ili DC01 bez DNS-a i domenu nitko ne nalazi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dc-promotion",
+  "title": {
+    "hr": "Što radi promocija kontrolera domene",
+    "en": "What promoting a DC does"
+  },
+  "concept": {
+    "hr": "AD DS, DNS zona i SRV zapisi, SYSVOL i prva replikacija",
+    "en": "AD DS, the DNS zone and SRV records, SYSVOL, the first replication"
+  },
+  "summary": {
+    "hr": "DC01 korak po korak postaje prvi kontroler domene, pa DC02 drugi. Krivi DNS na DC02 ili DC01 bez DNS-a i domenu nitko ne nalazi.",
+    "en": "Step DC01 becoming the first domain controller, then DC02 the second. With the wrong DNS on DC02, or DC01 without DNS, nobody finds the domain."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 7,
+  "entries": [
+    {
+      "preset": "first-dc"
+    },
+    {
+      "preset": "second-dc"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dc-promotion"]; colours only from kit tokens.
+   Layout: DC01 | replication | DC02 on top, the two zones under them. */
+[data-sim="win-dc-promotion"] .dp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8.5rem minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.5rem 0.6rem;
+  height: 100%;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+[data-sim="win-dc-promotion"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-dc-promotion"] .dp-mono { font-family: var(--mono); }
+[data-sim="win-dc-promotion"] .dp-muted { color: var(--muted); }
+[data-sim="win-dc-promotion"] .dp-sm { font-size: var(--fs-sm); }
+
+/* a server box */
+[data-sim="win-dc-promotion"] .dp-srv {
+  display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; min-height: 0;
+  border: 0.22rem solid var(--sw); border-radius: var(--radius); padding: 0.3rem 0.5rem 0.45rem; background: var(--bg);
+}
+[data-sim="win-dc-promotion"] .dp-srv.dp-plain { border-style: dashed; }
+[data-sim="win-dc-promotion"] .dp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; }
+[data-sim="win-dc-promotion"] .dp-name { font-size: 1.3rem; font-weight: 700; }
+[data-sim="win-dc-promotion"] .dp-state { padding: 0 0.45rem; border: var(--line-w) dashed var(--ink); border-radius: 0.8rem; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-state[data-role="promoting"] { border-style: dotted; }
+[data-sim="win-dc-promotion"] .dp-state[data-role="dc"] { border-style: solid; font-weight: 700; }
+[data-sim="win-dc-promotion"] .dp-client { margin-left: auto; font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-dc-promotion"] .dp-domain { display: flex; flex-wrap: wrap; gap: 0 0.6rem; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0.35rem; min-height: 0; }
+[data-sim="win-dc-promotion"] .dp-panel {
+  display: flex; flex-direction: column; gap: 0.2rem; min-width: 0;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); padding: 0.15rem 0.4rem 0.3rem; background: var(--panel);
+}
+[data-sim="win-dc-promotion"] .dp-panel h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="win-dc-promotion"] .dp-row { display: flex; flex-wrap: wrap; gap: 0.2rem 0.3rem; align-items: center; }
+
+/* partitions: cylinder slices; an empty slot is dashed */
+[data-sim="win-dc-promotion"] .dp-part {
+  display: block; padding: 0 0.6rem; font-size: var(--fs-sm); line-height: 1.35;
+  border: var(--line-w) solid var(--ink); border-radius: 50% / 0.45rem; background: var(--bg);
+  border-bottom-width: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-sim="win-dc-promotion"] .dp-part.dp-empty { border-style: dashed; border-bottom-width: var(--line-w); color: var(--muted); background: transparent; }
+
+/* zones: a folder */
+[data-sim="win-dc-promotion"] .dp-folder {
+  position: relative; display: inline-block; flex: 0 0 auto; width: 1.1em; height: 0.78em; margin: 0.25em 0.1em 0 0;
+  border: var(--line-w) solid var(--ink); border-radius: 0 0.12em 0.12em 0.12em; vertical-align: -0.05em;
+}
+[data-sim="win-dc-promotion"] .dp-folder::before {
+  content: ''; position: absolute; left: -2px; top: -0.3em; width: 0.5em; height: 0.22em;
+  border: var(--line-w) solid var(--ink); border-bottom: 0; border-radius: 0.12em 0.12em 0 0;
+}
+[data-sim="win-dc-promotion"] .dp-folder.dp-missing, [data-sim="win-dc-promotion"] .dp-folder.dp-missing::before { border-style: dashed; }
+[data-sim="win-dc-promotion"] .dp-zone { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.35rem; font-size: var(--fs-sm); padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="win-dc-promotion"] .dp-zone b { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+/* shares and GPOs */
+[data-sim="win-dc-promotion"] .dp-share { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-hand { width: 1.15em; height: 1em; flex: 0 0 auto; }
+[data-sim="win-dc-promotion"] .dp-gpo { display: block; font-size: var(--fs-sm); line-height: 1.2; padding: 0 0.25rem; border-left: 0.25rem solid var(--ok); border-radius: var(--radius-sm); }
+[data-sim="win-dc-promotion"] .dp-gpo small { display: block; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+
+/* roles: FSMO badges (square), GC (double border) */
+[data-sim="win-dc-promotion"] .dp-fsmo { display: inline-block; padding: 0 0.35rem; border: var(--line-w) solid var(--c4); border-radius: 0.15rem; box-shadow: inset 0.25rem 0 0 var(--c4); font-size: var(--fs-sm); font-weight: 700; background: var(--bg); }
+[data-sim="win-dc-promotion"] .dp-gc { display: inline-block; padding: 0 0.45rem; border: 0.28rem double var(--ink); border-radius: 0.8rem; font-size: var(--fs-sm); font-weight: 700; background: var(--bg); }
+
+/* the replication column */
+[data-sim="win-dc-promotion"] .dp-repl { display: flex; flex-direction: column; justify-content: center; gap: 0.8rem; min-width: 0; text-align: center; }
+[data-sim="win-dc-promotion"] .dp-repl h3 { margin: 0; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-arrow { display: flex; flex-direction: column; gap: 0.1rem; font-size: var(--fs-sm); line-height: 1.15; border-radius: var(--radius-sm); padding: 0.1rem 0; }
+[data-sim="win-dc-promotion"] .dp-line { display: flex; align-items: center; }
+[data-sim="win-dc-promotion"] .dp-line i { flex: 1 1 auto; border-top: 0.25rem solid var(--ink); }
+[data-sim="win-dc-promotion"] .dp-arrow.dp-once .dp-line i { border-top-style: dashed; }
+[data-sim="win-dc-promotion"] .dp-line b { font-size: 1.1rem; line-height: 1; }
+
+/* the zones under the servers */
+[data-sim="win-dc-promotion"] .dp-zones { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 0.6rem; min-height: 0; }
+[data-sim="win-dc-promotion"] .dp-zones.dp-one { grid-template-columns: minmax(0, 1fr); align-content: center; }
+[data-sim="win-dc-promotion"] .dp-ztab { min-width: 0; min-height: 0; border: var(--line-w) solid var(--ink); border-radius: var(--radius); padding: 0.2rem 0.5rem 0.35rem; background: var(--bg); }
+[data-sim="win-dc-promotion"] .dp-ztab.dp-missing { border-style: dashed; }
+[data-sim="win-dc-promotion"] .dp-ztab h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; margin: 0 0 0.15rem; font-size: 1rem; }
+[data-sim="win-dc-promotion"] .dp-ztab h3 span { font-weight: 400; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-dc-promotion"] .dp-recs { display: grid; grid-template-columns: max-content 3.6rem minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-rec { display: contents; }
+[data-sim="win-dc-promotion"] .dp-rname { font-family: var(--mono); padding-left: 0.4rem; border-left: 0.25rem solid var(--line); overflow-wrap: anywhere; max-width: 24rem; }
+[data-sim="win-dc-promotion"] .dp-rec[data-type="SRV"] .dp-rname { border-left-color: var(--ink); }
+[data-sim="win-dc-promotion"] .dp-rtype { font-family: var(--mono); font-weight: 700; }
+[data-sim="win-dc-promotion"] .dp-targets { display: flex; flex-wrap: wrap; gap: 0.15rem 0.3rem; }
+[data-sim="win-dc-promotion"] .dp-target { padding: 0 0.35rem; border: var(--line-w) solid var(--sw); border-radius: var(--radius-sm); font-family: var(--mono); background: var(--bg); white-space: nowrap; }
+[data-sim="win-dc-promotion"] .dp-target b { color: var(--sw); }
+[data-sim="win-dc-promotion"] .dp-rec.dp-failed .dp-rname, [data-sim="win-dc-promotion"] .dp-rec.dp-failed .dp-rtype { text-decoration: line-through; color: var(--muted); }
+[data-sim="win-dc-promotion"] .dp-rec.dp-failed .dp-target { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+[data-sim="win-dc-promotion"] .dp-note { margin: 0.2rem 0 0; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-none { align-self: center; justify-self: center; margin: 0; color: var(--muted); }
+
+/* DC02's DNS query card */
+[data-sim="win-dc-promotion"] .dp-query { display: flex; flex-direction: column; gap: 0.2rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); padding: 0.3rem 0.5rem; background: var(--panel); }
+[data-sim="win-dc-promotion"] .dp-query .dp-mono { overflow-wrap: anywhere; font-size: var(--fs-sm); }
+[data-sim="win-dc-promotion"] .dp-query.dp-bad { border-color: var(--danger); border-style: dashed; }
+[data-sim="win-dc-promotion"] .dp-stop { border: 0.22rem solid var(--danger); border-radius: var(--radius-sm); padding: 0.2rem 0.5rem; background: var(--bg); }
+[data-sim="win-dc-promotion"] .dp-stop b { color: var(--danger); }
+
+/* what this step created */
+[data-sim="win-dc-promotion"] .dp .sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-width: 0.18rem; outline-offset: 0; }
+[data-sim="win-dc-promotion"] .dp .sd-changed small, [data-sim="win-dc-promotion"] .dp .sd-changed .dp-muted { color: var(--on-hl); }
+
+/* legend swatches of our own */
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-part'] { background: transparent; border: var(--line-w) solid var(--ink); border-bottom-width: 0.22rem; border-radius: 50% / 0.3rem; }
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-zone'] { background: transparent; border: var(--line-w) solid var(--ink); border-radius: 0 0.15em 0.15em 0.15em; box-shadow: -0.05em -0.28em 0 -0.12em var(--ink); }
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-rec'] { background: transparent; border: 0; border-left: 0.25rem solid var(--ink); border-bottom: var(--line-w) solid var(--line); border-radius: 0; }
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-share'] { background: transparent; border: var(--line-w) solid var(--ink); border-bottom-width: 0.3rem; }
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-fsmo'] { background: transparent; border: var(--line-w) solid var(--c4); box-shadow: inset 0.25rem 0 0 var(--c4); border-radius: 0.1rem; }
+[data-sim="win-dc-promotion"] .sd-swatch[data-shape='dp-repl'] { background: transparent; border: 0; border-top: 0.25rem dashed var(--ink); border-radius: 0; height: 0; align-self: center; }
+
+/* Phone and portrait: one column; the page scrolls. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dc-promotion"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dc-promotion"] .dp { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; padding: 0.4rem; }
+  [data-sim="win-dc-promotion"] .dp-panels, [data-sim="win-dc-promotion"] .dp-zones { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-dc-promotion"] .dp-zones { grid-column: 1; }
+  [data-sim="win-dc-promotion"] .dp-repl { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 0.3rem 0.8rem; }
+  [data-sim="win-dc-promotion"] .dp-repl h3 { flex: 1 1 100%; }
+  [data-sim="win-dc-promotion"] .dp-arrow { flex: 0 1 8rem; }
+  [data-sim="win-dc-promotion"] .dp-recs { grid-template-columns: minmax(0, 1fr) auto; }
+  [data-sim="win-dc-promotion"] .dp-targets { grid-column: 1 / -1; padding-left: 0.65rem; }
+  [data-sim="win-dc-promotion"] .dp-client { margin-left: 0; white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Što radi promocija kontrolera domene</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var DCS = ['DC01', 'DC02'];
+  var DC_C = { DC01: 'var(--c1)', DC02: 'var(--c2)' };
+  var STATE_KEY = { server: 'stServer', binaries: 'stBinaries', promoting: 'stPromoting', dc: 'stDc' };
+  var PART_KEY = { schema: 'partSchema', config: 'partConfig', domain: 'partDomain' };
+  var PART_DATA = { domainDns: 'DomainDnsZones', forestDns: 'ForestDnsZones' };
+  var FSMO_KEY = { schema: 'fsmoSchema', naming: 'fsmoNaming', rid: 'fsmoRid', pdc: 'fsmoPdc', infrastructure: 'fsmoInfra' };
+
+  /** Data (names, addresses) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** A long DNS name that may break after its dots. */
+  function dnsName(name, cls) {
+    var out = [];
+    name.split('.').forEach(function (l, i, a) { out.push(l + (i < a.length - 1 ? '.' : '')); if (i < a.length - 1) out.push(h('wbr')); });
+    return h('span', { translate: 'no', class: cls || 'dp-mono' }, out);
+  }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule); repeated nodes cloned. */
+  function rich(key, vars) {
+    var out = [];
+    var seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+  function partName(p) { return PART_KEY[p] ? t(PART_KEY[p]) : data(PART_DATA[p]); }
+  function shortGuid(g) { return g.slice(0, 8) + '…'; }
+  function recName(r) { return r.name.length === 36 && r.name.split('-').length === 5 ? shortGuid(r.name) : r.name; }
+  function key(r) { return r.zone + '|' + r.name + '|' + r.type + '|' + r.dc; }
+  function has(list, x) { return !!list && list.indexOf(x) >= 0; }
+  function ch(on) { return on ? ' sd-changed' : ''; }
+
+  /** The hand under a shared folder, drawn in the text colour. */
+  function hand() {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 20'); svg.setAttribute('class', 'dp-hand'); svg.setAttribute('aria-hidden', 'true');
+    [['path', 'M3 3h6l2 2h10v8H3z'], ['path', 'M1 15c3 0 5 1 7 3h11c1 0 2-1 1-2l-4-1']].forEach(function (d) {
+      var p = document.createElementNS(NS, d[0]);
+      p.setAttribute('d', d[1]); p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'currentColor'); p.setAttribute('stroke-width', '2');
+      p.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(p);
+    });
+    return svg;
+  }
+
+  // ── a server box ──
+  function clientText(s, name) {
+    var c = s.servers[name].dnsClient;
+    var who = c === L.LOOPBACK ? t('itself') : c === L.PUBLIC ? t('publicDns') : data(DCS.filter(function (d) { return L.IP[d] === c; })[0] || '');
+    return h('span', { class: 'dp-client' }, t('dnsClient'), ' ', data(c, 'dp-mono'), ' (', who, ')');
+  }
+  function serverBox(c, name) {
+    var s = c.state, d = s.servers[name], was = c.prev ? c.prev.servers[name] : null;
+    var head = h('div', { class: 'dp-head' },
+      h('span', { class: 'dp-name', translate: 'no' }, name),
+      data(d.ip, 'dp-mono'),
+      h('span', { class: 'dp-state' + ch(was && was.role !== d.role), dataset: { role: d.role } }, t(STATE_KEY[d.role])),
+      h('span', { class: was && was.dnsClient !== d.dnsClient ? 'sd-changed' : null, style: { marginLeft: 'auto' } }, clientText(s, name)));
+    var dom = d.dsrm && s.domain
+      ? h('div', { class: 'dp-domain' + ch(was && !was.dsrm) }, dnsName(s.domain.name), data('NetBIOS ' + s.domain.netbios, 'dp-mono'),
+        h('span', null, t('level'), ' ', data(s.domain.level)), h('span', null, t('dsrm'), ' ✓'))
+      : h('div', { class: 'dp-domain dp-muted' }, t('noDomain'));
+    var showQuery = name === 'DC02' && s.query && (s.log[s.log.length - 1] === 'locate' || s.log[s.log.length - 1] === 'stop');
+    return h('section', { class: 'dp-srv' + (d.role === 'dc' ? '' : ' dp-plain'), style: { '--sw': DC_C[name] }, 'aria-label': name },
+      head, dom, showQuery ? queryCard(s) : panels(d, was));
+  }
+  function panels(d, was) {
+    var db = h('div', { class: 'dp-panel' }, h('h3', null, t('pDb'), ' ', d.partitions.length ? data('NTDS.dit', 'dp-mono') : null),
+      L.PARTITIONS.map(function (p) {
+        var on = has(d.partitions, p);
+        return h('span', { class: 'dp-part' + (on ? '' : ' dp-empty') + ch(on && was && !has(was.partitions, p)) }, partName(p));
+      }));
+    var dns = h('div', { class: 'dp-panel' }, h('h3', null, t(d.dnsServer ? 'pDns' : 'pNoDns')),
+      L.ZONES.filter(function (z) { return d.zones[z]; }).map(function (z) {
+        var n = d.zones[z].length;
+        var fresh = was && (!was.zones[z] || was.zones[z].length !== n);
+        return h('div', { class: 'dp-zone' + ch(fresh) }, h('span', { class: 'dp-folder', 'aria-hidden': 'true' }), h('b', null, dnsName(z)),
+          h('span', null, t('zoneIn'), ' ', data(PART_DATA[L.ZONE_STORE[z]])), h('span', null, '· ', t.n('nRecords', n)));
+      }));
+    var sys = h('div', { class: 'dp-panel' }, h('h3', null, t('pSysvol'), d.dfsr ? h('span', { class: 'dp-muted' }, ' · ', t('dfsr')) : null),
+      d.shares.length ? h('div', { class: 'dp-row' }, d.shares.map(function (x) {
+        return h('span', { class: 'dp-share' + ch(was && !has(was.shares, x)), translate: 'no' }, hand(), x);
+      })) : h('span', { class: 'dp-muted dp-sm' }, t('noShares')),
+      d.sysvol.map(function (id) {
+        var g = L.GPOS.filter(function (x) { return x.id === id; })[0];
+        return h('span', { class: 'dp-gpo' + ch(was && !has(was.sysvol, id)), translate: 'no' }, g.name, h('small', null, g.id.slice(0, 9) + '…}'));
+      }));
+    var roles = h('div', { class: 'dp-panel' }, h('h3', null, t('pRoles')),
+      d.fsmo.length || d.gc ? h('div', { class: 'dp-row' },
+        d.fsmo.map(function (f) { return h('span', { class: 'dp-fsmo' + ch(was && !has(was.fsmo, f)) }, t(FSMO_KEY[f])); }),
+        d.gc ? h('span', { class: 'dp-gc' + ch(was && !was.gc) }, t('gc')) : null)
+        : h('span', { class: 'dp-muted dp-sm' }, t('noRoles')));
+    return h('div', { class: 'dp-panels' }, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } }, db, roles),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem' } }, dns, sys));
+  }
+  function queryCard(s) {
+    var q = s.query;
+    var ans = q.answer === 'found'
+      ? h('div', null, t('queryFound'), ' ', data('0 100 389 ' + q.target.toLowerCase() + '.' + L.DOMAIN + '.', 'dp-mono'), ' → ', data(L.IP[q.target], 'dp-mono'))
+      : h('div', null, h('b', null, '✕ '), t(q.answer === 'nxdomain' ? 'queryNx' : 'queryNone'));
+    var stop = s.result === 'stopped'
+      ? h('div', { class: 'dp-stop sd-changed' }, h('b', null, '✕ ', t('stopped')), h('div', null, t('stopMsg'))) : null;
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4rem' } },
+      h('div', { class: 'dp-query' + (q.answer === 'found' ? '' : ' dp-bad') + ch(!stop) },
+        h('b', null, t('queryTitle')),
+        h('div', null, t.parts('queryAsk', { from: data(q.from), server: data(q.server, 'dp-mono') })),
+        h('div', null, dnsName(q.name), ' ', data('SRV', 'dp-mono')),
+        ans),
+      stop);
+  }
+
+  // ── the replication column ──
+  function arrow(from, label, once, fresh) {
+    var ltr = from === 'DC01';
+    return h('div', { class: 'dp-arrow' + (once ? ' dp-once' : '') + ch(fresh) },
+      h('span', null, label),
+      h('div', { class: 'dp-line', 'aria-hidden': 'true' }, ltr ? null : h('b', null, '◀'), h('i'), ltr ? h('b', null, '▶') : null),
+      h('span', { class: 'dp-muted', translate: 'no' }, ltr ? 'DC01 → DC02' : 'DC02 → DC01'));
+  }
+  function replColumn(c) {
+    var s = c.state;
+    var items = s.flows.map(function (f) { return arrow(f.from, t(f.kind === 'initial' ? 'flowInitial' : 'flowSysvol'), true, true); });
+    var fresh = c.prev && !c.prev.connections.length;
+    s.connections.forEach(function (x) { items.push(arrow(x.from, t('connection'), false, fresh)); });
+    return h('div', { class: 'dp-repl', role: 'group', 'aria-label': t('replTitle') }, h('h3', null, t('replTitle')),
+      items.length ? items : h('span', { class: 'dp-muted dp-sm' }, t('noRepl')));
+  }
+
+  // ── the zones ──
+  function zoneSource(s) {
+    for (var i = 0; i < DCS.length; i++) if (s.servers[DCS[i]].dnsServer) return s.servers[DCS[i]];
+    return null;
+  }
+  function target(r, failed, fresh) {
+    var label = r.type === 'SRV' ? [h('b', null, r.dc.toLowerCase()), ':' + r.port] : r.type === 'A' ? [r.data] : [h('b', null, r.dc.toLowerCase()), '.' + L.DOMAIN + '.'];
+    return h('span', { class: 'dp-target' + ch(fresh), translate: 'no', style: { '--sw': DC_C[r.dc] } }, failed ? '✕ ' : null, label);
+  }
+  function recRows(recs, before, failed, failedNow) {
+    return h('div', { class: 'dp-recs' }, L.groups(recs).map(function (g) {
+      var isNew = function (r) { return !failed && !!before && !before[key(r)]; };
+      var fresh = failed ? failedNow : g.recs.every(isNew);
+      return h('div', { class: 'dp-rec' + (failed ? ' dp-failed' : ''), dataset: { type: g.type } },
+        h('span', { class: 'dp-rname' + ch(fresh), translate: 'no', title: g.name }, recName(g)),
+        h('span', { class: 'dp-rtype', translate: 'no' }, g.type),
+        h('span', { class: 'dp-targets' }, g.recs.map(function (r) { return target(r, failed, isNew(r)); })));
+    }));
+  }
+  function zonesArea(c) {
+    var s = c.state;
+    var src = zoneSource(s);
+    var before = null;
+    if (c.prev) {
+      before = {};
+      var ps = zoneSource(c.prev);
+      if (ps) Object.keys(ps.zones).forEach(function (z) { ps.zones[z].forEach(function (r) { before[key(r)] = true; }); });
+    }
+    var failed = [], failedBy = null;
+    DCS.forEach(function (d) { if (s.servers[d].failed.length) failedBy = d; failed = failed.concat(s.servers[d].failed); });
+    var failedNow = !!c.prev && !!failedBy && !c.prev.servers[failedBy].failed.length;
+    if (!src && !failed.length) return h('div', { class: 'dp-zones dp-one' }, h('p', { class: 'dp-none' }, t('zoneNone')));
+    return h('div', { class: 'dp-zones' }, L.ZONES.map(function (z) {
+      var held = src && src.zones[z];
+      var recs = held ? src.zones[z] : failed.filter(function (r) { return r.zone === z; });
+      var heading = h('h3', null, h('span', { class: 'dp-folder' + (held ? '' : ' dp-missing'), 'aria-hidden': 'true', style: { fontSize: '1rem' } }),
+        dnsName(z), held ? h('span', null, t('zoneIn'), ' ', data(PART_DATA[L.ZONE_STORE[z]]), ' · ', t.n('nRecords', recs.length)) : null);
+      var body = held && !recs.length ? h('p', { class: 'dp-note dp-muted' }, t('zoneEmpty'))
+        : recRows(recs, held ? before : null, !held, failedNow);
+      var note = !held && z === L.DOMAIN && failed.length
+        ? h('p', { class: 'dp-note' + ch(failedNow) }, h('b', null, t('failedTitle')), ' ', t.parts('failedWhy', { dns: data(s.servers[failedBy].dnsClient, 'dp-mono'), zone: dnsName(L.DOMAIN) })) : null;
+      return h('section', { class: 'dp-ztab' + (held ? '' : ' dp-missing') }, heading, note, body);
+    }));
+  }
+
+  // ── captions ──
+  function captionFor(c) {
+    var s = c.state, p = c.params;
+    var dc = p.server === 'dc02' ? 'DC02' : 'DC01';
+    var dcEl = data(dc);
+    var dom = data(L.DOMAIN, 'dp-mono');
+    if (c.first) {
+      if (p.server === 'dc02') return rich('capStart2', { domain: dom, dns: data(s.servers.DC02.dnsClient, 'dp-mono') });
+      return rich('capStart1');
+    }
+    var phase = s.log[s.log.length - 1];
+    var d = s.servers[dc];
+    switch (phase) {
+      case 'role': return rich('capRole', { n: c.n, dc: dcEl });
+      case 'forest': return rich('capForest', { dc: dcEl, domain: dom, netbios: data(L.NETBIOS) });
+      case 'database': return rich('capDatabase', { dc: dcEl, ntds: data('NTDS.dit', 'dp-mono'), domain: dom });
+      case 'dns': return rich('capDns', { domain: dom, msdcs: data(L.MSDCS, 'dp-mono'), ddz: data('DomainDnsZones'), fdz: data('ForestDnsZones'), lo: data(L.LOOPBACK, 'dp-mono') });
+      case 'sysvol':
+        if (dc === 'DC02') return rich('capSysvol2', { dc: dcEl });
+        return rich('capSysvol1', { dc: dcEl, path: data('C:\\Windows\\SYSVOL', 'dp-mono'), sysvol: data('SYSVOL'), netlogon: data('NETLOGON') });
+      case 'reboot':
+        if (dc === 'DC02') return rich(d.gc ? 'capReboot2Gc' : 'capReboot2NoGc', { dc: dcEl });
+        return rich('capReboot1', { dc: dcEl });
+      case 'register': {
+        var mine = L.dcRecords(dc, { gc: d.gc, pdc: has(d.fsmo, 'pdc') }).length;
+        if (s.result === 'unregistered') return rich('capRegisterFail', { n: t.n('nRec', mine), dns: data(d.dnsClient, 'dp-mono'), domain: dom });
+        if (dc === 'DC02') return rich('capRegister2', { dc: dcEl, n: t.n('nRec', mine), total: t.n('nRec', L.recordCount(s.servers.DC01)), locator: dnsName(L.LOCATOR) });
+        return rich('capRegister', { dc: dcEl, n: t.n('nRec', mine), locator: dnsName(L.LOCATOR) });
+      }
+      case 'locate': {
+        var q = s.query;
+        var v = { dc: dcEl, server: data(q.server, 'dp-mono'), locator: dnsName(L.LOCATOR), domain: dom };
+        if (q.answer === 'found') return rich('capLocateFound', Object.assign(v, { target: data(q.target.toLowerCase() + '.' + L.DOMAIN, 'dp-mono') }));
+        return rich(q.answer === 'nxdomain' ? 'capLocateNx' : 'capLocateNone', v);
+      }
+      case 'stop': return rich(s.query.answer === 'nxdomain' ? 'capStopNx' : 'capStopNone', { domain: dom });
+      case 'replicate': return rich('capReplicate', { dc: dcEl, n: t.n('nPart', d.partitions.length) });
+    }
+    return '';
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'server', type: 'choice', label: t('paramServer'), resets: true, options: [['dc01', t('serverDc01')], ['dc02', t('serverDc02')]] },
+      { key: 'dns', type: 'toggle', label: t('paramDns'), hint: t('paramDnsHint'), resets: true },
+      { key: 'dc2Dns', type: 'choice', label: t('paramDc2Dns'), resets: true, options: [['dc01', t('dc2DnsDc01')], ['public', t('dc2DnsPublic')]],
+        visible: function (p) { return p.server === 'dc02'; } },
+      { key: 'gc2', type: 'toggle', label: t('paramGc2'), visible: function (p) { return p.server === 'dc02'; } }
+    ],
+
+    presets: [
+      { id: 'first-dc', label: t('presetFirst'), hint: t('presetFirstHint'), params: { server: 'dc01', dns: true } },
+      { id: 'second-dc', label: t('presetSecond'), hint: t('presetSecondHint'), params: { server: 'dc02', dns: true, dc2Dns: 'dc01', gc2: true } },
+      { id: 'wrong-dns', label: t('presetWrongDns'), hint: t('presetWrongDnsHint'), params: { server: 'dc02', dns: true, dc2Dns: 'public' } },
+      { id: 'no-dns-role', label: t('presetNoDns'), hint: t('presetNoDnsHint'), params: { server: 'dc01', dns: false } }
+    ],
+
+    legend: [
+      { shape: 'dp-part', label: t('legPartition') },
+      { shape: 'dp-zone', label: t('legZone') },
+      { shape: 'dp-rec', label: t('legRecord') },
+      { shape: 'dp-share', label: t('legShare') },
+      { shape: 'dp-fsmo', label: t('legFsmo') },
+      { shape: 'dp-repl', label: t('legRepl') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'dp' },
+        serverBox(c, 'DC01'), replColumn(c), serverBox(c, 'DC02'), zonesArea(c)));
+    },
+
+    caption: captionFor
+  });
+})();
+</script>
+</body>
+</html>
