@@ -1,0 +1,450 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-zone-types: an explorer. Top, the forest's servers as a rule table (kit view K4, kit/ruletable.js,
+     docs/sim-ui.md §12): one row per server, the match columns are what the replication scope looks at (domain, role,
+     DNS), then one column per zone with what the server holds, and the mark column says whether this server gets the
+     zone being defined. Below, the cell key, the zone on the server it was created on, and the check.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-zone-types">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: vrste zona i opseg replikacije · simdeck</title>
+<meta name="description" content="Stvori zonu na poslužitelju, dodaj DC-u ulogu DNS i vidi tko drži koju zonu: upisivu kopiju, kopiju za čitanje, stub ili samo spremljenu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-zone-types",
+  "title": {
+    "hr": "DNS: vrste zona i opseg replikacije",
+    "en": "DNS zone types and replication scope"
+  },
+  "concept": {
+    "hr": "Primarna, sekundarna, stub i zona u AD-u; opseg šuma, domena ili vlastiti",
+    "en": "Primary, secondary, stub, AD-integrated; forest, domain or custom scope"
+  },
+  "summary": {
+    "hr": "Stvori zonu na poslužitelju, dodaj DC-u ulogu DNS i vidi tko drži koju zonu: upisivu kopiju, kopiju za čitanje, stub ili samo spremljenu.",
+    "en": "Create a zone on a server, give a DC the DNS role and see who holds which zone: writable, read-only, stub, or stored but not served."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-zone-types"]; colours only from kit tokens.
+   Layout: the server × zone table across the top; the cell key, the zone's detail and the check below it. */
+[data-sim="win-dns-zone-types"] .zt {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1.4cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+[data-sim="win-dns-zone-types"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-dns-zone-types"] h2 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-dns-zone-types"] .zt-low { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1.2cqw; min-height: 0; align-items: start; }
+[data-sim="win-dns-zone-types"] .zt-low[data-recs='true'] { grid-template-columns: minmax(0, 1.5fr) auto minmax(0, 1fr); }
+[data-sim="win-dns-zone-types"] .zt-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.8rem 0.6rem; min-width: 0; }
+
+/* the table: the zone being defined is the action column, the other zones follow */
+[data-sim="win-dns-zone-types"] .sd-rt-table td { padding-top: 0.2rem; padding-bottom: 0.2rem; }
+[data-sim="win-dns-zone-types"] .sd-rt-table td.sd-rt-act { font-weight: 400; }
+[data-sim="win-dns-zone-types"] .sd-rt-table th.sd-rt-act { white-space: normal; }
+/* notes follow the mark word on its line when they fit, so a row stays one line high */
+[data-sim="win-dns-zone-types"] .sd-rt-table td.sd-rt-mark .sd-rt-tag { display: inline-block; margin-left: 0.4rem; white-space: normal; }
+[data-sim="win-dns-zone-types"] .zt-this { display: block; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="win-dns-zone-types"] .zt-role[data-dc='false'] { font-style: italic; }
+[data-sim="win-dns-zone-types"] .zt-dns[data-on='false'] { color: var(--muted); }
+
+/* a cell: glyph and word, and a pattern per holding so it reads in grayscale */
+[data-sim="win-dns-zone-types"] .zt-cell { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0.05rem 0.45rem; border: 0.15rem solid transparent; border-radius: var(--radius-sm); white-space: nowrap; }
+/* the glyphs in the mono font: the sans fallback draws ◔ without its ring */
+[data-sim="win-dns-zone-types"] .zt-g { font-family: var(--mono); font-weight: 700; min-width: 1.1em; text-align: center; }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='write'] { border-color: var(--ink); background: var(--bg); font-weight: 700; }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='read'] { border-color: var(--ink); border-style: dashed; background: var(--bg); }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='stub'] { border-color: var(--ink); border-style: dotted; background: var(--bg); }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='stored'] { border-color: var(--muted); color: var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 25%, transparent) 0.35em 0.5em); }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='refused'] { border-color: var(--danger); border-style: dashed; color: var(--danger); }
+[data-sim="win-dns-zone-types"] .zt-cell[data-hold='none'] { color: var(--muted); }
+[data-sim="win-dns-zone-types"] .zt-rej { margin-left: 0.2rem; padding: 0 0.3rem; border: 0.15rem dashed var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-weight: 700; }
+[data-sim="win-dns-zone-types"] .zt-cell.sd-changed { outline: 0.25rem solid var(--ink); outline-offset: 0.1rem; background: var(--hl); color: var(--on-hl); }
+
+/* presets in two columns, so the panel fits at 1920×1080 (as dns-records) */
+[data-sim="win-dns-zone-types"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-dns-zone-types"] .sd-preset { line-height: 1.15; }
+
+/* the cell key: one strip under the table */
+[data-sim="win-dns-zone-types"] .zt-key { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; padding: 0 0.4rem; }
+[data-sim="win-dns-zone-types"] .zt-key ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; }
+[data-sim="win-dns-zone-types"] .zt-key li { white-space: nowrap; }
+[data-sim="win-dns-zone-types"] .zt-key .zt-rej { margin-left: 0; padding: 0.05rem 0.45rem; }
+
+/* the detail and the check */
+[data-sim="win-dns-zone-types"] .zt-det ul, [data-sim="win-dns-zone-types"] .zt-chk ul { list-style: none; margin: 0.3rem 0 0; padding: 0; display: grid; gap: 0.25rem; }
+[data-sim="win-dns-zone-types"] .zt-det li { overflow-wrap: anywhere; }
+[data-sim="win-dns-zone-types"] .zt-rr { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.1rem 0.7rem; margin-top: 0.3rem; font-size: 0.93em; overflow-wrap: anywhere; }
+[data-sim="win-dns-zone-types"] .zt-lbl { color: var(--muted); }
+[data-sim="win-dns-zone-types"] .zt-type { font-weight: 400; }
+[data-sim="win-dns-zone-types"] .zt-chk li { display: grid; grid-template-columns: 1.5em minmax(0, 1fr); align-items: baseline; }
+[data-sim="win-dns-zone-types"] .zt-ico { font-weight: 700; }
+[data-sim="win-dns-zone-types"] .zt-chk li[data-level='ok'] .zt-ico { color: var(--ok); }
+[data-sim="win-dns-zone-types"] .zt-chk li[data-level='error'] .zt-ico { color: var(--danger); }
+[data-sim="win-dns-zone-types"] .zt-chk li[data-level='info'] .zt-ico { color: var(--muted); }
+[data-sim="win-dns-zone-types"] .zt-chk[data-bad='true'] { border: 0.2rem dashed var(--danger); }
+
+/* Phone and portrait: one column, the stage grows with its content; the table scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-zone-types"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-zone-types"] .zt { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="win-dns-zone-types"] .zt-low, [data-sim="win-dns-zone-types"] .zt-low[data-recs='true'] { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  /* the domain column gives way so the zone cells show beside the server; the domain is in the caption */
+  [data-sim="win-dns-zone-types"] .sd-rt-table [data-col='domain'] { display: none; }
+  /* on a phone the sticky mark column would cover the zone cells: it scrolls with the table instead */
+  [data-sim="win-dns-zone-types"] .sd-rt--sticky .sd-rt-table .sd-rt-mark { position: static; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: vrste zona i opseg replikacije</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PRESET_KEY = {
+    'domain-scope': 'presetDomain', 'forest-scope': 'presetForest', 'all-dcs': 'presetAll', 'secondary-ms1': 'presetMs1',
+    'stub-partner': 'presetStub', 'ad-on-member': 'presetMember'
+  };
+  var TYPE_KEY = { primary: 'typePrimary', secondary: 'typeSecondary', stub: 'typeStub', adPrimary: 'typeAdPrimary', adStub: 'typeAdStub' };
+  var SCOPE_KEY = { forest: 'scopeForest', domain: 'scopeDomain', allDCsDomain: 'scopeAll', custom: 'scopeCustom' };
+  var ZONE_KEY = { 'corp.example': 'zCorp', 'branch.corp.example': 'zBranch', 'partner.example': 'zPartner' };
+  /** A holding: its glyph (a shape besides the colour and the border pattern) and its word. */
+  var HOLD = {
+    write: { g: '✎', w: 'holdWrite' }, read: { g: '⊙', w: 'holdRead' }, stub: { g: '◔', w: 'holdStub' },
+    stored: { g: '▣', w: 'holdStored' }, refused: { g: '⊘', w: 'holdRefused' }, none: { g: '—', w: 'holdNone' }
+  };
+  var ERR_KEY = { 'not-dc': 'errNotDc', 'no-dns': 'errNoDns', rodc: 'errRodc', 'not-enlisted': 'errNotEnlisted', exists: 'errExists',
+    'scope-on-file': 'errScopeFile', 'no-scope': 'errNoScope', 'no-host': 'errNoHost', 'exists-ad': 'errExistsAd' };
+  /** The same rejections, short, for the note in the table's mark column. */
+  var REJ_KEY = { 'not-dc': 'rejNotDc', 'no-dns': 'rejNoDns', rodc: 'rejRodc', 'not-enlisted': 'rejNotEnlisted', exists: 'rejExists',
+    'scope-on-file': 'rejScopeFile', 'no-scope': 'rejNoScope', 'no-host': 'rejNoHost', 'exists-ad': 'rejExistsAd' };
+
+  /** Data (server and zone names, partitions, addresses, serials) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function list(ids) { return data(ids.join(', ')); }
+  /** A name relative to the zone, as a zone file writes it: the zone itself is @. */
+  function rel(name, zone) {
+    if (name === zone) return '@';
+    return name.slice(-(zone.length + 1)) === '.' + zone ? name.slice(0, -(zone.length + 1)) : name;
+  }
+  /** A zone name in a column header: it may break after a dot. */
+  function zoneHead(name) {
+    var out = [];
+    name.split(/(\.)/).forEach(function (bit) { if (bit) { out.push(bit); if (bit === '.') out.push(h('wbr')); } });
+    return h('span', { translate: 'no' }, out);
+  }
+  /** The rejections grouped by reason, so four servers that already hold the zone are one line: [{ code, zone, servers }]. */
+  function grouped(errors) {
+    var out = [];
+    errors.forEach(function (e) {
+      var g = out.filter(function (x) { return x.code === e.code && x.zone === e.zone && x.by === e.by; })[0];
+      if (g) g.servers.push(e.server);
+      else out.push({ code: e.code, zone: e.zone, by: e.by, part: e.part, servers: [e.server] });
+    });
+    return out;
+  }
+  function errText(g) {
+    var vars = { server: g.servers.join(', '), zone: g.zone, part: g.part || L.CUSTOM.name };
+    return g.code === 'exists' ? t.n('errExists', g.servers.length, vars) : t(ERR_KEY[g.code], vars);
+  }
+
+  /** One cell of the table: glyph and word, the border pattern by holding, ✕ when a definition was rejected here. */
+  function cellNode(s, server, zone, changed) {
+    var c = s.holdings[server][zone];
+    var k = HOLD[c.hold];
+    var what = t(k.w) + (c.serial ? ', ' + t('cellSerial', { serial: c.serial }) : '') + (c.rejected ? ', ' + t('holdRejected') : '');
+    return h('span', { class: 'zt-cell' + (changed ? ' sd-changed' : ''), dataset: { hold: c.hold }, title: t('cellTitle', { server: server, zone: zone, what: what }) },
+      h('span', { class: 'zt-g', 'aria-hidden': 'true' }, k.g),
+      c.hold === 'none' ? null : h('span', null, t(k.w)),
+      c.rejected ? h('span', { class: 'zt-rej', 'aria-label': t('holdRejected') }, '✕') : null);   // the word is in the key and the title
+  }
+
+  /** The mark of a server for the zone being defined: holds (and answers), stores only, or not reached, with the
+      columns that keep it out struck through and a note. */
+  function markOf(s, sv) {
+    var c = s.holdings[sv.id][s.zone];
+    var def = s.def;
+    var spec = { hit: false, miss: [], note: null };
+    var notes = [];
+    var err = s.errors.filter(function (e) { return e.server === sv.id && e.zone === s.zone; })[0];
+    if (c.hold === 'write' || c.hold === 'read' || c.hold === 'stub') {
+      spec.hit = true;
+      if (sv.id === 'MS1' && s.ms1 === 'ok') notes.push({ k: 'muted', text: t('noteMs1', { from: c.from }) });
+      else if (c.from && c.via === 'xfr') notes.push({ k: 'muted', text: t('noteXfr', { from: c.from }) });   // an AD stub's source is in the detail box
+      if (c.hold === 'read' && c.via === 'ad') notes.push({ k: 'muted', text: t('noteRodc') });
+      if (c.via === 'file') notes.push({ k: 'muted', text: t('noteFile') });
+    } else if (c.hold === 'stored') {
+      spec.hit = null; spec.mark = 'hit';
+      notes.push({ k: 'muted', text: t('noteStored') });
+    } else if (c.hold === 'refused') {
+      notes.push({ k: 'dashed', text: '⊘ ' + t('noteRefused', { from: c.from }) });
+    } else if (def) {
+      spec.miss = L.reachOf(s.servers, def, sv.id).filter(function (k) { return k === 'role' || k === 'domain' || k === 'dns'; });
+      if (L.isAD(def.type) && def.scope === 'custom' && sv.isDC && L.CUSTOM.members.indexOf(sv.id) < 0) notes.push({ k: 'muted', text: t('noteNotEnlisted') });
+    }
+    if (err && err.by === 'zone') {
+      // the definition was rejected here: it does not reach this server; only the reason is noted
+      spec.mark = 'no'; spec.hit = null; spec.miss = [];
+      notes = [{ k: 'dashed', text: '✕ ' + t(REJ_KEY[err.code]) }];
+    } else if (err) notes.push({ k: 'dashed', text: '✕ ' + t(REJ_KEY[err.code]) });   // MS1's extra copy, rejected: what it holds stays
+    spec.note = notes.length ? notes : null;
+    return spec;
+  }
+
+  function table(s, changed) {
+    var others = L.ZONES.filter(function (z) { return z !== s.zone; });
+    var isChanged = function (id, z) { return changed.some(function (x) { return x[0] === id && x[1] === z; }); };
+    var rows = s.servers.map(function (sv) {
+      var m = markOf(s, sv);
+      var cells = {
+        domain: sv.domain,
+        role: h('span', { class: 'zt-role', dataset: { dc: String(sv.isDC) } }, t(sv.isRODC ? 'roleRODC' : sv.isDC ? 'roleDC' : 'roleMember')),
+        dns: h('span', { class: 'zt-dns', dataset: { on: String(sv.dnsRole) } }, t(sv.dnsRole ? 'dnsYes' : 'dnsNo'))
+      };
+      others.forEach(function (z) { cells[z] = cellNode(s, sv.id, z, isChanged(sv.id, z)); });
+      var row = { no: sv.id, cells: cells, action: cellNode(s, sv.id, s.zone, isChanged(sv.id, s.zone)), hit: m.hit, miss: m.miss, note: m.note };
+      if (m.mark) row.mark = m.mark;
+      return row;
+    });
+    return RT({
+      mode: 'deny',
+      title: t('tableTitle'),
+      noLabel: t('colServer'),
+      columns: [{ key: 'domain', label: t('colDomain') }, { key: 'role', label: t('colRole') }, { key: 'dns', label: t('colDns') }],
+      actionLabel: h('span', null, zoneHead(s.zone), h('span', { class: 'zt-this' }, t('colThis'))),
+      extra: others.map(function (z) { return { key: z, label: zoneHead(z) }; }),
+      markLabel: t('colMark'),
+      rows: rows,
+      at: 'all',
+      done: true,
+      words: { win: t('wordWin'), hit: t('wordHit') },
+      stickyMark: true
+    });
+  }
+
+  function keyBox() {
+    var items = ['write', 'read', 'stub', 'stored', 'refused', 'none'].map(function (k) {
+      return h('li', null, h('span', { class: 'zt-cell', dataset: { hold: k } }, h('span', { class: 'zt-g', 'aria-hidden': 'true' }, HOLD[k].g), h('span', null, t(HOLD[k].w))));
+    });
+    items.push(h('li', null, h('span', { class: 'zt-rej' }, '✕ ', t('holdRejected'))));
+    return h('section', { class: 'zt-key' }, h('h2', null, t('keyTitle')), h('ul', null, items));
+  }
+
+  /** The zone on the server it was created on: where it is stored, what it holds, how it answers, its updates. */
+  function detailBox(s) {
+    var def = s.def;
+    if (!def) return [h('section', { class: 'zt-box zt-det' }, h('h2', null, t.parts('detNobody', { zone: data(s.zone) })))];
+    var c = s.holdings[def.host][s.zone];
+    var ct = L.contentOf(c, s.zone);
+    var items = [];
+    if (L.isAD(def.type)) items.push(h('li', null, t.parts('detStoreAd', { part: data(s.partition) })));
+    else if (def.type === 'primary') items.push(h('li', null, t.parts('detStoreFile', { file: data(s.zone + '.dns') })));
+    var vars = { from: c.from || '', serial: c.serial };   // plain text: t.n fills text, not nodes (numbers and DC names only)
+    if (c.hold === 'refused') items.push(h('li', null, t.parts('detCopyRefused', vars)));
+    else if (ct.kind === 'full') items.push(h('li', null, t.n(c.from ? 'detFullFrom' : 'detFull', ct.records, vars)));
+    else if (ct.kind === 'stub') items.push(h('li', null, t.n('detStub', ct.records, vars)));
+    else if (ct.kind === 'stored') items.push(h('li', null, t('detStored')));
+    if (ct.answer) {
+      var a = ct.answer, ans;
+      if (a.kind === 'answer') ans = t.parts('detAnswer', { addr: data(a.addr) });
+      else if (a.kind === 'refer') ans = t.parts('detRefer', { ns: list(a.ns) });
+      else ans = [t(a.kind === 'servfail' ? 'detServfail' : 'detElsewhere')];
+      items.push(h('li', null, h('span', { class: 'zt-lbl' }, t.parts('detQuery', { name: data(a.name) })), ' ', ans));
+    }
+    var up = L.updatesOf(def.type);
+    items.push(h('li', null, h('span', { class: 'zt-lbl' }, t('detUpdates')), ' ',
+      t(up.indexOf('secure') >= 0 ? 'updSecure' : up.length ? 'updNonsecure' : 'updMaster')));
+    var box = h('section', { class: 'zt-box zt-det' },
+      h('h2', null, t.parts('detTitle', { zone: data(s.zone), server: data(def.host) }), h('span', { class: 'zt-type' }, ' · ', t(TYPE_KEY[def.type]))),
+      h('ul', null, items));
+    // a stub's records in a box of their own beside it, so the low row stays one box high
+    if (ct.kind !== 'stub') return [box];
+    return [box, h('section', { class: 'zt-box zt-recs' }, h('h2', null, t('recsTitle')),
+      h('div', { class: 'zt-rr', translate: 'no' }, ct.rr.map(function (r) {
+        // as a zone file writes them: names relative to the zone, the SOA with its first and its serial field only
+        var data = r.type === 'SOA' ? rel(r.data.split(' ')[0], s.zone) + ' … ' + r.data.split(' ')[1] : rel(r.data, s.zone);
+        return [h('span', null, rel(r.name, s.zone)), h('span', null, r.type), h('span', null, data)];
+      })))];
+  }
+
+  function checkBox(s) {
+    var items = [];
+    function add(level, ico, parts) { items.push(h('li', { dataset: { level: level } }, h('span', { class: 'zt-ico', 'aria-hidden': 'true' }, ico), h('span', null, parts))); }
+    if (s.accepted) add('ok', '✓', t.parts('chkOk', { zone: data(s.zone), server: data(s.created.host) }));
+    else add('error', '✕', t.parts('chkRejected', { zone: data(s.zone) }));
+    grouped(s.errors).forEach(function (g) { add('error', '✕', [errText(g)]); });
+    if (s.ms1 === 'ok') { var m = s.holdings.MS1[s.zone]; add('ok', '✓', t.parts('chkMs1Ok', { from: data(m.from), serial: data(m.serial) })); }
+    else if (s.ms1 === 'refused') add('error', '⊘', t.parts('chkMs1Refused', { from: data(s.holdings.MS1[s.zone].from) }));
+    else if (s.ms1 === 'rejected') add('error', '✕', [t('chkMs1Rejected')]);
+    add('info', 'ⓘ', [t(s.allowXfr ? 'chkXfrOn' : 'chkXfrOff')]);
+    var bad = !s.accepted || s.ms1 === 'refused' || s.ms1 === 'rejected';
+    return h('section', { class: 'zt-box zt-chk', dataset: { bad: String(bad) } }, h('h2', null, t('checkTitle')), h('ul', null, items));
+  }
+
+  // "Changed" outlines the cells whose holding changed with the last param change (not on the renders while the page
+  // loads: preset, then the URL's params).
+  var last = { key: null, state: null, cells: [] }, loaded = false;
+  setTimeout(function () { loaded = true; }, 0);
+  function changesFor(s, p) {
+    var key = JSON.stringify(p);
+    if (key !== last.key) {
+      last.cells = loaded ? L.changedCells(last.state, s) : [];
+      last.key = key; last.state = s;
+    }
+    return last.cells;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'zone', type: 'select', label: t('zone'), options: L.CHOICES.map(function (z) { return [z, t(ZONE_KEY[z])]; }) },
+      { key: 'type', type: 'select', label: t('type'), options: L.TYPES.map(function (x) { return [x, t(TYPE_KEY[x])]; }) },
+      { key: 'scope', type: 'select', label: t('scope'), options: L.SCOPES.map(function (x) { return [x, t(SCOPE_KEY[x])]; }) },
+      { key: 'host', type: 'select', label: t('host'), options: L.HOSTS.map(function (x) { return [x, t('s' + x)]; }) },
+      { key: 'dc3Dns', type: 'toggle', label: t('dc3Dns') },
+      { key: 'ms1Secondary', type: 'toggle', label: t('ms1Secondary') },
+      { key: 'allowXfr', type: 'toggle', label: t('allowXfr') }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'rt-win', label: t('legServes') },
+      { shape: 'rt-hit', label: t('legStores') },
+      { shape: 'rt-no', label: t('legOut') },
+      { shape: 'rt-warn', label: t('legRejected') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var ch = changesFor(s, c.params);
+      var det = detailBox(s);
+      c.stage.replaceChildren(h('div', { class: 'zt' }, table(s, ch), keyBox(),
+        h('div', { class: 'zt-low', dataset: { recs: String(det.length > 1) } }, det, checkBox(s))));
+    },
+
+    caption: function (c) {
+      var s = c.state, def = s.def;
+      var out = [];
+      function add(parts) { if (out.length) out.push(' '); out = out.concat(parts); }
+      // servers holding this zone's copy from the definition in force (MS1's extra secondary is not one of them)
+      var holders = function (holds, via) {
+        return s.servers.filter(function (sv) {
+          var x = s.holdings[sv.id][s.zone];
+          return holds.indexOf(x.hold) >= 0 && (!via || x.via === via);
+        }).map(function (sv) { return sv.id; });
+      };
+      var plural = function (key, ids) { if (ids.length) add([t.n(key, ids.length, { list: ids.join(', ') })]); };
+      if (!s.accepted) {
+        add(t.parts('capRejected', { why: errText(grouped(s.errors)[0]) }));
+      } else if (def.type === 'adPrimary') {
+        var host = s.servers.filter(function (sv) { return sv.id === def.host; })[0];
+        var served = list(holders(['write', 'read'], 'ad'));
+        var dcs = s.servers.filter(function (sv) { return sv.isDC; });
+        var outDomain = dcs.filter(function (sv) { return sv.domain !== host.domain; }).map(function (sv) { return sv.id; });
+        var outDns = function (sameDomain) {
+          return dcs.filter(function (sv) { return !sv.dnsRole && (!sameDomain || sv.domain === host.domain); }).map(function (sv) { return sv.id; });
+        };
+        if (def.scope === 'domain') {
+          add(t.parts('capDomain', { domain: data(host.domain), list: served }));
+          plural('capOutDns', outDns(true));
+          plural('capOutDomain', outDomain);
+        } else if (def.scope === 'forest') {
+          add(t.parts('capForest', { list: served }));
+          plural('capOutDns', outDns(false));
+        } else if (def.scope === 'allDCsDomain') {
+          add(t.parts('capAll', { domain: data(host.domain) }));
+          plural('capStored', holders(['stored']));
+        } else add(t.parts('capCustom', { part: data(L.CUSTOM.name), list: served }));
+        if (s.holdings.RODC1[s.zone].hold === 'read' && s.holdings.RODC1[s.zone].via === 'ad') add([t('capRodc')]);
+      } else if (def.type === 'adStub') {
+        if (holders(['refused']).length) add(t.parts('capStubRefused', { from: data(s.holdings[def.host][s.zone].from) }));
+        else add(t.parts('capAdStub', { list: list(holders(['stub'], 'ad')) }));
+        plural('capStored', holders(['stored']));
+      } else {
+        var cell = s.holdings[def.host][s.zone];
+        if (def.type === 'primary') {
+          add(t.parts('capPrimary', { server: data(def.host) }));
+          var ad = holders(['write', 'read'], 'ad');
+          if (ad.length) add(t.parts('capPrimaryBeside', { list: list(ad) }));
+        } else if (cell.hold === 'refused') add(t.parts(def.type === 'stub' ? 'capStubRefused' : 'capSecondaryRefused', { server: data(def.host), from: data(cell.from) }));
+        else if (def.type === 'secondary') add(t.parts('capSecondary', { server: data(def.host), from: data(cell.from) }));
+        else {
+          var ns = list(L.DATA[s.zone].ns.map(function (n) { return n[0]; }));
+          add(t.parts(s.zone === 'partner.example' ? 'capStub' : 'capStubOwn', { zone: data(s.zone), ns: ns }));
+        }
+      }
+      if (s.ms1 === 'ok') add(t.parts('capMs1Ok', { from: data(s.holdings.MS1[s.zone].from), serial: data(s.holdings.MS1[s.zone].serial) }));
+      else if (s.ms1 === 'refused') add(t.parts('capMs1Refused', { from: data(s.holdings.MS1[s.zone].from) }));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
