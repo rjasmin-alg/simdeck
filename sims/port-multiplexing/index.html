@@ -1,0 +1,557 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- port-multiplexing: ports and sockets. A stepper drawn in HTML: client hosts with their programs and sockets on the
+     left, the segment on its way in the middle, the servers with their listening sockets on the right, and under them
+     the receiver's socket table (kit view K4, first match: connections, then listening sockets, then the implicit
+     reject). Rules: SPEC.md; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="port-multiplexing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portovi i socketi · simdeck</title>
+<meta name="description" content="Otvori veze s nekoliko klijenata prema istom poslužitelju: kad segment stigne, OS ga traži u tablici po protokolu, adresama i portovima.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json (the build replaces it). -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "port-multiplexing",
+  "title": {
+    "hr": "Portovi i socketi",
+    "en": "Ports and sockets"
+  },
+  "concept": {
+    "hr": "pet vrijednosti razdvaja mnogo veza na jednom portu 443",
+    "en": "the 5-tuple keeps many connections apart on one port 443"
+  },
+  "summary": {
+    "hr": "Otvori veze s nekoliko klijenata prema istom poslužitelju: kad segment stigne, OS ga traži u tablici po protokolu, adresama i portovima.",
+    "en": "Open connections from several clients to one server: when a segment arrives, the OS finds its row by protocol, addresses and ports."
+  },
+  "tags": [
+    "tcp"
+  ],
+  "class": "stepper",
+  "steps": 9,
+  "entries": [
+    {
+      "preset": "two-tabs"
+    },
+    {
+      "preset": "port-clash"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="port-multiplexing"]; colours only from kit tokens.
+   A program is round, a connection solid, a listening socket hollow and dashed; a rejected port is struck with ✕. */
+[data-sim="port-multiplexing"] .pm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+[data-sim="port-multiplexing"] [translate="no"] { font-family: var(--mono); }
+[data-sim="port-multiplexing"] h3 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-sm { font-size: var(--fs-sm); }
+[data-sim="port-multiplexing"] .pm-muted { color: var(--muted); }
+/* the kit's .sd-ctl display beats the [hidden] its `visible` sets (NOTES.md, Shared requests); presets in two columns */
+[data-sim="port-multiplexing"] .sd-ctl[hidden] { display: none; }
+[data-sim="port-multiplexing"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* the scene: clients | segment | servers */
+[data-sim="port-multiplexing"] .pm-scene { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.95fr) minmax(0, 0.85fr); gap: 1.2cqw; align-items: start; }
+[data-sim="port-multiplexing"] .pm-col { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+[data-sim="port-multiplexing"] .pm-col > h3 { color: var(--muted); font-weight: 400; font-size: var(--fs-sm); }
+[data-sim="port-multiplexing"] .pm-hosts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.4rem; }
+[data-sim="port-multiplexing"] .pm-hosts .pm-card { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 0.7rem; }
+[data-sim="port-multiplexing"] .pm-hosts .pm-progs { flex: 1 1 12rem; }
+[data-sim="port-multiplexing"] .pm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="port-multiplexing"] .pm-card[data-on] { border-color: var(--ink); border-width: 0.14rem; }
+[data-sim="port-multiplexing"] .pm-ip { font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-progs { display: flex; flex-wrap: wrap; gap: 0.25rem 0.3rem; }
+
+/* a program: round; its sockets inside */
+[data-sim="port-multiplexing"] .pm-prog {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+  min-width: 0;
+  padding: 0 0.6rem;
+  border: 0.14rem solid var(--ink);
+  border-radius: 999px;
+  background: var(--bg);
+}
+[data-sim="port-multiplexing"] .pm-prog.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; }
+[data-sim="port-multiplexing"] .pm-prog-name { font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-sock { font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-sock[data-fail] { text-decoration: line-through; text-decoration-thickness: 0.12rem; }
+[data-sim="port-multiplexing"] .pm-sock[data-fail]::after { content: ' ✕'; display: inline-block; text-decoration: none; font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-none { color: var(--muted); font-style: italic; font-size: var(--fs-sm); }
+[data-sim="port-multiplexing"] .pm-prog.sd-changed .pm-none { color: var(--on-hl); }
+
+/* a listening socket: hollow, dashed */
+[data-sim="port-multiplexing"] .pm-listen {
+  align-self: flex-start;
+  padding: 0 0.45rem;
+  border: 0.14rem dashed var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+[data-sim="port-multiplexing"] .pm-listens { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+/* the segment: an arrow with its fields */
+[data-sim="port-multiplexing"] .pm-seg { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+[data-sim="port-multiplexing"] .pm-arrow { display: flex; align-items: center; gap: 0.4rem; font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-arrow-line { flex: 1; height: 0.2rem; background: var(--ink); }
+[data-sim="port-multiplexing"] .pm-arrow-head { font-size: 1.6em; line-height: 1; }
+[data-sim="port-multiplexing"] .pm-segcard { padding: 0.3rem 0.5rem 0.4rem; border: 0.14rem solid var(--ink); border-left-width: 0.5rem; border-radius: var(--radius); background: var(--panel); }
+[data-sim="port-multiplexing"] .pm-fields { display: grid; grid-template-columns: repeat(3, minmax(0, auto)); justify-content: start; gap: 0.15rem 1rem; margin-top: 0.2rem; }
+[data-sim="port-multiplexing"] .pm-f { display: flex; flex-direction: column; min-width: 0; }
+[data-sim="port-multiplexing"] .pm-f-k { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="port-multiplexing"] .pm-f-v { align-self: flex-start; padding: 0 0.2rem; border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="port-multiplexing"] .pm-f-v.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); box-shadow: none; }
+[data-sim="port-multiplexing"] .pm-idle { padding: 0.4rem 0.5rem; border: var(--line-w) dashed var(--line); border-radius: var(--radius); color: var(--muted); font-style: italic; }
+[data-sim="port-multiplexing"] .pm-full { color: var(--ink); font-style: italic; }
+
+/* the socket table (K4) and its rows: a connection solid, a listening socket hollow */
+[data-sim="port-multiplexing"] .pm-low { display: flex; flex-direction: column; gap: 0.4rem; min-height: 0; overflow: hidden; }
+[data-sim="port-multiplexing"] .pm-low .sd-rt { flex: 0 1 auto; min-height: 0; }
+[data-sim="port-multiplexing"] .pm-low .sd-rt-table td { padding-top: 0.15rem; padding-bottom: 0.15rem; }
+[data-sim="port-multiplexing"] .pm-low .sd-rt-mark .sd-rt-tag { display: inline-block; margin-right: 0.4rem; }
+[data-sim="port-multiplexing"] .pm-low .sd-rt-no::before { content: ''; display: inline-block; width: 0.7em; height: 0.7em; margin-right: 0.3em; border: 0.14rem solid var(--ink); border-radius: 2px; vertical-align: -0.05em; }
+[data-sim="port-multiplexing"] .pm-low tr.pm-conn .sd-rt-no::before { background: var(--ink); }
+[data-sim="port-multiplexing"] .pm-low tr.pm-listen .sd-rt-no::before { border-style: dashed; background: var(--bg); }
+[data-sim="port-multiplexing"] .pm-low thead .sd-rt-no::before,
+[data-sim="port-multiplexing"] .pm-low tr.sd-rt-implicit .sd-rt-no::before { display: none; }
+[data-sim="port-multiplexing"] .pm-low tr.pm-listen td:not(.sd-rt-ptr):not(.sd-rt-mark) { border-top-style: dashed; }
+[data-sim="port-multiplexing"] .pm-low tr.pm-new td[data-col],
+[data-sim="port-multiplexing"] .pm-low tr.pm-new .sd-rt-act,
+[data-sim="port-multiplexing"] .pm-low td.pm-touch { background: var(--hl); color: var(--on-hl); }
+[data-sim="port-multiplexing"] .pm-note { margin: 0; font-size: var(--fs-sm); font-style: italic; }
+[data-sim="port-multiplexing"] .pm-empty { color: var(--muted); font-style: italic; }
+
+/* legend swatches */
+[data-sim="port-multiplexing"] .sd-swatch[data-shape^='pm-'] { position: relative; background: var(--bg); }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-listen'] { border: 0.14rem dashed var(--ink); }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-conn'] { border: 0.14rem solid var(--ink); background: var(--ink); }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-prog'] { border: 0.14rem solid var(--ink); border-radius: 999px; }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-seg'] { border: 0; }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-seg']::after,
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-rej']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-seg']::after { content: '→'; color: var(--ink); }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-rej'] { border: 0; }
+[data-sim="port-multiplexing"] .sd-swatch[data-shape='pm-rej']::after { content: '✕'; color: var(--danger); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="port-multiplexing"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="port-multiplexing"] .pm { height: auto; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="port-multiplexing"] .pm-scene { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+  [data-sim="port-multiplexing"] .pm-low { overflow: visible; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Portovi i socketi</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (addresses, ports, protocol names, flags) is not language: the word check skips translate="no". */
+  function code(s) { return h('code', { translate: 'no' }, String(s)); }
+  function data(s, cls) { return h('span', Object.assign({ translate: 'no' }, cls ? { class: cls } : {}), String(s)); }
+  function has(s, m) { return s.changed.indexOf(m) >= 0; }
+  function ap(ip, port) { return ip + ':' + port; }
+  function P(proto) { return String(proto).toUpperCase(); }
+
+  /**
+   * Croatian keeps the English words *port* and *socket* (URM ch13), in italics: wrap them in the caption's text
+   * nodes. English captions stay plain.
+   */
+  var ITAL = /(^|[^\p{L}])((?:port|socket)\p{L}*)/giu;
+  function italics(parts) {
+    if (Simdeck.lang !== 'hr') return parts;
+    var out = [];
+    parts.forEach(function (x) {
+      var txt = typeof x === 'string' ? x : x.nodeType === 3 ? x.textContent : null;
+      if (txt == null) { out.push(x); return; }
+      var last = 0, m;
+      ITAL.lastIndex = 0;
+      while ((m = ITAL.exec(txt))) {
+        var start = m.index + m[1].length;
+        if (start > last) out.push(txt.slice(last, start));
+        out.push(h('i', null, m[2]));
+        last = start + m[2].length;
+      }
+      if (last < txt.length) out.push(txt.slice(last));
+    });
+    return out;
+  }
+  /** A sentence: t.parts with its first letter capitalised (it may start with a program name), in hr italics. */
+  function sent(key, vars) {
+    var out = t.parts(key, vars);
+    if (typeof out[0] === 'string') out[0] = out[0].charAt(0).toUpperCase() + out[0].slice(1);
+    else if (out[0] && out[0].nodeType === 3) out[0].textContent = out[0].textContent.charAt(0).toUpperCase() + out[0].textContent.slice(1);
+    return italics(out);
+  }
+
+  // ── names ──
+
+  /** A program's label (pg*) or its name in a sentence (nm*). */
+  function progName(pr, inSentence) {
+    var pre = inSentence ? 'nm' : 'pg';
+    if (pr.kind === 'browser') return pr.tab ? t(pre + 'Tab', { n: pr.tab }) : t(pre + 'Browser');
+    return t(pre + (pr.kind === 'ssh' ? 'Ssh' : 'Game'));
+  }
+  function serverName(kind, inSentence) {
+    var k = { web: ['srvWeb', 'nmWeb'], ssh: ['srvSsh', 'nmSshd'], game: ['srvGame', 'nmGameSrv'] }[kind];
+    return t(k[inSentence ? 1 : 0]);
+  }
+  function procById(s, hostId, progId) {
+    var host = L.hostOf(s, hostId);
+    return host ? host.procs.filter(function (x) { return x.id === progId; })[0] : null;
+  }
+  function connProg(s, c, inSentence) { return progName(procById(s, c.host, c.prog), inSentence); }
+
+  // ── the scene ──
+
+  function progBox(s, host, pr) {
+    // the host's IP is the card's heading, so a socket shows its port; the protocol only beside a UDP socket
+    var udp = pr.socks.some(function (k) { return k.proto === 'udp'; });
+    var socks = pr.socks.map(function (k) {
+      return data((udp ? P(k.proto) + ' ' : '') + ':' + k.port, 'pm-sock');
+    });
+    pr.socks.forEach(function (k, i) { if (k.fail) socks[i].dataset.fail = ''; });
+    return h('span', { class: 'pm-prog' + (has(s, 'prog:' + host.id + ':' + pr.id) ? ' sd-changed' : '') },
+      h('span', { class: 'pm-prog-name' }, progName(pr, false)),
+      socks.length ? socks : h('span', { class: 'pm-none' }, t('noConn')));
+  }
+
+  function clients(s, c) {
+    var on = s.seg ? (s.seg.dir === 'up' ? s.seg.sip : s.seg.dip) : null;
+    var cards = s.hosts.map(function (host) {
+      return h('section', { class: 'pm-card', dataset: host.ip === on ? { on: '' } : {} },
+        data(host.ip, 'pm-ip'),
+        h('div', { class: 'pm-progs' }, host.procs.map(function (pr) { return progBox(s, host, pr); })));
+    });
+    var full = L.addsLeft(c.params) === 0;
+    return h('div', { class: 'pm-col' }, h('h3', null, t('clients'), full ? [' · ', h('span', { class: 'pm-full' }, t('openFull', { n: L.MAX_OPENS }))] : null),
+      h('div', { class: 'pm-hosts', dataset: { n: String(s.hosts.length) } }, cards));
+  }
+
+  function servers(s) {
+    var on = s.seg ? (s.seg.dir === 'up' ? s.seg.dip : s.seg.sip) : null;
+    var cards = s.servers.map(function (x) {
+      return h('section', { class: 'pm-card', dataset: x.ip === on ? { on: '' } : {} },
+        data(x.ip, 'pm-ip'),
+        h('span', { class: 'pm-prog' + (has(s, 'srv:' + x.ip) ? ' sd-changed' : '') }, h('span', { class: 'pm-prog-name' }, serverName(x.kind, false))),
+        h('div', { class: 'pm-listens' }, x.listen.map(function (l) {
+          return h('span', { class: 'pm-listen' }, data(P(l.proto) + ' *:' + l.port + (l.proto === 'tcp' ? ' LISTEN' : '')),
+            l.proto === 'udp' ? [' ', t('bound')] : null);
+        })));
+    });
+    return h('div', { class: 'pm-col' }, h('h3', null, s.servers.length > 1 ? t('servers') : t('server')), cards);
+  }
+
+  function segment(s) {
+    var g = s.seg;
+    if (!g) return h('div', { class: 'pm-col' }, h('h3', null, ' '), h('div', { class: 'pm-idle' }, s.event.kind === 'start' ? t('segNone') : t('segIdle')));
+    function field(k, label, v) {
+      return h('div', { class: 'pm-f' }, h('span', { class: 'pm-f-k' }, t(label)),
+        h('span', { class: 'pm-f-v' + (has(s, 'seg:' + k) ? ' sd-changed' : ''), translate: 'no' }, String(v)));
+    }
+    var up = g.dir === 'up';
+    var arrow = h('div', { class: 'pm-arrow', 'aria-hidden': 'true' },
+      up ? null : h('span', { class: 'pm-arrow-head' }, '◀'), h('span', { class: 'pm-arrow-line' }), up ? h('span', { class: 'pm-arrow-head' }, '▶') : null);
+    return h('div', { class: 'pm-col pm-seg' }, h('h3', null, g.proto === 'tcp' ? t('segTcp') : t('segUdp')), arrow,
+      h('div', { class: 'pm-segcard' },
+        h('div', { class: 'pm-fields' },
+          field('sip', 'fSip', g.sip), field('sport', 'fSport', g.sport), field('proto', 'fProto', P(g.proto)),
+          field('dip', 'fDip', g.dip), field('dport', 'fDport', g.dport),
+          g.proto === 'tcp' ? field('flag', 'fFlag', g.flag) : h('div', { class: 'pm-f' }, h('span', { class: 'pm-f-k' }, t('fFlag')), h('span', { class: 'pm-f-v pm-muted' }, t('noFlag'))),
+          field('bytes', 'fData', g.bytes + ' B'))));
+  }
+
+  // ── the socket table (K4) ──
+
+  /** Which side's table is drawn, and whose: the receiver or sender of this step's segment, else the first. */
+  function tableSide(s, view) {
+    var g = s.seg;
+    if (view === 'server') return { side: 'server', ip: g ? (g.dir === 'up' ? g.dip : g.sip) : s.servers[0].ip };
+    return { side: 'client', ip: g ? (g.dir === 'up' ? g.sip : g.dip) : s.hosts[0].ip };
+  }
+
+  var MISS_COL = { proto: 'proto', lip: 'lip', lport: 'lport', rip: 'rip', rport: 'rport', flag: 'takes' };
+
+  function table(s, c) {
+    var who = tableSide(s, c.params.view);
+    var rows = L.tableOf(s, who.side, who.ip);
+    var look = s.look && s.look.side === who.side && s.look.ip === who.ip ? s.look : null;
+    var byKey = {};
+    if (look) look.read.forEach(function (r) { byKey[r.key] = r; });
+    var atKey = look && look.at < look.read.length ? look.read[look.at].key : null;
+    var at = look ? (atKey ? rows.map(function (r) { return r.key; }).indexOf(atKey) : rows.length) : -1;
+    var title = t.parts(who.side === 'server' ? 'tblServer' : 'tblClient', { ip: data(who.ip) });
+    var newKey = look && look.result === 'new' ? look.conn : s.event.kind === 'open' && s.event.result === 'new' ? s.event.conn : null;
+    var spec = {
+      dir: c.dir,
+      mode: 'first',
+      title: title,
+      columns: [
+        { key: 'proto', label: t('colProto') }, { key: 'lip', label: t('colLip') }, { key: 'lport', label: t('colLport') },
+        { key: 'rip', label: t('colRip') }, { key: 'rport', label: t('colRport') }
+      ].concat(who.side === 'server' ? [{ key: 'takes', label: t('colTakes') }] : []),
+      extra: [{ key: 'bytes', label: t('colBytes') }],
+      actionLabel: t('colOwner'),
+      markLabel: t('colMark'),
+      rows: rows.map(function (r, i) {
+        var rd = byKey[r.key];
+        var conn = r.conn ? L.connOf(s, r.conn) : null;
+        var miss = rd && rd.miss.length ? rd.miss.map(function (m) { return MISS_COL[m]; }) : null;
+        var isNew = r.conn && r.conn === newKey;
+        var cells = { proto: P(r.proto), lip: r.lip, lport: r.lport, rip: r.rip, rport: r.rport, bytes: conn ? conn.bytes + ' B' : '' };
+        if (who.side === 'server') cells.takes = r.flag === 'SYN' ? 'SYN' : h('span', null, t('takesAny'));
+        return {
+          no: i + 1,
+          cells: cells,
+          action: r.listen ? h('span', null, t('listenAct'))
+            : h('span', null, who.side === 'server' ? serverName(conn.skind, false) : connProg(s, conn, false)),
+          hit: rd ? rd.miss.length === 0 : null,
+          miss: miss,
+          note: isNew ? [{ k: 'hl', text: t('tagNew') }, { k: 'muted', text: conn.proto === 'tcp' ? t('noteNewSyn') : t('noteNewUdp') }] : null
+        };
+      }),
+      implicit: { text: t('implicitText'), action: 'RST / ICMP', effect: 'deny' },
+      at: at,
+      subject: look ? { mark: s.seg.flag || P(s.seg.proto), c: 1 } : null,
+      done: !!look,
+      outcome: function () {
+        if (look.result === 'deliver') return RT.verdict(true, t('outDeliver'));
+        if (look.result === 'new') return RT.verdict(true, t('outNew'));
+        if (look.result === 'same') return RT.verdict(false, t('outSame'));
+        return RT.verdict(false, t(look.answer === 'rst' ? 'outRst' : 'outIcmp'));
+      },
+      words: { win: t('markWin'), skip: t('markSkip') },
+      changed: !!look,
+      stickyMark: true
+    };
+    var el = RT(spec);
+    // row shapes (connection solid, listening hollow), the new row, and a row touched where the lookup is elsewhere
+    var trs = el.querySelectorAll('tbody tr');
+    rows.forEach(function (r, i) {
+      var tr = trs[i];
+      tr.classList.add(r.listen ? 'pm-listen' : 'pm-conn');
+      if (r.conn && r.conn === newKey) tr.classList.add('pm-new');
+      var was = r.conn && c.prev ? L.connOf(c.prev, r.conn) : null;
+      if (r.conn && !look && (!was || was.bytes !== L.connOf(s, r.conn).bytes) && has(s, 'conn:' + r.conn)) {
+        var cell = tr.querySelector('td[data-col="bytes"]');
+        if (cell) cell.classList.add('pm-touch');
+      }
+    });
+    var kids = [el];
+    if (!rows.filter(function (r) { return !r.listen; }).length && who.side === 'client') kids.push(h('p', { class: 'pm-empty' }, t('tblEmpty')));
+    if (s.look && !look) {
+      kids.push(h('p', { class: 'pm-note' }, t.parts('elsewhere', { ip: data(s.look.ip), side: s.look.side === 'server' ? t('viewServer') : t('viewClient') })));
+    }
+    return h('div', { class: 'pm-low' }, kids);
+  }
+
+  // ── captions ──
+
+  /** The row number of a key in the receiver's table (1-based). */
+  function rowNo(s, look, key) {
+    var rows = L.tableOf(s, look.side, look.ip).map(function (r) { return r.key; });
+    return rows.indexOf(key) + 1;
+  }
+  var FIELD_WORD = { proto: 'fieldProto', lip: 'fieldLip', lport: 'fieldLport', rip: 'fieldRip', rport: 'fieldRport' };
+
+  function caption(c) {
+    var s = c.state, e = s.event, g = s.seg, look = s.look;
+    var out = [];
+    function add(x) { if (out.length) out.push(' '); out.push.apply(out, x); }
+    var scene = s.scene;
+    if (e.kind === 'start') {
+      var host = code(s.hosts[0].ip), dst = code(ap(s.servers[0].ip, 443));
+      add(sent({ 'three-programs': 'c0Three', 'two-tabs': 'c0Tabs', 'many-clients': 'c0Many', 'port-clash': 'c0Clash', 'quic-too': 'c0Quic' }[scene], { host: host, dst: dst }));
+      return out;
+    }
+    if (e.kind === 'none') {
+      var gone = procById(s, e.host, e.prog);
+      add(sent(e.what === 'send' ? 'cNoneSend' : 'cNoneReply', { prog: gone ? progName(gone, true) : '' }));
+      return out;
+    }
+    var pr = procById(s, e.host, e.prog);
+    var progN = pr ? progName(pr, true) : '';
+    if (e.kind === 'open') {
+      var hostIp = code(L.hostOf(s, e.host).ip);
+      if (g.proto === 'udp') add(sent('cOpenUdp', { prog: progN, host: hostIp, port: code(g.sport), dst: code(ap(g.dip, g.dport)) }));
+      else add(sent(e.forced ? 'cOpenForced' : 'cOpen', { prog: progN, host: hostIp, port: code(g.sport), dst: code(ap(g.dip, g.dport)) }));
+      var lisKey = look.at < look.read.length ? look.read[look.at].key : null;
+      if (look.result === 'new') {
+        var lis = code(P(g.proto) + ' *:' + g.dport);
+        var n = rowNo(s, look, look.conn);
+        var conns = look.read.filter(function (r) { return r.key.indexOf('L:') !== 0; });
+        if (g.proto === 'udp') add(sent('rNewUdp', { lis: lis, n: n }));
+        else add(sent(conns.length ? 'rNew' : 'rNewFirst', { lis: lis, n: n }));
+        // the closest earlier row: one value apart (rules 2, 6, 8)
+        var one = conns.filter(function (r) { return r.miss.length === 1; })[0];
+        if (one) {
+          var oc = L.connOf(s, one.key), m = one.miss[0];
+          var tabs = pr && pr.tab && (procById(s, oc.host, oc.prog) || {}).tab;
+          if (m === 'rport') {
+            add(sent(tabs ? 'dPort' : 'dPortAny', { dst: code(ap(g.dip, g.dport)), a: code(oc.cport), b: code(g.sport) }));
+            add(sent('dOwn'));
+          }
+          else if (m === 'rip') add(sent('dIp', { port: code(g.sport), a: code(oc.cip), b: code(g.sip) }));
+          else if (m === 'proto') add(sent('dProto', { r: rowNo(s, look, one.key), a: code(P(oc.proto)), b: code(P(g.proto)) }));
+        }
+      } else if (look.result === 'same') {
+        add(sent('rSame', { r: rowNo(s, look, lisKey), prog: progN }));
+      } else {
+        add(sent('rReject', { answer: look.answer === 'rst' ? code('RST') : t('answerIcmp') }));
+      }
+      return out;
+    }
+    var conn = L.connOf(s, e.conn);
+    if (e.kind === 'send') {
+      add(sent('cSend', { prog: progN, bytes: g.bytes, src: code(ap(g.sip, g.sport)), dst: code(ap(g.dip, g.dport)) }));
+      if (look.result === 'deliver') {
+        add(sent('rDeliver', { r: rowNo(s, look, look.key), owner: serverName(conn.skind, true) }));
+        var near = look.read.slice(0, look.at).filter(function (r) { return r.miss.length === 1; }).pop();
+        if (near) add(sent('rOnly', { r: rowNo(s, look, near.key), field: t(FIELD_WORD[near.miss[0]]) }));
+      }
+      return out;
+    }
+    // reply
+    add(sent('cReply', { owner: serverName(conn.skind, true), src: code(ap(g.sip, g.sport)), dst: code(ap(g.dip, g.dport)), sport: code(g.sport) }));
+    if (look.result === 'deliver') {
+      var before = look.read.slice(0, look.at).filter(function (r) { return r.miss.indexOf('lport') >= 0; })[0];
+      if (before) {
+        var bc = L.connOf(s, before.key);
+        add(sent('rReplyNot', { ip: code(g.dip), port: code(g.dport), prog: progN, other: connProg(s, bc, true), oport: code(bc.cport) }));
+      } else add(sent('rReply', { ip: code(g.dip), port: code(g.dport), r: rowNo(s, look, look.key), prog: progN }));
+    }
+    return out;
+  }
+
+  // ── the stage ──
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'pm' },
+      h('div', { class: 'pm-scene' }, clients(s, c), segment(s), servers(s)),
+      table(s, c)));
+    // the open button says when it is used up (rejected actions keep focus: aria-disabled, never disabled)
+    var full = L.addsLeft(c.params) === 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-sd-controls] .sd-btn[aria-keyshortcuts="O"], [data-sd-controls] .sd-btn[aria-keyshortcuts="o"]'), function (b) {
+      b.setAttribute('aria-disabled', full ? 'true' : 'false');
+    });
+  }
+
+  var CLIENT_OPTS = L.CLIENTS.map(function (x) { return [x.id, x.ip]; });
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'choice', label: '', resets: true, visible: function () { return false; },
+        options: L.SCENE_IDS.map(function (id) { return [id, id]; }) },
+      { key: 'client', type: 'choice', label: t('client'), options: CLIENT_OPTS },
+      { type: 'button', label: t('open'), key: 'o',
+        run: function (x) {
+          var p = x.params;
+          if (!L.addsLeft(p)) return;
+          // adds has no control of its own (a hidden slider would confuse the page check): set keeps the preset, so R
+          // takes the added connections away again
+          x.set({ adds: L.addClick(p.adds, x.n, p.client) }, { preset: x.preset });
+          x.next();
+        } },
+      { key: 'forcePort', type: 'choice', label: t('forcePort'), options: [['auto', t('fpAuto')], ['reuse', t('fpReuse')]] },
+      { key: 'view', type: 'choice', label: t('view'), options: [['server', t('viewServer')], ['client', t('viewClient')]] }
+    ],
+
+    presets: [
+      { id: 'three-programs', label: t('pThree'), params: { scene: 'three-programs', view: 'client' } },
+      { id: 'two-tabs', label: t('pTabs'), params: { scene: 'two-tabs', view: 'server' } },
+      { id: 'many-clients', label: t('pMany'), params: { scene: 'many-clients', view: 'server' } },
+      { id: 'port-clash', label: t('pClash'), params: { scene: 'port-clash', forcePort: 'reuse', view: 'server' } },
+      { id: 'quic-too', label: t('pQuic'), params: { scene: 'quic-too', view: 'server' } }
+    ],
+
+    legend: [
+      { shape: 'pm-listen', label: t('lgListen') },
+      { shape: 'pm-conn', label: t('lgConn') },
+      { shape: 'pm-prog', label: t('lgProg') },
+      { shape: 'pm-seg', label: t('lgSeg') },
+      { shape: 'hl', label: t('lgChanged') },
+      { shape: 'pm-rej', label: t('lgReject') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
