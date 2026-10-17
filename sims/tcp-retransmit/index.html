@@ -1,0 +1,508 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- tcp-retransmit: loss and retransmission in TCP. A stepper, one event per step (a message arrives or is lost, the
+     timer expires). Centre: the exchange as kit view K1 (kit/sequence.js), lanes A (sender) and B (receiver), with the
+     retransmission timer on A's lifeline. Left, beside A: its segments, the timer draining, the duplicate-ACK counter
+     and the round-trip time sample. Right, beside B: what B holds, the gap and the ACK number it sends.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="tcp-retransmit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP: gubitak i ponovni prijenos · simdeck</title>
+<meta name="description" content="Izgubi odabrani segment ili potvrdu i prati razmjenu: broj potvrde stane, stižu duple potvrde, a pošiljatelj šalje ponovno nakon roka ili odmah.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tcp-retransmit",
+  "title": {
+    "hr": "TCP: gubitak i ponovni prijenos",
+    "en": "TCP: loss and retransmission"
+  },
+  "concept": {
+    "hr": "RTO, duple potvrde, brzi ponovni prijenos",
+    "en": "RTO, duplicate ACKs, fast retransmit"
+  },
+  "summary": {
+    "hr": "Izgubi odabrani segment ili potvrdu i prati razmjenu: broj potvrde stane, stižu duple potvrde, a pošiljatelj šalje ponovno nakon roka ili odmah.",
+    "en": "Drop a chosen segment or ACK and step the exchange: the ACK number stalls, duplicate ACKs arrive, and the sender resends after a timeout or at once."
+  },
+  "tags": [
+    "tcp"
+  ],
+  "class": "stepper",
+  "steps": 9,
+  "entries": [
+    {
+      "preset": "book-fast"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tcp-retransmit"]; colours only from kit tokens.
+   Layout: three columns. Left the sender's panel, centre the K1 chart (A left, B right), right the receiver's panel.
+   A and its segments are c1, B and its ACKs c2. */
+[data-sim="tcp-retransmit"] .tr {
+  display: grid;
+  grid-template-columns: minmax(0, 17rem) minmax(0, 1fr) minmax(0, 15rem);
+  gap: 1cqw;
+  height: 100%;
+  padding: 1.4cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="tcp-retransmit"] .tr-col { display: flex; flex-direction: column; gap: 1.2cqh; min-height: 0; }
+[data-sim="tcp-retransmit"] .tr-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="tcp-retransmit"] .tr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+}
+[data-sim="tcp-retransmit"] .tr-box h2 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 700; }
+[data-sim="tcp-retransmit"] .tr-box h3 { margin: 0 0 0.25rem; font-size: 0.9rem; font-weight: 700; }
+[data-sim="tcp-retransmit"] .tr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+[data-sim="tcp-retransmit"] .tr-mono { font-family: var(--mono); }
+[data-sim="tcp-retransmit"] .tr-muted { color: var(--muted); }
+[data-sim="tcp-retransmit"] .tr-sm { font-size: var(--fs-sm); }
+[data-sim="tcp-retransmit"] .tr-big { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; }
+[data-sim="tcp-retransmit"] .tr-note { margin: 0.35rem 0 0; padding: 0.15rem 0.45rem; border-left: 0.3rem solid var(--ink); font-size: var(--fs-sm); }
+/* changed in this step: yellow, with the tokens inside switched to dark-on-yellow so the text stays legible in both themes */
+[data-sim="tcp-retransmit"] .tr-seg.sd-changed, [data-sim="tcp-retransmit"] .tr-line.sd-changed {
+  --ink: var(--on-hl); --muted: var(--on-hl); --bg: var(--hl);
+  background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink);
+}
+
+/* segment lists (A's and B's): a mark, the byte range, the state in words */
+[data-sim="tcp-retransmit"] .tr-segs { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="tcp-retransmit"] .tr-seg {
+  display: grid; grid-template-columns: 1.3rem auto minmax(0, 1fr); gap: 0 0.45rem; align-items: center;
+  padding: 0.1rem 0.35rem; border-radius: var(--radius-sm); background: var(--bg);
+}
+[data-sim="tcp-retransmit"] .tr-seg > b { font-family: var(--mono); font-size: max(16px, 0.85rem); }
+[data-sim="tcp-retransmit"] .tr-seg > span:last-child { font-size: var(--fs-sm); text-align: right; }
+[data-sim="tcp-retransmit"] .tr-mark {
+  width: 1.1rem; height: 1.1rem; display: grid; place-items: center;
+  border: 0.18rem solid var(--sw); border-radius: var(--radius-sm);
+  font-size: max(16px, 0.8rem); font-weight: 700; line-height: 1;
+}
+[data-sim="tcp-retransmit"] .tr-mark[data-st="done"] { background: var(--sw); color: var(--bg); }
+[data-sim="tcp-retransmit"] .tr-mark[data-st="wait"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="tcp-retransmit"] .tr-mark[data-st="out"] { background: var(--bg); }
+[data-sim="tcp-retransmit"] .tr-mark[data-st="gap"] { border-style: dashed; border-color: var(--ink); background: repeating-linear-gradient(45deg, transparent 0 0.15rem, var(--ink) 0.15rem 0.25rem); }
+[data-sim="tcp-retransmit"] .tr-mark[data-st="dropped"] { border-color: var(--ink); }
+[data-sim="tcp-retransmit"] .tr-seg[data-st="dropped"] > b { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="tcp-retransmit"] .tr-a .tr-mark { --sw: var(--c1); }
+[data-sim="tcp-retransmit"] .tr-b .tr-mark { --sw: var(--c2); }
+[data-sim="tcp-retransmit"] .tr-tx { padding: 0 0.25rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="tcp-retransmit"] .tr-line { margin: 0.3rem 0 0; padding: 0 0.2rem; border-radius: var(--radius-sm); }
+
+/* the timer: a bar that drains */
+[data-sim="tcp-retransmit"] .tr-meter { position: relative; height: 1.1rem; margin: 0.2rem 0; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; }
+[data-sim="tcp-retransmit"] .tr-meter > span { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.2rem, var(--bg) 0.2rem 0.45rem); }
+[data-sim="tcp-retransmit"] .tr-meter[data-st="expired"] { border-style: dashed; }
+[data-sim="tcp-retransmit"] .tr-meter[data-st="off"] { border-style: dotted; }
+[data-sim="tcp-retransmit"] .tr-rto { display: flex; flex-wrap: wrap; gap: 0.2rem 0.4rem; align-items: baseline; }
+[data-sim="tcp-retransmit"] .tr-rto s { color: var(--muted); }
+
+/* the duplicate-ACK counter: three boxes, the third sends at once */
+[data-sim="tcp-retransmit"] .tr-dups { display: flex; gap: 0.35rem; align-items: center; margin: 0.15rem 0; }
+[data-sim="tcp-retransmit"] .tr-dups > span {
+  width: 2rem; height: 1.6rem; display: grid; place-items: center;
+  border: 0.18rem dashed var(--c2); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-weight: 700;
+}
+[data-sim="tcp-retransmit"] .tr-dups > span[data-on] { border-style: solid; background: var(--c2); color: var(--bg); }
+[data-sim="tcp-retransmit"] .tr-dups > span:nth-child(3) { border-width: 0.35rem; border-style: double; }
+[data-sim="tcp-retransmit"] .tr-dups > span:nth-child(3)[data-on] { border-style: solid; }
+[data-sim="tcp-retransmit"] .tr-dups.sd-changed { margin-bottom: 0.4rem; padding: 0.1rem 0.2rem; }
+[data-sim="tcp-retransmit"] .tr-dups > b { margin-left: 0.3rem; }
+
+/* the chart's lane bodies are empty: the panels hold the state */
+[data-sim="tcp-retransmit"] .sd-seq-cause { font-size: var(--fs-sm); }
+
+/* legend swatches (the kit has line and dash) */
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="thin"] { height: 0.15rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="lost"] { position: relative; background: transparent; border: 0; }
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="lost"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="dupb"] { width: 1.6em; background: transparent; border-radius: var(--radius-sm); position: relative; }
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="dupb"]::after { content: '2'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="tcp-retransmit"] .sd-swatch[data-shape="timer"] { width: 0.55em; border-top: 0; background: repeating-linear-gradient(180deg, var(--ink) 0 0.15em, var(--bg) 0.15em 0.35em); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tcp-retransmit"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tcp-retransmit"] .tr { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="tcp-retransmit"] .tr-col { gap: 0.7rem; }
+  [data-sim="tcp-retransmit"] .tr-mid { order: -1; }
+  [data-sim="tcp-retransmit"] .tr-mid > .sd-seq { flex: none; }
+  /* a receiver word or ✕ hangs a few px below the last row; without room fit() drops rows on a phone too */
+  [data-sim="tcp-retransmit"] .tr-mid .sd-seq-list { padding-bottom: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">TCP: gubitak i ponovni prijenos</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (byte numbers, ACK numbers, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'tr-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      // a placeholder used twice is the same node: clone it, or appending moves it
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function range(from, to) { return from + '–' + (to - 1); }
+  function secs(ms) { return t('sec', { n: String(ms / 1000) }); }
+  function msOf(ms) { return t('ms', { n: String(ms) }); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  /** Rows (chart) and message indices that changed in this step: the event's message, everything sent in it. */
+  function freshRows(c) { return c.prev ? c.prev.rows.length : 0; }
+  function evMsg(c) { var e = c.state.ev; return e.m != null ? c.state.msgs[e.m] : null; }
+
+  // ── the chart (K1) ──
+
+  var RE_B = { lost: 'reLost', held: 'reHeld', discarded: 'reDiscarded', fills: 'reFills', already: 'reAlready' };
+  var RE_A = { lost: 'reLost', fast: 'reFast', partial: 'rePartial' };
+  var WHY = { rto: 'cRto', fast: 'cFast', partial: 'cPartial' };
+
+  function renderChart(c) {
+    var s = c.state, fresh = freshRows(c), ev = s.ev;
+    var rows = s.rows.map(function (r, i) {
+      if (r.note != null) {
+        var note = s.notes[r.note];
+        return { kind: 'note', lane: 'A', k: 'solid', text: t('noteRto'), time: msOf(note.at), changed: i >= fresh };
+      }
+      var m = s.msgs[r.m];
+      var changed = i >= fresh || ev.m === r.m;
+      var word = m.fate === 'flight' ? t('reFlight') : null;
+      var row;
+      if (m.k === 'seg') {
+        if (!word && RE_B[m.re]) word = t(RE_B[m.re]);
+        row = { from: 'A', to: 'B', c: 1, label: range(m.seq, m.seq + m.len),
+          line: m.tx > 0 ? 'dashed' : undefined, cause: m.why ? t(WHY[m.why]) : undefined, re: word ? { B: word } : {} };
+      } else {
+        if (!word && RE_A[m.re]) word = t(RE_A[m.re]);
+        row = { from: 'B', to: 'A', c: 2, weight: 'thin', label: 'ACK ' + m.n,
+          cause: m.dup ? t('cDup', { k: m.dup }) : undefined, re: word ? { A: word } : {} };
+      }
+      return Object.assign(row, { time: msOf(m.sentAt), muted: m.fate === 'flight', drop: m.fate === 'lost', changed: changed });
+    });
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '5.6rem',
+      lanes: [
+        { id: 'A', c: 1, name: t('laneA') },
+        { id: 'B', c: 2, name: t('laneB') }
+      ],
+      rows: rows,
+      timers: s.timers.map(function (tm) {
+        return { lane: 'A', from: tm.from, to: tm.to === null ? undefined : tm.to, end: tm.end || undefined, label: data('RTO ' + tm.rto / 1000 + ' s', '') };
+      }),
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── left: the sender ──
+
+  function changedSeg(c, side, seq) {
+    if (!c.prev) return false;
+    var a = segStateA(c.prev, seq), b = segStateA(c.state, seq);
+    if (side === 'B') { a = segStateB(c.prev, c.params, seq); b = segStateB(c.state, c.params, seq); }
+    return a !== b || (side === 'A' && c.prev.segs.filter(function (g) { return g.seq === seq; })[0].tx !== c.state.segs.filter(function (g) { return g.seq === seq; })[0].tx);
+  }
+  function segStateA(s, seq) {
+    var g = s.segs.filter(function (x) { return x.seq === seq; })[0];
+    return g.acked ? 'done' : g.tx ? 'out' : 'wait';
+  }
+  function renderA(c) {
+    var s = c.state, box = h('section', { class: 'tr-box tr-a' });
+    box.append(h('div', { class: 'tr-head' }, h('h2', null, t('aTitle')),
+      h('span', { class: 'tr-sm' }, h('span', { class: 'tr-muted' }, t('now'), ' '), B(msOf(s.t)))));
+
+    box.append(h('h3', null, t('win')));
+    box.append(h('ul', { class: 'tr-segs' }, s.segs.map(function (g) {
+      var st = segStateA(s, g.seq), ch = changedSeg(c, 'A', g.seq);
+      return h('li', { class: 'tr-seg' + (ch ? ' sd-changed' + anim(c) : ''), dataset: { st: st } },
+        h('span', { class: 'tr-mark', dataset: { st: st }, 'aria-hidden': 'true' }, st === 'done' ? '✓' : ''),
+        h('b', { translate: 'no' }, range(g.seq, g.seq + g.len)),
+        h('span', null, g.tx > 1 ? [h('span', { class: 'tr-tx' }, t.n('sent', g.tx)), ' '] : null,
+          t(st === 'done' ? 'cellAcked' : st === 'out' ? 'cellOut' : 'cellNot')));
+    })));
+    var end = L.endOf(s.flow);
+    box.append(h('p', { class: 'tr-line tr-sm' }, s.sndUna >= end && s.n > 0
+      ? h('b', null, t('allAcked'))
+      : [h('span', { class: 'tr-muted' }, t('una'), ': '), B(s.sndUna)]));
+    return box;
+  }
+
+  function renderTimer(c) {
+    var s = c.state, box = h('section', { class: 'tr-box' });
+    var expiredNow = s.ev.kind === 'rto';
+    var restarted = c.prev && c.prev.timers.length !== s.timers.length;
+    box.append(h('h2', null, t('timer')));
+    var left = L.remaining(s);
+    var rto = h('div', { class: 'tr-rto' + (restarted ? ' tr-line sd-changed' + anim(c) : '') });
+    if (expiredNow) rto.append(h('s', { translate: 'no', class: 'tr-mono' }, 'RTO ' + s.notes[s.notes.length - 1].rto / 1000 + ' s'), ' → ');
+    rto.append(h('span', { class: 'tr-big', translate: 'no' }, 'RTO ' + s.rto / 1000 + ' s'));
+    box.append(rto);
+    var pct = left === null ? 0 : Math.max(0, Math.min(100, 100 * left / s.rto));
+    box.append(h('div', { class: 'tr-meter', dataset: { st: left === null ? 'off' : 'on' }, 'aria-hidden': 'true' }, h('span', { style: { width: pct + '%' } })));
+    var why = left !== null ? t('timerLeft', { left: String(left), at: String(s.rtoDeadline) })
+      : s.n === 0 ? t('timerIdle') : t('timerOff');
+    box.append(h('p', { class: 'tr-sm', style: { margin: 0 } }, why));
+    return box;
+  }
+
+  function renderDups(c) {
+    var s = c.state, box = h('section', { class: 'tr-box' });
+    var ch = c.prev && c.prev.dupCount !== s.dupCount;
+    box.append(h('h2', null, t('dups')));
+    var cells = [1, 2, 3].map(function (k) { return h('span', { translate: 'no', dataset: k <= s.dupCount ? { on: '' } : {} }, String(k)); });
+    box.append(h('div', { class: 'tr-dups' + (ch ? ' tr-line sd-changed' + anim(c) : '') }, cells, h('b', null, t('dupOf', { k: String(Math.min(s.dupCount, L.DUP_THRESH)) }), s.dupCount > L.DUP_THRESH ? data(' +' + (s.dupCount - L.DUP_THRESH)) : null)));
+    box.append(h('p', { class: 'tr-sm tr-muted', style: { margin: 0 } }, t('dupFast')));
+    // the round-trip time sample of the newest ACK that moved snd.una (Karn: none from a resent segment)
+    var last = null;
+    s.msgs.forEach(function (m) { if (m.k === 'ack' && m.sample != null) last = m; });
+    var mm = evMsg(c);
+    var fresh = !!(mm && last === mm);
+    box.append(h('p', { class: 'tr-line tr-sm' + (fresh ? ' sd-changed' : '') },
+      h('span', { class: 'tr-muted' }, t('rttSample'), ': '),
+      last === null ? t('rttNone') : last.sample === 'karn' ? t('rttKarn') : B(msOf(last.sample))));
+    return box;
+  }
+
+  // ── right: the receiver ──
+
+  function segStateB(s, p, seq) {
+    var e = seq + s.flow.len;
+    if (e <= s.rcvNxt) return 'done';
+    if (s.ooo.some(function (r) { return r[0] <= seq && e <= r[1]; })) return 'held';
+    if (s.discarded.some(function (r) { return r[0] === seq; })) return 'dropped';
+    var after = s.ooo.some(function (r) { return r[0] >= e; }) || s.discarded.some(function (r) { return r[0] >= e; });
+    return after ? 'gap' : 'wait';
+  }
+  var B_WORD = { done: 'cellIn', held: 'cellHeld', gap: 'cellGap', dropped: 'cellDropped', wait: 'cellWait' };
+  var B_MARK = { done: 'done', held: 'out', gap: 'gap', dropped: 'dropped', wait: 'wait' };
+  function renderB(c) {
+    var s = c.state, p = c.params, box = h('section', { class: 'tr-box tr-b' });
+    box.append(h('h2', null, t('bTitle')));
+    box.append(h('h3', null, t('buf')));
+    box.append(h('ul', { class: 'tr-segs' }, s.segs.map(function (g) {
+      var st = segStateB(s, p, g.seq), ch = changedSeg(c, 'B', g.seq);
+      return h('li', { class: 'tr-seg' + (ch ? ' sd-changed' + anim(c) : ''), dataset: { st: st } },
+        h('span', { class: 'tr-mark', dataset: { st: B_MARK[st] }, 'aria-hidden': 'true' }, st === 'done' ? '✓' : st === 'dropped' ? '✕' : ''),
+        h('b', { translate: 'no' }, range(g.seq, g.seq + g.len)),
+        h('span', null, t(B_WORD[st])));
+    })));
+    var ch = c.prev && c.prev.rcvNxt !== s.rcvNxt;
+    box.append(h('p', { class: 'tr-line' + (ch ? ' sd-changed' + anim(c) : '') },
+      h('span', { class: 'tr-sm tr-muted' }, t('expects')), h('br'), h('span', { class: 'tr-big', translate: 'no' }, 'ACK ' + s.rcvNxt)));
+    if (!p.bufferOoo) box.append(h('p', { class: 'tr-note' }, t('noBuffer')));
+    return box;
+  }
+
+  // ── captions ──
+
+  function segOf(m) { return B(range(m.seq, m.seq + m.len)); }
+  /** The bytes missing before the first held or discarded range. */
+  function gapText(s) {
+    var next = s.ooo.length ? s.ooo[0][0] : null;
+    s.discarded.forEach(function (r) { if (r[0] >= s.rcvNxt && (next === null || r[0] < next)) next = r[0]; });
+    return next === null ? '' : range(s.rcvNxt, next);
+  }
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.ev, f = s.flow;
+    var out;
+    switch (ev.kind) {
+      case 'start': {
+        var v = p.lose, k = v === 'none' ? 0 : Number(v.slice(1));
+        // segment K of fewer, or B's K-th ACK with K above the count (one lost ACK leaves B sending exactly count ACKs)
+        var lost = v === 'none' || k > f.count ? rich('capLostNone')
+          : v[0] === 's' ? rich('capLostSeg', { k: String(k) }) : rich('capLostAck', { k: String(k) });
+        if (v[0] === 's' && k <= f.count && p.loseRetx > 0) lost = lost.concat(' ', t.n('capLostRetx', p.loseRetx));
+        return rich('capStart', { count: t.n('segCount', f.count, { len: f.len }), first: data(f.start), last: data(L.endOf(f) - 1), lost: h('span', null, lost) });
+      }
+      case 'window': out = rich('capWindow', { count: t.n('segCount', f.count, { len: f.len }), last: data(ev.last), rto: data(secs(L.RTO0), '') }); break;
+      case 'rto': {
+        var note = s.notes[ev.note];
+        out = rich('capRto', { seg: B(s.sndUna), rto: B(secs(note.next)) });
+        // the few duplicates are news only at the first timeout of this segment
+        var first = s.segs.filter(function (g) { return g.seq === s.sndUna; })[0].tx === 2;
+        if (first && c.prev.dupCount > 0 && c.prev.dupCount < L.DUP_THRESH) out = out.concat(' ', t.n('capRtoFew', c.prev.dupCount));
+        if (note.next === note.rto) out = out.concat(' ', rich('capRtoCap', { rto: data(secs(note.next), '') }));
+        break;
+      }
+      case 'lost': {
+        var ml = s.msgs[ev.m];
+        out = ml.k === 'seg' ? rich('capSegLost', { seg: segOf(ml) }) : rich('capAckLost', { n: B(ml.n) });
+        break;
+      }
+      case 'arrived': {
+        var m = s.msgs[ev.m];
+        if (m.k === 'seg') {
+          var n = B(s.rcvNxt);
+          if (m.re === 'inorder') out = rich('capInorder', { seg: segOf(m), n: n });
+          else if (m.re === 'held') out = rich('capHeld', { seg: segOf(m), gap: B(gapText(s)), n: n });
+          else if (m.re === 'discarded') out = rich('capDiscarded', { seg: segOf(m), gap: B(gapText(s)), n: n });
+          else if (m.re === 'fills') out = rich('capFills', { seg: segOf(m), held: B(range(m.seq + m.len, s.rcvNxt)), n: n });
+          else out = rich('capAlready', { seg: segOf(m), n: n });
+          break;
+        }
+        var an = B(m.n);
+        if (m.re === 'dup') out = m.dup >= L.DUP_THRESH ? rich('capDupMore', { n: an, k: String(m.dup) }) : rich('capDup', { n: an, k: String(m.dup) });
+        else if (m.re === 'fast') out = rich('capFast', { n: an });
+        else if (m.re === 'partial') out = rich('capPartial', { n: an, end: data(L.endOf(f)) });
+        else if (m.re === 'all') out = rich('capAckAll', { n: an });
+        else out = rich('capAckNew', { n: an, rto: data(secs(s.rto), '') });
+        if (m.re === 'new' || m.re === 'all' || m.re === 'partial') {
+          // a cumulative ACK covers an earlier lost one (rule 7)
+          var covered = s.msgs.filter(function (x) { return x.k === 'ack' && x.fate === 'lost' && x.n > c.prev.sndUna && x.n <= m.n; });
+          if (covered.length) out = out.concat(' ', rich('capAckCovers', { m: B(covered[covered.length - 1].n) }));
+          out = out.concat(' ', m.sample === 'karn' ? rich('capKarn') : rich('capSample', { ms: data(m.sample) }));
+        }
+        break;
+      }
+      default: out = [];
+    }
+    if (s.done) out = out.concat(' ', h('b', null, rich('capDone', { t: data(s.t, '') })));
+    else if (c.last && s.n > 0) out = out.concat(' ', rich('capTrunc'));
+    return out;
+  }
+
+  // ── a loss setting changed mid-run: it applies from the next step, the past stays (NOTES.md) ──
+
+  // The kit replays from step 0 on every change. When the user changes what is lost at step n (not a preset, not a
+  // reset), the page pins the past: `keep` lists what was already lost by step n, `from` = n, and the new choice acts on
+  // later steps only (sim.js isLost). A change that sends the demo to step 0 (data, buffer, RTT) clears both.
+  var LOSS = ['lose', 'loseRetx'], OTHER = ['flow', 'bufferOoo', 'rtt'];
+  var seen = null, busy = false;
+  function pin(c) {
+    if (busy) return;
+    var p = c.params, before = seen;
+    seen = { p: Object.assign({}, p), n: c.n };
+    if (!before) return;
+    var diff = function (keys) { return keys.some(function (k) { return before.p[k] !== p[k]; }); };
+    var at = before.n, patch = null;
+    if (diff(OTHER)) {
+      if (p.keep || p.from) { patch = { keep: '', from: 0 }; at = 0; }
+    } else if (diff(LOSS) && !c.preset && at > 0 && c.n > 0 && p.keep === before.p.keep && p.from === before.p.from) {
+      patch = { keep: L.lostBy(before.p, at).join(','), from: at };
+    }
+    if (!patch) return;
+    busy = true;
+    window.simdeck.set(patch);
+    window.simdeck.go(at);
+    busy = false;
+    seen = { p: Object.assign({}, window.simdeck.params), n: window.simdeck.n };
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'flow', type: 'choice', label: t('flow'), resets: true, options: [['rto', t('flowRto')], ['fast', t('flowFast')], ['five', t('flowFive')]] },
+      { key: 'lose', type: 'select', label: t('lose'), options: L.LOSE.map(function (v) {
+          return [v, v === 'none' ? t('loseNone') : t(v[0] === 's' ? 'loseSeg' : 'loseAck', { k: v.slice(1) })];
+        }) },
+      { key: 'loseRetx', type: 'choice', label: t('loseRetx'), options: [[0, '0'], [1, '1'], [2, '2']] },
+      { key: 'bufferOoo', type: 'toggle', label: t('bufferOoo'), resets: true },
+      { key: 'rtt', type: 'choice', label: t('rtt'), resets: true, options: [[100, msOf(100)], [300, msOf(300)]] }
+    ],
+
+    presets: [
+      { id: 'book-rto', label: t('presetRto'), hint: t('presetRtoHint'), params: {} },
+      { id: 'book-fast', label: t('presetFast'), hint: t('presetFastHint'), params: { flow: 'fast' } },
+      { id: 'ack-lost', label: t('presetAck'), hint: t('presetAckHint'), params: { flow: 'five', lose: 'a2' } },
+      { id: 'backoff', label: t('presetBackoff'), hint: t('presetBackoffHint'), params: { loseRetx: 2 } },
+      { id: 'no-buffer', label: t('presetNoBuffer'), hint: t('presetNoBufferHint'), params: { flow: 'fast', bufferOoo: false } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legSeg') },
+      { shape: 'thin', label: t('legAck') },
+      { shape: 'dupb', label: t('legDup') },
+      { shape: 'lost', label: t('legLost') },
+      { shape: 'dash', label: t('legRetx') },
+      { shape: 'timer', label: t('legTimer') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'tr' },
+        h('div', { class: 'tr-col' }, renderA(c), renderTimer(c), renderDups(c)),
+        h('div', { class: 'tr-col tr-mid' }, chart),
+        h('div', { class: 'tr-col' }, renderB(c))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+  window.simdeck.on(pin);
+  pin({ params: window.simdeck.params, n: window.simdeck.n });
+})();
+</script>
+</body>
+</html>
