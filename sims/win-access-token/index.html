@@ -1,0 +1,470 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-access-token: ana's access token and Kerberos tickets carry the groups AD had when she logged on. An
+     administrator adds her to Prodaja (or removes her) on DC1 or DC2; she tries FS1's folder Prodaja (ACL:
+     DL_FS1_Prodaja_Modify Modify, Prodaja nested in it) before and after logging off and on, after new tickets only,
+     or after doing nothing. A stepper, one event per step.
+     Left: AD on DC1 and DC2 (membership, replication, the change log). Middle: ana's logon session on PC-07 (the
+     clock, the access token, the TGT, the service ticket for FS1), each group flagged ≠ where it differs from AD.
+     Right: the access check of her last attempt, the ACL drawn with kit view K4 (rule table, kit/ruletable.js), and
+     the SMB session on FS1.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-access-token">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pristupni token · simdeck</title>
+<meta name="description" content="Ana je dodana u grupu, a pristup i dalje ne radi: token i Kerberos karte nastali su pri prijavi. Odjava, nove karte, otvorena SMB sesija, replikacija.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-access-token",
+  "title": {
+    "hr": "Pristupni token",
+    "en": "The access token"
+  },
+  "concept": {
+    "hr": "SID-ovi i grupe utvrđuju se pri prijavi; zato se nakon promjene grupe odjaviš",
+    "en": "SIDs and groups are fixed at logon; why you log off after a group change"
+  },
+  "summary": {
+    "hr": "Ana je dodana u grupu, a pristup i dalje ne radi: token i Kerberos karte nastali su pri prijavi. Odjava, nove karte, otvorena SMB sesija, replikacija.",
+    "en": "ana is added to a group and is still denied: her token and Kerberos tickets come from her logon. Logging off, new tickets, an open SMB session, replication."
+  },
+  "tags": [
+    "permissions"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-access-token"]; colours only from kit tokens.
+   Layout: three columns: AD (DC1, replication, DC2, changes), the logon session on PC-07 (clock, token, TGT, service
+   ticket), the access check (target, the token used, the ACL as K4, the SMB session). */
+[data-sim="win-access-token"] .at {
+  display: grid;
+  grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 1cqh 1.1cqw;
+  height: 100%;
+  padding: 1.2cqh 1.1cqw;
+  font-size: 1rem;
+  --at-sm: max(var(--fs-sm), 0.86em);
+}
+[data-sim="win-access-token"] .at-col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; min-height: 0; }
+[data-sim="win-access-token"] .at-col > h2 { margin: 0; font-size: 1.05em; display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; }
+[data-sim="win-access-token"] .at-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.65rem 0.45rem;
+  min-width: 0;
+}
+[data-sim="win-access-token"] .at-box h3 { margin: 0 0 0.2rem; font-size: 1em; display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: baseline; }
+[data-sim="win-access-token"] .at-box[data-active] { border-color: var(--ink); border-width: 0.18rem; }
+[data-sim="win-access-token"] .at-sub { font-size: var(--at-sm); color: var(--muted); font-weight: 400; line-height: 1.3; }
+[data-sim="win-access-token"] .at-mono { font-family: var(--mono); }
+[data-sim="win-access-token"] .at-line { display: flex; flex-wrap: wrap; gap: 0.15rem 0.45rem; align-items: baseline; font-size: var(--at-sm); line-height: 1.4; margin-top: 0.15rem; }
+[data-sim="win-access-token"] .at-tag { padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--at-sm); font-weight: 400; }
+[data-sim="win-access-token"] .at-tag[data-k="dashed"] { border-style: dashed; }
+
+/* group chips; ≠ where the group differs from AD now: in the card but no longer in AD (dashed, ≠), or in AD but not
+   in the card (a ghost: dashed, muted, struck ≠) */
+[data-sim="win-access-token"] .at-g {
+  display: inline-flex; align-items: baseline; gap: 0.25rem;
+  padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); font-family: var(--mono); font-size: var(--at-sm);
+}
+[data-sim="win-access-token"] .at-g[data-neq] { border-style: dashed; border-width: 0.16rem; }
+[data-sim="win-access-token"] .at-g[data-neq="missing"] { color: var(--muted); border-color: var(--muted); }
+[data-sim="win-access-token"] .at-neq { font-weight: 700; color: var(--danger); font-family: inherit; }
+[data-sim="win-access-token"] .at-g.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-access-token"] .at-gs { display: flex; flex-wrap: wrap; gap: 0.25rem 0.3rem; margin-top: 0.2rem; }
+
+/* AD: two DC boxes with the replication arrow between them */
+[data-sim="win-access-token"] .at-mem { display: flex; flex-direction: column; gap: 0.1rem; font-size: var(--at-sm); }
+[data-sim="win-access-token"] .at-mem > .at-gs { margin: 0 0 0.25rem 0.8rem; }
+[data-sim="win-access-token"] .at-repl { display: flex; align-items: center; gap: 0.5rem; padding-left: 1.2rem; font-size: var(--at-sm); min-height: 2.1rem; }
+[data-sim="win-access-token"] .at-repl-line { width: 0; height: 1.9rem; border-left: 0.2rem solid var(--ink); position: relative; }
+[data-sim="win-access-token"] .at-repl[data-k="wait"] .at-repl-line { border-left-style: dashed; border-left-color: var(--muted); }
+[data-sim="win-access-token"] .at-repl[data-k="none"] .at-repl-line { border-left: 0.12rem dotted var(--muted); }
+[data-sim="win-access-token"] .at-repl-tip { position: absolute; left: -0.55rem; font-size: 0.9rem; line-height: 1; color: var(--ink); }
+[data-sim="win-access-token"] .at-repl[data-dir="up"] .at-repl-tip { top: -0.35rem; }
+[data-sim="win-access-token"] .at-repl[data-dir="down"] .at-repl-tip { bottom: -0.35rem; }
+[data-sim="win-access-token"] .at-repl.sd-changed .at-repl-word { background: var(--hl); color: var(--on-hl); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="win-access-token"] .at-repl.sd-changed { outline: 0; box-shadow: none; }
+[data-sim="win-access-token"] .at-log { margin: 0; padding: 0; list-style: none; font-size: var(--at-sm); }
+[data-sim="win-access-token"] .at-log li { display: flex; flex-wrap: wrap; gap: 0.1rem 0.45rem; align-items: baseline; }
+
+/* session: the clock, then the token card (thick left bar) and the ticket cards (dashed edge, like a ticket stub) */
+[data-sim="win-access-token"] .at-clock { font-family: var(--mono); font-weight: 700; font-size: 1.5rem; padding: 0 0.4rem; border: 0.16rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-access-token"] .at-clock.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-access-token"] .at-tok { border-left: 0.55rem solid var(--ink); }
+[data-sim="win-access-token"] .at-tkt { border-left: 0.32rem dashed var(--ink); }
+[data-sim="win-access-token"] .at-off { border-style: dashed; color: var(--muted); }
+[data-sim="win-access-token"] .at-sids { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.6rem; align-items: baseline; font-size: var(--at-sm); margin-top: 0.15rem; }
+[data-sim="win-access-token"] .at-sid { font-family: var(--mono); color: var(--muted); }
+[data-sim="win-access-token"] .at-sids .at-g { justify-self: start; }
+
+/* access check */
+[data-sim="win-access-token"] .at-chk .sd-rt { margin-top: 0.3rem; }
+[data-sim="win-access-token"] .at-path { font-family: var(--mono); font-weight: 700; }
+[data-sim="win-access-token"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-access-token"] .sd-swatch[data-shape="tok"] { background: var(--bg); border: var(--line-w) solid var(--ink); border-left: 0.35rem solid var(--ink); border-radius: 0.1rem; }
+[data-sim="win-access-token"] .sd-swatch[data-shape="tkt"] { background: var(--bg); border: var(--line-w) solid var(--ink); border-left: 0.22rem dashed var(--ink); border-radius: 0.1rem; }
+[data-sim="win-access-token"] .sd-swatch[data-shape="neq"] { background: var(--bg); border: 0.14rem dashed var(--ink); border-radius: 0.1rem; position: relative; }
+[data-sim="win-access-token"] .sd-swatch[data-shape="neq"]::after { content: '≠'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; font-size: 0.8em; line-height: 1; }
+[data-sim="win-access-token"] .sd-swatch[data-shape="repl"] { width: 0.3rem; border: 0; border-left: 0.2rem solid var(--ink); border-radius: 0; background: transparent; }
+
+/* Phone and portrait: the stage grows with its content; the columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-access-token"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-access-token"] .at { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.8rem; }
+  [data-sim="win-access-token"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Pristupni token</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var DAY = 24 * 3600;
+  /** The share ana opened at 08:05 (any share on FS1 gives the ticket and the session for FS1). */
+  var MORNING_SHARE = '\\\\FS1\\Javno';
+
+  /** Data (names, SIDs, paths, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'at-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  function sub(text) { return h('span', { class: 'at-sub' }, text); }
+  /** A name that may break after each underscore (DL_FS1_Prodaja_Modify). */
+  function nm(text, cls, at) {
+    var out = [];
+    String(text).split(at || /(?<=_)/).forEach(function (part, i) { if (i) out.push(h('wbr')); out.push(part); });
+    return h('span', { translate: 'no', class: cls === undefined ? 'at-mono' : cls || null }, out);
+  }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  /** A SID that may break after each hyphen. */
+  function sid(text) { return nm(text, 'at-sid', /(?<=-)/); }
+  function last(c) { return c.n > 0 ? c.state.log[c.state.log.length - 1] : null; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  /** A time of day; an expiry after midnight says so. */
+  function when(at) { return at >= DAY ? t('nextDay', { t: L.clock(at) }) : L.clock(at); }
+  function whenNode(at) { return at >= DAY ? h('span', null, t.parts('nextDay', { t: data(L.clock(at), '') })) : data(L.clock(at), ''); }
+
+  /** What AD has now (the newest membership): every group of ana, and the ones a TGT carries. */
+  function adNow(s) { return L.expand(s.ad.members, L.USER); }
+  function adNowTgt(s) { return L.tgtGroups(s.ad.members, L.USER); }
+
+  /** Group chips: the card's groups, ≠ on those AD no longer has, and ghosts ≠ for those AD has and the card lacks. */
+  function chips(c, groups, ad, changed) {
+    var d = L.diff(groups, ad);
+    var out = groups.map(function (g) {
+      var extra = d.extra.indexOf(g) >= 0;
+      return h('span', { class: 'at-g' + (changed ? ' sd-changed' + anim(c) : ''), dataset: extra ? { neq: 'extra' } : {}, title: extra ? t('neqExtra') : null },
+        extra ? h('span', { class: 'at-neq', 'aria-hidden': 'true' }, '≠') : null, nm(g, ''));
+    });
+    d.missing.forEach(function (g) {
+      out.push(h('span', { class: 'at-g', dataset: { neq: 'missing' }, title: t('neqMissing') },
+        h('span', { class: 'at-neq', 'aria-hidden': 'true' }, '≠'), nm(g, '')));
+    });
+    return h('div', { class: 'at-gs' }, out);
+  }
+
+  // ── AD ──
+  function dcBox(c, id) {
+    var s = c.state, m = L.membersAt(s.ad, id), e = last(c);
+    var mPrev = c.prev ? L.membersAt(c.prev.ad, id) : m;
+    var active = e && ((e.kind === 'change' && e.dc === id) || (e.kind === 'repl' && (e.from === id || e.to === id)) ||
+      ((e.kind === 'logon' || e.kind === 'tgt' && e.reason !== 'renewal' || e.kind === 'ticket') && id === L.LOGON_DC));
+    function members(g) {
+      var now = m[g] || [], was = mPrev[g] || [];
+      if (!now.length) return h('span', { class: 'at-sub' + (was.length ? ' sd-changed' : '') }, t('memNone'));
+      return h('span', { class: 'at-gs' }, now.map(function (x) {
+        return h('span', { class: 'at-g' + (was.indexOf(x) < 0 ? ' sd-changed' + anim(c) : '') }, data(x, ''));
+      }));
+    }
+    return h('section', { class: 'at-box', dataset: active ? { active: '' } : {} },
+      h('h3', null, data(id, ''), h('span', { class: 'at-tag', dataset: id === L.LOGON_DC ? {} : { k: 'dashed' } }, t(id === L.LOGON_DC ? 'dcAnswers' : 'dcOther'))),
+      h('div', { class: 'at-mem' },
+        nm('Prodaja'), members('Prodaja'),
+        nm('DL_FS1_Prodaja_Modify'), members('DL_FS1_Prodaja_Modify')));
+  }
+  function replArrow(c) {
+    var s = c.state, ch = s.ad.changes[0], e = last(c);
+    if (!ch) return h('div', { class: 'at-repl', dataset: { k: 'none', dir: 'down' } }, h('span', { class: 'at-repl-line' }), sub(t('replArrow')));
+    var to = ch.dc === 'DC1' ? 'DC2' : 'DC1';
+    var done = L.reached(ch, to, s.t);
+    return h('div', { class: 'at-repl' + (e && (e.kind === 'repl' || e.kind === 'change') ? ' sd-changed' : ''), dataset: { k: done ? 'done' : 'wait', dir: ch.dc === 'DC1' ? 'down' : 'up' } },
+      h('span', { class: 'at-repl-line' }, h('span', { class: 'at-repl-tip', 'aria-hidden': 'true' }, ch.dc === 'DC1' ? '▼' : '▲')),
+      h('span', { class: 'at-repl-word' }, done ? t.parts('replDone', { t: data(L.clock(ch.at + L.REPL_DELAY), '') }) : t('replWait')));
+  }
+  function changeLog(c) {
+    var s = c.state;
+    var items = s.ad.changes.map(function (x) {
+      return h('li', null, data(L.clock(x.at)), q((x.op === 'add' ? '+ ' : '− ') + x.principal + (x.op === 'add' ? ' → ' : ' ✕ ') + x.group),
+        sub(t('chOn', { dc: x.dc })));
+    });
+    return h('section', { class: 'at-box' }, h('h3', null, t('changesTitle')),
+      items.length ? h('ul', { class: 'at-log' }, items) : sub(t('changesNone')));
+  }
+  function adCol(c) {
+    return h('div', { class: 'at-col' }, h('h2', null, t('adTitle')), dcBox(c, 'DC1'), replArrow(c), dcBox(c, 'DC2'), changeLog(c));
+  }
+
+  // ── session ──
+  function tokenCard(c) {
+    var s = c.state, ses = s.session, e = last(c);
+    var changed = e && e.kind === 'logon';
+    var ad = adNow(s), d = L.diff(ses.tokenGroups, ad);
+    var direct = s.ad.members;
+    var rows = [data(L.USER, 'at-g'), h('span', null, sid(L.USER_SID), ' ', sub(t('rowUser')))];
+    ses.tokenGroups.forEach(function (g) {
+      var extra = d.extra.indexOf(g) >= 0;
+      var nested = (direct[g] || []).indexOf(L.USER) < 0 && g !== 'Domain Users' && (direct[g] || []).length;
+      rows.push(h('span', { class: 'at-g', dataset: extra ? { neq: 'extra' } : {} },
+        extra ? h('span', { class: 'at-neq', 'aria-hidden': 'true' }, '≠') : null, nm(g, '')));
+      var why = [];
+      if (nested) why.push(sub(t('viaNest', { g: direct[g][0] })));
+      if (extra) why.push(sub(t('neqExtra')));
+      rows.push(h('span', null, sid(L.GROUP_SID[g]), why.map(function (w, i) { return [i ? ', ' : ' ', w]; })));
+    });
+    d.missing.forEach(function (g) {
+      rows.push(h('span', { class: 'at-g', dataset: { neq: 'missing' } }, h('span', { class: 'at-neq', 'aria-hidden': 'true' }, '≠'), nm(g, '')));
+      rows.push(sub(t('neqMissing')));
+    });
+    var wk = ['Everyone', 'Authenticated Users', 'INTERACTIVE'].map(function (k) { return [data(k, ''), ' ', sid(L.WELL_KNOWN[k])]; });
+    return h('section', { class: 'at-box at-tok' + (changed ? ' sd-changed' : '') },
+      h('h3', null, t('tokenTitle'), h('span', { class: 'at-sub' }, t.parts('tokenBuilt', { t: data(L.clock(ses.logonAt), ''), dc: data(ses.logonDc, '') }))),
+      h('div', { class: 'at-sids' }, rows),
+      h('div', { class: 'at-line' }, sub(t('wellKnown')), wk.map(function (x, i) { return [i ? ' · ' : '', x]; })));
+  }
+  function tgtCard(c) {
+    var s = c.state, tg = s.session.tgt, e = last(c);
+    var changed = e && (e.kind === 'logon' || e.kind === 'tgt');
+    return h('section', { class: 'at-box at-tkt' + (changed ? ' sd-changed' : '') },
+      h('h3', null, t('tgtTitle'), sub(t.parts('fromDc', { dc: data(tg.dc, '') })), tg.renewed ? h('span', { class: 'at-tag' }, t('renewedTag')) : null),
+      h('div', { class: 'at-line' }, sub(t.parts('issued', { t: data(L.clock(tg.issuedAt), '') })), sub(['· ', t.parts('validTo', { t: whenNode(tg.expiresAt) })])),
+      chips(c, tg.groups, adNowTgt(s), false));
+  }
+  function ticketCard(c) {
+    var s = c.state, st = s.session.serviceTickets.filter(function (x) { return x.server === L.FS; })[0], e = last(c);
+    var changed = e && e.kind === 'ticket';
+    if (!st) {
+      return h('section', { class: 'at-box at-tkt at-off' + (e && (e.kind === 'tgt' || e.kind === 'logon') ? ' sd-changed' : '') },
+        h('h3', null, t('tktTitle'), data(L.FS, '')), sub(t('noTicket')));
+    }
+    var expired = st.expiresAt <= s.t;
+    return h('section', { class: 'at-box at-tkt' + (changed ? ' sd-changed' : '') + (expired ? ' at-off' : '') },
+      h('h3', null, t('tktTitle'), data(st.server, ''), sub(t.parts('fromDc', { dc: data(st.dc, '') }))),
+      h('div', { class: 'at-line' }, sub(t.parts('issued', { t: data(L.clock(st.issuedAt), '') })), sub(['· ', t.parts('validTo', { t: whenNode(st.expiresAt) })])),
+      chips(c, st.groups, adNow(s), false));
+  }
+  function sessionCol(c) {
+    var s = c.state, e = last(c);
+    var head = h('h2', null, data(L.PC, ''), sub(t('sesTitle')), sub(t('clockLabel')),
+      h('span', { class: 'at-clock' + (c.prev && c.prev.t !== s.t ? ' sd-changed' : ''), translate: 'no' }, L.clock(s.t)));
+    if (!s.session) {
+      return h('div', { class: 'at-col' }, head,
+        h('section', { class: 'at-box at-tok at-off' + (e && e.kind === 'logoff' ? ' sd-changed' : '') }, h('h3', null, t('tokenTitle')), sub(t('loggedOff'))));
+    }
+    return h('div', { class: 'at-col' }, head, tokenCard(c), tgtCard(c), ticketCard(c));
+  }
+
+  // ── access check ──
+  function checkCol(c) {
+    var s = c.state, a = s.attempt;
+    var local = a && a.where === 'local';
+    var acl = local ? s.local.acl : s.fs1.acl;
+    var fresh = !!a && a.n === c.n;
+    var target = h('div', { class: 'at-line' }, data(local ? L.LOCAL_FOLDER : L.SHARE, 'at-path'), sub(t(local ? 'targetLocal' : 'targetFs')));
+    var used = null;
+    if (a) {
+      var key = { ticket: 'usedTicket', reauth: 'usedTicket', session: 'usedSession', token: 'usedToken' }[a.via];
+      used = h('section', { class: 'at-box ' + (a.via === 'token' ? 'at-tok' : 'at-tkt') },
+        h('div', { class: 'at-line' }, sub(t.parts(key, { t: data(L.clock(a.since), '') }))),
+        chips(c, a.groups, adNow(s), false));
+    }
+    var at = a ? (a.ok ? a.row : acl.length) : -1;
+    var table = RT({
+      dir: c.dir,
+      mode: 'first',
+      columns: [{ key: 'who', label: t('colWho'), wrap: true }],
+      actionLabel: t('colRights'),
+      markLabel: a ? h('span', null, t.parts('colMark', { t: data(L.clock(a.at), '') })) : t('colMarkNone'),
+      rows: acl.map(function (r, i) {
+        var hit = a && i < a.hits.length ? a.hits[i] : null;
+        return { no: String(i + 1), cells: { who: nm(r.who) }, action: h('span', null, t(r.rights === 'full' ? 'rFull' : 'rModify')), effect: 'allow',
+          hit: hit, miss: hit === false ? ['who'] : [] };
+      }),
+      implicit: { text: t('implicitDeny'), action: h('span', null, t('denied')), effect: 'deny' },
+      at: at,
+      subject: { mark: L.USER, c: 1 },
+      done: !!a,
+      outcome: function () { return RT.verdict(a.ok, t(a.ok ? 'outOk' : 'outDenied')); },
+      words: { win: t('markWin'), skip: t('markSkip') },
+      changed: fresh,
+      bare: true,
+      stickyMark: true
+    });
+    var smb = s.fs1.sessions.filter(function (x) { return x.user === L.USER; })[0];
+    var smbOn = smb && smb.expiresAt > s.t;
+    return h('div', { class: 'at-col at-chk' },
+      h('h2', null, t('chkTitle')),
+      h('section', { class: 'at-box', dataset: fresh ? { active: '' } : {} }, target,
+        a ? null : h('div', { class: 'at-line' }, sub(t('noAttempt'))), table),
+      used,
+      h('section', { class: 'at-box' }, h('div', { class: 'at-line' }, h('b', null, t('smbTitle')),
+        smbOn ? sub(t.parts('smbOpen', { t: data(L.clock(smb.since), '') })) : sub(t('smbNone')))));
+  }
+
+  // ── captions ──
+  function groupList(groups) { return q(groups.join(', ')); }
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n, e = last(c);
+    var T = e ? q(L.clock(e.at)) : null, share = q(L.SHARE);
+    // the nested preset opens at the denied 10:05 attempt of add-then-relog (a URL may change its params)
+    if (c.preset === 'nested' && e && e.kind === 'attempt' && !s.attempt.ok && p.change === 'add' && p.changeOn === 'DC1') return rich('capNested');
+    if (c.first) {
+      var start = rich(p.change === 'remove' ? 'capStart_remove' : 'capStart_add', { pub: q(MORNING_SHARE) });
+      if (p.smbOpen) start.push(t('capStartSmb'));
+      return start;
+    }
+    var stale = s.ad.dcs.filter(function (d) { return d.id === L.LOGON_DC; })[0].replicatedUpTo < s.ad.changes.length;
+    var before = s.log.slice(0, -1);
+    function happened(kind, reason) { return before.some(function (x) { return x.kind === kind && (!reason || x.reason === reason); }); }
+    var out;
+    switch (e.kind) {
+      case 'change':
+        if (e.op === 'add') out = e.dc === 'DC1' ? rich('capChangeAdd') : rich('capChangeAddDc2', { n: n, t: T, dc: q(e.dc) });
+        else out = rich(e.dc === 'DC1' ? 'capChangeRemove' : 'capChangeRemoveDc2', { n: n, t: T, dc: q(e.dc) });
+        break;
+      case 'repl': out = rich('capRepl', { n: n, t: T }); break;
+      case 'logoff':
+        out = rich('capLogoff', { n: n, t: T });
+        if (c.prev.fs1.sessions.some(function (x) { return x.user === L.USER; })) out.push(t('capLogoffSmb'));
+        break;
+      case 'logon': out = rich(stale ? 'capLogonStale' : 'capLogon', { n: n, t: T, dc: q(e.dc), groups: groupList(e.groups) }); break;
+      case 'tgt':
+        if (e.reason === 'renewal') out = rich('capTgtRenewal', { n: n, t: T, exp: q(when(e.expiresAt)), groups: groupList(e.groups) });
+        else out = rich(stale ? 'capTgtRenewStale' : 'capTgtRenew', { n: n, t: T, groups: groupList(e.groups), logon: q(L.clock(s.session.logonAt)) });
+        break;
+      case 'ticket':
+        out = rich(happened('tgt', 'renewal') ? 'capTicketAfterRenewal' : 'capTicket', { n: n, t: T, groups: groupList(e.groups) });
+        break;
+      case 'attempt': {
+        var a = s.attempt;
+        var probe = !happened('attempt') && !happened('logoff') && !happened('tgt');
+        if (e.where === 'local') out = rich(a.ok ? 'capLocalOk' : 'capLocalDenied', { n: n, t: T, path: q(L.LOCAL_FOLDER), logon: q(L.clock(s.session.logonAt)) });
+        else if (probe) out = a.ok ? rich('capProbeOk') : rich(a.via === 'session' ? 'capProbeDeniedSession' : 'capProbeDenied', { n: n, t: T, share: share, since: q(L.clock(a.since)) });
+        else if (a.via === 'session') out = rich(a.ok ? 'capAttemptSessionOk' : 'capAttemptSession', { n: n, t: T, share: share, since: q(L.clock(a.since)) });
+        else if (happened('tgt', 'renewal')) {
+          out = rich(a.ok ? 'capAttemptStillOk' : 'capAttemptStillDenied', { n: n, t: T, share: share });
+          if (a.via === 'reauth') out.push(t('capReauth'));
+        } else out = rich(a.ok ? 'capAttemptOk' : 'capAttemptDenied', { n: n, t: T, share: share });
+        break;
+      }
+      default: out = [''];
+    }
+    if (c.last) out.push(t('capEnd'));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'change', type: 'choice', label: t('pChange'), options: [['add', t('optAdd')], ['remove', t('optRemove')]] },
+      { key: 'changeOn', type: 'choice', label: t('pChangeOn'), options: [['DC1', 'DC1'], ['DC2', 'DC2']] },
+      { key: 'action', type: 'choice', label: t('pAction'), options: [['relog', t('optRelog')], ['renew', t('optRenew')], ['none', t('optNone')]] },
+      { key: 'smbOpen', type: 'toggle', label: t('pSmb') }
+    ],
+
+    presets: [
+      { id: 'add-then-relog', label: t('presetAdd'), hint: t('presetAddHint'), params: {} },
+      { id: 'nested', label: t('presetNested'), hint: t('presetNestedHint'), params: {}, step: 2 },
+      { id: 'remove-still-works', label: t('presetRemove'), hint: t('presetRemoveHint'), params: { change: 'remove', action: 'none' } },
+      { id: 'renew-tickets', label: t('presetRenew'), hint: t('presetRenewHint'), params: { action: 'renew' } },
+      { id: 'replication-lag', label: t('presetLag'), hint: t('presetLagHint'), params: { changeOn: 'DC2' } }
+    ],
+
+    legend: [
+      { shape: 'tok', label: t('legToken') },
+      { shape: 'tkt', label: t('legTicket') },
+      { shape: 'neq', label: t('legNeq') },
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'rt-verdict', label: t('legVerdict') },
+      { shape: 'repl', label: t('legRepl') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'at' }, adCol(c), sessionCol(c), checkCol(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
