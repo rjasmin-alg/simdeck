@@ -1,0 +1,574 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ipv6-slaac: host H joins an IPv6 link. A stepper, one phase per step: interface ID (modified EUI-64), link-local
+     (tentative), DAD (NS, RetransTimer), RS, RA, global address from the prefix, DAD again. Left: H's address list,
+     groups and default router; centre: the messages on the link as kit view K1 (kit/sequence.js) and the card of the
+     newest message; right: the bit strip that builds the address. The eui64 preset shows the bit strip alone.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ipv6-slaac">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPv6 SLAAC · simdeck</title>
+<meta name="description" content="Računalo se spaja na IPv6 vezu: identifikator iz MAC adrese, link-local adresa, DAD, traženje i oglas usmjernika, globalna adresa iz prefiksa.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ipv6-slaac",
+  "title": {
+    "hr": "IPv6 SLAAC: samododjela adrese",
+    "en": "IPv6 SLAAC: address autoconfiguration"
+  },
+  "concept": {
+    "hr": "RS i RA, prefiks + identifikator sučelja, otkrivanje dvostruke adrese",
+    "en": "RS and RA, prefix + interface ID, duplicate address detection"
+  },
+  "summary": {
+    "hr": "Računalo se spaja na vezu: identifikator iz MAC adrese, link-local, DAD, RS i RA, globalna adresa iz prefiksa. I kad ne uspije.",
+    "en": "A host joins a link: interface ID from the MAC, link-local, DAD, RS and RA, a global address from the prefix. And when it fails."
+  },
+  "tags": [
+    "ipv6"
+  ],
+  "class": "stepper",
+  "steps": 10,
+  "entries": [
+    {
+      "preset": "eui64"
+    },
+    {
+      "preset": "dad-fail"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ipv6-slaac"]; colours only from kit tokens.
+   Layout: three columns. Left H's addresses, groups and default router; centre the K1 chart (lanes H, N, R) and the
+   card of the newest message; right the bit strip. Prefix bits are c3, interface ID bits c5, H is c1, N c2, R c4. */
+[data-sim="ipv6-slaac"] .sl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 0.95fr);
+  gap: 1.2cqh 1cqw;
+  height: 100%;
+  padding: 1.4cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="ipv6-slaac"] .sl-col { display: flex; flex-direction: column; gap: 1.2cqh; min-height: 0; }
+[data-sim="ipv6-slaac"] .sl-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+}
+[data-sim="ipv6-slaac"] .sl-box h2 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-box h3 { margin: 0.5rem 0 0.15rem; font-size: 0.9rem; font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-mono { font-family: var(--mono); }
+[data-sim="ipv6-slaac"] .sl-muted { color: var(--muted); }
+[data-sim="ipv6-slaac"] .sl-sm { font-size: var(--fs-sm); }
+[data-sim="ipv6-slaac"] .sl-wrap { overflow-wrap: anywhere; }
+[data-sim="ipv6-slaac"] .sl-note { margin: 0.4rem 0 0; padding: 0.2rem 0.45rem; border-left: 0.3rem solid var(--ink); font-size: var(--fs-sm); }
+[data-sim="ipv6-slaac"] .sl-note[data-k="bad"] { border-left-style: double; border-left-width: 0.45rem; font-weight: 700; }
+/* changed in this step: yellow, and the tokens inside switch to dark-on-yellow so muted text and tags stay legible in both
+   themes (the chart's notes and cards use the kit's own changed mark) */
+[data-sim="ipv6-slaac"] .sl-addr.sd-changed, [data-sim="ipv6-slaac"] .sl-kv .sd-changed, [data-sim="ipv6-slaac"] p.sd-changed {
+  --ink: var(--on-hl); --muted: var(--on-hl); --bg: var(--hl);
+  background: var(--hl); color: var(--on-hl);
+}
+
+/* address list */
+[data-sim="ipv6-slaac"] .sl-addrs ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="ipv6-slaac"] .sl-addr { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: 0 0.45rem; align-items: start; padding: 0.2rem 0.35rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="ipv6-slaac"] .sl-addr.sd-changed { outline: 0.2rem solid var(--ink); }
+[data-sim="ipv6-slaac"] .sl-addr b { font-family: var(--mono); font-size: 0.85rem; overflow-wrap: anywhere; }
+[data-sim="ipv6-slaac"] .sl-addr > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+[data-sim="ipv6-slaac"] .sl-dot { width: 1.1rem; height: 1.1rem; margin-top: 0.2rem; border: 0.18rem solid var(--c1); border-radius: 50%; display: grid; place-items: center; font-size: 0.8rem; font-weight: 700; line-height: 1; }
+[data-sim="ipv6-slaac"] .sl-dot[data-st="tentative"] { border-style: dashed; background: transparent; }
+[data-sim="ipv6-slaac"] .sl-dot[data-st="preferred"] { background: var(--c1); }
+[data-sim="ipv6-slaac"] .sl-dot[data-st="duplicate"] { border-color: var(--ink); border-radius: var(--radius-sm); }
+[data-sim="ipv6-slaac"] .sl-addr[data-st="duplicate"] b { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="ipv6-slaac"] .sl-addr[data-st="duplicate"] { border-style: dashed; }
+[data-sim="ipv6-slaac"] .sl-tag { display: inline-block; padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-tag[data-st="tentative"] { border-style: dashed; }
+[data-sim="ipv6-slaac"] .sl-tag[data-st="duplicate"] { background: var(--ink); color: var(--bg); }
+[data-sim="ipv6-slaac"] .sl-use { font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.05rem 0.5rem; margin: 0; align-items: baseline; }
+[data-sim="ipv6-slaac"] .sl-kv dt { color: var(--muted); }
+[data-sim="ipv6-slaac"] .sl-kv dd { margin: 0; min-width: 0; }
+[data-sim="ipv6-slaac"] .sl-kv dd.sd-changed, [data-sim="ipv6-slaac"] .sl-kv dt.sd-changed { padding: 0 0.2rem; }
+[data-sim="ipv6-slaac"] .sl-groups dt { font-family: var(--mono); color: var(--ink); }
+[data-sim="ipv6-slaac"] .sl-groups dd { color: var(--muted); }
+
+/* centre: chart and message card */
+[data-sim="ipv6-slaac"] .sl-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="ipv6-slaac"] .sl-lane { font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="ipv6-slaac"] .sl-lane .sl-mono { overflow-wrap: anywhere; }
+[data-sim="ipv6-slaac"] .sl-off { padding: 0 0.35rem; background: var(--ink); color: var(--bg); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-msg { flex: 0 0 auto; }
+[data-sim="ipv6-slaac"] .sl-mtype { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; margin-bottom: 0.3rem; }
+[data-sim="ipv6-slaac"] .sl-mtype b { padding: 0 0.45rem; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 1.05rem; outline: var(--line-w) dashed var(--ink); outline-offset: 2px; }
+[data-sim="ipv6-slaac"] .sl-opt { margin-top: 0.3rem; padding: 0.15rem 0.5rem 0.25rem; border-left: 0.4rem solid var(--c3); background: var(--bg); }
+
+/* bit strip */
+[data-sim="ipv6-slaac"] .sl-bits { display: flex; flex-direction: column; gap: 0.3rem; min-height: 0; }
+[data-sim="ipv6-slaac"] .sl-row > .sl-lbl { display: block; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="ipv6-slaac"] .sl-row > .sl-lbl b { color: var(--ink); }
+[data-sim="ipv6-slaac"] .sl-oct { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0.2rem; }
+[data-sim="ipv6-slaac"] .sl-oct > span {
+  display: grid; place-items: center;
+  padding: 0.1rem 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+[data-sim="ipv6-slaac"] .sl-oct > span[data-gap] { border: 0; background: transparent; }
+[data-sim="ipv6-slaac"] .sl-oct > span[data-k="mac"] { border-color: var(--c1); }
+[data-sim="ipv6-slaac"] .sl-oct > span[data-k="ins"] { border-style: dashed; border-color: var(--ink); }
+[data-sim="ipv6-slaac"] .sl-oct > span[data-k="iid"] { border-color: var(--c5); background: color-mix(in srgb, var(--c5) 14%, var(--bg)); }
+[data-sim="ipv6-slaac"] .sl-oct > span[data-k="flip"], [data-sim="ipv6-slaac"] .sl-oct > span[data-new] { border-color: var(--ink); border-width: 0.2rem; background: var(--hl); color: var(--on-hl); }
+[data-sim="ipv6-slaac"] .sl-bin { font-family: var(--mono); }
+[data-sim="ipv6-slaac"] .sl-bin i { font-style: normal; padding: 0 0.1rem; border: var(--line-w) solid var(--ink); background: var(--hl); color: var(--on-hl); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-iid { font-family: var(--mono); font-weight: 700; color: var(--c5); }
+[data-sim="ipv6-slaac"] .sl-bar { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 0.15rem; }
+[data-sim="ipv6-slaac"] .sl-bar > span {
+  grid-column: span 2;
+  display: grid; place-items: center;
+  padding: 0.05rem 0;
+  border: var(--line-w) solid;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+[data-sim="ipv6-slaac"] .sl-bar > span[data-half] { grid-column: span 1; }
+[data-sim="ipv6-slaac"] .sl-bar > span[data-k="p"] { border-color: var(--c3); background: color-mix(in srgb, var(--c3) 14%, var(--bg)); }
+[data-sim="ipv6-slaac"] .sl-bar > span[data-k="i"] { border-color: var(--c5); background: color-mix(in srgb, var(--c5) 14%, var(--bg)); border-style: dashed; }
+[data-sim="ipv6-slaac"] .sl-bar > span[data-k="x"] { border-color: var(--danger); border-style: dashed; color: var(--danger); background-color: var(--bg); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-bar[data-new] { outline: 0.25rem solid var(--hl); box-shadow: 0 0 0 0.4rem var(--ink); border-radius: var(--radius-sm); }
+[data-sim="ipv6-slaac"] .sl-row > .sl-lbl { margin-bottom: 0.2rem; }
+[data-sim="ipv6-slaac"] .sl-split { display: flex; justify-content: space-between; gap: 0.5rem; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="ipv6-slaac"] .sl-split > span:first-child { color: var(--c3); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-split > span:last-child { color: var(--c5); font-weight: 700; text-align: right; }
+[data-sim="ipv6-slaac"] .sl-missing { color: var(--danger); font-size: var(--fs-sm); font-weight: 700; text-align: center; }
+[data-sim="ipv6-slaac"] .sl-sn { font-family: var(--mono); font-weight: 700; }
+[data-sim="ipv6-slaac"] .sl-sn span { color: var(--c5); text-decoration: underline; text-decoration-thickness: 0.12em; }
+
+/* interface ID only (eui64): the bit strip alone, larger */
+[data-sim="ipv6-slaac"] .sl.sl-only { grid-template-columns: minmax(0, 1fr); justify-items: center; align-content: start; font-size: 1.25rem; padding-top: 3cqh; }
+[data-sim="ipv6-slaac"] .sl-only .sl-bits { width: min(100%, 46rem); gap: 0.7rem; }
+[data-sim="ipv6-slaac"] .sl-only .sl-box h2 { font-size: 1.25rem; }
+[data-sim="ipv6-slaac"] .sl-only .sl-oct > span { padding: 0.35rem 0; font-size: 1.5rem; }
+[data-sim="ipv6-slaac"] .sl-only .sl-lbl, [data-sim="ipv6-slaac"] .sl-only .sl-split { font-size: 1rem; }
+[data-sim="ipv6-slaac"] .sl-cmp { border-collapse: collapse; width: 100%; font-family: var(--mono); }
+[data-sim="ipv6-slaac"] .sl-cmp caption { font-family: var(--sans); text-align: left; }
+[data-sim="ipv6-slaac"] .sl-cmp th { font-family: var(--sans); text-align: left; color: var(--muted); font-weight: 400; font-size: 1rem; }
+[data-sim="ipv6-slaac"] .sl-cmp td, [data-sim="ipv6-slaac"] .sl-cmp caption { font-family: var(--sans); text-align: left; }
+[data-sim="ipv6-slaac"] .sl-cmp th { padding: 0.15rem 0.6rem 0.15rem 0; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="ipv6-slaac"] .sl-cmp tr[data-cur] td { font-weight: 700; }
+
+/* the kit's .sd-ctl { display: flex } beats [hidden], so a param's `visible` would not hide it (NOTES.md, shared requests) */
+[data-sim="ipv6-slaac"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatch for a duplicate address (the kit has round, hollow, hl, dash, line) */
+[data-sim="ipv6-slaac"] .sd-swatch[data-shape="dup"] { position: relative; background-color: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, var(--ink) 0.2em 0.3em); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ipv6-slaac"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ipv6-slaac"] .sl, [data-sim="ipv6-slaac"] .sl.sl-only { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="ipv6-slaac"] .sl-col { gap: 0.7rem; }
+  [data-sim="ipv6-slaac"] .sl-mid > .sd-seq { flex: none; }
+  [data-sim="ipv6-slaac"] .sl-only .sl-oct > span { font-size: 1rem; }
+  /* a receiver word or ✕ hangs a few px below the last row; the kit's fit() then drops rows on a phone too (NOTES.md) */
+  [data-sim="ipv6-slaac"] .sl-mid .sd-seq-list { padding-bottom: 1.5rem; }
+  /* an address bar wraps into the prefix row and the interface ID row */
+  [data-sim="ipv6-slaac"] .sl-bar { grid-template-columns: repeat(8, minmax(0, 1fr)); row-gap: 0.3rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">IPv6 SLAAC</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { H: '1', N: '2', R: '4' };
+
+  /** Data (addresses, MACs, message names, hex) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sl-mono' : cls || null }, text); }
+  function B(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      // a placeholder used twice is the same node: clone it, or appending moves it
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function days(sec) { return t.n('days', sec / 86400); }
+  function groupName(addr) {
+    return addr === L.ALL_NODES ? t('gAllNodes') : addr === L.ALL_ROUTERS ? t('gAllRouters') : t('gSolicited');
+  }
+  function changedHere(c, key) { return c.state.changed.indexOf(key) >= 0 && c.state.phase !== 'start'; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+
+  // ── left: H's addresses, groups, default router ──
+
+  function renderAddrs(c) {
+    var s = c.state;
+    var box = h('section', { class: 'sl-box sl-addrs' }, h('h2', null, t('addrTitle')));
+    if (!s.addrs.length) box.append(h('p', { class: 'sl-muted', style: { margin: 0 } }, t('addrNone')));
+    else box.append(h('ul', null, s.addrs.map(function (a) {
+      var ch = changedHere(c, a.addr);
+      var life = a.valid === null ? t('life', { v: '∞', p: '∞' }) : t('life', { v: days(a.valid), p: days(a.preferred) });
+      var use = null;
+      if (s.outcome === 'ready') use = a.scope === 'link' ? t('useLink') : t.parts('useBeyond', { r: data(L.ROUTER.ll, '') });
+      return h('li', { class: 'sl-addr' + (ch ? ' sd-changed' + anim(c) : ''), dataset: { st: a.state } },
+        h('span', { class: 'sl-dot', dataset: { st: a.state }, 'aria-hidden': 'true' }, a.state === 'duplicate' ? '✕' : ''),
+        h('span', null,
+          h('b', { translate: 'no' }, a.addr),
+          h('span', { class: 'sl-sm' },
+            h('span', null, a.scope === 'link' ? t('scLink') : t('scGlobal')), ' ',
+            h('span', { class: 'sl-tag', dataset: { st: a.state } }, t('st' + a.state.charAt(0).toUpperCase() + a.state.slice(1)))),
+          h('span', { class: 'sl-sm sl-muted' }, life),
+          use ? h('span', { class: 'sl-sm sl-use' }, use) : null));
+    })));
+    if (!s.ipv6) box.append(h('p', { class: 'sl-note', dataset: { k: 'bad' } }, t('offNote')));
+    else if (s.outcome === 'globalDuplicate') box.append(h('p', { class: 'sl-note', dataset: { k: 'bad' } }, t('dupNote')));
+    else if (s.outcome === 'noLength') box.append(h('p', { class: 'sl-note', dataset: { k: 'bad' } }, t('noLenNote', { p: c.params.prefixLen })));
+    else if (s.outcome === 'noAFlag') box.append(h('p', { class: 'sl-note', dataset: { k: 'bad' } }, t('noANote')));
+
+    box.append(h('h3', null, t('groupsTitle')));
+    var groups = s.ipv6 ? s.groups : [];
+    box.append(groups.length ? h('dl', { class: 'sl-kv sl-groups sl-sm' }, groups.map(function (g) {
+      var ch = s.joined.indexOf(g.addr) >= 0;
+      return [h('dt', { class: ch ? 'sd-changed' : null, translate: 'no' }, g.addr), h('dd', null, groupName(g.addr))];
+    })) : h('p', { class: 'sl-muted sl-sm', style: { margin: 0 } }, t('groupsNone')));
+
+    box.append(h('h3', null, t('routerTitle')));
+    var r = s.defaultRouter;
+    box.append(r ? h('p', { class: 'sl-sm' + (changedHere(c, 'router') ? ' sd-changed' + anim(c) : ''), style: { margin: 0 } },
+      B(r.addr), ' · ', t('routerLife', { n: r.lifetime }))
+      : h('p', { class: 'sl-muted sl-sm', style: { margin: 0 } }, t('routerNone')));
+    return box;
+  }
+
+  // ── centre: the chart (K1) and the message card ──
+
+  function laneBody(lines) { return h('div', { class: 'sl-lane' }, lines); }
+  function lanes(c) {
+    var p = c.params, s = c.state, nodes = L.others(p);
+    var hLines = [data(p.mac)];
+    if (!s.ipv6) hLines.push(h('div', null, h('span', { class: 'sl-off' }, t('ipv6Off'))));
+    else if (!s.addrs.length) hLines.push(h('div', { class: 'sl-muted' }, t('noAddrYet')));
+    // H in the middle: its notes have room on both sides, and the link reads neighbour, host, router
+    return [
+      { id: 'N', c: COLOUR.N, name: t('laneN'), changed: c.state.dupOf === 'N' && c.state.phase === 'dadNa',
+        body: laneBody(nodes[0].addrs.map(function (a) { return h('div', null, data(a)); })) },
+      { id: 'H', c: COLOUR.H, name: t('laneH'), body: laneBody(hLines.map(function (x) { return h('div', null, x); })) },
+      { id: 'R', c: COLOUR.R, shape: 'square', name: t('laneR'), body: laneBody([h('div', null, data(L.ROUTER.ll))]) }
+    ];
+  }
+  var RE = { notMine: 'reNotMine', owns: 'reOwns', answers: 'reAnswers', processes: 'reProcesses' };
+  function renderChart(c) {
+    var s = c.state;
+    var fresh = c.prev ? c.prev.rows.length : 0;
+    var scopeOf = function (addr) { return L.isLinkLocal(addr) ? t('scLink') : t('scGlobal'); };
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '3.4rem',
+      lanes: lanes(c),
+      rows: s.rows.map(function (r, i) {
+        var time = r.kind === 'msg' ? s.msgs[r.n - 1].t : r.t;
+        var row = { time: time + ' s', changed: i >= fresh };
+        if (r.kind === 'note') {
+          return Object.assign(row, { kind: 'note', lane: 'H', k: r.what === 'noAddr' ? 'fill' : null,
+            text: r.what === 'noAddr' ? t('noteNoAddr') : t(r.what === 'formed' ? 'noteFormed' : 'notePreferred', { scope: scopeOf(r.addr) }) });
+        }
+        var m = s.msgs[r.n - 1];
+        var re = {}, lost = [];
+        m.to.forEach(function (id) {
+          if (m.react[id] === 'notMember') lost.push(id);   // ✕ without a word: the message card names the members
+          else if (RE[m.react[id]]) re[id] = t(RE[m.react[id]]);   // a member that only hears it gets no word
+        });
+        if (m.type === 'NA' && m.react.H === 'processes') re.H = h('b', null, t('stDuplicate'));
+        return Object.assign(row, { from: m.from, to: m.to, label: m.type, c: COLOUR[m.from], line: 'dashed', lost: lost, re: re });
+      }),
+      timers: s.timers.map(function (tm) { return { lane: tm.lane, from: tm.from, to: tm.to === null ? undefined : tm.to, end: tm.end || undefined, label: data('1 s', '') }; }),   // RetransTimer, named in the caption; a longer label covers N's word
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  function addrWithName(addr) {
+    var name = addr === L.UNSPEC ? t('unspecified') : addr.indexOf('ff02:') === 0 ? groupName(addr) : null;
+    return [data(addr, 'sl-mono sl-wrap'), name ? h('span', { class: 'sl-muted' }, ' (' + name + ')') : null];
+  }
+  function renderMsg(c) {
+    var s = c.state, before = c.prev ? c.prev.msgs.length : 0;
+    var box = h('section', { class: 'sl-box sl-msg' });
+    if (!s.msgs.length) { box.append(h('h2', null, t('msgNone'))); return box; }
+    var fresh = s.msgs.length > before;
+    var m = s.msgs[s.msgs.length - 1];
+    box.append(h('h2', null, t('msgTitle', { n: m.n }), ' · ', h('span', { class: 'sl-muted' }, fresh ? t('msgNew') : t('msgOld'))));
+    box.append(h('div', { class: 'sl-mtype' },
+      h('b', { class: 'sd-fill' + (fresh ? anim(c) : ''), dataset: { c: COLOUR[m.from] }, translate: 'no' }, m.type),
+      h('span', null, rich('name' + m.type))));
+    var kv = [h('dt', null, t('fSrc')), h('dd', null, addrWithName(m.src)), h('dt', null, t('fDst')), h('dd', null, addrWithName(m.dst))];
+    if (m.target) kv.push(h('dt', null, t('fTarget')), h('dd', null, data(m.target, 'sl-mono sl-wrap')));
+    kv.push(h('dt', null, t('fMembers')), h('dd', null, m.members.length ? data(m.members.join(', '), '') : t('fNobody'),
+      m.to.length > m.members.length ? h('span', { class: 'sl-muted' }, ' · ', t('fIgnore'), ' ', data(m.to.filter(function (id) { return m.members.indexOf(id) < 0; }).join(', '), '')) : null));
+    if (m.type === 'NA') kv.push(h('dt', null, t('fFlags')), h('dd', null, data('S = ' + (m.flags.S ? 1 : 0) + ', O = ' + (m.flags.O ? 1 : 0))));
+    if (m.type === 'RA') kv.push(h('dt', null, t('fFlags')), h('dd', null, data('M = ' + (m.flags.M ? 1 : 0) + ', O = ' + (m.flags.O ? 1 : 0))),
+      h('dt', null, t('fRouterLife')), h('dd', null, data(t('lifeVal', { n: m.routerLifetime }), '')));
+    box.append(h('dl', { class: 'sl-kv' }, kv));
+    if (m.type === 'RA') {
+      var o = m.prefix;
+      box.append(h('div', { class: 'sl-opt' }, h('dl', { class: 'sl-kv' },
+        h('dt', null, t('fPrefix')), h('dd', null, data(o.prefix + '/' + o.len), ' ', data('L = ' + (o.L ? 1 : 0) + ', A = ' + (o.A ? 1 : 0))),
+        h('dt', null, t('fValid')), h('dd', null, data(t('lifeVal', { n: o.valid }), ''), ' (', days(o.valid), ')'),
+        h('dt', null, t('fPreferred')), h('dd', null, data(t('lifeVal', { n: o.preferred }), ''), ' (', days(o.preferred), ')'))));
+    }
+    return box;
+  }
+
+  // ── right: the bit strip ──
+
+  function oct(cells) { return h('div', { class: 'sl-oct', translate: 'no' }, cells); }
+  function cell(text, k, extra) { return h('span', { dataset: Object.assign({ k: k }, extra || {}) }, text); }
+  function row(label, body) { return h('div', { class: 'sl-row' }, h('span', { class: 'sl-lbl' }, label), body); }
+  function bin8(v, mark) {
+    var s = ('0000000' + v.toString(2)).slice(-8), out = [];
+    for (var i = 0; i < 8; i++) {
+      if (i === 4) out.push(' ');
+      out.push(i === mark ? h('i', null, s[i]) : s[i]);
+    }
+    return out;
+  }
+  function groups4(groups) { return groups.map(function (g) { return ('000' + g.toString(16)).slice(-4); }); }
+
+  /** An address as 8 groups: prefix groups (c3), interface ID groups (c5). With a /56 prefix the 4th group is half
+      prefix, half missing: 56 + 64 = 120 bits. */
+  function bar(prefix, len, iid, changed, c) {
+    var pg = groups4(L.parse(prefix).slice(0, 4)), ig = groups4(iid);
+    var cells = [];
+    if (len === 64) pg.forEach(function (g) { cells.push(cell(g, 'p')); });
+    else {
+      pg.slice(0, 3).forEach(function (g) { cells.push(cell(g, 'p')); });
+      cells.push(cell(pg[3].slice(0, 2), 'p', { half: '' }), cell('??', 'x', { half: '' }));
+    }
+    ig.forEach(function (g) { cells.push(cell(g, 'i')); });
+    var bits = h('div', { class: 'sl-bar' + (changed ? anim(c) : ''), dataset: changed ? { new: '' } : {}, translate: 'no' }, cells);
+    var legend = h('div', { class: 'sl-split' }, h('span', null, t.n('prefixBits', len)), h('span', null, t.n('iidBits', 64)));
+    return [bits, legend, len === 64 ? null : h('div', { class: 'sl-missing' }, '?? = ', t.n('missing', 128 - 64 - len))];
+  }
+
+  function renderBits(c, only) {
+    var p = c.params, s = c.state, e = L.eui64(p.mac), st = s.stage, ph = s.phase;
+    var box = h('section', { class: 'sl-box sl-bits' }, h('h2', null, t('bitsTitle')));
+    var macCells = [];
+    e.mac.forEach(function (b, i) {
+      if (i === 3) macCells.push(st >= 1 ? cell('', 'gap', { gap: '' }) : null, st >= 1 ? cell('', 'gap', { gap: '' }) : null);
+      macCells.push(cell(L.hex2(b), 'mac'));
+    });
+    box.append(row(t('rowMac'), oct(macCells)));
+    if (st >= 1 && st < 4 && only) box.append(h('div', { class: 'sl-split' }, h('span', null, t('half', { n: 1 })), h('span', null, t('half', { n: 2 }))));
+    if (st >= 2) {
+      // the bits just written carry the changed mark: ff:fe in its step, the flipped octet always (the U/L highlight)
+      var ins = ph === 'insert' || ph === 'iid';
+      box.append(row(t('rowInsert'), oct(e.inserted.map(function (b, i) {
+        return i === 3 || i === 4 ? cell(L.hex2(b), 'ins', ins ? { new: '' } : null) : cell(L.hex2(b), 'mac');
+      }))));
+    }
+    if (st >= 3) {
+      box.append(row(t('rowFlip'), oct(e.iid.map(function (b, i) { return cell(L.hex2(b), i === 0 ? 'flip' : 'iid'); }))));
+      // the comparison (step 4 of the interface-ID view) carries the U/L bit and the IID of every MAC itself
+      if (st < 4) {
+        box.append(row(t('ulBit'), h('span', { class: 'sl-bin', translate: 'no' }, bin8(e.mac[0], 6), ' → ', bin8(e.iid[0], 6))));
+        box.append(row(t('rowIid'), h('span', { class: 'sl-iid', translate: 'no' }, L.full(e.groups))));
+      }
+    }
+    if (only) {
+      if (st >= 4) box.append(compareTable(p));
+      return box;
+    }
+    var ll = s.addrs.filter(function (a) { return a.scope === 'link'; })[0];
+    if (ll) {
+      box.append(row(h('span', null, t('rowLl'), ' ', data(ll.addr)), bar('fe80::', 64, e.groups, changedHere(c, ll.addr) && ph === 'll', c)));
+      var sn = L.solicitedNodeParts(ll.addr);
+      box.append(row(h('span', null, t('rowSn'), ' · ', t('lowBits')),
+        h('span', { class: 'sl-sn', translate: 'no' }, sn.fixed, h('span', null, sn.low))));
+    }
+    var ra = s.msgs.filter(function (m) { return m.type === 'RA'; })[0];
+    var gua = s.addrs.filter(function (a) { return a.scope === 'global'; })[0];
+    if (ll) {
+      var gLabel = h('span', null, t('rowGlobal'), gua ? [' ', data(gua.addr)] : null);
+      if (!ra) box.append(row(gLabel, h('span', { class: 'sl-muted sl-sm' }, t('notYet'))));
+      else if (!ra.prefix.A) box.append(row(gLabel, h('p', { class: 'sl-note', dataset: { k: 'bad' } }, t('noA'))));
+      else box.append(row(gLabel, bar(L.ROUTER.prefix, ra.prefix.len, e.groups, ph === 'gua' || ph === 'noAddr', c)));
+    }
+    return box;
+  }
+
+  function compareTable(p) {
+    return h('table', { class: 'sl-cmp' },
+      h('caption', { class: 'sl-lbl' }, t('cmpTitle')),
+      h('tr', null, h('th', null, t('rowMac')), h('th', null, t('cmpUl')), h('th', null, t('rowIid'))),
+      L.MACS.map(function (mac) {
+        var e = L.eui64(mac);
+        return h('tr', { dataset: mac === p.mac ? { cur: '' } : {} },
+          h('td', { translate: 'no' }, mac), h('td', { translate: 'no' }, e.ulBefore + ' → ' + e.ulAfter), h('td', { translate: 'no', class: 'sl-iid' }, L.full(e.groups)));
+      }));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params, e = L.eui64(p.mac);
+    var D = function (v) { return data(v); };
+    var m = s.msgs[s.msgs.length - 1];
+    var out;
+    switch (s.phase) {
+      case 'start': return s.mode === 'iid' ? rich('capStartIid', { mac: D(p.mac) }) : rich('capStart');
+      case 'split': return rich('capSplit', { mac: D(p.mac), a: B(e.split[0].map(L.hex2).join(':')), b: B(e.split[1].map(L.hex2).join(':')) });
+      case 'insert': return rich('capInsert', { eui: B(e.inserted.map(L.hex2).join(':')) });
+      case 'flip':
+        out = rich('capFlip', { before: D(L.hex2(e.mac[0])), after: B(L.hex2(e.iid[0])), iid: B(L.full(e.groups)) });
+        if (e.ulBefore) out = out.concat(' ', rich('capFlipLocal'));
+        return out;
+      case 'compare': return rich('capCompare');
+      case 'iid': return rich('capIid', { mac: D(p.mac), iid: B(L.full(e.groups)) });
+      case 'll': return rich('capLl', { addr: B(s.probe), all: D(L.ALL_NODES), sn: D(L.solicitedNode(s.probe)) });
+      case 'gua':
+        out = rich('capGua', { prefix: D(L.ROUTER.prefix + '/' + p.prefixLen), addr: B(s.probe) });
+        if (!s.joined.length) out = out.concat(' ', rich('capGuaGroup', { sn: D(L.solicitedNode(s.probe)) }));
+        return out;
+      case 'dadNs':
+        out = rich('capNs', { sn: D(m.dst), addr: B(m.target) });
+        var owner = m.members.filter(function (id) { return m.react[id] === 'owns'; });
+        var silent = m.members.filter(function (id) { return m.react[id] === 'notMine'; });
+        if (owner.length) out = out.concat(' ', rich('capNsOwner', { who: data(owner[0], '') }));
+        silent.forEach(function (id) { out = out.concat(' ', rich('capNsNotMine', { who: data(id, '') })); });
+        if (!m.members.length) out = out.concat(' ', rich('capNsNobody'));
+        return out;
+      case 'dadOk': return rich('capOk', { addr: B(s.addrs.filter(function (a) { return a.state === 'preferred'; }).slice(-1)[0].addr) });
+      case 'dadNa':
+        return rich('capNa', { who: data(m.from, ''), all: D(m.dst), addr: B(m.target) }).concat(' ', rich(s.ipv6 ? 'capNaGlobal' : 'capNaLl'));
+      case 'rs': return rich('capRs', { dst: D(m.dst) });
+      case 'ra':
+        out = rich('capRa', { src: D(m.src), dst: D(m.dst), prefix: B(m.prefix.prefix + '/' + m.prefix.len), a: D(m.prefix.A ? '1' : '0'), life: D(String(m.routerLifetime)) });
+        if (m.flags.M) out = out.concat(' ', rich('capRaM'));
+        return out;
+      case 'noAddr':
+        return s.outcome === 'noAFlag' ? rich('capNoA') : rich('capNoLength', { p: D(String(p.prefixLen)), sum: B(String(p.prefixLen + 64)) });
+      case 'ready':
+        return rich('capReady', { ll: B(s.addrs[0].addr), gua: B(s.addrs[1].addr), r: D(L.ROUTER.ll) });
+    }
+    return '';
+  }
+
+  /** prefix, A flag and duplicate act on the whole link only; the interface-ID view hides them. */
+  var wholeLink = function (p) { return !p.iidOnly; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'iidOnly', type: 'toggle', label: t('iidOnly'), resets: true },
+      { key: 'mac', type: 'select', label: t('mac'), options: [[L.MACS[0], t('mac1')], [L.MACS[1], t('mac2')], [L.MACS[2], t('mac3')]] },
+      { key: 'prefixLen', type: 'choice', label: t('prefixLen'), options: [[64, '/64'], [56, '/56']], visible: wholeLink },
+      { key: 'aFlag', type: 'toggle', label: t('aFlag'), visible: wholeLink },
+      { key: 'duplicate', type: 'choice', label: t('duplicate'), options: [['none', t('dupNone')], ['link-local', t('dupLl')], ['global', t('dupGlobal')]], visible: wholeLink }
+    ],
+
+    presets: [
+      { id: 'join', label: t('presetJoin'), params: {} },
+      { id: 'eui64', label: t('presetEui'), params: { iidOnly: true } },
+      { id: 'dad-fail', label: t('presetDad'), params: { duplicate: 'global' }, hint: t('presetDadHint') },
+      { id: 'prefix-56', label: t('presetP56'), params: { prefixLen: 56 } },
+      { id: 'a-off', label: t('presetAoff'), params: { aFlag: false } }
+    ],
+
+    legend: [
+      { shape: 'hollow', label: t('legTentative') },
+      { shape: 'round', c: 1, label: t('legPreferred') },
+      { shape: 'dup', label: t('legDuplicate') },
+      { shape: 'dash', label: t('legMulticast') },
+      { c: 3, label: t('legPrefix') },
+      { c: 5, label: t('legIid') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      if (c.params.iidOnly) {
+        c.stage.replaceChildren(h('div', { class: 'sl sl-only' }, renderBits(c, true)));
+        return;
+      }
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'sl' },
+        h('div', { class: 'sl-col' }, renderAddrs(c), renderMsg(c)),
+        h('div', { class: 'sl-col sl-mid' }, chart),
+        h('div', { class: 'sl-col' }, renderBits(c, false))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
