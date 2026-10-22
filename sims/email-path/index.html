@@ -1,0 +1,489 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- email-path: the path of one e-mail. A stepper, one hand-over per step (submission, MX lookup, relay, delivery,
+     fetch, read). Left: the hand-overs as kit view K1 (kit/sequence.js), one lane per role: the sender's MUA, the
+     sending server (MSA, then MTA), DNS, the receiving MTA, the delivery agent with the mailbox, the recipient's MUA
+     with two devices. Right: the message as an envelope (MAIL FROM, RCPT TO) around a letter (trace lines, header,
+     body), and the log line each server wrote. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="email-path">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Put e-poruke · simdeck</title>
+<meta name="description" content="Pošalji poruku u drugu domenu: predaja na 587, zapis MX, skok na 25, dostava u sandučić i dohvat IMAP-om ili POP3-om; omotnica nije zaglavlje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "email-path",
+  "title": {
+    "hr": "Put e-poruke",
+    "en": "The path of an e-mail"
+  },
+  "concept": {
+    "hr": "MUA → MSA → MTA → MDA → IMAP; omotnica i zaglavlje",
+    "en": "MUA → MSA → MTA → MDA → IMAP; envelope vs header"
+  },
+  "summary": {
+    "hr": "Pošalji poruku u drugu domenu: predaja na 587, zapis MX, skok na 25, dostava u sandučić i dohvat IMAP-om ili POP3-om, a omotnica nije zaglavlje.",
+    "en": "Send a mail to another domain: submission on 587, the MX record, a hop on 25, delivery to the mailbox and an IMAP or POP3 fetch; the envelope is not the header."
+  },
+  "tags": [
+    "email"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="email-path"]; colours only from kit tokens.
+   Layout: two columns. Left the K1 chart, right the message (envelope around letter) and the server logs. Lane
+   colours: A c1, P c2, D c8, M c4, S c3, I c6; a row takes its sender's colour. The lane that holds the message is
+   drawn active (thick ink border) and says so in words. */
+[data-sim="email-path"] .ep {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  gap: 1cqh 1cqw;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="email-path"] .ep-mid { grid-column: 1 / -1; display: flex; flex-direction: column; min-height: 0; }
+[data-sim="email-path"] .ep-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="email-path"] .ep-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem 0.5rem;
+}
+[data-sim="email-path"] .ep-box h2 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 700; }
+[data-sim="email-path"] .ep-mono { font-family: var(--mono); }
+[data-sim="email-path"] .ep-muted { color: var(--muted); }
+[data-sim="email-path"] .ep-sm { font-size: var(--fs-sm); }
+
+/* the envelope: dashed border with a flap (a V drawn by two borders), holding the letter */
+[data-sim="email-path"] .ep-env {
+  position: relative;
+  border: 0.18rem dashed var(--c2);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.5rem 0.4rem;
+  background: var(--bg);
+}
+[data-sim="email-path"] .ep-msg { padding: 0.9rem 0.5rem 0.45rem; }
+[data-sim="email-path"] .ep-env::before {
+  content: ''; position: absolute; top: 0; left: 50%; width: 1.6rem; height: 1.6rem;
+  border-right: 0.18rem dashed var(--c2); border-bottom: 0.18rem dashed var(--c2);
+  transform: translate(-50%, -55%) rotate(45deg); background: var(--bg); left: 96%;
+}
+/* each shape's caption sits on its top border, like a fieldset legend */
+[data-sim="email-path"] .ep-cap {
+  position: absolute; top: 0; left: 0.6rem; transform: translateY(-55%); max-width: calc(50% - 1.6rem);
+  padding: 0 0.3rem; background: var(--bg); font-size: var(--fs-sm); color: var(--muted); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-sim="email-path"] .ep-letter > .ep-cap { max-width: calc(100% - 2.4rem); background: var(--panel); }
+/* the letter: solid border with a folded corner */
+[data-sim="email-path"] .ep-letter {
+  position: relative;
+  margin-top: 0.7rem;
+  border: 0.15rem solid var(--ink);
+  border-radius: 0 0.9rem 0 0;
+  padding: 0.55rem 0.5rem 0.35rem;
+  background: var(--panel);
+}
+[data-sim="email-path"] .ep-letter::after {
+  content: ''; position: absolute; top: -0.15rem; right: -0.15rem; width: 0.9rem; height: 0.9rem;
+  border-left: 0.15rem solid var(--ink); border-bottom: 0.15rem solid var(--ink); background: var(--bg);
+}
+[data-sim="email-path"] .ep-line {
+  display: block; padding: 0 0.3rem; border-radius: var(--radius-sm);
+  font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3;
+}
+[data-sim="email-path"] .ep-line b { font-weight: 700; }
+[data-sim="email-path"] .ep-note { font-family: var(--sans); }
+[data-sim="email-path"] .ep-line[data-k="trace"] { color: var(--muted); }
+[data-sim="email-path"] .ep-line[data-k="trace"] b { color: var(--ink); }
+[data-sim="email-path"] .ep-line[data-k="body"] { font-family: inherit; }
+[data-sim="email-path"] .ep-msg .ep-line { font-size: var(--fs-sm); }
+/* changed marks inside text: a yellow fill with a thin outline (the kit's halo would cover the next line) */
+[data-sim="email-path"] .ep-line.sd-changed, [data-sim="email-path"] .ep-card .sd-changed, [data-sim="email-path"] .ep-log li.sd-changed {
+  --ink: var(--on-hl); --muted: var(--on-hl);
+  background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--on-hl); outline-offset: 0; box-shadow: none;
+}
+[data-sim="email-path"] .ep-row { display: flex; flex-wrap: wrap; gap: 0 1.2rem; }
+
+/* logs */
+[data-sim="email-path"] .ep-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
+[data-sim="email-path"] .ep-log li { padding: 0.1rem 0.35rem; border-radius: var(--radius-sm); background: var(--bg); line-height: 1.3; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="email-path"] .ep-log b { font-weight: 700; }
+[data-sim="email-path"] .ep-log li[data-st="reject"] { border-left: 0.3rem double var(--ink); }
+
+/* lane cards */
+[data-sim="email-path"] .ep-card { margin: 0.1rem 0 0; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="email-path"] .ep-card p { margin: 0; overflow-wrap: anywhere; }
+[data-sim="email-path"] .ep-card p + p { margin-top: 0.15rem; }
+[data-sim="email-path"] .ep-card .sd-changed { padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="email-path"] .ep-card s { text-decoration-thickness: 0.15rem; }
+[data-sim="email-path"] .ep-mx { white-space: nowrap; }
+[data-sim="email-path"] .ep-mx[data-st="pick"] { font-weight: 700; outline: 0.15rem solid var(--ink); border-radius: var(--radius-sm); padding: 0 0.2rem; }
+[data-sim="email-path"] .ep-has { font-weight: 700; }
+[data-sim="email-path"] .ep-logrole { font-style: italic; }
+[data-sim="email-path"] .ep-differs { font-size: var(--fs-sm); font-weight: 700; border: 0.14rem dashed var(--ink); border-radius: var(--radius-sm); padding: 0 0.3rem; line-height: 1.25; }
+
+/* the port badge on a chip, and the read dots */
+[data-sim="email-path"] .ep-port {
+  display: inline-block; margin-left: 0.3em; padding: 0 0.25em; border: 0.14rem solid currentColor; border-radius: var(--radius-sm);
+  font-family: var(--mono); font-weight: 700; line-height: 1.15;
+}
+[data-sim="email-path"] .ep-dot {
+  display: inline-block; width: 0.75em; height: 0.75em; margin-right: 0.3em; border-radius: 50%;
+  border: 0.15rem solid var(--ink); vertical-align: -0.05em;
+}
+[data-sim="email-path"] .ep-dot[data-seen="true"] { background: var(--ink); }
+[data-sim="email-path"] .sd-seq-cause { font-size: var(--fs-sm); }
+/* six lanes: tighter rows, gaps and card padding (rows as tls-handshake does) so the whole path fits at 1920×1080 */
+@media (min-width: 901px) and (min-aspect-ratio: 1/1) {
+  [data-sim="email-path"] .sd-seq { --sd-seq-row: 2.3rem; --sd-seq-gap: 0.5rem; }
+  [data-sim="email-path"] .sd-seq-head { padding: 0.3rem 0.4rem 0.35rem; }
+}
+
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as http-exchange). */
+[data-sim="email-path"] .sd-panel [hidden] { display: none; }
+
+/* legend swatches: envelope (dashed), letter (folded corner), port badge, dots */
+[data-sim="email-path"] .sd-swatch[data-shape="env"] { background: transparent; border: 0.16rem dashed var(--c2); border-radius: 0.15rem; }
+[data-sim="email-path"] .sd-swatch[data-shape="letter"] { background: transparent; border: 0.15rem solid var(--ink); border-radius: 0 0.45rem 0 0; }
+[data-sim="email-path"] .sd-swatch[data-shape="port"] { width: 1.6em; background: transparent; border: 0.14rem solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="email-path"] .sd-swatch[data-shape="dots"] {
+  width: 1.7em; border: 0; border-radius: 0;
+  background: radial-gradient(circle at 25% 50%, var(--ink) 0 0.3em, transparent 0.31em),
+              radial-gradient(circle at 75% 50%, transparent 0 0.2em, var(--ink) 0.21em 0.3em, transparent 0.31em);
+}
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="email-path"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="email-path"] .ep { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="email-path"] .ep-mid { grid-column: auto; }
+  [data-sim="email-path"] .ep-mid > .sd-seq { flex: none; }
+  [data-sim="email-path"] .ep-mid .sd-seq-list { padding-bottom: 1.5rem; }
+  [data-sim="email-path"] .ep-cap, [data-sim="email-path"] .ep-letter > .ep-cap { position: static; transform: none; max-width: none; padding: 0; white-space: normal; margin-bottom: 0.2rem; }
+  [data-sim="email-path"] .ep-env, [data-sim="email-path"] .ep-letter { padding-top: 0.4rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Put e-poruke</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (addresses, host names, ports, header lines) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'ep-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function ch(on, c) { return on ? 'sd-changed' + anim(c) : null; }
+  function port(n) { return h('span', { class: 'ep-port', translate: 'no' }, String(n)); }
+  function dot(seen) { return h('span', { class: 'ep-dot', dataset: { seen: String(!!seen) }, 'aria-hidden': 'true' }); }
+  function devName(id) { return t(id === 'phone' ? 'devPhoneName' : 'devComputerName'); }
+  function devCap(id) { return t(id === 'phone' ? 'devPhone' : 'devComputer'); }
+  var COLOR = { A: 1, P: 2, D: 8, M: 4, S: 3, I: 6 };
+  var CAUSE = { smtp: null, reply: 'cRefuse', 'dns-q': null, 'dns-a': null, 'note-local': 'cLocal', deliver: 'cDeliver',
+    imap: 'cFetch', pop3: 'cFetch', 'imap-seen': 'cRead', 'note-read': 'cRead' };
+
+  // ── the chart (K1) ──
+
+  function rowSpec(r, s, changed) {
+    var c = COLOR[r.from], o = { from: r.from, to: r.to, c: c, changed: changed, time: String(r.n) };
+    var cause = CAUSE[r.kind];
+    switch (r.kind) {
+      case 'smtp':
+        o.label = h('span', null, data('SMTP', ''), port(r.port));
+        if (r.port === L.PORT.submission) { cause = 'cSubmit'; if (r.auth === false) o.fields = h('span', null, t('noAuth')); }
+        else { cause = 'cRelay'; }
+        break;
+      case 'reply':
+        o.label = r.code + ' ' + r.enh; o.fields = h('span', null, t('refused')); o.line = 'dashed';
+        break;
+      case 'dns-q':
+        o.label = 'MX?'; o.fields = r.domain; o.line = 'dotted'; cause = null; o.time = String(r.n);
+        o.cause = data('MX', '');
+        break;
+      case 'dns-a':
+        o.label = r.pref + ' ' + r.host; o.place = 'mid'; o.line = 'dotted'; o.time = '';
+        break;
+      case 'note-local':
+        return { kind: 'note', lane: r.from, text: t('noteLocal'), k: 'solid', time: String(r.n), cause: t('cLocal'), changed: changed };
+      case 'note-read':
+        return { kind: 'note', lane: r.from, text: t('noteRead'), k: 'solid', time: String(r.n), cause: t('cRead'), changed: changed };
+      case 'deliver':
+        o.label = 'LMTP';
+        break;
+      case 'imap': case 'pop3':
+        o.label = h('span', null, data(r.kind.toUpperCase(), ''), port(r.port)); o.fields = h('span', null, devName(r.device));
+        if (r.removed) o.re = { S: h('span', null, t('removedQuit')) };
+        else if (!r.count) o.re = { S: h('span', null, t('rowNone')) };
+        break;
+      case 'imap-seen':
+        o.label = h('span', null, data('IMAP', ''), port(r.port)); o.fields = '\\Seen';
+        break;
+    }
+    if (cause && !o.cause) o.cause = t(cause);
+    return o;
+  }
+
+  function renderChart(c) {
+    var s = c.state, n = s.n;
+    var rows = s.rows.map(function (r) { return rowSpec(r, s, r.n === n && c.n > 0); });
+    var lanes = L.SCENES[s.scene].lanes.map(function (id) { return lane(id, c); });
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '5.8rem',
+      lanes: lanes,
+      rows: rows,
+      empty: t('chartEmpty'),
+      earlier: function (k) { return t.n('earlier', k); }
+    });
+  }
+
+  /** The role words each server writes in its own log (UL ch20, figure put-poruke). In the grafo scene the sending
+      server delivers itself and never carries the message on. */
+  var LOGS = { P: ['logReceive', 'logSend'], M: ['logReceive'], S: ['logDeliver'] };
+  var ABBR = { A: 'MUA', P: 'MSA · MTA', D: 'DNS', M: 'MTA', S: 'MDA', I: 'MUA' };
+
+  function lane(id, c) {
+    var s = c.state, sc = L.SCENES[s.scene];
+    var held = s.at === id;
+    var wasHere = c.prev && c.prev.at === id;
+    var host = id === 'A' || id === 'I' || id === 'D' ? null : sc.host[id];
+    var body = [h('p', { class: 'ep-muted' }, t('role' + id))];
+    if (host) body.push(h('p', null, data(host, '')));
+    if (id === 'A') body.push(h('p', null, data(sc.from, '')));
+    if (id === 'I') body.push(h('p', null, data(sc.to, '')));
+    if (id === 'D') body.push(dnsBody(c));
+    if (id === 'S') body.push(storeBody(c));
+    var logs = id === 'P' && s.scene === 'grafo' ? ['logReceive'] : LOGS[id];
+    if (logs) body.push(h('p', { class: 'ep-logrole' }, t('logIn'), ' ', logs.map(function (k) { return t(k); }).join(', ')));
+    if (id === 'I') body.push(devicesBody(c));
+    if (held && id !== 'S') body.push(h('p', { class: 'ep-has ' + (ch(!wasHere, c) || '') }, '✉ ', id === 'A' && s.refused ? t('outbox') : t('hasMsg')));
+    return {
+      id: id, mark: null, c: COLOR[id], shape: id === 'A' || id === 'I' ? 'square' : undefined,
+      name: data(ABBR[id], ''), tags: id === 'D' ? data(L.domainOf(sc.to), '') : null, state: held ? 'active' : null,
+      body: h('div', { class: 'ep-card' }, body)
+    };
+  }
+
+  function dnsBody(c) {
+    var s = c.state, sc = L.SCENES[s.scene];
+    var recs = sc.dns[L.domainOf(sc.to)] || [];
+    var picked = s.mx && s.mx.host;
+    return h('div', null,
+      recs.map(function (r) {
+        var pick = picked === r.host;
+        return h('p', { class: ch(pick && s.hop === 'mx', c) }, h('span', { class: 'ep-mx', dataset: { st: pick ? 'pick' : 'other' }, translate: 'no' }, r.pref + ' ' + r.host));
+      }));
+  }
+
+  function storeBody(c) {
+    var s = c.state, sc = L.SCENES[s.scene];
+    var prev = c.prev ? c.prev.store.messages : [];
+    var lines = s.store.messages.map(function (m) {
+      var before = prev.filter(function (k) { return k.id === m.id; })[0];
+      var changed = !before || before.seen !== m.seen || before.deleted !== m.deleted;
+      var what = t('msgN', { n: m.id });
+      return h('p', { class: ch(changed && c.n > 0, c) }, m.deleted
+        ? [h('s', null, dot(m.seen), what), ' ', t('removedQuit')]
+        : [dot(m.seen), what]);
+    });
+    return h('div', null, lines.length ? lines : h('p', { class: 'ep-muted' }, t('mailboxEmpty')));
+  }
+
+  function devicesBody(c) {
+    var s = c.state;
+    return h('div', null, s.devices.map(function (d) {
+      var p = c.prev && c.prev.devices.filter(function (k) { return k.id === d.id; })[0];
+      var changed = c.n > 0 && p && JSON.stringify(p) !== JSON.stringify(d);
+      var what = !d.synced ? h('span', { class: 'ep-muted' }, t('notSynced'))
+        : d.sees.length ? d.sees.map(function (m) { return h('span', null, dot(m.seen), t('msgN', { n: m.id })); })
+        : h('span', null, t('mailboxEmpty'));
+      return h('p', { class: ch(changed, c) }, h('b', null, devName(d.id)), ': ', what);
+    }));
+  }
+
+  // ── right: the message, envelope around letter ──
+
+  function line(k, text, changed, c) { return h('span', { class: 'ep-line' + (changed ? ' sd-changed' + anim(c) : ''), dataset: { k: k }, translate: 'no' }, text); }
+  function kv(name, value) { return [h('b', null, name), ' ' + value]; }
+
+  function renderMessage(c) {
+    var s = c.state, m = s.msg, pm = c.prev ? c.prev.msg : null;
+    var newTrace = pm ? m.received.length - pm.received.length : 0;
+    var env = h('div', { class: 'ep-env' },
+      h('span', { class: 'ep-cap' }, t('envTitle')),
+      h('div', { class: 'ep-row' }, line('env', kv('MAIL FROM:', '<' + m.envelope.mailFrom + '>'), false, c),
+        m.envelope.rcptTo.map(function (r) {
+          // a session refused at MAIL never gets to RCPT TO
+          var unsent = s.hop === 'try' || s.hop === 'refuse';
+          return line('env', kv('RCPT TO:', '<' + r + '>').concat(unsent ? [' ', h('span', { class: 'ep-muted ep-note', translate: 'yes' }, '(', t('notSent'), ')')] : []), false, c);
+        })));
+    var letter = h('div', { class: 'ep-letter' }, h('span', { class: 'ep-cap' }, t('letterTitle'), ' · ', t('traceNote')));
+    if (m.returnPath) letter.append(line('trace', kv('Return-Path:', '<' + m.returnPath + '>'), !(pm && pm.returnPath), c));
+    m.received.forEach(function (r, i) {
+      letter.append(line('trace', kv('Received:', 'from ' + r.from + ' by ' + r.by + ' with ' + r.with), i < newTrace, c));
+    });
+    letter.append(
+      h('div', { class: 'ep-row' }, line('hdr', kv('From:', m.header.from), false, c),
+        m.header.from !== m.envelope.mailFrom ? h('span', { class: 'ep-differs' }, '≠ ', data('MAIL FROM', ''), ' ', t('fromDiffers')) : null,
+        line('hdr', kv('To:', m.header.to), false, c),
+        line('hdr', kv('Subject:', m.header.subject), false, c)),
+      line('body', m.body, false, c));
+    env.append(letter);
+    return h('section', { class: 'ep-box ep-msg', 'aria-label': t('msgTitle') }, env);
+  }
+
+  function renderLog(c) {
+    var s = c.state;
+    var ROLE = { receive: 'logReceive', send: 'logSend', deliver: 'logDeliver' };
+    var items = s.log.map(function (l) {
+      // receiving side: who sent it (the envelope's MAIL FROM) and the port; sending side and delivery: the recipient
+      var bits = [];
+      if (l.role === 'receive') bits.push('from=<' + l.from + '>', 'port=' + l.port);
+      else bits.push('to=<' + l.to + '>');
+      if (l.relay) bits.push('relay=' + l.relay + ':' + l.port);
+      if (l.auth) bits.push('auth=' + l.auth);
+      if (l.status === 'reject') bits.push('reject ' + l.code);
+      else if (l.status !== 'accepted') bits.push('status=' + l.status);
+      return h('li', { class: ch(l.n === s.n && c.n > 0, c), dataset: { st: l.status } },
+        h('b', null, data(l.host, '')), ' · ', t(ROLE[l.role]), h('br'), data(bits.join(' ')));
+    });
+    return h('section', { class: 'ep-box' }, h('h2', null, t('logTitle')),
+      items.length ? h('ul', { class: 'ep-log' }, items) : h('p', { class: 'ep-muted ep-sm' }, t('logEmpty')));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, sc = L.SCENES[s.scene], m = s.msg, out;
+    var env = m.envelope.mailFrom, hdr = m.header.from, diff = env !== hdr;
+    switch (ev.kind) {
+      case 'start':
+        out = s.scene === 'grafo'
+          ? t.parts('capStartUrm', { from: B(sc.from), to: B(sc.to), srv: B(sc.host.P.replace(/[[\]]/g, '')) })
+          : t.parts('capStart', { from: B(sc.from), to: B(sc.to) });
+        break;
+      case 'try': out = t.parts('capTry', { from: B(env) }); break;
+      case 'refuse': out = t.parts('capRefuse', {}); break;
+      case 'submit':
+        out = t.parts('capSubmit', { from: B(env), to: B(m.envelope.rcptTo[0]) });
+        if (diff) out = out.concat(' ', t.parts('capSubmitDiff', { hdr: B(hdr), env: B(env) }));
+        break;
+      case 'local': out = t.parts('capLocal', { domain: B(ev.domain) }); break;
+      case 'mx': out = t.parts('capMx', { domain: B(ev.domain), count: B(ev.count), host: B(ev.host), pref: B(ev.pref) }); break;
+      case 'relay': out = t.parts('capRelay', { from: B(sc.host.P), to: B(ev.to) }); break;
+      case 'deliver':
+        out = t.parts('capDeliver', { to: B(m.envelope.rcptTo[0]), from: B(env) });
+        if (diff) out = out.concat(' ', t.parts('capDeliverDiff', { env: B(env), hdr: B(hdr) }));
+        break;
+      case 'fetch':
+        if (!ev.count) out = t.parts('capFetchNone', { device: devCap(ev.device) });
+        else if (ev.proto === 'pop3') out = t.parts('capFetchPop', { device: devCap(ev.device) });
+        else out = t.parts('capFetchImap', { device: devCap(ev.device), state: h('b', null, t(ev.seen ? 'stRead' : 'stUnread')) });
+        if (ev.count && diff) out = out.concat(' ', t.parts('capFetchHdr', { hdr: B(hdr), env: B(env) }));
+        break;
+      case 'read':
+        out = t.parts(ev.onServer ? 'capReadImap' : 'capReadPop', { device: devName(ev.device) });
+        break;
+      default: out = [];
+    }
+    if (c.last && s.scene === 'lab' && s.msg.received.length === 3 && s.log.length === 4 && c.preset === 'two-domains') out = out.concat(' ', t('capEndTwo'));
+    return out;
+  }
+
+  var never = function () { return false; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'script', type: 'choice', label: t('script'), visible: never, resets: true,
+        options: [['two-domains', '1'], ['urm-two-devices', '2'], ['envelope-vs-header', '3'], ['no-auth-submission', '4']] },
+      { key: 'fetch', type: 'choice', label: t('fetch'), options: [['imap', data('IMAP', '')], ['pop3', t('fetchPop3')]] },
+      { key: 'headerFromDiffers', type: 'toggle', label: t('headerFromDiffers') },
+      { key: 'authenticated', type: 'toggle', label: t('authenticated') }
+    ],
+
+    presets: [
+      { id: 'two-domains', label: t('presetTwo'), hint: t('presetTwoHint'), params: { script: 'two-domains' } },
+      { id: 'urm-two-devices', label: t('presetUrm'), hint: t('presetUrmHint'), params: { script: 'urm-two-devices' } },
+      { id: 'envelope-vs-header', label: t('presetEnv'), hint: t('presetEnvHint'), params: { script: 'envelope-vs-header', headerFromDiffers: true } },
+      { id: 'no-auth-submission', label: t('presetNoAuth'), hint: t('presetNoAuthHint'), params: { script: 'no-auth-submission', authenticated: false } }
+    ],
+
+    legend: [
+      { shape: 'env', label: t('legEnvelope') },
+      { shape: 'letter', label: t('legLetter') },
+      { shape: 'port', label: t('legPort') },
+      { shape: 'dots', label: t('legDot') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'ep' }, h('div', { class: 'ep-mid' }, chart), renderMessage(c), renderLog(c)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
