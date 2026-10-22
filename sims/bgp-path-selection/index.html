@@ -1,0 +1,437 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- bgp-path-selection: one prefix spreads between five autonomous systems by eBGP announcements. A stepper: one step
+     is one synchronous round (or the link failure once the network has converged). Kit view K2 draws the ASes, the
+     links and the announcements on the wire; the side column holds each AS's stored paths with the best marked.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="bgp-path-selection">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BGP: odabir puta · simdeck</title>
+<meta name="description" content="Pet AS-ova uči jedan prefiks iz najava susjeda: lokalna prednost, pa kraći AS put, pa niži ID usmjernika. Prekini vezu i gledaj povlačenje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "bgp-path-selection",
+  "title": {
+    "hr": "BGP: odabir puta",
+    "en": "BGP path selection"
+  },
+  "concept": {
+    "hr": "AS put, lokalna prednost i širenje prefiksa između autonomnih sustava",
+    "en": "AS path, local preference, and how a prefix spreads between ASes"
+  },
+  "summary": {
+    "hr": "Pet AS-ova uči jedan prefiks iz najava susjeda: lokalna prednost, pa kraći AS put, pa niži ID usmjernika. Prekini vezu i gledaj povlačenje.",
+    "en": "Five ASes learn one prefix from their neighbours: local preference, then the shorter AS path, then the lower router ID. Cut a link, watch the withdrawal."
+  },
+  "tags": [
+    "bgp"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="bgp-path-selection"]; colours only from kit tokens.
+   Layout: the K2 drawing on the left (AS cards, links, announcements beside the links), the side column on the
+   right (the round, then one block per AS: its stored paths, the best marked, and the rule that decided). */
+[data-sim="bgp-path-selection"] .bgp {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="bgp-path-selection"] .bgp-draw { min-width: 0; min-height: 0; display: flex; }
+[data-sim="bgp-path-selection"] .bgp-draw .sd-topo { flex: 1; height: 100%; align-content: stretch; }
+[data-sim="bgp-path-selection"] .sd-topo-chip { font-family: var(--mono); }
+[data-sim="bgp-path-selection"] .bgp-side { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; min-height: 0; }
+[data-sim="bgp-path-selection"] .bgp-side h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="bgp-path-selection"] .bgp-round { font-weight: 700; font-size: var(--fs-lg); }
+/* paths in the caption: the monospace space is wide; keep a route on one line */
+[data-sim="bgp-path-selection"] .sd-caption .sd-mono { word-spacing: -0.3em; }
+[data-sim="bgp-path-selection"] .bgp-route { white-space: nowrap; }
+
+/* one block per AS */
+[data-sim="bgp-path-selection"] .bgp-as { padding: 0.2rem 0.6rem 0.3rem; border: var(--line-w) solid var(--line);
+  border-left: 0.45rem solid var(--sw, var(--line)); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="bgp-path-selection"] .bgp-as[data-active] { border-color: var(--ink); border-left-color: var(--sw, var(--ink)); }
+[data-sim="bgp-path-selection"] .bgp-as[data-watch] { outline: 0.2rem solid var(--ink); outline-offset: 0.1rem; }
+[data-sim="bgp-path-selection"] .bgp-head { display: flex; flex-wrap: wrap; gap: 0 0.7rem; align-items: baseline; }
+[data-sim="bgp-path-selection"] .bgp-head b { font-size: 1.05em; }
+[data-sim="bgp-path-selection"] .bgp-rid { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="bgp-path-selection"] .bgp-by { font-size: var(--fs-sm); margin-left: auto; padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); }
+[data-sim="bgp-path-selection"] .bgp-as table { width: 100%; border-collapse: separate; border-spacing: 0 0.1rem; font-size: var(--fs-sm); }
+[data-sim="bgp-path-selection"] .bgp-as th { text-align: left; font-weight: 400; color: var(--muted); padding: 0 0.5rem 0 0; white-space: nowrap; }
+[data-sim="bgp-path-selection"] .bgp-as td { padding: 0 0.5rem 0 0; white-space: nowrap; vertical-align: middle; }
+[data-sim="bgp-path-selection"] .bgp-as td.bgp-path { font-family: var(--mono); width: 100%; }
+[data-sim="bgp-path-selection"] .bgp-as td.bgp-star { width: 1.4em; text-align: center; font-weight: 700; }
+[data-sim="bgp-path-selection"] .bgp-as tr[data-best] td { font-weight: 700; }
+[data-sim="bgp-path-selection"] .bgp-as tr[data-best] td.bgp-path { text-decoration: underline; text-decoration-thickness: 0.15em; text-underline-offset: 0.2em; }
+[data-sim="bgp-path-selection"] .bgp-as tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="bgp-path-selection"] .bgp-as tr[data-gone] td { color: var(--muted); }
+[data-sim="bgp-path-selection"] .bgp-as tr[data-gone] td.bgp-path { text-decoration: line-through; }
+[data-sim="bgp-path-selection"] .bgp-as tr[data-gone] small { font-family: var(--sans); font-size: 1em; margin-left: 0.4rem; }
+[data-sim="bgp-path-selection"] .bgp-none { font-size: var(--fs-sm); color: var(--danger); font-weight: 700; }
+
+/* legend swatches the kit lacks: the AS box, a dropped arrow, the thick best path */
+[data-sim="bgp-path-selection"] .sd-swatch[data-shape="bgp-as"] { border-radius: var(--radius-sm); }
+[data-sim="bgp-path-selection"] .sd-swatch[data-shape="bgp-drop"] { position: relative; background: var(--bg); border-color: var(--danger); }
+[data-sim="bgp-path-selection"] .sd-swatch[data-shape="bgp-drop"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--danger); }
+[data-sim="bgp-path-selection"] .sd-swatch[data-shape="bgp-best"] { height: 0.55rem; border: 0; border-radius: 0; background: var(--ink); }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="bgp-path-selection"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="bgp-path-selection"] .bgp { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="bgp-path-selection"] .bgp-draw .sd-topo { height: auto; }
+  [data-sim="bgp-path-selection"] .bgp-as td.bgp-path { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">BGP: odabir puta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { O: '1', A: '2', B: '3', C: '4', D: '5' };
+  // the drawing: O on top, A and B in the middle, C and D at the bottom; [col, row, span] in a grid of 7 columns
+  var POS = { O: [2, 0, 3], A: [0, 2, 2], B: [5, 2, 2], C: [0, 4, 2], D: [5, 4, 2] };
+  var BY = { only: 'byOnly', local: 'byLocal', lp: 'byLp', len: 'byLen', rid: 'byRid', order: 'byOrder' };
+
+  /** Data (letters, ASNs, paths, addresses, numbers) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'sd-mono' }, String(text)); }
+  function name(text) { return h('span', { translate: 'no' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  /** Several caption pieces with a space between. */
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Nodes separated by words: "A, B i C". */
+  function sepList(nodes) {
+    var out = h('span', null);
+    nodes.forEach(function (n, i) { if (i) out.append(t(i === nodes.length - 1 ? 'andSep' : 'listSep')); out.append(n); });
+    return out;
+  }
+
+  // ── names for the data ──
+
+  function pathText(path) { return '[' + path.join(' ') + ']'; }
+  function asnName(scene, id) { return 'AS' + L.asOf(scene, id).asn; }
+
+  // ── the drawing (kit view K2) ──
+
+  function renderTopo(c, scene) {
+    var s = c.state, p = c.params;
+    var watched = L.pathIds(scene, s, p.watch) || [];
+    var onBest = {};
+    for (var i = 0; i + 1 < watched.length; i++) onBest[[watched[i], watched[i + 1]].sort().join('-')] = true;
+
+    var nodes = scene.ases.map(function (a) {
+      var P = POS[a.id], st = s.ases[a.id];
+      var badges = [];
+      if (a.id === scene.origin) badges.push({ text: t('bOrigin'), k: 'fill' });
+      if (a.id === p.watch) badges.push({ text: t('bWatch'), k: 'solid' });
+      if (!st.best && s.phase !== 'origin') badges.push({ text: t('bNoPath'), k: 'dashed' });
+      return {
+        id: a.id, kind: 'router', col: P[0], row: P[1], span: P[2], c: COLOUR[a.id],
+        lines: [{ text: 'AS' + a.asn, kind: 'addr' }, a.id === scene.origin ? { text: scene.prefix, kind: 'sub' } : null],
+        badges: badges, state: s.changed.indexOf(a.id) >= 0 && s.phase !== 'origin' ? 'active' : null,
+        changed: s.changed.indexOf(a.id) >= 0 && s.phase !== 'origin'
+      };
+    });
+    var links = scene.links.map(function (l) {
+      var up = s.links.filter(function (x) { return x.id === l.id; })[0].up;
+      return { id: l.id, a: l.a, b: l.b, state: up ? 'up' : 'down', active: up && !!onBest[[l.a, l.b].sort().join('-')] };
+    });
+    var packets = s.msgs.map(function (m) {
+      return m.kind === 'withdraw'
+        ? { from: m.from, to: m.to, label: t('chipWithdraw'), c: COLOUR[m.from], cast: 'broadcast' }
+        : { from: m.from, to: m.to, label: pathText(m.path), c: COLOUR[m.from], drop: m.result === 'loop' };
+    });
+    // phone order: top to bottom, left to right
+    nodes.sort(function (x, y) { return POS[x.id][1] - POS[y.id][1] || POS[x.id][0] - POS[y.id][0]; });
+    return Simdeck.topology({ cols: 7, rows: ['auto', 'minmax(2rem, 1fr)', 'auto', 'minmax(2rem, 1fr)', 'auto'], dir: c.dir,
+      nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  // ── the side column: one block per AS ──
+
+  function roundLabel(s) {
+    if (s.phase === 'origin') return t('roundStart');
+    var n = t('roundT', { n: s.round });
+    if (s.phase === 'fail') return n + ' · ' + t('roundFail');
+    if (s.phase === 'converged') return n + ' · ' + t('roundDone');
+    return n;
+  }
+
+  function renderSide(c, scene) {
+    var s = c.state, prev = c.prev, p = c.params;
+    var out = [h('div', { class: 'bgp-round' }, roundLabel(s)), h('h2', null, t('sideTitle', { p: scene.prefix }))];
+    scene.ases.forEach(function (a) {
+      var st = s.ases[a.id];
+      var changed = s.changed.indexOf(a.id) >= 0 && s.phase !== 'origin';
+      var rows = st.rib.map(function (e) {
+        var isBest = st.best && e.from === st.best.from && !!e.local === !!st.best.local;
+        return h('tr', { class: isBest && changed ? 'sd-changed' : null, dataset: isBest ? { best: '1' } : {} },
+          h('td', { class: 'bgp-star', translate: 'no' }, isBest ? '★' : ''),
+          h('td', null, e.local ? t('own') : name(e.from)),
+          h('td', { class: 'bgp-path' }, e.local ? t('ownPath') : data(pathText(e.path))),
+          h('td', { translate: 'no' }, String(e.lp)));
+      });
+      // paths removed this step (a withdrawal, a looped replacement, a failed link): struck through
+      if (prev) prev.ases[a.id].rib.forEach(function (e) {
+        if (e.local || st.rib.some(function (x) { return x.from === e.from; })) return;
+        rows.push(h('tr', { dataset: { gone: '1' } },
+          h('td', { class: 'bgp-star' }, ''),
+          h('td', null, name(e.from)),
+          h('td', { class: 'bgp-path' }, data(pathText(e.path)), h('small', null, t('gone'))),
+          h('td', { translate: 'no' }, String(e.lp))));
+      });
+      out.push(h('section', { class: 'bgp-as',
+        dataset: Object.assign({ c: COLOUR[a.id] }, changed ? { active: '1' } : {}, a.id === p.watch ? { watch: '1' } : {}) },
+        h('div', { class: 'bgp-head' }, b(a.id), h('span', { translate: 'no' }, 'AS' + a.asn),
+          h('span', { class: 'bgp-rid', translate: 'no' }, t('rid', { r: a.routerId })),
+          st.best && st.rib.length ? h('span', { class: 'bgp-by' }, t(BY[st.by])) : null),
+        rows.length ? h('table', null,
+          h('thead', null, h('tr', null, h('th', null, ''), h('th', null, t('thFrom')), h('th', null, t('thPath')), h('th', null, t('thLp')))),
+          h('tbody', null, rows)) : null,
+        !st.best ? h('div', { class: 'bgp-none' }, t('noPath')) : null));
+    });
+    return out;
+  }
+
+  // ── captions ──
+
+  /** The sentence on how an AS chose (or lost) its best path. */
+  function decision(scene, s, id) {
+    var st = s.ases[id], x = b(asnName(scene, id));
+    if (!st.best) return parts('decNone', { x: x, p: data(scene.prefix) });
+    var bst = st.best;
+    if (st.by === 'only' || st.by === 'local') return parts('decOnly', { x: x, path: data(pathText(bst.path)), n: name(bst.from) });
+    var sorted = st.rib.slice().sort(function (u, v) { return L.cmpPath(scene, u, v); });
+    var runner = sorted[1];
+    var list = sepList(st.rib.map(function (e) { return h('span', null, parts('pathFrom', { path: data(pathText(e.path)), n: name(e.from) })); }));
+    var vars = { x: x, k: data(st.rib.length), list: list, n: name(bst.from) };
+    if (st.by === 'lp') {
+      return parts(bst.path.length > runner.path.length ? 'decLpLonger' : 'decLp', Object.assign(vars, { lp: data(bst.lp), lp2: data(runner.lp) }));
+    }
+    if (st.by === 'len') return parts('decLen', Object.assign(vars, { lp: data(bst.lp) }));
+    // more paths than the tie: name only the tied ones
+    var tied = st.rib.filter(function (e) { return e.lp === bst.lp && e.path.length === bst.path.length; });
+    if (tied.length < st.rib.length) {
+      vars.list = sepList(tied.map(function (e) { return h('span', null, parts('pathFrom', { path: data(pathText(e.path)), n: name(e.from) })); }));
+    }
+    return parts(tied.length < st.rib.length ? 'decRidSome' : 'decRid', Object.assign(vars, { lp: data(bst.lp), len: data(bst.path.length),
+      r: data(L.asOf(scene, bst.from).routerId), r2: data(L.asOf(scene, runner.from).routerId) }));
+  }
+
+  /** Which AS the caption explains: the watched one if its best changed, else the first that changed, else the
+      watched one if it heard something, else none. */
+  function focusOf(s, p, touched) {
+    if (s.changed.indexOf(p.watch) >= 0) return p.watch;
+    if (s.changed.length) return s.changed[0];
+    if (touched.indexOf(p.watch) >= 0) return p.watch;
+    return null;
+  }
+
+  function capRound(c, scene) {
+    var s = c.state, p = c.params;
+    var ann = [], wd = [], touched = [];
+    s.msgs.forEach(function (m) {
+      var list = m.kind === 'withdraw' ? wd : ann;
+      if (list.indexOf(m.from) < 0) list.push(m.from);
+      if (touched.indexOf(m.to) < 0) touched.push(m.to);
+    });
+    var out = [];
+    if (ann.length === 1 && ann[0] === scene.origin) {
+      out.push(parts('capRoundOrigin', { n: data(s.round), o: b(asnName(scene, scene.origin)), p: data(scene.prefix) }));
+      var prep = scene.prepend[scene.origin] || {};
+      Object.keys(prep).forEach(function (to) { if (prep[to]) out.push(parts('capPrepend', { b: name(to), k: data(prep[to] + 1) })); });
+    } else if (ann.length) {
+      out.push(parts(ann.length === 1 ? 'capRound1' : 'capRoundN', { n: data(s.round), s: sepList(ann.map(b)) }));
+    }
+    if (wd.length) {
+      out.push(parts('capWithdrawLead', { n: data(s.round), s: sepList(wd.map(b)) }));
+      s.msgs.filter(function (m) { return m.kind === 'withdraw' && m.removed; }).forEach(function (m) {
+        out.push(parts(s.ases[m.to].rib.length ? 'capWithdrawn' : 'capWithdrawnEmpty', { r: name(m.to), s: name(m.from) }));
+      });
+    }
+    var focus = focusOf(s, p, touched);
+    // one loop sentence: the first one at the focus AS, else the first one that removed an old path, else the first
+    var loops = s.msgs.filter(function (m) { return m.result === 'loop'; });
+    var loop = loops.filter(function (m) { return m.to === focus; })[0] || loops.filter(function (m) { return m.removed; })[0] || loops[0];
+    var loopPart = null;
+    if (loop) {
+      loopPart = [parts('capLoop', { r: name(loop.to), path: data(pathText(loop.path)), s: name(loop.from) })];
+      if (loop.removed) loopPart.push(parts('capLoopOld', { old: data(pathText(loop.removed)), s: name(loop.from) }));
+      loopPart = join(loopPart);
+    }
+    // LOCAL_PREF stays home: a stored announcement from an AS whose own best has a non-default LP
+    var lpMsg = s.msgs.filter(function (m) { return m.result === 'stored' && c.prev.ases[m.from].best && c.prev.ases[m.from].best.lp !== L.LP_DEFAULT; })[0];
+    var lpPart = lpMsg ? parts('capLpNotSent', { s: name(lpMsg.from), lp: data(c.prev.ases[lpMsg.from].best.lp), r: name(lpMsg.to),
+      lp2: data(L.lpFor(scene, lpMsg.to, lpMsg.from)) }) : null;
+    var dec = null, after = null, also = null;
+    if (focus) {
+      dec = decision(scene, s, focus);
+      after = parts(s.changed.indexOf(focus) >= 0 ? 'afterChanged' : 'afterSame', { x: b(focus) });
+      var others = s.changed.filter(function (id) { return id !== focus; });
+      if (others.length) also = parts('alsoChanged', { list: sepList(others.map(b)) });
+    } else {
+      after = [t('nothingChanged')];
+    }
+    // the lead, the LOCAL_PREF sentence and the decision always; the loop and the closing sentences only while the
+    // caption stays within three lines at 1920×1080 (the drawing's crosses, the table and the changed marks say the
+    // same)
+    var keep = out.concat([lpPart, dec].filter(Boolean));
+    [loopPart, after, also].forEach(function (x) {
+      if (x && textLength(keep) + textLength([x]) <= CAPTION_MAX) keep.push(x); else if (x === loopPart) loopPart = null;
+      if (x === after && keep.indexOf(x) < 0) after = null;
+      if (x === also && keep.indexOf(x) < 0) also = null;
+    });
+    return join(out.concat([loopPart, lpPart, dec, after, also].filter(Boolean)));
+  }
+
+  var CAPTION_MAX = 300;
+  function textLength(list) {
+    return list.reduce(function (n, x) {
+      return n + 1 + [].concat(x).reduce(function (m, y) { return m + (typeof y === 'string' ? y : y.textContent || '').length; }, 0);
+    }, 0);
+  }
+
+  function capFail(c, scene) {
+    var s = c.state;
+    var l = scene.links.filter(function (k) { return k.id === s.failed; })[0];
+    var out = [parts('capFail', { l: b(l.a + '–' + l.b), a: name(l.a), b: name(l.b) })];
+    s.changed.forEach(function (id) {
+      var st = s.ases[id];
+      if (st.best) out.push(parts('failAlt', { x: b(asnName(scene, id)), path: data(pathText(st.best.path)), n: name(st.best.from) }));
+      else out.push(parts('failNoneLeft', { x: b(asnName(scene, id)) }));
+    });
+    if (!s.changed.length) out.push(t('failNoChange'));
+    return join(out);
+  }
+
+  function capDone(c, scene) {
+    var s = c.state, p = c.params;
+    var ids = L.pathIds(scene, s, p.watch);
+    if (!ids) return parts('capDoneNone', { n: data(s.round), x: b(asnName(scene, p.watch)), p: data(scene.prefix) });
+    var route = h('b', { translate: 'no', class: 'bgp-route' }, ids.join(t('arrow')));
+    return parts('capDone', { n: data(s.round), x: b(asnName(scene, p.watch)), p: data(scene.prefix), route: route });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'dLocalPrefFromC', type: 'choice', label: t('pLp'), options: [[100, '100'], [200, '200']], resets: true },
+      { key: 'failLink', type: 'choice', label: t('pFail'), resets: true,
+        options: [['none', t('failNone')], ['O-B', t('failOB')], ['O-A', t('failOA')]] },
+      { key: 'prependOtoB', type: 'range', label: t('pPrep'), min: 0, max: 3, step: 1, resets: true,
+        format: function (v) { return t('prepVal', { n: v }); } },
+      { key: 'watch', type: 'choice', label: t('pWatch'), options: [['C', t('watchC')], ['D', t('watchD')]] }
+    ],
+
+    presets: [
+      { id: 'shortest-path', label: t('prShortest'), params: { dLocalPrefFromC: 100, failLink: 'none', prependOtoB: 0, watch: 'D' } },
+      { id: 'local-pref', label: t('prLocalPref'), hint: t('prLocalPrefHint'), params: { dLocalPrefFromC: 200, failLink: 'none', prependOtoB: 0, watch: 'D' } },
+      { id: 'router-id-tie', label: t('prRouterId'), hint: t('prRouterIdHint'), params: { dLocalPrefFromC: 100, failLink: 'none', prependOtoB: 0, watch: 'C' } },
+      { id: 'link-failure', label: t('prFailure'), params: { dLocalPrefFromC: 100, failLink: 'O-B', prependOtoB: 0, watch: 'D' } },
+      { id: 'prepending', label: t('prPrepend'), hint: t('prPrependHint'), params: { dLocalPrefFromC: 100, failLink: 'none', prependOtoB: 2, watch: 'D' } },
+      { id: 'withdrawal', label: t('prWithdraw'), hint: t('prWithdrawHint'), params: { dLocalPrefFromC: 100, failLink: 'O-A', prependOtoB: 0, watch: 'C' } }
+    ],
+
+    legend: [
+      { shape: 'bgp-as', c: 5, label: t('legAs') },
+      { shape: 'line', label: t('legAnnounce') },
+      { shape: 'dash', label: t('legWithdraw') },
+      { shape: 'bgp-drop', label: t('legDrop') },
+      { shape: 'bgp-best', label: t('legBest') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'bgp' },
+        h('div', { class: 'bgp-draw' }, renderTopo(c, scene)),
+        h('div', { class: 'bgp-side' }, renderSide(c, scene))));
+    },
+
+    caption: function (c) {
+      var scene = L.sceneOf(c.params), s = c.state;
+      switch (s.phase) {
+        case 'origin': return parts('capOrigin', { o: b(asnName(scene, scene.origin)), p: data(scene.prefix) });
+        case 'fail': return capFail(c, scene);
+        case 'converged': return capDone(c, scene);
+        default: return capRound(c, scene);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
