@@ -1,0 +1,628 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-mount-layers: disk → partition → filesystem → mount, and a mount that hides what the directory held. Left, the
+     four layers of each partition on /dev/vdb (block device, partition, filesystem, mount point) with the three steps
+     between them; right, the root filesystem as a tray holding the mount-point directories, each mounted filesystem a
+     lid over its directory (the newest on top), and a mark on what the path leads to. Below, df -h and ls as they read
+     now; above, the command of this step and what it printed. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-mount-layers">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Od blokovnog uređaja do točke montiranja · simdeck</title>
+<meta name="description" content="Tri koraka od praznog diska do staze, pa montiranje preko direktorija s datotekom: nije obrisana, df je i dalje broji, a staza do nje ne vodi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-mount-layers",
+  "title": {
+    "hr": "Od blokovnog uređaja do točke montiranja",
+    "en": "Block device to mount point"
+  },
+  "concept": {
+    "hr": "Disk → particija → datotečni sustav → montiranje; montiranje zaklanja sadržaj",
+    "en": "Disk → partition → filesystem → mount; a mount hides what was there"
+  },
+  "summary": {
+    "hr": "Tri koraka od praznog diska do staze, pa montiranje preko direktorija s datotekom: nije obrisana, df je i dalje broji, a staza do nje ne vodi.",
+    "en": "Three steps from an empty disk to a path, then a mount over a directory holding a file: not deleted, df still counts it, but the path no longer leads to it."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 8,
+  "entries": [
+    {
+      "preset": "layers"
+    },
+    {
+      "preset": "stack"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-mount-layers"]; colours only from kit tokens.
+   Layout: the shell strip on top; the scene (the four layers | the root tray with its lids); under it df and ls. */
+[data-sim="lnx-mount-layers"] .ml {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+/* layer colours: mount point c1, partition c2, filesystem c3, device c4; the root filesystem c8 */
+[data-sim="lnx-mount-layers"] [data-c="1"] { --ml-c: var(--c1); }
+[data-sim="lnx-mount-layers"] [data-c="2"] { --ml-c: var(--c2); }
+[data-sim="lnx-mount-layers"] [data-c="3"] { --ml-c: var(--c3); }
+[data-sim="lnx-mount-layers"] [data-c="4"] { --ml-c: var(--c4); }
+[data-sim="lnx-mount-layers"] [data-c="8"] { --ml-c: var(--c8); }
+
+/* the shell strip */
+[data-sim="lnx-mount-layers"] .ml-shell {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-mount-layers"] .ml-cmd { font-family: var(--mono); font-size: 1.1rem; font-weight: 700; }
+[data-sim="lnx-mount-layers"] .ml-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-mount-layers"] .ml-hint { color: var(--muted); font-family: var(--sans); font-weight: 400; font-size: 1rem; }
+[data-sim="lnx-mount-layers"] .ml-out {
+  margin: 0;
+  min-height: calc(var(--lines, 1) * 1.3em);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.3;
+  white-space: pre;
+  overflow-x: auto;
+}
+[data-sim="lnx-mount-layers"] .ml-out .ml-err { color: var(--danger); font-weight: 700; }
+
+/* the scene */
+[data-sim="lnx-mount-layers"] .ml-scene {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.6rem;
+  align-items: stretch;
+}
+[data-sim="lnx-mount-layers"] .ml-tag {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+[data-sim="lnx-mount-layers"] .ml-word { color: var(--muted); }
+[data-sim="lnx-mount-layers"] code { font-family: var(--mono); }
+
+/* left: the four layers, one column per partition */
+[data-sim="lnx-mount-layers"] .ml-layers {
+  display: grid;
+  grid-template-columns: 8.2rem repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-auto-rows: auto;
+  gap: 0.25rem 0.6rem;
+  align-content: center;
+}
+[data-sim="lnx-mount-layers"] .ml-lname {
+  align-self: center;
+  padding-left: 0.5rem;
+  border-left: 0.45rem solid var(--ml-c);
+  font-weight: 700;
+  line-height: 1.15;
+}
+[data-sim="lnx-mount-layers"] .ml-arrow { grid-column: 2 / -1; color: var(--muted); line-height: 1.2; }
+[data-sim="lnx-mount-layers"] .ml-arrow b { color: var(--ink); }
+[data-sim="lnx-mount-layers"] .ml-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.3rem 0.6rem;
+  border: 2px solid var(--ink);
+  border-left: 0.6rem solid var(--ml-c);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ml-c) 12%, var(--bg));
+}
+[data-sim="lnx-mount-layers"] .ml-box .ml-main { font-family: var(--mono); font-weight: 700; font-size: 1.15rem; overflow-wrap: anywhere; }
+[data-sim="lnx-mount-layers"] .ml-box .ml-tags { display: flex; flex-wrap: wrap; gap: 0.2rem 0.3rem; }
+[data-sim="lnx-mount-layers"] .ml-box.ml-none {
+  border: 2px dashed var(--muted);
+  background: transparent;
+  color: var(--muted);
+  justify-content: center;
+}
+[data-sim="lnx-mount-layers"] .ml-device { grid-column: 2 / -1; }
+
+/* right: the root tray, its directories and the lids over them */
+[data-sim="lnx-mount-layers"] .ml-trays {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0 0.8rem;
+  min-height: 0;
+}
+[data-sim="lnx-mount-layers"] .ml-lids { display: flex; flex-direction: column; justify-content: flex-end; gap: 0.35rem; padding: 0 0.6rem 0.35rem; min-width: 0; }
+[data-sim="lnx-mount-layers"] .ml-root {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  gap: 0.4rem 0.8rem;
+  padding: 0.4rem 0.6rem 0.6rem;
+  border: 2px solid var(--ink);
+  border-top: 0.5rem solid var(--ml-c);
+  border-radius: var(--radius-sm);
+}
+[data-sim="lnx-mount-layers"] .ml-root > h3 { grid-column: 1 / -1; margin: 0; font-size: 1rem; }
+[data-sim="lnx-mount-layers"] .ml-tray {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  min-height: 4.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-mount-layers"] .ml-lid { border-left: 0.6rem solid var(--ml-c); background: color-mix(in srgb, var(--ml-c) 12%, var(--bg)); box-shadow: 0 0.3rem 0 var(--line); }
+[data-sim="lnx-mount-layers"] .ml-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; }
+[data-sim="lnx-mount-layers"] .ml-head code { font-weight: 700; font-size: 1.1rem; }
+[data-sim="lnx-mount-layers"] .ml-files { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 1.15rem; }
+[data-sim="lnx-mount-layers"] .ml-files .ml-size { color: var(--muted); font-size: 1rem; }
+[data-sim="lnx-mount-layers"] .ml-files .ml-ghost { color: var(--muted); }
+[data-sim="lnx-mount-layers"] .ml-empty { color: var(--muted); font-style: italic; }
+/* covered: hatched, contents unreadable unless xray */
+[data-sim="lnx-mount-layers"] .ml-covered {
+  border-style: dashed;
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 22%, transparent) 0.35em 0.5em);
+}
+/* where the path leads: thick outline and a badge */
+[data-sim="lnx-mount-layers"] .ml-reach { outline: 0.25rem solid var(--ink); outline-offset: 0.12rem; }
+[data-sim="lnx-mount-layers"] .ml-badge {
+  align-self: flex-start;
+  padding: 0 0.45rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 700;
+}
+[data-sim="lnx-mount-layers"] .ml-badge.sd-hl { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-mount-layers"] .ml-none-dirs { color: var(--muted); }
+
+/* under the scene: df and ls as they read now */
+[data-sim="lnx-mount-layers"] .ml-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 1.6rem;
+  align-items: start;
+}
+[data-sim="lnx-mount-layers"] .ml-foot h3 { margin: 0 0 0.2rem; font-size: 1rem; color: var(--muted); }
+[data-sim="lnx-mount-layers"] .ml-df { border-collapse: collapse; font-family: var(--mono); font-size: 1.05rem; }
+[data-sim="lnx-mount-layers"] .ml-df th { padding: 0 0.7rem 0 0; color: var(--muted); font-weight: 400; text-align: right; }
+[data-sim="lnx-mount-layers"] .ml-df td { padding: 0.05rem 0.7rem 0.05rem 0; text-align: right; }
+[data-sim="lnx-mount-layers"] .ml-df th:first-child, [data-sim="lnx-mount-layers"] .ml-df td:first-child,
+[data-sim="lnx-mount-layers"] .ml-df th:last-child, [data-sim="lnx-mount-layers"] .ml-df td:last-child { text-align: left; }
+[data-sim="lnx-mount-layers"] .ml-df tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-mount-layers"] .ml-ls { display: flex; flex-direction: column; gap: 0.15rem; font-family: var(--mono); font-size: 1.05rem; }
+[data-sim="lnx-mount-layers"] .ml-ls .ml-lsrow { padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-mount-layers"] .ml-ls .ml-lsrow.sd-changed { outline-offset: 0; }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-mount-layers"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-mount-layers"] .sd-swatch[data-shape="ml-covered"] { border: 2px dashed var(--ink); background: repeating-linear-gradient(45deg, var(--bg) 0 0.2rem, var(--muted) 0.2rem 0.3rem); }
+[data-sim="lnx-mount-layers"] .sd-swatch[data-shape="ml-reach"] { background: var(--bg); border: 0.2rem solid var(--ink); outline: 0.12rem solid var(--ink); outline-offset: 0.08rem; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-mount-layers"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-mount-layers"] .ml { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-mount-layers"] .ml-cmd { font-size: 1rem; overflow-wrap: anywhere; }
+  [data-sim="lnx-mount-layers"] .ml-out { font-size: 0.9rem; }
+  [data-sim="lnx-mount-layers"] .ml-scene, [data-sim="lnx-mount-layers"] .ml-foot { display: flex; flex-direction: column; gap: 1rem; }
+  [data-sim="lnx-mount-layers"] .ml-layers { grid-template-columns: 6.5rem repeat(var(--cols, 1), minmax(0, 1fr)); }
+  [data-sim="lnx-mount-layers"] .ml-df-wrap { max-width: 100%; overflow-x: auto; }
+  [data-sim="lnx-mount-layers"] .ml-df { font-size: 0.9rem; }
+  [data-sim="lnx-mount-layers"] .ml-tag { font-size: 0.9rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Od blokovnog uređaja do točke montiranja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PROMPT = '[student@demosrv1 ~]$';
+  var COL = { mp: 1, part: 2, fs: 3, device: 4, root: 8 };
+
+  // ── small pieces ──
+
+  /** Data (devices, paths, sizes, UUIDs) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function dev(name) { return '/dev/' + name; }
+  function has(s, key) { return s.event.changed.indexOf(key) >= 0; }
+  function chg(on, c) { return on ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''; }
+  function short(id) { return id.slice(0, 8) + '…'; }
+  /** A filesystem type as captions write it: ext4, XFS. */
+  function typeName(type) { return t(type === 'xfs' ? 'optXfs' : 'optExt4'); }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands, *word* as <em lang="en"> and `x` as code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── the command line ──
+
+  function cmdText(c) {
+    switch (c.op) {
+      case 'ls': return 'ls ' + c.path;
+      case 'cp': return 'sudo cp ' + c.src + ' ' + c.dir + '/';
+      case 'mount': return 'sudo mount ' + dev(c.dev) + ' ' + c.target;
+      case 'umount': return 'sudo umount ' + c.target;
+      case 'df': return 'df -h' + (c.T ? 'T' : '') + (c.paths.length ? ' ' + c.paths.join(' ') : '');
+      case 'du': return 'sudo du -sh ' + c.path;
+      case 'lsblk': return 'lsblk ' + dev(L.DISK.name);
+      case 'parted': {
+        var d = L.PARTS[c.part];
+        return 'sudo parted -s ' + dev(L.DISK.name) + (c.label ? ' mklabel ' + c.label : '') + ' mkpart ' + d.label + ' ' + c.fs + ' ' + d.start + ' ' + d.end;
+      }
+      case 'mkfs': return 'sudo mkfs.' + c.type + ' ' + dev(c.dev);
+      case 'mkdir': return 'sudo mkdir -p ' + c.path;
+    }
+    return '';
+  }
+  /** Output lines a preset ever prints at once: the strip keeps that height, so the scene does not jump. */
+  var linesMemo = {};
+  function maxLines(p) {
+    var key = p.scene + '|' + p.fsType;
+    if (linesMemo[key] == null) {
+      var n = 1;
+      for (var i = 0; i <= L.steps(p); i++) n = Math.max(n, Simdeck.stateAt(L, p, i).out.length);
+      linesMemo[key] = n;
+    }
+    return linesMemo[key];
+  }
+  function shell(s, p) {
+    return h('div', { class: 'ml-shell' },
+      h('div', { class: 'ml-cmd' }, h('span', { class: 'ml-prompt', translate: 'no' }, PROMPT + ' '),
+        s.cmd ? h('span', { translate: 'no' }, cmdText(s.cmd)) : h('span', { class: 'ml-hint' }, t('before'))),
+      h('pre', { class: 'ml-out', translate: 'no', style: { '--lines': String(maxLines(p)) } },
+        s.out.map(function (l) { return h('span', { class: s.err ? 'ml-err' : null }, l + '\n'); })));
+  }
+
+  // ── left: the four layers ──
+
+  function box(c, colour, main, tags, changed, none) {
+    return h('div', { class: 'ml-box' + (none ? ' ml-none' : '') + chg(changed, c), dataset: { c: String(colour) } },
+      main, tags && tags.length ? h('div', { class: 'ml-tags' }, tags) : null);
+  }
+  function tag(text) { return h('span', { class: 'ml-tag', translate: 'no' }, text); }
+
+  function layers(s, c) {
+    var parts = s.parts.length ? s.parts : [null];
+    var cells = [];
+    function lname(key, colour) { return h('div', { class: 'ml-lname', dataset: { c: String(colour) } }, t(key)); }
+    function arrow(key) { return h('div', { class: 'ml-arrow' }, h('b', null, '↑ '), t(key)); }
+
+    cells.push(lname('layerMp', COL.mp));
+    parts.forEach(function (p) {
+      var on = p ? s.mounts.filter(function (m) { return m.source === p.name; }) : [];
+      if (!on.length) { cells.push(box(c, COL.mp, h('span', null, t('notMounted')), null, false, true)); return; }
+      cells.push(box(c, COL.mp, h('div', { class: 'ml-main' }, on.map(function (m, i) { return [i ? ', ' : '', code(m.target)]; })),
+        on.map(function (m) {
+          var top = L.topOf(s, m.target);
+          return top !== m ? h('span', { class: 'ml-word' }, t('underMount', { dev: dev(top.source) })) : null;
+        }).filter(Boolean), has(s, 'mount:' + p.name)));
+    });
+    cells.push(arrow('step3'));
+
+    cells.push(lname('layerFs', COL.fs));
+    parts.forEach(function (p) {
+      if (!p || !p.fs) { cells.push(box(c, COL.fs, h('span', null, t('noFs')), null, false, true)); return; }
+      cells.push(box(c, COL.fs, h('div', { class: 'ml-main', translate: 'no' }, p.fs.type), [tag('UUID=' + short(p.fs.uuid))], has(s, 'fs:' + p.name)));
+    });
+    cells.push(arrow('step2'));
+
+    cells.push(lname('layerPart', COL.part));
+    parts.forEach(function (p) {
+      if (!p) { cells.push(box(c, COL.part, h('span', null, t('noPart')), null, false, true)); return; }
+      cells.push(box(c, COL.part, h('div', { class: 'ml-main', translate: 'no' }, dev(p.name) + ' · ' + p.sizeMiB + 'M'),
+        [tag('PARTUUID=' + short(p.partuuid)), tag('PARTLABEL=' + p.label)], has(s, 'part:' + p.name)));
+    });
+    cells.push(arrow('step1'));
+
+    cells.push(lname('layerDevice', COL.device));
+    var d = box(c, COL.device, h('div', { class: 'ml-main', translate: 'no' }, dev(s.disk.name) + ' · 2 GiB'),
+      [s.disk.table ? h('span', null, h('span', { class: 'ml-word' }, t('tableIs') + ' '), data(s.disk.table)) : h('span', { class: 'ml-word' }, t('noTable'))],
+      has(s, 'table'));
+    d.classList.add('ml-device');
+    cells.push(d);
+    return h('div', { class: 'ml-layers', style: { '--cols': String(parts.length) } }, cells);
+  }
+
+  // ── right: the root tray, its directories and the lids ──
+
+  function dirsOf(s) { return Object.keys(s.rootFs.dirs); }
+
+  function fileList(files, ghost) {
+    if (!files.length) return h('p', { class: 'ml-empty', style: { margin: 0 } }, t('empty'));
+    return h('ul', { class: 'ml-files' }, files.map(function (f) {
+      return h('li', { class: ghost ? 'ml-ghost' : null }, data(f.name),
+        f.kib ? [' ', h('span', { class: 'ml-size', translate: 'no' }, L.human(f.kib))] : null,
+        ghost ? [' ', h('span', { class: 'ml-tag' }, t('hiddenTag'))] : null);
+    }));
+  }
+  /** A tray (a lid or the root directory): covered ones are hatched, readable only with xray. */
+  function tray(c, opts) {
+    var body;
+    if (opts.covered) body = c.params.xray ? fileList(opts.files, true) : h('p', { class: 'ml-empty', style: { margin: 0 } }, t('covered'));
+    else body = fileList(opts.files, false);
+    return h('div', { class: 'ml-tray' + (opts.lid ? ' ml-lid' : '') + (opts.covered ? ' ml-covered' : '') + (opts.reach ? ' ml-reach' : '') + chg(opts.changed, c),
+      dataset: { c: String(opts.lid ? COL.fs : COL.root) } },
+      h('div', { class: 'ml-head' }, opts.head,
+        opts.reach ? h('span', { class: 'ml-badge' + (opts.moved ? ' sd-hl' : '') }, t.parts('leadsHere', { path: code(opts.path) })) : null),
+      body);
+  }
+
+  function trays(s, c) {
+    var dirs = dirsOf(s);
+    if (!dirs.length) {
+      return h('div', { class: 'ml-trays' }, h('div', { class: 'ml-lids' }),
+        h('div', { class: 'ml-root', dataset: { c: String(COL.root) } }, h('h3', null, t.parts('rootTray', { dev: code(dev(s.rootFs.dev)) })),
+          h('p', { class: 'ml-none-dirs' }, t('noDirs'))));
+    }
+    var lidCols = [], dirCells = [];
+    dirs.forEach(function (d) {
+      var on = s.mounts.filter(function (m) { return m.target === d; }).reverse();   // newest first
+      var moved = has(s, 'path:' + d);
+      lidCols.push(h('div', { class: 'ml-lids' }, on.map(function (m, i) {
+        var fs = L.partOf(s, m.source).fs;
+        return tray(c, { lid: true, covered: i > 0, reach: i === 0, moved: moved, path: d, files: fs.files,
+          head: [h('span', null, t.parts('lidOf', { dev: code(dev(m.source)) })), tag(fs.type)],
+          changed: i === 0 && has(s, 'mount:' + m.source) });
+      })));
+      dirCells.push(tray(c, { covered: on.length > 0, reach: !on.length, moved: moved, path: d, files: s.rootFs.dirs[d],
+        head: code(d), changed: has(s, 'dir:' + d) }));
+    });
+    return h('div', { class: 'ml-trays', style: { '--cols': String(dirs.length) } }, lidCols,
+      h('div', { class: 'ml-root', dataset: { c: String(COL.root) }, style: { '--cols': String(dirs.length) } },
+        h('h3', null, t.parts('rootTray', { dev: code(dev(s.rootFs.dev)) })), dirCells));
+  }
+
+  // ── under the scene: df -h and ls as they read now ──
+
+  function dfTable(s, c) {
+    var rows = L.dfRows(s);
+    var prev = c.prev ? L.dfRows(c.prev) : null;
+    var cols = ['source', 'size', 'used', 'avail', 'pcent', 'target'];
+    var heads = ['Filesystem', 'Size', 'Used', 'Avail', 'Use%', 'Mounted on'];
+    return h('div', { class: 'ml-df-wrap' }, h('h3', null, t('dfNow')),
+      h('table', { class: 'ml-df', translate: 'no' },
+        h('thead', null, h('tr', null, heads.map(function (x) { return h('th', null, x); }))),
+        h('tbody', null, rows.map(function (r) {
+          var old = prev && prev.filter(function (q) { return q.key === r.key && q.target === r.target; })[0];
+          var isNew = !!prev && !old;
+          return h('tr', { class: isNew ? 'sd-changed' : null }, cols.map(function (k) {
+            var diff = old && old[k] !== r[k];
+            return h('td', null, diff ? h('span', { class: 'sd-hl' }, r[k]) : r[k]);
+          }));
+        }))));
+  }
+  function lsLines(s, c) {
+    var dirs = dirsOf(s);
+    if (!dirs.length) dirs = ['/mnt/vjezba'];
+    return h('div', null, h('h3', null, t('lsNow')), h('div', { class: 'ml-ls' }, dirs.map(function (d) {
+      var names = L.listing(s, d);
+      var out = names === null ? data("ls: cannot access '" + d + "': No such file or directory")
+        : names.length ? data(names.join('  ')) : h('span', { class: 'ml-empty' }, t('empty'));
+      return h('div', { class: 'ml-lsrow' + chg(has(s, 'path:' + d), c) }, data('$ ls ' + d + ' → '), out);
+    })));
+  }
+
+  function render(c) {
+    var s = c.state, p = c.params;
+    c.stage.replaceChildren(h('div', { class: 'ml' }, shell(s, p),
+      h('div', { class: 'ml-scene' }, layers(s, c), trays(s, c)),
+      h('div', { class: 'ml-foot' }, dfTable(s, c), lsLines(s, c))));
+  }
+
+  // ── captions ──
+
+  function fileIn(s, d) { return (s.rootFs.dirs[d] || [])[0] || null; }
+
+  function caption(c) {
+    var s = c.state, ev = s.event, cmd = s.cmd;
+    if (c.n === 0) {
+      var f0 = fileIn(s, '/mnt/vjezba');
+      return rich('capStart_' + s.scene, { dir: code('/mnt/vjezba'), dev: code('/dev/vdb1'), type: s.parts[0] && s.parts[0].fs ? typeName(s.parts[0].fs.type) : '',
+        disk: code('/dev/vdb'), dev1: code('/dev/vdb1'), dev2: code('/dev/vdb2'), dir1: code('/mnt/vjezba'), dir2: code('/mnt/druga'),
+        file: code(f0 ? f0.name : 'stara.txt'), size: data(f0 ? L.human(f0.kib) : '') });
+    }
+    if (s.err) {
+      if (cmd.op === 'mount' && s.err === 'NOPOINT') return rich('capMountNoPoint', { dir: code(cmd.target) });
+      return rich('capErr').concat(sp([code(s.out[0])]));
+    }
+    switch (cmd.op) {
+      case 'ls': {
+        var out = ev.at.kind === 'root' ? rich('capLsRoot', { dir: code(cmd.path) }) : rich('capLsFs', { dev: code(dev(ev.at.dev)) });
+        var under = L.hiddenAt(s, cmd.path).files;
+        if (ev.at.kind === 'fs' && under.length) out = out.concat(sp(rich('capLsUnder', { file: code(under[0]) })));
+        else if (!s.out.length) out = out.concat(sp(rich('capLsEmpty')));
+        else if (ev.at.kind === 'root' && c.prev && c.prev.event.op === 'umount' && c.prev.event.shown.length) out = out.concat(sp(rich('capLsBack', { file: code(c.prev.event.shown[0]) })));
+        return out;
+      }
+      case 'cp': {
+        var v = { file: code(cmd.name), size: data(L.human(cmd.kib)), dir: code(cmd.dir) };
+        var used = L.human(s.rootFs.usedKiB);
+        if (ev.at.kind === 'root' && c.prev && L.human(c.prev.rootFs.usedKiB) === used) return rich('capCpRootRound', Object.assign(v, { used: data(used), pcent: data(L.pcent(s.rootFs)) }));
+        if (ev.at.kind === 'root') return rich('capCpRoot', Object.assign(v, { used: data(used) }));
+        return rich('capCpFs', Object.assign(v, { dev: code(dev(ev.at.dev)) }));
+      }
+      case 'mount': {
+        if (ev.over) return rich('capMountOver', { dev: code(dev(cmd.dev)), dir: code(cmd.target), under: code(dev(ev.over)) });
+        if (ev.hid.length) {
+          var hf = fileIn(s, cmd.target);
+          return rich('capMountHides', { dev: code(dev(cmd.dev)), dir: code(cmd.target), file: code(hf.name), size: data(L.human(hf.kib)) });
+        }
+        return rich('capMount', { dev: code(dev(cmd.dev)), dir: code(cmd.target) });
+      }
+      case 'umount': {
+        if (ev.to.kind === 'fs') return rich('capUmountTop', { dev: code(dev(ev.gone)), dir: code(cmd.target), under: code(dev(ev.to.dev)) });
+        if (ev.shown.length) return rich('capUmountBack', { dev: code(dev(ev.gone)), dir: code(cmd.target), file: code(ev.shown[0]) });
+        return rich('capUmountEmpty', { dev: code(dev(ev.gone)), dir: code(cmd.target) });
+      }
+      case 'df': {
+        var rows = L.dfRows(s);
+        if (cmd.T) {
+          var a = rows.filter(function (r) { return r.target === cmd.paths[0]; })[0], b = rows.filter(function (r) { return r.target === cmd.paths[1]; })[0];
+          if (a && b) return rich('capDfT', { d1: code(a.source), s1: data(a.size), u1: data(a.used), d2: code(b.source), s2: data(b.size), u2: data(b.used) });
+        }
+        if (cmd.paths.length === 1 && cmd.paths[0] === '/') {
+          var hidden = fileIn(s, '/mnt/vjezba');
+          if (hidden) return rich('capDfRoot', { file: code(hidden.name), used: data(L.human(s.rootFs.usedKiB)), size: data(L.human(hidden.kib)), dir: code('/mnt/vjezba') });
+        }
+        var mounted = rows.filter(function (r) { return r.key !== 'root'; });
+        if (!mounted.length) return rich('capDfNone', { part: code('/dev/' + (s.parts[0] ? s.parts[0].name : 'vdb1')) });
+        var r = mounted[mounted.length - 1];
+        return rich(r.type === 'xfs' ? 'capDfXfs' : 'capDfExt4', { part: code(r.source), size: data(r.size), used: data(r.used) });
+      }
+      case 'du': {
+        if (ev.at.kind === 'root') return rich('capDuRoot', { du: data(L.human(ev.kib)) });
+        var hd = L.hiddenAt(s, cmd.path).files;
+        if (hd.length) return rich('capDuFs', { dev: code(dev(ev.at.dev)), du: data(L.human(ev.kib)), file: code(hd[0]) });
+        return rich('capDuFsOnly', { dev: code(dev(ev.at.dev)), du: data(L.human(ev.kib)) });
+      }
+      case 'lsblk':
+        return rich(s.parts.length ? 'capLsblkParts' : 'capLsblk', { disk: code(dev(L.DISK.name)) });
+      case 'parted':
+        return rich('capParted', { part: code(dev(cmd.part)) });
+      case 'mkfs':
+        return rich('capMkfs', { cmd: code('mkfs.' + cmd.type), type: typeName(cmd.type), part: code(dev(cmd.dev)) });
+      case 'mkdir':
+        return rich(ev.made ? 'capMkdir' : 'capMkdirSame', { dir: code(cmd.path) });
+    }
+    return code(s.out.join(' '));
+  }
+
+  var NO_FILE = { layers: true, nopoint: true };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['hide', t('pHide')], ['layers', t('pLayers')], ['nopoint', t('pNopoint')], ['stack', t('pStack')]],
+        visible: function () { return false; } },
+      { key: 'fileMiB', type: 'range', label: t('fileMiB'), hint: t('fileHint'), min: 10, max: 500, step: 10,
+        format: function (v) { return t.n('unitMiB', v); },
+        disabled: function (p) { return NO_FILE[p.scene] ? t('fileOff') : false; } },
+      { key: 'xray', type: 'toggle', label: t('xray'), hint: t('xrayHint') },
+      { key: 'fsType', type: 'choice', label: t('fsType'), hint: t('fsTypeHint'), resets: true,
+        disabled: function (p) { return L.SCENES[p.scene] && L.SCENES[p.scene].ext4 ? t('fsTypeOff') : false; },
+        options: [['ext4', t('optExt4')], ['xfs', t('optXfs')]] }
+    ],
+
+    presets: [
+      { id: 'hide', label: t('pHide'), params: { scene: 'hide' }, hint: t('pHideHint') },
+      { id: 'layers', label: t('pLayers'), params: { scene: 'layers' }, hint: t('pLayersHint') },
+      { id: 'nopoint', label: t('pNopoint'), params: { scene: 'nopoint' }, hint: t('pNopointHint') },
+      { id: 'stack', label: t('pStack'), params: { scene: 'stack' }, hint: t('pStackHint') }
+    ],
+
+    legend: [
+      { c: COL.device, label: t('legDevice') },
+      { c: COL.part, label: t('legPart') },
+      { c: COL.fs, label: t('legFs') },
+      { c: COL.mp, label: t('legMp') },
+      { shape: 'ml-covered', label: t('legHidden') },
+      { shape: 'ml-reach', label: t('legPath') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
