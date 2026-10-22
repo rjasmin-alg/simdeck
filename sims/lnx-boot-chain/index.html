@@ -1,0 +1,453 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-boot-chain: booting is a chain of hand-overs. Above, the chain of six boxes (firmware, boot loader, kernel,
+     initramfs, init process, target), each with where it lives, what it needs and what it hands on; below, the
+     console of this moment, a card with the root, PID 1 and the target, and the time per phase (systemd-analyze).
+     Each step one link checks what it needs and hands on, or the chain stops there. Model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="lnx-boot-chain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanac podizanja sustava · simdeck</title>
+<meta name="description" content="Korak po korak od uključenja do prijave: svaka karika predaje upravljanje sljedećoj. Pokvari jednu i lanac stane baš ondje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-boot-chain",
+  "title": {
+    "hr": "Lanac podizanja sustava",
+    "en": "The boot chain"
+  },
+  "concept": {
+    "hr": "Firmware → pokretač sustava → jezgra → initramfs → systemd: lanac predaja",
+    "en": "Firmware → boot loader → kernel → initramfs → systemd: a chain of hand-overs"
+  },
+  "summary": {
+    "hr": "Korak po korak od uključenja do prijave: svaka karika predaje upravljanje sljedećoj. Pokvari jednu i lanac stane baš ondje.",
+    "en": "Step from power on to the login: each link hands control to the next. Break one, and the chain stops right there."
+  },
+  "tags": [
+    "boot"
+  ],
+  "class": "stepper",
+  "steps": 7,
+  "entries": [
+    {
+      "preset": "wrong-uuid"
+    },
+    {
+      "preset": "rescue"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-boot-chain"]; colours only from kit tokens. */
+[data-sim="lnx-boot-chain"] .bc {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 2.2cqh;
+  height: 100%;
+  padding: 2.2cqh 1.4cqw;
+  font-size: 1rem;
+}
+
+/* the chain */
+[data-sim="lnx-boot-chain"] .bc-chain { display: flex; align-items: stretch; min-width: 0; }
+[data-sim="lnx-boot-chain"] .bc-arrow {
+  flex: 0 0 auto; align-self: center; width: 1.9rem; text-align: center;
+  font-size: 1.6rem; font-weight: 700; color: var(--line);
+}
+[data-sim="lnx-boot-chain"] .bc-arrow[data-on] { color: var(--ink); }
+[data-sim="lnx-boot-chain"] .bc-box {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 0.35rem;
+  padding: 0.55rem 0.65rem 0.6rem;
+  border: 0.2rem solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+[data-sim="lnx-boot-chain"] .bc-box:last-child { flex-grow: 1.2; }
+[data-sim="lnx-boot-chain"] .bc-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
+[data-sim="lnx-boot-chain"] .bc-num {
+  display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  border: 2px solid currentColor; font-weight: 700; font-size: var(--fs-sm);
+}
+[data-sim="lnx-boot-chain"] .bc-status { font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="lnx-boot-chain"] .bc-name { font-size: 1.2rem; font-weight: 700; line-height: 1.15; }
+[data-sim="lnx-boot-chain"] .bc-sub { font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.2; overflow-wrap: break-word; }
+[data-sim="lnx-boot-chain"] .bc-lives {
+  align-self: flex-start; padding: 0.05rem 0.45rem; border: 2px solid currentColor; border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+[data-sim="lnx-boot-chain"] .bc-need, [data-sim="lnx-boot-chain"] .bc-hands { font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="lnx-boot-chain"] .bc-need b, [data-sim="lnx-boot-chain"] .bc-hands b { font-weight: 700; }
+[data-sim="lnx-boot-chain"] .bc-mark { font-weight: 700; }
+[data-sim="lnx-boot-chain"] .bc-mark[data-m="ok"] { color: var(--ok); }
+[data-sim="lnx-boot-chain"] .bc-mark[data-m="bad"] { color: var(--danger); }
+[data-sim="lnx-boot-chain"] .bc-hands { margin-top: auto; padding-top: 0.35rem; border-top: 2px dashed var(--line); color: var(--muted); }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="done"] .bc-hands { color: var(--ink); border-top-style: solid; }
+
+[data-sim="lnx-boot-chain"] .bc-box[data-st="done"] { border-color: var(--c1); background: color-mix(in srgb, var(--c1) 16%, var(--bg)); }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="now"] { border: 0.35rem solid var(--ink); padding: 0.4rem 0.5rem 0.45rem; }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="failed"] { border: 0.35rem solid var(--danger); padding: 0.4rem 0.5rem 0.45rem; }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="failed"] .bc-status { color: var(--danger); }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="never"] { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-boot-chain"] .bc-box[data-st="never"] .bc-hands { border-top-color: transparent; }
+
+/* the console, the state card */
+[data-sim="lnx-boot-chain"] .bc-mid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 1.4cqw; min-height: 0; }
+[data-sim="lnx-boot-chain"] .bc-screen {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  border-radius: var(--radius); background: var(--ink); color: var(--bg);
+  padding: 0.5rem 0.8rem;
+}
+[data-sim="lnx-boot-chain"] .bc-screen-title { font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 0.3rem; }
+[data-sim="lnx-boot-chain"] .bc-lines { margin: 0; font-family: var(--mono); font-size: max(var(--fs-sm), 0.9rem); line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-sim="lnx-boot-chain"] .bc-lines .bc-desc { font-family: inherit; font-style: italic; }
+[data-sim="lnx-boot-chain"] .bc-screen[data-off] .bc-lines { font-style: italic; }
+[data-sim="lnx-boot-chain"] .bc-card {
+  display: flex; flex-direction: column; gap: 0.45rem; min-height: 0; overflow: hidden;
+  padding: 0.6rem 0.9rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="lnx-boot-chain"] .bc-row { display: grid; grid-template-columns: 7.4rem minmax(0, 1fr); gap: 0.6rem; align-items: baseline; }
+[data-sim="lnx-boot-chain"] .bc-sep { border-top: 2px dashed var(--line); }
+[data-sim="lnx-boot-chain"] .bc-key { color: var(--muted); font-weight: 700; }
+[data-sim="lnx-boot-chain"] .bc-val { min-width: 0; overflow-wrap: anywhere; }
+[data-sim="lnx-boot-chain"] .bc-val code { font-size: var(--fs-sm); }
+[data-sim="lnx-boot-chain"] .bc-val[data-bad] { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-boot-chain"] .bc-val .sd-changed { padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-boot-chain"] .bc-cmp { display: grid; gap: 0.25rem; margin-top: 0.1rem; font-size: var(--fs-sm); }
+[data-sim="lnx-boot-chain"] .bc-cmp div { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: 0.3rem; }
+
+/* the time bar */
+[data-sim="lnx-boot-chain"] .bc-time { display: grid; gap: 0.4rem; }
+[data-sim="lnx-boot-chain"] .bc-time-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; }
+[data-sim="lnx-boot-chain"] .bc-time-head b { font-weight: 700; }
+[data-sim="lnx-boot-chain"] .bc-raw { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="lnx-boot-chain"] .bc-bar { position: relative; display: flex; height: 1.7rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="lnx-boot-chain"] .bc-seg { min-width: 0.5rem; border-right: var(--line-w) solid var(--ink); }
+[data-sim="lnx-boot-chain"] .bc-seg:last-child { border-right: 0; }
+[data-sim="lnx-boot-chain"] .bc-seg[data-st="done"] { background: var(--sc); }
+[data-sim="lnx-boot-chain"] .bc-seg[data-st="done"][data-k="initrd"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--bg) 45%, transparent) 0.35em 0.5em);
+}
+[data-sim="lnx-boot-chain"] .bc-seg[data-st="done"][data-k="userspace"] {
+  background-image: repeating-linear-gradient(0deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 40%, transparent) 0.3em 0.42em);
+}
+[data-sim="lnx-boot-chain"] .bc-seg[data-st="never"] { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 25%, transparent) 0.35em 0.5em); }
+[data-sim="lnx-boot-chain"] .bc-tick { position: absolute; top: -0.55rem; bottom: -0.55rem; width: 0.3rem; margin-left: -0.15rem; background: var(--ink); }
+[data-sim="lnx-boot-chain"] .bc-tlegend { display: flex; flex-wrap: wrap; gap: 0.2rem 1.4rem; font-size: var(--fs-sm); }
+[data-sim="lnx-boot-chain"] .bc-tlegend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="lnx-boot-chain"] .bc-sw { width: 1.1rem; height: 1.1rem; border: 2px solid var(--ink); border-radius: 0.2rem; background: var(--sc, var(--bg)); }
+[data-sim="lnx-boot-chain"] .bc-sw[data-k="initrd"] { background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--bg) 45%, transparent) 0.25em 0.37em); }
+[data-sim="lnx-boot-chain"] .bc-sw[data-k="userspace"] { background-image: repeating-linear-gradient(0deg, transparent 0 0.22em, color-mix(in srgb, var(--bg) 40%, transparent) 0.22em 0.32em); }
+[data-sim="lnx-boot-chain"] .bc-sw[data-k="tick"] { width: 0.3rem; border: 0; background: var(--ink); }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-boot-chain"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-boot-chain"] .sd-swatch[data-shape="bc-done"] { border: 2px solid var(--c1); background: color-mix(in srgb, var(--c1) 16%, var(--bg)); }
+[data-sim="lnx-boot-chain"] .sd-swatch[data-shape="bc-now"] { border: 0.25rem solid var(--ink); background: var(--bg); }
+[data-sim="lnx-boot-chain"] .sd-swatch[data-shape="bc-failed"] { position: relative; border: 0.25rem solid var(--danger); background: var(--bg); }
+[data-sim="lnx-boot-chain"] .sd-swatch[data-shape="bc-failed"]::after { content: '✗'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--danger); }
+[data-sim="lnx-boot-chain"] .sd-swatch[data-shape="bc-never"] { border: 2px dashed var(--muted); background: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; the chain wraps into two columns and the arrows go. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-boot-chain"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-boot-chain"] .bc { height: auto; padding: 0.6rem; gap: 0.9rem; }
+  [data-sim="lnx-boot-chain"] .bc-chain { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  [data-sim="lnx-boot-chain"] .bc-arrow { display: none; }
+  [data-sim="lnx-boot-chain"] .bc-mid { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+  [data-sim="lnx-boot-chain"] .bc-name { font-size: 1.05rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Lanac podizanja sustava</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings); // picks the language; every visible word goes through t
+
+  // ── small pieces ──
+
+  /** Data (versions, UUIDs, unit names) is not language: the word check skips translate="no". */
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function secs(x) { var s = x.toFixed(3); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+
+  /** Caption parts (from sims/lnx-links-inodes): t.parts with node placeholders cloned where they land, *English term*
+      as <em lang="en"> (the Croatian term rule, for terms the glossary lacks) and `x` as code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+
+  // ── the chain ──
+
+  var MARKS = { done: '✓', now: '▶', failed: '✗', never: '–', waiting: '·' };
+  var STATUS = { done: 'stDone', now: 'stNow', failed: 'stFailed', never: 'stNever', waiting: 'stWaiting' };
+
+  function stateOf(s, id, i) {
+    if (s.done.indexOf(id) >= 0) return 'done';
+    if (s.failedAt === id) return 'failed';
+    if (s.failedAt) return 'never';
+    if (s.at === i) return 'now';
+    return 'waiting';
+  }
+
+  function box(c, st, i) {
+    var s = c.state, p = c.params;
+    var k = stateOf(s, st.id, i);
+    var sub = L.subOf(st, p);
+    var needs = st.needs.length ? h('div', { class: 'bc-need' }, h('b', null, t('needs') + ': '),
+      st.needs.map(function (n, j) {
+        var m = k === 'done' ? 'ok' : k === 'failed' && n === p['break'] ? 'bad' : null;
+        return [j ? ', ' : '', t('need_' + n),
+          m ? h('span', { class: 'bc-mark', dataset: { m: m } }, m === 'ok' ? ' ✓' : ' ✗') : null];
+      })) : null;
+    var changed = s.changed === st.id;
+    return h('div', {
+      class: 'bc-box' + (changed ? ' sd-changed' : '') + (changed && c.dir === 'forward' ? ' sd-anim-in' : ''),
+      dataset: { st: k }
+    },
+      h('div', { class: 'bc-head' }, h('span', { class: 'bc-num' }, String(i + 1)),
+        h('span', { class: 'bc-status' }, MARKS[k] + ' ' + t(STATUS[k]))),
+      h('div', { class: 'bc-name' }, t(st.label)),
+      sub ? h('div', { class: 'bc-sub', translate: 'no' }, sub) : null,
+      h('span', { class: 'bc-lives' }, t(st.lives)),
+      needs,
+      h('div', { class: 'bc-hands' }, h('b', null, t('hands') + ': '), t(st.hands)));
+  }
+
+  function chainRow(c) {
+    var chain = L.chainOf(c.params), s = c.state, out = [];
+    chain.stages.forEach(function (st, i) {
+      if (i) out.push(h('span', { class: 'bc-arrow', 'aria-hidden': 'true', dataset: s.done.indexOf(chain.stages[i - 1].id) >= 0 ? { on: '' } : {} }, '→'));
+      out.push(box(c, st, i));
+    });
+    return h('div', { class: 'bc-chain' }, out);
+  }
+
+  // ── the console and the state card ──
+
+  function screenPanel(s) {
+    var off = !s.power;
+    var lines = off ? [h('span', null, t('scrOff'))] : s.screen.map(function (l, i) {
+      var br = i < s.screen.length - 1 ? '\n' : '';
+      return typeof l === 'string' ? [h('span', { translate: 'no' }, l), br] : [h('span', { class: 'bc-desc' }, t(l.t)), br];
+    });
+    return h('div', { class: 'bc-screen', dataset: off ? { off: '' } : {} },
+      h('div', { class: 'bc-screen-title' }, t('screen')),
+      h('pre', { class: 'bc-lines' }, lines));
+  }
+
+  function row(key, val, attrs) { return h('div', { class: 'bc-row' }, h('span', { class: 'bc-key' }, t(key)), h('span', Object.assign({ class: 'bc-val' }, attrs || {}), val)); }
+  function marked(node, on) { return on ? h('span', { class: 'sd-changed' }, node) : node; }
+
+  function card(c) {
+    var s = c.state, prev = c.prev;
+    var rootVal = s.root.real ? [t('rootReal'), ' ', code('UUID=' + L.ROOT_UUID.slice(0, 8) + '…')]
+      : s.root.initramfs ? t('rootInitramfs') : t('rootNone');
+    var rootChanged = prev && (prev.root.real !== s.root.real || prev.root.initramfs !== s.root.initramfs);
+    var p = c.params, chain = L.chainOf(p), vars = chain.vars(p);
+    // Only the rows the chain's stages fill (a chain without a PID 1 or a target shows no such row).
+    var sets = function (k) { return chain.stages.some(function (st) { return st.does && st.does[k]; }); };
+    var rows = [];
+    if (sets('root')) rows.push(row('rootLabel', marked(h('span', null, rootVal), rootChanged)));
+    if (sets('pid1')) rows.push(row('pid1Label', marked(s.pid1 ? code(s.pid1) : h('span', null, t('pid1None')), prev && prev.pid1 !== s.pid1)));
+    if (sets('target')) rows.push(row('targetLabel', marked(s.target ? code(s.target) : h('span', null, t('targetNone')), prev && prev.target !== s.target),
+      s.halt === 'emergency' ? { dataset: { bad: '' } } : null));
+    // What root= asks for and what the disk has: the two causes of one symptom (no driver, wrong UUID) side by side.
+    if (vars.uuid && s.done.indexOf('loader') >= 0 && !s.root.real) {
+      // The answer shows once the initramfs has looked (it stopped there); until then it is still looking.
+      var looked = s.failedAt === 'initramfs';
+      var hidden = p['break'] === 'diskDriver';
+      rows.push(h('div', { class: 'bc-sep' }));
+      rows.push(row('wantKey', code('root=UUID=' + vars.uuid), looked && vars.uuid !== L.ROOT_UUID ? { dataset: { bad: '' } } : null));
+      rows.push(row('diskKey', !looked ? h('span', null, t('diskUnknown'))
+        : hidden ? h('span', null, t('diskHidden')) : code('vda4 UUID=' + L.ROOT_UUID),
+        looked && hidden ? { dataset: { bad: '' } } : null));
+    }
+    if (s.halt) rows.push(row('haltLabel', t('halt_' + s.halt), { dataset: { bad: '' } }));
+    if (s.halt === 'emergency') {
+      rows.push(h('div', { class: 'bc-cmp' },
+        h('div', null, h('span', { class: 'bc-mark', dataset: { m: 'bad' } }, '✗'), h('span', null, code('rescue.target'), ': ', t('cmpRescue'))),
+        h('div', null, h('span', { class: 'bc-mark' }, '▶'), h('span', null, code('emergency.target'), ': ', t('cmpEmergency')))));
+    }
+    return h('div', { class: 'bc-card' }, rows);
+  }
+
+  // ── the time bar ──
+
+  var PHASES = [['kernel', 'tKernel', 'var(--c2)'], ['initrd', 'tInitrd', 'var(--c3)'], ['userspace', 'tUser', 'var(--c4)']];
+
+  function timeBar(c) {
+    var chain = L.chainOf(c.params), tm = chain.timing, s = c.state, p = c.params;
+    if (!tm) return null;
+    var full = { kernel: tm.kernel, initrd: tm.initrd, userspace: tm.userspace['multi-user'] };
+    var total = full.kernel + full.initrd + full.userspace;
+    var stopped = !!s.failedAt;
+    var finished = !stopped && s.at >= chain.stages.length;
+    var segs = [], legend = [];
+    PHASES.forEach(function (ph) {
+      var v = s.t[ph[0]];
+      var st = v != null ? 'done' : stopped ? 'never' : 'wait';
+      var notMeasured = finished && v == null;
+      segs.push(h('div', { class: 'bc-seg', dataset: { k: ph[0], st: st },
+        style: { flex: '0 0 ' + (100 * full[ph[0]] / total) + '%', '--sc': ph[2] } }));
+      legend.push(h('span', null, h('span', { class: 'bc-sw', dataset: { k: ph[0] }, style: { '--sc': ph[2] } }),
+        t(ph[1]) + ': ', v != null ? h('b', { translate: 'no' }, secs(v) + ' s')
+          : t(notMeasured ? 'tNotMeasured' : stopped ? 'tNotRun' : 'tWait')));
+    });
+    var tick = null;
+    if (s.t.targetAt != null) {
+      var at = (full.kernel + full.initrd + s.t.targetAt) / total * 100;
+      tick = h('span', { class: 'bc-tick', style: { left: at + '%' } });
+      legend.push(h('span', null, h('span', { class: 'bc-sw', dataset: { k: 'tick' } }), t('tTargetAt', { s: secs(s.t.targetAt) })));
+    }
+    var head = [h('b', null, t('timeTitle'))];
+    if (finished && s.t.userspace != null) {
+      // The book's line is cut before systemd's "= total"; the page prints only what the book shows.
+      head.push(h('span', { class: 'bc-raw', translate: 'no' }, 'Startup finished in ' + s.t.kernel.toFixed(3) + 's (kernel) + ' +
+        s.t.initrd.toFixed(3) + 's (initrd) + ' + s.t.userspace.toFixed(3) + 's (userspace)'));
+    } else if (stopped) head.push(h('span', null, t('tUnfinished')));
+    return h('div', { class: 'bc-time' },
+      h('div', { class: 'bc-time-head' }, head),
+      h('div', { class: 'bc-bar' }, segs, tick),
+      h('div', { class: 'bc-tlegend' }, legend));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'bc' },
+      chainRow(c),
+      h('div', { class: 'bc-mid' }, screenPanel(c.state), card(c)),
+      timeBar(c)));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params, chain = L.chainOf(p);
+    var pre = chain.capPrefix || '';
+    var vars = { kver: code(L.KVER), target: code(L.targetName(p) || ''),
+      at: s.t.targetAt != null ? secs(s.t.targetAt) : '', user: s.t.userspace != null ? secs(s.t.userspace) : '' };
+    if (!s.power) return rich('capOff');
+    if (s.failedAt) {
+      var i = s.stages.indexOf(s.failedAt);
+      var out = rich(pre + 'capFail_' + p['break'], vars);
+      // The last link has nothing after it to not try.
+      return i < s.stages.length - 1 ? out.concat(' ', rich('capStopped', { ord: t('ord' + (i + 1)) })) : out;
+    }
+    if (!s.done.length) return rich('capPowerOn');
+    var last = s.done[s.done.length - 1];
+    if (s.at >= chain.stages.length && s.t.targetAt == null && chain.timing) return rich(pre + 'capDone_' + last + 'Other', vars);
+    return rich(pre + 'capDone_' + last, vars);
+  }
+
+  var breaks = [['none', t('break_none')]];
+  Object.keys(L.CHAINS).forEach(function (k) {
+    L.CHAINS[k].breaks.forEach(function (b) { if (!breaks.some(function (o) { return o[0] === b; })) breaks.push([b, t('break_' + b)]); });
+  });
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'chain', type: 'select', label: t('chain'), resets: true, options: [['linux', t('chainLinux')]],
+        visible: function () { return false; } },
+      { key: 'break', type: 'select', label: t('breakLabel'), hint: t('breakHint'), resets: true, options: breaks },
+      { key: 'target', type: 'choice', label: t('targetParam'),
+        options: [['multi-user', t('targetMulti')], ['graphical', t('targetGraphical')]],
+        visible: function (p) { return L.chainOf(p).targets.length > 0; } }
+    ],
+
+    presets: [
+      { id: 'normal', label: t('pNormal'), params: {}, hint: t('pNormalHint') },
+      { id: 'no-kernel', label: t('pNoKernel'), params: { break: 'kernelFile' }, hint: t('pNoKernelHint') },
+      { id: 'no-driver', label: t('pNoDriver'), params: { break: 'diskDriver' }, hint: t('pNoDriverHint') },
+      { id: 'wrong-uuid', label: t('pWrongUuid'), params: { break: 'rootUuid' }, hint: t('pWrongUuidHint') },
+      { id: 'rescue', label: t('pRescue'), params: { break: 'targetUnit' }, hint: t('pRescueHint') }
+    ],
+
+    legend: [
+      { shape: 'bc-done', label: t('legDone') },
+      { shape: 'bc-now', label: t('legNow') },
+      { shape: 'bc-failed', label: t('legFailed') },
+      { shape: 'bc-never', label: t('legNever') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
