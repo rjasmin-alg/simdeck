@@ -113,7 +113,7 @@
       capUnknown: 'Prvo spajanje: klijent ključ poslužitelja ne poznaje i pokazuje njegov otisak {fp}. Odgovor yes bez usporedbe isključuje zaštitu od aktivnog posrednika.',
       capUnknownAgain: 'Stari redak je uklonjen, pa je ključ opet nepoznat: klijent pita kao pri prvom spajanju. Usporedi otisak {fp} s onim koji je javio administrator.',
       capMismatch: 'Poslužitelj pokazuje ključ {fp}, a u retku {line} spremljen je {old}. Klijent upozorava da se identitet poslužitelja promijenio i odbija vezu, bez pitanja: s ove strane ponovna instalacija i aktivni posrednik izgledaju jednako.',
-      capYes: 'yes: ključ {fp} upisan je u redak {line} datoteke {file} („povjerenje pri prvom spajanju”). Od sada klijent uspoređuje sam. Pitanje 1 je riješeno; slijedi pitanje 2.',
+      capYes: 'yes: ključ {fp} upisan je u redak {line} datoteke {file} ([[trust on first use]]). Od sada klijent uspoređuje sam. Pitanje 1 je riješeno; slijedi pitanje 2.',
       capNo: 'no: klijent ništa ne sprema i prekida vezu (Host key verification failed). Do pitanja 2 nije ni došlo.',
       capAuthKey: 'Pitanje 2: klijent šalje javni ključ {fp} i potpis napravljen privatnim ključem. Poslužitelj ga nalazi u {file} i prihvaća: sjednica je otvorena, bez lozinke. Privatni ključ nije prešao mrežu.',
       capAuthKeyFailPw: 'Ključ {fp} nije u {file}: failure. Poslužitelj u popisu i dalje navodi password, pa klijent pita korisnika za lozinku.',
@@ -137,13 +137,13 @@
       capFull: 'Demonstracija je puna: R počinje ispočetka.',
 
       explain: '<p>Svako SSH spajanje odgovara na <strong>dva pitanja, dvama različitim ključevima</strong>. Prvo: je li ovo pravi poslužitelj? ' +
-        'Pri razmjeni ključeva poslužitelj pokazuje svoj <i lang="en">host key</i> (ključ poslužitelja), a klijent ga uspoređuje s ' +
+        'Pri razmjeni ključeva poslužitelj pokazuje svoj [[host key]], a klijent ga uspoređuje s ' +
         'datotekom <code translate="no">~/.ssh/known_hosts</code>. Da bi to mogao, mora ga <em>unaprijed</em> poznavati. ' +
-        'Drugo: tko je korisnik? To rješava <i lang="en">user authentication</i> (autentikacija korisnika), ključem ili lozinkom.</p>' +
+        'Drugo: tko je korisnik? To rješava [[user authentication]], ključem ili lozinkom.</p>' +
         '<p><strong>Prvo spajanje.</strong> Ključ još nije spremljen, pa klijent pokazuje njegov [[key fingerprint]] i pita. ' +
         'Nakon <code>yes</code> ključ je spremljen i idući put klijent ne pita. Pri prvom spajanju taj je odgovor jedina ' +
         'provjera poslužitelja: <code>yes</code> bez usporedbe s otiskom dobivenim drugim putem čuva samo od pasivnog prisluškivanja, ' +
-        'ne od <i lang="en">man in the middle</i> (aktivnog posrednika). Kad se spremljeni ključ i pokazani razlikuju, klijent ne pita nego odbija.</p>' +
+        'ne od [[man in the middle]]. Kad se spremljeni ključ i pokazani razlikuju, klijent ne pita nego odbija.</p>' +
         '<p><strong>Ključ ili lozinka.</strong> Na klijentu nastaje [[key pair]]; [[public key]] ide u <code translate="no">authorized_keys</code> ' +
         'na poslužitelju, a [[private key]] ne prelazi mrežu nikad: klijent njime samo potpisuje. Lozinka mrežu prelazi pri svakoj prijavi, ' +
         'kao otvoreni tekst unutar paketa koji šifrira prijenosni sloj. Specifikacija za <code>publickey</code> kaže REQUIRED, za ' +
@@ -258,7 +258,7 @@
       capUnknown: 'First connection: the client does not know the server\'s key and shows its fingerprint {fp}. Answering yes without comparing switches off the protection against an active man in the middle.',
       capUnknownAgain: 'The old line is gone, so the key is unknown again: the client asks as on a first connection. Compare the fingerprint {fp} with the one the admin gave you.',
       capMismatch: 'The server presents the key {fp}, but line {line} holds {old}. The client warns that the server\'s identification has changed and refuses to connect, without a question: from here a reinstall and an active man in the middle look the same.',
-      capYes: 'yes: the key {fp} is written to line {line} of {file} ("trust on first use"). From now on the client compares by itself. Question 1 is settled; question 2 follows.',
+      capYes: 'yes: the key {fp} is written to line {line} of {file} ([[trust on first use]]). From now on the client compares by itself. Question 1 is settled; question 2 follows.',
       capNo: 'no: the client stores nothing and ends the connection (Host key verification failed). Question 2 never comes.',
       capAuthKey: 'Question 2: the client sends the public key {fp} and a signature made with the private key. The server finds it in {file} and accepts: the session opens, no password. The private key never crossed the network.',
       capAuthKeyFailPw: 'The key {fp} is not in {file}: failure. The server still lists password, so the client asks the user for it.',
@@ -282,13 +282,13 @@
       capFull: 'The demo is full: R starts again.',
 
       explain: '<p>Every SSH connection answers <strong>two questions, with two different keys</strong>. First: is this the right server? ' +
-        'During the key exchange the server presents its host key, and the client compares it with the file ' +
+        'During the key exchange the server presents its [[host key]], and the client compares it with the file ' +
         '<code translate="no">~/.ssh/known_hosts</code>. To do that it must know the key <em>in advance</em>. ' +
-        'Second: who is the user? That is user authentication, by key or by password.</p>' +
+        'Second: who is the user? That is [[user authentication]], by key or by password.</p>' +
         '<p><strong>First connection.</strong> The key is not stored yet, so the client shows its [[key fingerprint]] and asks. ' +
         'After <code>yes</code> the key is stored and the client does not ask again. At the first connection that answer is the only ' +
         'check of the server: <code>yes</code> without comparing with a fingerprint obtained another way protects against passive ' +
-        'eavesdropping only, not against an active man in the middle. When the stored key and the presented one differ, the client does not ask: it refuses.</p>' +
+        'eavesdropping only, not against an active [[man in the middle]]. When the stored key and the presented one differ, the client does not ask: it refuses.</p>' +
         '<p><strong>Key or password.</strong> The [[key pair]] is made on the client; the [[public key]] goes into ' +
         '<code translate="no">authorized_keys</code> on the server, and the [[private key]] never crosses the network: the client only signs with it. ' +
         'A password crosses the network at every login, as plain text inside a packet the transport layer encrypts. The specification ' +

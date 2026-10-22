@@ -85,7 +85,7 @@ and expected numbers: `SPEC.md`. The messages are drawn with kit view **K1, mess
   checking." on a changed key (the string is in the binary; the order of the lines is from memory).
 - RFC section numbers above.
 
-## Term pairs (not in `kit/glossary.js`; written out in both tables)
+## Term pairs (added to `kit/glossary.js` with `"src": "simdeck"`; the page now marks them `[[term]]`)
 
 | English | Croatian | Source |
 |---|---|---|
