@@ -1,0 +1,722 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-links-inodes: names are directory entries that point to inodes. Left, the directory's entries (name → inode
+     number); right, one card per inode (number, type, link count, the process that holds it open, its data); arrows
+     from each name to its inode, and from a symbolic link's stored path to the entry it names. Under them the data
+     blocks; above them the command of this step and what it printed. Each step runs one command: ln, ln -s, rm, mv,
+     cat, printf >, kill. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-links-inodes">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imena, inodei i poveznice · simdeck</title>
+<meta name="description" content="Dodaj ime, ukloni ime, preimenuj: brojač poveznica kaže koliko imena vodi do inodea, a simbolička poveznica pamti samo stazu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-links-inodes",
+  "title": {
+    "hr": "Imena, inodei i poveznice",
+    "en": "Hard links, symlinks and inodes"
+  },
+  "concept": {
+    "hr": "Ime pokazuje na inode; brojač poveznica; viseća simbolička poveznica",
+    "en": "Names point to inodes; the link count; dangling symlinks"
+  },
+  "summary": {
+    "hr": "Dodaj ime, ukloni ime, preimenuj: brojač poveznica kaže koliko imena vodi do inodea, a simbolička poveznica pamti samo stazu.",
+    "en": "Add a name, remove one, rename: the link count says how many names lead to an inode, and a symbolic link stores only a path."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 3,
+  "entries": [
+    {
+      "preset": "simbolicka"
+    },
+    {
+      "preset": "otvorena"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-links-inodes"]; colours only from kit tokens.
+   Layout: the shell strip on top; the scene (directory tables | a lane for the arrows | inode cards, with an SVG of the
+   arrows over it); the data blocks (kit view K3, one row) at the bottom. */
+[data-sim="lnx-links-inodes"] .li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  height: 100%;
+  padding: 0.8cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-links-inodes"] [data-c="1"] { --li-c: var(--c1); }
+[data-sim="lnx-links-inodes"] [data-c="2"] { --li-c: var(--c2); }
+[data-sim="lnx-links-inodes"] [data-c="3"] { --li-c: var(--c3); }
+[data-sim="lnx-links-inodes"] [data-c="4"] { --li-c: var(--c4); }
+[data-sim="lnx-links-inodes"] [data-c="5"] { --li-c: var(--c5); }
+[data-sim="lnx-links-inodes"] [data-c="6"] { --li-c: var(--c6); }
+[data-sim="lnx-links-inodes"] [data-c="7"] { --li-c: var(--c7); }
+[data-sim="lnx-links-inodes"] [data-c="8"] { --li-c: var(--c8); }
+
+/* the shell strip: prompt and command, what it printed, the process that holds a file */
+[data-sim="lnx-links-inodes"] .li-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 1.2rem;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-links-inodes"] .li-cmd { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-cmd .li-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-links-inodes"] .li-cmd .li-hint { color: var(--muted); font-family: var(--sans); font-weight: 400; font-size: 1rem; }
+[data-sim="lnx-links-inodes"] .li-proc { align-self: start; color: var(--muted); font-size: 1rem; }
+[data-sim="lnx-links-inodes"] .li-proc code { color: var(--ink); }
+[data-sim="lnx-links-inodes"] .li-out {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-height: calc(var(--lines, 1) * 1.3em);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.3;
+  white-space: pre;
+  overflow-x: auto;
+}
+[data-sim="lnx-links-inodes"] .li-out .li-err { color: var(--danger); font-weight: 700; }
+
+/* the scene */
+[data-sim="lnx-links-inodes"] .li-scene {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem minmax(0, 1.05fr);
+  align-items: start;
+}
+[data-sim="lnx-links-inodes"] .li-col { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+[data-sim="lnx-links-inodes"] .li-dirs { grid-column: 1; }
+[data-sim="lnx-links-inodes"] .li-inodes { grid-column: 3; }
+[data-sim="lnx-links-inodes"] .li-col h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--muted); font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-col h3 code { color: var(--ink); }
+[data-sim="lnx-links-inodes"] .li-none { color: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
+/* directory entries: one row each, a bar in the inode's colour, name → inode number */
+[data-sim="lnx-links-inodes"] .li-table { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-links-inodes"] .li-ent {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-height: 2.8rem;
+  padding: 0.35rem 0.9rem;
+  border: 2px solid var(--ink);
+  border-left: 0.6rem solid var(--li-c, var(--ink));
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 1.45rem;
+}
+[data-sim="lnx-links-inodes"] .li-ent .li-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-ent .li-to { margin-left: auto; font-family: var(--mono); }
+[data-sim="lnx-links-inodes"] .li-ent .li-stored { color: var(--muted); font-family: var(--mono); font-size: 1.15rem; }
+[data-sim="lnx-links-inodes"] .li-ent .li-tag { color: var(--muted); font-size: 1rem; }
+/* removed this step: struck; no entry (where a symlink points): a dashed outline */
+[data-sim="lnx-links-inodes"] .li-ent.li-gone { border-color: var(--line); border-left-color: var(--line); color: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-ent.li-gone .li-name,
+[data-sim="lnx-links-inodes"] .li-ent.li-gone .li-to { text-decoration: line-through; }
+[data-sim="lnx-links-inodes"] .li-ent.li-ghost { border: 2px dashed var(--muted); background: transparent; color: var(--muted); }
+/* on the path this step's lookup took */
+[data-sim="lnx-links-inodes"] .li-hop { outline: 0.25rem solid var(--ink); outline-offset: 0.1rem; }
+
+/* inode cards: file (square corners), directory (a folder tab), symlink (round corners); the type letter as well */
+[data-sim="lnx-links-inodes"] .li-ino {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.45rem 0.9rem;
+  font-size: 1.1rem;
+  border: 2px solid var(--ink);
+  border-left: 0.6rem solid var(--li-c, var(--ink));
+  border-radius: 0;
+  background: var(--bg);
+}
+[data-sim="lnx-links-inodes"] .li-ino[data-type="dir"] { margin-top: 0.7rem; border-top-left-radius: 0; }
+[data-sim="lnx-links-inodes"] .li-ino[data-type="dir"]::before {
+  content: '';
+  position: absolute;
+  top: calc(-0.7rem - 2px);
+  left: -0.6rem;
+  width: 5rem;
+  height: 0.7rem;
+  border: 2px solid var(--ink);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--li-c, var(--ink));
+}
+[data-sim="lnx-links-inodes"] .li-ino[data-type="symlink"] { border-radius: 1.2rem; }
+[data-sim="lnx-links-inodes"] .li-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+[data-sim="lnx-links-inodes"] .li-num { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-type {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+[data-sim="lnx-links-inodes"] .li-word { color: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-badge { margin-left: auto; padding: 0 0.5rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-fields { display: flex; flex-wrap: wrap; gap: 0.1rem 1.4rem; }
+[data-sim="lnx-links-inodes"] .li-fields b { font-family: var(--mono); font-size: 1.3rem; }
+[data-sim="lnx-links-inodes"] .li-lab { color: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-data code { font-size: 1.25rem; font-weight: 700; }
+[data-sim="lnx-links-inodes"] .li-data .li-size { color: var(--muted); font-family: var(--mono); }
+/* no name left, still open: hatched; freed this step: dashed and struck */
+[data-sim="lnx-links-inodes"] .li-ino.li-orphan { background: repeating-linear-gradient(135deg, var(--panel) 0 0.45rem, var(--bg) 0.45rem 0.9rem); }
+[data-sim="lnx-links-inodes"] .li-ino.li-freed { border-style: dashed; border-color: var(--muted); border-left-color: var(--muted); color: var(--muted); background: transparent; }
+[data-sim="lnx-links-inodes"] .li-ino.li-freed .li-num { text-decoration: line-through; }
+[data-sim="lnx-links-inodes"] .li-ino.li-freed::before { border-color: var(--muted); background: var(--line); }
+
+/* the arrows (SVG in CSS pixels, drawn after layout) */
+[data-sim="lnx-links-inodes"] .li-w { fill: none; stroke: var(--ink); stroke-width: 2.5; }
+[data-sim="lnx-links-inodes"] .li-w.li-sym { stroke-dasharray: 9 6; }
+[data-sim="lnx-links-inodes"] .li-w.li-now { stroke-width: 4.5; }
+[data-sim="lnx-links-inodes"] .li-w.li-broken { stroke: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-halo { fill: none; stroke: var(--hl); stroke-width: 12; stroke-linecap: round; }
+[data-sim="lnx-links-inodes"] .li-head-mark { fill: var(--ink); }
+[data-sim="lnx-links-inodes"] .li-head-mark.li-broken { fill: var(--muted); }
+[data-sim="lnx-links-inodes"] .li-x { stroke: var(--danger); stroke-width: 4; stroke-linecap: round; }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-links-inodes"] .sd-ctl[hidden] { display: none; }
+
+/* the block row */
+[data-sim="lnx-links-inodes"] .li .sd-bg-cell { font-size: 1rem; }
+
+/* legend swatches */
+[data-sim="lnx-links-inodes"] .sd-swatch[data-shape="li-ent"] { background: var(--bg); border: 2px solid var(--ink); border-left: 0.45rem solid var(--c2); }
+[data-sim="lnx-links-inodes"] .sd-swatch[data-shape="li-ino"] { background: var(--bg); border: 2px solid var(--ink); border-radius: 0; }
+[data-sim="lnx-links-inodes"] .sd-swatch[data-shape="li-hop"] { background: var(--bg); border: 0.2rem solid var(--ink); outline: 0.12rem solid var(--ink); outline-offset: 0.08rem; }
+[data-sim="lnx-links-inodes"] .sd-swatch[data-shape="li-held"] { background: repeating-linear-gradient(135deg, var(--muted) 0 0.2rem, var(--bg) 0.2rem 0.4rem); border: 2px solid var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the tables stack and the arrows go (the rows carry → number). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-links-inodes"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-links-inodes"] .li { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-links-inodes"] .li-shell { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-links-inodes"] .li-cmd { font-size: 1rem; overflow-wrap: anywhere; }
+  [data-sim="lnx-links-inodes"] .li-out { font-size: 0.9rem; }
+  [data-sim="lnx-links-inodes"] .li-scene { display: flex; flex-direction: column; gap: 1rem; }
+  [data-sim="lnx-links-inodes"] .li-wires { display: none; }
+  [data-sim="lnx-links-inodes"] .li-ent { font-size: 1rem; flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Imena, inodei i poveznice</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var NS = 'http://www.w3.org/2000/svg';
+  var PROMPT = '[student@demosrv1 ~]$';
+  var TYPE = { file: 'tFile', dir: 'tDir', symlink: 'tSymlink' };
+
+  // ── small pieces ──
+
+  /** Data (names, paths, inode numbers, process ids) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  /** An inode's colour: directories grey, files and symlinks a series colour by their number. */
+  function colourOf(s, ino) {
+    var n = L.inodeOf(s, ino);
+    if (n && n.type === 'dir') return 8;
+    return 1 + ((Number(ino) - 33616720) % 7 + 7) % 7;
+  }
+  function quoteOf(text) { return '"' + text.replace(/\n$/, '').replace(/\n/g, '\\n') + '"'; }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands (a node can stand in one place only),
+      *English term* turned into <em lang="en"> (the Croatian term rule, for terms the glossary lacks) and `x` into code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── the command line ──
+
+  function cmdText(c) {
+    if (!c) return '';
+    var x;
+    switch (c.op) {
+      case 'ls': x = 'ls -li ' + c.path; break;
+      case 'stat': x = 'stat -c "%h %n" ' + c.path; break;
+      case 'cat': x = 'cat ' + c.path; break;
+      case 'write': x = 'printf \'' + c.text.replace(/\n/g, '\\n') + '\' > ' + c.path; break;
+      case 'ln': x = 'ln ' + (c.sym ? '-s ' : '') + c.target + ' ' + c.name; break;
+      case 'rm': x = 'rm ' + c.path; break;
+      case 'mv': x = 'mv ' + c.from + ' ' + c.to; break;
+      case 'mkdir': x = 'mkdir -p ' + c.path; break;
+      case 'kill': x = 'kill ' + c.pid; break;
+    }
+    return x + (c.then ? '; ls -li ' + c.then : '');
+  }
+  /** Output lines a preset ever prints at once: the strip keeps that height, so the scene does not jump. */
+  var linesMemo = {};
+  function maxLines(p) {
+    var key = p.scene + '|' + p.holdOpen;
+    if (linesMemo[key] == null) {
+      var n = 1;
+      for (var i = 0; i <= L.steps(p); i++) n = Math.max(n, Simdeck.stateAt(L, p, i).out.length);
+      linesMemo[key] = n;
+    }
+    return linesMemo[key];
+  }
+
+  function shell(s, p) {
+    var errs = s.ev.err ? 1 : 0;
+    var out = s.out.map(function (l, i) {
+      return h('span', { class: errs && i === s.out.length - 1 && !s.cmd.then ? 'li-err' : null }, l + '\n');
+    });
+    var proc = s.procs[0];
+    return h('div', { class: 'li-shell' },
+      h('div', { class: 'li-cmd' }, h('span', { class: 'li-prompt', translate: 'no' }, PROMPT + ' '), s.cmd ? h('span', { translate: 'no' }, cmdText(s.cmd)) : null,
+        s.cmd ? null : h('span', { class: 'li-hint' }, ' ', t('before'))),
+      proc ? h('div', { class: 'li-proc' }, t.parts('procChip', { pid: data(proc.pid), cmd: code('tail -f ' + proc.path) })) : h('div'),
+      h('pre', { class: 'li-out', translate: 'no', style: { '--lines': String(maxLines(p)) } }, out));
+  }
+
+  // ── the scene ──
+
+  function has(list, dir, name) { return list.some(function (x) { return x.dir === dir && x.name === name; }); }
+  function hopOn(s, dir, name) { return (s.ev.resolve || []).some(function (x) { return x.dir === dir && x.name === name; }); }
+  function inoOnHop(s, ino) { return (s.ev.resolve || []).some(function (x) { return x.ino === ino; }); }
+
+  /** Rows of one directory: its entries, the ones removed in this step (struck), and an empty place where a symlink of
+      the table points to a name that has no entry; sorted by name like ls. */
+  function rowsOf(s, dir) {
+    var rows = s.dirs[dir].map(function (e) { return { name: e.name, ino: e.ino, kind: 'live' }; });
+    s.gone.entries.forEach(function (g) {
+      if (g.dir === dir && !rows.some(function (r) { return r.name === g.name; })) rows.push({ name: g.name, ino: g.ino, kind: g.renamed ? 'renamed' : 'removed' });
+    });
+    s.dirs[dir].forEach(function (e) {
+      var n = L.inodeOf(s, e.ino);
+      if (n.type !== 'symlink') return;
+      var r = L.resolve(s, dir + '/' + e.name, true);
+      if (!r.ok && r.dir === dir && !rows.some(function (x) { return x.name === r.name; })) rows.push({ name: r.name, ino: null, kind: 'ghost' });
+    });
+    return rows.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  }
+
+  function entryRow(s, c, dir, r, id) {
+    var anim = c.dir === 'forward';
+    if (r.kind === 'ghost') {
+      return h('li', { class: 'li-ent li-ghost', dataset: { w: id } }, h('span', { class: 'li-name', translate: 'no' }, r.name), h('span', { class: 'li-tag' }, t('ghost')));
+    }
+    var node = L.inodeOf(s, r.ino) || (c.prev && L.inodeOf(c.prev, r.ino));
+    var now = r.kind === 'live' && has(s.changed.entries, dir, r.name);
+    var cls = 'li-ent' + (r.kind !== 'live' ? ' li-gone' : '') + (now ? ' sd-changed' + (anim ? ' sd-anim-in' : '') : '') +
+      (r.kind === 'live' && hopOn(s, dir, r.name) ? ' li-hop' : '');
+    return h('li', { class: cls, dataset: { w: id, c: String(colourOf(L.inodeOf(s, r.ino) ? s : c.prev, r.ino)) } },
+      h('span', { class: 'li-name', translate: 'no' }, r.name),
+      r.kind !== 'live' ? h('span', { class: 'li-tag' }, t(r.kind)) : null,
+      node && node.type === 'symlink' ? h('span', { class: 'li-stored', translate: 'no' }, '⇢ ' + node.data) : null,
+      h('span', { class: 'li-to', translate: 'no' }, '→ ' + r.ino));
+  }
+
+  function card(s, c, ino, freed) {
+    var src = freed ? c.prev : s;
+    var n = L.inodeOf(src, ino);
+    var anim = c.dir === 'forward';
+    var orphan = !freed && L.orphan(s, ino);
+    var now = !freed && s.changed.inodes.indexOf(ino) >= 0;
+    var counted = !freed && s.changed.counts.indexOf(ino) >= 0;
+    var cls = 'li-ino' + (orphan ? ' li-orphan' : '') + (freed ? ' li-freed' : '') + (now ? ' sd-changed' + (anim ? ' sd-anim-in' : '') : '') +
+      (!freed && inoOnHop(s, ino) ? ' li-hop' : '');
+    var dataPart;
+    if (n.type === 'symlink') {
+      dataPart = h('div', { class: 'li-data' }, h('span', { class: 'li-lab' }, t('fPath') + ': '), h('code', { translate: 'no', dataset: { text: String(ino) } }, n.data),
+        ' ', h('span', { class: 'li-size', translate: 'no' }, n.size + ' B'));
+    } else if (n.type === 'dir') {
+      dataPart = h('div', { class: 'li-data' }, h('span', { class: 'li-lab' }, t('fData') + ': '), h('span', null, t('dirData')));
+    } else {
+      var blocks = n.blocks.length ? (n.blocks.length > 1 ? n.blocks[0] + '–' + n.blocks[n.blocks.length - 1] : String(n.blocks[0])) : null;
+      dataPart = h('div', { class: 'li-data' }, h('span', { class: 'li-lab' }, t('fData') + ': '),
+        n.data === '' ? h('span', null, t('empty')) : n.data === null || freed ? null : code(quoteOf(n.data)), ' ',
+        h('span', { class: 'li-size', translate: 'no' }, n.size + ' B' + (blocks !== null && !freed ? ' · #' + blocks : '')));
+    }
+    return h('div', { class: cls, dataset: { w: 'i' + ino, type: n.type, c: String(colourOf(src, ino)) } },
+      h('div', { class: 'li-head' }, h('span', { class: 'li-num', translate: 'no' }, String(ino)), h('span', { class: 'li-type', translate: 'no' }, L.LETTER[n.type]),
+        h('span', { class: 'li-word' }, t(TYPE[n.type])),
+        orphan ? h('span', { class: 'li-badge' }, t('noName')) : freed ? h('span', { class: 'li-badge' }, t('freed')) : null),
+      h('div', { class: 'li-fields' },
+        h('span', null, h('span', { class: 'li-lab' }, t('fNlink') + ' '), h('b', { class: counted ? 'sd-hl' : null, translate: 'no' }, String(freed ? 0 : n.nlink))),
+        h('span', null, h('span', { class: 'li-lab' }, t('fOpen') + ' '), h('b', { translate: 'no' }, !freed && n.openBy.length ? n.openBy.join(', ') : '—'))),
+      dataPart);
+  }
+
+  /** Arrows, drawn after layout in CSS pixels: { a, b, kind: 'hard' | 'sym', now, broken }; a and b are data-w ids. */
+  function drawWires(scene) {
+    var svg = scene.querySelector('.li-wires');
+    if (!svg || !scene.isConnected) return;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (getComputedStyle(svg).display === 'none') return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    function el(id) { return scene.querySelector('[data-w="' + id + '"]'); }
+    /** The layout box of x in the scene's coordinates: offsets ignore the transform of the pop animation. */
+    function boxOf(x) {
+      var l = 0, tp = 0, e = x;
+      while (e && e !== scene) { l += e.offsetLeft; tp += e.offsetTop; e = e.offsetParent; }
+      return { left: l, top: tp, right: l + x.offsetWidth, width: x.offsetWidth, height: x.offsetHeight };
+    }
+    function add(tag, attrs) {
+      var x = document.createElementNS(NS, tag);
+      Object.keys(attrs).forEach(function (k) { x.setAttribute(k, attrs[k]); });
+      svg.appendChild(x);
+      return x;
+    }
+    (scene._wires || []).forEach(function (w) {
+      var A = el(w.a), B = el(w.b);
+      if (!A || !B) return;
+      var a = boxOf(A), b = boxOf(B);
+      var x1, y1, x2, y2, c1, c2;
+      if (w.kind === 'hard') {
+        x1 = a.right; y1 = a.top + a.height / 2;
+        x2 = b.left - 0.15 * rem; y2 = b.top + Math.min(b.height / 2, 1.3 * rem) + w.slot * 0.4 * rem;
+        c1 = x1 + 3 * rem; c2 = x2 - 3 * rem;
+      } else {
+        // from the stored text in the symlink's card back to the entry it names, a little below the hard arrow's start
+        var cardBox = boxOf(A.closest('.li-ino'));
+        x1 = cardBox.left - 0.15 * rem; y1 = a.top + a.height / 2;
+        x2 = b.right + 0.2 * rem; y2 = b.top + b.height * 0.78;
+        c1 = x1 - 3 * rem; c2 = x2 + 3 * rem;
+      }
+      var d = 'M' + x1 + ' ' + y1 + ' C' + c1 + ' ' + y1 + ' ' + c2 + ' ' + y2 + ' ' + x2 + ' ' + y2;
+      var cls = 'li-w' + (w.kind === 'sym' ? ' li-sym' : '') + (w.now ? ' li-now' : '') + (w.broken ? ' li-broken' : '');
+      if (w.now && !w.broken) add('path', { d: d, class: 'li-halo' });
+      add('path', { d: d, class: cls });
+      // the head, along the curve's last tangent (c2 → end)
+      var dx = x2 - c2, dy = 0, len = Math.abs(dx) || 1;
+      var ux = dx / len, uy = dy / len, s = 0.55 * rem;
+      add('path', { d: 'M' + x2 + ' ' + y2 + ' L' + (x2 - ux * s - uy * s * 0.6) + ' ' + (y2 - uy * s + ux * s * 0.6) + ' L' + (x2 - ux * s + uy * s * 0.6) + ' ' + (y2 - uy * s - ux * s * 0.6) + ' Z',
+        class: 'li-head-mark' + (w.broken ? ' li-broken' : '') });
+      if (w.broken) {
+        // a cross at the curve's middle: the path resolves to nothing
+        var mx = (x1 + 3 * c1 + 3 * c2 + x2) / 8, my = (y1 + 3 * y1 + 3 * y2 + y2) / 8, k = 0.45 * rem;
+        add('path', { d: 'M' + (mx - k) + ' ' + (my - k) + ' L' + (mx + k) + ' ' + (my + k) + ' M' + (mx + k) + ' ' + (my - k) + ' L' + (mx - k) + ' ' + (my + k), class: 'li-x' });
+      }
+    });
+  }
+
+  function scene(s, c) {
+    var dirs = Object.keys(s.dirs).sort();
+    var wires = [];
+    var ids = {};
+    var nid = 0;
+    var dirCol = h('div', { class: 'li-col li-dirs' }, dirs.length ? dirs.map(function (dir) {
+      var rows = rowsOf(s, dir);
+      return h('section', null,
+        h('h3', null, t.parts('dirTitle', { dir: code(dir) })),
+        rows.length ? h('ul', { class: 'li-table' }, rows.map(function (r) {
+          var id = 'e' + (nid++);
+          ids[dir + '/' + r.name] = id;
+          if (r.kind === 'live') wires.push({ a: id, b: 'i' + r.ino, kind: 'hard', now: has(s.changed.entries, dir, r.name) || hopOn(s, dir, r.name) });
+          return entryRow(s, c, dir, r, id);
+        })) : h('p', { class: 'li-none' }, t('dirEmpty')));
+    }) : h('p', { class: 'li-none' }, t('noDirs')));
+
+    // cards: every inode, and the ones freed in this step (struck), by number
+    var inos = Object.keys(s.inodes).map(Number);
+    var freed = s.gone.inodes.map(function (g) { return g.ino; });
+    var all = inos.concat(freed).sort(function (a, b) { return a - b; });
+    var cards = all.map(function (ino) { return card(s, c, ino, freed.indexOf(ino) >= 0 && inos.indexOf(ino) < 0); });
+    var inoCol = h('div', { class: 'li-col li-inodes' }, h('h3', null, t('inodesTitle')), all.length ? cards : h('p', { class: 'li-none' }, t('noInodes')));
+
+    // several names on one inode end a little apart on its card
+    var slots = {};
+    wires.forEach(function (w) { slots[w.b] = (slots[w.b] || 0); w.slot = slots[w.b]++; });
+    wires.forEach(function (w) { w.slot -= (slots[w.b] - 1) / 2; });
+
+    // a symlink's stored text → the entry it names (rule 6), broken when nothing is there
+    dirs.forEach(function (dir) {
+      s.dirs[dir].forEach(function (e) {
+        var n = L.inodeOf(s, e.ino);
+        if (n.type !== 'symlink') return;
+        var r = L.resolve(s, dir + '/' + e.name, true);
+        var hop = r.hops[1];
+        var target = hop ? ids[hop.dir + '/' + hop.name] : ids[r.dir + '/' + r.name];
+        if (!target) return;
+        var used = (s.ev.resolve || []).some(function (x) { return x.ino === e.ino && x.text != null; });
+        wires.push({ a: null, text: e.ino, b: target, kind: 'sym', now: used, broken: !hop });
+      });
+    });
+    wires.forEach(function (w) { if (w.kind === 'sym') { w.a = 't' + w.text; } });
+
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'li-wires');
+    svg.setAttribute('aria-hidden', 'true');
+    var el = h('div', { class: 'li-scene' }, dirCol, h('div'), inoCol, svg);
+    // the symlink's stored text is the start of its arrow
+    el.querySelectorAll('[data-text]').forEach(function (x) { x.dataset.w = 't' + x.dataset.text; });
+    el._wires = wires;
+    return el;
+  }
+
+  function blockRow(s, c) {
+    var used = L.usedBlocks(s);
+    var freedNow = {};
+    s.gone.inodes.forEach(function (g) { L.inodeOf(c.prev, g.ino).blocks.forEach(function (b) { freedNow[b] = g.ino; }); });
+    var cells = s.blocks.map(function (ino, i) {
+      if (ino === null) return freedNow[i] != null ? { text: String(freedNow[i]).slice(-3), kind: 'dead', now: true } : {};
+      var fresh = !c.prev || c.prev.blocks[i] !== ino;
+      return { text: String(ino).slice(-3), kind: L.orphan(s, ino) ? 'soft' : 'fill', c: colourOf(s, ino), now: !!c.prev && fresh };
+    });
+    var changed = !!c.prev && L.usedBlocks(c.prev) !== used;
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('blocksTitle'),
+      count: { text: t('blocksCount', { used: used, total: L.TOTAL }), hl: changed },
+      cellHeight: '2.4rem',
+      rows: [{ id: 'blocks', cells: cells }]
+    });
+  }
+
+  function render(c) {
+    var s = c.state, p = c.params;
+    var sc = scene(s, c);
+    c.stage.replaceChildren(h('div', { class: 'li' }, shell(s, p), sc, p.showBlocks ? blockRow(s, c) : null));
+    requestAnimationFrame(function () { drawWires(sc); });
+    if (typeof ResizeObserver === 'function') {
+      var ro = new ResizeObserver(function () { if (!sc.isConnected) { ro.disconnect(); return; } drawWires(sc); });
+      ro.observe(sc);
+    }
+  }
+
+  // ── captions ──
+
+  /** Symlinks in the state whose text now names a path with no entry, given the name that was just removed. */
+  function danglingTo(s, dir, name) {
+    var out = [];
+    Object.keys(s.dirs).forEach(function (d) {
+      s.dirs[d].forEach(function (e) {
+        var n = L.inodeOf(s, e.ino);
+        if (n.type !== 'symlink') return;
+        var r = L.resolve(s, d + '/' + e.name, true);
+        if (!r.ok && r.dir === dir && r.name === name) out.push({ link: e.name, text: n.data });
+      });
+    });
+    return out;
+  }
+  function blocksOf(n) { return t.n('blocks', n); }
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.ev, cmd = s.cmd;
+    if (c.n === 0) {
+      var sc = L.SCENES[s.scene];
+      var d0 = Object.keys(s.dirs)[0] || '~/p2';
+      var e0 = (s.dirs[d0] || [])[0];
+      var v0 = { dir: code(d0), file: e0 ? code(e0.name) : null, ino: e0 ? data(e0.ino) : null };
+      if (s.scene === 'primjer') { v0.sub = code('podmapa'); v0.dino = data(41962518); }
+      if (s.scene === 'otvorena') v0.blocks = blocksOf(L.inodeOf(s, e0.ino).blocks.length);
+      var start = rich('capStart_' + s.scene, v0);
+      var proc = s.procs[0];
+      if (proc && sc.held) start = start.concat(sp(rich('capHeld', { pid: data(proc.pid), tail: code('tail -f ' + proc.path), file: code(L.baseOf(proc.path)) })));
+      return start;
+    }
+    var out = [];
+    var dangle = function (dir, name) {
+      danglingTo(s, dir, name).forEach(function (x) { out = out.concat(sp(rich('capNowDangles', { link: code(x.link), text: code(x.text) }))); });
+    };
+    switch (cmd.op) {
+      case 'ls': {
+        var orphan = Object.keys(s.inodes).filter(function (k) { return L.orphan(s, k); })[0];
+        if (!s.dirs[cmd.path].length && orphan) {
+          return rich('capLsHeld', { dir: code(cmd.path), ino: data(orphan), blocks: blocksOf(L.inodeOf(s, orphan).blocks.length),
+            pid: data(L.inodeOf(s, orphan).openBy[0]) });
+        }
+        if (!s.dirs[cmd.path].length) return rich('capLsEmpty', { dir: code(cmd.path) });
+        return rich('capLs', { dir: code(cmd.path) });
+      }
+      case 'ln': {
+        if (ev.err) return rich('capLnErr', { why: t('why' + ev.err) });
+        if (cmd.sym) {
+          var tr = L.resolve(s, L.joinFrom(L.dirOf(cmd.name), cmd.target), false);
+          if (!tr.ok) return rich('capSymNone', { ino: data(ev.made), text: code(cmd.target) });
+          return rich('capSym', { ino: data(ev.made), text: code(cmd.target), target: code(tr.name), n: L.inodeOf(s, tr.ino).nlink });
+        }
+        var cn = ev.counts[0];
+        return rich('capLn', { name: code(L.baseOf(cmd.name)), ino: data(cn.ino), from: cn.from, to: cn.to });
+      }
+      case 'cat': {
+        if (ev.err) {
+          var hop = ev.resolve[0];
+          var sl = hop && L.inodeOf(s, hop.ino);
+          if (sl && sl.type === 'symlink') {
+            out = rich('capDangling', { text: code(sl.data) });
+            var held = Object.keys(s.inodes).filter(function (k) { return L.orphan(s, k); })[0];
+            if (held) out = out.concat(sp(rich('capDanglingHeld', { ino: data(held), pid: data(L.inodeOf(s, held).openBy[0]) })));
+            return out;
+          }
+          return code(s.out[0]);
+        }
+        var hops = ev.resolve;
+        var last = hops[hops.length - 1];
+        if (hops.length > 1) return rich('capCatSym', { name: code(L.baseOf(cmd.path)), text: code(hops[0].text), ino: data(last.ino) });
+        if (s.scene === 'sadrzaj') {
+          return rich('capCatKept', { name: code(L.baseOf(cmd.path)), data: code(quoteOf(L.inodeOf(s, last.ino).data)), ino: data(last.ino), gone: code('a.txt') });
+        }
+        if (s.scene === 'preimenuj') return rich('capCatHard', { h: code(L.baseOf(cmd.path)), old: code('a.txt'), ino: data(last.ino) });
+        return rich('capCat', { name: code(L.baseOf(cmd.path)), ino: data(last.ino) });
+      }
+      case 'write': {
+        var made = L.inodeOf(s, ev.made);
+        out = rich('capWriteNew', { name: code(L.baseOf(cmd.path)), ino: data(ev.made), blocks: blocksOf(made.blocks.length) });
+        Object.keys(s.dirs).forEach(function (d) {
+          s.dirs[d].forEach(function (e) {
+            var n = L.inodeOf(s, e.ino);
+            if (n.type !== 'symlink') return;
+            var r = L.resolve(s, d + '/' + e.name, true);
+            if (r.ok && r.ino === ev.made) out = out.concat(sp(rich('capWriteHeals', { link: code(e.name), text: code(n.data) })));
+          });
+        });
+        return out;
+      }
+      case 'rm': {
+        if (ev.err) return code(s.out[0]);
+        var del = ev.del[0], f = ev.free[0], k = ev.counts[0];
+        var v = { name: code(del.name), ino: data(del.ino), from: k.from, to: k.to };
+        if (f.what === 'kept') out = rich('capRmKept', v);
+        else if (f.what === 'freed') out = f.blocks ? rich('capRmFreed', Object.assign({ blocks: t.n('blocksFreeAgain', f.blocks) }, v)) : rich('capRmFreedNone', v);
+        else out = rich('capRmPostponed', Object.assign({ pid: data(L.inodeOf(s, del.ino).openBy[0]), blocks: t.n('blocksStay', f.blocks) }, v));
+        dangle(del.dir, del.name);
+        return out;
+      }
+      case 'mv': {
+        var rn = ev.ren;
+        out = rich('capMv', { from: code(rn.from), to: code(rn.to), ino: data(rn.ino), n: L.inodeOf(s, rn.ino).nlink });
+        s.dirs[rn.toDir].forEach(function (e) { if (e.ino === rn.ino && e.name !== rn.to) out = out.concat(sp(rich('capMvHard', { h: code(e.name) }))); });
+        dangle(rn.dir, rn.from);
+        return out;
+      }
+      case 'mkdir':
+        return rich('capMkdir', { dir: code(cmd.path) });
+      case 'kill': {
+        if (ev.err) return rich('capKillNone', { pid: data(cmd.pid) });
+        var fr = ev.free[0];
+        return rich('capKill', { pid: data(cmd.pid), blocks: t.n('blocksNowFree', fr ? fr.blocks : 0) });
+      }
+    }
+    return code(s.out.join(' '));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['primjer', t('pPrimjer')], ['sadrzaj', t('pSadrzaj')], ['simbolicka', t('pSimbolicka')], ['preimenuj', t('pPreimenuj')],
+          ['otvorena', t('pOtvorena')]],
+        visible: function () { return false; } },
+      { key: 'showBlocks', type: 'toggle', label: t('showBlocks') },
+      { key: 'holdOpen', type: 'toggle', label: t('holdOpen'), hint: t('holdOpenHint'),
+        disabled: function (p) { return L.SCENES[p.scene] && !L.SCENES[p.scene].held ? t('holdOpenOff') : false; } }
+    ],
+
+    presets: [
+      { id: 'primjer', label: t('pPrimjer'), params: { scene: 'primjer' }, hint: t('pPrimjerHint') },
+      { id: 'sadrzaj', label: t('pSadrzaj'), params: { scene: 'sadrzaj' }, hint: t('pSadrzajHint') },
+      { id: 'simbolicka', label: t('pSimbolicka'), params: { scene: 'simbolicka' }, hint: t('pSimbolickaHint') },
+      { id: 'preimenuj', label: t('pPreimenuj'), params: { scene: 'preimenuj' }, hint: t('pPreimenujHint') },
+      { id: 'otvorena', label: t('pOtvorena'), params: { scene: 'otvorena', holdOpen: true }, hint: t('pOtvorenaHint') }
+    ],
+
+    legend: [
+      { shape: 'li-ent', label: t('legEntry') },
+      { shape: 'li-ino', label: t('legInode') },
+      { shape: 'line', label: t('legHard') },
+      { shape: 'dash', label: t('legSym') },
+      { shape: 'li-held', label: t('legHeld') },
+      { shape: 'li-hop', label: t('legHop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
