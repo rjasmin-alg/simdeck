@@ -1,0 +1,563 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- systemd dependencies and ordering: a native explorer (docs/sim-ui.md). Left, the unit graph: four units, the
+     requirement edges (Wants= dashed, Requires= thick) and the ordering edges (After=, an arrow with a clock), with
+     app.service's unit file in its card. Right, the boot timeline: a lane per unit, slots left to right, the final
+     state per unit. A boot button replays the timeline slot by slot (animation only).
+     Model: sim.js; words: strings.js; rules and numbers: SPEC.md. -->
+<html lang="hr" data-sim="lnx-systemd-ordering">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ovisnosti i redoslijed jedinica · simdeck</title>
+<meta name="description" content="Wants= i Requires= povlače jedinice u transakciju, After= i Before= određuju redoslijed; što se dogodi kad ovisnost ne uspije.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-systemd-ordering",
+  "title": {
+    "hr": "Ovisnosti i redoslijed jedinica",
+    "en": "Unit dependencies and ordering"
+  },
+  "concept": {
+    "hr": "Wants/Requires povlače, After/Before određuju redoslijed; neuspjela ovisnost",
+    "en": "Wants/Requires pull units in, After/Before set the order; a failed dependency"
+  },
+  "summary": {
+    "hr": "Uredi veze jedinice app.service, podigni sustav i gledaj tko je u transakciji, tko koga čeka i što se dogodi kad db ne uspije.",
+    "en": "Edit the relations of app.service, boot, and see who is in the transaction, who waits for whom and what happens when db fails."
+  },
+  "tags": [
+    "services"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "requires-no-after"
+    },
+    {
+      "preset": "after-only"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-systemd-ordering"]; colours only from kit tokens. */
+[data-sim="lnx-systemd-ordering"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-systemd-ordering"] .sd-preset { line-height: 1.15; }
+[data-sim="lnx-systemd-ordering"] .so {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="lnx-systemd-ordering"] .so-panel {
+  position: relative;
+  display: flex; flex-direction: column; gap: 0.6rem;
+  min-width: 0; min-height: 0;
+  padding: 0.6rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-systemd-ordering"] .so-title { font-weight: 700; font-size: var(--fs-lg); line-height: 1.15; }
+[data-sim="lnx-systemd-ordering"] code,
+[data-sim="lnx-systemd-ordering"] .so-mono { font-family: var(--mono); }
+
+/* ── the graph: cards on a grid, edges drawn over them in CSS pixels ── */
+[data-sim="lnx-systemd-ordering"] .so-graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(4rem, 1fr) auto;
+  grid-template-rows: auto minmax(2.5rem, 1fr) auto minmax(2.5rem, 1fr) auto;
+  grid-template-areas: "mu mu mu" ". . ." "app . db" ". . ." "net . .";
+  align-items: center;
+  justify-items: center;
+}
+[data-sim="lnx-systemd-ordering"] .so-card {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; gap: 0.15rem;
+  max-width: 100%;
+  padding: 0.35rem 0.7rem;
+  border: 0.22rem solid var(--ok);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg);
+  line-height: 1.2;
+}
+[data-sim="lnx-systemd-ordering"] .so-card[data-area="mu"] { grid-area: mu; }
+[data-sim="lnx-systemd-ordering"] .so-card[data-area="app"] { grid-area: app; }
+[data-sim="lnx-systemd-ordering"] .so-card[data-area="db"] { grid-area: db; }
+[data-sim="lnx-systemd-ordering"] .so-card[data-area="net"] { grid-area: net; }
+[data-sim="lnx-systemd-ordering"] .so-name { font-family: var(--mono); font-weight: 700; font-size: var(--fs-md); white-space: nowrap; }
+[data-sim="lnx-systemd-ordering"] .so-sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="lnx-systemd-ordering"] .so-file {
+  margin: 0.15rem 0 0; padding: 0.2rem 0.4rem;
+  border-left: 0.25rem solid var(--c1);
+  background: var(--panel);
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.25; white-space: pre;
+}
+[data-sim="lnx-systemd-ordering"] .so-file .so-sec { color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-state { display: flex; align-items: center; gap: 0.4rem; font-size: var(--fs-sm); font-weight: 700; }
+
+/* unit states: border, symbol and word together (never colour alone) */
+[data-sim="lnx-systemd-ordering"] [data-st="failed"].so-card { border-color: var(--danger); }
+[data-sim="lnx-systemd-ordering"] [data-st="dependency"].so-card { border-color: var(--warn); border-style: dashed; }
+[data-sim="lnx-systemd-ordering"] [data-st="none"].so-card { border-color: var(--muted); border-style: dotted; color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] [data-st="cycle"].so-card,
+[data-sim="lnx-systemd-ordering"] [data-st="wait"].so-card { border-color: var(--line); }
+[data-sim="lnx-systemd-ordering"] [data-st="wait"] .so-state { color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-sym { display: inline-grid; place-items: center; min-width: 1.2em; font-weight: 700; }
+[data-sim="lnx-systemd-ordering"] [data-st="active"] .so-sym { color: var(--ok); }
+[data-sim="lnx-systemd-ordering"] [data-st="failed"] .so-sym { color: var(--danger); }
+[data-sim="lnx-systemd-ordering"] [data-st="dependency"] .so-sym { color: var(--warn); }
+[data-sim="lnx-systemd-ordering"] [data-st="none"] .so-sym { color: var(--muted); }
+
+/* edges */
+[data-sim="lnx-systemd-ordering"] .so-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+[data-sim="lnx-systemd-ordering"] .so-req { stroke: var(--ink); fill: none; }
+[data-sim="lnx-systemd-ordering"] .so-req.so-wants { stroke-width: 2.5; stroke-dasharray: 9 7; }
+[data-sim="lnx-systemd-ordering"] .so-req.so-requires { stroke-width: 7; }
+[data-sim="lnx-systemd-ordering"] .so-chev { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linejoin: round; }
+[data-sim="lnx-systemd-ordering"] .so-ord { stroke: var(--c1); stroke-width: 3; fill: none; }
+[data-sim="lnx-systemd-ordering"] .so-head { fill: var(--c1); }
+[data-sim="lnx-systemd-ordering"] .so-auto .so-ord { stroke: var(--muted); stroke-dasharray: 3 5; }
+[data-sim="lnx-systemd-ordering"] .so-auto .so-head { fill: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-clock circle { fill: var(--bg); stroke: var(--c1); stroke-width: 2.5; }
+[data-sim="lnx-systemd-ordering"] .so-clock line { stroke: var(--c1); stroke-width: 2.5; stroke-linecap: round; }
+[data-sim="lnx-systemd-ordering"] .so-auto .so-clock circle,
+[data-sim="lnx-systemd-ordering"] .so-auto .so-clock line { stroke: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-elabel {
+  position: absolute; z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 0 0.25rem;
+  border-radius: 0.2rem;
+  background: var(--panel);
+  font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; line-height: 1.2;
+  white-space: nowrap;
+}
+[data-sim="lnx-systemd-ordering"] .so-elabel.so-l-ord { color: var(--c1); }
+[data-sim="lnx-systemd-ordering"] .so-elabel.so-l-auto { color: var(--muted); font-family: var(--sans); }
+[data-sim="lnx-systemd-ordering"] .so-elabel.so-l-off { color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-off .so-req,
+[data-sim="lnx-systemd-ordering"] .so-off .so-ord,
+[data-sim="lnx-systemd-ordering"] .so-off .so-chev,
+[data-sim="lnx-systemd-ordering"] .so-off .so-clock circle,
+[data-sim="lnx-systemd-ordering"] .so-off .so-clock line { stroke: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-off .so-ord { stroke-dasharray: 3 5; }
+[data-sim="lnx-systemd-ordering"] .so-off .so-head { fill: var(--muted); }
+
+/* ── the timeline ── */
+[data-sim="lnx-systemd-ordering"] .so-tl {
+  display: grid;
+  grid-template-columns: max-content repeat(var(--slots), minmax(0, 1fr)) max-content;
+  align-items: stretch;
+  row-gap: 0.5rem;
+  column-gap: 0;
+}
+[data-sim="lnx-systemd-ordering"] .so-th { padding: 0.2rem 0.5rem; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); text-align: center; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="lnx-systemd-ordering"] .so-th:first-child,
+[data-sim="lnx-systemd-ordering"] .so-th.so-th-res { text-align: left; }
+[data-sim="lnx-systemd-ordering"] .so-th.so-now { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-systemd-ordering"] .so-lane { display: flex; align-items: center; padding: 0.3rem 0.6rem 0.3rem 0; font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="lnx-systemd-ordering"] .so-lane[data-st="none"] { color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-cell { position: relative; display: grid; align-items: center; min-height: 2.6rem; border-left: 2px dotted var(--line); }
+[data-sim="lnx-systemd-ordering"] .so-cell.so-run::before { content: ''; position: absolute; left: 0; right: 0; top: calc(50% - 0.15rem); height: 0.3rem; background: var(--ok); }
+[data-sim="lnx-systemd-ordering"] .so-bar {
+  position: relative;
+  display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+  margin: 0 0.35rem;
+  min-height: 2.3rem;
+  border: 0.2rem solid var(--ok);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg);
+  font-weight: 700;
+}
+[data-sim="lnx-systemd-ordering"] .so-bar[data-st="failed"] { border-color: var(--danger); }
+[data-sim="lnx-systemd-ordering"] .so-bar[data-st="dependency"] { border-color: var(--warn); border-style: dashed; }
+[data-sim="lnx-systemd-ordering"] .so-bar[data-st="active"] .so-sym { color: var(--ok); }
+[data-sim="lnx-systemd-ordering"] .so-res { display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0 0.3rem 0.6rem; font-size: var(--fs-sm); font-weight: 700; border-left: 2px dotted var(--line); white-space: nowrap; }
+[data-sim="lnx-systemd-ordering"] .so-res[data-st="none"] { color: var(--muted); }
+[data-sim="lnx-systemd-ordering"] .so-lane.so-row-chg { justify-self: start; padding-left: 0.3rem; background: var(--hl); color: var(--on-hl); outline: max(3px, 0.2rem) solid var(--ink); outline-offset: -0.1rem; }
+[data-sim="lnx-systemd-ordering"] .so-file-out { display: none; }
+[data-sim="lnx-systemd-ordering"] .so-banner { padding: 0.4rem 0.6rem; border: 0.2rem solid var(--danger); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="lnx-systemd-ordering"] .so-note { margin-top: auto; padding: 0.25rem 0.5rem; border-left: 0.3rem solid var(--c1); font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+
+/* legend swatches */
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape^='so-'] { position: relative; background: var(--bg); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-wants'] { width: 1.8em; height: 0; border: 0; border-top: 0.16rem dashed var(--ink); border-radius: 0; background: transparent; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-requires'] { width: 1.8em; height: 0.4rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-after'] { width: 1.8em; border: 0; background: transparent; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-after']::after { content: '⏱→'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--c1); font-weight: 700; line-height: 1; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape^='so-st-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-active'] { border-color: var(--ok); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-active']::after { content: '●'; color: var(--ok); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-failed'] { border-color: var(--danger); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-failed']::after { content: '✗'; color: var(--danger); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-dep'] { border-color: var(--warn); border-style: dashed; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-dep']::after { content: '⊘'; color: var(--warn); }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-none'] { border-color: var(--muted); border-style: dotted; }
+[data-sim="lnx-systemd-ordering"] .sd-swatch[data-shape='so-st-none']::after { content: '○'; color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content; the panels stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-systemd-ordering"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-systemd-ordering"] .so { height: auto; grid-template-columns: 1fr; gap: 0.6rem; padding: 0.4rem; }
+  [data-sim="lnx-systemd-ordering"] .so-panel { padding: 0.4rem 0.5rem; }
+  [data-sim="lnx-systemd-ordering"] .so-graph { grid-template-columns: minmax(0, 1fr) minmax(5.5rem, 0.9fr) minmax(0, 1fr); grid-template-rows: auto 5rem auto 5rem auto; }
+  [data-sim="lnx-systemd-ordering"] .so-card { padding: 0.25rem 0.4rem; }
+  [data-sim="lnx-systemd-ordering"] .so-name { font-size: var(--fs-sm); white-space: normal; }
+  [data-sim="lnx-systemd-ordering"] .so-card .so-file,
+  [data-sim="lnx-systemd-ordering"] .so-card .so-sub { display: none; }
+  [data-sim="lnx-systemd-ordering"] .so-card .so-word,
+  [data-sim="lnx-systemd-ordering"] .so-elabel.so-l-auto { display: none; }   /* symbols only; the legend names them */
+  [data-sim="lnx-systemd-ordering"] .so-file-out { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+  [data-sim="lnx-systemd-ordering"] .so-tl { grid-template-columns: minmax(0, 1.6fr) repeat(var(--slots), minmax(2.4rem, 1fr)) auto; }
+  [data-sim="lnx-systemd-ordering"] .so-th { padding: 0.2rem; overflow-wrap: anywhere; }
+  [data-sim="lnx-systemd-ordering"] .so-lane { white-space: normal; }
+  [data-sim="lnx-systemd-ordering"] .so-bar { margin: 0 0.15rem; }
+  [data-sim="lnx-systemd-ordering"] .so-res { padding-left: 0.3rem; }
+  [data-sim="lnx-systemd-ordering"] .so-res .so-word { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Ovisnosti i redoslijed jedinica</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  var SYM = { active: '●', failed: '✗', dependency: '⊘', none: '○' };
+  var ST = { active: 'stActive', failed: 'stFailed', dependency: 'stDependency', none: 'stNone' };
+  var AREA = {};
+  AREA[L.MU] = 'mu'; AREA[L.APP] = 'app'; AREA[L.DB] = 'db'; AREA[L.NET] = 'net';
+
+  /** Text with `code` spans: the tables mark unit names and directives with backticks. */
+  function coded(text) {
+    return String(text).split('`').map(function (part, i) { return i % 2 ? h('code', { translate: 'no' }, part) : part; })
+      .filter(function (x) { return x !== ''; });
+  }
+  function svg(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function rem() { return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16; }
+  function stateOf(s, id) {
+    if (s.cycle && s.result[id] !== 'none') return 'cycle';
+    if (shown != null && s.result[id] !== 'none' && s.slots[id] > shown) return 'wait';   // the replay has not got there
+    return s.result[id];
+  }
+  /** A unit name that may break after its dots and dashes (the phone's narrow cards and lanes). */
+  function unitName(id) {
+    var out = [];
+    String(id).split(/(?<=[.-])/).forEach(function (part, i) { if (i) out.push(h('wbr')); out.push(part); });
+    return out;
+  }
+
+  // ── replay: an animation over the computed timeline, not model steps ──
+  var shown = null, replayKey = null, replayTimer = 0;
+  function stopReplay() { if (replayTimer) window.clearTimeout(replayTimer); replayTimer = 0; shown = null; replayKey = null; }
+  function replay(sim) {
+    stopReplay();
+    var s = sim.state;
+    if (s.cycle || !s.nSlots || Simdeck.reducedMotion()) { sim.render(); return; }
+    replayKey = JSON.stringify(sim.params);
+    shown = 1;
+    var tick = function () {
+      if (shown == null) return;
+      if (shown >= s.nSlots) { stopReplay(); sim.render(); return; }
+      shown++;
+      sim.render();
+      replayTimer = window.setTimeout(tick, 1100);
+    };
+    sim.render();
+    replayTimer = window.setTimeout(tick, 1100);
+  }
+
+  // ── the graph ──
+
+  function unitFile(p) {
+    var lines = [h('span', { class: 'so-sec' }, '[Unit]')];
+    var add = function (s) { lines.push('\n' + s); };
+    if (p.appToDb === 'wants' && p.appToNet === 'wants') add('Wants=' + L.DB + ' ' + L.NET);
+    else {
+      if (p.appToDb === 'wants') add('Wants=' + L.DB);
+      if (p.appToNet === 'wants') add('Wants=' + L.NET);
+    }
+    if (p.appToDb === 'requires') add('Requires=' + L.DB);
+    var after = [p.appAfterDb ? L.DB : null, p.appAfterNet ? L.NET : null].filter(Boolean);
+    if (after.length) add('After=' + after.join(' '));
+    lines.push('\n', h('span', { class: 'so-sec' }, '[Install]'), '\nWantedBy=' + L.MU);
+    return h('pre', { class: 'so-file', translate: 'no' }, lines);
+  }
+
+  function card(s, p, id, chg) {
+    var st = stateOf(s, id);
+    var u = s.units.filter(function (x) { return x.id === id; })[0];
+    var kids = [h('div', { class: 'so-name', translate: 'no' }, unitName(id))];
+    if (id === L.MU) kids.push(h('div', { class: 'so-sub' }, t('defaultTarget')));
+    if (id === L.APP) kids.push(h('div', { class: 'so-sub' }, t('unitFile')), unitFile(p));
+    if (id === L.DB) {
+      kids.push(h('div', { class: 'so-sub' }, h('span', { translate: 'no' }, 'WantedBy=' + L.MU)));
+      kids.push(h('div', { class: 'so-sub' }, t(u.enabled ? 'enabled' : 'disabled') + (u.fails ? ' · ' + t('willFail') : '')));
+    }
+    if (st === 'wait') kids.push(h('div', { class: 'so-state' }, t('waiting')));
+    else if (st !== 'cycle') kids.push(h('div', { class: 'so-state' }, h('span', { class: 'so-sym', 'aria-hidden': 'true' }, SYM[st]), h('span', { class: 'so-word' }, t(ST[st]))));
+    return h('div', { class: 'so-card' + (chg ? ' sd-changed' : ''), dataset: { area: AREA[id], st: st, id: id } }, kids);
+  }
+
+  function centre(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  function edgePoint(r, p, gap) {
+    var c = centre(r), dx = p.x - c.x, dy = p.y - c.y;
+    var hw = r.width / 2 + gap, hh = r.height / 2 + gap;
+    if (!dx && !dy) return c;
+    var k = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity, 1);
+    return { x: c.x + dx * k, y: c.y + dy * k };
+  }
+
+  /** Draws the edges of s over the cards in el (CSS pixels, 1:1, so labels stay HTML and full size). */
+  function drawEdges(el, s) {
+    var R = el.getBoundingClientRect();
+    if (!R.width) return;
+    var u = rem();
+    var box = {};
+    Array.prototype.forEach.call(el.querySelectorAll('.so-card'), function (c) {
+      var r = c.getBoundingClientRect();
+      box[c.dataset.id] = { left: r.left - R.left, top: r.top - R.top, width: r.width, height: r.height };
+    });
+    var layer = svg('svg', { class: 'so-edges', 'aria-hidden': 'true' });
+    var labels = [];
+    var tag = function (at, off, node) { node._at = at; if (off) node.classList.add('so-l-off'); return node; };
+    // one line per relation; a pair's requirement and ordering lines sit side by side
+    var pairs = {};
+    // a `depends` relation (win-services) is drawn as what it is: a requirement and an ordering
+    var drawn = [];
+    s.edges.forEach(function (e) {
+      if (e.kind !== 'depends') drawn.push(e);
+      else drawn.push({ from: e.from, to: e.to, kind: 'requires', via: e.via }, { from: e.from, to: e.to, kind: 'after', via: e.via });
+    });
+    drawn.forEach(function (e) {
+      var key = [e.from, e.to].sort().join('|');
+      (pairs[key] = pairs[key] || []).push(e);
+    });
+    Object.keys(pairs).forEach(function (key) {
+      var list = pairs[key];
+      var a0 = list[0].from < list[0].to ? list[0].from : list[0].to;
+      var b0 = a0 === list[0].from ? list[0].to : list[0].from;
+      var A = box[a0], B = box[b0];
+      if (!A || !B) return;
+      var ca = centre(A), cb = centre(B);
+      var len = Math.hypot(cb.x - ca.x, cb.y - ca.y) || 1;
+      var n = { x: -(cb.y - ca.y) / len, y: (cb.x - ca.x) / len };
+      var gap = 0.75 * u;
+      list.forEach(function (e) {
+        var ordering = e.kind === 'after' || e.kind === 'before';
+        var side = (ordering ? 1 : -1) * gap;   // fixed sides, so a line does not move when its partner appears
+        var from = ordering ? (e.kind === 'after' ? e.to : e.from) : e.from;   // ordering: earlier → later
+        var to = ordering ? (e.kind === 'after' ? e.from : e.to) : e.to;
+        var mv = function (r) { return { left: r.left + n.x * side, top: r.top + n.y * side, width: r.width, height: r.height }; };
+        var F = mv(box[from]), T = mv(box[to]);
+        var p0 = edgePoint(F, centre(T), 0.2 * u), p1 = edgePoint(T, centre(F), 0.2 * u);
+        var L2 = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+        var d = { x: (p1.x - p0.x) / L2, y: (p1.y - p0.y) / L2 };
+        var mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        // an edge to a unit outside the transaction does nothing (rule 5): drawn muted
+        var off = s.txn.indexOf(e.from) < 0 || s.txn.indexOf(e.to) < 0;
+        var g = svg('g', { class: (e.via === 'target' ? 'so-auto' : '') + (off ? ' so-off' : '') });
+        // labels staggered along the pair (requirement nearer its first id, ordering nearer the second), so the
+        // labels of two lines that meet at one card do not collide
+        var f = ordering ? 0.62 : 0.38, at = from === a0 ? f : 1 - f;
+        var labelAt = { x: p0.x + (p1.x - p0.x) * at, y: p0.y + (p1.y - p0.y) * at, n: n, sign: side >= 0 ? 1 : -1 };
+        if (ordering) {
+          var hb = { x: p1.x - d.x * 0.9 * u, y: p1.y - d.y * 0.9 * u };
+          g.append(svg('line', { x1: p0.x, y1: p0.y, x2: hb.x, y2: hb.y, class: 'so-ord' }));
+          g.append(svg('polygon', { class: 'so-head', points: [p1.x, p1.y, hb.x + d.y * 0.5 * u, hb.y - d.x * 0.5 * u, hb.x - d.y * 0.5 * u, hb.y + d.x * 0.5 * u].join(' ') }));
+          var r = 0.55 * u, clock = svg('g', { class: 'so-clock' });
+          clock.append(svg('circle', { cx: mid.x, cy: mid.y, r: r }));
+          clock.append(svg('line', { x1: mid.x, y1: mid.y, x2: mid.x, y2: mid.y - r * 0.65 }));
+          clock.append(svg('line', { x1: mid.x, y1: mid.y, x2: mid.x + r * 0.5, y2: mid.y }));
+          g.append(clock);
+          labels.push(tag(labelAt, off, e.via === 'target'
+            ? h('span', { class: 'so-elabel so-l-auto', style: { left: labelAt.x + 'px', top: labelAt.y + 'px' } }, h('code', { translate: 'no' }, 'After='), ' ' + t('auto'))
+            : h('span', { class: 'so-elabel so-l-ord', translate: 'no', style: { left: labelAt.x + 'px', top: labelAt.y + 'px' } }, e.kind === 'after' ? 'After=' : 'Before=')));
+        } else {
+          g.append(svg('line', { x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, class: 'so-req so-' + (e.kind === 'wants' ? 'wants' : 'requires') }));
+          var tip = { x: p1.x - d.x * 0.2 * u, y: p1.y - d.y * 0.2 * u }, back = { x: tip.x - d.x * 0.8 * u, y: tip.y - d.y * 0.8 * u };
+          g.append(svg('polyline', { class: 'so-chev', points: [back.x + d.y * 0.6 * u, back.y - d.x * 0.6 * u, tip.x, tip.y, back.x - d.y * 0.6 * u, back.y + d.x * 0.6 * u].join(' ') }));
+          var text = e.via === 'install' ? 'WantedBy=' : e.kind === 'wants' ? 'Wants=' : 'Requires=';
+          labels.push(tag(labelAt, off, h('span', { class: 'so-elabel', translate: 'no', style: { left: labelAt.x + 'px', top: labelAt.y + 'px' } }, text)));
+        }
+        layer.append(g);
+      });
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.so-edges, .so-elabel'), function (x) { x.remove(); });
+    el.prepend(layer);
+    labels.forEach(function (x) {
+      el.append(x);
+      // push the label out from its line until its box clears it, on the line's own side
+      var a = x._at, w = x.offsetWidth, ht = x.offsetHeight;
+      var dist = Math.abs(a.n.x) * w / 2 + Math.abs(a.n.y) * ht / 2 + 0.3 * u;
+      var lx = a.x + a.n.x * a.sign * dist;
+      x.style.left = Math.max(w / 2, Math.min(R.width - w / 2, lx)) + 'px';   // never past the graph's edges
+      x.style.top = (a.y + a.n.y * a.sign * dist) + 'px';
+    });
+  }
+
+  function graphPanel(s, p, chg) {
+    var g = h('div', { class: 'so-graph' }, [L.MU, L.APP, L.DB, L.NET].map(function (id) { return card(s, p, id, chg.indexOf(id) >= 0); }));
+    var draw = function () { if (g.isConnected) drawEdges(g, s); };
+    if (typeof ResizeObserver === 'function') {
+      var ro = new ResizeObserver(function () { if (!g.isConnected) { ro.disconnect(); return; } draw(); });
+      ro.observe(g);
+    } else requestAnimationFrame(draw);
+    var out = unitFile(p);
+    out.classList.add('so-file-out');
+    return h('div', { class: 'so-panel' }, h('div', { class: 'so-title' }, t('graphTitle')), g, out);
+  }
+
+  // ── the timeline ──
+
+  function timeline(s, chg) {
+    if (s.cycle) {
+      return h('div', { class: 'so-panel' }, h('div', { class: 'so-title' }, t('timeTitle')),
+        h('div', { class: 'so-banner' }, t('cycleBanner')),
+        h('div', null, coded('`' + s.loop.join('`, `') + '`')));
+    }
+    var n = s.nSlots, limit = shown == null ? n : shown;
+    var rows = [h('div', { class: 'so-th' }, t('lane'))];
+    for (var k = 1; k <= n; k++) rows.push(h('div', { class: 'so-th' + (shown === k ? ' so-now' : '') }, t('slot', { n: k })));
+    rows.push(h('div', { class: 'so-th so-th-res' }, t('result')));
+    s.order.forEach(function (id) {
+      var st = s.result[id], slot = s.slots[id];
+      var c = chg.indexOf(id) >= 0 ? ' so-row-chg' : '';
+      rows.push(h('div', { class: 'so-lane' + c, translate: 'no', dataset: { st: st } }, unitName(id)));
+      for (var k = 1; k <= n; k++) {
+        var cell = h('div', { class: 'so-cell' + (st === 'active' && slot < k && k <= limit ? ' so-run' : '') });
+        if (slot === k && k <= limit) {
+          cell.append(h('div', { class: 'so-bar' + (st === 'failed' ? ' sd-hatch' : ''), dataset: { st: st }, 'aria-label': t('unitLabel', { unit: id, state: t(ST[st]) }) },
+            h('span', { class: 'so-sym', 'aria-hidden': 'true' }, SYM[st])));
+        }
+        rows.push(cell);
+      }
+      var known = st === 'none' || slot <= limit;
+      rows.push(h('div', { class: 'so-res', dataset: { st: known ? st : 'wait' } }, known
+        ? [h('span', { class: 'so-sym', 'aria-hidden': 'true' }, SYM[st]), h('span', { class: 'so-word' }, t(ST[st]))]
+        : h('span', null, t('waiting'))));
+    });
+    return h('div', { class: 'so-panel' }, h('div', { class: 'so-title' }, t('timeTitle')),
+      h('div', { class: 'so-tl', style: { '--slots': String(n) } }, rows));
+  }
+
+  // ── captions: the relation whose params changed last speaks (sim.js nextFocus, captionKey) ──
+  var focus = null, lastParams = null, lastPreset = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (replayKey && key !== replayKey) stopReplay();
+    var same = lastParams && JSON.stringify(lastParams) === key && lastPreset === c.preset;
+    if (!same) {
+      focus = L.nextFocus(focus, lastParams, c.params, c.preset, lastPreset);
+      chg = lastState ? L.changed(lastState, c.state) : [];
+      lastParams = Object.assign({}, c.params);
+      lastPreset = c.preset;
+      lastState = c.state;
+    }
+  }
+
+  var labels = { 'network-online': 'presetNet', 'requires-no-after': 'presetReqNoAfter', 'requires-after': 'presetReqAfter', 'wants-after': 'presetWantsAfter', 'after-only': 'presetAfterOnly' };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'appToDb', type: 'choice', label: t('appToDb'), options: [['none', t('optNone')], ['wants', t('optWants')], ['requires', t('optRequires')]] },
+      { key: 'appAfterDb', type: 'toggle', label: t('appAfterDb') },
+      { key: 'appToNet', type: 'choice', label: t('appToNet'), options: [['none', t('optNone')], ['wants', t('optWants')]] },
+      { key: 'appAfterNet', type: 'toggle', label: t('appAfterNet') },
+      { key: 'dbFails', type: 'toggle', label: t('dbFails') },
+      { key: 'dbEnabled', type: 'toggle', label: t('dbEnabled') },
+      { type: 'button', label: t('boot'), hint: t('bootHint'), key: 'p', run: replay }
+    ],
+
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { shape: 'so-wants', label: t('legendWants') },
+      { shape: 'so-requires', label: t('legendRequires') },
+      { shape: 'so-after', label: t('legendAfter') },
+      { shape: 'so-st-active', label: t('legendActive') },
+      { shape: 'so-st-failed', label: t('legendFailed') },
+      { shape: 'so-st-dep', label: t('legendDependency') },
+      { shape: 'so-st-none', label: t('legendNone') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'so' }, graphPanel(c.state, c.params, chg), timeline(c.state, chg)));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (shown != null) {
+        var ids = s.order.filter(function (id) { return s.slots[id] === shown; });
+        return coded(t.n('cReplay', ids.length, { k: shown, total: s.nSlots, units: '`' + ids.join('`, `') + '`' }));
+      }
+      var k = L.captionKey(s, c.params, focus);
+      var vars = Object.assign({}, k, { units: s.cycle ? '`' + s.loop.join('`, `') + '`' : '' });
+      return coded(t(k.key, vars));
+    }
+  });
+})();
+</script>
+</body>
+</html>
