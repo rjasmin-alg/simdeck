@@ -1,0 +1,524 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-lvm-extend: the four layers between two disks and the files, PV → VG → LV → filesystem. A stepper: each step
+     runs one command (the terminal on top, with its output and exit status) that changes one layer or reads one.
+     Below it the layers as one kit block grid (K3), top to bottom filesystem, logical volume, volume group and a row
+     of extents per disk, the disks side by side so a layer sits over the space it holds; next to each layer the
+     commands that change it and what its read-only command prints now. Model: sim.js; rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="lnx-lvm-extend">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proširenje logičkog volumena i datotečnog sustava · simdeck</title>
+<meta name="description" content="Arhivi treba prostora: dodaj disk i proširi svaki sloj redom. lvextend uspije, a df i dalje kaže 960M dok se ne poveća i datotečni sustav.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-lvm-extend",
+  "title": {
+    "hr": "Proširenje logičkog volumena i datotečnog sustava",
+    "en": "Extending an LV and its filesystem"
+  },
+  "concept": {
+    "hr": "Fizički volumen → grupa → logički volumen → datotečni sustav, tim redom",
+    "en": "PV → VG → LV → filesystem, in that order"
+  },
+  "summary": {
+    "hr": "Arhivi treba prostora: dodaj disk i proširi svaki sloj redom. lvextend uspije, a df i dalje kaže 960M dok se ne poveća i datotečni sustav.",
+    "en": "The archive needs space: add a disk and extend each layer in turn. lvextend succeeds, yet df still says 960M until the filesystem grows too."
+  },
+  "tags": [
+    "lvm"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-lvm-extend"]; colours only from kit tokens.
+   Layout: the terminal (command, exit status, output) on top; under it one kit block grid (K3) with a row per layer:
+   filesystem, logical volume, volume group, then one row of extents per disk. Disks sit side by side, so every layer
+   is drawn over the extents it holds. Each row's label is the layer and its name; its aside the commands that change
+   it and what the read-only command prints now. A layer the step changed is on the highlight, a layer that was asked
+   but did not change has a --danger double frame and ✕, the layer a read-only command reads an ink outline. */
+[data-sim="lnx-lvm-extend"] .lx {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-lvm-extend"] [translate="no"] { font-family: var(--mono); }
+
+/* the terminal */
+[data-sim="lnx-lvm-extend"] .lx-term {
+  flex: none;
+  padding: 0.35rem 0.7rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="lnx-lvm-extend"] .lx-cmdline { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; font-size: 1rem; }
+[data-sim="lnx-lvm-extend"] .lx-prompt { color: var(--muted); }
+[data-sim="lnx-lvm-extend"] .lx-cmd { font-weight: 700; padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-lvm-extend"] .lx-cmd.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.12rem solid var(--ink); box-shadow: none; }
+[data-sim="lnx-lvm-extend"] .lx-exit {
+  margin-left: auto; padding: 0 0.45rem; border: var(--line-w) solid var(--ok); border-radius: var(--radius-sm);
+  color: var(--ok); font-family: var(--sans); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="lnx-lvm-extend"] .lx-exit[data-bad] { border: 0.25rem double var(--danger); color: var(--danger); }
+[data-sim="lnx-lvm-extend"] .lx-out { margin: 0.15rem 0 0; white-space: pre; overflow-x: auto; overflow-y: hidden; }
+[data-sim="lnx-lvm-extend"] .lx-out[data-bad] { color: var(--danger); font-weight: 700; }
+
+/* the layers (kit view K3) */
+[data-sim="lnx-lvm-extend"] .lx .sd-bg { flex: 1 1 auto; min-height: 0; }
+[data-sim="lnx-lvm-extend"] .lx .sd-bg-grid { --bg-row-gap: 0.55rem; }
+/* a changed cell keeps its colour (which disk an extent sits on) under the kit's ink outline, with a thinner halo
+   that leaves the span numbers under the row readable */
+[data-sim="lnx-lvm-extend"] .lx .sd-bg-cell.sd-changed { box-shadow: 0 0 0 0.2rem var(--hl); outline-offset: 0.05rem; }
+[data-sim="lnx-lvm-extend"] .lx .sd-bg-cell.sd-changed.sd-fill { background: var(--sw); color: var(--on-series); }
+[data-sim="lnx-lvm-extend"] .lx .sd-bg-num { position: relative; z-index: 4; }
+[data-sim="lnx-lvm-extend"] .lx-lab,
+[data-sim="lnx-lvm-extend"] .lx-aside {
+  display: flex; flex-direction: column; justify-content: center; gap: 0.05rem;
+  padding: 0 0.45rem; border: 0.15rem solid transparent; border-radius: var(--radius-sm); line-height: 1.1;
+}
+[data-sim="lnx-lvm-extend"] .lx-word { font-weight: 700; white-space: nowrap; }
+[data-sim="lnx-lvm-extend"] .lx-name { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="lnx-lvm-extend"] .lx-aside { font-size: var(--fs-sm); }
+[data-sim="lnx-lvm-extend"] .lx-makers { color: var(--muted); white-space: nowrap; }
+[data-sim="lnx-lvm-extend"] .lx-makers [translate="no"] { color: var(--ink); }
+[data-sim="lnx-lvm-extend"] .lx-read { white-space: nowrap; }
+[data-sim="lnx-lvm-extend"] .lx-rcmd { color: var(--muted); }
+[data-sim="lnx-lvm-extend"] .lx-val { font-weight: 700; }
+[data-sim="lnx-lvm-extend"] .lx-quiet { color: var(--muted); font-style: italic; }
+[data-sim="lnx-lvm-extend"] [data-st="changed"] { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="lnx-lvm-extend"] [data-st="changed"] .lx-name,
+[data-sim="lnx-lvm-extend"] [data-st="changed"] .lx-makers,
+[data-sim="lnx-lvm-extend"] [data-st="changed"] .lx-makers [translate="no"],
+[data-sim="lnx-lvm-extend"] [data-st="changed"] .lx-rcmd,
+[data-sim="lnx-lvm-extend"] [data-st="changed"] .lx-quiet { color: var(--on-hl); }
+[data-sim="lnx-lvm-extend"] [data-st="refused"] { border: 0.15rem solid var(--danger); box-shadow: 0 0 0 0.15rem var(--bg), 0 0 0 0.3rem var(--danger); }
+[data-sim="lnx-lvm-extend"] [data-st="refused"] .lx-word::after { content: ' ✕'; color: var(--danger); }
+[data-sim="lnx-lvm-extend"] [data-st="asked"] { border-color: var(--ink); border-style: dashed; }
+
+/* legend swatches: a free extent, a refused layer, the layer being read */
+[data-sim="lnx-lvm-extend"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
+[data-sim="lnx-lvm-extend"] .sd-swatch[data-shape="lx-ref"] { background: var(--bg); border: 0.25rem double var(--danger); }
+[data-sim="lnx-lvm-extend"] .sd-swatch[data-shape="lx-ask"] { background: var(--bg); border: 0.15rem dashed var(--ink); }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-lvm-extend"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; the grid and the terminal scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-lvm-extend"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-lvm-extend"] .lx { height: auto; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="lnx-lvm-extend"] .lx-cmdline { font-size: var(--fs-sm); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Proširenje logičkog volumena i datotečnog sustava</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var DISK_C = ['1', '2'];        // series colour per disk (the rows also differ by place, label and span)
+  var FS_C = '3';
+  var MAKERS = { fs: ['mkfs', 'xfs_growfs', 'resize2fs'], lv: ['lvcreate', 'lvextend'], vg: ['vgcreate', 'vgextend'], pv: ['pvcreate'] };
+  var READER = { fs: 'df -hT', lv: 'lvs', vg: 'vgs', pv: 'pvs' };
+
+  /** Data (devices, sizes, commands, tool output) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** A dataset without its null entries (h() would write them as "null"). */
+  function ds(o) { var out = {}; Object.keys(o).forEach(function (k) { if (o[k] != null) out[k] = o[k]; }); return out; }
+  function sp(parts) { return [' '].concat(parts); }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule for "extent"). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+  function node(parts) { return h('span', null, parts); }
+  function ext(n) { return node(rich('extents', null, n)); }
+  function list(nodes) {
+    var out = [];
+    nodes.forEach(function (x, i) { if (i) out.push(i === nodes.length - 1 ? t('and') : ', '); out.push(x); });
+    return node(out);
+  }
+
+  /** The most out lines any step of this scene prints, so the terminal keeps one height through the run. */
+  var tallest = {};
+  function maxLines(p) {
+    var key = JSON.stringify(p);
+    if (tallest[key] === undefined) {
+      var s = L.initial(p), m = 1;
+      for (var n = 1; n <= L.steps(p); n++) { s = L.step(s, n, p); m = Math.max(m, s.out.length); }
+      tallest[key] = m;
+    }
+    return tallest[key];
+  }
+
+  // ── stage ──
+
+  function terminal(c) {
+    var s = c.state;
+    var line = h('div', { class: 'lx-cmdline' },
+      h('span', { class: 'lx-prompt', translate: 'no' }, '[student@demosrv1 ~]$'),
+      s.cmd ? h('span', { class: 'lx-cmd sd-changed', translate: 'no' }, s.cmd) : null,
+      s.exit === null ? null : h('span', { class: 'lx-exit', dataset: ds({ bad: s.exit ? 'true' : null }) }, t('exit', { n: s.exit })));
+    var out = h('pre', { class: 'lx-out', translate: 'no', dataset: ds({ bad: s.exit ? 'true' : null }),
+      style: { minHeight: (maxLines(c.params) * 1.3) + 'em' } }, s.out.join('\n'));
+    return h('section', { class: 'lx-term', 'aria-label': t('terminal') }, line, out);
+  }
+
+  /** A cell drawn when a layer holds at least half the extents in its column (the counts are in the spans). */
+  function most(n, of) { return n > 0 && 2 * n >= of; }
+
+  function cellsOf(s) {
+    var col = L.columns(s);
+    var row = { fs: [], lv: [], vg: [] };
+    s.disks.forEach(function (d) { row['pv:' + d.name] = []; });
+    col.cols.forEach(function (x) {
+      var dc = DISK_C[x.di], lvHere = most(x.lv, x.cap);
+      row.fs.push(!lvHere ? null : s.fs && most(x.fs, x.lv) ? { kind: 'fill', c: FS_C } : { kind: 'ghost' });
+      row.lv.push(lvHere ? { kind: 'fill', c: dc } : null);
+      row.vg.push(x.pv === 'vg' ? (most(x.used, x.cap) ? { kind: 'fill', c: dc } : {}) : null);
+      s.disks.forEach(function (d) {
+        row['pv:' + d.name].push(d.name !== x.disk ? null : x.pv === 'raw' ? { kind: 'ghost' } : x.pv === 'orphan' ? {} :
+          most(x.used, x.cap) ? { kind: 'fill', c: dc } : {});
+      });
+    });
+    return { col: col, row: row };
+  }
+
+  function sig(cell) { return cell ? (cell.kind || 'free') + (cell.c || '') : '-'; }
+  /** The first and last column of a row where pred holds, as a span { from, len }, or null. */
+  function run(cells, pred) {
+    var a = -1, b = -1;
+    cells.forEach(function (x, i) { if (pred(x, i)) { if (a < 0) a = i; b = i; } });
+    return a < 0 ? null : { from: a, len: b - a + 1 };
+  }
+
+  function stateOf(s, id) {
+    if (s.refused.indexOf(id) >= 0) return 'refused';
+    if (s.changed.indexOf(id) >= 0) return 'changed';
+    if (s.asked.indexOf(id) >= 0) return 'asked';
+    return null;
+  }
+
+  function labelOf(word, name, st) {
+    return h('div', { class: 'lx-lab', dataset: ds({ st: st }) }, h('span', { class: 'lx-word' }, word),
+      name ? h('span', { class: 'lx-name', translate: 'no' }, name) : null);
+  }
+  function asideOf(kind, value, st) {
+    var makers = MAKERS[kind].map(function (m) { return data(m); });
+    var mk = [];
+    makers.forEach(function (m, i) { if (i) mk.push(' · '); mk.push(m); });
+    return h('div', { class: 'lx-aside', dataset: ds({ st: st }) },
+      h('div', { class: 'lx-makers' }, t('changes'), ' ', mk),
+      h('div', { class: 'lx-read' }, h('span', { class: 'lx-rcmd' }, t('reads'), ' ', data(READER[kind])), ' ', value));
+  }
+  function val(text) { return h('span', { class: 'lx-val', translate: 'no' }, text); }
+  function quiet(key) { return h('span', { class: 'lx-quiet' }, t(key)); }
+
+  function render(c) {
+    var s = c.state, prev = c.prev;
+    var now = cellsOf(s), was = prev ? cellsOf(prev) : null;
+    var col = now.col;
+    var mark = function (id) {
+      return now.row[id].map(function (cell, i) {
+        if (!cell) return null;
+        var changed = was && s.changed.indexOf(id) >= 0 && sig(was.row[id][i]) !== sig(cell);
+        return changed ? Object.assign({ now: true }, cell) : cell;
+      });
+    };
+    var fsRow = mark('fs'), lvRow = mark('lv'), vgRow = mark('vg');
+
+    // spans: the filesystem's blocks, the LV's extents on each disk, the VG's extents
+    var fsSpans = [], lvSpans = [], vgSpans = [];
+    if (s.fs) {
+      var r = run(fsRow, function (x) { return x && x.kind === 'fill'; });
+      var grew = prev && prev.fs && prev.fs.blocks !== s.fs.blocks;
+      if (r) fsSpans.push(Object.assign({ label: s.fs.blocks + ' × 4 KiB', now: !!grew }, r));
+    }
+    if (s.lv) {
+      var per = L.split(s, s.lv.les), perWas = prev && prev.lv ? L.split(prev, prev.lv.les) : [];
+      per.forEach(function (x) {
+        var di = s.disks.map(function (d) { return d.name; }).indexOf(x.disk);
+        var r2 = run(lvRow, function (cell, i) { return cell && col.cols[i].di === di; });
+        var w = perWas.filter(function (y) { return y.disk === x.disk; })[0];
+        if (r2) lvSpans.push(Object.assign({ label: x.disk.replace('/dev/', '') + ': ' + x.n + ' LE', now: !!prev && (!w || w.n !== x.n) }, r2));
+      });
+    }
+    if (s.vg) {
+      var r3 = run(vgRow, function (x) { return !!x; });
+      var vgWas = prev ? L.vgsRow(prev) : null;
+      if (r3) vgSpans.push(Object.assign({ label: L.vgTotal(s) + ' PE', now: !!prev && (!vgWas || vgWas.pes !== L.vgTotal(s)) }, r3));
+    }
+
+    var df = L.dfRow(s), lvs = L.lvsRow(s), vgs = L.vgsRow(s), pvs = L.pvsRows(s);
+    var rows = [
+      { id: 'fs', label: labelOf(t('layFs'), s.fs ? s.fs.type + ' · ' + L.MNT : null, stateOf(s, 'fs')),
+        aside: asideOf('fs', df ? val('Size ' + df.size + '  Used ' + df.used + '  Avail ' + df.avail + '  ' + df.pct)
+          : quiet(s.fs ? 'notMounted' : 'none'), stateOf(s, 'fs')),
+        cells: fsRow, spans: fsSpans },
+      { id: 'lv', label: labelOf(t('layLv'), s.lv ? L.LV : null, stateOf(s, 'lv')),
+        aside: asideOf('lv', lvs ? val('LSize ' + lvs.lsize + '  (' + lvs.les + ' LE)') : quiet('none'), stateOf(s, 'lv')),
+        cells: lvRow, spans: lvSpans },
+      { id: 'vg', label: labelOf(t('layVg'), s.vg ? L.VG : null, stateOf(s, 'vg')),
+        aside: asideOf('vg', vgs ? val('#PV ' + vgs.pv + '  #LV ' + vgs.lv + '  VSize ' + vgs.vsize + '  VFree ' + vgs.vfree) : quiet('none'), stateOf(s, 'vg')),
+        cells: vgRow, spans: vgSpans }
+    ];
+    s.disks.forEach(function (d) {
+      var id = 'pv:' + d.name, r4 = pvs.filter(function (x) { return x.pv === d.name; })[0];
+      var value = !r4 ? quiet('notPv') : r4.vg ? val('PSize ' + r4.psize + '  PFree ' + r4.pfree + '  (' + r4.pes + ' PE)')
+        : h('span', null, val('PSize ' + r4.psize + '  PFree ' + r4.pfree), ' ', quiet('noGroup'));
+      rows.push({ id: id, label: labelOf(d.pv ? t('layPv') : t('layDisk'), d.name, stateOf(s, id)),
+        aside: asideOf('pv', value, stateOf(s, id)), cells: mark(id) });
+    });
+
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [node(rich('perCol', { mib: col.chunkMiB, ext: ext(col.perCol) })), node(rich('peSize', { pe: s.peMiB }))],
+      cols: col.cols.length,
+      cellHeight: '2.4rem',
+      rows: rows
+    });
+    c.stage.replaceChildren(h('div', { class: 'lx' }, terminal(c), grid));
+  }
+
+  // ── captions ──
+
+  function sceneOf(c) { return L.norm(c.params).scene; }
+  function lsize(s) { return data(L.lvsRow(s).lsize); }
+  function dfSize(s) { return data(L.dfRow(s).size); }
+  function reqArg(mib) { return mib % 1024 === 0 ? (mib / 1024) + 'G' : mib + 'M'; }
+
+  function capStart(c) {
+    var s = c.state, sc = sceneOf(c);
+    if (sc === 'build') return rich('capStartBuild', { vdb: data(L.VDB), vdc: data(L.VDC) });
+    if (sc === 'forgot-fs') return rich('capStartForgot');
+    if (sc === 'will-it-fit') return rich('capStartFit', { lv: data(L.LV), lsize: lsize(s) });
+    return rich('capStartBook', { vg: data(L.VG), vdb: data(L.VDB), lv: data(L.LV), lsize: lsize(s), les: ext(s.lv.les.length),
+      type: data(s.fs.type), mnt: data(L.MNT), size: dfSize(s), vdc: data(L.VDC) });
+  }
+
+  function capPvcreate(c) {
+    var s = c.state, d = s.op.disk;
+    var out = rich('capPv', { disk: data(d) });
+    if (s.vg) return out.concat(sp(rich('capPvNoVg', { vg: data(L.VG), free: ext(L.vgFree(s)), disk: data(d) })));
+    return out.concat(sp(rich('capPvAlone')));
+  }
+
+  function capVg(c) {
+    var s = c.state, i = s.info;
+    if (s.event === 'vgcreate') {
+      return rich('capVgCreate', { vg: data(L.VG), disk: data(i.disk), pes: ext(i.pes), pe: s.peMiB, naive: i.naive });
+    }
+    var v = L.vgsRow(s);
+    return rich('capVgExtend', { disk: data(i.disk), vg: data(L.VG), added: ext(i.pes), free: ext(v.free), vfree: data(v.vfree),
+      lsize: s.lv ? lsize(s) : data('–') });
+  }
+
+  function capLvcreate(c) {
+    var s = c.state, i = s.info;
+    var out = rich('capLvCreate', { lv: data(L.LV), size: data(reqArg(i.mib)), need: ext(i.need),
+      disks: list(i.split.map(function (x) { return data(x.disk); })), free: ext(L.vgFree(s)) });
+    if (i.rounded) out = out.concat(sp(rich('capRounded', { req: data(reqArg(i.mib)), pe: s.peMiB })));
+    return out;
+  }
+
+  function capLvextendFail(c) {
+    var s = c.state, i = s.info, isCreate = s.op.op === 'lvcreate';
+    if (isCreate) return rich('capCmdFail', { exit: t('exit', { n: s.exit }) });
+    var out = rich('capExtFail', { exit: t('exit', { n: s.exit }), req: data(reqArg(i.mib)), need: ext(i.need), vg: data(L.VG),
+      free: ext(i.free), lv: data(L.LV), lsize: lsize(s) });
+    if (i.rounded) out = out.concat(sp(rich('capRounded', { req: data(reqArg(i.mib)), pe: s.peMiB })));
+    var orphan = s.disks.filter(function (d) { return d.pv && !d.vg; })[0];
+    var raw = s.disks.filter(function (d) { return !d.pv; })[0];
+    if (orphan) out = out.concat(sp(rich('capExtOutside', { disk: data(orphan.name) })));
+    else if (raw) out = out.concat(sp(rich('capExtRaw', { disk: data(raw.name) })));
+    else out = out.concat(sp(rich('capExtThird')));
+    return out;
+  }
+
+  function capLvextend(c) {
+    var s = c.state, i = s.info;
+    var parts = i.split.map(function (x) { return node(rich('capSplitPart', { n: x.n, disk: data(x.disk) })); });
+    var out = rich('capExtOk', { need: ext(i.need), split: list(parts), lv: data(L.LV), to: ext(i.to), lsize: lsize(s), from: i.from });
+    if (i.rounded) out = out.concat(sp(rich('capRounded', { req: data(reqArg(i.mib)), pe: s.peMiB })));
+    if (i.split.length > 1 && !s.op.resizefs) out = out.concat(sp(rich('capExtOrder', { first: data(i.split[0].disk), second: data(i.split[1].disk) })));
+    if (s.op.resizefs && i.fsTo !== undefined) out = out.concat(sp(rich('capExtR', { from: i.fsFrom, to: i.fsTo })));
+    else if (s.fs) out = out.concat(sp(rich('capExtFsSame')));
+    return out;
+  }
+
+  function capDf(c) {
+    var s = c.state, r = L.dfRow(s);
+    if (!r) return rich('capCmdFail', { exit: t('exit', { n: s.exit }) });
+    if (s.refused.indexOf('fs') >= 0) {
+      if (sceneOf(c) === 'forgot-fs') return rich('capDfAsk', { lsize: lsize(s), size: dfSize(s) });
+      return rich('capDfShort', { to: ext(s.lv.les.length), size: dfSize(s), mkfs: data('mkfs.' + s.fs.type) });
+    }
+    var out = rich('capDf', { size: data(r.size), used: data(r.used), avail: data(r.avail) });
+    if (s.fs.blocks !== s.fs.agsize * 4) return out.concat(sp(rich('capDfGrown')));
+    if (sceneOf(c) === 'build') return out.concat(sp(rich('capDfFresh', { used: data(r.used) })));
+    return out;
+  }
+
+  function capGrowfs(c) {
+    var s = c.state, i = s.info, tool = data(s.fs.type === 'xfs' ? 'xfs_growfs' : 'resize2fs');
+    if (i.from === i.to) return rich('capGrowSame', { tool: tool });
+    var out = rich('capGrow', { tool: tool, from: i.from, to: i.to, mib: L.lvMiB(s), mnt: data(L.MNT) });
+    if (sceneOf(c) === 'forgot-fs') out = rich('capGrowAnswer').concat(sp(out));
+    return out;
+  }
+
+  function capRead(c) {
+    var s = c.state, out = [];
+    if (s.op.restore) out = rich('capRestore').concat([' ']);
+    if (s.event === 'pvs') {
+      var parts = L.pvsRows(s).map(function (r) {
+        if (r.free === 0) return node(rich('capPvsFull', { disk: data(r.pv) }));
+        return node(rich('capPvsPart', { disk: data(r.pv), pfree: data(r.pfree), free: r.free === null ? data('–') : ext(r.free) }));
+      });
+      out = out.concat(rich('capPvs', { list: list(parts) }));
+      if (L.split(s, s.lv ? s.lv.les : []).length > 1) out = out.concat(sp(rich('capPvsSpread')));
+      return out;
+    }
+    if (s.event === 'vgs') {
+      var v = L.vgsRow(s);
+      return out.concat(rich('capVgs', { vg: data(L.VG), pv: t.n('pvs', v.pv), free: ext(v.free), vfree: data(v.vfree) }));
+    }
+    return out.concat(rich('capLvs', { lv: data(L.LV), lsize: lsize(s), les: ext(s.lv.les.length) }));
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.event;
+    if (e === 'start') return capStart(c);
+    if (e === 'pvcreate') return capPvcreate(c);
+    if (e === 'vgcreate' || e === 'vgextend') return capVg(c);
+    if (e === 'lvcreate') return capLvcreate(c);
+    if (e === 'lvextend') return capLvextend(c);
+    if (e === 'lvextend-fail' || e === 'lvcreate-fail') return capLvextendFail(c);
+    if (e === 'mkfs') return rich('capMkfs', { tool: data('mkfs.' + s.fs.type), lv: data(L.DEV), blocks: s.info.blocks });
+    if (e === 'mount') return rich('capMount', { mnt: data(L.MNT) });
+    if (e === 'df') return capDf(c);
+    if (e === 'growfs') return capGrowfs(c);
+    if (e === 'pvs' || e === 'vgs' || e === 'lvs') return capRead(c);
+    return rich('capCmdFail', { exit: t('exit', { n: s.exit }) });
+  }
+
+  var growable = function (p) { var sc = L.norm(p).scene; return sc === 'book' || sc === 'ext4-r'; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['book', t('presetBook')], ['ext4-r', t('presetExt4')], ['forgot-fs', t('presetForgot')],
+          ['will-it-fit', t('presetFit')], ['build', t('presetBuild')]],
+        visible: function () { return false; } },
+      { key: 'peMiB', type: 'choice', label: t('peMiB'), resets: true, options: [[4, '4'], [8, '8'], [16, '16'], [32, '32']] },
+      { key: 'disk2GiB', type: 'choice', label: t('disk2GiB'), resets: true, options: [[2, '2'], [4, '4'], [8, '8']] },
+      { key: 'fsType', type: 'choice', label: t('fsType'), resets: true, options: [['xfs', t('fsXfs')], ['ext4', t('fsExt4')]] },
+      { key: 'growMiB', type: 'range', label: t('growMiB'), min: 100, max: 6000, step: 100,
+        format: function (v) { return '+' + v + ' MiB'; }, visible: growable }
+    ],
+
+    presets: [
+      { id: 'book', label: t('presetBook'), params: { scene: 'book' }, hint: t('presetBookHint') },
+      { id: 'ext4-r', label: t('presetExt4'), params: { scene: 'ext4-r', fsType: 'ext4' }, hint: t('presetExt4Hint') },
+      { id: 'forgot-fs', label: t('presetForgot'), params: { scene: 'forgot-fs' }, hint: t('presetForgotHint') },
+      { id: 'will-it-fit', label: t('presetFit'), params: { scene: 'will-it-fit' }, hint: t('presetFitHint') },
+      { id: 'build', label: t('presetBuild'), params: { scene: 'build' }, hint: t('presetBuildHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'lx-ref', label: t('legRefused') },
+      { shape: 'lx-ask', label: t('legAsked') },
+      { shape: 'slot', label: t('legFree') },
+      { shape: 'bg-fill', c: 1, label: t('legOnVdb') },
+      { shape: 'bg-fill', c: 2, label: t('legOnVdc') },
+      { shape: 'bg-fill', c: 3, label: t('legFs') },
+      { shape: 'bg-ghost', label: t('legGhost') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
