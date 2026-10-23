@@ -1,0 +1,593 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-namespaces: a container is a process. On top, the command of this step, who ran it (a host terminal or the
+     container's shell) and what it printed. Below, two panels side by side, the host's view and the container's view,
+     each with the processes as that view numbers them, the network interfaces and the mount table; under both, the one
+     kernel with the PID, network and mount namespaces it keeps (the container diagram the other §5.17 pages reuse).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-namespaces">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontejner je proces · simdeck</title>
+<meta name="description" content="Pokreni kontejner i usporedi poglede: unutra je ljuska PID 1, a domaćin je vidi kao 4321; ps bez novog /proc vidi sve, a izolacija ide u jednom smjeru.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-namespaces",
+  "title": {
+    "hr": "Kontejner je proces",
+    "en": "A container is a process"
+  },
+  "concept": {
+    "hr": "Imenski prostori za PID, mrežu i montiranje izoliraju jedno stablo procesa",
+    "en": "PID, network and mount namespaces isolate one process tree"
+  },
+  "summary": {
+    "hr": "Pokreni kontejner i usporedi poglede: unutra je ljuska PID 1, a domaćin je vidi kao 4321; ps bez novog /proc vidi sve, a izolacija ide u jednom smjeru.",
+    "en": "Start a container and compare the views: inside, the shell is PID 1 and the host sees it as 4321; ps without a new /proc sees all; isolation runs one way."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "stepper",
+  "steps": 9,
+  "entries": [
+    {
+      "preset": "no-mount-proc"
+    },
+    {
+      "preset": "kill-init"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-namespaces"]; colours only from kit tokens.
+   Layout: the command strip on top; the two views side by side; the kernel bar under both. */
+[data-sim="lnx-namespaces"] .ns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-namespaces"] code, [data-sim="lnx-namespaces"] .ns-mono { font-family: var(--mono); }
+/* the container's namespaces: hatched, with a C badge; the host's are plain */
+[data-sim="lnx-namespaces"] .ns-c {
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.45em, color-mix(in srgb, var(--c2) 30%, transparent) 0.45em 0.65em);
+}
+[data-sim="lnx-namespaces"] .ns-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.3em;
+  height: 1.3em;
+  padding: 0 0.15em;
+  border: 2px solid var(--c2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+[data-sim="lnx-namespaces"] .ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+[data-sim="lnx-namespaces"] .ns-chip.ns-c { border: 2px solid var(--c2); }
+[data-sim="lnx-namespaces"] .ns-muted { color: var(--muted); }
+
+/* the command strip */
+[data-sim="lnx-namespaces"] .ns-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.8rem;
+  align-items: baseline;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-namespaces"] .ns-side { font-weight: 700; padding: 0.05rem 0.5rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap; }
+[data-sim="lnx-namespaces"] .ns-side.ns-c { border-color: var(--c2); }
+[data-sim="lnx-namespaces"] .ns-cmd { font-family: var(--mono); font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="lnx-namespaces"] .ns-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-namespaces"] .ns-hint { color: var(--muted); font-family: var(--sans); font-weight: 400; font-size: 1rem; }
+[data-sim="lnx-namespaces"] .ns-out {
+  grid-column: 2;
+  margin: 0;
+  min-height: calc(var(--lines, 1) * 1.2em);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  line-height: 1.2;
+  white-space: pre;
+  overflow-x: auto;
+}
+[data-sim="lnx-namespaces"] .ns-out .ns-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-namespaces"] .ns-out .ns-none { color: var(--muted); font-family: var(--sans); font-style: italic; }
+
+/* the two views */
+[data-sim="lnx-namespaces"] .ns-views {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+/* view host or container: that panel alone, full width, processes beside interfaces and mounts, larger */
+[data-sim="lnx-namespaces"] .ns-views[data-view="host"], [data-sim="lnx-namespaces"] .ns-views[data-view="container"] { grid-template-columns: minmax(0, 1fr); }
+[data-sim="lnx-namespaces"] .ns-views[data-view="host"] .ns-panel[data-side="container"],
+[data-sim="lnx-namespaces"] .ns-views[data-view="container"] .ns-panel[data-side="host"] { display: none; }
+[data-sim="lnx-namespaces"] .ns-views[data-view="host"] .ns-panel, [data-sim="lnx-namespaces"] .ns-views[data-view="container"] .ns-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
+  gap: 0.3rem 1.4rem;
+  font-size: 1.2rem;
+}
+[data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel > .ns-phead, [data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel > .ns-empty { grid-column: 1 / -1; }
+[data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel > .ns-sec:nth-child(2) { grid-column: 1; grid-row: 2 / span 2; }
+[data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel > .ns-sec:nth-child(3) { grid-column: 2; grid-row: 2; }
+[data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel > .ns-sec:nth-child(4) { grid-column: 2; grid-row: 3; align-self: start; }
+[data-sim="lnx-namespaces"] .ns-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.25rem 0.6rem 0.4rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  overflow: hidden;
+}
+[data-sim="lnx-namespaces"] .ns-panel[data-side="container"] { border-color: var(--c2); border-width: 0.2rem; }
+[data-sim="lnx-namespaces"] .ns-phead { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+[data-sim="lnx-namespaces"] .ns-phead h3 { margin: 0 0.3rem 0 0; font-size: 1.1em; }
+[data-sim="lnx-namespaces"] .ns-sec { display: flex; flex-direction: column; gap: 0.08rem; }
+[data-sim="lnx-namespaces"] .ns-sec h4 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; margin: 0.05rem 0 0; font-size: 0.875rem; color: var(--muted); }
+[data-sim="lnx-namespaces"] .ns-sec h4 b { color: var(--ink); font-size: 0.95rem; }
+[data-sim="lnx-namespaces"] .ns-rows { display: flex; flex-direction: column; gap: 0.08rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-namespaces"] .ns-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+  min-height: 1.2em;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.9em;
+  line-height: 1.3;
+}
+[data-sim="lnx-namespaces"] .ns-row.ns-c { border-color: var(--c2); }
+[data-sim="lnx-namespaces"] .ns-row.ns-c, [data-sim="lnx-namespaces"] .ns-chip.ns-c, [data-sim="lnx-namespaces"] .ns-side.ns-c {
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.45em, color-mix(in srgb, var(--c2) 24%, transparent) 0.45em 0.65em);
+}
+/* changed rows and chips: the kit's outline and glow would cover the neighbours, so inset, on a yellow fill */
+[data-sim="lnx-namespaces"] .ns-row.sd-changed, [data-sim="lnx-namespaces"] .ns-chip.sd-changed {
+  outline: 0.18rem solid var(--ink);
+  outline-offset: -0.18rem;
+  box-shadow: none;
+  background-color: var(--hl);
+  color: var(--on-hl);
+}
+[data-sim="lnx-namespaces"] .sd-changed .ns-inner, [data-sim="lnx-namespaces"] .sd-changed .ns-tag,
+[data-sim="lnx-namespaces"] .sd-changed .ns-tree, [data-sim="lnx-namespaces"] .sd-changed .ns-muted { color: var(--on-hl); }
+[data-sim="lnx-namespaces"] .ns-panel > *, [data-sim="lnx-namespaces"] .ns-sec > *, [data-sim="lnx-namespaces"] .ns-rows > * { flex-shrink: 0; }
+[data-sim="lnx-namespaces"] .ns-row.ns-ran { border: 2px dashed var(--ink); }
+[data-sim="lnx-namespaces"] .ns-row.ns-gone { border-style: dotted; color: var(--muted); background-image: none; }
+[data-sim="lnx-namespaces"] .ns-row.ns-gone .ns-main { text-decoration: line-through; }
+[data-sim="lnx-namespaces"] .ns-pid { min-width: 4.6em; font-family: var(--mono); font-weight: 700; text-align: right; }
+[data-sim="lnx-namespaces"] .ns-pid .ns-inner { color: var(--c2); }
+[data-sim="lnx-namespaces"] .ns-main { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-namespaces"] .ns-tree { color: var(--muted); font-family: var(--mono); white-space: pre; }
+[data-sim="lnx-namespaces"] .ns-tag { font-size: 0.875rem; color: var(--muted); }
+[data-sim="lnx-namespaces"] .ns-mcols { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 0 0.8rem; align-items: center; }
+[data-sim="lnx-namespaces"] .ns-state { font-size: 0.9rem; }
+[data-sim="lnx-namespaces"] .ns-empty { color: var(--muted); font-style: italic; margin: 0.4rem 0; }
+
+/* the kernel bar */
+[data-sim="lnx-namespaces"] .ns-kernel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1.2rem;
+  padding: 0.3rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-top-width: 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-namespaces"] .ns-kernel h3 { margin: 0; font-size: 1rem; }
+[data-sim="lnx-namespaces"] .ns-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+[data-sim="lnx-namespaces"] .ns-kind > b { font-size: 0.9rem; }
+[data-sim="lnx-namespaces"] .ns-chip.ns-gone { border-style: dotted; color: var(--muted); background-image: none; }
+[data-sim="lnx-namespaces"] .ns-chip.ns-closed { border-style: dashed; }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-namespaces"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-host"] { background: var(--bg); border: 2px solid var(--ink); }
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-c"] {
+  border: 2px solid var(--c2);
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.15rem, color-mix(in srgb, var(--c2) 55%, transparent) 0.15rem 0.3rem);
+}
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-pair"] { position: relative; background: var(--bg); }
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-pair"]::after { content: '/'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-ran"] { background: var(--bg); border: 2px dashed var(--ink); }
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-gone"] { position: relative; background: var(--bg); border: 2px dotted var(--muted); }
+[data-sim="lnx-namespaces"] .sd-swatch[data-shape="ns-gone"]::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-namespaces"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-namespaces"] .ns { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-namespaces"] .ns-shell { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-namespaces"] .ns-out { grid-column: 1; font-size: 0.875rem; }
+  [data-sim="lnx-namespaces"] .ns-views { display: flex; flex-direction: column; }
+  [data-sim="lnx-namespaces"] .ns-panel { overflow: visible; }
+  [data-sim="lnx-namespaces"] .ns-views[data-view] .ns-panel { display: flex; font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kontejner je proces</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HOST = L.HOST;
+  var TERMINAL = { h1: 1, h2: 2 };
+
+  // ── small pieces ──
+
+  /** Data (PIDs, names, paths) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function has(s, key) { return s.changed.indexOf(key) >= 0; }
+  function chg(on, c) { return on ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''; }
+  function isC(ns) { return ns !== HOST; }
+  function badge() { return h('span', { class: 'ns-badge', translate: 'no' }, 'C'); }
+  /** The name of a namespace as a view label: the host's, or the container's (hatched, C). */
+  function nsName(ns) { return isC(ns) ? h('span', null, badge(), ' ', t('nsC')) : t('nsHost'); }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands, *word* as <em lang="en"> and `x` as code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── the command strip ──
+
+  var FLAGS = [['pid', '--pid'], ['fork', '--fork'], ['mountProc', '--mount-proc'], ['net', '--net'], ['mount', '--mount']];
+  function cmdText(c) {
+    switch (c.op) {
+      case 'unshare': return 'unshare ' + FLAGS.filter(function (f) { return c.flags[f[0]]; }).map(function (f) { return f[1]; }).join(' ') + ' bash' + (c.norc ? ' --norc' : '');
+      case 'echo': return 'echo $$';
+      case 'ps': return 'ps -eo pid,comm';
+      case 'ip': return 'ip -br link';
+      case 'mount': return 'mount -t ' + c.fstype + ' ' + c.src + ' ' + c.target;
+      case 'findmnt': return 'findmnt ' + c.target;
+      case 'ls': return 'ls';
+      case 'bg': return c.name + ' 1000 &';
+      case 'kill': return 'kill ' + (c.flag ? c.flag + ' ' : '') + c.pid;
+      case 'exit': return 'exit';
+    }
+    return '';
+  }
+  /** Output lines a preset ever prints at once: the strip keeps that height, so the panels do not jump. */
+  var linesMemo = {};
+  function maxLines(p) {
+    if (linesMemo[p.scene] == null) {
+      var n = 1;
+      for (var i = 0; i <= L.steps(p); i++) n = Math.max(n, Simdeck.stateAt(L, p, i).out.length);
+      linesMemo[p.scene] = n;
+    }
+    return linesMemo[p.scene];
+  }
+  function shell(s, p) {
+    var c = s.cmd;
+    var side = !c ? null : c.on === 'c' ? h('span', { class: 'ns-side ns-c' }, badge(), ' ', t('sideC'))
+      : h('span', { class: 'ns-side' }, t('sideHost', { n: TERMINAL[c.on] }));
+    var out = !c ? [] : s.out.length ? s.out.map(function (l) { return h('span', { class: s.lastError ? 'ns-err' : null }, l + '\n'); })
+      : [h('span', { class: 'ns-none' }, t('noOutput'))];
+    return h('div', { class: 'ns-shell' }, side || h('span'),
+      h('div', { class: 'ns-cmd' }, c ? [h('span', { class: 'ns-prompt', translate: 'no' }, '# '), h('span', { translate: 'no' }, cmdText(c))]
+        : h('span', { class: 'ns-hint' }, t('before'))),
+      h('pre', { class: 'ns-out', translate: c && s.out.length ? 'no' : null, style: { '--lines': String(maxLines(p)) } }, out));
+  }
+
+  // ── the two views ──
+
+  /** Depth of a process in the tree its view can see: parents outside the view make a root. */
+  function depths(rows) {
+    var byId = {}, out = {};
+    rows.forEach(function (r) { byId[r.id] = r; });
+    function d(r) { if (out[r.id] != null) return out[r.id]; var p = byId[r.parent]; out[r.id] = p && p !== r ? d(p) + 1 : 0; return out[r.id]; }
+    rows.forEach(d);
+    return out;
+  }
+  function procRow(c, side, r, depth, gone) {
+    var s = c.state;
+    var pid = side === HOST && r.inner != null ? [String(r.pid), h('span', { class: 'ns-inner' }, ' / ' + r.inner)] : String(r.pid);
+    var extra = [];
+    if (side === HOST && !isC(r.nsPid) && !gone) {                 // a host process inside the container's net or mount (unshare)
+      if (isC(r.nsNet)) extra.push(h('span', { class: 'ns-chip ns-c' }, t('kindNet'), badge()));
+      if (isC(r.nsMnt)) extra.push(h('span', { class: 'ns-chip ns-c' }, t('kindMnt'), badge()));
+      if (r.forChildren) extra.push(h('span', { class: 'ns-chip ns-c' }, t.parts('tagNext', { ns: badge() })));
+    }
+    if (isC(r.nsPid)) extra.unshift(badge());
+    if (r.ran) extra.push(h('span', { class: 'ns-tag' }, t('tagRan')));
+    if (gone) extra.push(h('span', { class: 'ns-tag' }, t('tagGone')));
+    return h('li', { class: 'ns-row' + (isC(r.nsPid) ? ' ns-c' : '') + (r.ran ? ' ns-ran' : '') + (gone ? ' ns-gone' : '') + chg(!gone && has(s, side + ':proc:' + r.id), c) },
+      h('span', { class: 'ns-pid', translate: 'no' }, pid),
+      depth ? h('span', { class: 'ns-tree', translate: 'no' }, new Array(depth).join('  ') + '└ ') : null,
+      h('span', { class: 'ns-main', translate: 'no' }, r.name), extra);
+  }
+  function ifaceRow(c, side, net, i, gone) {
+    var s = c.state;
+    return h('li', { class: 'ns-row' + (isC(net) ? ' ns-c' : '') + (gone ? ' ns-gone' : '') + chg(!gone && has(s, side + ':iface:' + i.name), c) },
+      h('span', { class: 'ns-main', translate: 'no' }, i.name),
+      h('span', { class: 'ns-state' }, (i.up ? '● ' : '○ ') + t(i.up ? 'up' : 'down')),
+      gone ? h('span', { class: 'ns-tag' }, t('tagGone')) : null);
+  }
+  function mountRow(c, side, mnt, m, gone) {
+    var s = c.state;
+    return h('li', { class: 'ns-row ns-mcols' + (isC(mnt) ? ' ns-c' : '') + (gone ? ' ns-gone' : '') + chg(!gone && has(s, side + ':mnt:' + m.target), c) },
+      h('span', { class: 'ns-main', translate: 'no' }, m.target),
+      h('span', { class: 'ns-mono', translate: 'no' }, m.src + ' · ' + m.fstype),
+      m.pidns ? h('span', { class: 'ns-tag' }, t.parts('pidsOf', { ns: nsName(m.pidns) })) : gone ? h('span', { class: 'ns-tag' }, t('tagGone')) : h('span'));
+  }
+  function section(title, note, rows) {
+    return h('div', { class: 'ns-sec' }, h('h4', null, h('b', null, title), note), h('ul', { class: 'ns-rows' }, rows));
+  }
+  function nsHead(ns) {
+    return [['kindPid', ns.pid], ['kindNet', ns.net], ['kindMnt', ns.mnt]].map(function (k) {
+      return h('span', { class: 'ns-chip' + (isC(k[1]) ? ' ns-c' : '') }, h('b', null, t(k[0])), isC(k[1]) ? badge() : h('span', null, t('nsHost')));
+    });
+  }
+
+  function panel(c, side) {
+    var s = c.state, v = L.view(s, side);
+    var title = h('h3', null, t(side === HOST ? 'panelHost' : 'panelC'));
+    var lost = s.gone[side];
+    var goneProcs = lost.filter(function (r) { return r.pid != null; });
+    var goneIfaces = lost.filter(function (r) { return r.mac != null; });
+    var goneMounts = lost.filter(function (r) { return r.target != null; });
+    // no container (yet, or any more): its rows left the view, but the host's processes did not end, so none is struck
+    if (!v) return h('div', { class: 'ns-panel', dataset: { side: side } }, h('div', { class: 'ns-phead' }, title),
+      h('p', { class: 'ns-empty' + chg(lost.length > 0, c) }, t(lost.length ? 'containerGone' : 'noContainer')));
+    var all = v.procs.map(function (r) { return { r: r, gone: false }; }).concat(goneProcs.map(function (r) { return { r: r, gone: true }; }));
+    all.sort(function (a, b) { return a.r.pid - b.r.pid || (a.r.id < b.r.id ? -1 : 1); });
+    var dep = depths(all.map(function (x) { return x.r; }));
+    var shared = side !== HOST;
+    return h('div', { class: 'ns-panel', dataset: { side: side } },
+      h('div', { class: 'ns-phead' }, title, side === HOST ? null : nsHead(v.ns)),
+      section(t('secProcs'), [h('span', null, t.parts('procFrom', { ns: nsName(v.procFrom) })),
+        v.self ? h('span', null, t.parts('self', { pid: data(v.self.pid) })) : null],
+        all.map(function (x) { return procRow(c, side, x.r, dep[x.r.id], x.gone); })),
+      section(t('secIfaces'), shared && !isC(v.ns.net) ? h('span', null, t('shared')) : null,
+        v.ifaces.map(function (i) { return ifaceRow(c, side, v.ns.net, i, false); }).concat(goneIfaces.map(function (i) { return ifaceRow(c, side, v.ns.net, i, true); }))),
+      section(t('secMounts'), shared && !isC(v.ns.mnt) ? h('span', null, t('shared')) : null,
+        v.mounts.map(function (m) { return mountRow(c, side, v.ns.mnt, m, false); }).concat(goneMounts.map(function (m) { return mountRow(c, side, v.ns.mnt, m, true); }))));
+  }
+
+  // ── the kernel bar ──
+
+  function kernel(c) {
+    var s = c.state;
+    var kinds = [['pid', 'kindPid'], ['net', 'kindNet'], ['mnt', 'kindMnt']];
+    return h('div', { class: 'ns-kernel' }, h('h3', null, t('kernel')),
+      kinds.map(function (k) {
+        var now = s.ns[k[0]], before = c.prev ? c.prev.ns[k[0]] : [];
+        var chips = now.map(function (n) {
+          var note = null;
+          if (k[0] === 'pid' && isC(n.id)) {
+            if (n.dead) note = t('nsClosed');
+            else if (!n.init) note = t('nsNoProc');
+            else note = t.parts('nsInit', { name: data(L.proc(s, n.init).name) });
+          }
+          return h('span', { class: 'ns-chip' + (isC(n.id) ? ' ns-c' : '') + (n.dead ? ' ns-closed' : '') + chg(has(s, 'ns:' + k[0] + ':' + n.id), c) },
+            isC(n.id) ? [badge(), ' ', t('nsC')] : t('nsHost'), note ? h('span', { class: 'ns-muted' }, '· ', note) : null);
+        });
+        before.forEach(function (n) {
+          if (!now.some(function (x) { return x.id === n.id; })) chips.push(h('span', { class: 'ns-chip ns-gone' }, badge(), ' ', h('s', null, t('nsC')), ' · ', t('nsGone')));
+        });
+        return h('span', { class: 'ns-kind' }, h('b', null, t(k[1])), chips);
+      }));
+  }
+
+  function render(c) {
+    var s = c.state, p = c.params;
+    c.stage.replaceChildren(h('div', { class: 'ns' }, shell(s, p),
+      h('div', { class: 'ns-views', dataset: p.view === 'host' || p.view === 'container' ? { view: p.view } : {} }, panel(c, HOST), panel(c, 'container')),
+      kernel(c)));
+  }
+
+  // ── captions ──
+
+  function hostPid(s, id) { var q = L.proc(s, id); return q ? q.pidByNs[HOST] : null; }
+
+  function caption(c) {
+    var s = c.state, ev = s.event, cmd = s.cmd, prev = c.prev;
+    if (c.n === 0) return rich('capStart').concat(sp(rich('capGoal_' + s.scene)));
+    switch (cmd.op) {
+      case 'unshare': {
+        var f = cmd.flags, sh = L.proc(s, s.container);
+        if (!f.fork) return rich('capUnshareNoFork', { pid: data(sh.pidByNs[HOST]) });
+        if (f.mountProc && !f.net) return rich('capUnshareProc');
+        var out = rich('capUnshare', { host: data(sh.pidByNs[HOST]) });
+        if (c.n > 1) out = rich('capAgain').concat(sp(out));             // the second run of a comparison
+        if (f.net) out = out.concat(sp(rich('capUnshareNet')));
+        out = out.concat(sp(rich(f.mountProc ? 'capUnshareMnt' : 'capUnshareNoProc')));
+        return out;
+      }
+      case 'echo':
+        return ev.pid === 1 ? rich('capEchoInit') : rich('capEchoHost', { pid: data(ev.pid) });
+      case 'ps': {
+        if (s.lastError) return rich('capForkFail');
+        if (ev.procFrom === HOST) return rich('capPsHost', { host: data(hostPid(s, s.container)) });
+        var ps = L.proc(s, ev.ran), mine = ps.pidByNs[ps.nsPid];
+        if (L.pidNs(s, ps.nsPid).killed) return rich('capPsAfter', { pid: data(mine) });
+        return rich('capPsOwn', { host: data(ps.pidByNs[HOST]) });
+      }
+      case 'ip':
+        return rich(cmd.on === 'c' ? 'capIpC' : 'capIpH');
+      case 'mount':
+        return rich('capMount');
+      case 'findmnt':
+        return rich(ev.found ? 'capFindC' : 'capFindH');
+      case 'ls': {
+        if (s.lastError) return rich('capForkFail');
+        if (ev.init) return rich('capLsInit', { host: data(hostPid(s, ev.ran)) });
+        return [code(s.out.join(' '))];
+      }
+      case 'bg': {
+        var bg = L.proc(s, ev.started);
+        return rich('capBg', { inner: data(bg.pidByNs[bg.nsPid]), host: data(bg.pidByNs[HOST]) });
+      }
+      case 'kill': {
+        var k = ev.kill;
+        var kc = code(cmdText(cmd));
+        if (k.result === 'ESRCH') return rich(cmd.on === 'c' ? 'capKillNoSuchC' : 'capKillNoSuchH', { cmd: kc, pid: data(cmd.pid) });
+        if (k.result === 'ignored') return rich('capKillIgnored');
+        if (k.result === 'dropped') {
+          if (k.inside) return rich(cmd.sig === 'KILL' ? 'capKillKill' : 'capKillUsr');
+          return rich('capKillDropped');
+        }
+        if (ev.zapped || (prev && prev.container === k.target)) return rich('capKillInit', { host: data(cmd.pid) });
+        if (cmd.on !== 'c') {
+          var tg = L.proc(prev, k.target);
+          return rich('capKillHost', { cmd: kc, inner: data(tg.pidByNs[tg.nsPid]) });
+        }
+        return rich('capKilled');
+      }
+      case 'exit': {
+        var kinds = [['pid', 'kindsPid'], ['net', 'kindsNet'], ['mnt', 'kindsMnt']].filter(function (k) {
+          return prev.ns[k[0]].some(function (n) { return isC(n.id) && has(s, 'ns:' + k[0] + ':' + n.id); });
+        }).map(function (k) { return t(k[1]); });
+        var waited = (ev.ended || []).some(function (e) { return L.proc(prev, e.id) && L.proc(prev, e.id).name === 'unshare'; });
+        if (!waited) return rich('capExitNoFork');
+        return kinds.length > 1 ? rich('capExitInit', { kinds: kinds.join(', ') }) : rich('capExitInitPid');
+      }
+    }
+    return rich('capErr');
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['full', t('pFull')], ['no-mount-proc', t('pNoProc')], ['no-fork', t('pNoFork')], ['kill-init', t('pKillInit')], ['one-way', t('pOneWay')]],
+        visible: function () { return false; } },
+      { key: 'view', type: 'choice', label: t('view'), hint: t('viewHint'),
+        options: [['both', t('viewBoth')], ['host', t('viewHost')], ['container', t('viewContainer')]] }
+    ],
+
+    presets: [
+      { id: 'full', label: t('pFull'), params: { scene: 'full' }, hint: t('pFullHint') },
+      { id: 'no-mount-proc', label: t('pNoProc'), params: { scene: 'no-mount-proc' }, hint: t('pNoProcHint') },
+      { id: 'no-fork', label: t('pNoFork'), params: { scene: 'no-fork' }, hint: t('pNoForkHint') },
+      { id: 'kill-init', label: t('pKillInit'), params: { scene: 'kill-init' }, hint: t('pKillInitHint') },
+      { id: 'one-way', label: t('pOneWay'), params: { scene: 'one-way' }, hint: t('pOneWayHint') }
+    ],
+
+    legend: [
+      { shape: 'ns-host', label: t('legHost') },
+      { shape: 'ns-c', label: t('legC') },
+      { shape: 'ns-pair', label: t('legPair') },
+      { shape: 'ns-ran', label: t('legRan') },
+      { shape: 'ns-gone', label: t('legGone') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
