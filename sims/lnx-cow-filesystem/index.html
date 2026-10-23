@@ -1,0 +1,420 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-cow-filesystem: a pool of physical blocks under a copy-on-write filesystem. The live tree (podaci) and each
+     snapshot are rows of pointers over the pool row; a snapshot copies pointers, a write goes to a new block and
+     moves only the live pointer, rm and destroy free only what no tree points to. Drawn on kit view K3 (block grid).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-cow-filesystem">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datotečni sustavi s kopiranjem pri pisanju · simdeck</title>
+<meta name="description" content="Upiši datoteku, uzmi snimku, piši dalje i gledaj dijeljene i vlastite blokove: snimka ne košta ništa dok se živo stablo ne promijeni.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-cow-filesystem",
+  "title": {
+    "hr": "Datotečni sustavi s kopiranjem pri pisanju",
+    "en": "Copy-on-write filesystems"
+  },
+  "concept": {
+    "hr": "Snimke dijele blokove; pisanje ide u nove blokove",
+    "en": "Snapshots share blocks; writes go to new blocks"
+  },
+  "summary": {
+    "hr": "Upiši datoteku, uzmi snimku, piši dalje i gledaj dijeljene i vlastite blokove: snimka ne košta ništa dok se živo stablo ne promijeni.",
+    "en": "Write a file, take a snapshot, write again and watch shared and owned blocks: a snapshot costs nothing until the live tree changes."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-cow-filesystem"]; colours only from kit tokens.
+   Layout: one kit block grid (K3, kit/blockgrid.js): a row of pointers per tree (live first, then the snapshots
+   oldest first), the pool's physical blocks under them; the space table as the grid's foot. */
+[data-sim="lnx-cow-filesystem"] .cw {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-cow-filesystem"] .cw .sd-bg-grid { --bg-row-gap: 1.7rem; }
+[data-sim="lnx-cow-filesystem"] .sd-bg-label > * { position: relative; padding: 0.1rem 0.2rem; background: var(--panel); }
+[data-sim="lnx-cow-filesystem"] .cw-role { color: var(--muted); }
+[data-sim="lnx-cow-filesystem"] .cw-role[data-on] { color: var(--ink); font-weight: 700; }
+[data-sim="lnx-cow-filesystem"] .cw-gone { color: var(--muted); text-decoration: line-through; }
+[data-sim="lnx-cow-filesystem"] .cw-none { color: var(--muted); }
+[data-sim="lnx-cow-filesystem"] .cw-bad { color: var(--danger); font-weight: 700; }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-cow-filesystem"] .sd-ctl[hidden] { display: none; }
+/* legend: a free block (no kind: the page colour, a hairline edge) */
+[data-sim="lnx-cow-filesystem"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
+/* legend: a pool block whose reference count changed (the kit's mark 'under': a bar along the bottom) */
+[data-sim="lnx-cow-filesystem"] .sd-swatch[data-shape="under"] { background: var(--bg); box-shadow: inset 0 -0.3rem 0 var(--ink); }
+
+/* the space table: per tree referenced and exclusive; the pool's used, free and shared */
+[data-sim="lnx-cow-filesystem"] .cw-foot { display: flex; flex-wrap: wrap; gap: 0.6rem 2.4rem; align-items: flex-start; }
+[data-sim="lnx-cow-filesystem"] .cw-table { border-collapse: collapse; font-size: var(--fs-md); }
+[data-sim="lnx-cow-filesystem"] .cw-table th,
+[data-sim="lnx-cow-filesystem"] .cw-table td { padding: 0.05rem 0.7rem; text-align: right; white-space: nowrap; }
+[data-sim="lnx-cow-filesystem"] .cw-table thead th { color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--line); }
+[data-sim="lnx-cow-filesystem"] .cw-table tbody th { text-align: left; font-weight: 700; }
+[data-sim="lnx-cow-filesystem"] .cw-table td { font-family: var(--mono); }
+[data-sim="lnx-cow-filesystem"] .cw-table .cw-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
+[data-sim="lnx-cow-filesystem"] .cw-table tr[data-off] { color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-cow-filesystem"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-cow-filesystem"] .cw { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-cow-filesystem"] .cw .sd-bg-grid { --bg-row-gap: 1rem; }
+  [data-sim="lnx-cow-filesystem"] .cw-foot { gap: 0.6rem 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Datotečni sustavi s kopiranjem pri pisanju</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { podaci: '1', '@s1': '2', '@s2': '3' };   // series colour per tree; rows also differ by label and place
+  var SHARED = '8';                                         // a shared pool block: hatched, ×n, in the neutral colour
+
+  /** Data (tree names, block ids and labels, the error text) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+  /** Block ids as a short list: runs of three or more as "0–7". */
+  function ids(list) {
+    var a = list.slice().sort(function (x, y) { return x - y; }), out = [];
+    for (var i = 0; i < a.length;) {
+      var j = i;
+      while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++;
+      out.push(j - i >= 2 ? a[i] + '–' + a[j] : j > i ? a[i] + ', ' + a[j] : String(a[i]));
+      i = j + 1;
+    }
+    return data(out.join(', '));
+  }
+  function names(list) { return data(list.join(t('and'))); }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary
+      lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+  function term(key, later) { return h('span', null, rich(later ? key + 'Later' : key)); }
+
+  function tree(s, name) { return s.trees.filter(function (x) { return x.name === name; })[0] || null; }
+  function block(s, id) { return s.blocks.filter(function (b) { return b.id === id; })[0] || null; }
+  function fs(s) { return L.fsOf(s); }
+  function fileLen(s, p) { return L.norm(p).fileBlocks; }
+  /** Has a snapshot been taken before step n (so the term is a later mention)? */
+  function snapBefore(c) {
+    var sc = L.script(c.params);
+    for (var i = 0; i < c.n - 1; i++) if (sc[i].op === 'snapshot') return true;
+    return false;
+  }
+  function cowBefore(c) {
+    var sc = L.script(c.params);
+    for (var i = 0; i < c.n - 1; i++) if (sc[i].op === 'write' && sc[i].idx) return true;
+    return false;
+  }
+
+  // ── stage ──
+
+  function render(c) {
+    var s = c.state, p = c.params, o = L.norm(p), prev = c.prev;
+    var moved = {};
+    s.moved.forEach(function (m) { moved[m.k] = m; });
+    var changedRefs = s.changed;
+    var rows = L.treeNames(p).map(function (name) {
+      var x = tree(s, name);
+      var gone = s.gone.indexOf(name) >= 0;
+      var cells = [];
+      if (!x) {                                          // not yet taken or destroyed: the band keeps its place
+        for (var k = 0; k < o.fileBlocks; k++) cells.push(null);
+        return { id: name, label: gone ? h('span', { class: 'cw-gone', translate: 'no' }, name) : h('span', { class: 'cw-none', translate: 'no' }, name),
+          aside: gone ? h('span', { class: 'cw-role' }, t('roleGone')) : '', cells: cells };
+      }
+      var f = x.files[L.FILE];
+      for (var i = 0; i < o.fileBlocks; i++) {
+        if (!f) { cells.push({}); continue; }
+        var b = block(s, f[i]);
+        var isNew = name === L.LIVE && moved[i];
+        var created = s.event === 'snapshot' && s.op.name === name;
+        cells.push({ text: b.ver, sub: '→' + b.id, kind: b.refs >= 2 ? 'soft' : 'fill', c: COLOUR[name],
+          now: !!(isNew || created || (s.event === 'create')) });
+      }
+      var role = name === L.LIVE ? h('span', { class: 'cw-role', dataset: { on: 'true' } }, t('roleLive')) : h('span', { class: 'cw-role' }, t('roleSnap'));
+      var aside = role;
+      if (name === L.LIVE && !f && s.event !== 'start') aside = h('span', null, role, ' · ', h('span', { class: 'cw-role' }, t('roleNoFile')));
+      if (name === L.LIVE && s.err) aside = h('span', null, role, ' · ', h('span', { class: 'cw-bad', translate: 'no' }, '✕ ' + s.err));
+      return { id: name, label: name, aside: aside, cells: cells };
+    });
+    var freed = {};
+    s.freed.forEach(function (f) { freed[f.id] = f.ver; });
+    var pool = [];
+    for (var id = 0; id < o.poolSize; id++) {
+      var b = block(s, id);
+      if (b) {
+        var hs = L.holders(fs(s), id);
+        pool.push({ text: b.ver, sub: p.showRefs ? '×' + b.refs : undefined, kind: b.refs >= 2 ? 'soft' : 'fill',
+          c: b.refs >= 2 ? SHARED : COLOUR[hs[0]], now: s.allocated.indexOf(id) >= 0,
+          mark: changedRefs.indexOf(id) >= 0 && s.allocated.indexOf(id) < 0 ? 'under' : undefined });
+      } else if (id in freed) {
+        pool.push({ text: freed[id], sub: p.showRefs ? '×0' : undefined, kind: 'dead' });
+      } else pool.push({});
+    }
+    rows.push({ id: 'pool', label: h('span', null, t('poolRow')), cells: pool });
+
+    // only the pointers that moved get an arrow (the kit's advice: few links); every other pointer is its "→n" line
+    var links = s.moved.filter(function (m) { return m.from !== null; }).map(function (m) {
+      return { from: { row: L.LIVE, cell: m.k }, to: { row: 'pool', cell: m.to }, now: true };
+    });
+
+    var t0 = L.space(fs(s)), t1 = prev ? L.space(fs(prev)) : null;
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [t.n('poolOf', o.poolSize), t.n('fileOf', o.fileBlocks, { f: L.FILE })],
+      count: { text: t('count', { used: t0.used, total: t0.total }), hl: !!(t1 && t1.used !== t0.used) || s.event === 'rm' || !!s.err },
+      cols: Math.max(o.poolSize, o.fileBlocks),
+      colLabels: pool.map(function (x, i) { return String(i); }),
+      cellHeight: '3.3rem',
+      rows: rows, links: links,
+      foot: [spaceTable(c, t0, t1)]
+    });
+    c.stage.replaceChildren(h('div', { class: 'cw' }, grid));
+  }
+
+  function spaceTable(c, now, before) {
+    var p = c.params;
+    var mark = function (v, was) { return h('td', { class: before && was !== v ? 'cw-now' : null }, v === null ? '–' : String(v)); };
+    var find = function (sp, name) { return sp ? sp.trees.filter(function (x) { return x.name === name; })[0] || null : null; };
+    var body = L.treeNames(p).map(function (name) {
+      var r = find(now, name), w = find(before, name);
+      var ref = r ? r.referenced : null, exc = r ? r.exclusive : null;
+      return h('tr', { dataset: { off: r ? null : 'true' } }, h('th', { translate: 'no' }, name),
+        mark(ref, w ? w.referenced : null), mark(exc, w ? w.exclusive : null));
+    });
+    var trees = h('table', { class: 'cw-table' },
+      h('thead', null, h('tr', null, h('th', null, t('thTree')), h('th', null, t('thRef')), h('th', null, t('thExcl')))),
+      h('tbody', null, body));
+    var poolT = h('table', { class: 'cw-table' },
+      h('thead', null, h('tr', null, h('th', null, t('thPool')), h('th', null, t('thUsed')), h('th', null, t('thFree')), h('th', null, t('thShared')))),
+      h('tbody', null, h('tr', null, h('th', null, ''), mark(now.used, before && before.used), mark(now.free, before && before.free),
+        mark(now.shared, before && before.shared))));
+    return h('div', { class: 'cw-foot' }, trees, poolT);
+  }
+
+  // ── captions ──
+
+  function used(s) { var x = L.space(fs(s)); return rich('capUsed', { used: x.used, total: x.total }); }
+
+  function capSnap(c) {
+    var s = c.state, later = snapBefore(c);
+    var snap = term('termSnap', later);
+    var live = tree(s, L.LIVE), ptrs = live.files[L.FILE] || [];
+    var shared2 = ptrs.every(function (id) { return block(s, id).refs === 2; });
+    if (!later && shared2) {
+      return rich('capSnapFirst', { snap: snap, name: data(s.op.name), list: ids(ptrs), trees: t.n('trees', 2) });
+    }
+    return rich('capSnapLater', { snap: snap, name: data(s.op.name), live: data(L.LIVE), n: t.n('blocksOf', ptrs.length) })
+      .concat(sp(used(s)));
+  }
+
+  function capCreate(c) {
+    var s = c.state;
+    return rich('capCreate', { f: data(L.FILE), live: data(L.LIVE), n: t.n('poolOf', s.allocated.length), list: ids(s.allocated) });
+  }
+
+  function capOverwrite(c) {
+    var s = c.state, prev = c.prev;
+    var ks = s.moved.map(function (m) { return m.k; });
+    var out = rich('capWriteHead', { list: data(ks.join(', ')), f: data(L.FILE) }, ks.length);
+    out = out.concat(sp(rich('capWriteCow', { cow: term('termCow', cowBefore(c)), new: ids(s.allocated), live: data(L.LIVE) }, s.allocated.length)));
+    var froms = s.moved.map(function (m) { return m.from; });
+    var freedIds = s.freed.map(function (f) { return f.id; });
+    var kept = froms.filter(function (id) { return freedIds.indexOf(id) < 0; });
+    if (kept.length) {
+      var hs = [];
+      kept.forEach(function (id) { L.holders(fs(s), id).forEach(function (x) { if (hs.indexOf(x) < 0) hs.push(x); }); });
+      out = out.concat(sp(rich(hs.length > 1 ? 'capKeptMany' : 'capKept', { list: ids(kept), holders: names(hs) }, kept.length)));
+    }
+    if (freedIds.length) out = out.concat(sp(rich('capFreedOld', { list: ids(freedIds) }, freedIds.length)));
+    // the snapshots whose exclusive count grew: what they now cost
+    var a = L.space(fs(s)), b = L.space(fs(prev));
+    a.trees.forEach(function (x) {
+      if (x.name === L.LIVE) return;
+      var w = b.trees.filter(function (y) { return y.name === x.name; })[0];
+      if (w && x.exclusive > w.exclusive) out = out.concat(sp(rich('capCost', { snap: term('termSnap', true), name: data(x.name), n: t.n('poolOf', x.exclusive) })));
+    });
+    return out;
+  }
+
+  function capError(c) {
+    var s = c.state;
+    var x = L.space(fs(s));
+    var out = rich('capErrHead', { list: data(s.want.join(', ')), msg: data(t('enospc')) }, s.want.length);
+    out = out.concat(sp(rich('capErrSpace', { free: t.n('poolOf', x.free), need: t.n('poolOf', s.want.length) })));
+    var live = tree(s, L.LIVE), anyShared = s.want.some(function (k) { return block(s, live.files[L.FILE][k]).refs >= 2; });
+    out = out.concat(sp(anyShared ? rich('capErrShared', { snap: term('termSnap', true) }) : rich('capErrOwn')));
+    return out.concat(sp(rich('capErrNothing')));
+  }
+
+  function capRm(c) {
+    var s = c.state, prev = c.prev;
+    var snap = term('termSnap', true);
+    var out = rich('capRm', { f: data(L.FILE), live: data(L.LIVE) });
+    var gone = tree(prev, L.LIVE).files[L.FILE] || [];
+    var freedIds = s.freed.map(function (f) { return f.id; });
+    var snaps = s.trees.filter(function (x) { return x.name !== L.LIVE; }).map(function (x) { return x.name; });
+    if (!freedIds.length) out = out.concat(sp(rich('capRmNone', { snap: snap, names: names(snaps) }, snaps.length)));
+    else if (freedIds.length < gone.length) out = out.concat(sp(rich('capRmSome', { snap: snap, n: t.n('poolOf', freedIds.length), list: ids(freedIds) })));
+    else out = out.concat(sp(rich('capRmAll', { snap: snap, n: t.n('poolOf', freedIds.length), list: ids(freedIds) })));
+    out = out.concat(sp(used(s)));
+    if (snaps.length && freedIds.length * 2 < gone.length) out = out.concat(sp(rich('capRmBarely', { snap: snap })));
+    return out;
+  }
+
+  function capDestroy(c) {
+    var s = c.state, prev = c.prev;
+    var snap = term('termSnap', true);
+    var freedIds = s.freed.map(function (f) { return f.id; });
+    var had = (tree(prev, s.op.name).files[L.FILE] || []).length;
+    var out = freedIds.length
+      ? rich('capDestroy', { snap: snap, name: data(s.op.name), n: t.n('poolOf', freedIds.length), list: ids(freedIds) })
+      : rich('capDestroyNone', { snap: snap, name: data(s.op.name) });
+    if (had > freedIds.length) {
+      var kept = (tree(prev, s.op.name).files[L.FILE] || []).filter(function (id) { return freedIds.indexOf(id) < 0; });
+      var hs = [];
+      kept.forEach(function (id) { L.holders(fs(s), id).forEach(function (x) { if (hs.indexOf(x) < 0) hs.push(x); }); });
+      out = out.concat(sp(rich('capDestroyKept', { holders: names(hs) }, hs.length)));
+    }
+    return out.concat(sp(used(s)));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['basic', t('presetBasic')], ['delete-doesnt-free', t('presetDelete')], ['middle-snapshot', t('presetMiddle')],
+          ['full-pool', t('presetFull')]],
+        visible: function () { return false; } },
+      { key: 'fileBlocks', type: 'range', label: t('fileBlocks'), min: 4, max: 8, resets: true },
+      { key: 'poolSize', type: 'range', label: t('poolSize'), min: 10, max: 24, resets: true },
+      { key: 'showRefs', type: 'toggle', label: t('showRefs') }
+    ],
+
+    presets: [
+      { id: 'basic', label: t('presetBasic'), params: { scene: 'basic' }, hint: t('presetBasicHint') },
+      { id: 'delete-doesnt-free', label: t('presetDelete'), params: { scene: 'delete-doesnt-free' }, hint: t('presetDeleteHint') },
+      { id: 'middle-snapshot', label: t('presetMiddle'), params: { scene: 'middle-snapshot' }, hint: t('presetMiddleHint') },
+      { id: 'full-pool', label: t('presetFull'), params: { scene: 'full-pool', poolSize: 10 }, hint: t('presetFullHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'under', label: t('legRefs') },
+      { shape: 'bg-soft', c: Number(SHARED), label: t('legShared') },
+      { shape: 'bg-fill', c: 1, label: t('legOwned') },
+      { shape: 'slot', label: t('legFree') },
+      { shape: 'bg-dead', label: t('legFreed') },
+      { shape: 'bg-link', label: t('legMoved') }
+    ],
+
+    render: render,
+
+    caption: function (c) {
+      var s = c.state;
+      if (s.event === 'start') return rich('capStart', { pool: t.n('blocksOf', s.poolSize), live: data(L.LIVE) });
+      if (s.event === 'create') return capCreate(c);
+      if (s.event === 'snapshot') return capSnap(c);
+      if (s.event === 'overwrite') return capOverwrite(c);
+      if (s.event === 'error') return capError(c);
+      if (s.event === 'rm') return capRm(c);
+      return capDestroy(c);
+    }
+  });
+
+  // Both sliders start at their maximum, so a click near the end changes nothing: the kit blurs a slider only on
+  // 'change', and the clicker's → would then move the slider instead of stepping. Release it after any pointer click (it fires after 'change')
+  // (NOTES.md, Shared requests).
+  document.querySelector('[data-sd-controls]').addEventListener('click', function (e) {
+    var el = e.target;
+    if (el.matches && el.matches('input[type="range"]') && e.detail > 0) el.blur();     // detail 0: not a pointer click
+  });
+})();
+</script>
+</body>
+</html>
