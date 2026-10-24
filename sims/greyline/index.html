@@ -1,0 +1,405 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Grey line: a native simdeck explorer (docs/sim-ui.md), written for simdeck. The idea comes from the 50ohm.de
+     greyline applet; none of its code is used (NOTES.md says why). The model is in sim.js (the Sun's position from
+     the NOAA / Meeus equations), the words in strings.js, the land outlines in land.js (Natural Earth, public domain).
+     The map is a canvas (the shading, pixel by pixel) under an SVG at 1:1 (lines, markers, labels). -->
+<html lang="hr" data-sim="greyline">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greyline · simdeck</title>
+<meta name="description" content="Karta svijeta s danom i noći: pojas sumraka (greyline) putuje Zemljom, a kratki valovi uz njega stižu daleko.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "greyline",
+  "title": {
+    "hr": "Greyline (siva linija)",
+    "en": "The grey line"
+  },
+  "concept": {
+    "hr": "U pojasu sumraka D-regija više ne guta signal, a F-regija ga još lomi daleko",
+    "en": "At twilight the D region is gone but the F region still bends HF signals far"
+  },
+  "summary": {
+    "hr": "Karta svijeta s danom, noći i pojasom sumraka. Pomiči datum i vrijeme ili pokreni dan: kada su dvije postaje zajedno na greyline?",
+    "en": "A world map with day, night and the twilight band. Move the date and time, or play the day: when do two stations share the grey line?"
+  },
+  "tags": [
+    "propagation"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="greyline"]; colours only from kit tokens. */
+[data-sim="greyline"] .gl { height: 100%; display: grid; place-items: center; }
+[data-sim="greyline"] .gl-map { position: relative; }
+[data-sim="greyline"] .gl-map canvas, [data-sim="greyline"] .gl-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+[data-sim="greyline"] .gl-map svg { overflow: visible; }
+[data-sim="greyline"] .gl-map text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); }
+[data-sim="greyline"] .gl-map text.gl-big { font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="greyline"] .gl-map text.gl-name { font-size: var(--fs-md); font-weight: 700; }
+[data-sim="greyline"] .gl-map text.gl-halo { stroke: var(--bg); stroke-width: 6; paint-order: stroke; stroke-linejoin: round; }
+[data-sim="greyline"] .gl-frame { fill: none; stroke: var(--ink); stroke-width: 2; }
+[data-sim="greyline"] .gl-grid { fill: none; stroke: var(--line); stroke-width: 1; stroke-opacity: 0.6; }
+[data-sim="greyline"] .gl-equator { fill: none; stroke: var(--line); stroke-width: 1.5; }
+[data-sim="greyline"] .gl-term { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linejoin: round; }
+[data-sim="greyline"] .gl-edge { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 7 5; }
+[data-sim="greyline"] .gl-sun { fill: var(--c7); stroke: var(--ink); stroke-width: 2; }
+[data-sim="greyline"] .gl-ray { stroke: var(--c7); stroke-width: 3; stroke-linecap: round; }
+[data-sim="greyline"] .gl-path-in { fill: none; stroke: var(--c1); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="greyline"] .gl-path-out { fill: none; stroke: var(--c1); stroke-width: 3; stroke-dasharray: 3 7; stroke-linecap: round; }
+[data-sim="greyline"] .gl-path-under { fill: none; stroke: var(--bg); stroke-width: 9; stroke-opacity: 0.8; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="greyline"] .gl-sta { fill: var(--c1); stroke: var(--bg); stroke-width: 2.5; }
+[data-sim="greyline"] .gl-sta-b { fill: var(--c4); stroke: var(--bg); stroke-width: 2.5; }
+/* legend swatches of the map's own fills */
+[data-sim="greyline"] .sd-swatch[data-shape='gl-day'] { background: var(--bg); }
+[data-sim="greyline"] .sd-swatch[data-shape='gl-band'] { background: repeating-linear-gradient(45deg, var(--c2) 0 0.15em, var(--panel) 0.15em 0.45em); }
+[data-sim="greyline"] .sd-swatch[data-shape='gl-night'] { background: var(--ink); }
+[data-sim="greyline"][data-theme='dark'] .sd-swatch[data-shape='gl-night'] { background: var(--bg); }
+[data-sim="greyline"] .sd-swatch[data-shape='gl-sun'] { background: var(--c7); border-radius: 50%; }
+[data-sim="greyline"] .sd-swatch[data-shape='gl-a'] { background: var(--c1); border-radius: 0; transform: rotate(45deg) scale(0.8); }
+[data-sim="greyline"] .sd-swatch[data-shape='gl-b'] { background: var(--c4); border-radius: 50%; }
+[data-sim="greyline"] .gl-credit { order: 9; flex: 1 1 30rem; margin: 0; text-align: right; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="greyline"] .gl-credit a { color: inherit; }
+
+/* Phone and portrait: the stage grows with its content instead of a fixed height. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="greyline"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="greyline"] .gl { height: auto; aspect-ratio: 2 / 1; }
+  [data-sim="greyline"] .gl-credit { text-align: left; }
+  /* The kit makes the bar sticky on a phone; with the credit in it, it would cover a third of the screen. */
+  [data-sim="greyline"] .sd-bar { position: static; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Greyline</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport>
+    <p class="gl-credit" data-t-html="credit"></p>
+  </footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="land.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var LAND = window.SimGreylineLand;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var sim = null;
+
+  // ── words and numbers ──
+  function num(x, digits) {
+    var s = Math.abs(x).toFixed(digits || 0);
+    if (Simdeck.lang === 'hr') s = s.replace('.', ',');
+    return s;
+  }
+  function thousands(x) { return String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0'); }   // no-break space
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function clock(minutes) { return pad2(Math.floor(minutes / 60)) + ':' + pad2(minutes % 60); }
+  function dateText(day) { var d = L.dateOf(day); return t('dateFmt', { d: d.date, m: t('m' + d.month) }); }
+  function lat(x) { return t(x >= 0 ? 'latN' : 'latS', { v: num(x, Math.abs(x) < 10 ? 1 : 0) }); }
+  function lon(x) { return t(x >= 0 ? 'lonE' : 'lonW', { v: num(x, Math.abs(x) < 10 ? 1 : 0) }); }
+  // Elevations to a tenth of a degree; one that shows as 0.0 is "on the horizon" and unsigned, so label and caption agree.
+  function zero(x) { return Math.abs(x) < 0.05; }
+  function elev(x) { return zero(x) ? t('onHorizon') : t(x > 0 ? 'above' : 'below', { v: t('deg', { v: num(x, 1) }) }); }
+  function signedDeg(x) { return (zero(x) ? '' : x < 0 ? '−' : '+') + t('deg', { v: num(x, 1) }); }
+  function name(id) { return t('pl_' + id); }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) e.append(arguments[i]);
+    return e;
+  }
+  function remPx() { return parseFloat(getComputedStyle(document.documentElement).fontSize); }
+
+  // A token's colour as [r, g, b] (the canvas normalises any CSS colour to #rrggbb).
+  var probe = document.createElement('canvas').getContext('2d');
+  function rgb(token) {
+    probe.fillStyle = '#000';
+    probe.fillStyle = Simdeck.cssVar(token) || '#000';
+    var c = probe.fillStyle;
+    if (c[0] === '#') return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+    var m = c.match(/\d+(\.\d+)?/g) || [0, 0, 0];
+    return [+m[0], +m[1], +m[2]];
+  }
+  function lum(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+
+  // ── the map ──
+  // Equirectangular: x from −180° (left) to 180°, y from 90° (top) to −90°.
+  function drawMap(box, st) {
+    var rem = remPx();
+    var W = box.clientWidth - 0.6 * rem, H = box.clientHeight - 0.6 * rem;
+    if (W <= 0 || H <= 0) return;
+    var mw = Math.floor(Math.min(W, 2 * H)), mh = Math.floor(mw / 2);
+    var map = h('div', { class: 'gl-map', style: { width: mw + 'px', height: mh + 'px' } });
+    function X(lo) { return (lo + 180) / 360 * mw; }
+    function Y(la) { return (90 - la) / 180 * mh; }
+
+    // 1. the canvas: sea, land, then night and the band laid over both
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var cw = Math.round(mw * dpr), ch = Math.round(mh * dpr);
+    var cv = h('canvas', { width: cw, height: ch, 'aria-hidden': 'true' });
+    var g = cv.getContext('2d');
+    g.fillStyle = Simdeck.cssVar('--bg'); g.fillRect(0, 0, cw, ch);
+    g.globalAlpha = 0.16; g.fillStyle = Simdeck.cssVar('--c6'); g.fillRect(0, 0, cw, ch);
+    g.globalAlpha = 0.34; g.fillStyle = Simdeck.cssVar('--c3');
+    var land = new Path2D();
+    LAND.forEach(function (r) {
+      for (var i = 0; i < r.length; i += 2) {
+        var px = (r[i] / 10 + 180) / 360 * cw, py = (90 - r[i + 1] / 10) / 180 * ch;
+        if (i === 0) land.moveTo(px, py); else land.lineTo(px, py);
+      }
+      land.closePath();
+    });
+    g.fill(land, 'evenodd');
+    g.globalAlpha = 0.9; g.strokeStyle = Simdeck.cssVar('--muted'); g.lineWidth = dpr; g.stroke(land);
+    g.globalAlpha = 1;
+
+    // the shade, pixel by pixel: sin e = sin φ sin δ + cos φ cos δ cos(λ − λ☉)
+    var ink = rgb('--ink'), bg = rgb('--bg'), stripe = rgb('--c2');
+    var light = lum(ink) < lum(bg);
+    var dark = light ? ink : bg;                          // night is the darker of the two in either theme
+    var nightA = light ? 150 : 215, bandA = light ? 60 : 110;
+    var shade = g.createImageData(cw, ch), px = shade.data;
+    var sd = Math.sin(st.sub.lat * Math.PI / 180), cd = Math.cos(st.sub.lat * Math.PI / 180);
+    var edge = Math.sin(-st.depth * Math.PI / 180);
+    var cosH = new Float64Array(cw);
+    for (var i = 0; i < cw; i++) cosH[i] = Math.cos(((i + 0.5) / cw * 360 - 180 - st.sub.lon) * Math.PI / 180);
+    var period = Math.round(14 * dpr), width = Math.round(4 * dpr);
+    for (var j = 0; j < ch; j++) {
+      var la = (90 - (j + 0.5) / ch * 180) * Math.PI / 180, a = Math.sin(la) * sd, b = Math.cos(la) * cd;
+      for (var k = 0; k < cw; k++) {
+        var e = a + b * cosH[k], o = (j * cw + k) * 4;
+        if (e > 0) continue;                                     // day: clear
+        if (e < edge) { px[o] = dark[0]; px[o + 1] = dark[1]; px[o + 2] = dark[2]; px[o + 3] = nightA; continue; }
+        if ((j + k) % period < width) { px[o] = stripe[0]; px[o + 1] = stripe[1]; px[o + 2] = stripe[2]; px[o + 3] = 215; }
+        else { px[o] = dark[0]; px[o + 1] = dark[1]; px[o + 2] = dark[2]; px[o + 3] = bandA; }
+      }
+    }
+    var layer = document.createElement('canvas'); layer.width = cw; layer.height = ch;
+    layer.getContext('2d').putImageData(shade, 0, 0);
+    g.drawImage(layer, 0, 0);
+
+    // 2. the SVG at 1:1: grid, contours, path, markers, labels
+    var svg = s('svg', { width: mw, height: mh, 'aria-hidden': 'true' });
+    var roomy = mw >= 40 * rem;
+    for (var gl = -60; gl <= 60; gl += 30) svg.append(s('line', { class: gl === 0 ? 'gl-equator' : 'gl-grid', x1: 0, x2: mw, y1: Y(gl), y2: Y(gl) }));
+    for (var gx = -150; gx <= 150; gx += 30) svg.append(s('line', { class: 'gl-grid', x1: X(gx), x2: X(gx), y1: 0, y2: mh }));
+    if (roomy) {
+      [60, 30, 0, -30, -60].forEach(function (v) {
+        svg.append(s('text', { class: 'gl-halo', x: 0.3 * rem, y: Y(v) - 0.3 * rem }, v === 0 ? t('deg', { v: 0 }) : lat(v)));
+      });
+      [-120, -60, 60, 120].forEach(function (v) {
+        svg.append(s('text', { class: 'gl-halo', x: X(v), y: mh - 0.4 * rem, 'text-anchor': 'middle' }, lon(v)));
+      });
+    }
+
+    // a lat/lon polyline, broken where it jumps across the map's edge, and left out within 1° of a pole (there a
+    // contour through the pole would otherwise run along the map's top or bottom edge, the pole's image)
+    function lines(points, cls) {
+      var runs = [[]];
+      for (var i = 0; i < points.length; i++) {
+        var p = points[i], run = runs[runs.length - 1];
+        if (Math.abs(p.lat) > 89) { if (run.length) runs.push([]); continue; }
+        if (run.length && Math.abs(p.lon - run[run.length - 1].lon) > 90) runs.push(run = []);
+        run.push(p);
+      }
+      runs.forEach(function (r) {
+        if (r.length < 2) return;
+        svg.append(s('polyline', { class: cls, points: r.map(function (p) { return X(p.lon).toFixed(1) + ',' + Y(p.lat).toFixed(1); }).join(' ') }));
+      });
+    }
+    lines(L.contour(st.sub, -st.depth, 720), 'gl-edge');
+    lines(L.contour(st.sub, 0, 720), 'gl-term');
+
+    // the subsolar point: a sun with rays
+    var sx = X(st.sub.lon), sy = Y(st.sub.lat), sr = 0.6 * rem;
+    for (var q = 0; q < 8; q++) {
+      var an = q * Math.PI / 4;
+      svg.append(s('line', { class: 'gl-ray', x1: sx + Math.cos(an) * sr * 1.5, y1: sy + Math.sin(an) * sr * 1.5, x2: sx + Math.cos(an) * sr * 2.2, y2: sy + Math.sin(an) * sr * 2.2 }));
+    }
+    svg.append(s('circle', { class: 'gl-sun', cx: sx, cy: sy, r: sr }));
+
+    // the path: solid where it lies in the band, dotted in day or night
+    if (st.b) {
+      var pts = L.greatCircle(st.a, st.b, 200).map(function (p) { return { lat: p.lat, lon: p.lon, zone: L.zoneOf(L.elevation(p.lat, p.lon, st.sub), st.depth) }; });
+      lines(pts, 'gl-path-under');
+      var runs = [], cur = null;
+      pts.forEach(function (p, i) {
+        var inBand = p.zone === 'band';
+        if (!cur || cur.inBand !== inBand) { if (cur) cur.pts.push(p); cur = { inBand: inBand, pts: i ? [pts[i - 1], p] : [p] }; runs.push(cur); }
+        else cur.pts.push(p);
+      });
+      runs.forEach(function (r) { lines(r.pts, r.inBand ? 'gl-path-in' : 'gl-path-out'); });
+    }
+
+    // stations: A a diamond, B a circle; each named with its Sun elevation (on a phone the caption names them).
+    // A's label sits above, B's too unless B is close to A, then below.
+    function stationMark(sta, isA, below) {
+      var x = X(sta.lon), y = Y(sta.lat), r = 0.55 * rem;
+      if (isA) svg.append(s('polygon', { class: 'gl-sta', points: [[x, y - r * 1.4], [x + r * 1.4, y], [x, y + r * 1.4], [x - r * 1.4, y]].map(function (p) { return p.join(','); }).join(' ') }));
+      else svg.append(s('circle', { class: 'gl-sta-b', cx: x, cy: y, r: r * 1.1 }));
+      if (!roomy) return;
+      var right = x < mw - 9 * rem;
+      below = below || y < 2.6 * rem;
+      svg.append(s('text', { class: 'gl-name gl-halo', x: x + (right ? 1.1 : -1.1) * rem, y: y + (below ? 1.6 : -0.5) * rem, 'text-anchor': right ? 'start' : 'end' },
+        name(sta.id) + ' ' + signedDeg(sta.elev)));
+    }
+    stationMark(st.a, true, false);
+    if (st.b) stationMark(st.b, false, Math.abs(X(st.b.lon) - X(st.a.lon)) < 12 * rem && Math.abs(Y(st.b.lat) - Y(st.a.lat)) < 2.5 * rem);
+
+    // the clock, top left over the Arctic (on a phone the sliders and the caption say it)
+    if (roomy) svg.append(s('text', { class: 'gl-big gl-halo', x: 0.4 * rem, y: 1.5 * rem }, dateText(st.day) + ' · ' + t('clock', { time: clock(st.time) })));
+    svg.append(s('rect', { class: 'gl-frame', x: 0, y: 0, width: mw, height: mh }));
+
+    map.append(cv, svg);
+    box.replaceChildren(map);
+  }
+
+  // ── play: time runs. Page state, not model state: a link opens still. ──
+  var playing = false, lastT = 0, ownSet = false;
+  function every() { return Simdeck.reducedMotion() ? 1000 : 120; }     // ms between ticks; jumps under reduced motion
+  function stride() { return Simdeck.reducedMotion() ? 30 : L.TIME_STEP; }
+  function frame(now) {
+    if (!playing) return;
+    if (now - lastT >= every()) {
+      lastT = now;
+      var nx = L.advance(sim.params.day, sim.params.time, stride());
+      ownSet = true; sim.set({ day: nx.day, time: nx.time }); ownSet = false;
+    }
+    requestAnimationFrame(frame);
+  }
+  // The play button sits in the transport bar, before the kit's reset (an explorer's bar has only that).
+  var playBtn = h('button', { type: 'button', class: 'sd-btn sd-btn--primary', 'aria-keyshortcuts': 'p', title: t('playHint') + ' (P)',
+    onmousedown: function (e) { e.preventDefault(); }, onclick: function () { toggle(); } });
+  function playLabel() {
+    var lbl = playing ? t('pause') : t('play');
+    playBtn.replaceChildren(Simdeck.icon(playing ? 'pause' : 'play'), h('span', { class: 'sd-btn-label' }, lbl), h('kbd', null, 'P'));
+    playBtn.setAttribute('aria-label', lbl);
+    playBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+  }
+  function start() { playing = true; lastT = performance.now(); playLabel(); requestAnimationFrame(frame); }
+  function stop() { if (!playing) return; playing = false; playLabel(); }
+  function toggle() { if (playing) stop(); else start(); }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) stop(); });
+
+  // ── presets: the model's, with "now" from this computer's clock as key 4 ──
+  var labels = { equinox: 'presetEquinox', juneSolstice: 'presetJuneSolstice', decSolstice: 'presetDecSolstice',
+    now: 'presetNow', pathGrey: 'presetPathGrey', pathDay: 'presetPathDay' };
+  var d0 = new Date();
+  var nowParams = { day: L.dayOf(d0.getUTCMonth() + 1, d0.getUTCDate()),
+    time: Math.floor((d0.getUTCHours() * 60 + d0.getUTCMinutes()) / L.TIME_STEP) * L.TIME_STEP, nautical: false, a: 'zagreb', b: 'off' };
+  var list = L.presets.slice(0, 3).concat([{ id: 'now', params: nowParams }], L.presets.slice(3));
+
+  var placeOpts = L.PLACES.map(function (p) { return [p.id, name(p.id)]; });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'day', type: 'range', label: t('day'), min: 1, max: L.DAYS, step: 1,
+        format: function (v) { return dateText(v); } },
+      { key: 'time', type: 'range', label: t('time'), min: 0, max: 1440 - L.TIME_STEP, step: L.TIME_STEP,
+        format: function (v) { return t('clock', { time: clock(v) }); } },
+      { key: 'nautical', type: 'toggle', label: t('nautical') },
+      { key: 'a', type: 'select', label: t('a'), options: placeOpts },
+      { key: 'b', type: 'select', label: t('b'), options: [['off', t('off')]].concat(placeOpts) }
+    ],
+    presets: list.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    keys: [{ key: 'P', label: t('playKey'), run: toggle }],
+    legend: [
+      { shape: 'gl-day', label: t('legendDay') },
+      { shape: 'gl-band', label: t('legendBand') },
+      { shape: 'gl-night', label: t('legendNight') },
+      { shape: 'line', label: t('legendTerminator') },
+      { shape: 'gl-sun', label: t('legendSun') },
+      { shape: 'gl-a', label: t('legendA') },
+      { shape: 'gl-b', label: t('legendB') }
+    ],
+
+    render: function (c) {
+      var box = h('div', { class: 'gl' });
+      c.stage.replaceChildren(box);
+      drawMap(box, c.state);
+    },
+
+    caption: function (c) {
+      var st = c.state;
+      var b = function (x) { return h('b', null, x); };
+      var vars = {
+        date: b(dateText(st.day)), clock: b(t('clock', { time: clock(st.time) })),
+        sub: b(lat(st.sub.lat) + ', ' + lon(st.sub.lon)), a: b(name(st.a.id)), elev: b(elev(st.a.elev))
+      };
+      if (st.b) {
+        vars.b = b(name(st.b.id));
+        vars.km = b(t('km', { v: thousands(st.path.km) }));
+        vars.band = b(t('pct', { v: st.path.band }));
+        vars.day = b(t('pct', { v: st.path.day }));
+        vars.night = b(t('pct', { v: st.path.night }));
+      }
+      return t.parts('cap_' + st.kind, vars);
+    }
+  });
+
+  // A hand change while playing carries on from there; a preset stops the clock.
+  (function () {
+    var g = document.querySelector('[data-sd-transport] .sd-tgroup');
+    playLabel();
+    if (g) g.prepend(playBtn);
+  })();
+  sim.on(function () { if (playing && !ownSet && sim.preset) stop(); });
+
+  // The drawing is in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var last = '';
+    new ResizeObserver(function (es) {
+      var rc = es[0].contentRect, key = Math.round(rc.width) + 'x' + Math.round(rc.height);
+      if (key !== last) { last = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
+</body>
+</html>
