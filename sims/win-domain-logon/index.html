@@ -1,0 +1,541 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-domain-logon: PC07, an HQ laptop, in HQ, at the branch or offline, and a user logging on to quillmoor.example:
+     the DC locator (DNS SRV query, LDAP ping, the site from the ping), Kerberos AS with the DC found (RODC01
+     forwarding to DC01 when it lacks the password), then the cached verifier stored, or a cached logon, or none.
+     A stepper, one message or event per step.
+     Top: the sites HQ and Branch (shaded zones with their subnet), the tunnel between them, the offline spot; PC07
+     where it is, the chosen DC outlined. Below: kit view K1 (message sequence chart, kit/sequence.js) with the lanes
+     PC07, DNS, DC01 and RODC01; beside it the result and PC07's cached credentials (count / 10).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-domain-logon">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prijava u domenu · simdeck</title>
+<meta name="description" content="Prijavi se u HQ-u, u podružnici s RODC-om i izvan mreže: SRV upit, LDAP ping i lokacija, Kerberos; bez DC-a samo tko se već prijavljivao.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-domain-logon",
+  "title": {
+    "hr": "Prijava u domenu",
+    "en": "Domain logon"
+  },
+  "concept": {
+    "hr": "Lociranje DC-a preko DNS SRV, zatim Kerberos; bez DC-a spremljene vjerodajnice",
+    "en": "DC locator via DNS SRV, then Kerberos; cached credentials when no DC answers"
+  },
+  "summary": {
+    "hr": "Prijavi se u HQ-u, u podružnici s RODC-om i izvan mreže: SRV upit, LDAP ping i lokacija, Kerberos; bez DC-a samo tko se već prijavljivao.",
+    "en": "Log on in HQ, at a branch with an RODC, and offline: SRV query, LDAP ping and site, Kerberos; with no DC, only users seen before get in."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-domain-logon"]; colours only from kit tokens.
+   Layout: the topology strip on top; below it the K1 chart and a side column (result, cached credentials). */
+[data-sim="win-domain-logon"] .dl {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1cqh;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="win-domain-logon"] .dl-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1cqw; min-height: 0; }
+[data-sim="win-domain-logon"] .dl-bottom > .sd-seq { min-height: 0; }
+[data-sim="win-domain-logon"] .dl-side { display: flex; flex-direction: column; gap: 0.8cqh; min-width: 0; min-height: 0; }
+[data-sim="win-domain-logon"] .dl-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-domain-logon"] .dl-box h2 { margin: 0 0 0.15rem; font-size: 1em; font-weight: 700; }
+[data-sim="win-domain-logon"] .dl-mono { font-family: var(--mono); }
+[data-sim="win-domain-logon"] .dl-sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 400; line-height: 1.3; }
+[data-sim="win-domain-logon"] .dl-line { display: flex; flex-wrap: wrap; gap: 0.1rem 0.45rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.35; }
+
+/* topology: two shaded site zones, the tunnel between them, the offline spot */
+[data-sim="win-domain-logon"] .dl-topo { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr) 10rem; gap: 0.8rem; align-items: stretch; }
+[data-sim="win-domain-logon"] .dl-zone {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.35rem 0.6rem 0.5rem;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--sw) 10%, var(--bg));
+  min-width: 0;
+}
+[data-sim="win-domain-logon"] .dl-zone[data-off] { border-style: dashed; border-color: var(--muted); background: var(--bg); }
+[data-sim="win-domain-logon"] .dl-zone-h { display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: baseline; font-size: var(--fs-sm); }
+[data-sim="win-domain-logon"] .dl-zone-h b { font-size: 1rem; }
+[data-sim="win-domain-logon"] .dl-subnet { font-family: var(--mono); padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-domain-logon"] .dl-subnet[data-off] { border-style: dashed; color: var(--muted); font-family: inherit; }
+[data-sim="win-domain-logon"] .dl-nodes { display: flex; gap: 0.6rem; align-items: stretch; flex: 1; }
+[data-sim="win-domain-logon"] .dl-card {
+  display: flex; flex-direction: column; gap: 0.05rem;
+  flex: 1 1 0; min-width: 0;
+  padding: 0.25rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-left: 0.45rem solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="win-domain-logon"] .dl-card[data-chosen] { border-width: 0.25rem; border-left-width: 0.6rem; }
+[data-sim="win-domain-logon"] .dl-card-name { display: flex; gap: 0.4rem; align-items: baseline; font-weight: 700; font-family: var(--mono); }
+[data-sim="win-domain-logon"] .dl-badge { padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--sans); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="win-domain-logon"] .dl-wan { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.2rem; text-align: center; font-size: var(--fs-sm); }
+[data-sim="win-domain-logon"] .dl-wan-line { width: 100%; height: 0; border-top: 0.25rem solid var(--muted); position: relative; }
+[data-sim="win-domain-logon"] .dl-wan[data-state="down"] .dl-wan-line { border-top-style: dashed; }
+[data-sim="win-domain-logon"] .dl-wan[data-now] .dl-wan-line { border-top-color: var(--ink); border-top-width: 0.4rem; }
+[data-sim="win-domain-logon"] .dl-wan-x { position: absolute; left: 50%; top: -0.95rem; transform: translateX(-50%); color: var(--danger); font-weight: 700; font-size: 1.3rem; line-height: 1; background: var(--bg); padding: 0 0.15rem; }
+[data-sim="win-domain-logon"] .dl-wan-now { padding: 0 0.3rem; border-radius: var(--radius-sm); }
+
+/* result */
+[data-sim="win-domain-logon"] .dl-res { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; }
+[data-sim="win-domain-logon"] .dl-res h2 { flex-basis: 100%; }
+[data-sim="win-domain-logon"] .dl-res[data-k] { border-width: 0.2rem; border-color: var(--ink); }
+[data-sim="win-domain-logon"] .dl-res[data-k="fail"] { border-color: var(--danger); }
+[data-sim="win-domain-logon"] .dl-res-sym { font-weight: 700; font-size: 1.3rem; line-height: 1; }
+[data-sim="win-domain-logon"] .dl-res[data-k="fail"] .dl-res-sym { color: var(--danger); }
+[data-sim="win-domain-logon"] .dl-res[data-k="ok"] .dl-res-sym { color: var(--ok); }
+[data-sim="win-domain-logon"] .dl-res[data-k="warn"] .dl-res-sym { color: var(--warn); }
+[data-sim="win-domain-logon"] .dl-res-main { font-weight: 700; flex: 1 1 10rem; }
+[data-sim="win-domain-logon"] .dl-tags { display: flex; flex-wrap: wrap; gap: 0.25rem 0.4rem; flex-basis: 100%; }
+[data-sim="win-domain-logon"] .dl-tag { padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-domain-logon"] .dl-tag[data-k="warn"] { border-style: dashed; }
+[data-sim="win-domain-logon"] .dl-msg { flex-basis: 100%; font-size: var(--fs-sm); }
+
+/* cached credentials */
+[data-sim="win-domain-logon"] .dl-cache h2 { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; }
+[data-sim="win-domain-logon"] .dl-count { font-family: var(--mono); font-size: 1.3rem; white-space: nowrap; }
+[data-sim="win-domain-logon"] .dl-keys { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.2rem 0 0; padding: 0; list-style: none; }
+[data-sim="win-domain-logon"] .dl-key {
+  display: flex; gap: 0.4rem; align-items: center;
+  padding: 0.1rem 0.4rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg);
+  font-size: var(--fs-sm);
+}
+[data-sim="win-domain-logon"] .dl-key b { font-family: var(--mono); }
+[data-sim="win-domain-logon"] .dl-key[data-used] { border-width: 0.22rem; }
+[data-sim="win-domain-logon"] .dl-key[data-missing] { border-style: dashed; color: var(--muted); }
+[data-sim="win-domain-logon"] .dl-key[data-missing] .dl-x { color: var(--danger); font-weight: 700; }
+[data-sim="win-domain-logon"] .dl-key.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-domain-logon"] .dl-key svg { width: 1.3em; height: 1.3em; flex: none; }
+[data-sim="win-domain-logon"] .dl-key-note { margin-left: auto; }
+
+/* the K1 view's ✕ in red */
+[data-sim="win-domain-logon"] .sd-seq-x { color: var(--danger); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-domain-logon"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.16em, transparent 0.16em 0.36em); }
+[data-sim="win-domain-logon"] .sd-swatch[data-shape="zone"] { background: color-mix(in srgb, var(--c2) 10%, var(--bg)); border-color: var(--c2); }
+[data-sim="win-domain-logon"] .sd-swatch[data-shape="chosen"] { background: var(--bg); border: 0.22rem solid var(--ink); }
+[data-sim="win-domain-logon"] .sd-swatch[data-shape="key"] {
+  background:
+    radial-gradient(circle at 30% 50%, transparent 0.13em, var(--ink) 0.14em 0.24em, transparent 0.25em),
+    linear-gradient(var(--ink), var(--ink)) 78% 50% / 42% 0.1em no-repeat,
+    var(--bg);
+  border-color: var(--ink);
+}
+[data-sim="win-domain-logon"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-domain-logon"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-domain-logon"] .dl { height: auto; padding: 0.4rem; gap: 0.6rem; }
+  [data-sim="win-domain-logon"] .dl-topo { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-domain-logon"] .dl-wan { flex-direction: row; flex-wrap: wrap; }
+  [data-sim="win-domain-logon"] .dl-wan-line { width: 3rem; }
+  [data-sim="win-domain-logon"] .dl-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-domain-logon"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prijava u domenu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { pc: '1', DC01: '2', dns: '3', RODC01: '5' };
+  var SITE_COLOUR = { HQ: '2', Branch: '5' };
+  var SVG = 'http://www.w3.org/2000/svg';
+
+  /** Data (names, addresses, record names, users) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'dl-mono' : cls || null }, String(text)); }
+  function breakable(text) {
+    var out = [];
+    String(text).split(/(?<=[.])/).forEach(function (part, i) { if (i) out.push(h('wbr')); out.push(part); });
+    return out;
+  }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  function qLong(text) { return h('b', { translate: 'no' }, breakable(text)); }
+  function sub(text) { return h('span', { class: 'dl-sub' }, text); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      // always a copy: one placeholder node may serve several parts of a caption, and appending would move it
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function last(c) { return c.n > 0 ? c.state.log[c.state.log.length - 1] : null; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  /** A key, drawn: the cached-credential mark. No text inside, so the viewBox scales nothing readable. */
+  function keyIcon() {
+    var svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    [['circle', { cx: 7, cy: 12, r: 4.5 }], ['path', { d: 'M11.5 12H22M18 12v4M21 12v3' }]].forEach(function (d) {
+      var el = document.createElementNS(SVG, d[0]);
+      Object.keys(d[1]).forEach(function (k) { el.setAttribute(k, d[1][k]); });
+      el.setAttribute('fill', 'none'); el.setAttribute('stroke', 'currentColor'); el.setAttribute('stroke-width', '2.4');
+      svg.append(el);
+    });
+    return svg;
+  }
+  function lane(who) { return who === 'PC' ? 'pc' : who; }
+  function maxN() { return L.CACHE_MAX; }
+
+  // ── topology ──
+  function renderTopo(c) {
+    var s = c.state, p = c.params, e = last(c);
+    var prevChosen = c.prev ? c.prev.dcChosen : null;
+    function card(id, lines) {
+      var chosen = s.dcChosen === id;
+      var ds = { c: id === 'PC07' ? COLOUR.pc : COLOUR[id] };
+      if (chosen) ds.chosen = '';
+      return h('div', { class: 'dl-card' + (chosen && prevChosen !== id ? ' sd-changed' + anim(c) : ''), dataset: ds },
+        h('div', { class: 'dl-card-name' }, data(id, ''), chosen ? h('span', { class: 'dl-badge' }, '✓ ', t('chosen')) : null),
+        lines.map(function (l) { return h('div', { class: 'dl-line' }, l); }));
+    }
+    function pcCard() {
+      return card('PC07', [s.pc.ip ? data(s.pc.ip) : sub(t('offline')), sub(t('pcNow'))]);
+    }
+    function zone(site, dc) {
+      var subnet = L.SITES[site].subnet;
+      return h('section', { class: 'dl-zone', dataset: { c: SITE_COLOUR[site] } },
+        h('div', { class: 'dl-zone-h' }, sub(t('siteWord')), q(site),
+          p.subnets ? data(subnet, 'dl-subnet') : h('span', { class: 'dl-subnet', dataset: { off: '' } }, t('noSubnet'))),
+        h('div', { class: 'dl-nodes' },
+          card(dc, [data(L.DC[dc].ip), sub([t(L.DC[dc].rodc ? 'readOnly' : 'writable'), ', ', t('dnsToo')])]),
+          L.LOCATION_SITE[s.pc.location] === site ? pcCard() : null));
+    }
+    var now = null;
+    if (e && e.wan && /^(ping|pong|asReq|asRep)$/.test(e.kind)) now = e.lost ? 'lost' : 'cross';
+    var wan = h('div', { class: 'dl-wan', dataset: { state: s.wanUp ? 'up' : 'down', now: now || null } },
+      h('span', null, t('tunnel')),
+      h('div', { class: 'dl-wan-line' }, s.wanUp ? null : h('span', { class: 'dl-wan-x', 'aria-hidden': 'true' }, '✕')),
+      h('span', null, s.wanUp ? '✓ ' : '✕ ', t(s.wanUp ? 'tunnelUp' : 'tunnelDown')),
+      now ? h('span', { class: 'dl-wan-now sd-changed' + anim(c) }, t(now === 'lost' ? 'tunnelLost' : 'tunnelCross')) : null);
+    var off = h('section', { class: 'dl-zone', dataset: { off: '' } },
+      h('div', { class: 'dl-zone-h' }, h('b', null, t('offWord'))),
+      s.pc.location === 'offline' ? h('div', { class: 'dl-nodes' }, pcCard()) : sub(t('offNote')));
+    return h('div', { class: 'dl-topo' }, zone('HQ', 'DC01'), wan, zone('Branch', 'RODC01'), off);
+  }
+
+  // ── result ──
+  function renderResult(c) {
+    var s = c.state, p = c.params, r = s.result;
+    var head = h('h2', null, t('resTitle'));
+    if (!r) {
+      return h('section', { class: 'dl-box dl-res' }, head,
+        h('span', { class: 'dl-res-sym', 'aria-hidden': 'true' }, '…'), h('span', null, t('resWait', { u: p.user })));
+    }
+    if (!r.ok) {
+      return h('section', { class: 'dl-box dl-res' + anim(c), dataset: { k: 'fail' } }, head,
+        h('span', { class: 'dl-res-sym', 'aria-hidden': 'true' }, '✕'), h('span', { class: 'dl-res-main' }, t('resFail')),
+        h('span', { class: 'dl-msg' }, '“', t('msg'), '”'));
+    }
+    if (r.how === 'cached') {
+      return h('section', { class: 'dl-box dl-res' + anim(c), dataset: { k: 'warn' } }, head,
+        h('span', { class: 'dl-res-sym', 'aria-hidden': 'true' }, '✓'), h('span', { class: 'dl-res-main' }, t('resCached', { u: r.user })),
+        h('span', { class: 'dl-tags' },
+          h('span', { class: 'dl-tag', dataset: { k: 'warn' } }, '⚠ ', t('resNoTicket')),
+          h('span', { class: 'dl-tag', dataset: { k: 'warn' } }, '⚠ ', t('resNoGpo'))));
+    }
+    var tags = [h('span', { class: 'dl-tag' }, t('resVia', { dc: r.dc })), h('span', { class: 'dl-tag' }, t('resTgt'))];
+    if (r.forwarded) tags.push(h('span', { class: 'dl-tag' }, t('resFwd')));
+    if (r.wan) tags.push(h('span', { class: 'dl-tag', dataset: { k: 'warn' } }, '⚠ ', t('resWan')));
+    return h('section', { class: 'dl-box dl-res' + anim(c), dataset: { k: r.wan ? 'warn' : 'ok' } }, head,
+      h('span', { class: 'dl-res-sym', 'aria-hidden': 'true' }, '✓'), h('span', { class: 'dl-res-main' }, t('resOk', { u: r.user })), h('span', { class: 'dl-tags' }, tags));
+  }
+
+  // ── cached credentials ──
+  function renderCache(c) {
+    var s = c.state, e = last(c);
+    var list = h('ul', { class: 'dl-keys' });
+    s.pc.cache.forEach(function (u) {
+      var added = e && e.kind === 'cacheStore' && e.added && e.user === u;
+      var used = e && e.kind === 'cachedLogon' && e.user === u;
+      var ds = used ? { used: '' } : {};
+      list.append(h('li', { class: 'dl-key' + (added ? ' sd-changed' + anim(c) : ''), dataset: ds },
+        keyIcon(), data(u, ''), added ? h('span', { class: 'dl-key-note' }, t('cacheNew')) : used ? h('span', { class: 'dl-key-note' }, '✓ ', t('cacheUsed')) : null));
+    });
+    if (e && e.kind === 'noLogon') {
+      list.append(h('li', { class: 'dl-key', dataset: { missing: '' } }, h('span', { class: 'dl-x', 'aria-hidden': 'true' }, '✕'),
+        h('span', null, rich('cacheMissing', { u: q(e.user) }))));
+    }
+    if (!list.children.length) list.append(h('li', { class: 'dl-sub' }, t('cacheEmpty')));
+    return h('section', { class: 'dl-box dl-cache' },
+      h('h2', null, h('span', null, t('cacheTitle')), data(t('cacheCount', { k: s.pc.cache.length, max: maxN() }), 'dl-count')),
+      list);
+  }
+
+  // ── chart ──
+  function lanes(c) {
+    var s = c.state, p = c.params, e = last(c);
+    function on(id) {
+      if (!e) return null;
+      var who = [];
+      switch (e.kind) {
+        case 'query': case 'answer': who = ['pc', 'dns']; break;
+        case 'ping': who = ['pc', e.to]; break;
+        case 'pong': who = ['pc', e.from]; break;
+        case 'asReq': case 'asRep': case 'krbError': who = [lane(e.from), lane(e.to)]; break;
+        default: who = ['pc'];
+      }
+      return who.indexOf(id) >= 0 ? 'active' : null;
+    }
+    var dns = s.pc.dns;
+    var site = s.pc.site ? data(s.pc.site, '') : t('siteNone');
+    return [
+      { id: 'pc', mark: 'P', c: COLOUR.pc, shape: 'square', name: data('PC07', ''), state: on('pc'), tags: sub(t('laneClient')),
+        body: [h('div', { class: 'dl-line' }, s.pc.ip ? data(s.pc.ip) : sub(t('offline'))),
+          h('div', { class: 'dl-line' }, sub([t('siteWord'), ': ']), site)],
+        changed: !!(c.prev && c.prev.pc.site !== s.pc.site) },
+      { id: 'dns', mark: 'N', c: COLOUR.dns, name: t('dnsWord'), state: dns ? on('dns') : 'down',
+        tags: sub(dns ? t('dnsOn', { dc: dns }) : t('dnsNone')),
+        body: [h('div', { class: 'dl-line' }, dns ? data(L.DC[dns].ip) : sub(t('offline'))), h('div', { class: 'dl-line' }, sub(t('dnsZone')))] },
+      { id: 'DC01', mark: '1', c: COLOUR.DC01, name: data('DC01', ''), state: on('DC01'), tags: null,
+        body: [h('div', { class: 'dl-line' }, data(L.DC.DC01.ip)), h('div', { class: 'dl-line' }, sub([t('siteWord'), ': ']), data('HQ', ''))] },
+      { id: 'RODC01', mark: 'R', c: COLOUR.RODC01, name: data('RODC01', ''), state: on('RODC01'), tags: null,
+        body: [h('div', { class: 'dl-line' }, data(L.DC.RODC01.ip)),
+          h('div', { class: 'dl-line' }, sub((s.rodcCached.indexOf(p.user) >= 0 ? '✓ ' : '✕ ') + t(s.rodcCached.indexOf(p.user) >= 0 ? 'pwdYes' : 'pwdNo', { u: p.user })))] }
+    ];
+  }
+  function short(e) { return '_ldap ' + (e.scope === 'site' ? e.site : 'dc'); }
+  function rows(c) {
+    var out = [];
+    c.state.log.forEach(function (e) {
+      var r = null;
+      switch (e.kind) {
+        case 'query':
+          r = { from: 'pc', to: 'dns', label: 'SRV?', c: COLOUR.pc, line: 'dashed', fields: data(short(e)) };
+          if (e.lost) r.drop = true; // the ✕ says it; a word past it would cover the field on this short arrow
+          break;
+        case 'answer': r = { from: 'dns', to: 'pc', label: 'SRV', c: COLOUR.dns, line: 'dashed', fields: data(e.targets.join(', ')) }; break;
+        case 'ping':
+          r = { from: 'pc', to: e.to, label: 'LDAP ping', c: COLOUR.pc, line: 'dotted', place: 'mid' };
+          if (e.lost) { r.drop = true; r.re = {}; r.re[e.to] = h('span', null, t('reTunnel')); }
+          break;
+        case 'pong':
+          r = { from: e.from, to: 'pc', label: h('span', null, t('pongLabel')), c: COLOUR[e.from], line: 'dotted',
+            fields: e.site ? h('span', null, data(e.site, ''), ' ', e.closest ? '✓ ' : '✕ ', t(e.closest ? 'closestYes' : 'closestNo')) : h('span', null, t('noSite')) };
+          break;
+        case 'asReq':
+          r = { from: lane(e.from), to: lane(e.to), label: 'AS-REQ', c: COLOUR[lane(e.from)], fields: data(e.user), place: 'mid' };
+          if (e.lost) { r.drop = true; r.re = {}; r.re[lane(e.to)] = h('span', null, t('reTunnel')); }
+          break;
+        case 'asRep': r = { from: lane(e.from), to: lane(e.to), label: 'AS-REP', c: COLOUR[lane(e.from)], fields: data('TGT'), place: 'mid' }; break;
+        case 'krbError': r = { from: lane(e.from), to: 'pc', label: 'KRB-ERROR', c: COLOUR[lane(e.from)], place: 'mid' }; break;
+        case 'cacheStore': r = { kind: 'note', lane: 'pc', text: t(e.added ? 'noteStored' : 'noteRefreshed', { u: e.user, k: e.count, max: maxN() }), k: 'solid' }; break;
+        case 'cachedLogon': r = { kind: 'note', lane: 'pc', text: t('noteCached', { u: e.user }), k: 'solid' }; break;
+        case 'noLogon': r = { kind: 'note', lane: 'pc', text: t('noteNoLogon'), k: 'fill' }; break;
+      }
+      if (!r) return;
+      r.changed = e.n === c.n;
+      out.push(r);
+    });
+    return out;
+  }
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '0.4rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── captions ──
+  /** Why no DC could log the user on: offline, the DCs the locator found did not answer, or the RODC could not check. */
+  function why(s, p) { return t('why_' + (p.location === 'offline' ? 'offline' : s.result.reason)); }
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    var C = q('PC07'), U = q(p.user), IP = q(s.pc.ip || '—');
+    if (c.first) {
+      var out = rich('capStart_' + p.location, { u: U, c: C, ip: IP });
+      out = out.concat(s.pc.site ? rich('startSite', { site: q(s.pc.site) }) : rich('startNoSite'));
+      if (!p.subnets) out = out.concat(rich('startNoSubnets'));
+      if (!p.wan) out.push(t('startWanDown'));
+      if (s.pc.cache.length) out = out.concat(rich('startCache', { c: C, list: q(s.pc.cache.join(', ')) }));
+      else out = out.concat(rich('startCacheEmpty', { c: C }));
+      if (p.rodcHasPwd) out = out.concat(t.parts('startRodc', { u: q(p.user) }));
+      return out;
+    }
+    var e = last(c), before = s.log.slice(0, -1);
+    var pongs = before.filter(function (x) { return x.kind === 'pong'; });
+    var lastPong = pongs[pongs.length - 1];
+    switch (e.kind) {
+      case 'query': {
+        var Q = qLong(L.fqdn(e.name));
+        if (e.lost) return rich(before.length ? 'capQueryLostAgain' : 'capQueryLost', { n: n, c: C, q: Q });
+        if (e.scope === 'site') {
+          if (lastPong) return rich('capQueryLearnt', { n: n, dc: q(lastPong.from), ip: IP, site: q(e.site), q: Q });
+          return rich('capQuerySite', { n: n, c: C, site: q(e.site), dns: q(L.DC[e.server].ip), q: Q });
+        }
+        var siteQ = before.filter(function (x) { return x.kind === 'query' && x.scope === 'site'; })[0];
+        if (siteQ) return rich('capQueryFallback', { n: n, c: C, site: q(siteQ.site), q: Q });
+        return rich('capQueryNone', { n: n, c: C, dns: q(L.DC[e.server].ip), q: Q });
+      }
+      case 'answer': {
+        var dc = e.targets[0];
+        var tried = before.some(function (x) { return x.kind === 'ping' && x.to === dc; });
+        if (tried) return rich('capAnswerTried', { n: n, t: q(dc) });
+        if (e.scope === 'site' && lastPong) return rich('capAnswerLearnt', { n: n, t: q(dc), ip: q(L.DC[dc].ip), site: q(e.site) });
+        var a = rich('capAnswer', { n: n, dns: q(e.server), t: q(dc), ip: q(L.DC[dc].ip) });
+        if (e.scope === 'domain') a = a.concat(rich('noRodc'));
+        return a;
+      }
+      case 'ping':
+        if (e.lost) return rich('capPingLost', { n: n, c: C, dc: q(e.to) });
+        return rich('capPing', { n: n, c: C, dc: q(e.to) }).concat(e.wan ? [t('wanPing')] : []);
+      case 'pong': {
+        var D = q(e.from);
+        if (!e.site) {
+          var o = rich('capPongNoSite', { n: n, dc: D, ip: IP, c: C });
+          var home = L.LOCATION_SITE[p.location], near = home && L.SITES[home].dc;
+          if (near && near !== e.from) o = o.concat(t.parts('pongNextDoor', { near: q(near) }));
+          return o;
+        }
+        if (e.closest) return rich('capPongClosest', { n: n, dc: D, c: C, ip: IP, site: q(e.site) });
+        return rich('capPongFar', { n: n, dc: D, c: C, ip: IP, site: q(e.site), dcsite: q(L.DC[e.from].site) });
+      }
+      case 'asReq':
+        if (e.fwd) return rich(e.lost ? 'capFwdLost' : 'capFwd', { n: n, u: U });
+        return rich('capAsReq', { n: n, c: C, dc: q(e.to), u: U });
+      case 'asRep': {
+        if (e.fwd) return rich('capFwdRep', { n: n });
+        var r = rich('capAsRep', { n: n, dc: q(e.from), u: U, c: C });
+        if (e.from === 'RODC01' && p.rodcHasPwd) r = r.concat(t.parts('rodcOwn', { u: q(p.user) }));
+        return r;
+      }
+      case 'krbError': return rich('capKrbError', { n: n, u: U });
+      case 'cacheStore': {
+        var st = rich(e.added ? 'capStore' : 'capRefresh', { n: n, c: C, u: U, k: q(e.count), max: q(maxN()) });
+        if (s.result.wan) st = st.concat(t.parts('tailWan', { dc: q(s.result.dc) }));
+        else if (s.result.forwarded) st.push(t('tailFwd'));
+        return st;
+      }
+      case 'cachedLogon': return rich('capCached', { n: n, why: why(s, p), c: C, u: U });
+      case 'noLogon': return rich('capNoLogon', { n: n, why: why(s, p), c: C, u: U, msg: t('msg'), old: t('msgOld') });
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'location', type: 'choice', label: t('pLocation'), options: [['hq', t('optHq')], ['branch', t('optBranch')], ['offline', t('optOffline')]], resets: true },
+      { key: 'lastSite', type: 'choice', label: t('pLastSite'), options: [['HQ', t('optSiteHq')], ['Branch', t('optSiteBranch')], ['none', t('optSiteNone')]], resets: true },
+      { key: 'user', type: 'choice', label: t('pUser'), options: [['ana', 'ana'], ['marko', 'marko']], resets: true },
+      { key: 'subnets', type: 'toggle', label: t('pSubnets'), resets: true },
+      { key: 'wan', type: 'toggle', label: t('pWan'), resets: true },
+      { key: 'cachedOnPc', type: 'toggle', label: t('pCachedOnPc'), resets: true },
+      { key: 'rodcHasPwd', type: 'toggle', label: t('pRodcHasPwd'), resets: true }
+    ],
+
+    presets: [
+      { id: 'hq', label: t('presetHq'), hint: t('presetHqHint'), params: {} },
+      { id: 'branch-first', label: t('presetBranchFirst'), hint: t('presetBranchFirstHint'), params: { location: 'branch' } },
+      { id: 'branch-wan-down', label: t('presetWanDown'), hint: t('presetWanDownHint'), params: { location: 'branch', lastSite: 'Branch', wan: false, cachedOnPc: true } },
+      { id: 'offline-new-user', label: t('presetOffline'), hint: t('presetOfflineHint'), params: { location: 'offline', user: 'marko', cachedOnPc: true } },
+      { id: 'no-subnets', label: t('presetNoSubnets'), hint: t('presetNoSubnetsHint'), params: { location: 'branch', subnets: false, lastSite: 'none' } }
+    ],
+
+    legend: [
+      { shape: 'dash', label: t('legDns') },
+      { shape: 'dot', label: t('legPing') },
+      { shape: 'line', label: t('legKerb') },
+      { shape: 'zone', label: t('legSite') },
+      { shape: 'chosen', label: t('legChosen') },
+      { shape: 'key', label: t('legKey') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'dl' }, renderTopo(c),
+        h('div', { class: 'dl-bottom' }, chart, h('div', { class: 'dl-side' }, renderResult(c), renderCache(c)))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
