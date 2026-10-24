@@ -1,0 +1,468 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ad-replication: three DCs in a ring, user ana with two attributes. A stepper, one event per step: an
+     originating write (the DC's next USN, version + 1) or one pull (changes above the high-watermark, left out by the
+     up-to-dateness vector when the destination has them, applied under the destination's own next USN with the
+     originating metadata kept, conflicts resolved per attribute). Kit view K2 draws the ring with the pull on the wire;
+     each DC card holds its USN, UTD and HWM and the attributes' metadata; the pull box and the edits box sit in the
+     free corner of the grid. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ad-replication">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replikacija AD-a s više glavnih kopija · simdeck</title>
+<meta name="description" content="Promijeni isti atribut na dva DC-a odjednom i prati povlačenja: lokalni USN-ovi, gornje oznake, vektor ažurnosti i koja vrijednost pobjeđuje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ad-replication",
+  "title": {
+    "hr": "Replikacija AD-a s više glavnih kopija",
+    "en": "AD multi-master replication"
+  },
+  "concept": {
+    "hr": "USN-ovi, vektor ažurnosti i pobjeda zadnjeg upisa po atributu",
+    "en": "USNs, the up-to-dateness vector, attribute-level last writer wins"
+  },
+  "summary": {
+    "hr": "Promijeni isti atribut na dva DC-a odjednom i prati povlačenja: lokalni USN-ovi, gornje oznake, vektor ažurnosti i koja vrijednost pobjeđuje.",
+    "en": "Change one attribute on two DCs at once and follow the pulls: local USNs, high-watermarks, the up-to-dateness vector, and which value wins."
+  },
+  "tags": [
+    "active-directory",
+    "replication"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ad-replication"]; colours only from kit tokens.
+   Layout: kit view K2 in a 9-column grid, DC01 top left, DC02 top right, DC03 bottom left, the boxes bottom right. */
+[data-sim="win-ad-replication"] .ar { height: 100%; padding: 1.2cqh 1.2cqw; font-size: 1rem; }
+[data-sim="win-ad-replication"] .ar .sd-topo { height: 100%; align-content: stretch; }
+[data-sim="win-ad-replication"] .sd-topo-card { min-width: 0; align-content: start; }
+[data-sim="win-ad-replication"] .ar-extra { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.35rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-replication"] [translate="no"].ar-d { font-family: var(--mono); white-space: nowrap; }
+/* changed in this step: the kit's highlight colour plus an ink underline, so it survives grayscale */
+[data-sim="win-ad-replication"] .ar-ch { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* USN, UTD and HWM */
+[data-sim="win-ad-replication"] .sd-topo-mark { align-self: start; }
+[data-sim="win-ad-replication"] .ar-name { font-weight: 400; display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="win-ad-replication"] .ar-host { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.8rem; font-weight: 700; min-height: 1.9rem; }
+[data-sim="win-ad-replication"] .ar-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.2rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-replication"] .ar-usn { font-size: var(--fs-lg); }
+[data-sim="win-ad-replication"] .ar-usn b { font-family: var(--mono); padding: 0 0.2rem; }
+[data-sim="win-ad-replication"] .ar-tab { border-collapse: collapse; }
+[data-sim="win-ad-replication"] .ar-tab th, [data-sim="win-ad-replication"] .ar-tab td { padding: 0.05rem 0.35rem; text-align: left; white-space: nowrap; }
+[data-sim="win-ad-replication"] .ar-tab thead th { color: var(--muted); font-weight: 400; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="win-ad-replication"] .ar-tab tbody th { font-weight: 700; }
+[data-sim="win-ad-replication"] .ar-tab td { font-family: var(--mono); }
+[data-sim="win-ad-replication"] .ar-tab td.ar-word { font-family: var(--sans); }
+[data-sim="win-ad-replication"] .ar-vec th:first-child { padding-left: 0; }
+[data-sim="win-ad-replication"] .ar-obj { width: 100%; }
+[data-sim="win-ad-replication"] .ar-obj th:first-child, [data-sim="win-ad-replication"] .ar-obj td:first-child { padding-left: 0; }
+[data-sim="win-ad-replication"] .ar-objh { margin-top: 0.15rem; font-weight: 700; }
+
+/* the boxes beside the drawing */
+[data-sim="win-ad-replication"] .ar-boxes { grid-column: 6 / span 4; grid-row: 3; position: relative; z-index: 1; min-width: 0;
+  display: grid; grid-template-rows: auto auto; align-content: start; gap: 0.6rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-replication"] .ar-box { padding: 0.4rem 0.7rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); min-width: 0; }
+[data-sim="win-ad-replication"] .ar-box > b { display: block; font-size: var(--fs-md); margin-bottom: 0.15rem; }
+[data-sim="win-ad-replication"] .ar-box ul { margin: 0.25rem 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="win-ad-replication"] .ar-box li { padding: 0.05rem 0.45rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="win-ad-replication"] .ar-box p { margin: 0.1rem 0; }
+[data-sim="win-ad-replication"] .ar-muted { color: var(--muted); }
+[data-sim="win-ad-replication"] .ar-mark { display: inline-block; min-width: 1.1em; font-weight: 700; }
+/* outcome: ✓ thick ink frame; ✕ the value struck through; left out: dashed and hatched */
+[data-sim="win-ad-replication"] li[data-k="win"] { border-color: var(--ink); border-width: 0.2rem; }
+[data-sim="win-ad-replication"] li[data-k="lost"] { border-color: var(--danger); }
+[data-sim="win-ad-replication"] li[data-k="lost"] .ar-mark { color: var(--danger); }
+[data-sim="win-ad-replication"] li[data-k="skip"] { border-style: dashed; color: var(--muted); }
+[data-sim="win-ad-replication"] .ar-strike { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="win-ad-replication"] li[data-k="lost"] .ar-strike { text-decoration-color: var(--danger); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-ad-replication"] .sd-swatch[data-shape^="ar-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape^="ar-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-win"] { border-width: 0.2rem; }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-win"]::after { content: '✓'; color: var(--ink); }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-lost"] { border-color: var(--danger); }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-lost"]::after { content: '✕'; color: var(--danger); }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-skip"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="win-ad-replication"] .sd-swatch[data-shape="ar-skip"]::after { content: '–'; color: var(--muted); }
+
+[data-sim="win-ad-replication"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="win-ad-replication"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the kit's card list, the boxes after it; the tables may wrap, nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ad-replication"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ad-replication"] .ar { height: auto; padding: 0.5rem; }
+  [data-sim="win-ad-replication"] .ar .sd-topo { height: auto; }
+  [data-sim="win-ad-replication"] .ar-boxes { grid-column: auto; grid-row: auto; }
+  [data-sim="win-ad-replication"] .ar-tab th, [data-sim="win-ad-replication"] .ar-tab td { white-space: normal; padding: 0.05rem 0.25rem; }
+  /* the attribute table becomes one block per attribute, each field with its label */
+  [data-sim="win-ad-replication"] .ar-obj thead { display: none; }
+  [data-sim="win-ad-replication"] .ar-obj, [data-sim="win-ad-replication"] .ar-obj tbody, [data-sim="win-ad-replication"] .ar-obj tr,
+  [data-sim="win-ad-replication"] .ar-obj tbody th { display: block; }
+  [data-sim="win-ad-replication"] .ar-obj tr { padding: 0.2rem 0; border-top: var(--line-w) solid var(--line); }
+  [data-sim="win-ad-replication"] .ar-obj td { display: inline-block; margin-right: 0.5rem; white-space: nowrap; padding: 0; }
+  [data-sim="win-ad-replication"] .ar-obj td::before { content: attr(data-l) ' '; color: var(--muted); font-family: var(--sans); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Replikacija AD-a s više glavnih kopija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour per DC; host names from the estate's forest (student side). */
+  var COLOUR = { DC01: '1', DC02: '2', DC03: '3' };
+  var HOST = { DC01: 'qm-dc01', DC02: 'qm-dc02', DC03: 'brk-dc03' };
+  /** Grid places [col, row] in a 9-column grid, cards span 4; the boxes take columns 6–9 of row 3. */
+  var POS = { DC01: [0, 0], DC02: [5, 0], DC03: [0, 2] };
+  var LINKS = [['DC01', 'DC02'], ['DC02', 'DC03'], ['DC03', 'DC01']];
+  var USER = 'ana';
+
+  /** Data (DC names, USNs, attribute names, phone numbers, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'ar-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** A value: a phone number is data; '@title0' is a word from the table. */
+  function val(v, cls) {
+    if (isWord(v)) return h('span', { class: cls || null }, t(wordKey(v)));
+    return data(v, cls);
+  }
+  function isWord(v) { return typeof v === 'string' && v.charAt(0) === '@'; }
+  /** '@title0' → the table key vTitle0. */
+  function wordKey(v) { return 'v' + v.charAt(1).toUpperCase() + v.slice(2); }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  /** Real time t (s) as the clock reads it: 10:00:00 + t. */
+  function clock(sec) {
+    var x = 36000 + sec;
+    return two(Math.floor(x / 3600)) + ':' + two(Math.floor(x / 60) % 60) + ':' + two(x % 60);
+  }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Nodes are cloned, so one
+      vars object may serve several sentences of a caption and a placeholder may appear twice. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Highlight a cell whose value differs from the step before. */
+  function ch(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    try { return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev)); } catch (e) { return false; }
+  }
+  function others(id) { return L.DCS.filter(function (d) { return d !== id; }); }
+
+  // ── the DC cards (kit view K2) ──
+
+  function vecTable(c, id) {
+    var ps = others(id);
+    return h('table', { class: 'ar-tab ar-vec' },
+      h('thead', null, h('tr', null, h('th', null, t('partner')), ps.map(function (o) { return h('th', null, data(o)); }))),
+      h('tbody', null, ['utd', 'hwm'].map(function (k) {
+        return h('tr', null, h('th', null, data(k.toUpperCase())), ps.map(function (o) {
+          return h('td', { class: ch(c, function (s) { return s.dcs[id][k][o]; }) ? 'ar-ch' : null, translate: 'no' }, String(c.state.dcs[id][k][o]));
+        }));
+      })));
+  }
+
+  function objTable(c, id) {
+    var cols = [['thAttr'], ['thValue', 'value'], ['thVer', 'ver'], ['thOrig', 'origDc'], ['thOrigUsn', 'origUsn'], ['thTime', 'origTime'], ['thLocal', 'localUsn']];
+    return h('table', { class: 'ar-tab ar-obj' },
+      h('thead', null, h('tr', null, cols.map(function (x) { return h('th', null, t(x[0])); }))),
+      h('tbody', null, L.ATTRS.map(function (attr) {
+        var a = c.state.dcs[id].obj[attr];
+        return h('tr', null, h('th', null, data(attr)), cols.slice(1).map(function (x) {
+          var f = x[1];
+          var hit = ch(c, function (s) { return s.dcs[id].obj[attr][f]; });
+          var cls = hit ? 'ar-ch' : null;
+          if (f === 'value') {
+            var word = isWord(a.value);
+            return h('td', { class: [word ? 'ar-word' : '', cls || ''].join(' ').trim() || null, translate: word ? null : 'no', dataset: { l: t(x[0]) } }, word ? t(wordKey(a.value)) : a.value);
+          }
+          return h('td', { class: cls, translate: 'no', dataset: { l: t(x[0]) } }, f === 'origTime' ? clock(a.origTime) : String(a[f]));
+        }));
+      })));
+  }
+
+  /** The card's head, beside the mark: host name and this step's badge, then the USN and the UTD/HWM table. */
+  function cardHead(c, id) {
+    var b = badgeOf(c.state, id);
+    return h('div', { class: 'ar-name' },
+      h('div', { class: 'ar-host' }, data(HOST[id]), b ? h('span', { class: 'sd-topo-badge', dataset: { k: b.k } }, b.text) : null),
+      h('div', { class: 'ar-head' },
+        h('span', { class: 'ar-usn', translate: 'no' }, 'USN ', h('b', { class: ch(c, function (s) { return s.dcs[id].usn; }) ? 'ar-ch' : null }, String(c.state.dcs[id].usn))),
+        vecTable(c, id)));
+  }
+
+  function cardExtra(c, id) {
+    return h('div', { class: 'ar-extra' },
+      h('div', { class: 'ar-objh' }, t.parts('objOf', { u: data(USER) })),
+      objTable(c, id));
+  }
+
+  /** This step's role of a DC: it writes, it pulls, it sends; null when it does nothing. */
+  function badgeOf(s, id) {
+    var e = s.last;
+    if (!e) return null;
+    if (e.kind === 'write') return e.dc === id ? { text: t('bWrites'), k: 'fill' } : null;
+    if (e.dest === id) return { text: t('bPulls'), k: 'fill' };
+    if (e.src === id) return { text: t('bSends'), k: 'solid' };
+    return null;
+  }
+
+  function sentOf(e) { return e.changes.filter(function (x) { return x.outcome !== 'utd' && x.outcome !== 'own'; }); }
+
+  function renderTopo(c) {
+    var s = c.state, e = s.last;
+    var acting = e ? (e.kind === 'write' ? [e.dc] : [e.dest]) : [];
+    var nodes = L.DCS.map(function (id) {
+      return { id: id, kind: 'server', col: POS[id][0], row: POS[id][1], span: 4, c: COLOUR[id], name: cardHead(c, id),
+        state: acting.indexOf(id) >= 0 ? 'active' : null, extra: cardExtra(c, id) };
+    });
+    var pair = e && e.kind === 'pull' ? [e.src, e.dest] : null;
+    var links = LINKS.map(function (l) {
+      var on = pair && pair.indexOf(l[0]) >= 0 && pair.indexOf(l[1]) >= 0;
+      return { id: l.join('-'), a: l[0], b: l[1], state: 'up', active: !!on };
+    });
+    var packets = [];
+    if (pair) {
+      var n = sentOf(e).length;
+      packets.push({ from: e.src, to: e.dest, label: n ? t.n('chipN', n) : t('chipNone'), c: COLOUR[e.src], at: 0.5 });
+    }
+    var el = Simdeck.topology({ cols: 9, rows: ['auto', 'minmax(3.2rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+    el.append(h('div', { class: 'ar-boxes' }, eventBox(c), editsBox(c)));
+    return el;
+  }
+
+  // ── the boxes ──
+
+  function outcomeItem(c, x, e) {
+    var held = c.prev.dcs[e.dest].obj[x.attr];
+    var head = [data(x.attr), ' = ', val(x.value, x.outcome === 'lost' ? 'ar-strike' : null), ' ', data('v' + x.ver + ' · ' + x.origDc + ' ' + x.origUsn + ' · ' + clock(x.origTime), 'ar-muted')];
+    var k, mark, out;
+    if (x.outcome === 'applied') {
+      k = 'win'; mark = '✓';
+      out = [t.parts('outApplied', { usn: data(x.localUsn) })];
+      if (held.wid !== x.wid) out.push(', ', t.parts('outOver', { held: val(held.value, 'ar-strike') }));
+    } else if (x.outcome === 'lost') {
+      k = 'lost'; mark = '✕';
+      out = [t.parts('outLost', { held: val(held.value) })];
+    } else if (x.outcome === 'utd') {
+      k = 'skip'; mark = '–';
+      out = [t.parts('outUtd', { o: data(x.origDc), v: data(c.prev.dcs[e.dest].utd[x.origDc]) })];
+    } else if (x.outcome === 'own') {
+      k = 'skip'; mark = '–';
+      out = [t.parts('outOwn', { dest: data(e.dest) })];
+    } else {
+      k = 'skip'; mark = '–';
+      out = [t('outSame')];
+    }
+    return h('li', { dataset: { k: k } }, h('span', { class: 'ar-mark', 'aria-hidden': 'true' }, mark), head, h('br'), out);
+  }
+
+  function eventBox(c) {
+    var s = c.state, e = s.last;
+    if (!e) {
+      return h('div', { class: 'ar-box' }, h('b', null, t('boxStart')), h('p', null, t('boxStartText')),
+        h('p', null, t.parts('boxStartObj', { u: data(USER), dc: data('DC01') })));
+    }
+    if (e.kind === 'write') {
+      var w = s.writes[e.wid - 1];
+      return h('div', { class: 'ar-box' }, h('b', null, t.parts('boxWrite', { dc: data(e.dc) })),
+        h('p', null, data('USN ' + (w.usn - 1) + ' → ' + w.usn)),
+        h('p', null, data(w.attr), ' = ', val(w.value), ', ', t.parts('boxVer', { a: data(w.ver - 1), b: data(w.ver) })),
+        h('p', { class: 'ar-muted' }, t('boxOnlyThis')));
+    }
+    var utdMoved = others(e.dest).some(function (o) { return s.dcs[e.dest].utd[o] !== c.prev.dcs[e.dest].utd[o]; });
+    return h('div', { class: 'ar-box' }, h('b', null, t.parts('boxPull', { dest: data(e.dest), src: data(e.src) })),
+      h('p', null, t.parts('boxAsk', { dest: data(e.dest), src: data(e.src), hwm: data(e.from) })),
+      e.changes.length ? h('ul', null, e.changes.map(function (x) { return outcomeItem(c, x, e); })) : h('p', { class: 'ar-muted' }, t.parts('boxNone', { src: data(e.src) })),
+      h('p', null, data('HWM[' + e.src + '] ' + e.from + ' → ' + e.to), ' · ', utdMoved ? t.parts('boxUtd', { src: data(e.src) }) : t('boxUtdSame')));
+  }
+
+  function editsBox(c) {
+    var s = c.state;
+    var items = s.writes.map(function (w) {
+      var line = [val(w.value), ' ', data(w.dc + ' · v' + w.ver + ' · ' + clock(w.t), 'ar-muted'), ' — '];
+      if (c.last) {
+        var f = L.fateOf(s, w.wid);
+        if (f === 'lost') return h('li', { dataset: { k: 'lost' } }, h('span', { class: 'ar-mark', 'aria-hidden': 'true' }, '✕'), val(w.value, 'ar-strike'), ' ', line[2], ' — ', t('fateLost'));
+        if (f === 'kept') return h('li', { dataset: { k: 'win' } }, h('span', { class: 'ar-mark', 'aria-hidden': 'true' }, '✓'), line, t('fateKept'));
+        return h('li', { dataset: { k: 'over' } }, h('span', { class: 'ar-mark', 'aria-hidden': 'true' }, '↺'), line, t('fateOver'));
+      }
+      var hs = L.holders(s, w.wid);
+      return h('li', null, line, hs.length ? t.parts('heldBy', { n: hs.length, list: data(hs.join(', ')) }) : t('heldNone'));
+    });
+    return h('div', { class: 'ar-box' }, h('b', null, t('editsTitle')),
+      items.length ? h('ul', null, items) : h('p', { class: 'ar-muted' }, t('editsNone')));
+  }
+
+  // ── captions ──
+
+  function capStart(c) {
+    var e = L.eff(c.params), s = c.state;
+    var out = [rich('capStart', { u1: data(s.dcs.DC01.usn), u2: data(s.dcs.DC02.usn), u3: data(s.dcs.DC03.usn) })];
+    var when = h('span', null, e.t2 ? t.parts('whenAfter', { t: data(e.t2) }) : t('whenSame'));
+    var vars = { n: e.edits1, attr: data('telephoneNumber'), attr2: data('title'), when: when };
+    out.push(rich(!e.edit2 ? 'planOne' : e.sameAttr ? 'planSame' : 'planDiff', vars));
+    return join(out);
+  }
+
+  function capWrite(c) {
+    var s = c.state, e = s.last, w = s.writes[e.wid - 1];
+    var vars = { dc: data(w.dc), attr: data(w.attr), value: val(w.value), from: data(w.usn - 1), usn: data(w.usn), v0: data(w.ver - 1),
+      v: data(w.ver), time: data(clock(w.t)) };
+    var again = s.writes.some(function (x) { return x.wid < w.wid && x.dc === w.dc && x.attr === w.attr; });
+    var out = [again ? rich('capWriteAgain', vars) : rich('capWrite', vars)];
+    // the other writer's change to the same attribute has not arrived: two originating versions exist side by side
+    var other = s.writes.filter(function (x) { return x.dc !== w.dc && x.attr === w.attr; });
+    if (other.length) {
+      var o = other[other.length - 1];
+      out.push(rich(o.ver === w.ver ? 'capConcurrent' : 'capConcurrentVer', { n: other.length, dc: data(w.dc), other: data(o.dc), v: data(w.ver), vo: data(o.ver) }));
+    }
+    return join(out);
+  }
+
+  function changeSentence(c, x, e, single) {
+    var held = c.prev.dcs[e.dest].obj[x.attr];
+    var vars = { dest: data(e.dest), src: data(e.src), attr: data(x.attr), value: val(x.value), usn: data(x.localUsn), ou: data(x.origUsn),
+      od: data(x.origDc), v: data(x.ver), vh: data(held.ver), held: val(held.value), hd: data(held.origDc) };
+    if (x.outcome === 'utd') {
+      // covered by the vector although the destination never held it: it lost on the DC whose vector came over
+      var lostThere = !L.supersedes(c.state, held.wid, x.wid);
+      return rich(lostThere ? 'capUtdLost' : 'capUtd', Object.assign(vars, { v: data(c.prev.dcs[e.dest].utd[x.origDc]) }));
+    }
+    if (x.outcome === 'own') return rich('capOwn', vars);
+    if (x.outcome === 'same') return rich('capSame', vars);
+    if (x.outcome === 'lost') {
+      // the loser is still seen: the source's vector comes over at the end of the pull (rule 4)
+      return join([rich(x.rule === 'version' ? 'capLostVersion' : x.rule === 'time' ? 'capLostTime' : 'capLostId', vars),
+        rich('capLostSeen', Object.assign(vars, { u: data(c.state.dcs[e.dest].utd[x.origDc]) }))]);
+    }
+    // applied: a conflict when the held value is a write the incoming one had not seen
+    var conflict = held.wid > 0 && !L.supersedes(c.state, x.wid, held.wid);
+    if (!conflict) return rich(single ? 'capApplied' : 'capAppliedShort', vars);
+    var why = x.rule === 'version' ? (held.origTime > x.origTime ? 'capWinVersion' : 'capWinVersionPlain') : x.rule === 'time' ? 'capWinTime' : 'capWinId';
+    return join([rich(why, vars), rich('capAppliedShort', vars)]);
+  }
+
+  function capPull(c) {
+    var s = c.state, e = s.last;
+    var vars = { dest: data(e.dest), src: data(e.src), hwm: data(e.from), from: data(e.from), to: data(e.to) };
+    if (!e.changes.length) return join([rich('capPullNone', vars), rich('capHwm', vars)]);
+    var out = [rich('capPull', vars)];
+    e.changes.forEach(function (x) { out.push(changeSentence(c, x, e, e.changes.length === 1)); });
+    if (!sentOf(e).length) out.push(rich('capHwm', vars));
+    if (c.last) {
+      var lost = s.writes.filter(function (w) { return L.fateOf(s, w.wid) === 'lost'; });
+      out.push(lost.length ? rich('capEndLost', { value: val(lost[0].value), dc: data(lost[0].dc) }) : t('capEndKept'));
+    }
+    return join(out);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'edits1', type: 'range', label: t('pEdits1'), min: 1, max: 3, step: 1, resets: true },
+      { key: 'edit2', type: 'toggle', label: t('pEdit2'), resets: true },
+      { key: 't2', type: 'range', label: t('pT2'), min: 0, max: 10, step: 1, format: function (v) { return v + ' s'; },
+        visible: function (p) { return !!p.edit2; } },
+      { key: 'sameAttr', type: 'toggle', label: t('pSame'), hint: t('pSameHint'), visible: function (p) { return !!p.edit2; } },
+      { key: 'direct', type: 'toggle', label: t('pDirect'), resets: true }
+    ],
+
+    presets: [
+      { id: 'one-change', label: t('prOne'), params: { edits1: 1, edit2: false, t2: 2, sameAttr: true, direct: false } },
+      { id: 'same-attr-time', label: t('prSame'), params: { edits1: 1, edit2: true, t2: 2, sameAttr: true, direct: false } },
+      { id: 'version-beats-time', label: t('prVer'), params: { edits1: 2, edit2: true, t2: 5, sameAttr: true, direct: false } },
+      { id: 'different-attrs', label: t('prDiff'), params: { edits1: 1, edit2: true, t2: 0, sameAttr: false, direct: false } },
+      { id: 'dampening', label: t('prDamp'), params: { edits1: 1, edit2: false, t2: 2, sameAttr: true, direct: true } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('lgPull') },
+      { shape: 'ar-win', label: t('lgWin') },
+      { shape: 'ar-lost', label: t('lgLost') },
+      { shape: 'ar-skip', label: t('lgSkip') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'ar' }, renderTopo(c)));
+    },
+
+    caption: function (c) {
+      var e = c.state.last;
+      if (!e) return capStart(c);
+      return e.kind === 'write' ? capWrite(c) : capPull(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
