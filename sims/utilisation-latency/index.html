@@ -1,0 +1,514 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Latency near full utilisation: one server's mean and p99 time in system against its utilisation, the queue in
+     front of it and a three-tier call chain (task docs/tasks/w2/utilisation-latency.md). An explorer: the params drive
+     the stage live; the model is in sim.js (rules in SPEC.md), the words in strings.js. No kit view fits (a curve plot),
+     so the page draws its own SVG at 1:1 (no viewBox); gauges, queue and chain are HTML. -->
+<html lang="hr" data-sim="utilisation-latency">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kašnjenje pri gotovo punoj iskorištenosti · simdeck</title>
+<meta name="description" content="Vrijeme čekanja eksplodira kad iskorištenost ρ ide prema 1.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "utilisation-latency",
+  "title": { "hr": "Kašnjenje pri gotovo punoj iskorištenosti", "en": "Latency near full utilisation" },
+  "concept": { "hr": "Vrijeme čekanja eksplodira kad iskorištenost ρ ide prema 1", "en": "Waiting time explodes as utilisation ρ goes to 1" },
+  "summary": {
+    "hr": "Pomiči opterećenje i gledaj red čekanja, srednje vrijeme i p99: od 90 % do 99 % kašnjenje naraste deset puta; varijabilnost diže rep, lanac zbraja p99.",
+    "en": "Move the load and watch the queue, the mean time and p99: from 90 % to 99 % latency grows tenfold; variability lifts the tail, a chain adds up p99."
+  },
+  "tags": ["performance"],
+  "class": "explorer",
+  "entries": [{ "preset": "half-load" }, { "preset": "knee" }, { "preset": "near-full" }, { "preset": "variability" }, { "preset": "three-tier-chain" }]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="utilisation-latency"]; colours only from kit tokens. */
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="utilisation-latency"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+/* The subscript of W_q in the explanation, at the text floor (16 px). */
+[data-sim="utilisation-latency"] .sd-explain sub { font-size: var(--fs-sm); }
+
+[data-sim="utilisation-latency"] .ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 0.7rem 1.2rem;
+  height: 100%;
+  padding: 1cqh 1.2cqw 1cqh;
+  font-size: var(--fs-md);
+}
+[data-sim="utilisation-latency"] .ul-plot { position: relative; min-height: 16rem; }
+[data-sim="utilisation-latency"] .ul-plot svg { position: absolute; inset: 0; overflow: visible; touch-action: none; cursor: ew-resize; }
+[data-sim="utilisation-latency"] .ul-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+[data-sim="utilisation-latency"] .ul-plot .ul-muted { fill: var(--muted); }
+[data-sim="utilisation-latency"] .ul-plot .ul-big { font-size: var(--fs-md); font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-plot .ul-bad { fill: var(--danger); }
+[data-sim="utilisation-latency"] .ul-plot .ul-tw { fill: var(--c1); }
+[data-sim="utilisation-latency"] .ul-plot .ul-tp { fill: var(--c2); }
+[data-sim="utilisation-latency"] .ul-axis { stroke: var(--ink); stroke-width: 3; }
+[data-sim="utilisation-latency"] .ul-grid { stroke: var(--line); stroke-width: 1; }
+[data-sim="utilisation-latency"] .ul-tick { stroke: var(--ink); stroke-width: 2; }
+[data-sim="utilisation-latency"] .ul-knee { fill: url(#ul-hatch); stroke: var(--warn); stroke-width: 2; }
+[data-sim="utilisation-latency"] .ul-hatch-line { stroke: var(--warn); stroke-width: 2; opacity: 0.45; }
+[data-sim="utilisation-latency"] .ul-sat { stroke: var(--danger); stroke-width: 3; stroke-dasharray: 9 6; }
+[data-sim="utilisation-latency"] .ul-service { stroke: var(--muted); stroke-width: 2; stroke-dasharray: 2 5; }
+[data-sim="utilisation-latency"] .ul-w { fill: none; stroke: var(--c1); stroke-width: 5; stroke-linejoin: round; }
+[data-sim="utilisation-latency"] .ul-p99 { fill: none; stroke: var(--c2); stroke-width: 4; stroke-dasharray: 14 8; stroke-linejoin: round; }
+[data-sim="utilisation-latency"] .ul-head-w { fill: var(--c1); }
+[data-sim="utilisation-latency"] .ul-head-p99 { fill: var(--c2); }
+[data-sim="utilisation-latency"] .ul-guide { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 4 5; }
+[data-sim="utilisation-latency"] .ul-ring { fill: var(--bg); stroke: var(--ink); stroke-width: 4; }
+[data-sim="utilisation-latency"] .ul-ring-dot-w { fill: var(--c1); }
+[data-sim="utilisation-latency"] .ul-ring-dot-p99 { fill: var(--c2); }
+[data-sim="utilisation-latency"] .ul-up { fill: var(--ink); }
+
+/* Gauges: four cards beside the plot. */
+[data-sim="utilisation-latency"] .ul-gauges { display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; }
+[data-sim="utilisation-latency"] .ul-gauge {
+  flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: center;
+  padding: 0.35rem 0.8rem; border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel);
+}
+[data-sim="utilisation-latency"] .ul-g-label { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="utilisation-latency"] .ul-g-val { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+[data-sim="utilisation-latency"] .ul-g-val[data-unb] { font-size: var(--fs-lg); color: var(--danger); }
+[data-sim="utilisation-latency"] .ul-g-sub { font-size: var(--fs-sm); }
+[data-sim="utilisation-latency"] .ul-zone { font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-zone[data-z='knee'] { color: var(--ink); text-decoration: underline wavy var(--warn); text-underline-offset: 0.2em; }
+[data-sim="utilisation-latency"] .ul-zone[data-z='saturated'] { color: var(--danger); }
+[data-sim="utilisation-latency"] .ul-gauge.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="utilisation-latency"] .ul-gauge.sd-changed .ul-g-label { color: var(--on-hl); }
+[data-sim="utilisation-latency"] .ul-gauge.sd-changed .ul-zone { color: var(--on-hl); }
+
+/* The queue: arrivals → waiting requests → the server. */
+[data-sim="utilisation-latency"] .ul-queue { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.8rem; min-width: 0; }
+[data-sim="utilisation-latency"] .ul-q-title { font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-q-in { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="utilisation-latency"] .ul-q-line { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="utilisation-latency"] .ul-q-slots {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.3rem;
+  min-height: 2.2rem; padding: 0.2rem 0.4rem; border-bottom: 3px solid var(--ink);
+}
+[data-sim="utilisation-latency"] .ul-q-req { width: 1.3rem; height: 1.8rem; border-radius: 0.3rem; background: var(--c3); border: 2px solid var(--ink); }
+[data-sim="utilisation-latency"] .ul-q-req[data-part] { background: linear-gradient(90deg, var(--c3) 0 var(--part), transparent var(--part)); border-style: dashed; }
+[data-sim="utilisation-latency"] .ul-q-more { font-weight: 700; padding: 0 0.3rem; }
+[data-sim="utilisation-latency"] .ul-q-more[data-sat] { color: var(--danger); }
+[data-sim="utilisation-latency"] .ul-q-note { font-size: var(--fs-sm); text-align: right; }
+[data-sim="utilisation-latency"] .ul-server {
+  position: relative; flex: 0 0 auto; width: 9rem; padding: 0.3rem 0.6rem; border: 3px solid var(--ink); border-radius: 0.5rem;
+  background: linear-gradient(0deg, var(--c4) 0 var(--busy), var(--bg) var(--busy)); text-align: center;
+}
+[data-sim="utilisation-latency"] .ul-server span { display: block; padding: 0 0.2rem; background: var(--bg); border-radius: 0.25rem; }
+[data-sim="utilisation-latency"] .ul-server .ul-busy { font-size: var(--fs-sm); margin-top: 0.2rem; }
+[data-sim="utilisation-latency"] .ul-arrow { font-size: var(--fs-lg); font-weight: 700; }
+
+/* The chain: api → cache → db, audit at 0.2, and the end-to-end sum. */
+[data-sim="utilisation-latency"] .ul-chain { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; padding-top: 0.5rem; border-top: 2px solid var(--line); }
+[data-sim="utilisation-latency"] .ul-chain[hidden] { display: none; }
+[data-sim="utilisation-latency"] .ul-c-title { font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-node { padding: 0.2rem 0.6rem; border: 2px solid var(--ink); border-radius: 0.5rem; background: var(--panel); font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="utilisation-latency"] .ul-node b { font-size: var(--fs-md); }
+[data-sim="utilisation-latency"] .ul-node[data-z='knee'] { border: 3px dashed var(--warn); }
+[data-sim="utilisation-latency"] .ul-node[data-z='saturated'] { border: 4px double var(--danger); }
+[data-sim="utilisation-latency"] .ul-node.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="utilisation-latency"] .ul-w8 { font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-branch { margin-left: 1.2rem; padding-left: 1.2rem; border-left: 2px solid var(--line); }
+[data-sim="utilisation-latency"] .ul-e2e { margin-left: auto; font-size: var(--fs-md); }
+[data-sim="utilisation-latency"] .ul-ok { color: var(--ok); font-weight: 700; }
+[data-sim="utilisation-latency"] .ul-no { color: var(--danger); font-weight: 700; }
+
+/* Legend swatches: shapes and patterns, so they read in grayscale too. */
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-w'] { width: 1.8em; height: 0.3rem; border: 0; border-radius: 0; background: var(--c1); }
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-p99'] { width: 1.8em; height: 0.25rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--c2) 0 0.45em, transparent 0.45em 0.7em); }
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-ring'] { border-radius: 50%; border: 0.2rem solid var(--ink); background: var(--bg); }
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-knee'] { border-color: var(--warn); background: repeating-linear-gradient(45deg, var(--warn) 0 0.1em, var(--bg) 0.1em 0.3em); }
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-sat'] { position: relative; border: 0; background: transparent; }
+[data-sim="utilisation-latency"] .sd-swatch[data-shape='ul-sat']::after { content: '↑'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; the plot gets a fixed height, the gauges two columns. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="utilisation-latency"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="utilisation-latency"] .ul { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.4rem; }
+  [data-sim="utilisation-latency"] .ul-plot { height: 22rem; }
+  [data-sim="utilisation-latency"] .ul-gauges { display: grid; grid-template-columns: 1fr 1fr; }
+  [data-sim="utilisation-latency"] .ul-g-val { font-size: var(--fs-lg); }
+  [data-sim="utilisation-latency"] .ul-queue { flex-wrap: wrap; }
+  [data-sim="utilisation-latency"] .ul-q-line { flex-basis: 100%; order: 3; }
+  [data-sim="utilisation-latency"] .ul-server { order: 4; }
+  [data-sim="utilisation-latency"] .ul-queue > .ul-arrow { order: 5; }
+  [data-sim="utilisation-latency"] .ul-branch { margin-left: 0; padding-left: 0; border-left: 0; }
+  [data-sim="utilisation-latency"] .ul-e2e { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kašnjenje pri gotovo punoj iskorištenosti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var NAME = { api: 'nApi', cache: 'nCache', db: 'nDb', audit: 'nAudit' };
+  var ZONE = { below: 'zoneBelow', knee: 'zoneKnee', saturated: 'zoneSaturated' };
+  var MAX_SLOTS = 24;
+
+  // ── numbers in the page's language ──
+  /** Three significant digits (0.200, 4.61, 46.1), whole numbers from 1000; ∞ when not finite. */
+  function num(v) {
+    if (!isFinite(v)) return '∞';
+    var s = v === 0 ? '0' : Math.abs(v) >= 1000 ? String(Math.round(v)) : v.toPrecision(3);
+    return s.replace('.', t('dec'));
+  }
+  /** Short form for axis ticks and ratios: 0.2, 10, 1.4. */
+  function short(v, digits) { return String(parseFloat(v.toFixed(digits == null ? 3 : digits))).replace('.', t('dec')); }
+  function sec(v) { return t('sec', { v: num(v) }); }
+  function pct(v) { return t('pct', { v: short(v * 100, 1) }); }
+  function times(v) { return v < 10 ? short(v, 1) : String(Math.round(v)); }
+  /** A ratio in two significant digits (0.11, 1.4, 50), so a small one never rounds to 0. */
+  function ratio(v) { return v >= 100 ? String(Math.round(v)) : short(parseFloat(v.toPrecision(2)), 3); }
+  function data(x) { return h('b', { translate: 'no' }, x); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var str = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (str === null) { out.push(p); return; }
+      str.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+  /** Appends a text element and returns its measured width (the svg is in the page already). */
+  function textW(svg, el) { svg.append(el); return el.getComputedTextLength(); }
+
+  // ── what changed with the last change: the params before it (caption) and the gauges that crossed a zone ──
+  var lastKey = null, lastP = null, prevP = null;
+  function track(p) {
+    var key = JSON.stringify(p);
+    if (key === lastKey) return;            // a redraw of the same state (theme, resize) keeps the last change
+    prevP = lastP; lastP = p; lastKey = key;
+  }
+
+  // ── the latency curve ──
+  /** W and p99 at utilisation r for the current server (the model's formulas, clamped like the model). */
+  function at(r, p) { return L.queueMetrics(r * p.capacity, p.capacity, p.cv2); }
+
+  /** Polyline of one metric from ρ 0 up to where it leaves the plot (bisected), or to the clamp. */
+  function curvePoints(p, key, ymax, X, Y) {
+    var pts = [], N = 400, prev = 0, exit = null;
+    for (var i = 0; i <= N; i++) {
+      var r = Math.min(L.CLAMP, i / N), v = at(r, p)[key];
+      if (v > ymax) {
+        var lo = prev, hi = r;
+        for (var k = 0; k < 40; k++) { var mid = (lo + hi) / 2; if (at(mid, p)[key] > ymax) hi = mid; else lo = mid; }
+        exit = lo; pts.push([X(lo), Y(ymax)]);
+        break;
+      }
+      pts.push([X(r), Y(v)]);
+      prev = r;
+      if (r === L.CLAMP) break;
+    }
+    return { d: 'M' + pts.map(function (q) { return q[0].toFixed(1) + ' ' + q[1].toFixed(1); }).join(' L'), exit: exit };
+  }
+
+  function draw(box, st, p) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var fs = Math.max(16, 0.8 * rem);
+    var narrow = W < 40 * rem;   // phone: the service key and the axis title take two lines under the axis
+    var m = { l: 4.2 * rem, r: 1.4 * rem, t: 2.6 * fs, b: (narrow ? 4.1 : 2.9) * fs };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var ymax = 100 / p.capacity;   // a hundred service times: W reaches the top at ρ 0.99 (cv² 1)
+    var X = function (r) { return m.l + r * pw; };
+    var Y = function (v) { return m.t + ph - Math.min(v, ymax) / ymax * ph; };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('plot') });
+    box.replaceChildren(svg);
+    svg.append(s('defs', null,
+      s('pattern', { id: 'ul-hatch', patternUnits: 'userSpaceOnUse', width: 12, height: 12, patternTransform: 'rotate(45)' },
+        s('line', { class: 'ul-hatch-line', x1: 0, y1: 0, x2: 0, y2: 12 }))));
+
+    // knee band 0.8–1, and the saturation line at ρ = 1
+    svg.append(s('rect', { class: 'ul-knee', x: X(L.KNEE), y: m.t, width: X(1) - X(L.KNEE), height: ph }));
+    var kneeEl = s('text', { x: X(L.KNEE) + 0.3 * rem, y: m.t - 0.5 * fs, class: 'ul-muted' }, t('knee'));
+    var kw = textW(svg, kneeEl);
+    svg.append(s('line', { class: 'ul-sat', x1: X(1), x2: X(1), y1: m.t - 1.6 * fs, y2: m.t + ph }));
+    var satEl = s('text', { x: X(1) + 0.2 * rem, y: m.t - 1.75 * fs, 'text-anchor': 'end', class: 'ul-bad' }, t('unbounded'));
+    var sw = textW(svg, satEl);
+    if (X(1) + 0.2 * rem - sw < X(L.KNEE) + 0.3 * rem + kw + 0.4 * rem) kneeEl.setAttribute('y', m.t + 1.2 * fs);
+
+    // grid, ticks and axes
+    for (var i = 0; i <= 10; i++) {
+      var x = X(i / 10);
+      svg.append(s('line', { class: 'ul-grid', x1: x, x2: x, y1: m.t, y2: m.t + ph }));
+      svg.append(s('line', { class: 'ul-tick', x1: x, x2: x, y1: m.t + ph, y2: m.t + ph + 0.35 * fs }));
+      if (i % 2 === 0 && (pw > 30 * rem || i % 4 === 0 || i === 10)) {
+        svg.append(s('text', { x: x, y: m.t + ph + 1.4 * fs, 'text-anchor': 'middle' }, t('pct', { v: String(i * 10) })));
+      }
+    }
+    for (var j = 0; j <= 5; j++) {
+      var v = ymax * j / 5, y = Y(v);
+      svg.append(s('line', { class: 'ul-grid', x1: m.l, x2: m.l + pw, y1: y, y2: y }));
+      svg.append(s('text', { x: m.l - 0.4 * rem, y: y + 0.35 * fs, 'text-anchor': 'end' }, t('sec', { v: short(v) })));
+    }
+    svg.append(s('line', { class: 'ul-axis', x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph }));
+    svg.append(s('line', { class: 'ul-axis', x1: m.l, x2: m.l, y1: m.t, y2: m.t + ph }));
+    var axisXEl = s('text', { x: m.l + pw, y: m.t + ph + 2.6 * fs, 'text-anchor': 'end', class: 'ul-muted' }, t('axisX'));
+    var axw = textW(svg, axisXEl);
+    svg.append(s('text', { x: m.l - 0.4 * rem, y: m.t - 1.75 * fs, class: 'ul-muted', 'text-anchor': 'start' }, t('axisY')));
+
+    // service alone: the floor of W, explained under the axis (the curves hug the line at low load)
+    var ys = Y(st.service), yk = m.t + ph + 2.6 * fs;
+    svg.append(s('line', { class: 'ul-service', x1: m.l, x2: m.l + pw, y1: ys, y2: ys }));
+    var key = s('text', { x: m.l + 2.4 * rem, y: yk, class: 'ul-muted' }, t('serviceLine', { v: sec(st.service) }));
+    var kw2 = textW(svg, key);
+    if (narrow || m.l + 2.4 * rem + kw2 > m.l + pw - axw - rem) axisXEl.setAttribute('y', yk + 1.2 * fs);
+    svg.append(s('line', { class: 'ul-service', x1: m.l, x2: m.l + 2 * rem, y1: yk - 0.3 * fs, y2: yk - 0.3 * fs }));
+
+    // the two curves, each ending in an arrow where it leaves the plot
+    var cp = curvePoints(p, 'p99', ymax, X, Y), cw = curvePoints(p, 'w', ymax, X, Y);
+    svg.append(s('path', { class: 'ul-p99', d: cp.d }));
+    svg.append(s('path', { class: 'ul-w', d: cw.d }));
+    function head(exit, cls, label, tcls, anchor) {
+      if (exit == null) return;
+      var x0 = X(exit), y0 = m.t, a = 0.55 * rem;
+      svg.append(s('path', { class: cls, d: 'M' + (x0 - a) + ' ' + (y0 + a * 0.6) + ' L' + x0 + ' ' + (y0 - a) + ' L' + (x0 + a) + ' ' + (y0 + a * 0.6) + ' Z' }));
+      var el = s('text', { x: x0 + (anchor === 'end' ? -0.7 : 0.7) * rem, y: y0 - 0.45 * fs, 'text-anchor': anchor, class: 'ul-big ' + tcls }, label);
+      svg.append(el);
+      return el;
+    }
+    // The knee label shares the top row with the curve heads: when one overlaps it, it moves into the band.
+    var kb = kneeEl.getBBox();
+    [head(cp.exit, 'ul-head-p99', t('curveP99'), 'ul-tp', 'end'), head(cw.exit, 'ul-head-w', t('curveW'), 'ul-tw', 'start')].forEach(function (el) {
+      if (!el) return;
+      var b = el.getBBox();
+      if (b.x < kb.x + kb.width + 4 && b.x + b.width > kb.x - 4 && b.y < kb.y + kb.height && b.y + b.height > kb.y) kneeEl.setAttribute('y', m.t + 1.2 * fs);
+    });
+
+    // the current point: a guide at ρ, a ring on each curve (an arrow at the top when it is off the plot)
+    var sv = st.server, xr = X(Math.min(sv.rho, 1));
+    svg.append(s('line', { class: 'ul-guide', x1: xr, x2: xr, y1: m.t, y2: m.t + ph }));
+    var right = xr > m.l + 0.55 * pw;
+    var yW = Y(sv.w), yP = Y(sv.p99);
+    // Labels top to bottom: p99 (always above W), then W at least one line lower. Off the plot, a label sits under
+    // the arrow at the top edge.
+    var below = -Infinity;
+    [['p99', sv.p99, yP, 'pointP99', 'ul-tp'], ['w', sv.w, yW, 'pointW', 'ul-tw']].forEach(function (c) {
+      var off = c[1] > ymax || sv.saturated, yy = c[2];
+      if (off) {
+        if (c[0] === 'p99' || !(sv.p99 > ymax || sv.saturated)) {
+          svg.append(s('path', { class: 'ul-up', d: 'M' + (xr - 0.45 * rem) + ' ' + (yy + 0.9 * rem) + ' L' + xr + ' ' + (yy + 0.1 * rem) + ' L' + (xr + 0.45 * rem) + ' ' + (yy + 0.9 * rem) + ' Z' }));
+        }
+      } else {
+        svg.append(s('circle', { class: 'ul-ring', cx: xr, cy: yy, r: 0.6 * rem }));
+        svg.append(s('circle', { class: c[0] === 'w' ? 'ul-ring-dot-w' : 'ul-ring-dot-p99', cx: xr, cy: yy, r: 0.25 * rem }));
+      }
+      var ly = Math.max((off ? yy + 1.5 * rem : yy) + 0.35 * fs, below + 1.3 * fs);
+      if (c[0] === 'p99' && !off) ly = Math.min(ly, yW + 0.35 * fs - 1.3 * fs);
+      below = ly;
+      var val = sv.saturated ? t('unbounded') : sec(c[1]);
+      var el = s('text', { x: xr + (right ? -1 : 1) * 1.0 * rem, y: ly, 'text-anchor': right ? 'end' : 'start', class: 'ul-big ' + c[4] }, t(c[3], { v: val }));
+      svg.append(el);
+    });
+
+    // drag or click on the plot to set the load
+    svg.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      var rect = svg.getBoundingClientRect();
+      function set(e) {
+        var v = Math.round(Math.max(0, Math.min(1, (e.clientX - rect.left - m.l) / pw)) * 100);
+        if (v !== sim.params.load) sim.set({ load: v });
+      }
+      function up() { window.removeEventListener('pointermove', set); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); }
+      set(ev);
+      window.addEventListener('pointermove', set);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  }
+
+  // ── gauges, queue and chain (HTML) ──
+  function gauge(key, label, val, sub, changed, unb) {
+    return h('div', { class: 'ul-gauge' + (changed ? ' sd-changed' : ''), dataset: { g: key } },
+      h('div', { class: 'ul-g-label' }, label),
+      h('div', unb ? { class: 'ul-g-val', 'data-unb': '' } : { class: 'ul-g-val' }, val),
+      h('div', { class: 'ul-g-sub' }, sub));
+  }
+  function gauges(st, crossed) {
+    var sv = st.server, unb = sv.saturated;
+    return [
+      gauge('rho', t('gRho'), pct(sv.rho), [h('span', { class: 'ul-zone', dataset: { z: sv.zone } }, t(ZONE[sv.zone])), ' · ',
+        t('gRhoSub', { l: short(st.lambda, 2), c: t('reqs', { v: String(sv.capacity) }) })], crossed.indexOf('server') >= 0),
+      gauge('w', t('gW'), unb ? t('unbounded') : sec(sv.w), unb ? t('queueGrows') : t('gWSub', { k: times(sv.w / st.service) }), false, unb),
+      gauge('p99', t('gP99'), unb ? t('unbounded') : sec(sv.p99), t('gP99Sub'), false, unb),
+      gauge('l', t('gL'), unb ? t('unbounded') : short(sv.L, sv.L < 10 ? 2 : 1), t('gLSub'), false, unb)
+    ];
+  }
+  function queue(st) {
+    var sv = st.server, slots = [], more = null;
+    var full = sv.saturated ? MAX_SLOTS : Math.floor(sv.Lq), part = sv.saturated ? 0 : sv.Lq - full;
+    if (full > MAX_SLOTS) { more = h('span', { class: 'ul-q-more' }, t('queueMore', { n: String(full - MAX_SLOTS + (part > 0 ? 1 : 0)) })); full = MAX_SLOTS; part = 0; }
+    if (sv.saturated) more = h('span', { class: 'ul-q-more', 'data-sat': '' }, t('queueMore', { n: '∞' }));
+    if (more) slots.push(more);
+    if (part >= 0.05) slots.push(h('span', { class: 'ul-q-req', 'data-part': '', style: { '--part': Math.round(part * 100) + '%' } }));
+    for (var i = 0; i < full; i++) slots.push(h('span', { class: 'ul-q-req' }));
+    return [
+      h('span', { class: 'ul-q-title' }, t('queueTitle')),
+      h('span', { class: 'ul-q-in' }, t('queueIn', { v: t('reqs', { v: short(st.lambda, 2) }) }), ' ', h('span', { class: 'ul-arrow', 'aria-hidden': 'true' }, '→')),
+      h('div', { class: 'ul-q-line' },
+        h('div', { class: 'ul-q-slots' }, slots),
+        h('div', { class: 'ul-q-note' }, sv.saturated ? t('queueGrows') : t('queueWaiting', { v: short(sv.Lq, sv.Lq < 10 ? 2 : 1) }))),
+      h('div', { class: 'ul-server', style: { '--busy': Math.round(Math.min(sv.rho, 1) * 100) + '%' } },
+        h('span', null, h('b', null, t('server'))),
+        h('span', { class: 'ul-busy' }, t('serverBusy', { v: pct(Math.min(sv.rho, 1)) }))),
+      h('span', { class: 'ul-arrow', 'aria-hidden': 'true' }, '→')
+    ];
+  }
+  function chainView(st, crossed) {
+    var ch = st.chain;
+    function card(n) {
+      return h('div', { class: 'ul-node' + (crossed.indexOf(n.id) >= 0 ? ' sd-changed' : ''), dataset: { z: n.zone } },
+        h('b', null, t(NAME[n.id])), ' ', t('nodeCap', { v: String(n.capacity) }), h('br'),
+        t('nodeRho', { v: pct(n.rho) }), ' · ', n.saturated ? h('span', { class: 'ul-no' }, t('zoneSaturated')) : t('nodeP99', { v: sec(n.p99) }));
+    }
+    var by = {};
+    ch.nodes.forEach(function (n) { by[n.id] = n; });
+    var arrow = function () { return h('span', { class: 'ul-arrow', 'aria-hidden': 'true' }, '→'); };
+    return [
+      h('span', { class: 'ul-c-title' }, t('chainTitle')),
+      card(by.api), arrow(), card(by.cache), arrow(), card(by.db),
+      h('span', { class: 'ul-w8 ul-branch' }, t('nApi')), arrow(), h('span', { class: 'ul-w8' }, t('nodeWeight', { w: short(by.audit.weight, 1) })), card(by.audit),
+      h('div', { class: 'ul-e2e' }, t('e2e'), ' ', ch.e2eSaturated ? h('b', { class: 'ul-no' }, t('unbounded')) : h('b', null, sec(ch.e2e)),
+        ' · ', t('slo', { v: t('sec', { v: short(ch.slo) }) }), ' ', h('span', { class: ch.sloMet ? 'ul-ok' : 'ul-no' }, t(ch.sloMet ? 'met' : 'missed')))
+    ];
+  }
+
+  // ── captions: the one thing the current picture shows ──
+  function caption(c) {
+    track(c.params);
+    var st = c.state, p = c.params, sv = st.server;
+    var b = function (x) { return h('b', null, x); };
+    switch (L.captionKey(st, p, prevP)) {
+      case 'saturated': return rich('cSaturated', { load: b(pct(sv.rho)) });
+      case 'chain': {
+        var ch = st.chain;
+        if (ch.e2eSaturated) {
+          var sat = ch.nodes.filter(function (n) { return n.saturated && n.weight > 0; })[0];
+          return rich('cChainSat', { l: t('reqs', { v: short(st.lambda, 2) }), node: t(NAME[sat.id]), rho: pct(sat.rho) });
+        }
+        var sum = ch.nodes.map(function (n) { return (n.weight !== 1 ? short(n.weight, 1) + ' × ' : '') + num(n.p99); }).join(' + ');
+        return rich('cChain', { l: t('reqs', { v: short(st.lambda, 2) }), sum: sum, e2e: b(sec(ch.e2e)), slo: t('sec', { v: short(ch.slo) }), verdict: t(ch.sloMet ? 'met' : 'missed') });
+      }
+      case 'cv2': {
+        // Both cv² at the current load, so a preset that also moves the load shows the variability effect alone.
+        var was = L.compute(Object.assign({}, p, { cv2: prevP.cv2 })).server;
+        var kw = sv.w / was.w, kp = sv.p99 / was.p99;
+        return rich(p.cv2 > prevP.cv2 && kp > kw ? 'cCv2Tail' : 'cCv2', { a: String(prevP.cv2), b: String(p.cv2), load: pct(sv.rho),
+          w0: sec(was.w), w1: b(sec(sv.w)), kw: ratio(kw), p0: sec(was.p99), p1: b(sec(sv.p99)), kp: ratio(kp) });
+      }
+      case 'load': {
+        var before = L.compute(prevP).server;
+        return rich('cLoad', { from: pct(before.rho), to: b(pct(sv.rho)), w0: sec(before.w), w1: b(sec(sv.w)), k: ratio(sv.w / before.w),
+          p0: sec(before.p99), p1: sec(sv.p99) });
+      }
+      default: {
+        var k = sv.w / st.service;
+        return rich(k < 1.1 ? 'cIdle' : 'cState', { load: b(pct(sv.rho)), w: b(sec(sv.w)), k: times(k), p99: b(sec(sv.p99)) });
+      }
+    }
+  }
+
+  var labels = { 'half-load': 'presetHalf', 'knee': 'presetKnee', 'near-full': 'presetNear', 'variability': 'presetVar', 'three-tier-chain': 'presetChain' };
+  var plot = null, gaugeBox = null, queueBox = null, chainBox = null, last = null;
+
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'load', type: 'range', label: t('load'), min: 0, max: 100, step: 1, format: function (v) { return t('pct', { v: String(v) }); } },
+      { key: 'capacity', type: 'choice', label: t('capacity'), options: [[10, t('cap10')], [100, t('cap100')]] },
+      { key: 'cv2', type: 'choice', label: t('cv2'), hint: t('cv2Hint'), options: [[0, t('cv0')], [1, t('cv1')], [4, t('cv4')], [9, t('cv9')]] },
+      { key: 'chain', type: 'toggle', label: t('chain') }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'ul-w', label: t('legendW') },
+      { shape: 'ul-p99', label: t('legendP99') },
+      { shape: 'ul-ring', label: t('legendPoint') },
+      { shape: 'ul-knee', label: t('legendKnee') },
+      { shape: 'ul-sat', label: t('legendSat') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+    render: function (c) {
+      if (!plot) {
+        plot = h('div', { class: 'ul-plot' });
+        gaugeBox = h('div', { class: 'ul-gauges' });
+        queueBox = h('div', { class: 'ul-queue' });
+        chainBox = h('div', { class: 'ul-chain' });
+        c.stage.replaceChildren(h('div', { class: 'ul' }, plot, gaugeBox, queueBox, chainBox));
+        new ResizeObserver(function () { if (last) draw(plot, last.state, last.params); }).observe(plot);
+      }
+      track(c.params);
+      var crossed = prevP ? L.crossed(c.state, L.compute(prevP)) : [];
+      last = { state: c.state, params: c.params };
+      gaugeBox.replaceChildren.apply(gaugeBox, gauges(c.state, crossed));
+      queueBox.replaceChildren.apply(queueBox, queue(c.state));
+      chainBox.hidden = !c.state.chain;
+      if (c.state.chain) chainBox.replaceChildren.apply(chainBox, chainView(c.state, crossed));
+      draw(plot, c.state, c.params);
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
