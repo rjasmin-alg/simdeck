@@ -1,0 +1,476 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-srv-records: the SRV records DC01 (HQ) and DC02 (Branch) publish in quillmoor.example and
+     _msdcs.quillmoor.example, groups of them deleted, and PC07 joining or logging on: the DC locator's DNS queries,
+     LDAP pings, the KDC lookup and Kerberos AS (or the NTLM fallback); optionally Netlogon restarted on DC01 first.
+     A stepper, one message or event per step.
+     Left: the records, grouped by what uses them, one chip per target DC (present ✓, deleted ✕ struck).
+     Right: the result, and kit view K1 (message sequence chart, kit/sequence.js) with the lanes PC07, the public DNS
+     (when the client asks it), the DNS server on DC01, DC01 and DC02.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-srv-records">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Što AD upisuje u DNS · simdeck</title>
+<meta name="description" content="Kontroleri domene upisuju SRV zapise za LDAP, Kerberos i lokacije. Obriši ih ili pitaj javni DNS i gledaj kako učlanjenje i prijava ne uspijevaju; Netlogon ih vraća.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-srv-records",
+  "title": {
+    "hr": "Što AD upisuje u DNS",
+    "en": "What AD puts in DNS"
+  },
+  "concept": {
+    "hr": "_ldap._tcp, _kerberos._tcp, _msdcs; što se pokvari kad ih nema",
+    "en": "_ldap._tcp, _kerberos._tcp, _msdcs; what breaks when they are missing"
+  },
+  "summary": {
+    "hr": "Kontroleri domene upisuju SRV zapise za LDAP, Kerberos i lokacije. Obriši ih ili pitaj javni DNS: učlanjenje i prijava ne uspijevaju; Netlogon ih vraća.",
+    "en": "Domain controllers register SRV records for LDAP, Kerberos and sites. Delete them or ask a public DNS: join and logon fail; Netlogon puts them back."
+  },
+  "tags": [
+    "dns",
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-srv-records"]; colours only from kit tokens.
+   Layout: the record list on the left, the result and the K1 chart on the right. */
+[data-sim="win-dns-srv-records"] .sr {
+  display: grid;
+  grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+  gap: 1cqh 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dns-srv-records"] .sr-right { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 0.8cqh; min-height: 0; min-width: 0; }
+[data-sim="win-dns-srv-records"] .sr-right > .sd-seq { min-height: 0; }
+[data-sim="win-dns-srv-records"] .sr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-dns-srv-records"] .sr-box h2 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-dns-srv-records"] .sr-mono { font-family: var(--mono); }
+[data-sim="win-dns-srv-records"] .sr-sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 400; line-height: 1.3; }
+[data-sim="win-dns-srv-records"] .sr-line { display: flex; flex-wrap: wrap; gap: 0.1rem 0.45rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.35; }
+
+/* records: groups of rows; a row is the owner name, the port and one chip per target */
+[data-sim="win-dns-srv-records"] .sr-recs { display: flex; flex-direction: column; gap: 0.15rem; overflow: hidden; }
+[data-sim="win-dns-srv-records"] .sr-recs h3 { margin: 0.35rem 0 0.05rem; font-size: var(--fs-sm); font-weight: 700; text-transform: none; }
+[data-sim="win-dns-srv-records"] .sr-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.2rem 9.6rem;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="win-dns-srv-records"] .sr-row.sd-changed { background: var(--hl); color: var(--on-hl); outline-offset: 0; box-shadow: none; }
+[data-sim="win-dns-srv-records"] .sr-name { font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="win-dns-srv-records"] .sr-port { font-family: var(--mono); color: var(--muted); text-align: right; }
+[data-sim="win-dns-srv-records"] .sr-row.sd-changed .sr-port { color: inherit; }
+[data-sim="win-dns-srv-records"] .sr-chips { display: flex; gap: 0.3rem; justify-content: flex-end; }
+[data-sim="win-dns-srv-records"] .sr-chip {
+  display: inline-flex; gap: 0.2rem; align-items: baseline; justify-content: center;
+  min-width: 4.4rem; padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink); border-left: 0.35rem solid var(--sw, var(--ink));
+  border-radius: var(--radius-sm); background: var(--bg); color: var(--ink);
+  font-family: var(--mono); font-weight: 700;
+}
+[data-sim="win-dns-srv-records"] .sr-chip[data-state="deleted"] { border-style: dashed; border-left-style: dashed; color: var(--muted); font-weight: 400; text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="win-dns-srv-records"] .sr-chip[data-state="deleted"] .sr-mk { color: var(--danger); text-decoration: none; font-weight: 700; }
+[data-sim="win-dns-srv-records"] .sr-chip[data-pick] { border-width: 0.2rem; border-left-width: 0.5rem; }
+[data-sim="win-dns-srv-records"] .sr-chip.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* result */
+[data-sim="win-dns-srv-records"] .sr-res { display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; align-items: baseline; }
+[data-sim="win-dns-srv-records"] .sr-res[data-k] { border-width: 0.2rem; border-color: var(--ink); }
+[data-sim="win-dns-srv-records"] .sr-res[data-k="fail"] { border-color: var(--danger); }
+[data-sim="win-dns-srv-records"] .sr-res-sym { font-weight: 700; font-size: 1.3rem; line-height: 1; }
+[data-sim="win-dns-srv-records"] .sr-res[data-k="fail"] .sr-res-sym { color: var(--danger); }
+[data-sim="win-dns-srv-records"] .sr-res[data-k="ok"] .sr-res-sym { color: var(--ok); }
+[data-sim="win-dns-srv-records"] .sr-res[data-k="warn"] .sr-res-sym { color: var(--warn); }
+[data-sim="win-dns-srv-records"] .sr-res-main { font-weight: 700; }
+[data-sim="win-dns-srv-records"] .sr-tag { padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-dns-srv-records"] .sr-tag[data-k="warn"] { border-style: dashed; }
+[data-sim="win-dns-srv-records"] .sr-msg { flex-basis: 100%; font-size: var(--fs-sm); }
+
+/* the K1 view's ✕ in red, as the legend says */
+[data-sim="win-dns-srv-records"] .sd-seq-x { color: var(--danger); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.16em, transparent 0.16em 0.36em); }
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="rec"],
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="del"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="del"] { border-style: dashed; }
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="rec"]::after,
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="del"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 0.8em; line-height: 1; }
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="rec"]::after { content: '✓'; color: var(--ink); }
+[data-sim="win-dns-srv-records"] .sd-swatch[data-shape="del"]::after { content: '✕'; color: var(--danger); }
+[data-sim="win-dns-srv-records"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-srv-records"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-srv-records"] .sr { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.6rem; }
+  [data-sim="win-dns-srv-records"] .sr-row { grid-template-columns: minmax(0, 1fr) auto; }
+  [data-sim="win-dns-srv-records"] .sr-port { display: none; }
+  [data-sim="win-dns-srv-records"] .sr-chip { min-width: 0; }
+  [data-sim="win-dns-srv-records"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Što AD upisuje u DNS</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { cl: '1', DC01: '2', dns: '3', pub: '4', DC02: '5' };
+
+  /** Data (names, addresses, record names, codes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sr-mono' : cls || null }, String(text)); }
+  /** A long name that may break after each dot. */
+  function breakable(text) {
+    var out = [];
+    String(text).split(/(?<=[.])/).forEach(function (part, i) { if (i) out.push(h('wbr')); out.push(part); });
+    return out;
+  }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  function qLong(text) { return h('b', { translate: 'no' }, breakable(text)); }
+  function sub(text) { return h('span', { class: 'sr-sub' }, text); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function last(c) { return c.n > 0 ? c.state.log[c.state.log.length - 1] : null; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  /** Full owner name of a record name relative to the domain. */
+  function full(name) { return L.fqdn(name); }
+  /** Short form for a chip's field: the service and the site or "dc". */
+  function short(e) {
+    var svc = e.purpose === 'kdc' ? '_kerberos' : '_ldap';
+    return svc + ' ' + (e.scope === 'site' ? e.site : 'dc');
+  }
+  function lane(dc) { return dc; }
+  function serverLane(c) { return c.state.client.dns === L.PUBLIC ? 'pub' : 'dns'; }
+
+  // ── records ──
+  function renderRecords(c) {
+    var s = c.state, e = last(c);
+    var picked = e && e.kind === 'answer' ? e.pick : null;
+    var restored = e && e.kind === 'updateOk' ? s.restored : [];
+    var box = h('section', { class: 'sr-box sr-recs' },
+      h('h2', null, t('recsTitle')),
+      h('div', { class: 'sr-line' }, data(L.DOMAIN + ' · ' + L.MSDCS, 'sr-sub sr-mono')),
+      h('div', { class: 'sr-line' }, sub(t('recsNote'))));
+    L.USES.forEach(function (use) {
+      box.append(h('h3', null, t('use_' + use)));
+      L.rowsOf(use).forEach(function (row) {
+        var focus = s.focus === row.name;
+        var chips = L.rowRecords(s, row.id).map(function (r) {
+          var ds = { state: r.present ? 'present' : 'deleted', c: COLOUR[r.target] };
+          var isPick = focus && picked === r.target;
+          if (isPick) ds.pick = '';
+          var back = restored.indexOf(r.key) >= 0;
+          var label = t(back ? 'recRestored' : isPick ? 'recPicked' : r.present ? 'recPresent' : 'recDeleted');
+          return h('span', { class: 'sr-chip' + (back ? ' sd-changed' + anim(c) : ''), dataset: ds, translate: 'no', title: label, 'aria-label': r.target + ': ' + label },
+            r.target, h('span', { class: 'sr-mk', 'aria-hidden': 'true' }, r.present ? (isPick ? '◂' : '✓') : '✕'));
+        });
+        var name = row.type === 'CNAME' ? row.name.slice(0, 8) + '…._msdcs' : row.name;
+        box.append(h('div', { class: 'sr-row' + (focus ? ' sd-changed' : '') },
+          h('span', { class: 'sr-name', translate: 'no', title: full(row.name) }, breakable(name)),
+          data(row.port ? ':' + row.port : row.type, 'sr-port'),
+          h('span', { class: 'sr-chips' }, chips)));
+      });
+    });
+    return box;
+  }
+
+  // ── result ──
+  function renderResult(c) {
+    var s = c.state, p = c.params, r = s.result;
+    if (!r) {
+      return h('section', { class: 'sr-box sr-res' }, h('h2', null, t('resTitle')),
+        h('span', { class: 'sr-res-sym', 'aria-hidden': 'true' }, '…'), h('span', null, t('resWait_' + p.action)));
+    }
+    if (!r.ok) {
+      return h('section', { class: 'sr-box sr-res' + (c.last ? anim(c) : ''), dataset: { k: 'fail' } }, h('h2', null, t('resTitle')),
+        h('span', { class: 'sr-res-sym', 'aria-hidden': 'true' }, '✕'), h('span', { class: 'sr-res-main' }, t('resFail_' + r.action)),
+        h('span', { class: 'sr-msg' }, '“', t('msg_' + r.action, { d: L.DOMAIN }), '”'));
+    }
+    var warn = r.wan || r.how === 'ntlm';
+    var tags = [h('span', { class: 'sr-tag' }, t('resVia', { dc: r.dc }))];
+    if (r.kdc) tags.push(h('span', { class: 'sr-tag' }, t('resKdc', { kdc: r.kdc })));
+    if (r.how === 'ntlm') tags.push(h('span', { class: 'sr-tag', dataset: { k: 'warn' } }, '⚠ ', t('resNtlm')));
+    if (r.wan) tags.push(h('span', { class: 'sr-tag', dataset: { k: 'warn' } }, '⚠ ', t('resWan')));
+    return h('section', { class: 'sr-box sr-res' + anim(c), dataset: { k: warn ? 'warn' : 'ok' } }, h('h2', null, t('resTitle')),
+      h('span', { class: 'sr-res-sym', 'aria-hidden': 'true' }, '✓'), h('span', { class: 'sr-res-main' }, t('resOk_' + r.action)), tags);
+  }
+
+  // ── chart ──
+  function lanes(c) {
+    var s = c.state, cl = s.client, e = last(c);
+    function on(id) {
+      if (!e) return null;
+      var who = [];
+      switch (e.kind) {
+        case 'restart': who = ['DC01']; break;
+        case 'update': case 'updateOk': who = ['DC01', 'dns']; break;
+        case 'query': case 'answer': who = ['cl', serverLane(c)]; break;
+        case 'ping': who = ['cl', e.to]; break;
+        case 'pong': who = ['cl', e.from]; break;
+        case 'asReq': case 'ntlm': who = ['cl', e.to]; break;
+        case 'asRep': case 'ntlmOk': who = ['cl', e.from]; break;
+      }
+      return who.indexOf(id) >= 0 ? 'active' : null;
+    }
+    var site = cl.site ? data(cl.site, '') : t('siteUnknown');
+    var out = [{ id: 'cl', mark: 'P', c: COLOUR.cl, shape: 'square', name: data(cl.name, ''), state: on('cl'),
+      tags: sub(t('laneClient')),
+      body: [h('div', { class: 'sr-line' }, data(cl.ip)), h('div', { class: 'sr-line' }, sub([t('siteWord'), ': ']), site)],
+      changed: !!(c.prev && c.prev.client.site !== cl.site) }];
+    if (cl.dns === L.PUBLIC) {
+      out.push({ id: 'pub', mark: 'N', c: COLOUR.pub, name: t('pubName'), state: on('pub'),
+        tags: null, body: [h('div', { class: 'sr-line' }, data(L.PUBLIC)), h('div', { class: 'sr-line' }, sub(t('pubTag')))] });
+    }
+    out.push({ id: 'dns', mark: 'N', c: COLOUR.dns, name: t('dnsWord'), state: on('dns'),
+      tags: sub(t('dnsOnDc')), body: [h('div', { class: 'sr-line' }, data(L.DC.DC01.ip)), h('div', { class: 'sr-line' }, sub(t('dnsZones')))] });
+    ['DC01', 'DC02'].forEach(function (dc) {
+      out.push({ id: dc, mark: dc === 'DC01' ? '1' : '2', c: COLOUR[dc], name: data(dc, ''), state: on(dc),
+        tags: null, body: [h('div', { class: 'sr-line' }, data(L.DC[dc].ip)), h('div', { class: 'sr-line' }, sub([t('siteWord'), ': ']), data(L.DC[dc].site, ''))] });
+    });
+    return out;
+  }
+  function rows(c) {
+    var out = [], srv = serverLane(c);
+    c.state.log.forEach(function (e) {
+      var r = null;
+      switch (e.kind) {
+        case 'restart': r = { kind: 'note', lane: 'DC01', text: t('noteRestart'), k: 'solid' }; break;
+        case 'update': r = { from: 'DC01', to: 'dns', label: 'UPDATE', c: COLOUR.DC01, line: 'dashed', fields: h('span', null, t.n('nRecords', e.count)) }; break;
+        case 'updateOk': r = { from: 'dns', to: 'DC01', label: 'NOERROR', c: COLOUR.dns, line: 'dashed', fields: data('+' + e.added) }; break;
+        case 'query': r = { from: 'cl', to: srv, label: 'SRV?', c: COLOUR.cl, line: 'dashed', fields: data(short(e)) }; break;
+        case 'answer':
+          r = e.rcode === 'NOERROR'
+            ? { from: srv, to: 'cl', label: 'SRV', c: COLOUR[srv], line: 'dashed', fields: data(e.targets.map(function (x) { return x.dc; }).join(', ')) }
+            : { from: srv, to: 'cl', label: 'NXDOMAIN', c: COLOUR[srv], line: 'dashed' };
+          break;
+        case 'ping': r = { from: 'cl', to: lane(e.to), label: 'LDAP ping', c: COLOUR.cl, line: 'dotted', place: 'mid' }; break;
+        case 'pong': r = { from: lane(e.from), to: 'cl', label: h('span', null, t('pongLabel')), c: COLOUR[e.from], line: 'dotted',
+          fields: h('span', null, data(e.site, ''), ' ', e.closest ? '✓ ' : '✕ ', t(e.closest ? 'closestYes' : 'closestNo')) }; break;
+        case 'asReq': r = { from: 'cl', to: lane(e.to), label: 'AS-REQ', c: COLOUR.cl, fields: data(e.user), place: 'mid' }; break;
+        case 'asRep': r = { from: lane(e.from), to: 'cl', label: 'AS-REP', c: COLOUR[e.from], fields: data('TGT'), place: 'mid' }; break;
+        case 'ntlm': r = { from: 'cl', to: lane(e.to), label: 'NTLM', c: COLOUR.cl, weight: 'thin', fields: data(e.user), place: 'mid' }; break;
+        case 'ntlmOk': r = { from: lane(e.from), to: 'cl', label: 'NTLM', c: COLOUR[e.from], weight: 'thin', fields: data('✓'), place: 'mid' }; break;
+      }
+      if (!r) return;
+      r.changed = e.n === c.n;
+      out.push(r);
+      // no DC found: the failure as a note on the client, in the same step
+      if (e.result && !e.result.ok) out.push({ kind: 'note', lane: 'cl', text: t('noteNoDc'), k: 'fill', changed: r.changed });
+    });
+    return out;
+  }
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '0.4rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, cl = s.client, n = c.n;
+    var C = q(cl.name), D = q(L.DOMAIN), U = q(L.NETBIOS + '\\' + L.USER);
+    if (c.first) {
+      var out = rich('capStart_' + p.action, { c: C, ip: q(cl.ip), d: D, u: U, dns: q(cl.dns) });
+      if (cl.dns === L.PUBLIC) out.push(t('startPublic'));
+      if (p.action === 'join') out = out.concat(rich('startJoin', { site: q(cl.subnet) }));
+      else out = out.concat(cl.site ? rich('startSite', { site: q(cl.site) }) : rich('startUnknown'));
+      var del = [];
+      L.ROWS.forEach(function (row) { if (s.records.some(function (r) { return r.row === row.id && !r.present; })) del.push(row.name); });
+      if (del.length) {
+        var list = [];
+        del.forEach(function (x, i) { if (i) list.push(', '); list.push(qLong(x)); });
+        out = out.concat(t.parts('startDeleted', { list: h('span', null, list) }));
+      }
+      if (p.restartNetlogon) out.push(t('startRestart'));
+      return out;
+    }
+    var e = last(c), r = e.result;
+    switch (e.kind) {
+      case 'restart': return rich('capRestart', { n: n, dc: q(e.dc) });
+      case 'update': return rich('capUpdate', { n: n, dc: q(e.from), k: q(e.count) });
+      case 'updateOk': {
+        var o = rich('capUpdateOk', { n: n });
+        o.push(e.added ? t.n('backN', e.added) : t('backNone'));
+        if (s.records.some(function (x) { return x.target === 'DC02' && !x.present; })) o.push(t('dc02Stays'));
+        return o;
+      }
+      case 'query': {
+        var Q = qLong(full(e.name));
+        if (e.purpose === 'kdc') return rich(e.scope === 'site' ? 'capQueryKdcSite' : 'capQueryKdcDomain', { n: n, c: C, q: Q });
+        if (e.scope === 'domain') {
+          var triedSite = s.log.some(function (x) { return x.kind === 'query' && x.purpose === 'ldap' && x.scope === 'site'; });
+          return rich(triedSite ? 'capQueryFallback' : p.action === 'join' ? 'capQueryJoin' : 'capQueryUnknown', { n: n, c: C, q: Q });
+        }
+        var pinged = s.log.filter(function (x) { return x.kind === 'pong'; });
+        if (pinged.length) return rich('capQueryLearnt', { n: n, c: C, q: Q, dc: q(pinged[pinged.length - 1].from), site: q(e.site) });
+        return rich('capQuerySite', { n: n, q: Q });
+      }
+      case 'answer':
+        if (r && cl.dns === L.PUBLIC) {
+          var all = s.records.every(function (x) { return x.present; });
+          return rich((all ? 'capFailPublic_' : 'capFailPublicAny_') + r.action, { n: n, dns: q(L.PUBLIC), z: q(L.MSDCS) });
+        }
+        if (r) {
+          var answers = s.log.filter(function (x) { return x.kind === 'answer'; }).length;
+          return rich('capFail_' + r.action, { n: n, nx: t(answers > 1 ? 'nxAgain' : 'nxOnce'), msg: t('msg_' + r.action, { d: L.DOMAIN }) });
+        }
+        if (e.rcode !== 'NOERROR') {
+          if (cl.dns === L.PUBLIC) return rich('capNxPublic', { n: n, dns: q(L.PUBLIC), d: D });
+          var pongs = s.log.filter(function (x) { return x.kind === 'pong'; });
+          if (e.purpose === 'ldap' && pongs.length) return rich('capNxStay', { n: n, c: C, site: q(e.site), dc: q(pongs[pongs.length - 1].from) });
+          return rich('capNxDeleted', { n: n });
+        }
+        if (e.targets.length === 1) {
+          var x = e.targets[0];
+          return rich('capAnswer1', { n: n, t: q(L.fqdn(x.dc.toLowerCase())), ip: q(L.DC[x.dc].ip), port: q(x.port) });
+        }
+        return rich('capAnswer2', { n: n, list: q(e.targets.map(function (y) { return y.dc; }).join(', ')), t: q(e.pick) });
+      case 'ping': return rich('capPing', { n: n, c: C, dc: q(e.to) });
+      case 'pong':
+        if (e.closest) return rich('capPongClosest', { n: n, c: C, dc: q(e.from), site: q(e.site) });
+        if (e.learnt) return rich('capPongLearnt', { n: n, c: C, dc: q(e.from), site: q(e.site) });
+        return rich('capPongFar', { n: n, c: C, dc: q(e.from), site: q(e.site) });
+      case 'asReq': return rich('capAsReq', { n: n, c: C, u: U, dc: q(e.to) });
+      case 'asRep': return tails(c, rich('capAsRep_' + r.action, { n: n, c: C, u: U, d: D, dc: q(e.from) }));
+      case 'ntlm': return rich('capNtlm', { n: n, c: C, dc: q(e.to) });
+      case 'ntlmOk': return tails(c, rich('capNtlmOk_' + r.action, { n: n, u: U, dc: q(e.from) }));
+      default: return '';
+    }
+    function tails(c2, parts) {
+      var res = c2.state.result, sub2 = c2.state.client.subnet;
+      if (res.wan) {
+        var far = [res.dc, res.kdc].filter(function (d, i, a) { return d && L.DC[d].site !== sub2 && a.indexOf(d) === i; });
+        parts = parts.concat(t.parts('tailWan', { dcs: q(far.join(', ')) }));
+      }
+      if (c2.params.gc) parts.push(t('tailGc'));
+      return parts;
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'action', type: 'choice', label: t('pAction'), options: [['join', t('optJoin')], ['logon', t('optLogon')]], resets: true },
+      { key: 'site', type: 'choice', label: t('pSite'), options: [['hq', t('optHq')], ['branch', t('optBranch')], ['unknown', t('optUnknown')]], resets: true },
+      { key: 'dns', type: 'choice', label: t('pDns'), options: [['dc01', t('optDc01')], ['public', t('optPublic')]], resets: true },
+      { key: 'locator', type: 'toggle', label: t('pLocator'), resets: true },
+      { key: 'siteRecord', type: 'toggle', label: t('pSiteRecord'), resets: true },
+      { key: 'kerberos', type: 'toggle', label: t('pKerberos'), resets: true },
+      { key: 'gc', type: 'toggle', label: t('pGc'), resets: true },
+      { key: 'restartNetlogon', type: 'toggle', label: t('pRestart'), resets: true }
+    ],
+
+    presets: [
+      { id: 'healthy-join', label: t('presetHealthy'), hint: t('presetHealthyHint'), params: {} },
+      { id: 'no-site-record', label: t('presetNoSite'), hint: t('presetNoSiteHint'), params: { action: 'logon', site: 'branch', siteRecord: true } },
+      { id: 'no-locator', label: t('presetNoLocator'), hint: t('presetNoLocatorHint'), params: { locator: true, siteRecord: true } },
+      { id: 'public-dns', label: t('presetPublic'), hint: t('presetPublicHint'), params: { dns: 'public' } },
+      { id: 'netlogon-fix', label: t('presetFix'), hint: t('presetFixHint'), params: { locator: true, siteRecord: true, restartNetlogon: true } },
+      { id: 'no-kerberos', label: t('presetNoKerberos'), hint: t('presetNoKerberosHint'), params: { action: 'logon', kerberos: true } }
+    ],
+
+    legend: [
+      { shape: 'dash', label: t('legDns') },
+      { shape: 'dot', label: t('legCldap') },
+      { shape: 'line', label: t('legKerb') },
+      { shape: 'rec', label: t('legPresent') },
+      { shape: 'del', label: t('legDeleted') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'sr' }, renderRecords(c), h('div', { class: 'sr-right' }, renderResult(c), chart)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
