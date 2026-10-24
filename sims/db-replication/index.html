@@ -1,0 +1,529 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- db-replication: a client writes x every 100 ms to a primary that acknowledges at once; one or two replicas apply
+     the same log records later by their lag. A stepper, one tick of 100 ms per step: read x back from a replica (stale,
+     or wait for your own LSN), or fail the primary: the replica with the highest LSN is promoted, the acknowledged tail
+     is lost, the other replica follows, and the old primary coming back is refused and rebuilt. Kit view K2 draws the
+     client and the servers with the records on the wire; kit view K3 draws each server's write-ahead log as a strip of
+     records. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="db-replication">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaostatak replikacije i preuzimanje · simdeck</title>
+<meta name="description" content="Klijent piše na primarni poslužitelj, replike primjenjuju iste zapise kasnije. Čitaj s replike, čekaj svoj LSN ili sruši primarni i pogledaj koji se potvrđeni upisi gube.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "db-replication",
+  "title": {
+    "hr": "Zaostatak replikacije i preuzimanje",
+    "en": "Replication lag and failover"
+  },
+  "concept": {
+    "hr": "Asinkrone replike kasne; preuzimanje gubi rep; čitanje vlastitih upisa",
+    "en": "Async replicas lag; failover loses the tail; reading your own writes"
+  },
+  "summary": {
+    "hr": "Klijent piše na primarni, replike iste zapise primjenjuju kasnije. Čitaj s replike, čekaj svoj zapis ili sruši primarni i vidi koji se potvrđeni upisi gube.",
+    "en": "A client writes to the primary; replicas apply the same records later. Read from a replica, wait for your record, or fail the primary and see what is lost."
+  },
+  "tags": [
+    "replication"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="db-replication"]; colours only from kit tokens.
+   Layout: the K2 drawing (client, primary, replicas) on top, the K3 log strips under it. */
+[data-sim="db-replication"] .dr {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="db-replication"] .dr-draw { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+[data-sim="db-replication"] .dr-draw .sd-topo { flex: 1; min-height: 0; align-content: stretch; }
+[data-sim="db-replication"] .sd-topo-card { min-width: 0; }
+[data-sim="db-replication"] .dr-extra { grid-column: 1 / -1; }
+[data-sim="db-replication"] .dr-log .sd-bg-grid { --bg-row-gap: 0.35rem; }
+
+/* the client's answer bubble: solid when fresh, hatched frame when stale, dashed while it waits */
+[data-sim="db-replication"] .dr-bubble { margin-top: 0.35rem; padding: 0.3rem; border: var(--line-w) solid var(--ink); border-radius: 0.9rem; }
+[data-sim="db-replication"] .dr-bubble > div { padding: 0.1rem 0.5rem; border-radius: 0.65rem; background-color: var(--bg); }
+[data-sim="db-replication"] .dr-bubble b { font-family: var(--mono); font-size: var(--fs-lg); }
+[data-sim="db-replication"] .dr-bubble[data-k="stale"] { border-color: var(--danger); }
+[data-sim="db-replication"] .dr-bubble[data-k="stale"] .dr-word { color: var(--danger); font-weight: 700; }
+[data-sim="db-replication"] .dr-bubble[data-k="wait"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="db-replication"] .dr-bubble[data-k="fresh"] .dr-word { font-weight: 700; }
+[data-sim="db-replication"] .dr-own { font-size: var(--fs-sm); }
+[data-sim="db-replication"] .dr-own b { font-family: var(--mono); }
+
+/* legend swatches the kit lacks: the acknowledgement and the stale answer */
+[data-sim="db-replication"] .sd-swatch[data-shape^="dr-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-ack"] { border: 0; background: transparent; }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-ack"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; color: var(--ink); line-height: 1; }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-stale"] { border-color: var(--danger); border-radius: 0.5em; }
+
+[data-sim="db-replication"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="db-replication"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the log strips follow; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="db-replication"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="db-replication"] .dr { grid-template-rows: auto auto; height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="db-replication"] .dr-draw .sd-topo { height: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Zaostatak replikacije i preuzimanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour per party: the client, the primary's history, the replicas. */
+  var COLOUR = { C: '4', P: '1', R1: '2', R2: '3' };
+  /** Grid places [col, row] in a 10-column grid, cards span 2: a diamond, client left, primary top, R1 below, R2 right. */
+  var POS = { C: [0, 1], P: [4, 0], R1: [4, 2], R2: [8, 1] };
+
+  /** Data (ids, LSNs, x = 5, times) is not language: the word check skips translate="no". */
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** A list of LSNs as "8–10" when it runs on, else "4, 6". */
+  function range(list) {
+    if (!list.length) return '';
+    var run = list.every(function (k, i) { return !i || k === list[i - 1] + 1; });
+    if (run && list.length > 2) return list[0] + '–' + list[list.length - 1];
+    return list.join(', ');
+  }
+  function replicaIds(s) { return s.ids.filter(function (id) { return id !== 'P'; }); }
+  function eff(c) { return L.eff(c.params); }
+  /** Records written so far, and the run's total (the strip keeps its width). */
+  function plannedWrites(p) {
+    var e = L.eff(p);
+    return e.read ? 5 : L.ticksOf(e);
+  }
+  function inFlight(s, id) {
+    var r = s.servers[id], P = s.servers.P;
+    if (!P.up || r.follows !== 'P') return [];
+    var out = [];
+    for (var k = r.applied + 1; k <= P.applied; k++) out.push(k);
+    return out;
+  }
+  function behind(s, id) { return s.servers.P.applied - s.servers[id].applied; }
+
+  // ── the drawing (kit view K2) ──
+
+  function serverName(s, id) {
+    var sv = s.servers[id];
+    if (id === 'P' && sv.role !== 'primary') return sv.role === 'replica' ? t('nReplica') : t('nOld');
+    if (sv.role === 'primary') return id === 'P' ? t('nPrimary') : t('nNewPrimary');
+    return t('nReplica');
+  }
+
+  function serverBadges(s, id) {
+    var sv = s.servers[id], out = [];
+    if (!sv.up) out.push({ text: t('bDown'), k: 'muted' });
+    if (s.phase === 'promote' && s.promoted === id) out.push({ text: t('bPromoted'), k: 'fill' });
+    if (sv.role === 'returned') out.push({ text: s.refused ? t('bRefused') : t('bBack'), k: s.refused ? 'dashed' : 'solid' });
+    if (s.phase === 'rebuild' && id === 'P') out.push({ text: sv.discarded.length ? t('bRebuilt') : t('bAttached'), k: 'solid' });
+    if (sv.role === 'replica' && sv.follows && sv.follows !== 'P') out.push({ text: t.parts('bFollows', { id: data(sv.follows) }), k: 'solid' });
+    if (s.changed.wrote && id === 'P') out.push({ text: t.parts('bAck', { k: data(s.changed.wrote) }), k: 'solid' });
+    var rd = s.reads[0];
+    if (rd && rd.from === id && rd.servedAt === null) out.push({ text: t.parts('bHolds', { k: data(rd.wait) }), k: 'dashed' });
+    return out;
+  }
+
+  function serverLines(s, id) {
+    var sv = s.servers[id];
+    var lines = [{ text: 'LSN ' + sv.applied, kind: 'addr' }];
+    if (sv.role === 'replica' && sv.follows === 'P' && s.servers.P.up) lines.push({ text: t('lagLine', { ms: sv.lagMs }), kind: 'role' });
+    return lines;
+  }
+
+  function bubble(s) {
+    var rd = s.reads[0];
+    if (!rd) return null;
+    var from = data(rd.from);
+    if (rd.servedAt === null) {
+      return h('div', { class: 'dr-bubble', dataset: { k: 'wait' } }, h('div', null, t.parts('bubbleWait', { from: from, k: data(rd.wait) })));
+    }
+    var k = rd.fresh ? 'fresh' : 'stale';
+    return h('div', { class: 'dr-bubble' + (rd.fresh ? '' : ' sd-hatch'), dataset: { k: k } }, h('div', null,
+      data('x = ' + rd.got), ' ', h('span', { class: 'dr-word' }, t(rd.fresh ? 'bubbleFresh' : 'bubbleStale')), ' ',
+      t.parts('bubbleFrom', { from: from, at: data(rd.servedAt) })));
+  }
+
+  function clientExtra(s, c) {
+    var own = s.writes.length ? s.writes[s.writes.length - 1].lsn : 0;
+    var kids = [];
+    if (eff(c).read) kids.push(h('div', { class: 'dr-own' }, t.parts('ownLine', { k: data(own) })));
+    var b = bubble(s);
+    if (b) kids.push(b);
+    return kids.length ? h('div', { class: 'dr-extra' }, kids) : null;
+  }
+
+  function renderTopo(c) {
+    var s = c.state, e = eff(c);
+    var promoted = s.promoted;
+    var nodes = [{ id: 'C', kind: 'host', mark: t('cMark'), col: POS.C[0], row: POS.C[1], span: 2, c: COLOUR.C, name: t('nClient'),
+      lines: [], badges: s.changed.wrote ? [{ text: t.parts('bAcked', { k: data(s.changed.wrote) }), k: 'solid' }] : [],
+      extra: clientExtra(s, c), changed: c.n > 0 && !!(s.changed.asked || s.changed.served), align: 'center' }];
+    s.ids.forEach(function (id) {
+      var sv = s.servers[id];
+      nodes.push({ id: id, kind: 'server', col: POS[id][0], row: POS[id][1], span: 2, c: COLOUR[id], name: serverName(s, id),
+        lines: serverLines(s, id), badges: serverBadges(s, id), state: sv.up ? (sv.role === 'returned' && s.refused ? 'down' : null) : 'down',
+        changed: c.n > 0 && s.changed.roles.indexOf(id) >= 0, align: 'center' });
+    });
+
+    var links = [], packets = [];
+    var Pup = s.servers.P.up;
+    // the write path: the client to the current primary
+    var writeTo = promoted || 'P';
+    links.push({ id: 'CP', a: 'C', b: 'P', state: Pup && !promoted ? 'up' : 'down', active: !promoted && !!s.changed.wrote });
+    if (s.changed.wrote) {
+      packets.push({ from: 'C', to: 'P', label: 'x = ' + s.changed.wrote, c: COLOUR.C });
+      packets.push({ from: 'P', to: 'C', label: '✓ ' + s.changed.wrote, c: COLOUR.P });
+    }
+    // the read path, or the write path to a promoted R1
+    if (e.read && e.readFrom === 'R1' || writeTo === 'R1') links.push({ id: 'CR1', a: 'C', b: 'R1', state: 'up', active: writeTo === 'R1' });
+    if (writeTo === 'R2') links.push({ id: 'CR2', a: 'C', b: 'R2', state: 'up', active: true });
+    var rd = s.reads[0];
+    if (rd && s.changed.asked) packets.push({ from: 'C', to: rd.from, label: 'x?', c: COLOUR.C, at: 0.5 });
+    if (rd && s.changed.served) packets.push({ from: rd.from, to: 'C', label: 'x = ' + rd.got, c: COLOUR[rd.from], at: 0.5 });
+
+    // replication: the primary to each replica, then (after the failover) the new primary to the others
+    replicaIds(s).forEach(function (id) {
+      var sv = s.servers[id];
+      var fromP = sv.follows === 'P' || id === promoted;
+      links.push({ id: 'P' + id, a: 'P', b: id, state: Pup && sv.follows === 'P' ? 'up' : s.phase === 'rebuild' && id === promoted ? 'up' : 'down' });
+      if (!fromP) return;
+      var got = s.changed.applied[id] || [];
+      var flying = inFlight(s, id);
+      if (sv.follows === 'P' && got.length && s.phase === 'tick') packets.push({ from: 'P', to: id, label: range(got), c: COLOUR.P, at: 0.75 });
+      if (flying.length) packets.push({ from: 'P', to: id, label: range(flying), c: COLOUR.P, mid: true, arrow: !got.length, at: 0.5, move: false });
+      // the failure: what was still on the way never arrives
+      var stranded = L.lostTail(s.servers.P.applied, sv.applied);
+      if (s.phase === 'fail' && stranded.length) packets.push({ from: 'P', to: id, label: range(stranded), c: COLOUR.P, mid: true, drop: true, at: 0.5 });
+    });
+    if (s.ids.length === 3 && s.phase !== 'start' && promoted && ['follow', 'return', 'rebuild'].indexOf(s.phase) >= 0) {
+      var other = promoted === 'R1' ? 'R2' : 'R1';
+      links.push({ id: 'R1R2', a: 'R1', b: 'R2', state: 'up', active: s.phase === 'follow' });
+      var rec = s.changed.received[other] || [];
+      if (s.phase === 'follow' && rec.length) packets.push({ from: promoted, to: other, label: range(rec), c: COLOUR.P });
+    }
+    if (s.phase === 'rebuild' && s.changed.received.P && s.changed.received.P.length) {
+      packets.push({ from: promoted, to: 'P', label: range(s.changed.received.P), c: COLOUR.P });
+    }
+    return Simdeck.topology({ cols: 10, rows: ['auto', 'minmax(1.5rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links,
+      packets: packets, gap: '1cqw' });
+  }
+
+  // ── the log strips (kit view K3) ──
+
+  function cellOf(s, id, k) {
+    var sv = s.servers[id];
+    var lost = s.lost.indexOf(k) >= 0;
+    var now = (s.changed.applied[id] || []).indexOf(k) >= 0;
+    if (sv.discarded.indexOf(k) >= 0) return { text: k, kind: 'dead', now: s.phase === 'rebuild' || s.phase === 'follow' };
+    if (k <= sv.applied) {
+      if (lost && (id === 'P')) return { text: k, kind: 'bad', now: s.phase === 'promote' };
+      return { text: k, kind: 'fill', c: COLOUR.P, now: now };
+    }
+    if (k > s.writes.length) return null;
+    if (lost) return { text: k, kind: 'bad', now: s.phase === 'promote' };
+    // not yet applied: in flight while the primary is up, stranded after it failed, or coming from the new primary
+    return { text: k, kind: 'ghost' };
+  }
+
+  /** Every row has one, so the grid keeps its columns: the lag gauge, or what the server is now. */
+  function asideOf(s, id) {
+    var sv = s.servers[id];
+    var word = function (text) { return h('span', null, text); };
+    if (!sv.up) return word(t('asideDown'));
+    if (sv.role === 'returned') return word(t(s.refused ? 'asideRefused' : 'asideBack'));
+    if (sv.role === 'primary') return id === 'P' ? word(t.n('ackedN', sv.applied)) : word(t('asideNewPrimary'));
+    if (sv.follows !== 'P') return word(t.parts('asideFollows', { id: data(sv.follows) }));
+    if (!s.servers.P.up) return word(t('asideNoPrimary'));
+    var n = behind(s, id);
+    return word(n ? t.n('behindN', n) : t('level'));
+  }
+
+  function bracketsOf(s, id) {
+    var sv = s.servers[id];
+    if (!s.lost.length) return [];
+    var from = s.lost[0] - 1, len = s.lost.length;
+    if (id === s.promoted && s.phase === 'promote') return [{ from: from, len: len, label: t('brLost') }];
+    if (id === 'P' && sv.role === 'returned' && sv.extra.length) return [{ from: sv.extra[0] - 1, len: sv.extra.length, label: t('brExtra') }];
+    if (id === 'P' && s.phase === 'rebuild' && sv.discarded.length) return [{ from: sv.discarded[0] - 1, len: sv.discarded.length, label: t('brDiscarded') }];
+    return [];
+  }
+
+  function renderLog(c) {
+    var s = c.state, e = eff(c);
+    var n = plannedWrites(c.params);
+    var cols = [];
+    for (var k = 1; k <= n; k++) cols.push(k);
+    var rows = s.ids.map(function (id) {
+      var row = { id: id, label: data(id), aside: asideOf(s, id), cells: cols.map(function (k) { return cellOf(s, id, k); }) };
+      if (e.failAt) row.brackets = bracketsOf(s, id);
+      return row;
+    });
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [t('gridMeta'), t('gridAxis')],
+      count: { text: h('span', { translate: 'no' }, 't = ' + s.t + ' ms'), hl: c.n > 0 && s.phase === 'tick' },
+      cols: n,
+      colLabels: cols.map(function (k) { return String(k * L.TICK); }),
+      rows: rows,
+      className: 'dr-log'
+    });
+  }
+
+  // ── captions ──
+
+  function lagList(s) {
+    return replicaIds(s).map(function (id) { return id + ' ' + s.servers[id].lagMs + ' ms'; }).join(', ');
+  }
+
+  function capStart(s, c) {
+    var e = eff(c);
+    var out = [rich('capStart', { reps: t.n('repsN', s.ids.length - 1), lags: data(lagList(s)) })];
+    if (e.read) out.push(rich(e.readFrom === 'P' ? 'capStartReadP' : e.rywWait ? 'capStartReadWait' : 'capStartRead', { at: data(L.READ_AT) }));
+    else if (e.failAt) out.push(rich(e.oldBack ? 'capStartFailBack' : 'capStartFail', { at: data(e.failAt) }));
+    else out.push(t('capStartPlain'));
+    return join(out);
+  }
+
+  /** What each replica applied in this tick, and how far behind it is. */
+  function replicaPart(s) {
+    return replicaIds(s).map(function (id) {
+      var got = s.changed.applied[id] || [], n = behind(s, id);
+      var vars = { id: data(id), list: data(range(got)), n: data(n) };
+      if (got.length) return t.parts(n ? 'repApplied' : 'repAppliedLevel', vars);
+      if (!s.servers[id].applied) return t.parts('repNothingYet', vars);
+      return t.parts(n ? 'repNothing' : 'repNothingLevel', vars);
+    });
+  }
+
+  function capTick(s, c) {
+    var e = eff(c), out = [];
+    var rd = s.reads[0];
+    if (s.changed.wrote) out.push(t.parts('capWrite', { t: data(s.t), k: data(s.changed.wrote) }));
+    else out.push(t.parts('capClock', { t: data(s.t) }));
+    if (s.changed.asked) {
+      // the read of this tick comes first: it is the point of the step
+      var vars = { from: data(rd.from), at: data(rd.at), got: data('x = ' + rd.got), lsn: data(rd.gotLsn), own: data(rd.own),
+        ownAt: data(rd.own * L.TICK), has: data(s.servers[rd.from].applied) };
+      if (rd.from === 'P') return rich('capReadP', vars);
+      // a replica that has applied nothing yet is said so, not "up to 0"
+      if (rd.servedAt === null) return rich(s.servers[rd.from].applied ? 'capReadHeld' : 'capReadHeldNone', vars);
+      return rich(rd.fresh ? 'capReadFresh' : rd.gotLsn ? 'capReadStale' : 'capReadStaleNone', vars);
+    }
+    out = out.concat(replicaPart(s));
+    if (rd && s.changed.served) out.push(rich('capServed', { from: data(rd.from), at: data(rd.servedAt), k: data(rd.wait),
+      waited: data(rd.servedAt - rd.at) }));
+    else if (rd && rd.servedAt === null) out.push(t.parts('capStillHeld', { k: data(rd.wait) }));
+    else if (rd && !rd.fresh && rd.from !== 'P') {
+      out.push(t.parts(s.servers[rd.from].applied >= rd.own ? 'capTooLate' : 'capWasStale', { got: data('x = ' + rd.got), at: data(rd.at), own: data(rd.own) }));
+    }
+    if (!e.read && !e.failAt && c.last && replicaIds(s).some(function (id) { return behind(s, id) > 0; })) out.push(t('capPlainEnd'));
+    return join(out);
+  }
+
+  function capFail(s) {
+    var P = s.servers.P;
+    var out = [t.parts('capFail', { t: data(s.failedAt), k: data(P.applied) })];
+    replicaIds(s).forEach(function (id) {
+      var n = P.applied - s.servers[id].applied;
+      out.push(t.parts(!n ? 'capFailRepAll' : s.servers[id].applied ? 'capFailRep' : 'capFailRepNone', { id: data(id), k: data(s.servers[id].applied),
+        list: data(range(L.lostTail(P.applied, s.servers[id].applied))) }));
+    });
+    return join(out);
+  }
+
+  function capPromote(s, c) {
+    var e = eff(c);
+    var np = s.servers[s.promoted];
+    var others = replicaIds(s).filter(function (id) { return id !== s.promoted; });
+    var tie = others.length && s.servers[others[0]].applied === np.applied;
+    var why = !others.length ? 'whyOnly' : !tie ? 'whyHighest' : e.prefer === s.promoted ? 'whyPrefer' : 'whyLowerId';
+    var out = [rich('capPromote', { id: data(s.promoted), k: data(np.applied) }), t.parts(why, { id: data(s.promoted), k: data(np.applied) })];
+    if (s.lost.length) {
+      out.push(rich(s.lost.length === 1 ? 'capLostOne' : 'capLost', { list: data(listAnd(s.lost)), id: data(s.promoted) }));
+      // the lost records were written in the last `lag` ms before the failure, never before the first write
+      out.push(t.parts('capLostSize', { n: t.n('recordsN', s.lost.length), ms: data(Math.min(np.lagMs, s.failedAt)) }));
+    } else out.push(t.parts('capNoLoss', { id: data(s.promoted) }));
+    return join(out);
+  }
+
+  /** "8, 9 i 10" / "8, 9 and 10". */
+  function listAnd(list) {
+    if (list.length === 1) return String(list[0]);
+    return list.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + list[list.length - 1];
+  }
+
+  function capFollow(s) {
+    return join(replicaIds(s).filter(function (id) { return id !== s.promoted; }).map(function (id) {
+      var rec = s.changed.received[id] || [];
+      var vars = { id: data(id), np: data(s.promoted), list: data(range(rec)), k: data(s.servers[id].applied) };
+      return t.parts(rec.length ? 'capFollow' : 'capFollowLevel', vars);
+    }));
+  }
+
+  function capReturn(s) {
+    var P = s.servers.P, np = s.servers[s.promoted];
+    var vars = { k: data(P.applied), np: data(s.promoted), nk: data(np.applied), list: data(range(P.extra)), next: data(np.applied + 1) };
+    return rich(s.refused ? 'capReturn' : 'capReturnLevel', vars);
+  }
+
+  function capRebuild(s) {
+    var P = s.servers.P;
+    var vars = { np: data(s.promoted), k: data(P.applied), list: data(range(P.discarded)) };
+    return rich(P.discarded.length ? 'capRebuild' : 'capAttach', vars);
+  }
+
+
+  /** Two replicas with the same applied LSN when the primary fails: only then does the priority decide (rule 4, T1). */
+  function tieAtFailure(p) {
+    var e = L.eff(p);
+    if (!e.failAt || e.replicas !== 2) return false;
+    var s = Simdeck.stateAt(L, p, L.ticksOf(e));
+    return s.servers.R1.applied === s.servers.R2.applied;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'replicas', type: 'choice', label: t('pReplicas'), resets: true, options: [[1, '1'], [2, '2']] },
+      { key: 'lag1', type: 'range', label: t('pLag1'), min: 0, max: 1000, step: 50, format: function (v) { return v + ' ms'; } },
+      { key: 'lag2', type: 'range', label: t('pLag2'), min: 0, max: 1000, step: 50, format: function (v) { return v + ' ms'; },
+        visible: function (p) { return Number(p.replicas) === 2; } },
+      { key: 'read', type: 'toggle', label: t('pRead'), hint: t('pReadHint'), resets: true,
+        visible: function (p) { return !!p.read || !(Number(p.failAt) > 0); } },
+      { key: 'readFrom', type: 'choice', label: t('pReadFrom'), resets: true, options: [['primary', t('optPrimary')], ['replica', t('optReplica')]],
+        visible: function (p) { return !!p.read; } },
+      { key: 'rywWait', type: 'toggle', label: t('pWait'), hint: t('pWaitHint'), resets: true,
+        visible: function (p) { return !!p.read && p.readFrom !== 'primary'; } },
+      { key: 'failAt', type: 'choice', label: t('pFailAt'), resets: true, options: [[0, t('optNever')], [600, '600 ms'], [1000, '1000 ms']],
+        visible: function (p) { return !p.read; } },
+      // the priority matters only on a tie: shown when both replicas have the same LSN at the failure
+      { key: 'prefer', type: 'choice', label: t('pPrefer'), resets: true,
+        options: [['none', t('optEqual')], ['R1', 'R1'], ['R2', 'R2']], visible: tieAtFailure },
+      { key: 'oldBack', type: 'toggle', label: t('pOldBack'), resets: true,
+        visible: function (p) { return !p.read && Number(p.failAt) > 0; } }
+    ],
+
+    presets: [
+      { id: 'steady-lag', label: t('prSteady'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 0, prefer: 'none', oldBack: false } },
+      { id: 'read-own-write', label: t('prRead'), hint: t('prReadHint'), params: { replicas: 1, lag1: 250, lag2: 600, read: true, readFrom: 'replica', rywWait: false, failAt: 0, prefer: 'none', oldBack: false } },
+      { id: 'failover-tail', label: t('prTail'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: false } },
+      { id: 'two-replicas', label: t('prTwo'), params: { replicas: 2, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: false } },
+      { id: 'old-primary-returns', label: t('prOld'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: true } }
+    ],
+
+    legend: [
+      { shape: 'bg-fill', c: 1, label: t('lgApplied') },
+      { shape: 'bg-ghost', label: t('lgFlight') },
+      { shape: 'dr-ack', label: t('lgAck') },
+      { shape: 'bg-bad', label: t('lgLost') },
+      { shape: 'bg-dead', label: t('lgDiscarded') },
+      { shape: 'dr-stale', label: t('lgStale') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'dr' }, h('div', { class: 'dr-draw' }, renderTopo(c)), renderLog(c)));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      switch (s.phase) {
+        case 'start': return capStart(s, c);
+        case 'tick': return capTick(s, c);
+        case 'fail': return capFail(s);
+        case 'promote': return capPromote(s, c);
+        case 'follow': return capFollow(s);
+        case 'return': return capReturn(s);
+        default: return capRebuild(s);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
