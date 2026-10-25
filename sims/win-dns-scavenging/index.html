@@ -1,0 +1,549 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-scavenging: records of corp.example over weeks. A stepper over a day axis: each row is a record, with its
+     timestamp ● and, from it, the no-refresh band (hatched), the refresh band (dotted) and the stale zone
+     (cross-hatched); scavenging runs are dashed vertical lines. Under the timeline: the zone's aging settings, the
+     server's scavenging, and the log of this step. Drawn by the page (no kit view has a time axis).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-scavenging">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: starenje i brisanje zastarjelih zapisa · simdeck</title>
+<meta name="description" content="Vremenske oznake, interval bez osvježavanja i interval osvježavanja: koji zastarjeli zapisi nestaju i kada.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-scavenging",
+  "title": {
+    "hr": "DNS: starenje i brisanje zastarjelih zapisa",
+    "en": "DNS: aging and scavenging"
+  },
+  "concept": {
+    "hr": "Vremenske oznake i dva intervala: koji zastarjeli zapisi nestaju i kada",
+    "en": "Timestamps and two intervals: which stale records disappear, and when"
+  },
+  "summary": {
+    "hr": "PC2 ode s mreže 1. dan, a prolaz brisanja ga uklanja tek 21. dan. Prekratki intervali brišu zapise uređaja koji su još na mreži.",
+    "en": "PC2 leaves on day 1, and a scavenging run removes it only on day 21. Intervals that are too short delete records of devices still online."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-scavenging"]; colours only from kit tokens.
+   Layout: a grid with the record cards on the left and their tracks over days on the right; the axis on top; the
+   zone, server and log cards in a row under it. */
+[data-sim="win-dns-scavenging"] .sv {
+  display: grid;
+  grid-template-columns: minmax(0, 21rem) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 0.55fr) repeat(var(--rows), minmax(0, 1fr)) auto;
+  gap: 0.9cqh 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 2.2cqw 1.4cqh 1.4cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dns-scavenging"] .sv-mono { font-family: var(--mono); }
+[data-sim="win-dns-scavenging"] .sv-muted { color: var(--muted); }
+[data-sim="win-dns-scavenging"] .sv-sm { font-size: var(--fs-sm); }
+
+/* cards */
+[data-sim="win-dns-scavenging"] .sv-card {
+  min-height: 0;
+  padding: 0.3rem 0.6rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  line-height: 1.3;
+  overflow: hidden;
+}
+[data-sim="win-dns-scavenging"] .sv-card h2 { margin: 0 0 0.1rem; font-size: 1em; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-dns-scavenging"] .sv-card h2 .sv-badge { margin-left: auto; }
+[data-sim="win-dns-scavenging"] .sv-card.sd-changed { background: var(--hl); color: var(--on-hl); outline: var(--line-w) solid var(--ink); }
+[data-sim="win-dns-scavenging"] .sv-card.sd-changed .sv-muted { color: var(--on-hl); }
+[data-sim="win-dns-scavenging"] .sv-card[data-gone] { border-style: dashed; }
+[data-sim="win-dns-scavenging"] .sv-line { display: flex; flex-wrap: wrap; gap: 0 0.45rem; align-items: baseline; }
+[data-sim="win-dns-scavenging"] .sv-badge {
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="win-dns-scavenging"] .sv-badge[data-k="off"] { border-style: dashed; color: var(--muted); }
+[data-sim="win-dns-scavenging"] .sv-badge[data-k="static"] { background: var(--ink); color: var(--bg); }
+[data-sim="win-dns-scavenging"] .sv-badge[data-k="stale"],
+[data-sim="win-dns-scavenging"] .sv-badge[data-k="warn"] { border-color: var(--danger); color: var(--danger); }
+[data-sim="win-dns-scavenging"] .sv-badge[data-k="deleted"] { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+[data-sim="win-dns-scavenging"] .sd-changed .sv-badge { color: var(--on-hl); border-color: var(--on-hl); }
+
+/* the bands: no-refresh hatched, refresh dotted, stale cross-hatched */
+[data-sim="win-dns-scavenging"] .sv-nr { background: repeating-linear-gradient(45deg, var(--c1) 0 0.14rem, color-mix(in srgb, var(--c1) 12%, var(--bg)) 0.14rem 0.5rem); }
+[data-sim="win-dns-scavenging"] .sv-rf { background: radial-gradient(circle, var(--c3) 0 0.13rem, transparent 0.15rem) 0 0 / 0.5rem 0.5rem, color-mix(in srgb, var(--c3) 12%, var(--bg)); }
+[data-sim="win-dns-scavenging"] .sv-st {
+  background: repeating-linear-gradient(45deg, var(--danger) 0 0.12rem, transparent 0.12rem 0.55rem),
+    repeating-linear-gradient(-45deg, var(--danger) 0 0.12rem, transparent 0.12rem 0.55rem), var(--bg);
+}
+
+/* tracks */
+[data-sim="win-dns-scavenging"] .sv-track { position: relative; min-height: 0; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="win-dns-scavenging"] .sv-band { position: absolute; top: 22%; bottom: 22%; box-sizing: border-box; border-block: 0.12rem solid var(--ink); }
+[data-sim="win-dns-scavenging"] .sv-band.sv-st { border-color: var(--danger); }
+[data-sim="win-dns-scavenging"] .sv-static {
+  position: absolute; top: 45%; bottom: 45%; left: 0; right: 0;
+  background: var(--ink);
+}
+[data-sim="win-dns-scavenging"] .sv-dot {
+  position: absolute; top: 50%; width: 1.1rem; height: 1.1rem; margin: -0.55rem 0 0 -0.55rem;
+  border-radius: 50%; background: var(--ink); border: 0.15rem solid var(--bg); box-sizing: border-box; z-index: 2;
+}
+[data-sim="win-dns-scavenging"] .sv-dot.sd-changed { outline: 0.3rem solid var(--hl); }
+[data-sim="win-dns-scavenging"] .sv-x {
+  position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 2;
+  font-size: 1.6rem; font-weight: 700; line-height: 1; color: var(--danger);
+}
+[data-sim="win-dns-scavenging"] .sv-x.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink); }
+[data-sim="win-dns-scavenging"] .sv-veil { position: absolute; top: 0; bottom: 0; right: 0; background: color-mix(in srgb, var(--bg) 62%, transparent); z-index: 3; pointer-events: none; }
+[data-sim="win-dns-scavenging"] .sv-vline { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none; z-index: 4; }
+[data-sim="win-dns-scavenging"] .sv-vline[data-k="run"] { border-left: 0.2rem dashed var(--ink); margin-left: -0.1rem; }
+[data-sim="win-dns-scavenging"] .sv-vline[data-k="run"][data-skip] { border-left: 0.12rem dotted var(--muted); }
+[data-sim="win-dns-scavenging"] .sv-vline[data-k="run"][data-future] { border-left-color: var(--muted); opacity: 0.6; }
+[data-sim="win-dns-scavenging"] .sv-vline[data-k="now"] { border-left: 0.35rem solid var(--accent); margin-left: -0.175rem; z-index: 5; }
+[data-sim="win-dns-scavenging"] .sv-tlabel-in { position: absolute; top: 0; left: 0.4rem; font-size: var(--fs-sm); color: var(--muted); z-index: 4; white-space: nowrap; }
+
+/* the axis */
+[data-sim="win-dns-scavenging"] .sv-axis { height: 3.6rem; border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="win-dns-scavenging"] .sv-tick { position: absolute; bottom: 0; height: 0.4rem; border-left: 0.1rem solid var(--ink); }
+[data-sim="win-dns-scavenging"] .sv-tick[data-big] { height: 0.7rem; border-left-width: var(--line-w); }
+[data-sim="win-dns-scavenging"] .sv-tlabel { position: absolute; bottom: 0.75rem; transform: translateX(-50%); font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-dns-scavenging"] .sv-tlabel[data-edge="l"] { transform: translateX(0.3rem); }
+[data-sim="win-dns-scavenging"] .sv-tlabel[data-edge="r"] { transform: translateX(calc(-100% - 0.4rem)); }
+[data-sim="win-dns-scavenging"] .sv-runmark { position: absolute; top: 0; transform: translateX(-50%); font-size: var(--fs-sm); line-height: 1; font-weight: 700; }
+[data-sim="win-dns-scavenging"] .sv-runmark[data-skip] { color: var(--muted); }
+[data-sim="win-dns-scavenging"] .sv-runmark[data-future] { opacity: 0.5; }
+[data-sim="win-dns-scavenging"] .sv-now { display: flex; flex-direction: column; justify-content: flex-end; }
+[data-sim="win-dns-scavenging"] .sv-now b { font-size: 1.4rem; }
+
+/* the cards under the timeline */
+[data-sim="win-dns-scavenging"] .sv-foot { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1.5fr); gap: 1.2cqw; }
+[data-sim="win-dns-scavenging"] .sv-kv { display: grid; grid-template-columns: auto 1fr; gap: 0 0.6rem; }
+[data-sim="win-dns-scavenging"] .sv-kv > :nth-child(odd) { color: var(--muted); }
+[data-sim="win-dns-scavenging"] .sv-card.sd-changed .sv-kv > :nth-child(odd) { color: var(--on-hl); }
+[data-sim="win-dns-scavenging"] .sv-log { margin: 0; padding: 0; list-style: none; }
+[data-sim="win-dns-scavenging"] .sv-log li { display: flex; gap: 0.45rem; align-items: baseline; }
+[data-sim="win-dns-scavenging"] .sv-log .sv-sym { flex: none; width: 1.2rem; text-align: center; font-weight: 700; }
+[data-sim="win-dns-scavenging"] .sv-log li[data-k="delete"] .sv-sym { color: var(--danger); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-dns-scavenging"] .sd-swatch[data-shape="ts"] { border-radius: 50%; background: var(--ink); border-color: var(--ink); }
+[data-sim="win-dns-scavenging"] .sd-swatch[data-shape="nr"] { background: repeating-linear-gradient(45deg, var(--c1) 0 0.12rem, var(--bg) 0.12rem 0.35rem); }
+[data-sim="win-dns-scavenging"] .sd-swatch[data-shape="rf"] { background: radial-gradient(circle, var(--c3) 0 0.11rem, transparent 0.13rem) 0 0 / 0.4rem 0.4rem, var(--bg); }
+[data-sim="win-dns-scavenging"] .sd-swatch[data-shape="st"] { border-color: var(--danger); background: repeating-linear-gradient(45deg, var(--danger) 0 0.1rem, transparent 0.1rem 0.35rem), repeating-linear-gradient(-45deg, var(--danger) 0 0.1rem, transparent 0.1rem 0.35rem), var(--bg); }
+[data-sim="win-dns-scavenging"] .sd-swatch[data-shape="run"] { border: 0; border-left: 0.2rem dashed var(--ink); border-radius: 0; width: 0.2rem; }
+[data-sim="win-dns-scavenging"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the zone's two intervals side by side, so the panel fits without its own scroll */
+[data-sim="win-dns-scavenging"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.55rem 1rem; }
+[data-sim="win-dns-scavenging"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="win-dns-scavenging"] [data-sd-controls] .sd-group > [data-key="noRefresh"],
+[data-sim="win-dns-scavenging"] [data-sd-controls] .sd-group > [data-key="refresh"] { grid-column: auto; justify-content: space-between; }
+/* the lease choice (printer only) on one row with its label, so the panel fits without its own scroll */
+[data-sim="win-dns-scavenging"] .sd-ctl[data-key="lease"]:not([hidden]) { flex-direction: row; align-items: center; justify-content: space-between; gap: 0.6rem; }
+[data-sim="win-dns-scavenging"] .sd-ctl[data-key="lease"] .sd-seg { flex: 0 1 60%; }
+/* the kit's .sd-ctl { display: flex } beats [hidden], so visible: () => false would not hide */
+[data-sim="win-dns-scavenging"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; each card sits above its track. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-scavenging"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-scavenging"] .sv { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.4rem; }
+  [data-sim="win-dns-scavenging"] .sv-track { height: 3rem; margin-bottom: 0.4rem; }
+  [data-sim="win-dns-scavenging"] .sv-axis { height: 3.6rem; }
+  [data-sim="win-dns-scavenging"] .sv-tlabel:not([data-key]) { display: none; }
+  [data-sim="win-dns-scavenging"] .sv-foot { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-dns-scavenging"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: starenje i brisanje zastarjelih zapisa</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var H = L.H;
+  var SERVER = 'DC1';
+
+  /** Data (names, addresses) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'sv-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** A time in hours → "dan 7" / "day 7", with the hour when it is not midnight. */
+  function when(x) {
+    var d = Math.floor(x / H), hr = x % H;
+    return hr ? t('dayHour', { d: d, h: (hr < 10 ? '0' : '') + hr + ':00' }) : t('day', { d: d });
+  }
+  /** The same after "nakon", "do", "od": the Croatian genitive ("7. dana"); English "day 7". */
+  function whenGen(x) {
+    var d = Math.floor(x / H), hr = x % H;
+    return hr ? t('dayGenHour', { d: d, h: (hr < 10 ? '0' : '') + hr + ':00' }) : t('dayGen', { d: d });
+  }
+  /** "every 7 days" / "svakih 7 dana"; "every day" for one. */
+  function every(x) {
+    if (x % H) return x === 1 ? t('everyHour') : t.n('everyHours', x);
+    return x === H ? t('everyDay') : t.n('everyDays', x / H);
+  }
+  /** A day number for the sums in captions: 3, or 3,5 / 3.5 for half days. */
+  function dn(x) {
+    var v = String(Math.round(x / H * 10) / 10);
+    return Simdeck.lang === 'hr' ? v.replace('.', ',') : v;
+  }
+  /** A length in hours → "7 dana" / "12 sati". */
+  function dur(x) { return x % H ? t.n('hours', x) : t.n('days', x / H); }
+  /** *word* in a string becomes an English term in italics (the term rule; NOTES.md, "Term pairs"). */
+  function rich(parts) {
+    var out = [];
+    (Array.isArray(parts) ? parts : [parts]).forEach(function (p) {
+      if (p && p.nodeType === 3) p = p.textContent; // t.parts gives text nodes for the table's words
+      if (typeof p !== 'string') { out.push(p); return; }
+      p.split(/(\*[^*]+\*)/).forEach(function (seg) {
+        if (/^\*[^*]+\*$/.test(seg)) out.push(h('em', { lang: 'en' }, seg.slice(1, -1)));
+        else if (seg) out.push(seg);
+      });
+    });
+    return out;
+  }
+  /** A dataset without the keys whose value is null: h() would write them as "null", and [data-x] would match. */
+  function ds(o) {
+    var out = {};
+    Object.keys(o).forEach(function (k) { if (o[k] !== null && o[k] !== undefined && o[k] !== false) out[k] = o[k]; });
+    return out;
+  }
+  function pct(v) { return Math.max(0, Math.min(100, v)) + '%'; }
+
+  // ── what the timeline draws, from the state's history ──
+
+  /** Rows: the static record, then the clients in their order. */
+  function rowNames(s) { return ['fs1'].concat(s.clients.map(function (c) { return c.name; })); }
+
+  /** One period per timestamp of a record: { ts, from, to, deleted }. The last one runs to the end of the axis. */
+  function periods(s, name, end) {
+    var out = [];
+    s.hist.forEach(function (e) {
+      if (e.name !== name) return;
+      var last = out[out.length - 1];
+      if (e.kind === 'delete') { if (last) { last.to = e.at; last.deleted = true; } return; }
+      if (last && last.to === null) last.to = e.at;
+      out.push({ ts: e.ts, from: e.at, to: null, deleted: false });
+    });
+    out.forEach(function (o) { if (o.to === null) o.to = end; });
+    return out;
+  }
+
+  /** The runs on the axis: those that happened (from the history) and those still to come. */
+  function runsOf(s, p) {
+    var done = s.hist.filter(function (e) { return e.kind === 'run'; }).map(function (e) {
+      return { at: e.at, skipped: e.skipped, future: false };
+    });
+    var seen = {};
+    done.forEach(function (r) { seen[r.at] = true; });
+    L.times(p).forEach(function (x) {
+      if (L.isRun(p, x) && !seen[x] && x >= s.t) done.push({ at: x, skipped: null, future: true });
+    });
+    return done;
+  }
+
+  function vlines(f, s, runs) {
+    var out = runs.map(function (r) {
+      return h('span', { class: 'sv-vline', dataset: ds({ k: 'run', skip: r.skipped ? '' : null, future: r.future ? '' : null }), style: { left: pct(f.x(r.at)) } });
+    });
+    if (s.phase !== 'start') out.push(h('span', { class: 'sv-vline', dataset: { k: 'now' }, style: { left: pct(f.x(s.t)) } }));
+    out.push(h('span', { class: 'sv-veil', style: { left: pct(f.x(s.t)) } }));
+    return out;
+  }
+
+  // ── axis ──
+  function renderAxis(f, s, runs) {
+    var ax = h('div', { class: 'sv-track sv-axis' });
+    var every = f.days <= 14 ? 1 : 7;
+    for (var d = 0; d <= f.days; d++) {
+      var big = d % every === 0 || d === f.days;
+      if (f.days > 30 && !big) continue;
+      ax.append(h('span', { class: 'sv-tick', dataset: ds({ big: big ? '' : null }), style: { left: pct(f.x(d * H)) } }));
+      if (big && (d === f.days || f.days - d >= every / 2 || every === 1)) {
+        ax.append(h('span', { class: 'sv-tlabel', dataset: ds({ key: d === 0 || d === f.days ? '' : null, edge: d === 0 ? 'l' : d === f.days ? 'r' : null }),
+          style: { left: pct(f.x(d * H)) } }, String(d)));
+      }
+    }
+    runs.forEach(function (r) {
+      ax.append(h('span', { class: 'sv-runmark', dataset: ds({ skip: r.skipped ? '' : null, future: r.future ? '' : null }), style: { left: pct(f.x(r.at)) }, 'aria-hidden': 'true' }, r.skipped ? '▽' : '▼'));
+    });
+    ax.append.apply(ax, vlines(f, s, []));
+    return ax;
+  }
+
+  // ── a record's row ──
+  function sourceWord(src) { return t({ client: 'srcClient', dhcp: 'srcDhcp', manual: 'srcManual', static: 'srcStatic' }[src]); }
+
+  function renderRow(f, p, s, name, c) {
+    var r = L.find(s.records, name);
+    var cl = s.clients.filter(function (x) { return x.name === name; })[0] || null;
+    var ps = periods(s, name, f.end);
+    var changed = s.changed.indexOf(name) >= 0;
+    var src = r ? r.source : cl.source;
+    var addr = r ? r.data : cl.ip;
+    var lines = [h('h2', null, data(name), data(addr), h('span', { class: 'sv-badge', dataset: { k: src === 'static' ? 'static' : 'src' } }, sourceWord(src)))];
+    var state;
+    if (r && !L.ages(r)) {
+      lines.push(h('div', { class: 'sv-line sv-sm' }, h('span', null, t('neverAges'))));
+    } else if (r) {
+      state = L.stateOf(r, s.zone, s.t);
+      var stateLine = state === 'noRefresh' ? t('stNoRefresh', { until: whenGen(r.timestamp + s.zone.noRefresh) })
+        : state === 'refresh' ? t('stRefresh', { after: whenGen(L.staleAfter(r, s.zone)) })
+        : t(L.deletionAt(r, s.zone, p) === null ? 'stStaleNever' : 'stStale', { since: whenGen(L.staleAfter(r, s.zone)) });
+      lines.push(h('div', { class: 'sv-line' }, h('span', { class: 'sv-muted' }, t('tsLbl')), h('b', null, when(r.timestamp)),
+        h('span', { class: 'sv-badge', dataset: { k: state === 'stale' ? 'stale' : 'state' } }, t({ noRefresh: 'wNoRefresh', refresh: 'wRefresh', stale: 'wStale' }[state]))));
+      lines.push(h('div', { class: 'sv-line sv-sm' }, h('span', null, stateLine)));
+      // nobody refreshes it any more: when the first run deletes it
+      if (cl && (cl.gone || cl.source === 'manual')) {
+        var del = L.deletionAt(r, s.zone, p);
+        lines.push(h('div', { class: 'sv-line sv-sm' }, h('span', { class: 'sv-muted' },
+          (cl.gone ? t('goneAt', { at: whenGen(cl.leavesAt) }) : t('nobodyRefreshes')) + ';'),
+          h('span', null, del === null ? t('neverDeleted') : t('deletedAtRun', { at: whenGen(del) }))));
+      }
+    } else {
+      var deleted = ps.length && ps[ps.length - 1].deleted;
+      lines.push(h('div', { class: 'sv-line' }, deleted
+        ? h('span', { class: 'sv-badge', dataset: { k: 'deleted' } }, t('wDeleted') + ' · ' + when(ps[ps.length - 1].to))
+        : h('span', { class: 'sv-muted' }, t('notYet'))));
+      if (deleted && cl && !cl.gone && cl.source !== 'manual') lines.push(h('div', { class: 'sv-line sv-sm' }, h('span', null, t('backAtRefresh'))));
+      if (deleted && cl && cl.gone) lines.push(h('div', { class: 'sv-line sv-sm' }, h('span', null, t('goneAt', { at: whenGen(cl.leavesAt) }))));
+    }
+    var card = h('div', { class: 'sv-card' + (changed ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''),
+      dataset: ds({ gone: !r ? '' : null }) }, lines);
+
+    var tr = h('div', { class: 'sv-track' });
+    if (r && !L.ages(r)) tr.append(h('span', { class: 'sv-static' }));
+    ps.forEach(function (o, i) {
+      var nrEnd = o.ts + s.zone.noRefresh, stEnd = nrEnd + s.zone.refresh;
+      [['sv-nr', o.from, Math.min(nrEnd, o.to)], ['sv-rf', nrEnd, Math.min(stEnd, o.to)], ['sv-st', stEnd, o.to]].forEach(function (band) {
+        if (band[2] > band[1]) tr.append(h('span', { class: 'sv-band ' + band[0], style: { left: pct(f.x(band[1])), width: pct(f.x(band[2]) - f.x(band[1])) } }));
+      });
+      var fresh = changed && i === ps.length - 1 && !o.deleted && o.from === s.t;
+      tr.append(h('span', { class: 'sv-dot' + (fresh ? ' sd-changed' : ''), style: { left: pct(f.x(o.from)) } }));
+      if (o.deleted) tr.append(h('span', { class: 'sv-x' + (changed && o.to === s.t ? ' sd-changed' : ''), style: { left: pct(f.x(o.to)) } }, '✕'));
+    });
+    tr.append.apply(tr, vlines(f, s, runsOf(s, p)));
+    return [card, tr];
+  }
+
+  // ── zone, server and log ──
+  function longest(p, s) {
+    var best = null;
+    s.clients.forEach(function (x) { if (x.every !== null && (!best || x.every > best.every)) best = x; });
+    return best;
+  }
+  function renderFoot(p, s, c) {
+    var z = s.zone, sv = s.server;
+    var zone = h('div', { class: 'sv-card' },
+      h('h2', null, t('zoneTitle'), data(L.ZONE), h('span', { class: 'sv-badge', dataset: { k: z.aging ? 'on' : 'off' } }, t('aging') + ' ' + t(z.aging ? 'on' : 'off'))),
+      h('div', { class: 'sv-kv' },
+        h('span', null, t('noRefresh')), h('b', null, dur(z.noRefresh)),
+        h('span', null, t('refresh')), h('b', null, dur(z.refresh)),
+        h('span', null, t('canAfter')), h('b', null, z.aging ? whenGen(z.canScavengeAfter) : '—')));
+    var lp = longest(p, s);
+    var ok = L.safe(p);
+    var lastRun = s.hist.filter(function (e) { return e.kind === 'run'; }).slice(-1)[0];
+    var server = h('div', { class: 'sv-card' + (s.phase === 'run' ? ' sd-changed' : '') },
+      h('h2', null, t('serverTitle'), data(SERVER), h('span', { class: 'sv-badge', dataset: { k: sv.scavenging ? 'on' : 'off' } }, t('scavShort') + ' ' + t(sv.scavenging ? 'on' : 'off'))),
+      h('div', { class: 'sv-kv' },
+        h('span', null, t('period')), h('b', null, sv.scavenging ? every(sv.period) : '—'),
+        h('span', null, t('lastRun')), h('span', null, lastRun ? when(lastRun.at) + (lastRun.skipped ? ' · ' + t('skippedShort') : ' · ' + t.n('deletedN', lastRun.deleted.length)) : '—'),
+        h('span', null, t('nextRun')), h('span', null, sv.scavenging && sv.nextRun !== null && sv.nextRun <= p.until * H ? when(sv.nextRun) : '—')),
+      lp ? h('div', { class: 'sv-line sv-sm' }, h('span', { class: 'sv-badge', dataset: { k: ok ? 'ok' : 'warn' } }, ok ? '✓' : '⚠'),
+        h('span', null, t.parts(ok ? 'safeOk' : 'safeNo', { r: dur(z.refresh), name: data(lp.name), every: ok ? dur(lp.every) : every(lp.every) }))) : null);
+    var items = logItems(p, s);
+    var log = h('div', { class: 'sv-card' },
+      h('h2', null, s.phase === 'start' ? t('logStart') : t('logTitle', { at: when(s.t) })),
+      items.length ? h('ul', { class: 'sv-log' }, items) : h('div', { class: 'sv-muted' }, t('logEmpty')));
+    return h('div', { class: 'sv-foot' }, zone, server, log);
+  }
+
+  function li(k, sym, parts) { return h('li', { dataset: { k: k } }, h('span', { class: 'sv-sym', 'aria-hidden': 'true' }, sym), h('span', null, parts)); }
+  function logItems(p, s) {
+    var out = [];
+    s.log.forEach(function (e) {
+      if (e.k === 'create') out.push(li('create', '+', t.parts(e.again ? 'logBack' : 'logCreate', { name: data(e.name), at: when(e.ts) })));
+      else if (e.k === 'refresh') out.push(li('refresh', '●', t.parts('logRefresh', { name: data(e.name), from: when(e.prevTs), to: when(e.ts) })));
+      else if (e.k === 'update') out.push(li('update', '↻', t.parts('logUpdate', { name: data(e.name), addr: data(e.data), at: when(e.ts) })));
+      else if (e.k === 'leave') out.push(li('leave', '→', t.parts('logLeave', { name: data(e.name) })));
+      else if (e.k === 'ignored') {
+        out.push(li('ignored', '·', t.parts(e.count === 1 ? 'logIgnored1' : 'logIgnored', { name: data(e.name), n: t.n('refreshesN', e.count),
+          from: when(e.first), to: when(e.last), until: whenGen(e.until) })));
+      } else if (e.k === 'run') {
+        if (e.skipped) out.push(li('skip', '▽', t(e.skipped === 'aging' ? 'logSkipAging' : 'logSkipNotYet', { after: whenGen(e.canScavengeAfter) })));
+        else {
+          e.deleted.forEach(function (d) { out.push(li('delete', '✕', t.parts('logDeleted', { name: data(d.name), after: whenGen(d.staleAfter) }))); });
+          e.kept.forEach(function (k) { out.push(li('kept', '✓', t.parts('logKept', { name: data(k.name), after: whenGen(k.staleAfter) }))); });
+          if (!e.deleted.length && !e.kept.length) out.push(li('kept', '✓', t('logNothing')));
+        }
+      } else if (e.k === 'end') out.push(li('end', '■', t('logEnd', { at: when(e.at) })));
+    });
+    return out;
+  }
+
+  // ── captions ──
+  function sum(ts, z) { return dn(ts) + ' + ' + dn(z.noRefresh) + ' + ' + dn(z.refresh); }
+
+  function caption(c) {
+    var s = c.state, p = c.params, z = s.zone;
+    if (c.first) {
+      var parts0 = t.parts('capStart', { fs1: data('fs1') });
+      parts0.push(' ');
+      parts0 = parts0.concat(t.parts(p.aging ? 'capStartAgingOn' : 'capStartAgingOff', { zone: b(L.ZONE), nr: dur(z.noRefresh), r: dur(z.refresh) }));
+      parts0.push(' ');
+      parts0 = parts0.concat(t.parts(p.scavenging ? 'capStartScav' : 'capStartNoScav', { per: every(s.server.period), server: data(SERVER) }));
+      parts0.push(' ', t('capPress'));
+      return parts0;
+    }
+    var head = t(s.phase === 'run' ? 'capHeadRun' : s.phase === 'end' ? 'capHeadEnd' : 'capHeadClients', { at: when(s.t) });
+    var parts = [head.charAt(0).toUpperCase() + head.slice(1)];
+    function say(x) { parts.push(' '); parts = parts.concat(rich(x)); }
+    var termSaid = false; // the term rule: the English term with its translation once per caption
+    s.log.forEach(function (e) {
+      if (e.k === 'create') {
+        var key = e.again ? 'capBack' : { client: termSaid ? 'capCreateLater' : 'capCreate', dhcp: 'capCreateDhcp', manual: 'capCreateManual' }[e.source];
+        if (key === 'capCreate') termSaid = true;
+        say(t.parts(key, { name: b(e.name), ts: dn(e.ts) }));
+      } else if (e.k === 'leave') say(t.parts('capLeave', { name: b(e.name) }));
+      else if (e.k === 'refresh') say(t.parts('capRefresh', { name: b(e.name), ts: dn(e.ts), prev: dn(e.prevTs), nr: dn(z.noRefresh) }));
+      else if (e.k === 'update') say(t.parts('capUpdate', { name: b(e.name), addr: b(e.data), ts: dn(e.ts), until: dn(e.ts + z.noRefresh) }));
+      else if (e.k === 'ignored' && e.last === s.t) say(t.parts('capIgnoredNow', { name: b(e.name), until: whenGen(e.until) }));
+      else if (e.k === 'run') {
+        if (e.skipped === 'aging') { say(t.parts('capSkipAging', { zone: b(L.ZONE) })); return; }
+        if (e.skipped) { say(t.parts(e.canScavengeAfter === e.at ? 'capSkipExact' : 'capSkipBefore', { after: whenGen(e.canScavengeAfter) })); return; }
+        e.deleted.forEach(function (d) {
+          var cl = s.clients.filter(function (x) { return x.name === d.name; })[0];
+          var vars = { name: b(d.name), sum: sum(d.ts, z), now: dn(e.at) };
+          if (cl && cl.gone) say(t.parts('capDelLeft', Object.assign(vars, { ago: dur(e.at - cl.leavesAt) })));
+          else if (cl && cl.source !== 'manual') say(t.parts('capDelLive', Object.assign(vars, { every: every(cl.every) })));
+          else say(t.parts('capDel', vars));
+        });
+        var tie = e.kept.filter(function (k) { return k.staleAfter === e.at; });
+        tie.forEach(function (k) { say(t.parts('capTie', { name: b(k.name), sum: sum(k.ts, z), now: dn(e.at) })); });
+        if (!e.deleted.length && !tie.length) say(t('capNothing'));
+      } else if (e.k === 'end') {
+        var stale = s.records.filter(function (r) { return L.stateOf(r, z, s.t) === 'stale'; });
+        stale.forEach(function (r) {
+          say(t.parts(!p.scavenging ? 'capEndStaleNoScav' : !p.aging ? 'capEndStaleNoAging' : 'capEndStale',
+            { name: b(r.name), since: whenGen(L.staleAfter(r, z)) }));
+        });
+        if (!stale.length) say(t('capEndClean'));
+      }
+    });
+    if (s.capped) say(t('capCapped', { n: L.MAX_STEPS }));
+    return parts;
+  }
+
+  var dayFormat = function (v) { return t.n('days', v); };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'choice', label: t('scenario'), resets: true,
+        options: [['leaver', t('scLeaver')], ['printer', t('scPrinter')], ['static', t('scStatic')], ['move', t('scMove')]] },
+      { key: 'noRefresh', type: 'range', label: t('pNoRefresh'), min: 1, max: 14, step: 1, format: dayFormat, resets: true },
+      { key: 'refresh', type: 'range', label: t('pRefresh'), min: 1, max: 14, step: 1, format: dayFormat, resets: true },
+      { key: 'period', type: 'range', label: t('pPeriod'), min: 1, max: 7, step: 1, format: dayFormat, resets: true },
+      { key: 'aging', type: 'toggle', label: t('pAging'), resets: true },
+      { key: 'scavenging', type: 'toggle', label: t('pScavenging'), resets: true },
+      { key: 'lease', type: 'choice', label: t('pLease'), resets: true, options: [[1, t.n('days', 1)], [8, t.n('days', 8)]],
+        visible: function (p) { return p.scenario === 'printer'; } },
+      { key: 'until', type: 'range', label: t('pUntil'), min: 7, max: 60, step: 1, format: function (v) { return t('day', { d: v }); }, resets: true }
+    ],
+
+    presets: [
+      { id: 'defaults', label: t('presetDefaults'), hint: t('presetDefaultsHint'), params: { scenario: 'leaver', noRefresh: 7, refresh: 7, period: 7, scavenging: true, aging: true, until: 21 } },
+      { id: 'too-aggressive', label: t('presetAggressive'), hint: t('presetAggressiveHint'), params: { scenario: 'printer', noRefresh: 1, refresh: 1, period: 1, lease: 8, until: 8 } },
+      { id: 'static-survives', label: t('presetStatic'), hint: t('presetStaticHint'), params: { scenario: 'static', until: 21 } },
+      { id: 'aging-only', label: t('presetAgingOnly'), hint: t('presetAgingOnlyHint'), params: { scenario: 'leaver', scavenging: false, until: 60 } },
+      { id: 'ip-change', label: t('presetIpChange'), hint: t('presetIpChangeHint'), params: { scenario: 'move', until: 14 } }
+    ],
+
+    legend: [
+      { shape: 'ts', label: t('legendTs') },
+      { shape: 'nr', label: t('legendNr') },
+      { shape: 'rf', label: t('legendRf') },
+      { shape: 'st', label: t('legendSt') },
+      { shape: 'run', label: t('legendRun') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var p = c.params, s = c.state;
+      var end = p.until * H;
+      var f = { days: p.until, end: end, x: function (x) { return x / end * 100; } };
+      var runs = runsOf(s, p);
+      var names = rowNames(s);
+      var kids = [h('div', { class: 'sv-now' }, h('span', { class: 'sv-muted sv-sm' }, t('axisNow')),
+        h('b', null, s.phase === 'start' ? t('day', { d: 0 }) : when(s.t)),
+        h('span', { class: 'sv-sm' }, t({ start: 'phStart', clients: 'phClients', run: 'phRun', end: 'phEnd' }[s.phase]))), renderAxis(f, s, runs)];
+      names.forEach(function (n) { kids = kids.concat(renderRow(f, p, s, n, c)); });
+      kids.push(renderFoot(p, s, c));
+      c.stage.replaceChildren(h('div', { class: 'sv', style: { '--rows': String(names.length - 1) } }, kids));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
