@@ -1,0 +1,415 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fragmentation-pmtud: one packet over a path whose link B is the bottleneck. An explorer: size, link B MTU and
+     tunnel overhead recompute the fragments; DF switches between fragmenting and drop + ICMP; "block ICMP" turns the
+     ICMP into silence and the outcome into retransmissions (a black hole). On top, the packet as sent and what leaves
+     R2 on link B; in the middle the path on kit view K2; under it the outcome timeline. Model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="fragmentation-pmtud">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fragmentacija i otkrivanje MTU-a puta · simdeck</title>
+<meta name="description" content="Mijenjaj veličinu paketa, MTU veze i tunel: usmjernik dijeli paket na fragmente ili ga uz DF odbacuje i javlja ICMP; blokiraj ICMP i dobij crnu rupu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fragmentation-pmtud",
+  "class": "explorer",
+  "title": { "hr": "Fragmentacija i otkrivanje MTU-a puta", "en": "Fragmentation and path MTU discovery" },
+  "concept": { "hr": "Fragmenti ili DF i ICMP „potrebna fragmentacija”, te crna rupa PMTUD-a", "en": "Fragments vs DF and ICMP \"fragmentation needed\", and the PMTUD black hole" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fragmentation-pmtud"]; colours only from kit tokens.
+   Layout: the packet view (as sent, and on link B), the K2 path, the outcome timeline. */
+[data-sim="fragmentation-pmtud"] .sd-legend { flex: 0 1 52rem; justify-content: flex-end; }
+[data-sim="fragmentation-pmtud"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="fragmentation-pmtud"] .sd-preset { line-height: 1.15; }
+[data-sim="fragmentation-pmtud"] .sd-panel { gap: 0.5rem; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="fragmentation-pmtud"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+[data-sim="fragmentation-pmtud"] .fp {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: space-evenly;
+  gap: 1.6cqh;
+  height: 100%;
+  padding: 1.6cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="fragmentation-pmtud"] .fp-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.8rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="fragmentation-pmtud"] .fp-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; }
+
+/* ── packet view ── */
+[data-sim="fragmentation-pmtud"] .fp-calc { display: flex; flex-wrap: wrap; gap: 0.2rem 1.6rem; margin: 0 0 0.4rem; font-size: var(--fs-sm); }
+[data-sim="fragmentation-pmtud"] .fp-calc b { font-family: var(--mono); }
+[data-sim="fragmentation-pmtud"] .fp-row { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 0.8rem; align-items: start; margin-top: 0.35rem; }
+[data-sim="fragmentation-pmtud"] .fp-rlbl { padding-top: 0.3rem; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fragmentation-pmtud"] .fp-blocks { display: flex; gap: 0.5rem; min-width: 0; }
+[data-sim="fragmentation-pmtud"] .fp-blk { flex: var(--w) 1 0; min-width: 10.5rem; display: grid; align-content: start; gap: 0.15rem; padding: 0.15rem; border: 3px solid transparent; border-radius: var(--radius-sm); }
+[data-sim="fragmentation-pmtud"] .fp-blk.sd-changed { border-color: var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="fragmentation-pmtud"] .fp-wire { display: flex; height: 2.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); overflow: hidden; }
+[data-sim="fragmentation-pmtud"] .fp-seg { position: relative; display: grid; place-items: center; min-width: 0; font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; overflow: hidden; }
+[data-sim="fragmentation-pmtud"] .fp-hdr { flex: 0 0 auto; min-width: 2.8rem; padding: 0 0.3rem; border-right: var(--line-w) solid var(--ink); }
+[data-sim="fragmentation-pmtud"] .fp-tun { flex: 0 0 auto; min-width: 2.6rem; padding: 0 0.3rem; border-right: var(--line-w) solid var(--ink); color: var(--ink); }
+[data-sim="fragmentation-pmtud"] .fp-tun.sd-hatch { background-color: color-mix(in srgb, var(--c4) 30%, var(--bg)); }
+[data-sim="fragmentation-pmtud"] .fp-data { flex: 1 1 0; }
+[data-sim="fragmentation-pmtud"] .fp-cut { position: absolute; top: 0; bottom: 0; width: 0; border-left: 3px dashed var(--ink); }
+[data-sim="fragmentation-pmtud"] .fp-lbl { display: flex; flex-wrap: wrap; gap: 0 0.7rem; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="fragmentation-pmtud"] .fp-lbl > * { white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .fp-dtxt { position: relative; z-index: 1; padding: 0 0.3rem; border-radius: var(--radius-sm); background: inherit; }
+[data-sim="fragmentation-pmtud"] .fp-lbl b { font-family: var(--mono); }
+[data-sim="fragmentation-pmtud"] .fp-lbl .fp-tag { padding: 0 0.35rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); }
+[data-sim="fragmentation-pmtud"] .fp-gap { flex: 0 0 auto; align-self: start; display: grid; place-items: center; height: 2.2rem; padding: 0 0.6rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .fp-none { display: flex; align-items: center; min-height: 2.2rem; padding: 0 0.7rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="fragmentation-pmtud"] .fp-note { margin: 0.35rem 0 0; font-size: var(--fs-sm); }
+[data-sim="fragmentation-pmtud"] .fp-blocks.sd-changed { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+/* ── path (kit view K2): marks on their own line; link labels are cloud cards under the links; the tunnel is a
+   hatched pipe card on link B ── */
+[data-sim="fragmentation-pmtud"] .sd-topo-card .sd-topo-mark { grid-row: auto; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card .sd-topo-name { grid-column: 1 / -1; white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card .sd-topo-addr,
+[data-sim="fragmentation-pmtud"] .sd-topo-card .sd-topo-sub,
+[data-sim="fragmentation-pmtud"] .sd-topo-card .sd-topo-role { grid-column: 1 / -1; white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card[data-kind='cloud'] > b { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card[data-id^='link'] { padding: 0.15rem 0.8rem; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card[data-id='pipe'] {
+  min-height: 2.6rem;
+  padding: 0.2rem 0.8rem;
+  border: var(--line-w) solid var(--c4);
+  border-radius: 1.3rem;
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em);
+  opacity: 0.92;
+}
+[data-sim="fragmentation-pmtud"] .sd-topo-card[data-id='pipe'] { justify-items: start; align-content: end; min-height: 3.6rem; padding-bottom: 0.15rem; }
+[data-sim="fragmentation-pmtud"] .sd-topo-card[data-id='pipe'] > b { padding: 0 0.3rem; background: var(--bg); border-radius: var(--radius-sm); }
+
+/* ── outcome timeline ── */
+[data-sim="fragmentation-pmtud"] .fp-tl { min-height: 0; overflow: hidden; }
+[data-sim="fragmentation-pmtud"] .fp-tl ol { display: grid; gap: 0.2rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="fragmentation-pmtud"] .fp-tl li {
+  display: grid;
+  grid-template-columns: 1.4rem 8.5rem 1.7rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+}
+[data-sim="fragmentation-pmtud"] .fp-tl li.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="fragmentation-pmtud"] .fp-num { font-weight: 700; color: var(--muted); text-align: right; }
+[data-sim="fragmentation-pmtud"] .fp-tl li.sd-changed .fp-num { color: var(--on-hl); }
+[data-sim="fragmentation-pmtud"] .fp-who { padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font-size: var(--fs-sm); font-weight: 700; text-align: center; white-space: nowrap; }
+[data-sim="fragmentation-pmtud"] .fp-mark { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: var(--line-w) solid var(--ink); border-radius: 50%; background: var(--bg); font-weight: 700; line-height: 1; }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='ok'] { color: var(--ok); border-color: var(--ok); }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='drop'] { color: var(--danger); border-color: var(--danger); border-radius: var(--radius-sm); }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='icmp'] { color: var(--on-series); background: var(--c5); border-color: var(--c5); }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='silence'] { color: var(--muted); border-style: dashed; }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='stall'] { color: var(--danger); border-color: var(--danger); border-style: dashed; border-radius: var(--radius-sm); }
+[data-sim="fragmentation-pmtud"] .fp-mark[data-m='info'] { color: var(--ink); }
+[data-sim="fragmentation-pmtud"] .fp-txt { line-height: 1.25; }
+
+/* legend swatches */
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-data'] { background: color-mix(in srgb, var(--c1) 16%, var(--bg)); border-color: var(--c1); }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-cut'] { background: var(--bg); border: 0; border-left: 3px dashed var(--ink); border-radius: 0; width: 0.6em; }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-tun'] { background-color: color-mix(in srgb, var(--c4) 30%, var(--bg)); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); border-color: var(--c4); }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-icmp'] { position: relative; background: var(--c5); border-color: var(--c5); border-radius: 50%; }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-icmp']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.7em; font-weight: 700; line-height: 1; color: var(--on-series); content: '↩'; }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-x'] { position: relative; background: var(--bg); border-color: var(--danger); }
+[data-sim="fragmentation-pmtud"] .sd-swatch[data-shape='fp-x']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+
+/* Phone and portrait: the stage grows with its content; blocks wrap. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fragmentation-pmtud"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fragmentation-pmtud"] .fp { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="fragmentation-pmtud"] .fp-row { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  [data-sim="fragmentation-pmtud"] .fp-blocks { flex-wrap: wrap; }
+  [data-sim="fragmentation-pmtud"] .fp-blk { flex-basis: 9rem; }
+  [data-sim="fragmentation-pmtud"] .fp-tl li { grid-template-columns: 2rem minmax(0, 1fr); }
+  [data-sim="fragmentation-pmtud"] .fp-tl .fp-num { display: none; }
+  [data-sim="fragmentation-pmtud"] .fp-tl .fp-who { grid-column: 1 / -1; justify-self: start; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Fragmentacija i otkrivanje MTU-a puta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PKT_C = '1', ICMP_C = '5', HDR_C = '3', DATA_C = '1', TUN_C = '4';
+  var MAX_BLOCKS = 4;
+
+  /** Data (ids, protocol names) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function hex(n) { return '0x' + n.toString(16); }
+  function B(v) { return t('bytes', { v: v }); }
+  /** "0, 60 i 120", or "0, 185, …, 1071" for many. */
+  function offsetList(fr) {
+    var o = fr.map(function (f) { return String(f.offset); });
+    if (o.length > 4) return o.slice(0, 2).join(', ') + ', …, ' + o[o.length - 1];
+    return o.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + o[o.length - 1];
+  }
+
+  // ── "changed": against the state before the last input (SPEC.md "Changed") ──
+  var lastParams = null, lastState = null, marks = { blocks: [], rows: [] };
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    marks = L.changed(lastState, c.state);
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+
+  // ── packet view ──
+
+  /** One packet or fragment on the wire: [tunnel][IP header][data], cut marks inside the data. */
+  function wire(s, b, tunnel, cuts) {
+    var segs = [];
+    if (tunnel) segs.push(h('span', { class: 'fp-seg fp-tun sd-hatch', dataset: { c: TUN_C } }, String(s.overhead)));
+    segs.push(h('span', { class: 'fp-seg fp-hdr sd-fill', dataset: { c: HDR_C } }, String(s.hdr)));
+    var d = h('span', { class: 'fp-seg fp-data sd-soft', dataset: { c: DATA_C } }, h('span', { class: 'fp-dtxt' }, B(b.data)));
+    (cuts || []).forEach(function (x) { d.append(h('span', { class: 'fp-cut', style: { left: (100 * x) + '%' } })); });
+    segs.push(d);
+    return h('div', { class: 'fp-wire' }, segs);
+  }
+
+  function blockEl(s, b, i, opts) {
+    var lbl = [h('b', null, B(b.len))];
+    if (opts.frag) {
+      lbl.push(h('span', null, t('blkOff', { o: b.offset, b: b.start })), h('span', null, t('blkMf', { m: b.mf ? 1 : 0 })));
+    }
+    if (opts.tag) lbl.push(h('span', { class: 'fp-tag' }, opts.tag));
+    return h('div', { class: 'fp-blk' + (marks.blocks.indexOf(i) >= 0 ? ' sd-changed' : ''), style: { '--w': String(b.len + (opts.tunnel ? s.overhead : 0)) } },
+      wire(s, b, opts.tunnel), h('div', { class: 'fp-lbl' }, lbl));
+  }
+
+  function packetView(c) {
+    var s = c.state, p = c.params;
+    var box = h('section', { class: 'fp-box fp-pkts' });
+    var calc = [h('span', null, s.overhead
+      ? t.parts('calcEffOvh', { mtu: h('b', null, String(p.mtuB)), ovh: h('b', null, String(s.overhead)), eff: h('b', null, String(s.effMtu)) })
+      : t.parts('calcEff', { eff: h('b', null, String(s.effMtu)) }))];
+    if (s.outcome === 'fragment') {
+      calc.push(h('span', null, t.parts('calcPer', { eff: h('b', null, String(s.effMtu)), hdr: h('b', null, String(s.hdr)), per: h('b', null, String(s.per)) })));
+      calc.push(h('span', null, t.parts('idLine', { id: h('b', { translate: 'no' }, hex(s.id)) })));
+    } else if (s.outcome !== 'refused') {
+      calc.push(h('span', null, t.parts('idOne', { id: h('b', { translate: 'no' }, hex(s.id)) })));
+    }
+    box.append(h('div', { class: 'fp-calc' }, calc));
+
+    // as sent: the data cut where R2 will split it
+    var cuts = s.fragments.slice(1).map(function (f) { return f.start / s.sent.data; });
+    var sentLbl = [h('b', null, B(s.sent.len))];
+    if (!s.v6) sentLbl.push(data(s.tcp ? 'DF = 1' : 'DF = 0'));
+    box.append(h('div', { class: 'fp-row' }, h('span', { class: 'fp-rlbl' }, t('fvSent')),
+      h('div', { class: 'fp-blocks' }, h('div', { class: 'fp-blk', style: { '--w': '1' } }, wire(s, s.sent, false, cuts), h('div', { class: 'fp-lbl' }, sentLbl)))));
+
+    // on link B
+    var row;
+    if (s.outcome === 'refused') {
+      row = h('div', { class: 'fp-none' }, t('noteRefused', { min: s.min }));
+    } else if (!s.onB.length) {
+      row = h('div', { class: 'fp-none' }, t(s.outcome === 'blackHole' ? 'noteBlack' : 'noteDropped'));
+    } else {
+      var frag = s.outcome === 'fragment';
+      var tag = s.outcome === 'pmtud' ? t('resentTag') : null;
+      var kids = L.visibleBlocks(s.onB.length, MAX_BLOCKS).map(function (i) {
+        if (i < 0) return h('div', { class: 'fp-gap' }, '… ' + t.n('gapMore', s.onB.length - 4) + ' …');
+        return blockEl(s, s.onB[i], i, { frag: frag, tunnel: s.overhead > 0, tag: tag });
+      });
+      row = h('div', { class: 'fp-blocks' }, kids);
+      // a single block is drawn at its share of the sent packet's width
+      if (s.onB.length === 1) row.style.width = Math.max(30, Math.min(100, 100 * (s.onB[0].len + s.overhead) / s.sent.len)) + '%';
+    }
+    box.append(h('div', { class: 'fp-row' }, h('span', { class: 'fp-rlbl' }, t('fvOnB')), row));
+    if (s.v6 && s.outcome !== 'pass' && s.outcome !== 'refused') box.append(h('p', { class: 'fp-note' }, t('noteV6')));
+    return box;
+  }
+
+  // ── path (kit view K2) ──
+
+  function pathView(c) {
+    var s = c.state, p = c.params, o = s.outcome;
+    var badges = { H1: [], R1: [], R2: [], H2: [] };
+    if (o === 'pmtud') badges.H1.push({ text: t('bPmtu', { v: s.pmtu }), k: 'fill' });
+    if (o === 'blackHole') badges.H1.push({ text: t('bWaits'), k: 'dashed' });
+    if (p.icmpBlocked) badges.R1.push({ text: t('bFw'), k: 'solid' });
+    if (o === 'pass') badges.R2.push({ text: t('bForwards'), k: 'muted' });
+    if (o === 'fragment') badges.R2.push({ text: t('bSplits'), k: 'solid' });
+    if (o === 'pmtud' || o === 'blackHole' || o === 'refused') badges.R2.push({ text: t('bDrops'), k: 'solid' });
+    if (o === 'pass' || o === 'pmtud') badges.H2.push({ text: t('bGets'), k: 'muted' });
+    if (o === 'fragment') badges.H2.push({ text: t('bReassembles'), k: 'solid' });
+    var node = function (id, kind, col, cc, name, extra) {
+      return { id: id, kind: kind, col: col, span: 2, row: 0, c: cc, name: name,
+        lines: extra || [], badges: badges[id].map(function (b) { return { text: b.text, k: b.k }; }),
+        state: (id === 'R2' && o !== 'pass') || (id === 'R1' && o === 'blackHole') ? 'active' : null };
+    };
+    var nodes = [
+      node('H1', 'host', 0, '1', t('sender')),
+      node('R1', 'router', 3, '2', null, [{ text: t('router'), kind: 'role' }]),
+      { id: 'linkA', kind: 'cloud', col: 4, span: 3, row: 1, name: t('linkLbl', { k: 'A', v: s.linkA }), align: 'center' },
+      node('R2', 'router', 6, '6', null, [{ text: t('router'), kind: 'role' }]),
+      { id: 'linkB', kind: 'cloud', col: 8, span: 3, row: 1, align: 'center', state: 'active',
+        name: s.overhead ? t('linkLblEff', { k: 'B', v: p.mtuB, o: s.overhead, eff: s.effMtu }) : t('linkLbl', { k: 'B', v: p.mtuB }) },
+      node('H2', 'host', 11, '5', t('receiver'))
+    ];
+    if (s.overhead) {
+      var pipeName = h('span', null, t.parts('pipe', { name: data(s.tunnel), n: s.overhead }));
+      nodes.splice(5, 0, { id: 'pipe', kind: 'cloud', col: 8, span: 3, row: 0, name: pipeName, align: 'center' });
+    }
+    var links = [
+      { id: 'lan', a: 'H1', b: 'R1', active: o !== 'refused' },
+      { id: 'a', a: 'R1', b: 'R2', active: o !== 'refused' },
+      { id: 'b', a: 'R2', b: 'H2', active: s.onB.length > 0, state: o === 'refused' ? 'down' : 'up' }
+    ];
+    var packets = [];
+    var first = s.tcp && !s.v6 ? t('chipPktDf', { v: s.sent.len }) : t('chipPkt', { v: s.sent.len });
+    var icmpChip = s.icmp ? t(s.icmp.v6 ? 'chipIcmp6' : 'chipIcmp', { v: s.icmp.nextHopMtu }) : null;
+    if (o !== 'refused') {
+      packets.push({ from: 'H1', to: 'R1', label: first, c: PKT_C, move: false });
+      packets.push({ from: 'R1', to: 'R2', chip: false, c: PKT_C, move: false, drop: !!s.icmp });
+    }
+    var atB = s.overhead ? 0.8 : 0.6;     // clear of the tunnel's label
+    if (o === 'pass') packets.push({ from: 'R2', to: 'H2', label: t('chipPkt', { v: s.sent.len }), c: PKT_C, move: false, at: atB });
+    if (o === 'fragment') packets.push({ from: 'R2', to: 'H2', label: t.n('chipFrags', s.fragments.length), c: PKT_C, move: false, at: atB });
+    if (o === 'pmtud') {
+      packets.push({ from: 'R2', to: 'R1', label: icmpChip, c: ICMP_C, move: false });
+      packets.push({ from: 'R1', to: 'H1', chip: false, c: ICMP_C, move: false });
+      packets.push({ from: 'R2', to: 'H2', label: t('chipResend', { v: s.pmtu }), c: PKT_C, move: false, at: atB });
+    }
+    if (o === 'blackHole') packets.push({ from: 'R2', to: 'R1', label: icmpChip, c: ICMP_C, move: false, drop: true });
+    return Simdeck.topology({ cols: 13, rows: ['auto', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  // ── outcome timeline ──
+
+  var MARK = { ok: '✓', drop: '✕', icmp: '↩', silence: '…', info: '→', stall: '⟳' };
+  function rowText(r, s) {
+    var v = r.v;
+    switch (r.k) {
+      case 'handshake': return t('tl_handshake', { n: v.n });
+      case 'send': return v.v6 ? t('tl_sendV6', { size: v.size }) : t(v.df ? 'tl_sendDf' : 'tl_send', { size: v.size });
+      case 'forward': return t('tl_forward', { size: v.size, eff: v.eff });
+      case 'receive': return t('tl_receive', { size: v.size });
+      case 'fragment': return t('tl_fragment', { frags: t.n('chipFrags', v.n), eff: v.eff });
+      case 'reassemble': return t('tl_reassemble', { frags: t.n('chipFrags', v.n), size: v.size });
+      case 'noIcmp': return t('tl_noIcmp');
+      case 'dropIcmp': return t(v.v6 ? 'tl_dropIcmp6' : 'tl_dropIcmp', { size: v.size, eff: v.eff });
+      case 'icmpLost': return t(v.v6 ? 'tl_icmpLost6' : 'tl_icmpLost');
+      case 'pmtu': return t('tl_pmtu', { pmtu: v.pmtu, mss: v.mss });
+      case 'resend': return t('tl_resend', { size: v.size, eff: v.eff });
+      case 'retry': return t('tl_retry', { size: v.size, times: v.times });
+      case 'refused': return t('tl_refused', { eff: v.eff, min: v.min });
+    }
+    return '';
+  }
+  function timeline(c) {
+    var s = c.state;
+    return h('section', { class: 'fp-box fp-tl' }, h('h2', null, t('tlTitle')),
+      h('ol', null, s.timeline.map(function (r, i) {
+        return h('li', { class: marks.rows.indexOf(i) >= 0 ? 'sd-changed' : null },
+          h('span', { class: 'fp-num' }, String(i + 1)),
+          h('span', { class: 'fp-who' }, t('who_' + r.who)),
+          h('span', { class: 'fp-mark', dataset: { m: r.mark }, 'aria-hidden': 'true' }, MARK[r.mark]),
+          h('span', { class: 'fp-txt' }, rowText(r, s)));
+      })));
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'size', type: 'range', label: t('size'), min: L.RANGES.size[0], max: L.RANGES.size[1], step: L.RANGES.size[2], format: B },
+      { key: 'mtuB', type: 'range', label: t('mtuB'), min: L.RANGES.mtuB[0], max: L.RANGES.mtuB[1], step: L.RANGES.mtuB[2], format: B },
+      { key: 'overhead', type: 'select', label: t('overhead'), options: L.OVERHEADS.map(function (x) { return [x[0], t('ovh_' + x[0])]; }) },
+      { key: 'proto', type: 'choice', label: t('proto'), options: [['ipv4', t('ipv4')], ['ipv6', t('ipv6')]] },
+      { key: 'df', type: 'toggle', label: t('df'), hint: t('dfHint'), disabled: function (p) { return p.proto === 'ipv6' ? t('dfV6') : false; } },
+      { key: 'icmpBlocked', type: 'toggle', label: t('icmpBlocked'), hint: t('icmpBlockedHint') }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { c: 3, label: t('legHdr') },
+      { shape: 'fp-data', label: t('legData') },
+      { shape: 'fp-cut', label: t('legCut') },
+      { shape: 'fp-tun', label: t('legTunnel') },
+      { shape: 'fp-icmp', label: t('legIcmp') },
+      { shape: 'fp-x', label: t('legDrop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'fp' }, packetView(c), pathView(c), timeline(c)));
+    },
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      var out;
+      switch (s.outcome) {
+        case 'refused': out = t.parts('capRefused', { eff: s.effMtu, min: s.min, ver: data(s.v6 ? 'IPv6' : 'IPv4') }); break;
+        case 'pass': out = t.parts('capPass', { size: p.size, eff: s.effMtu }); break;
+        case 'fragment': out = t.parts('capFragment', { size: p.size, eff: s.effMtu, frags: t.n('chipFrags', s.fragments.length), offs: offsetList(s.fragments) }); break;
+        case 'pmtud': out = t.parts(s.v6 ? 'capPmtud6' : 'capPmtud', { size: p.size, eff: s.effMtu, mss: s.mss }); break;
+        case 'blackHole': out = t.parts(s.v6 ? 'capBlack6' : 'capBlack', { size: p.size }); break;
+      }
+      if (p.icmpBlocked && !s.icmp && s.outcome !== 'refused') out = out.concat(t('capNoIcmp'));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
