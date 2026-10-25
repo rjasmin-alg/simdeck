@@ -1,0 +1,525 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- csma-cd: collisions on a shared bus and how binary exponential backoff resolves them. A stepper drawn in HTML (the
+     kit has no time axis view): the slot timeline on top, the stations on the bus below; one step is one slot time.
+     Rules: SPEC.md; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="csma-cd">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSMA/CD · simdeck</title>
+<meta name="description" content="Stanice osluškuju i šalju na dijeljenom mediju, odsječak po odsječak: kolizija, ometanje i slučajno odustajanje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "csma-cd",
+  "title": {
+    "hr": "CSMA/CD: kolizija i odustajanje",
+    "en": "CSMA/CD: collisions and backoff"
+  },
+  "concept": {
+    "hr": "Kolizije na dijeljenom mediju i kako ih slučajno odustajanje razrješava",
+    "en": "Collisions on a shared bus and how random backoff resolves them"
+  },
+  "summary": {
+    "hr": "Stanice osluškuju i šalju na dijeljenom mediju, odsječak po odsječak. Dvije šalju odjednom: kolizija, ometanje i slučajni k iz raspona koji raste.",
+    "en": "Stations sense and send on a shared bus, slot by slot. Two send at once: collision, a jam, and a random k from a range that doubles each time."
+  },
+  "tags": [
+    "ethernet"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="csma-cd"]; colours only from kit tokens.
+   A station is its series colour (c1–c4) plus its letter. Timeline cells: sending = solid fill with the letter (✓ on a
+   frame's last slot); collision = hatched --danger with a zig-zag; backoff = dotted border with the slots left;
+   deferring = dashed border with "…"; the medium idle = dashed hollow. The current slot's column has an ink outline
+   and its number on the highlighter. */
+[data-sim="csma-cd"] .cd {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2.5cqh;
+  height: 100%;
+  padding: 2.5cqh 2cqw;
+}
+[data-sim="csma-cd"] .cd-tlwrap { min-width: 0; }
+[data-sim="csma-cd"] .cd-tl {
+  /* cells grow with the stage: as wide as the slots allow, as tall as the rows allow, within limits */
+  --row: clamp(2.7rem, calc(50cqh / var(--rows)), 4.4rem);
+  display: grid;
+  grid-template-columns: max-content repeat(var(--cols), min(calc((100cqw - 12rem) / var(--cols)), 6rem));
+  grid-auto-rows: var(--row);
+  font-size: clamp(1rem, calc(var(--row) * 0.42), 1.6rem);
+  gap: 0.3rem 0.25rem;
+  justify-content: center;
+  align-items: stretch;
+}
+[data-sim="csma-cd"] .cd-lab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-right: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="csma-cd"] .cd-lab-muted { color: var(--muted); font-weight: 400; font-size: var(--fs-sm); }
+[data-sim="csma-cd"] .cd-head {
+  display: grid;
+  place-items: end center;
+  padding-bottom: 0.15rem;
+  font-family: var(--mono);
+  font-size: 1em;
+  color: var(--muted);
+}
+[data-sim="csma-cd"] .cd-head.cd-now { color: var(--on-hl); background: var(--hl); border-radius: var(--radius); font-weight: 700; place-items: center; }
+[data-sim="csma-cd"] .cd-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  font-weight: 700;
+}
+[data-sim="csma-cd"] .cd-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: max(2px, 0.12rem) solid transparent;
+  border-radius: var(--radius);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="csma-cd"] .cd-cell[data-m="none"] { border-color: var(--line); border-style: solid; opacity: 0.35; }
+[data-sim="csma-cd"] .cd-cell[data-m="future"] { border-color: var(--line); border-style: dotted; opacity: 0.3; }
+[data-sim="csma-cd"] .cd-cell[data-m="send"] { border-color: var(--ink); }
+[data-sim="csma-cd"] .cd-cell[data-m="jam"],
+[data-sim="csma-cd"] .cd-cell[data-m="coll"] {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--danger) 32%, transparent) 0.3em 0.48em), var(--bg);
+}
+[data-sim="csma-cd"] .cd-cell[data-m="wait"] { border: max(3px, 0.18rem) dotted var(--sw); color: var(--ink); font-family: var(--mono); font-size: 1em; background: color-mix(in srgb, var(--sw) 10%, var(--bg)); }
+[data-sim="csma-cd"] .cd-cell[data-m="defer"] { border: max(2px, 0.14rem) dashed var(--sw); color: var(--ink); background: var(--bg); }
+[data-sim="csma-cd"] .cd-cell[data-m="idle"] { border: max(2px, 0.12rem) dashed var(--muted); background: transparent; }
+[data-sim="csma-cd"] .cd-cell[data-m="drop"] { border-color: var(--danger); color: var(--danger); }
+[data-sim="csma-cd"] .cd-cell.cd-now { outline: max(3px, 0.2rem) solid var(--ink); outline-offset: max(2px, 0.1rem); z-index: 1; }
+[data-sim="csma-cd"] .cd-zig { width: 1.5em; height: 1.5em; }
+
+/* the bus and its stations */
+[data-sim="csma-cd"] .cd-net { display: flex; flex-direction: column; align-items: stretch; }
+[data-sim="csma-cd"] .cd-stations { display: flex; justify-content: space-around; gap: 1rem; }
+[data-sim="csma-cd"] .cd-st { display: flex; flex-direction: column; align-items: center; flex: 0 1 17rem; min-width: 0; }
+[data-sim="csma-cd"] .cd-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.55rem 0.8rem;
+  border: max(2px, 0.12rem) solid var(--sw);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--sw) 8%, var(--bg));
+}
+[data-sim="csma-cd"] .cd-card .cd-dot { flex: none; width: 2.6rem; height: 2.6rem; font-size: 1.4rem; }
+[data-sim="csma-cd"] .cd-card-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+[data-sim="csma-cd"] .cd-phase { font-weight: 700; }
+[data-sim="csma-cd"] .cd-meta { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="csma-cd"] .cd-drop { width: 0; height: 2.2cqh; min-height: 0.8rem; border-left: max(3px, 0.18rem) solid var(--ink); }
+[data-sim="csma-cd"] .cd-bus {
+  display: grid;
+  place-items: center;
+  min-height: 3rem;
+  border: max(3px, 0.18rem) solid var(--ink);
+  border-radius: 1.5rem;
+}
+[data-sim="csma-cd"] .cd-bus[data-m="idle"] { border-style: dashed; background: transparent; }
+[data-sim="csma-cd"] .cd-bus[data-m="busy"] { background: var(--sw); }
+[data-sim="csma-cd"] .cd-bus[data-m="collision"] {
+  border-color: var(--danger);
+  background: repeating-linear-gradient(45deg, transparent 0 0.5em, color-mix(in srgb, var(--danger) 35%, transparent) 0.5em 0.8em), var(--bg);
+}
+[data-sim="csma-cd"] .cd-bus-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem 0.8rem;
+  border: max(2px, 0.12rem) solid var(--ink);
+  border-radius: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+}
+[data-sim="csma-cd"] .cd-bus[data-m="collision"] .cd-bus-label { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+[data-sim="csma-cd"] .cd-bus-label .cd-lab-muted { color: var(--muted); }
+
+/* full duplex: A, two one-way lanes, the switch */
+[data-sim="csma-cd"] .cd-duo { display: grid; grid-template-columns: minmax(0, 16rem) minmax(0, 1fr) minmax(0, 16rem); align-items: center; gap: 1rem; }
+[data-sim="csma-cd"] .cd-lanes { display: flex; flex-direction: column; gap: 0.6rem; }
+[data-sim="csma-cd"] .cd-lanes-title { text-align: center; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="csma-cd"] .cd-lane { min-height: 2.6rem; border-radius: 1.3rem; }
+
+[data-sim="csma-cd"] .sd-explain sup { font-size: 0.9em; }
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as in cert-chain, amdahl). */
+[data-sim="csma-cd"] .sd-panel [hidden] { display: none; }
+
+/* legend swatches the kit lacks */
+[data-sim="csma-cd"] .sd-swatch[data-shape="cd-send"] { background: var(--sw); }
+[data-sim="csma-cd"] .sd-swatch[data-shape="cd-coll"] {
+  border-color: var(--danger);
+  background: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 45%, transparent) 0.2em 0.34em), var(--bg);
+}
+[data-sim="csma-cd"] .sd-swatch[data-shape="cd-wait"] { border: 0.16rem dotted var(--sw); background: var(--bg); }
+[data-sim="csma-cd"] .sd-swatch[data-shape="cd-defer"] { border: 0.14rem dashed var(--sw); background: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; the timeline scrolls inside its own box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="csma-cd"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="csma-cd"] .cd { height: auto; padding: 0.5rem; gap: 1rem; }
+  [data-sim="csma-cd"] .cd-tlwrap { overflow-x: auto; }
+  [data-sim="csma-cd"] .cd-tl { grid-template-columns: max-content repeat(var(--cols), 2.4rem); grid-auto-rows: 2.4rem; font-size: 1rem; justify-content: start; }
+  [data-sim="csma-cd"] .cd-stations { flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+  [data-sim="csma-cd"] .cd-st { flex: 1 1 9rem; }
+  [data-sim="csma-cd"] .cd-card { padding: 0.4rem; gap: 0.4rem; }
+  [data-sim="csma-cd"] .cd-phase { overflow-wrap: anywhere; }
+  [data-sim="csma-cd"] .cd-card .cd-dot { width: 2rem; height: 2rem; font-size: 1.1rem; }
+  [data-sim="csma-cd"] .cd-duo { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">CSMA/CD</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var drawSeed = 1; // the new-draws button picks a seed from Simdeck.rng; the model itself stays deterministic
+  var COLOUR = { A: '1', B: '2', C: '3', D: '4' };
+  var svgNs = 'http://www.w3.org/2000/svg';
+
+  function full(p) { return p.duplex === 'full'; }
+  /** In full duplex the second end is the switch port. */
+  function nameOf(id, p) { return full(p) && id === 'B' ? t('switchRef') : id; }
+  function list(ids, p) {
+    var a = ids.map(function (id) { return nameOf(id, p); });
+    return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + a[a.length - 1];
+  }
+  function zig() {
+    var s = document.createElementNS(svgNs, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'cd-zig');
+    s.setAttribute('aria-hidden', 'true');
+    var pl = document.createElementNS(svgNs, 'polyline');
+    pl.setAttribute('points', '2,13 7,5 11,19 15,5 19,19 22,11');
+    pl.setAttribute('fill', 'none');
+    pl.setAttribute('stroke', 'currentColor');
+    pl.setAttribute('stroke-width', '2.8');
+    pl.setAttribute('stroke-linejoin', 'round');
+    s.append(pl);
+    return s;
+  }
+  function dot(id, p) {
+    return h('span', { class: 'cd-dot sd-fill', dataset: { c: COLOUR[id] }, translate: 'no', 'aria-hidden': 'true' }, full(p) && id === 'B' ? '⇄' : id);
+  }
+
+  // ── the slot timeline ──
+
+  function cell(m, id, now, p) {
+    var mark = full(p) && id === 'B' ? '⇄' : id, who = nameOf(id, p);
+    var a = { class: 'cd-cell' + (now ? ' cd-now' : ''), dataset: { m: 'none', c: COLOUR[id] || '' } };
+    if (!m) return h('div', a);
+    if (m.m === 'send') {
+      a.class += ' sd-fill';
+      a.dataset.m = 'send';
+      a['aria-label'] = t(m.end ? 'cellEnd' : 'cellSend', { id: who });
+      return h('div', a, h('span', { translate: 'no' }, m.end ? mark + '✓' : mark));
+    }
+    if (m.m === 'jam') { a.dataset.m = 'jam'; a['aria-label'] = t('cellJam', { id: id }); return h('div', a, zig()); }
+    if (m.m === 'wait') { a.dataset.m = 'wait'; a['aria-label'] = t('cellWait', { id: id, v: m.v }); return h('div', a, String(m.v)); }
+    if (m.m === 'defer') { a.dataset.m = 'defer'; a['aria-label'] = t('cellDefer', { id: id }); return h('div', a, '…'); }
+    if (m.m === 'drop') { a.dataset.m = 'drop'; a['aria-label'] = t('cellDrop', { id: id }); return h('div', a, '⊘'); }
+    return h('div', a);
+  }
+
+  function mediumCell(col, now) {
+    var a = { class: 'cd-cell' + (now ? ' cd-now' : ''), dataset: { m: 'idle' } };
+    if (col.medium === 'collision') { a.dataset.m = 'coll'; a['aria-label'] = t('cellColl'); return h('div', a, zig()); }
+    if (col.medium === 'busy') {
+      var id = col.senders[0];
+      a.class += ' sd-fill';
+      a.dataset.m = 'send';
+      a.dataset.c = COLOUR[id];
+      a['aria-label'] = t('mBusy', { id: id });
+      return h('div', a, h('span', { translate: 'no' }, id));
+    }
+    a['aria-label'] = t('cellIdle');
+    return h('div', a);
+  }
+
+  function timeline(s, c) {
+    var p = c.params, total = Math.max(c.steps, 1), kids = [];
+    kids.push(h('div', { class: 'cd-lab cd-lab-muted' }, t('slot')));
+    for (var j = 1; j <= total; j++) kids.push(h('div', { class: 'cd-head' + (j === s.slot ? ' cd-now' : ''), translate: 'no' }, String(j)));
+    s.stations.forEach(function (x, i) {
+      kids.push(h('div', { class: 'cd-lab' }, dot(x.id, p), full(p) && x.id === 'B' ? t('switchName') : null));
+      for (var j = 1; j <= total; j++) {
+        var col = s.columns[j - 1];
+        kids.push(col ? cell(col.marks[i], x.id, j === s.slot, p) : h('div', { class: 'cd-cell', dataset: { m: 'future' } }));
+      }
+    });
+    if (!full(p)) {
+      kids.push(h('div', { class: 'cd-lab' }, t('medium')));
+      for (var k = 1; k <= total; k++) {
+        var col = s.columns[k - 1];
+        kids.push(col ? mediumCell(col, k === s.slot) : h('div', { class: 'cd-cell', dataset: { m: 'future' } }));
+      }
+    }
+    return h('div', { class: 'cd-tlwrap' }, h('div', { class: 'cd-tl', style: { '--cols': String(total), '--rows': String(s.stations.length + (full(p) ? 1 : 2)) } }, kids));
+  }
+
+  // ── the stations on the bus ──
+
+  function phaseText(x, p) {
+    switch (x.phase) {
+      case 'ready': return t('phReady');
+      case 'defer': return t('phDefer');
+      case 'send': return t('phSend', { v: x.sentSlots, f: p.frameSlots });
+      case 'jam': return t('phJam');
+      // the counter as the timeline cell shows it in this slot: the slots left, this one included
+      case 'backoff': return t('phWait', { v: x.backoffLeft + 1 });
+      case 'done': return t('phDone');
+      case 'gaveUp': return t('phGaveUp');
+      default: return t('phIdle');
+    }
+  }
+
+  function card(x, i, c) {
+    var p = c.params;
+    var changed = c.prev && c.prev.stations[i] && c.prev.stations[i].phase !== x.phase;
+    var meta = full(p) ? null : h('div', { class: 'cd-meta', translate: 'no' },
+      'n = ' + x.attempt, x.k != null ? '  ·  ' + t('drawLine', { k: x.k, max: x.range - 1 }) : null);
+    return h('div', { class: 'cd-card' + (changed ? ' sd-changed' : '') + (changed && c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { c: COLOUR[x.id] } },
+      dot(x.id, p),
+      h('div', { class: 'cd-card-body' },
+        full(p) && x.id === 'B' ? h('div', { class: 'cd-lab-muted' }, t('switchName')) : null,
+        h('div', { class: 'cd-phase' }, phaseText(x, p)),
+        meta));
+  }
+
+  function busLabel(s) {
+    if (s.medium === 'collision') return [zig(), t('mColl')];
+    if (s.medium === 'busy') return t('mBusy', { id: s.columns[s.columns.length - 1].senders[0] });
+    return t('mIdle');
+  }
+
+  function half(s, c) {
+    var sender = s.medium === 'busy' ? s.columns[s.columns.length - 1].senders[0] : null;
+    return h('div', { class: 'cd-net' },
+      h('div', { class: 'cd-stations' }, s.stations.map(function (x, i) {
+        return h('div', { class: 'cd-st' }, card(x, i, c), h('div', { class: 'cd-drop' }));
+      })),
+      h('div', { class: 'cd-bus', dataset: { m: s.medium, c: sender ? COLOUR[sender] : '' } },
+        h('span', { class: 'cd-bus-label' }, h('span', { class: 'cd-lab-muted' }, t('bus')), busLabel(s))));
+  }
+
+  function lane(s, from, to, p) {
+    var col = s.columns[s.columns.length - 1];
+    var busy = !!col && col.senders.indexOf(from) >= 0;
+    return h('div', { class: 'cd-bus cd-lane', dataset: { m: busy ? 'busy' : 'idle', c: COLOUR[from] } },
+      h('span', { class: 'cd-bus-label' }, t('laneTo', { a: nameOf(from, p), b: nameOf(to, p) }), ' · ', t(busy ? 'laneBusy' : 'laneIdle')));
+  }
+
+  function duplexLink(s, c) {
+    var p = c.params;
+    return h('div', { class: 'cd-duo' },
+      card(s.stations[0], 0, c),
+      h('div', { class: 'cd-lanes' }, h('div', { class: 'cd-lanes-title' }, t('link')), lane(s, 'A', 'B', p), lane(s, 'B', 'A', p)),
+      card(s.stations[1], 1, c));
+  }
+
+  // ── captions ──
+
+  function prevOf(c, id) {
+    return c.prev ? c.prev.stations.filter(function (x) { return x.id === id; })[0] : null;
+  }
+
+  function collisionParts(e, c) {
+    var p = c.params, out = [];
+    var prev = e.ids.map(function (id) { return prevOf(c, id); });
+    var allDefer = prev.every(function (x) { return x && x.phase === 'defer'; });
+    var sameK = prev.every(function (x) { return x && x.k != null && (x.phase === 'backoff' || x.phase === 'jam') && x.k === prev[0].k; });
+    if (allDefer) out.push(t('capCollDefer', { ids: list(e.ids, p) }));
+    else if (sameK) out.push(t('capCollSame', { ids: list(e.ids, p), k: prev[0].k }));
+    else out.push(t('capCollNew', { ids: list(e.ids, p) }));
+    out.push(t('capJam'));
+    if (e.draws.length) {
+      var sameN = e.draws.every(function (d) { return d.n === e.draws[0].n; });
+      if (sameN) {
+        out.push(t('capDrawsSame', { n: e.draws[0].n, max: e.draws[0].range - 1,
+          list: e.draws.map(function (d) { return t('drawItem', { id: d.id, k: d.k }); }).join(', ') }));
+      } else {
+        out.push(t('capDrawsMixed', { list: e.draws.map(function (d) {
+          return t('drawItemN', { id: d.id, n: d.n, max: d.range - 1, k: d.k });
+        }).join(', ') }));
+      }
+      var byK = {};
+      e.draws.forEach(function (d) { (byK[d.k] = byK[d.k] || []).push(d.id); });
+      Object.keys(byK).forEach(function (k) { if (byK[k].length > 1) out.push(t('capTie', { ids: list(byK[k], p) })); });
+    }
+    return out;
+  }
+
+  function startText(e, c) {
+    var p = c.params, id = e.ids[0], before = prevOf(c, id), f = p.frameSlots;
+    if (before && before.phase === 'defer') return t('capStartAfterDefer', { id: id, f: f });
+    if (before && before.phase === 'jam' && before.k === 0) return t('capStartK0', { id: id, f: f });
+    if (before && (before.phase === 'backoff' || before.phase === 'jam')) return t('capStartAfterWait', { id: id, f: f });
+    return t('capStart', { id: id, f: f });
+  }
+
+  function captionText(c) {
+    var s = c.state, p = c.params, cfg = L.cfgOf(p), out = [];
+    if (c.first) {
+      var ready = s.stations.filter(function (x) { return x.phase === 'ready'; }).map(function (x) { return x.id; });
+      if (full(p)) out.push(t('capStartFull'));
+      if (ready.length) out.push(full(p) ? t.n('capReady', ready.length, { ids: list(ready, p) }) : t.n('capStartHalf', ready.length, { ids: list(ready, p) }));
+      var later = {};
+      cfg.stations.forEach(function (x) { if (x.arrive > 1) (later[x.arrive] = later[x.arrive] || []).push(x.id); });
+      Object.keys(later).forEach(function (slot) { out.push(t.n('capLater', later[slot].length, { ids: list(later[slot], p), t: slot })); });
+      return out.join(' ');
+    }
+    out.push(t('capSlot', { t: s.slot }));
+    var ev = {};
+    s.log.forEach(function (e) { ev[e.code] = e; });
+    if (full(p)) {
+      if (ev.fullStart) out.push(t('capFullStart'));
+      else if (ev.deliver) out.push(t('capFullDeliver'));
+      else if (ev.idle) out.push(t('capFullIdle'));
+      else out.push(t('capFullContinue'));
+    } else {
+      if (ev.arrive) out.push(t.n('capArrive', ev.arrive.ids.length, { ids: list(ev.arrive.ids, p) }));
+      if (ev.collision) out.push.apply(out, collisionParts(ev.collision, c));
+      if (ev.start) out.push(startText(ev.start, c));
+      if (ev['continue']) out.push(t('capContinue', { id: ev['continue'].ids[0], v: ev['continue'].v, f: p.frameSlots }));
+      if (ev.deliver) out.push(t('capDeliver', { id: ev.deliver.ids[0] }));
+      if (ev.idle) out.push(t('capIdle'));
+      if (ev.defer) out.push(t.n('capDefer', ev.defer.ids.length, { ids: list(ev.defer.ids, p), by: ev.defer.by }));
+      if (ev.drop) out.push(t.n('capDrop', ev.drop.ids.length, { ids: list(ev.drop.ids, p) }));
+      if (ev.wait) {
+        var still = [], over = [];
+        // v: the counter as the cell shows it (slots left, this one included); 1 = the last waiting slot
+        ev.wait.ids.forEach(function (id, i) { if (ev.wait.left[i] > 0) still.push(t('waitItem', { id: id, v: ev.wait.left[i] + 1 })); else over.push(id); });
+        if (still.length) out.push(t.n('capWait', still.length, { list: still.join(', ') }));
+        if (over.length) out.push(t.n('capWaitDone', over.length, { ids: list(over, p) }));
+      }
+    }
+    if (c.last) {
+      if (s.done) {
+        var delivered = s.stations.reduce(function (a, x) { return a + x.delivered; }, 0);
+        var dropped = s.stations.reduce(function (a, x) { return a + x.gaveUp; }, 0);
+        out.push(t('capEnd', { frames: t.n('frames', delivered), colls: t.n('colls', s.collisions), slots: t.n('slots', s.slot) }));
+        if (dropped) out.push(t('capEndDrop', { n: dropped }));
+      } else {
+        var left = s.stations.filter(function (x) { return x.queued > 0; }).map(function (x) { return x.id; });
+        out.push(t.n('capCap', left.length, { slots: t.n('slots', s.slot), ids: list(left, p) }));
+      }
+    }
+    return out.join(' ');
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'stations', type: 'range', label: t('pStations'), min: 2, max: 4,
+        disabled: function (p) { return full(p) ? t('pStationsFull') : false; } },
+      { key: 'duplex', type: 'choice', label: t('pDuplex'), resets: true, options: [['half', t('half')], ['full', t('full')]] },
+      { key: 'frameSlots', type: 'range', label: t('pFrameSlots'), min: 1, max: 4 },
+      // 0 = the example's scripted draws; 1–99 = every k from that seed
+      { key: 'seed', type: 'range', label: t('pSeed'), min: 0, max: 99, visible: function (p) { return !full(p); },
+        format: function (v) { return v ? String(v) : t('seedScript'); } },
+      // N: a fresh seed, so every k is drawn anew (kit buttons cannot be hidden; in full duplex nothing is drawn)
+      { type: 'button', label: t('bNewDraw'), key: 'n', run: function (sim) {
+          var next = sim.params.seed;
+          while (next === sim.params.seed) next = 1 + Simdeck.rng(drawSeed++).int(99);
+          sim.set({ seed: next });
+          sim.first();
+        } },
+      // the presets' scene (arrivals and scripted draws): hidden, but kept in the URL so a link or L keeps it
+      { key: 'scene', type: 'choice', label: t('pScene'), visible: function () { return false; },
+        options: Object.keys(L.SCENES).map(function (k) { return [k, k]; }) }
+    ],
+
+    presets: [
+      { id: 'two-collide', label: t('prTwo'), hint: t('prTwoHint'), params: { scene: 'two-collide', stations: 2, duplex: 'half', seed: 0 } },
+      { id: 'same-draw', label: t('prSame'), hint: t('prSameHint'), params: { scene: 'same-draw', stations: 2, duplex: 'half', seed: 0 } },
+      { id: 'wait-then-crash', label: t('prWait'), hint: t('prWaitHint'), params: { scene: 'wait-then-crash', stations: 3, duplex: 'half', seed: 0 } },
+      { id: 'three-stations', label: t('prThree'), hint: t('prThreeHint'), params: { scene: 'three-stations', stations: 3, duplex: 'half', seed: 0 } },
+      { id: 'full-duplex', label: t('prFull'), hint: t('prFullHint'), params: { scene: 'full-duplex', stations: 2, duplex: 'full', seed: 0 } }
+    ],
+
+    legend: [
+      { c: 1, shape: 'cd-send', label: t('legendSend') },
+      { shape: 'hollow', label: t('legendIdle') },
+      { shape: 'cd-coll', label: t('legendColl') },
+      { c: 1, shape: 'cd-wait', label: t('legendWait') },
+      { c: 1, shape: 'cd-defer', label: t('legendDefer') },
+      { shape: 'hl', label: t('legendNow') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      c.stage.replaceChildren(h('div', { class: 'cd' }, timeline(s, c), full(c.params) ? duplexLink(s, c) : half(s, c)));
+    },
+
+    caption: function (c) { return captionText(c); }
+  });
+})();
+</script>
+</body>
+</html>
