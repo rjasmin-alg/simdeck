@@ -1,0 +1,568 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Collision and broadcast domains (task docs/tasks/w3/domains.md). An explorer: swap the device in a slot and the two
+     walks in sim.js redraw the domains; the domains that appeared, merged or split since the last change are marked.
+     The model is in sim.js (rules in SPEC.md), the words in strings.js. The drawing is the page's own (NOTES.md): kit
+     view K2 has no outlines around groups of links and devices, so shapes are SVG in a fixed viewBox (no text) and
+     every label is HTML placed over it. -->
+<html lang="hr" data-sim="domains">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kolizijske i broadcast domene · simdeck</title>
+<meta name="description" content="Koncentrator, preklopnik i usmjernik: tko dijeli kolizijske, a tko broadcast domene.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "domains",
+  "title": {
+    "hr": "Kolizijske i broadcast domene",
+    "en": "Collision and broadcast domains"
+  },
+  "concept": {
+    "hr": "Koncentrator, preklopnik i usmjernik dijele različite domene",
+    "en": "Hubs, switches and routers split different domains"
+  },
+  "summary": {
+    "hr": "Zamijeni koncentrator, preklopnik ili usmjernik i gledaj kako se kolizijske i broadcast domene prebojaju i prebroje, neovisno jedne o drugima.",
+    "en": "Swap a hub, a switch or a router and watch the collision and broadcast domains redrawn and recounted, each independently of the other."
+  },
+  "tags": [
+    "switching"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "primjer-3"
+    },
+    {
+      "preset": "primjer-3b"
+    },
+    {
+      "preset": "office-hub"
+    },
+    {
+      "preset": "no-router"
+    },
+    {
+      "preset": "vlans"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="domains"]; colours only from kit tokens. */
+[data-sim="domains"] .dm { display: flex; flex-direction: column; height: 100%; padding: 1cqh 1.2cqw; gap: 0.6rem; }
+
+/* the two counters */
+[data-sim="domains"] .dm-counts { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem 2rem; font-size: var(--fs-lg); }
+[data-sim="domains"] .dm-count {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.3rem 0.9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="domains"] .dm-count.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="domains"] .dm-count-n { font-size: var(--fs-xl); font-weight: 700; min-width: 1.6em; text-align: center; }
+[data-sim="domains"] .dm-count-head { font-weight: 700; }
+[data-sim="domains"] .dm-count-sub { font-size: var(--fs-sm); }
+[data-sim="domains"] .dm-count-icon { flex: none; width: 1.6rem; height: 1.6rem; border: 0.2rem solid var(--ink); }
+[data-sim="domains"] .dm-count-icon.dm-i-cd { border-radius: 50%; background: repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 6px); }
+[data-sim="domains"] .dm-count-icon.dm-i-bd { border-width: var(--line-w); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ink) 18%, transparent); }
+
+/* the scene: SVG shapes in a 1600 × 600 viewBox, HTML labels placed over them in % of the same box */
+[data-sim="domains"] .dm-wrap { flex: 1 1 auto; min-height: 0; container-type: size; display: grid; place-items: center; }
+[data-sim="domains"] .dm-scene { position: relative; width: min(100cqw, 100cqh * 1600 / 600); aspect-ratio: 1600 / 600; }
+[data-sim="domains"] .dm-scene svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="domains"] .dm-at { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; }
+
+[data-sim="domains"] .dm-k1 { --k: var(--c1); }
+[data-sim="domains"] .dm-k2 { --k: var(--c2); }
+[data-sim="domains"] .dm-k3 { --k: var(--c3); }
+[data-sim="domains"] .dm-k4 { --k: var(--c4); }
+[data-sim="domains"] .dm-k5 { --k: var(--c5); }
+[data-sim="domains"] .dm-k6 { --k: var(--c6); }
+[data-sim="domains"] .dm-k7 { --k: var(--c7); }
+[data-sim="domains"] .dm-k8 { --k: var(--c8); }
+
+/* broadcast regions: outline, then an opaque base, then a tint (a group, so overlaps do not darken) */
+[data-sim="domains"] .dm-r-out line { stroke: var(--k); }
+[data-sim="domains"] .dm-r-out circle, [data-sim="domains"] .dm-r-out rect { fill: var(--k); }
+[data-sim="domains"] .dm-r-base line { stroke: var(--bg); }
+[data-sim="domains"] .dm-r-base circle, [data-sim="domains"] .dm-r-base rect { fill: var(--bg); }
+[data-sim="domains"] .dm-r-tint { opacity: 0.2; }
+[data-sim="domains"] .dm-r-tint line { stroke: var(--k); }
+[data-sim="domains"] .dm-r-tint circle, [data-sim="domains"] .dm-r-tint rect { fill: var(--k); }
+[data-sim="domains"] .dm-ch .dm-r-out line { stroke: var(--ink); }
+[data-sim="domains"] .dm-ch .dm-r-out circle, [data-sim="domains"] .dm-ch .dm-r-out rect { fill: var(--ink); }
+
+/* collision tubes: outline, base (highlighter when changed), hatch in the domain's colour */
+[data-sim="domains"] .dm-c-out line { stroke: var(--k); }
+[data-sim="domains"] .dm-c-out circle { fill: var(--k); }
+[data-sim="domains"] .dm-c-base line { stroke: var(--bg); }
+[data-sim="domains"] .dm-c-base circle { fill: var(--bg); }
+[data-sim="domains"] .dm-ch .dm-c-out line { stroke: var(--ink); }
+[data-sim="domains"] .dm-ch .dm-c-out circle { fill: var(--ink); }
+[data-sim="domains"] .dm-ch .dm-c-base line { stroke: var(--hl); }
+[data-sim="domains"] .dm-ch .dm-c-base circle { fill: var(--hl); }
+[data-sim="domains"] pattern line { stroke: var(--k); }
+[data-sim="domains"] pattern circle { fill: var(--k); }
+
+/* links and devices */
+[data-sim="domains"] .dm-link { stroke: var(--ink); }
+[data-sim="domains"] .dm-dev { fill: var(--panel); stroke: var(--ink); }
+[data-sim="domains"] .dm-ink { fill: var(--ink); }
+[data-sim="domains"] .dm-arrow { fill: none; stroke: var(--ink); stroke-linecap: round; stroke-linejoin: round; }
+
+/* labels over the drawing */
+[data-sim="domains"] .dm-net { font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="domains"] .dm-kind {
+  padding: 0.05rem 0.55rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+[data-sim="domains"] button.dm-kind { cursor: pointer; border-width: 0.18rem; }
+[data-sim="domains"] button.dm-kind::after { content: ' ⇄'; color: var(--accent); }
+[data-sim="domains"] button.dm-kind:hover { background: var(--panel); }
+[data-sim="domains"] button.dm-kind:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="domains"] .dm-num {
+  display: grid;
+  place-items: center;
+  min-width: 2.1rem;
+  height: 2.1rem;
+  padding: 0 0.3rem;
+  border-radius: 1.05rem;
+  background: var(--k);
+  color: var(--on-series);
+  font-weight: 700;
+}
+[data-sim="domains"] .dm-num.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: 0 0 0 0.22rem var(--ink); }
+[data-sim="domains"] .dm-let {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border: var(--line-w) solid var(--k);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 700;
+}
+[data-sim="domains"] .dm-let b { font-size: var(--fs-lg); }
+[data-sim="domains"] .dm-let small { font-size: var(--fs-sm); }
+[data-sim="domains"] .dm-let.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); box-shadow: 0 0 0 0.18rem var(--ink); }
+[data-sim="domains"] .dm-tag { font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="domains"] .dm-trunk { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.3rem; background: var(--bg); border-radius: var(--radius-sm); }
+
+/* kit 0.6.0: .sd-ctl's display: flex beats the hidden attribute, so a param's visible() hides nothing (NOTES.md) */
+[data-sim="domains"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="domains"] .sd-swatch[data-shape='dm-cd'] { border-radius: 50%; border-color: var(--c1); background: repeating-linear-gradient(45deg, var(--c1) 0 2px, var(--bg) 2px 5px); }
+[data-sim="domains"] .sd-swatch[data-shape='dm-bd'] { border-color: var(--c6); background: color-mix(in srgb, var(--c6) 22%, var(--bg)); }
+[data-sim="domains"] .sd-swatch[data-shape='dm-hub'] { border-radius: 50%; background: radial-gradient(circle, var(--ink) 0 0.16em, var(--panel) 0.19em); }
+[data-sim="domains"] .sd-swatch[data-shape='dm-sw'] { width: 1.8em; height: 0.8em; background: var(--panel); border-radius: 0.15em; }
+[data-sim="domains"] .sd-swatch[data-shape='dm-rt'] { position: relative; border-radius: 50%; background: var(--panel); }
+[data-sim="domains"] .sd-swatch[data-shape='dm-rt']::after { content: '⇄'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="domains"] .sd-swatch[data-shape='dm-trunk'] { width: 1.6em; height: 0.55em; border: 0; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); border-radius: 0; background: transparent; }
+
+/* Phone and portrait: the stage grows with its content; the drawing keeps a readable width and scrolls inside. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="domains"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="domains"] .dm { width: 100%; min-width: 0; height: auto; padding: 0.4rem 0.2rem; }
+  [data-sim="domains"] .dm-counts { gap: 0.4rem; font-size: var(--fs-md); }
+  [data-sim="domains"] .dm-count { flex-wrap: wrap; gap: 0.2rem 0.6rem; }
+  [data-sim="domains"] .dm-wrap { container-type: normal; display: block; place-items: normal; max-width: 100%; overflow-x: auto; }
+  [data-sim="domains"] .dm-scene { width: 62rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kolizijske i broadcast domene</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var NS = 'http://www.w3.org/2000/svg';
+  var VW = 1600, VH = 600;
+
+  // ── geometry, in viewBox units ──
+  var TW = 40, TB = 5, TBC = 9;          // collision tube: width, outline, outline when changed
+  var RW = 140, RB = 4, RBC = 8;         // broadcast region: width, outline, outline when changed
+  var HOST = { w: 64, h: 46, blob: 42, region: 54 };
+  var HUB_R = 44, ROUTER_R = 50, SW_H = 70;
+  var KIND_Y = 112, HOST_Y = 470, DEV_Y = 190;
+  var CD_COLOURS = 5, BD_COLOURS = [6, 7, 8];
+
+  /** Places of the devices and the switch port of each link, per layout (ports apply when the device is a switch). */
+  var PLACES = {
+    two: {
+      S1: { x: 330, y: DEV_Y, w: 300 }, R: { x: 770, y: DEV_Y, w: 180 }, S2: { x: 1060, y: DEV_Y, w: 260 },
+      X: { x: 1390, y: DEV_Y, w: 240 },
+      a1: { x: 120, y: HOST_Y }, a2: { x: 260, y: HOST_Y }, a3: { x: 400, y: HOST_Y }, a4: { x: 540, y: HOST_Y },
+      b1: { x: 970, y: HOST_Y }, b2: { x: 1120, y: HOST_Y },
+      c1: { x: 1270, y: HOST_Y }, c2: { x: 1390, y: HOST_Y }, c3: { x: 1510, y: HOST_Y }
+    },
+    office: { S1: { x: 800, y: DEV_Y, w: 820 } }
+  };
+  for (var i = 1; i <= 10; i++) PLACES.office['o' + i] = { x: 125 + (i - 1) * 150, y: HOST_Y };
+  var PORTS = {
+    two: {
+      'S1|S1-a1': [-105, 1], 'S1|S1-a2': [-35, 1], 'S1|S1-a3': [35, 1], 'S1|S1-a4': [105, 1], 'S1|S1-R': ['r', 0],
+      'R|S1-R': ['l', 0], 'R|R-S2': ['r', 0],
+      'S2|R-S2': ['l', 0], 'S2|S2-b1': [-50, 1], 'S2|S2-b2': [30, 1], 'S2|S2-X': ['r', 0],
+      'X|S2-X': ['l', 0], 'X|X-c1': [-70, 1], 'X|X-c2': [0, 1], 'X|X-c3': [70, 1]
+    },
+    office: {}
+  };
+  for (i = 1; i <= 10; i++) PORTS.office['S1|S1-o' + i] = [(i - 5.5) * 80, 1];
+
+  function place(layout, id) { return PLACES[layout][id]; }
+  /** Where a link meets a device: a switch's port, a router's rim, else the centre (hosts and hubs). */
+  function endPoint(sc, l, id) {
+    var d = sc.devices[id], p = place(sc.layout, id), other = place(sc.layout, l.a === id ? l.b : l.a);
+    if (d.kind === 'switch') {
+      var spec = PORTS[sc.layout][id + '|' + l.id];
+      if (spec[0] === 'l') return { x: p.x - p.w / 2, y: p.y };
+      if (spec[0] === 'r') return { x: p.x + p.w / 2, y: p.y };
+      return { x: p.x + spec[0], y: p.y + SW_H / 2 };
+    }
+    if (d.kind === 'router') {
+      var dx = other.x - p.x, dy = other.y - p.y, len = Math.hypot(dx, dy);
+      return { x: p.x + ROUTER_R * dx / len, y: p.y + ROUTER_R * dy / len };
+    }
+    return { x: p.x, y: p.y };
+  }
+  /** Move point a towards b by d. */
+  function toward(a, b, d) {
+    var dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+    return { x: a.x + d * dx / len, y: a.y + d * dy / len };
+  }
+  function linkById(sc, id) { return sc.links.filter(function (l) { return l.id === id; })[0]; }
+
+  /** A collision tube's segment for one link: from a switch or router port it starts just outside the device. */
+  function tubeSeg(sc, l) {
+    var a = endPoint(sc, l, l.a), b = endPoint(sc, l, l.b);
+    var cut = TW / 2 + TBC + 3;
+    var ka = sc.devices[l.a].kind, kb = sc.devices[l.b].kind;
+    var a2 = ka === 'switch' || ka === 'router' ? toward(a, b, cut) : a;
+    var b2 = kb === 'switch' || kb === 'router' ? toward(b, a, cut) : b;
+    return [a2, b2];
+  }
+  /** A broadcast region's segment for one link: it stops short of a router, runs to the centre of anything else. */
+  function regionSeg(sc, l, rw) {
+    var cut = rw / 2 + RBC + 4;
+    function end(id, other) {
+      var p = place(sc.layout, id);
+      if (sc.devices[id].kind === 'router') return toward(endPoint(sc, l, id), place(sc.layout, other), cut);
+      if (sc.devices[id].kind === 'switch') return endPoint(sc, l, id);
+      return { x: p.x, y: p.y };
+    }
+    return [end(l.a, l.b), end(l.b, l.a)];
+  }
+
+  // ── SVG helpers ──
+  function s(tag, attrs, kids) {
+    var el = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) el.setAttribute(k, String(attrs[k])); });
+    (kids || []).forEach(function (c) { if (c) el.appendChild(c); });
+    return el;
+  }
+  function seg(p, w) { return s('line', { x1: p[0].x, y1: p[0].y, x2: p[1].x, y2: p[1].y, 'stroke-width': w, 'stroke-linecap': 'round' }); }
+  function pct(x, y) { return { left: (100 * x / VW) + '%', top: (100 * y / VH) + '%' }; }
+  function at(x, y, cls, attrs, kids) {
+    return h('div', Object.assign({ class: 'dm-at ' + cls, style: pct(x, y) }, attrs || {}), kids);
+  }
+
+  /** Hatch patterns per collision domain number: four angles, the colour cycles over c1–c5. */
+  function hatch(n) {
+    var id = 'dm-h' + n, k = 1 + (n - 1) % CD_COLOURS, kind = Math.floor((n - 1) / CD_COLOURS) % 3;
+    var rot = [45, -45, 0][kind];
+    return s('pattern', { id: id, class: 'dm-k' + k, patternUnits: 'userSpaceOnUse', width: 12, height: 12, patternTransform: 'rotate(' + rot + ')' },
+      [s('line', { x1: 0, y1: 0, x2: 0, y2: 12, 'stroke-width': n % 2 ? 4 : 2.5 })]);
+  }
+
+  // ── the domains ──
+  /** Regions, first to last. A later VLAN's region is narrower, so where VLANs share a switch and a trunk the one drawn
+      on top leaves the one under it visible around it. */
+  function regions(sc, bds, changed) {
+    return bds.map(function (d, i) {
+      var ch = changed.indexOf(i) >= 0;
+      var rw = d.vlan != null && L.VLANS.indexOf(d.vlan) > 0 ? RW * 0.6 : RW;
+      function pass(cls, extra) {
+        var kids = [];
+        d.links.forEach(function (lid) { kids.push(seg(regionSeg(sc, linkById(sc, lid), rw), rw + 2 * extra)); });
+        d.devices.forEach(function (id) {
+          var p = place(sc.layout, id), k = sc.devices[id].kind;
+          if (k === 'host') kids.push(s('circle', { cx: p.x, cy: p.y, r: HOST.region + extra }));
+          else if (k === 'hub') kids.push(s('circle', { cx: p.x, cy: p.y, r: RW / 2 + extra }));
+          else if (k === 'switch') {
+            var pad = rw / 2 - SW_H / 2 + extra;
+            kids.push(s('rect', { x: p.x - p.w / 2 - pad, y: p.y - SW_H / 2 - pad, width: p.w + 2 * pad, height: SW_H + 2 * pad, rx: rw / 2 + extra }));
+          }
+        });
+        return s('g', { class: cls }, kids);
+      }
+      var b = ch ? RBC : RB;
+      return s('g', { class: 'dm-k' + BD_COLOURS[i % BD_COLOURS.length] + (ch ? ' dm-ch' : '') },
+        [pass('dm-r-out', b), pass('dm-r-base', 0), pass('dm-r-tint', 0)]);
+    });
+  }
+  function tubes(sc, cds, changed) {
+    return cds.map(function (d, i) {
+      var ch = changed.indexOf(i) >= 0, n = i + 1;
+      function pass(cls, extra, paint) {
+        var kids = [];
+        d.links.forEach(function (lid) {
+          var line = seg(tubeSeg(sc, linkById(sc, lid)), TW + 2 * extra);
+          if (paint) line.setAttribute('stroke', paint);
+          kids.push(line);
+        });
+        d.devices.forEach(function (id) {
+          var p = place(sc.layout, id), r = (sc.devices[id].kind === 'hub' ? HUB_R + 14 : HOST.blob) + extra;
+          var c = s('circle', { cx: p.x, cy: p.y, r: r });
+          if (paint) c.setAttribute('fill', paint);
+          kids.push(c);
+        });
+        return s('g', { class: cls }, kids);
+      }
+      return s('g', { class: 'dm-k' + (1 + i % CD_COLOURS) + (ch ? ' dm-ch' : '') },
+        [pass('dm-c-out', ch ? TBC : TB), pass('dm-c-base', 0), pass('dm-c-hatch', 0, 'url(#dm-h' + n + ')')]);
+    });
+  }
+
+  // ── links and devices ──
+  function links(sc) {
+    return sc.links.map(function (l) {
+      var a = endPoint(sc, l, l.a), b = endPoint(sc, l, l.b);
+      if (!l.trunk) return s('line', { class: 'dm-link', x1: a.x, y1: a.y, x2: b.x, y2: b.y, 'stroke-width': 3 });
+      return s('g', null, [-5, 5].map(function (o) {
+        return s('line', { class: 'dm-link', x1: a.x, y1: a.y + o, x2: b.x, y2: b.y + o, 'stroke-width': 3 });
+      }));
+    });
+  }
+  function device(sc, id) {
+    var d = sc.devices[id], p = place(sc.layout, id);
+    if (d.kind === 'host') {
+      return s('g', null, [
+        s('rect', { class: 'dm-dev', x: p.x - HOST.w / 2, y: p.y - HOST.h / 2 - 4, width: HOST.w, height: HOST.h, rx: 6, 'stroke-width': 3 }),
+        s('rect', { class: 'dm-ink', x: p.x - 14, y: p.y + HOST.h / 2 - 2, width: 28, height: 7, rx: 2 })]);
+    }
+    if (d.kind === 'hub') {
+      return s('g', null, [
+        s('circle', { class: 'dm-dev', cx: p.x, cy: p.y, r: HUB_R, 'stroke-width': 3 }),
+        s('circle', { class: 'dm-ink', cx: p.x, cy: p.y, r: 12 })]);
+    }
+    if (d.kind === 'router') {
+      return s('g', null, [
+        s('circle', { class: 'dm-dev', cx: p.x, cy: p.y, r: ROUTER_R, 'stroke-width': 3 }),
+        s('path', { class: 'dm-arrow', 'stroke-width': 5, d: 'M' + (p.x - 26) + ' ' + (p.y - 11) + 'h48m-12-11l12 11l-12 11' }),
+        s('path', { class: 'dm-arrow', 'stroke-width': 5, d: 'M' + (p.x + 26) + ' ' + (p.y + 11) + 'h-48m12-11l-12 11l12 11' })]);
+    }
+    var kids = [s('rect', { class: 'dm-dev', x: p.x - p.w / 2, y: p.y - SW_H / 2, width: p.w, height: SW_H, rx: 8, 'stroke-width': 3 })];
+    sc.links.forEach(function (l) {
+      if (l.a !== id && l.b !== id) return;
+      var e = endPoint(sc, l, id), side = e.y === p.y;
+      kids.push(s('rect', { class: 'dm-ink', x: e.x - (side ? 6 : 9), y: e.y - (side ? 9 : 6), width: side ? 12 : 18, height: side ? 18 : 12, rx: 2 }));
+    });
+    return s('g', null, kids);
+  }
+
+  // ── labels over the drawing ──
+  var SLOT_OF = { S1: 'net1Core', R: 'router', X: 'net2Edge' };
+  var OTHER = { net1Core: { hub: 'switch', switch: 'hub' }, net2Edge: { hub: 'switch', switch: 'hub' }, router: { router: 'switch', switch: 'router' } };
+  function kindWord(k) { return t(k === 'router' ? 'routerKind' : k); }
+  function labels(st, params) {
+    var sc = st.scene, out = [];
+    if (sc.layout === 'two') {
+      out.push(at(330, 30, 'dm-net', null, t('net1')), at(1200, 30, 'dm-net', null, t('net2')));
+    } else out.push(at(800, 30, 'dm-net', null, t('office')));
+    Object.keys(sc.devices).forEach(function (id) {
+      var d = sc.devices[id], p = place(sc.layout, id);
+      if (d.kind === 'host') {
+        if (d.vlan != null) out.push(at(p.x, p.y - 4, 'dm-tag', { translate: 'no' }, String(d.vlan)));
+        return;
+      }
+      var slot = SLOT_OF[id];
+      if (!slot) { out.push(at(p.x, KIND_Y, 'dm-kind', null, kindWord(d.kind))); return; }
+      var next = OTHER[slot][params[slot]];
+      var patch = {};
+      patch[slot] = next;
+      out.push(h('button', {
+        type: 'button', class: 'dm-at dm-kind', style: pct(p.x, KIND_Y),
+        'aria-label': t('swap', { from: kindWord(d.kind), to: kindWord(next) }),
+        onmousedown: function (e) { e.preventDefault(); },
+        onclick: function () { if (sim) sim.set(patch); }
+      }, kindWord(d.kind)));
+    });
+    var trunk = sc.links.filter(function (l) { return l.trunk; })[0];
+    if (trunk) {
+      var ta = endPoint(sc, trunk, trunk.a), tb = endPoint(sc, trunk, trunk.b);
+      var tl = at((ta.x + tb.x) / 2, ta.y + 48, 'dm-trunk', null);
+      tl.innerHTML = t.html('trunk');
+      out.push(tl);
+    }
+    st.collision.forEach(function (d, i) {
+      var sg = tubeSeg(sc, linkById(sc, d.links[0]));
+      var ch = st.changedCollision.indexOf(i) >= 0;
+      out.push(at((sg[0].x + sg[1].x) / 2, (sg[0].y + sg[1].y) / 2, 'dm-num dm-k' + (1 + i % CD_COLOURS) + (ch ? ' sd-changed' : ''),
+        { translate: 'no' }, String(i + 1)));
+    });
+    st.broadcast.forEach(function (d, i) {
+      var host = d.devices.filter(function (id) { return sc.devices[id].kind === 'host'; })[0];
+      var p = place(sc.layout, host);
+      var ch = st.changedBroadcast.indexOf(i) >= 0;
+      out.push(at(p.x, p.y + RW / 2, 'dm-let dm-k' + BD_COLOURS[i % BD_COLOURS.length] + (ch ? ' sd-changed' : ''), null, [
+        h('b', { translate: 'no' }, String.fromCharCode(65 + i)),
+        d.vlan != null ? h('small', null, t('vlanTag', { v: d.vlan })) : null]));
+    });
+    return out;
+  }
+
+  function counts(st) {
+    var cc = st.was && st.was.collision !== st.collision.length;
+    var bc = st.was && st.was.broadcast !== st.broadcast.length;
+    function head(key) { var x = h('span', { class: 'dm-count-head' }); x.innerHTML = t.html(key); return x; }
+    var sub = [];
+    if (st.layout === 'two') sub.push(t('perNet', { a: st.perNet[1], b: st.perNet[2] }));
+    if (cc) sub.push(t('was', { n: st.was.collision }));
+    return h('div', { class: 'dm-counts' },
+      h('div', { class: 'dm-count' + (cc ? ' sd-changed' : '') },
+        h('span', { class: 'dm-count-icon dm-i-cd', 'aria-hidden': 'true' }), head('collHead'),
+        h('span', { class: 'dm-count-n' }, String(st.collision.length)),
+        sub.length ? h('span', { class: 'dm-count-sub' }, sub.join(' · ')) : null),
+      h('div', { class: 'dm-count' + (bc ? ' sd-changed' : '') },
+        h('span', { class: 'dm-count-icon dm-i-bd', 'aria-hidden': 'true' }), head('bcHead'),
+        h('span', { class: 'dm-count-n' }, String(st.broadcast.length)),
+        bc ? h('span', { class: 'dm-count-sub' }, t('was', { n: st.was.broadcast })) : null));
+  }
+
+  function drawing(st, params) {
+    var sc = st.scene;
+    var defs = s('defs', null, st.collision.map(function (d, i) { return hatch(i + 1); }));
+    var svg = s('svg', { viewBox: '0 0 ' + VW + ' ' + VH, preserveAspectRatio: 'xMidYMid meet', 'aria-hidden': 'true' },
+      [defs].concat(regions(sc, st.broadcast, st.changedBroadcast), tubes(sc, st.collision, st.changedCollision), links(sc),
+        Object.keys(sc.devices).map(function (id) { return device(sc, id); })));
+    return h('div', { class: 'dm-wrap' }, h('div', { class: 'dm-scene' }, svg, labels(st, params)));
+  }
+
+  // ── the "before" params: a preset's own, else the params before the last change (L.nextBefore) ──
+  var lastParams = null, before = null, cur = null;
+  function track(c) {
+    var pr = c.preset ? L.presets.filter(function (x) { return x.id === c.preset; })[0] : null;
+    before = L.nextBefore(before, lastParams, c.params, pr);
+    lastParams = Object.assign({}, c.params);
+    cur = L.compare(before, c.params);
+  }
+
+  // ── caption ──
+  var WHY = { router: 'whyRouter', vlan: 'whyVlan', none: 'whyNone' };
+  var WHERE = { net1: 'whereNet1', net2: 'whereNet2', office: 'whereOffice', both: 'whereBoth' };
+  function caption(c) {
+    var st = cur, ck = L.captionKey(before, c.params);
+    var C = st.collision.length, B = st.broadcast.length;
+    var coll = t.html('nColl', { n: C }), bc = t.html('nBc', { n: B });
+    var duplex = c.params.layout === 'office' && c.params.net1Core === 'switch';
+    var html;
+    if (ck.key === 'capTwo') html = t.html('capTwo', { coll: coll, n1: st.perNet[1], n2: st.perNet[2], why: t.html(WHY[ck.why], { bc: bc }) });
+    else if (ck.key === 'capOffice') html = t.html('capOffice_' + c.params.net1Core, { coll: coll, bc: bc });
+    else {
+      var what = t.html('what_' + ck.what), was = st.was;
+      if (ck.key === 'capColl') {
+        var now = ck.where === 'net1' ? st.perNet[1] : ck.where === 'net2' ? st.perNet[2] : C;
+        var then = ck.where === 'net1' ? was.perNet[1] : ck.where === 'net2' ? was.perNet[2] : was.collision;
+        html = t.html('capColl', { what: what, where: t.html(WHERE[ck.where]), coll: t.html('nColl', { n: now }), was: then, bcStill: t.html('bcStill', { n: B }) });
+      } else if (ck.key === 'capBc') {
+        var b0 = was.broadcast, key = B === 1 && b0 > 1 ? 'capMerge' : b0 === 1 && B > 1 ? 'capSplit' : 'capBc';
+        html = t.html(key, { what: what, b0: b0, b: B, move: t(B > b0 ? 'moveUp' : 'moveDown'), collStill: t.html('collStill', { n: C }) });
+      } else if (ck.key === 'capBoth') html = t.html('capBoth', { what: what, coll: coll, was: was.collision, bc: bc, b0: was.broadcast });
+      else html = t.html('capSame', { what: what, coll: coll, bc: bc });
+    }
+    if (duplex) html += ' ' + t.html('noteDuplex');
+    var out = h('span');
+    out.innerHTML = html;
+    return out;
+  }
+
+  var visibleTwo = function (p) { return p.layout === 'two'; };
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'layout', type: 'choice', label: t('layout'), options: [['two', t('layoutTwo')], ['office', t('layoutOffice')]] },
+      { key: 'net1Core', type: 'choice', label: t('net1Core'), options: [['hub', t('hub')], ['switch', t('switch')]] },
+      { key: 'net2Edge', type: 'choice', label: t('net2Edge'), visible: visibleTwo, options: [['hub', t('hub')], ['switch', t('switch')]] },
+      { key: 'router', type: 'choice', label: t('router'), visible: visibleTwo, options: [['router', t('routerKind')], ['switch', t('switch')]] },
+      { key: 'vlans', type: 'toggle', label: t('vlans'), visible: visibleTwo, disabled: function (p) {
+        var why = L.vlansBlocked(p);
+        return why === 'hub' ? t('vlanHub') : why === 'noRouter' ? t('vlanNoRouter') : false;
+      } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'dm-cd', label: t('legColl') },
+      { shape: 'dm-bd', label: t('legBc') },
+      { shape: 'dm-hub', label: t('legHub') },
+      { shape: 'dm-sw', label: t('legSwitch') },
+      { shape: 'dm-rt', label: t('legRouter') },
+      { shape: 'dm-trunk', label: t('legTrunk') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'dm' }, counts(cur), drawing(cur, c.params)));
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
