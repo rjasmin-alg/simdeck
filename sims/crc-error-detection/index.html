@@ -1,0 +1,512 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- crc-error-detection: parity and CRC on the same message. A stepper drawn in HTML (the kit has no bit strip view):
+     the sender's two frames and the receiver's two frames on the left, the long division modulo 2 on the right.
+     Rules: SPEC.md; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="crc-error-detection">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRC i paritet · simdeck</title>
+<meta name="description" content="Pošalji poruku s paritetom i s CRC-om, promijeni bitove na vodu i vidi tko otkriva pogrešku.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "crc-error-detection",
+  "title": {
+    "hr": "CRC i paritet: otkrivanje pogrešaka",
+    "en": "CRC and parity: error detection"
+  },
+  "concept": {
+    "hr": "CRC otkriva rafalne pogreške koje paritet promaši",
+    "en": "A CRC catches the burst errors that parity misses"
+  },
+  "summary": {
+    "hr": "Pošiljatelj dijeli poruku modulo 2 i šalje ostatak kao FCS. Promijeni bitove na vodu: paritet promaši paran broj, CRC otkriva rafal.",
+    "en": "The sender divides the message modulo 2 and sends the remainder as the FCS. Flip bits on the line: parity misses an even count, a CRC still detects the burst."
+  },
+  "tags": [
+    "error-detection"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="crc-error-detection"]; colours only from kit tokens.
+   A bit is a cell with its digit: message bits tinted --c1, check bits (P, FCS) tinted --c2 with a double border and
+   a gap before them. A bit flipped on the line is hatched with a --danger border and a ✕; a planned flip shows only
+   the ✕. The XOR window is the highlighter with an ink outline. Verdicts are a symbol and a word: ✓ accepted,
+   ⚑ detected, ✕ missed. */
+[data-sim="crc-error-detection"] .ce {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1cqh 2.2cqw;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+}
+[data-sim="crc-error-detection"] .ce-frames {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.2cqh;
+  min-width: 0;
+  container-type: inline-size;
+  /* --n bits in the longer strip (message + FCS); every cell takes 1.08 cells with its gap, plus the gap before the check bits */
+  --cell: min(calc(100cqw / (var(--n) * 1.08 + 0.4)), 3.6rem);
+}
+[data-sim="crc-error-detection"] .ce-side { display: flex; flex-direction: column; gap: 0.9cqh; }
+[data-sim="crc-error-detection"] .ce-side-name { font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-frame { display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="crc-error-detection"] .ce-frame-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 1rem;
+}
+[data-sim="crc-error-detection"] .ce-frame-name { font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-note { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="crc-error-detection"] .ce-note b { color: var(--ink); }
+[data-sim="crc-error-detection"] .ce-strip { display: flex; gap: calc(var(--cell) * 0.08); }
+[data-sim="crc-error-detection"] .ce-gap { width: calc(var(--cell) * 0.35); flex: none; }
+[data-sim="crc-error-detection"] .ce-bit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--cell);
+  height: calc(var(--cell) * 1.15);
+  padding: 0;
+  border: max(2px, 0.12rem) solid var(--sw);
+  border-radius: var(--radius);
+  font: 700 max(16px, calc(var(--cell) * 0.56)) / 1 var(--mono);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--sw) 16%, var(--bg));
+}
+[data-sim="crc-error-detection"] .ce-bit[data-k="check"] { border-style: double; border-width: max(4px, 0.22rem); }
+[data-sim="crc-error-detection"] .ce-bit[data-k="ghost"] { border-style: dashed; border-color: var(--line); background: var(--bg); color: var(--muted); }
+[data-sim="crc-error-detection"] button.ce-bit { cursor: pointer; }
+[data-sim="crc-error-detection"] button.ce-bit:hover { background: color-mix(in srgb, var(--sw) 30%, var(--bg)); }
+[data-sim="crc-error-detection"] button.ce-bit:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="crc-error-detection"] .ce-bit[data-flip="yes"] { border-color: var(--danger); }
+[data-sim="crc-error-detection"] .ce-bit[data-flip="yes"]:not([data-k="ghost"]) {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--danger) 30%, transparent) 0.3em 0.45em);
+}
+[data-sim="crc-error-detection"] .ce-x {
+  position: absolute;
+  top: -0.62em;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 700 max(16px, calc(var(--cell) * 0.36)) / 1 var(--sans);
+  color: var(--danger);
+}
+[data-sim="crc-error-detection"] .ce-bit.sd-changed { z-index: 1; }
+[data-sim="crc-error-detection"] .ce-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--muted);
+}
+[data-sim="crc-error-detection"] .ce-line::before,
+[data-sim="crc-error-detection"] .ce-line::after { content: ''; flex: 1; border-top: max(2px, 0.12rem) dashed var(--line); }
+[data-sim="crc-error-detection"] .ce-line b { color: var(--danger); }
+[data-sim="crc-error-detection"] .ce-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0 0.5em;
+  border: max(2px, 0.12rem) solid var(--vc);
+  border-radius: var(--radius);
+  margin-left: 0.6rem;
+  font-weight: 700;
+  color: var(--vc);
+  background: var(--bg);
+}
+[data-sim="crc-error-detection"] .ce-verdict[data-v="ok"] { --vc: var(--ok); }
+[data-sim="crc-error-detection"] .ce-verdict[data-v="detected"] { --vc: var(--warn); border-style: double; border-width: max(4px, 0.22rem); }
+[data-sim="crc-error-detection"] .ce-verdict[data-v="missed"] { --vc: var(--danger); border-style: dashed; }
+[data-sim="crc-error-detection"] .ce-verdict.sd-changed { color: var(--on-hl); background: var(--hl); }
+
+/* the long division */
+[data-sim="crc-error-detection"] .ce-div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6cqh;
+  min-width: 0;
+  min-height: 0;
+}
+[data-sim="crc-error-detection"] .ce-div-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.2rem 1rem; }
+[data-sim="crc-error-detection"] .ce-div-title { font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-genbox {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.05em 0.5em;
+  border: max(2px, 0.12rem) solid var(--ink);
+  border-radius: var(--radius);
+}
+[data-sim="crc-error-detection"] .ce-genbox .sd-mono { font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-poly { color: var(--muted); }
+[data-sim="crc-error-detection"] .ce-work { flex: 1; min-height: 0; container-type: size; }
+[data-sim="crc-error-detection"] .ce-grid {
+  display: grid;
+  grid-template-columns: 2.4em repeat(var(--cols), 1fr) 3.6em;
+  grid-auto-rows: 1.42em;
+  max-width: calc((var(--cols) + 6) * 1.25em);
+  margin: 0 auto;
+  font: max(16px, min(calc(100cqw / (var(--cols) + 6) * 0.78), calc(100cqh / (var(--lines) + 0.4) * 0.7))) / 1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="crc-error-detection"] .ce-g { display: grid; place-items: center; }
+[data-sim="crc-error-detection"] .ce-g[data-k="op"] { color: var(--muted); justify-items: start; }
+[data-sim="crc-error-detection"] .ce-g[data-k="mark"] { color: var(--muted); justify-items: end; font-family: var(--sans); font-size: max(16px, 0.62em); }
+[data-sim="crc-error-detection"] .ce-g[data-k="data"] { color: var(--c1); font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-g[data-k="pad"] { color: var(--c2); font-weight: 700; }
+[data-sim="crc-error-detection"] .ce-g[data-k="gen"] { color: var(--ink); font-weight: 700; border-bottom: max(2px, 0.1em) solid var(--ink); }
+[data-sim="crc-error-detection"] .ce-g[data-k="lead"] { color: var(--muted); opacity: 0.55; }
+[data-sim="crc-error-detection"] .ce-g[data-k="rest"] { color: var(--ink); }
+[data-sim="crc-error-detection"] .ce-g[data-k="rem"] { color: var(--c2); font-weight: 700; outline: max(2px, 0.08em) solid var(--c2); outline-offset: -0.12em; }
+[data-sim="crc-error-detection"] .ce-g[data-flip="yes"] { color: var(--danger); text-decoration: underline wavy; text-underline-offset: 0.08em; text-decoration-thickness: 0.06em; }
+[data-sim="crc-error-detection"] .ce-g.ce-win { color: var(--on-hl); background: var(--hl); outline: max(2px, 0.08em) solid var(--ink); outline-offset: -0.08em; }
+[data-sim="crc-error-detection"] .ce-g.ce-remhl { color: var(--on-hl); background: var(--hl); }
+[data-sim="crc-error-detection"] .ce-past { opacity: 0.85; }
+[data-sim="crc-error-detection"] .ce-credit { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="crc-error-detection"] .sd-ctl output { font-family: var(--mono); }
+
+/* legend swatches the kit lacks */
+[data-sim="crc-error-detection"] .sd-swatch[data-shape="check"] { --sw: var(--c2); border: 0.25rem double var(--c2); background: color-mix(in srgb, var(--c2) 16%, var(--bg)); }
+[data-sim="crc-error-detection"] .sd-swatch[data-shape="data"] { --sw: var(--c1); border-color: var(--c1); background: color-mix(in srgb, var(--c1) 16%, var(--bg)); }
+[data-sim="crc-error-detection"] .sd-swatch[data-shape="flip"] {
+  position: relative;
+  border-color: var(--danger);
+  background: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 40%, transparent) 0.2em 0.32em);
+}
+[data-sim="crc-error-detection"] .sd-swatch[data-shape="flip"]::after {
+  content: '✕';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+/* Phone and portrait: the stage grows with its content; the frames sit above the division. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="crc-error-detection"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="crc-error-detection"] .ce { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 1rem; }
+  [data-sim="crc-error-detection"] .ce-frames { gap: 0.6rem; }
+  [data-sim="crc-error-detection"] .ce-work { container-type: inline-size; }
+  [data-sim="crc-error-detection"] .ce-grid { font-size: max(16px, calc(100cqw / (var(--cols) + 6) * 0.78)); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">CRC i paritet</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var N = L.N;
+  var MAX = Math.pow(2, N) - 1;
+  var seed = 1; // the random message draws from Simdeck.rng; the model itself stays deterministic
+  var sim = null;
+  var POLY = { '10011': 'x⁴ + x + 1', '1011': 'x³ + x + 1', '100000111': 'x⁸ + x² + x + 1' };
+  var ICON = { ok: '✓', detected: '⚑', missed: '✕' };
+
+  function str(bits) { return bits.join(''); }
+  function binary(v) { return L.bitsOf(v, N).join(''); }
+  function data(s) { return h('b', { class: 'sd-mono', translate: 'no' }, s); }
+  function weight(i) { return Math.pow(2, N - 1 - i); }
+  /** Buttons on the stage never take focus on click, like the kit's, so → and Space keep driving the demo. */
+  function noFocus(el) { el.addEventListener('mousedown', function (e) { e.preventDefault(); }); return el; }
+
+  /** One bit cell. o: { v, kind: data|check|ghost, flip: yes|plan|'', changed, click, label } */
+  function bit(o) {
+    var attrs = {
+      class: 'ce-bit' + (o.changed ? ' sd-changed' : '') + (o.changed && o.forward ? ' sd-anim-in' : ''),
+      dataset: { k: o.kind, flip: o.flip ? 'yes' : 'no', c: o.kind === 'check' ? '2' : '1' },
+      'aria-label': o.label
+    };
+    var kids = [o.kind === 'ghost' ? ' ' : String(o.v), o.flip ? h('span', { class: 'ce-x', 'aria-hidden': 'true' }, '✕') : null];
+    if (o.click) {
+      attrs.type = 'button';
+      attrs.onclick = o.click;
+      return noFocus(h('button', attrs, kids));
+    }
+    return h('span', attrs, kids);
+  }
+
+  function verdict(v, changed) {
+    return h('span', { class: 'ce-verdict' + (changed ? ' sd-changed' : ''), dataset: { v: v } },
+      h('span', { 'aria-hidden': 'true' }, ICON[v]), t(v));
+  }
+
+  // ── left: the frames ──
+
+  function senderFrames(s, c) {
+    var p = c.params;
+    var sent = s.phase !== 'start' && s.phase !== 'divide';
+    var editBits = function (checkBits, kindChanged) {
+      return s.data.map(function (b, i) {
+        return bit({ v: b, kind: 'data', label: t('editLabel', { i: i, v: b }),
+          click: function () { sim.set({ data: p.data ^ weight(i) }); } });
+      }).concat([h('span', { class: 'ce-gap' })], checkBits);
+    };
+    var pBit = [bit({ v: s.parity, kind: 'check', label: t('bitLabel', { i: 'P', v: s.parity }), changed: c.first })];
+    var fcs = [];
+    for (var j = 0; j < s.r; j++) {
+      fcs.push(sent
+        ? bit({ v: s.fcs[j], kind: 'check', label: t('bitLabel', { i: N + j, v: s.fcs[j] }), changed: s.phase === 'sent', forward: c.dir === 'forward' })
+        : bit({ v: 0, kind: 'ghost', label: t('bitLabel', { i: N + j, v: '?' }) }));
+    }
+    var k = L.ones(s.data);
+    return h('div', { class: 'ce-side' },
+      h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-side-name' }, t('sender')), h('span', { class: 'ce-note' }, t('editHint'))),
+      h('div', { class: 'ce-frame' },
+        h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-frame-name' }, t('frameParity')),
+          h('span', { class: 'ce-note' }, t.n('onesP', k, { p: s.parity }))),
+        h('div', { class: 'ce-strip', translate: 'no' }, editBits(pBit))),
+      h('div', { class: 'ce-frame' },
+        h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-frame-name' }, t('frameCrc')),
+          sent ? h('span', { class: 'ce-note' }, t('fcsIs')) : null),
+        h('div', { class: 'ce-strip', translate: 'no' }, editBits(fcs))));
+  }
+
+  function lineBar(s, c) {
+    var n = s.flipped.length;
+    var text = s.received ? (n ? h('b', null, t.n('lineFlips', n)) : t('lineClean'))
+      : s.planned.length ? t.n('planned', s.planned.length) : null;
+    return h('div', { class: 'ce-line' }, h('span', null, '↓ ', t('line')), text);
+  }
+
+  function receiverFrames(s, c) {
+    var p = c.params;
+    var arrived = !!s.received;
+    var nowLine = s.phase === 'line';
+    function rx(frame, checkBits) {
+      return s.data.map(function (b, i) {
+        var planned = s.planned.indexOf(i) >= 0;
+        var flipped = s.flipped.indexOf(i) >= 0;
+        return bit({
+          v: arrived ? frame[i] : b, kind: arrived ? 'data' : 'ghost', flip: arrived ? flipped : planned,
+          changed: nowLine && flipped, forward: c.dir === 'forward',
+          label: t('flipLabel', { i: i, state: t(planned ? 'flipOn' : 'flipOff') }),
+          click: function () { sim.set({ flip: p.flip ^ weight(i) }); }
+        });
+      }).concat([h('span', { class: 'ce-gap' })], checkBits);
+    }
+    var pRx = arrived ? s.receivedParity[N] : 0;
+    var pCells = [bit({ v: pRx, kind: arrived ? 'check' : 'ghost', label: t('bitLabel', { i: 'P', v: arrived ? pRx : '?' }) })];
+    var fcsCells = [];
+    for (var j = 0; j < s.r; j++) {
+      var v = arrived ? s.received[N + j] : 0;
+      fcsCells.push(bit({ v: v, kind: arrived ? 'check' : 'ghost', label: t('bitLabel', { i: N + j, v: arrived ? v : '?' }) }));
+    }
+    var pc = s.parityCheck, cc = s.crcCheck;
+    var pNote = pc ? [h('span', { class: 'ce-note' }, t.n('ones', pc.ones), ', ', t(pc.ones % 2 ? 'odd' : 'even'), ' '), verdict(pc.verdict, s.phase === 'parity')]
+      : !arrived ? h('span', { class: 'ce-note' }, t('waiting')) : null;
+    var cNote = cc ? [h('span', { class: 'ce-note' }, t('remainder'), ' ', h('b', { translate: 'no' }, str(cc.remainder)), ' '), verdict(cc.verdict, s.phase === 'crc')]
+      : !arrived ? h('span', { class: 'ce-note' }, t('waiting')) : null;
+    return h('div', { class: 'ce-side' },
+      h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-side-name' }, t('receiver')), h('span', { class: 'ce-note' }, t('flipHint'))),
+      h('div', { class: 'ce-frame' },
+        h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-frame-name' }, t('frameParity')), h('span', null, pNote)),
+        h('div', { class: 'ce-strip', translate: 'no' }, rx(s.receivedParity, pCells))),
+      h('div', { class: 'ce-frame' },
+        h('div', { class: 'ce-frame-head' }, h('span', { class: 'ce-frame-name' }, t('frameCrc')), h('span', null, cNote)),
+        h('div', { class: 'ce-strip', translate: 'no' }, rx(s.received, fcsCells))));
+  }
+
+  // ── right: the long division ──
+
+  /**
+   * The rows of a division as grid lines: the dividend, then per XOR row the generator under its window (⊕) and the
+   * register it leaves, from the window on. cur = index of the row done in this step (or -1); remHl marks the
+   * remainder of the last line; flips marks bits of a received dividend.
+   */
+  function divisionGrid(dividend, rows, gen, o) {
+    var cols = dividend.length, r = gen.length - 1, cells = [], lines = 1 + 2 * rows.length;
+    function g(text, kind, extra) {
+      var a = { class: 'ce-g' + (extra && extra.cls ? ' ' + extra.cls : ''), dataset: { k: kind } };
+      if (extra && extra.flip) a.dataset.flip = 'yes';
+      return h('span', a, text);
+    }
+    function blank() { return h('span', { class: 'ce-g' }, ''); }
+    function regLine(reg, from, opts) {
+      cells.push(g(opts.op || '', 'op'));
+      for (var i = 0; i < cols; i++) {
+        if (i < from) { cells.push(blank()); continue; }
+        var kind = opts.dividend ? (i < cols - r ? 'data' : 'pad') : 'rest';
+        var firstOne = reg.indexOf(1, from);
+        if (!opts.dividend && (firstOne < 0 ? i < cols - r : i < firstOne) && i < cols - r) kind = 'lead';
+        var cls = '';
+        if (opts.win && i >= opts.win[0] && i <= opts.win[1]) cls = 'ce-win';
+        if (opts.rem && i >= cols - r) { kind = 'rem'; if (opts.remHl) cls = 'ce-remhl'; }
+        cells.push(g(String(reg[i]), kind, { cls: cls, flip: opts.flips && opts.flips.indexOf(i) >= 0 }));
+      }
+      cells.push(g(opts.mark || '', 'mark'));
+    }
+    var lastIdx = rows.length - 1;
+    var curWin = o.cur >= 0 ? [rows[o.cur].at, rows[o.cur].at + r] : null;
+    regLine(dividend, 0, { dividend: true, flips: o.flips, win: o.cur === 0 ? curWin : null, rem: rows.length === 0 && o.showRem, remHl: o.remHl });
+    rows.forEach(function (row, j) {
+      var win = j === o.cur ? curWin : null;
+      cells.push(g('⊕', 'op'));
+      for (var i = 0; i < cols; i++) {
+        if (i < row.at || i > row.at + r) cells.push(blank());
+        else cells.push(g(String(gen[i - row.at]), 'gen', { cls: win ? 'ce-win' : '' }));
+      }
+      cells.push(g(t('rowMark', { n: j + 1 }), 'mark'));
+      var isLast = j === lastIdx;
+      var nextWin = o.cur === j + 1 ? [rows[j + 1].at, rows[j + 1].at + r] : null;
+      regLine(row.after, row.at + 1, { win: win || nextWin, rem: isLast && o.showRem, remHl: isLast && o.remHl });
+    });
+    return h('div', { class: 'ce-grid', translate: 'no', style: { '--cols': String(cols), '--lines': String(lines) } }, cells);
+  }
+
+  function division(s, c) {
+    var rx = s.phase === 'crc';
+    var dividend = rx ? s.received : s.dividend;
+    var rows = rx ? s.crcCheck.rows : s.rows;
+    var cur = s.phase === 'divide' ? s.rows.length - 1 : -1;
+    var showRem = rx || (s.phase !== 'start' && s.phase !== 'divide');
+    var grid = divisionGrid(dividend, rows, s.gen, {
+      cur: cur, showRem: showRem, remHl: s.phase === 'sent' || rx, flips: rx ? s.flipped : null
+    });
+    return h('div', { class: 'ce-div' },
+      h('div', { class: 'ce-div-head' },
+        h('span', { class: 'ce-div-title' }, t(rx ? 'divReceiver' : 'divSender')),
+        h('span', { class: 'ce-genbox' }, h('span', null, t('genBox')), h('span', { class: 'sd-mono', translate: 'no' }, str(s.gen)),
+          h('span', { class: 'ce-poly', translate: 'no' }, POLY[str(s.gen)]))),
+      h('div', { class: 'ce-work' }, grid));
+  }
+
+  // ── captions ──
+
+  function listOf(idx) { return idx.join(', '); }
+
+  sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'gen', type: 'choice', label: t('gen'), hint: t('genHint'), resets: true,
+        options: [['10011', t('gen4')], ['1011', t('gen3')], ['100000111', t('gen8')]] },
+      // The message and the error pattern: sliders over every 10-bit value, shown as bits; clicking a bit on the stage
+      // is the quicker way to change one.
+      { key: 'data', type: 'range', label: t('message'), hint: t('messageHint'), min: 0, max: MAX, resets: true, format: binary },
+      { key: 'flip', type: 'range', label: t('pattern'), hint: t('patternHint'), min: 0, max: MAX, format: binary },
+      { type: 'button', label: t('random'), key: 'n', run: function (sm) { sm.set({ data: Simdeck.rng(seed++).int(MAX + 1) }); } },
+      { type: 'button', label: t('clear'), key: 'x', run: function (sm) { sm.set({ flip: 0 }); } }
+    ],
+
+    presets: [
+      { id: 'crc-build', label: t('presetBuild'), hint: t('presetBuildHint'), params: { flip: 0 } },
+      { id: 'crc-catches-burst', label: t('presetBurst'), hint: t('presetBurstHint'), params: { flip: 120 }, step: 6 },
+      { id: 'parity-catches', label: t('presetSingle'), hint: t('presetSingleHint'), params: { flip: 64 }, step: 6 },
+      { id: 'crc-blind-spot', label: t('presetBlind'), hint: t('presetBlindHint'), params: { flip: 152 }, step: 6 }
+    ],
+
+    legend: [
+      { shape: 'data', label: t('legendData') },
+      { shape: 'check', label: t('legendCheck') },
+      { shape: 'flip', label: t('legendFlip') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      c.stage.replaceChildren(h('div', { class: 'ce' },
+        h('div', { class: 'ce-frames', style: { '--n': String(L.N + s.r) } }, senderFrames(s, c), lineBar(s, c), receiverFrames(s, c)),
+        division(s, c)));
+    },
+
+    caption: function (c) {
+      var s = c.state, gen = str(s.gen);
+      var parts;
+      if (s.phase === 'start') {
+        parts = t.parts('captionStart', { data: data(str(s.data)), p: data(String(s.parity)), zeros: t.n('zeros', s.r), gen: data(gen) });
+        if (!s.rows.length && c.steps === 1) parts.push(' ', t('captionNoRow'));
+        return parts;
+      }
+      if (s.phase === 'divide') {
+        var j = s.rows.length - 1, row = s.rows[j];
+        var prevAt = j > 0 ? s.rows[j - 1].at : -1;
+        // leading zeros between the previous window's lead and this one are only brought down (rule 7)
+        var skipped = row.at - prevAt - 1;
+        parts = t.parts('captionRow', { n: j + 1, at: row.at, gen: data(gen) });
+        if (skipped > 0) parts.push(' ', t.n('skipped', skipped));
+        return parts;
+      }
+      if (s.phase === 'sent') {
+        parts = s.rows.length ? t.parts('captionSent', { fcs: data(str(s.fcs)), codeword: data(str(s.codeword)) })
+          : [t('captionNoRow'), ' '].concat(t.parts('captionSent', { fcs: data(str(s.fcs)), codeword: data(str(s.codeword)) }));
+        parts.push(' ', s.planned.length ? t('captionSentFlip') : t('captionSentClean'));
+        return parts;
+      }
+      var n = s.flipped.length;
+      if (s.phase === 'line') {
+        parts = t.parts(n === 1 ? 'captionLine1' : 'captionLine', { flips: t.n('lineFlips', n), list: data(listOf(s.flipped)) });
+        if (n > 1) parts.push(' ', t.n('burst', s.flipped[n - 1] - s.flipped[0] + 1));
+        return parts;
+      }
+      if (s.phase === 'parity') {
+        return t.parts(s.parityCheck.verdict === 'missed' ? 'captionParityMissed' : 'captionParityDetected',
+          { ones: t.n('ones', s.parityCheck.ones) });
+      }
+      parts = t.parts(s.crcCheck.verdict === 'missed' ? 'captionCrcMissed' : 'captionCrcDetected', { rem: data(str(s.crcCheck.remainder)) });
+      parts.push(' ', s.parityCheck.verdict === 'missed' ? t.n('recapParityMissed', n)
+        : t(s.crcCheck.verdict === 'missed' ? 'recapParityOnly' : 'recapParityDetected'));
+      return parts;
+    }
+  });
+})();
+</script>
+</body>
+</html>
