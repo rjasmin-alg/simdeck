@@ -1,0 +1,480 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- syn-outcomes: a SYN gets a SYN+ACK, an RST or nothing, and what each means. A stepper, one event per step. Left: the
+     probes as kit view K1 (kit/sequence.js), lanes Klijent · Vatrozid · Poslužitelj; the firewall card holds its rules
+     and the server card its port strip, both hidden until "Pokaži što klijent ne vidi". Right: the results, one row per
+     probe with the reply, the verdict and what it proves. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="syn-outcomes">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP SYN: otvoren, zatvoren, filtriran · simdeck</title>
+<meta name="description" content="Klijent šalje SYN na portove hosta iza vatrozida i čita samo ono što se vrati. Zašto RST dokazuje živ host, a tišina ništa određeno.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "syn-outcomes",
+  "title": {
+    "hr": "TCP SYN: otvoren, zatvoren, filtriran",
+    "en": "TCP SYN: open, closed, filtered"
+  },
+  "concept": {
+    "hr": "SYN dobije SYN+ACK, RST ili tišinu, i što koji odgovor dokazuje",
+    "en": "A SYN gets a SYN+ACK, an RST or nothing, and what each one proves"
+  },
+  "summary": {
+    "hr": "Klijent šalje SYN na portove hosta iza vatrozida i čita samo ono što se vrati. Zašto RST dokazuje živ host, a tišina ništa određeno.",
+    "en": "A client sends a SYN to ports of a host behind a firewall and reads only what comes back. Why an RST proves a live host, and silence nothing definite."
+  },
+  "tags": [
+    "tcp"
+  ],
+  "class": "stepper",
+  "steps": 8,
+  "entries": [
+    {
+      "preset": "book-capture"
+    },
+    {
+      "preset": "drop-vs-reject"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="syn-outcomes"]; colours only from kit tokens.
+   Layout: two columns, the K1 chart (client c1, firewall c3, server c2) and the results. */
+[data-sim="syn-outcomes"] .so {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="syn-outcomes"] .so-col { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+[data-sim="syn-outcomes"] .so-col > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="syn-outcomes"] .so-mono { font-family: var(--mono); }
+[data-sim="syn-outcomes"] .so-muted { color: var(--muted); }
+[data-sim="syn-outcomes"] .so-sm { font-size: var(--fs-sm); }
+[data-sim="syn-outcomes"] .so-hidden { margin: 0.2rem 0 0; color: var(--muted); font-size: var(--fs-sm); font-style: italic; }
+
+/* firewall card: its rules, the deciding one marked */
+[data-sim="syn-outcomes"] .so-rules { margin: 0.25rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="syn-outcomes"] .so-rule {
+  display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; gap: 0 0.4rem; align-items: baseline;
+  padding: 0 0.3rem; border: var(--line-w) solid transparent; border-radius: var(--radius-sm); font-size: var(--fs-sm);
+}
+[data-sim="syn-outcomes"] .so-rule b { font-family: var(--mono); }
+[data-sim="syn-outcomes"] .so-rule[data-act="block"] > span:last-child { font-weight: 700; }
+[data-sim="syn-outcomes"] .so-rule[data-on] { border-color: var(--ink); border-width: 0.18rem; background: var(--bg); }
+[data-sim="syn-outcomes"] .so-rule.sd-changed, [data-sim="syn-outcomes"] .so-res.sd-changed {
+  --ink: var(--on-hl); --muted: var(--on-hl); --bg: var(--hl);
+  background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink);
+}
+
+/* server card: the port strip */
+[data-sim="syn-outcomes"] .so-ports { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.3rem 0 0; padding: 0; list-style: none; }
+[data-sim="syn-outcomes"] .so-port {
+  display: flex; flex-direction: column; align-items: center; min-width: 3.4rem;
+  padding: 0.1rem 0.25rem; border: 0.18rem solid var(--c2); border-radius: var(--radius-sm); background: var(--bg);
+  font-size: var(--fs-sm); line-height: 1.25;
+}
+[data-sim="syn-outcomes"] .so-port > b { font-family: var(--mono); font-size: 1rem; }
+[data-sim="syn-outcomes"] .so-port[data-st="nothing"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="syn-outcomes"] .so-port[data-blocked] {
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.3rem, var(--panel) 0.3rem 0.55rem);
+}
+[data-sim="syn-outcomes"] .so-port[data-blocked] > em { font-style: normal; font-weight: 700; }
+[data-sim="syn-outcomes"] .so-port[data-cur] { outline: 0.2rem solid var(--ink); outline-offset: 0.1rem; }
+
+/* results */
+[data-sim="syn-outcomes"] .so-box {
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem; display: flex; flex-direction: column; gap: 0.4rem; min-height: 0; overflow: hidden;
+}
+[data-sim="syn-outcomes"] .so-box h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+[data-sim="syn-outcomes"] .so-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="syn-outcomes"] .so-res {
+  padding: 0.3rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+}
+[data-sim="syn-outcomes"] .so-res[data-phase="wait"] { border-style: dashed; color: var(--muted); }
+[data-sim="syn-outcomes"] .so-res[data-phase="run"] { border-color: var(--ink); border-width: 0.18rem; }
+[data-sim="syn-outcomes"] .so-res-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; }
+[data-sim="syn-outcomes"] .so-res-head > b { font-family: var(--mono); font-size: max(16px, 0.9rem); }
+[data-sim="syn-outcomes"] .so-res dl { margin: 0.2rem 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.5rem; font-size: var(--fs-sm); }
+[data-sim="syn-outcomes"] .so-res dt { color: var(--muted); }
+[data-sim="syn-outcomes"] .so-res dd { margin: 0; }
+[data-sim="syn-outcomes"] .so-really { font-weight: 700; }
+
+/* verdict badges: shape and word, colour third */
+[data-sim="syn-outcomes"] .so-v {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.45rem;
+  border: 0.18rem solid var(--vc); border-radius: var(--radius-sm); font-weight: 700; color: var(--ink); background: var(--bg);
+}
+[data-sim="syn-outcomes"] .so-v > i { font-style: normal; color: var(--vc); }
+[data-sim="syn-outcomes"] .so-v[data-v="open"] { --vc: var(--ok); }
+[data-sim="syn-outcomes"] .so-v[data-v="closed"] { --vc: var(--warn); }
+[data-sim="syn-outcomes"] .so-v[data-v="filtered"] {
+  --vc: var(--muted); border-style: dashed;
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.3rem, var(--panel) 0.3rem 0.55rem);
+}
+
+/* legend swatches (the kit has line, dash and hl) */
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.15em, transparent 0.15em 0.4em); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="lost"] { position: relative; background: transparent; border: 0; }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="lost"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="timer"] { width: 0.55em; border-top: 0; background: repeating-linear-gradient(180deg, var(--ink) 0 0.15em, var(--bg) 0.15em 0.35em); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape^="v-"] { position: relative; background: var(--bg); border-width: 0.15em; }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape^="v-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-open"] { border-color: var(--ok); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-open"]::after { content: '✓'; color: var(--ok); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-closed"] { border-color: var(--warn); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-closed"]::after { content: '■'; color: var(--warn); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-filtered"] { border-color: var(--muted); border-style: dashed; background: repeating-linear-gradient(45deg, var(--bg) 0 0.15em, var(--panel) 0.15em 0.3em); }
+[data-sim="syn-outcomes"] .sd-swatch[data-shape="v-filtered"]::after { content: '?'; color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="syn-outcomes"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="syn-outcomes"] .so { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="syn-outcomes"] .so-col > .sd-seq { flex: none; }
+  [data-sim="syn-outcomes"] .so-col .sd-seq-list { padding-bottom: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">TCP SYN: otvoren, zatvoren, filtriran</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (addresses, ports, numbers, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'so-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      // a placeholder used twice is the same node: clone it, or appending moves it
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  /** A number with the page's decimal separator, at most three decimals. */
+  function num(v) {
+    var s = String(Math.round(v * 1000) / 1000);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** A time in ms as the capture would show it: ms below a second, s above. */
+  function dur(ms) { return ms < 1000 ? t('ms', { n: num(ms) }) : t('sec', { n: num(ms / 1000) }); }
+  /** The book's capture keeps its own gaps: they are what happened, not a timer setting, so no "RTO" on them. */
+  function gapsCaptured(p) { var sc = scene(p); return sc.probes.some(function (pr) { return !!sc.targets[pr.target].gaps; }); }
+  function scene(p) { return L.SCENES[p.scene] || L.SCENES[L.defaults.scene]; }
+  function targetOf(p, q) { var sc = scene(p); return sc.targets[sc.probes[q].target]; }
+  /** Single-letter target names are the book's servers A, B, C: shown; other keys are internal. */
+  function named(q) { return /^[A-Z]$/.test(q.name); }
+  function where(q) { return (named(q) ? q.name + ' · ' : '') + q.addr + ':' + q.port; }
+  function ruleName(r) { return r === 'default' ? t('ruleDefault') : t('rule', { n: String(r + 1) }); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function curProbe(c) { return c.state.cur === null ? 0 : c.state.cur; }
+  var ACT = { allow: 'actAllow', drop: 'actDrop', 'reject-icmp': 'actIcmp', 'reject-rst': 'actRst' };
+
+  // ── the chart (K1) ──
+
+  function rowOf(c, e, i, fresh) {
+    var p = c.params, s = c.state, q = s.probes[e.probe], rev = p.reveal;
+    var r = { changed: i >= fresh, time: data(dur(e.t), '') };
+    if (e.kind === 'syn' || e.kind === 'retx') {
+      r.from = 'C';
+      r.label = 'SYN';
+      r.c = 1;
+      r.fields = 'seq ' + e.seq + (e.kind === 'syn' ? ' → ' + (named(q) ? q.name : '') + ':' + q.port : '');
+      if (e.kind === 'retx') { r.line = 'dashed'; r.cause = data(t('cRetx', { k: String(e.k) }), ''); }
+      if (e.fate === 'host') r.to = 'S';
+      else if (e.fate === 'fw-reject') {
+        if (rev) { r.to = 'F'; r.lost = ['F']; r.re = { F: t('reRejected') }; } else r.to = 'S';
+      } else if (rev && e.fate === 'fw-drop') { r.to = 'F'; r.lost = ['F']; r.re = { F: t('reDropped') }; }
+      else if (rev) { r.to = 'S'; r.lost = ['S']; r.re = { S: t('reNoHost') }; }
+      // the client's view of silence: the SYN stops short in empty space (half way to the next lane, not on it); no
+      // word, which would run into the fields on so short an arrow (the ✕, the legend and the caption say it)
+      else { r.to = 'F'; r.drop = true; }
+      return r;
+    }
+    r.to = e.to;
+    r.from = e.from;
+    if (e.kind === 'synack') { r.label = 'SYN+ACK'; r.c = 2; r.fields = 'seq ' + e.seq + ' ack ' + e.ack; }
+    else if (e.kind === 'ack') { r.label = 'ACK'; r.c = 1; r.weight = 'thin'; r.fields = 'seq ' + e.seq + ' ack ' + e.ack; }
+    else if (e.kind === 'abort') { r.label = 'RST'; r.c = 1; r.fields = 'seq ' + e.seq; }
+    else if (e.kind === 'rst') {
+      r.label = 'RST+ACK'; r.c = e.by === 'F' ? 3 : 2; r.fields = 'seq ' + e.seq + ' ack ' + e.ack;
+      // the client sees the host's address on a forged RST: drawn from the server until revealed
+      if (e.by === 'F' && !rev) { r.from = 'S'; r.c = 2; }
+      if (e.by === 'F' && rev) r.cause = t('reForged');
+    } else if (e.kind === 'icmp') {
+      r.label = 'ICMP ' + e.icmp.type + '/' + e.icmp.code; r.c = 3; r.line = 'dotted'; r.fields = t('icmpWhy');
+      r.place = 'mid';
+    }
+    return r;
+  }
+
+  function fwBody(c) {
+    var p = c.params, s = c.state, qi = curProbe(c), q = s.probes[qi], tg = targetOf(p, qi);
+    if (!p.reveal) return [h('p', { class: 'so-hidden' }, t('fwHidden'))];
+    if (!tg.fw) return [h('p', { class: 'so-hidden' }, t('fwNone'))];
+    if (!p.firewall) return [h('p', { class: 'so-hidden' }, t('fwOff'))];
+    var blockAs = q.as || p.fwAction;
+    // the deciding rule is marked once this probe's SYN has reached the firewall
+    var on = s.cur === qi ? q.fwRule : null;
+    var justNow = on !== null && s.ev && s.ev.probe === qi && s.ev.kind === 'syn';
+    var rows = tg.fw.rules.map(function (r, i) { return { port: r.port, action: r.action, id: i }; })
+      .concat([{ port: null, action: tg.fw.dflt, id: 'default' }]);
+    return [h('ul', { class: 'so-rules' }, rows.map(function (r) {
+      var act = r.action === 'block' ? blockAs : r.action;
+      var mark = r.id === on;
+      return h('li', { class: 'so-rule' + (mark && justNow ? ' sd-changed' + anim(c) : ''), dataset: Object.assign({ act: r.action === 'block' ? 'block' : 'allow' }, mark ? { on: '' } : {}) },
+        h('span', { 'aria-hidden': 'true' }, mark ? '▶' : ''),
+        r.port === null ? h('span', null, t('ruleElse')) : h('span', null, B(r.port)),
+        h('span', null, t(ACT[act])));
+    }))];
+  }
+
+  function hostBody(c) {
+    var p = c.params, qi = curProbe(c), q = c.state.probes[qi], tg = targetOf(p, qi);
+    if (!p.reveal) return [h('p', { class: 'so-hidden' }, t('hostHidden'))];
+    if (!tg.exists) return [h('p', { class: 'so-hidden' }, t('hostNone'))];
+    return [h('ul', { class: 'so-ports' }, tg.strip.map(function (port) {
+      var listen = tg.listening.indexOf(port) >= 0;
+      var blocked = p.firewall && tg.fw && L.fwDecide(tg.fw, port, 'block').action === 'block';
+      var ds = { st: listen ? 'listen' : 'nothing' };
+      if (blocked) ds.blocked = '';
+      if (port === q.port) ds.cur = '';
+      return h('li', { class: 'so-port', dataset: ds },
+        B(port), h('span', null, t(listen ? 'portListen' : 'portNothing')), blocked ? h('em', null, '▨ ' + t('portBlocked')) : null);
+    }))];
+  }
+
+  function renderChart(c) {
+    var s = c.state, p = c.params, fresh = c.prev ? c.prev.chart.length : 0;
+    var qi = curProbe(c), q = s.probes[qi], tg = targetOf(p, qi);
+    var fwState = p.reveal && (!tg.fw || !p.firewall) ? 'down' : null;
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '6.4rem',
+      lanes: [
+        { id: 'C', c: 1, shape: 'square', name: t('laneC'), tags: data(scene(p).client),
+          body: [h('p', { class: 'so-hidden' }, t(p.scan === 'half-open' ? 'scanHalf' : 'scanConnect'))] },
+        { id: 'F', c: 3, name: t('laneF'), state: fwState, body: fwBody(c) },
+        { id: 'S', c: 2, name: named(q) ? h('span', null, t('laneS'), ' ', data(q.name, '')) : t('laneS'), tags: data(q.addr),
+          state: p.reveal && !tg.exists ? 'down' : null, changed: !!(c.prev && c.prev.cur !== s.cur && s.cur !== null), body: hostBody(c) }
+      ],
+      rows: s.chart.map(function (e, i) { return rowOf(c, e, i, fresh); }),
+      timers: s.timers.map(function (tm) {
+        return { lane: 'C', from: tm.from, to: tm.to === null ? undefined : tm.to, end: tm.end || undefined, label: data((gapsCaptured(p) ? '' : 'RTO ') + dur(tm.rto), '') };
+      }),
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── the results ──
+
+  var VWORD = { open: 'vOpen', closed: 'vClosed', filtered: 'vFiltered' };
+  var VMARK = { open: '✓', closed: '■', filtered: '?' };
+  var PWORD = { app: 'provesApp', tcp: 'provesTcp', filter: 'provesFilter', nothing: 'provesNothing' };
+  function badge(v) { return h('span', { class: 'so-v', dataset: { v: v } }, h('i', { 'aria-hidden': 'true' }, VMARK[v]), t(VWORD[v])); }
+  function replyText(r) {
+    if (r.reply === 'synack') return data(t('replySynack'));
+    if (r.reply === 'rst') return data(t('replyRst'));
+    if (r.reply === 'icmp') return data(t('replyIcmp'));
+    return t.n('replyNone', r.retries);
+  }
+  function really(p, r) {
+    var tg = targetOf(p, r.probe);
+    var behind = !tg.exists ? t('reallyNoHost') : t(tg.listening.indexOf(r.port) >= 0 ? 'behindListen' : 'behindNothing');
+    switch (r.path) {
+      case 'synack': return t('reallySynack');
+      case 'rst': return t('reallyRst');
+      case 'fw-drop': return t('reallyFwDrop', { behind: behind });
+      case 'fw-icmp': return t('reallyFwIcmp', { behind: behind });
+      case 'fw-rst': return t('reallyFwRst', { behind: behind });
+      default: return t('reallyNoHost');
+    }
+  }
+  function renderResults(c) {
+    var s = c.state, p = c.params, fresh = c.prev ? c.prev.table.length : 0;
+    var byProbe = {};
+    s.table.forEach(function (r, i) { byProbe[r.probe] = { r: r, isNew: i >= fresh }; });
+    return h('section', { class: 'so-box' }, h('h2', null, t('results')),
+      h('ol', { class: 'so-list' }, s.probes.map(function (q, i) {
+        var hit = byProbe[i];
+        var head = h('div', { class: 'so-res-head' }, B(where(q)),
+          hit ? badge(hit.r.verdict) : h('span', { class: 'so-sm' }, t(q.phase === 'run' ? 'running' : 'pending')));
+        var body = null;
+        if (hit) {
+          body = h('dl', null,
+            h('dt', null, t('colReply')), h('dd', null, replyText(hit.r)),
+            h('dt', null, t('colProves')), h('dd', null, t(PWORD[hit.r.proves])),
+            p.reveal ? [h('dt', null, t('colReally')), h('dd', { class: 'so-really' }, really(p, hit.r))] : null);
+        }
+        return h('li', { class: 'so-res' + (hit && hit.isNew ? ' sd-changed' + anim(c) : ''), dataset: { phase: q.phase } }, head, body);
+      })));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params;
+    if (c.n === 0) {
+      var list = data(s.probes.map(where).join(', '));
+      var out0 = rich('capStart', { count: t.n('probes', s.probes.length), list: list });
+      return p.reveal ? out0 : out0.concat(' ', rich('capStartHidden'));
+    }
+    var e = s.ev, q = s.probes[e.probe], row = s.table.filter(function (r) { return r.probe === e.probe; })[0];
+    var v = row && row.verdict ? h('b', null, t(VWORD[row.verdict])) : null;
+    var out = [t('capStep', { n: String(c.n) })];
+    var more = [];
+    var gaps = scene(p).targets[scene(p).probes[e.probe].target].gaps;
+    switch (e.kind) {
+      case 'syn': {
+        var tgt = B(where(q)), x = B(e.seq);
+        if (e.fate === 'fw-drop' || e.fate === 'nohost') {
+          out = out.concat(gaps ? rich('capSynSilentCaptured', { target: tgt, x: x }) : rich('capSynSilent', { target: tgt, x: x, rto: data(dur(L.RTO0), '') }));
+          if (p.reveal) more = e.fate === 'nohost' ? rich('capWhyNoHost') : rich('capWhyDrop', { rule: ruleName(q.fwRule) });
+        } else {
+          out = out.concat(rich('capSyn', { target: tgt, x: x }));
+          if (p.reveal) {
+            if (e.fate === 'fw-reject') more = rich('capWhyReject', { rule: ruleName(q.fwRule) });
+            else more = q.fwRule !== null ? rich('capSynPass', { rule: ruleName(q.fwRule) }) : rich('capSynHost');
+          }
+        }
+        break;
+      }
+      case 'retx': {
+        var prev = s.chart[s.chart.length - 2];
+        if (row) { out = out.concat(rich('capLast', { v: v })); break; }
+        out = out.concat(rich('capRetx', { wait: data(dur(e.t - prev.t), ''), x: B(e.seq) }));
+        if (!gaps) more = rich('capRetxNext', { rto: data(dur(L.RTO0 * Math.pow(2, e.k)), '') });
+        break;
+      }
+      case 'synack': out = out.concat(rich('capSynack', { y: B(e.seq), x1: B(e.ack), port: data(q.port) })); break;
+      case 'ack': out = out.concat(rich('capAck', { y1: B(e.ack), v: v, port: data(q.port) })); break;
+      case 'abort': out = out.concat(rich('capAbort', { v: v })); break;
+      case 'rst': {
+        out = out.concat(rich('capRst', { x1: B(e.ack), port: data(q.port), v: v }));
+        if (e.by === 'F' && p.reveal) {
+          var tg = targetOf(p, e.probe);
+          more = rich('capRstForged', { port: data(q.port), behind: t(tg.listening.indexOf(q.port) >= 0 ? 'behindListen' : 'behindNothing') });
+        }
+        break;
+      }
+      case 'icmp': out = out.concat(rich('capIcmp', { v: v })); break;
+    }
+    return more.length ? out.concat(' ', more) : out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'firewall', type: 'toggle', label: t('firewall'), resets: true,
+        disabled: function (p) { return L.hasFirewall(p) ? false : t('fwNothing'); } },
+      { key: 'fwAction', type: 'choice', label: t('fwAction'), resets: true,
+        options: [['drop', t('optDrop')], ['reject-icmp', t('optIcmp')], ['reject-rst', t('optRst')]],
+        disabled: function (p) {
+          if (L.fwActionMatters(p)) return false;
+          if (!L.hasFirewall(p)) return t('fwNothing');
+          if (!p.firewall) return t('fwActionOff');
+          return p.scene === 'drop-vs-reject' ? t('fwActionNone') : t('fwNothing');
+        } },
+      { key: 'scan', type: 'choice', label: t('scan'), resets: true, options: [['connect', t('scanOptConnect')], ['half-open', t('scanOptHalf')]] },
+      { key: 'reveal', type: 'toggle', label: t('reveal') }
+    ],
+
+    presets: [
+      { id: 'book-three', label: t('presetThree'), hint: t('presetThreeHint'), params: { scene: 'book-three' } },
+      { id: 'book-capture', label: t('presetCapture'), hint: t('presetCaptureHint'), params: { scene: 'book-capture' } },
+      { id: 'behind-firewall', label: t('presetBehind'), hint: t('presetBehindHint'), params: { scene: 'behind-firewall' } },
+      { id: 'drop-vs-reject', label: t('presetDrop'), hint: t('presetDropHint'), params: { scene: 'drop-vs-reject' } },
+      { id: 'no-host', label: t('presetNoHost'), hint: t('presetNoHostHint'), params: { scene: 'no-host' } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legSeg') },
+      { shape: 'dot', label: t('legIcmp') },
+      { shape: 'lost', label: t('legLost') },
+      { shape: 'dash', label: t('legRetx') },
+      { shape: 'timer', label: t('legTimer') },
+      { shape: 'v-open', label: t('legOpen') },
+      { shape: 'v-closed', label: t('legClosed') },
+      { shape: 'v-filtered', label: t('legFiltered') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'so' },
+        h('div', { class: 'so-col' }, chart),
+        h('div', { class: 'so-col' }, renderResults(c))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
