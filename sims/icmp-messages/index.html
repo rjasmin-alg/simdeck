@@ -1,0 +1,495 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- icmp-messages: one ping from the PC to 192.168.2.50 over PC — R1 — R2 — server, one thing broken per scenario. A
+     stepper: the request or the answer crosses one link, or a device decides (route, TTL, filter, ARP; the first rule
+     that fires answers), or the timer runs out. Kit view K2 draws the path; under it the message on the wire, the
+     deciding device's checks, and what ping prints. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="icmp-messages">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Što znače odgovori na ping · simdeck</title>
+<meta name="description" content="Ping kroz dva usmjernika, jedan kvar po primjeru: nema puta, poslužitelj isključen, vatrozid odbacuje ili odbija, TTL 1. Tko odgovara i što ping ispiše?">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "icmp-messages",
+  "title": {
+    "hr": "Što znače odgovori na ping",
+    "en": "What ping answers mean"
+  },
+  "concept": {
+    "hr": "Echo odgovor, kodovi nedostupnosti, istek TTL-a i što znači tišina",
+    "en": "Echo reply, unreachable codes, time exceeded, and what silence means"
+  },
+  "summary": {
+    "hr": "Ping kroz dva usmjernika, jedan kvar po primjeru: nema puta, poslužitelj isključen, vatrozid odbacuje ili odbija, TTL 1. Tko odgovara i što ping ispiše?",
+    "en": "A ping through two routers, one fault per example: no route, server off, a firewall that drops or rejects, TTL 1. Who answers, and what does ping print?"
+  },
+  "tags": [
+    "icmp"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="icmp-messages"]; colours only from kit tokens.
+   Layout: the K2 path on top (the nodes in row 0; the local scenario's absent host in row 1); under it, on the left
+   the message on the wire above the deciding device's checks, on the right the console with what ping prints. */
+[data-sim="icmp-messages"] .im {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 2cqh;
+  height: 100%;
+  padding: 2cqh 1.4cqw;
+  font-size: 1rem;
+}
+[data-sim="icmp-messages"] .im-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.6cqh 1.1cqw;
+  min-height: 0;
+}
+[data-sim="icmp-messages"] .im-con { grid-column: 2; grid-row: 1 / span 2; }
+[data-sim="icmp-messages"] .im-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.75rem 0.55rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-sim="icmp-messages"] .im-box h2 { margin: 0 0 0.35rem; font-size: 1em; font-weight: 700; }
+[data-sim="icmp-messages"] .im-muted { color: var(--muted); }
+[data-sim="icmp-messages"] .im-none { margin: 0; color: var(--muted); }
+[data-sim="icmp-messages"] .im-none[data-k="silent"] { color: var(--ink); font-weight: 700; padding: 0.3rem 0.5rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); }
+
+/* the message on the wire: label / value rows, the type/code as a badge in the message's colour */
+[data-sim="icmp-messages"] .im-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.05rem 0.6rem; margin: 0; align-items: baseline; }
+[data-sim="icmp-messages"] .im-kv dt { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="icmp-messages"] .im-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+[data-sim="icmp-messages"] .im-tc { display: inline-block; padding: 0 0.5rem; border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="icmp-messages"] .im-tc[data-k="error"] { outline: var(--line-w) solid var(--ink); outline-offset: 2px; }
+[data-sim="icmp-messages"] .im-wire[data-k="answer"] h2::after { content: ' ↩'; }
+
+/* the deciding device: its checks in order, one per line, a marker per result */
+[data-sim="icmp-messages"] .im-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.9rem; line-height: 1.25; }
+[data-sim="icmp-messages"] .im-checks li { display: grid; grid-template-columns: 1.4em minmax(0, 1fr); gap: 0.2rem; padding: 0 0.35rem; border: var(--line-w) solid transparent; border-radius: var(--radius-sm); }
+[data-sim="icmp-messages"] .im-checks li::before { font-weight: 700; text-align: center; }
+[data-sim="icmp-messages"] .im-checks li[data-st="ok"]::before { content: '✓'; }
+[data-sim="icmp-messages"] .im-checks li[data-st="fail"]::before { content: '✕'; color: var(--danger); }
+[data-sim="icmp-messages"] .im-checks li[data-st="wait"]::before { content: '…'; }
+[data-sim="icmp-messages"] .im-checks li[data-st="skip"]::before { content: '–'; }
+[data-sim="icmp-messages"] .im-checks li[data-st="skip"] { color: var(--muted); }
+[data-sim="icmp-messages"] .im-checks li[data-st="skip"] span { text-decoration: line-through; }
+[data-sim="icmp-messages"] .im-checks li[data-st="fail"] { border-color: var(--ink); border-width: 3px; font-weight: 700; }
+[data-sim="icmp-messages"] .im-checks li b { margin-right: 0.35rem; }
+[data-sim="icmp-messages"] .im-dec p { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="icmp-messages"] .im-dec[data-past] { opacity: 0.85; }
+
+/* the console: the OS's output as data, monospace; the line just printed carries the changed mark */
+[data-sim="icmp-messages"] .im-con { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+[data-sim="icmp-messages"] .im-clock { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.8rem; font-size: var(--fs-sm); margin-bottom: 0.35rem; }
+[data-sim="icmp-messages"] .im-meter { flex: 1 1 6rem; height: 0.55rem; border: var(--line-w) solid var(--ink); border-radius: 0.3rem; background: var(--bg); overflow: hidden; }
+[data-sim="icmp-messages"] .im-meter i { display: block; height: 100%; background: repeating-linear-gradient(45deg, var(--ink) 0 0.2rem, transparent 0.2rem 0.4rem); }
+[data-sim="icmp-messages"] .im-term {
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow: hidden;
+  min-height: 0;
+}
+[data-sim="icmp-messages"] .im-term > div { white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-sim="icmp-messages"] .im-term .im-cmd { font-weight: 700; }
+[data-sim="icmp-messages"] .im-term .im-gap { height: 0.5em; }
+[data-sim="icmp-messages"] .im-term .im-rep { color: var(--muted); }
+[data-sim="icmp-messages"] .im-term .im-note { font-family: var(--sans); color: var(--muted); font-style: italic; }
+[data-sim="icmp-messages"] .im-term .sd-changed { box-shadow: none; outline: var(--line-w) solid var(--ink); outline-offset: 0; background: var(--hl); color: var(--on-hl); }
+
+/* topology: the broken element gets a dashed warn outline; the mark on its own line in narrow columns */
+[data-sim="icmp-messages"] .sd-topo-card .sd-topo-mark { grid-row: auto; }
+[data-sim="icmp-messages"] .sd-topo-card .sd-topo-addr,
+[data-sim="icmp-messages"] .sd-topo-card .sd-topo-sub { grid-column: 1 / -1; white-space: nowrap; }
+[data-sim="icmp-messages"] .im-broken-R1 .sd-topo-card[data-id="R1"],
+[data-sim="icmp-messages"] .im-broken-R2 .sd-topo-card[data-id="R2"],
+[data-sim="icmp-messages"] .im-broken-S .sd-topo-card[data-id="S"],
+[data-sim="icmp-messages"] .im-broken-X .sd-topo-card[data-id="X"] { outline: 0.25rem dashed var(--warn); outline-offset: 0.2rem; }
+
+/* legend swatches the kit does not have: the silent drop and the broken element */
+[data-sim="icmp-messages"] .sd-swatch[data-shape="x"] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); }
+[data-sim="icmp-messages"] .sd-swatch[data-shape="x"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+[data-sim="icmp-messages"] .sd-swatch[data-shape="broken"] { background: var(--bg); border: 0.2rem dashed var(--warn); }
+
+/* Phone and portrait: the stage grows with its content and the boxes stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="icmp-messages"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="icmp-messages"] .im { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="icmp-messages"] .im-bottom { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 0.8rem; }
+  [data-sim="icmp-messages"] .im-con { grid-column: auto; grid-row: auto; }
+  [data-sim="icmp-messages"] .im-term { font-size: var(--fs-sm); }
+  [data-sim="icmp-messages"] .sd-topo-card .sd-topo-addr,
+  [data-sim="icmp-messages"] .sd-topo-card .sd-topo-sub { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Što znače odgovori na ping</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { PC: '3', R1: '4', R2: '6', S: '7', X: '8' };
+  var KIND_C = { request: '1', reply: '2', error: '5' };
+  var PATH = ['PC', 'R1', 'R2', 'S'];
+  var IFS = { R1: ['192.168.1.1', '10.0.12.1'], R2: ['10.0.12.2', '192.168.2.1'] };
+  var BROKEN = { noRoute: 'R1', fwDrop: 'R2', fwReject: 'R2', hostDown: 'S', local: 'X' };
+  var MEAN = { '8/0': 'mean8', '0/0': 'mean0', '3/0': 'mean30', '3/1': 'mean31', '3/13': 'mean313', '11/0': 'mean110' };
+  var MSG = { 8: 'mReq', 0: 'mReply', 3: 'mUnreach', 11: 'mExceeded' };
+
+  /** Data (addresses, node ids, type/code, ping's output) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule); a placeholder used twice is cloned. */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  /** A time as the page shows it: ms below 1 s, else s with one decimal; the decimal comma on Croatian pages. */
+  function when(ms) {
+    var v = ms < 1000 ? (ms % 1 ? ms.toFixed(1) : String(ms)) : (ms / 1000).toFixed(1);
+    if (Simdeck.lang === 'hr') v = v.replace('.', ',');
+    return t(ms < 1000 ? 'ms' : 's', { v: v });
+  }
+  function tc(m) { return m.type + '/' + m.code; }
+  /** Who sent a message: the PC, the server, or the router whose interface is its source. */
+  function senderOf(m) {
+    if (m.kind === 'request') return 'PC';
+    if (m.kind === 'reply') return 'S';
+    for (var id in IFS) if (IFS[id].indexOf(m.src) >= 0) return id;
+    return '';
+  }
+  function what(m) { return m.kind === 'reply' ? t('wReply') : t('wErr', { tc: tc(m) }); }
+
+  // ── topology (kit view K2) ──
+
+  function badgesFor(id, c) {
+    var s = c.state, sc = s.scenario, out = [];
+    if (id === 'R1' && sc === 'noRoute') out.push({ text: t('bNoRoute'), k: 'dashed' });
+    if (id === 'R2' && (sc === 'fwDrop' || sc === 'fwReject')) out.push({ text: t(sc === 'fwDrop' ? 'bFilterDrop' : 'bFilterReject'), k: 'dashed' });
+    if (id === 'S' && sc === 'hostDown') out.push({ text: t('bOff'), k: 'muted' });
+    if (s.ev === 'start' && id === 'PC') out.push({ text: t('bSends'), k: 'fill' });
+    if (s.ev === 'decide' && s.decision.node === id) out.push({ text: t(s.decision.rule === 'echo' ? 'bAnswers' : s.decision.rule === 'drop' ? 'bDrops' : 'bDecides'), k: 'solid' });
+    if (s.ev === 'arp' && s.arp.node === id) out.push({ text: t('bArp'), k: 'solid' });
+    if (s.fwd && s.fwd.node === id) out.push({ text: t('bForwards'), k: 'muted' });
+    if (s.ev === 'wait' && id === 'PC') out.push({ text: t('bWaits'), k: 'dashed' });
+    if (s.result && id === 'PC' && s.ev !== 'decide') out.push(s.result.kind === 'timeout' ? { text: t('bGivesUp'), k: 'dashed' } : { text: t('bGets'), k: 'fill' });
+    return out;
+  }
+  function acting(id, s) {
+    return (s.ev === 'decide' && s.decision.node === id) || (s.ev === 'arp' && s.arp.node === id) || (!!s.fwd && s.fwd.node === id) ||
+      (id === 'PC' && (s.ev === 'start' || s.ev === 'wait' || !!s.result));
+  }
+
+  function renderTopo(c) {
+    var s = c.state, sc = s.scenario, local = sc === 'local';
+    function node(id, kind, col, name, lines) {
+      var down = (id === 'S' && sc === 'hostDown') || id === 'X';
+      return { id: id, kind: kind, col: col, row: 0, c: COLOUR[id], name: name, lines: lines, badges: badgesFor(id, c),
+        state: down ? 'down' : acting(id, s) ? 'active' : null, changed: acting(id, s) && s.ev !== 'start' };
+    }
+    var nodes = [
+      node('PC', 'host', 0, null, [{ text: t('pcRole'), kind: 'role' }, { text: L.PC_IP, kind: 'addr' }, { text: '192.168.1.0/24', kind: 'sub' }]),
+      node('R1', 'router', 2, null, [{ text: t('router'), kind: 'role' }, { text: '← ' + IFS.R1[0], kind: 'sub' }, { text: IFS.R1[1] + ' →', kind: 'sub' }]),
+      node('R2', 'router', 4, null, [{ text: t('router'), kind: 'role' }, { text: '← ' + IFS.R2[0], kind: 'sub' }, { text: IFS.R2[1] + ' →', kind: 'sub' }]),
+      node('S', 'server', 6, t('serverName'), [{ text: L.SERVER, kind: 'addr' }, { text: '192.168.2.0/24', kind: 'sub' }])
+    ];
+    var links = [{ id: 'l1', a: 'PC', b: 'R1' }, { id: 'l2', a: 'R1', b: 'R2' }, { id: 'l3', a: 'R2', b: 'S' }];
+    if (local) {
+      var x = node('X', 'host', 1, t('nobody'), [{ text: L.LOCAL, kind: 'addr' }]);
+      x.row = 1; x.mark = '?';
+      nodes.splice(1, 0, x);
+      links.push({ id: 'lx', a: 'PC', b: 'X', state: 'off' });
+    }
+    var packets = [], p = s.pkt;
+    if (s.ev === 'hop') {
+      var label = p.kind === 'request' ? t('chipReq', { ttl: p.ttl }) : p.kind === 'reply' ? t('chipReply', { ttl: p.ttl }) : t('chipErr', { tc: tc(p), ttl: p.ttl });
+      packets.push({ from: p.from, to: p.to, label: label, c: KIND_C[p.kind] });
+      links.forEach(function (l) { if ((l.a === p.from && l.b === p.to) || (l.b === p.from && l.a === p.to)) l.active = true; });
+    } else if (s.ev === 'decide' && s.decision.node !== 'S' && s.decision.node !== 'PC') {
+      var at = PATH.indexOf(s.decision.node);           // the dropped request, crossed out at the router
+      packets.push({ from: PATH[at - 1], to: s.decision.node, drop: true, move: false, label: t('chipReq', { ttl: s.decision.ttlIn }), c: KIND_C.request });
+    } else if (s.ev === 'arp') {
+      packets.push({ from: s.arp.node, to: s.arp.node === 'PC' ? 'X' : 'S', cast: 'broadcast', drop: true, label: t('chipArp', { ip: s.arp.ip }), c: COLOUR[s.arp.node], at: 0.3 });
+    }
+    var broken = BROKEN[sc];
+    return Simdeck.topology({ cols: 7, rows: local ? ['auto', 'auto'] : ['auto'], dir: c.dir, nodes: nodes, links: links, packets: packets,
+      className: broken ? 'im-broken-' + broken : null });
+  }
+
+  // ── the message on the wire ──
+
+  function renderWire(c) {
+    var s = c.state, m = s.pkt, answer = false;
+    if (!m && s.ev === 'decide' && s.answer) { m = s.answer; answer = true; }
+    var box = h('section', { class: 'im-box im-wire', dataset: answer ? { k: 'answer' } : {} }, h('h2', null, t(answer ? 'wireAnswer' : 'wireTitle')));
+    if (!m) {
+      var silent = (s.decision && s.decision.rule === 'drop') || s.ev === 'wait' || (s.result && s.result.kind === 'timeout');
+      var key = s.ev === 'start' ? 'wireStart' : s.scenario === 'local' ? 'wireNoPacket' : silent ? 'wireSilent' : s.ev === 'arp' ? 'wireArp' : 'wireNone';
+      box.append(h('p', { class: 'im-none', dataset: silent ? { k: 'silent' } : {} }, s.ev === 'arp' ? t.parts(key, { r: data(s.arp.node, ''), ip: data(s.arp.ip) }) : t(key)));
+      return box;
+    }
+    var who = senderOf(m);
+    var row = function (label, value) { return [h('dt', null, t(label)), h('dd', null, value)]; };
+    box.append(h('dl', { class: 'im-kv' },
+      row('fMsg', h('span', null, rich(MSG[m.type]))),
+      row('fTypeCode', h('span', { class: 'im-tc sd-fill', dataset: { c: KIND_C[m.kind], k: m.kind }, translate: 'no' }, m.type + ' / ' + m.code)),
+      row('fMeaning', t(MEAN[tc(m)])),
+      row('fSender', [data(who, ''), ' ', data(m.src)]),
+      row('fSrcDst', data(m.src + ' → ' + m.dst)),
+      row('fTtl', b(m.ttl)),
+      row('fCarries', t(m.kind === 'request' ? 'carriesReq' : m.kind === 'reply' ? 'carriesReply' : 'carriesErr'))));
+    return box;
+  }
+
+  // ── the deciding device ──
+
+  function checkItem(x) {
+    if (x.st === 'skip') return h('li', { dataset: { st: 'skip' } }, h('span', null, h('b', null, t({ route: 'kRoute', ttl: 'kTtl', filter: 'kFilter', arp: 'kArp' }[x.k])), t('cSkip')));
+    var st = x.st === 'drop' || x.st === 'reject' ? 'fail' : x.st, text;
+    if (x.k === 'route') text = x.st === 'fail' ? t.parts('cRouteFail', { dst: data(x.dst) })
+      : x.via ? t.parts('cRouteOk', { net: data(x.net), via: data(x.via) }) : t.parts('cRouteConn', { net: data(x.net) });
+    if (x.k === 'ttl') text = x.st === 'fail' ? t.parts('cTtlFail', { a: data(x.a) }) : t.parts('cTtlOk', { a: data(x.a), b: data(x.b) });
+    if (x.k === 'filter') text = t(x.action === 'drop' ? 'cFilterDrop' : 'cFilterReject');
+    if (x.k === 'arp') text = t.parts(x.st === 'fail' || x.st === 'wait' ? 'cArpFail' : 'cArpOk', { ip: data(x.ip) });
+    return h('li', { dataset: { st: st } }, h('span', null, text));
+  }
+  function li(st, kids) { return h('li', { dataset: { st: st } }, h('span', null, kids)); }
+
+  function renderDecision(c) {
+    var s = c.state, os = c.params.os, items = null, title = null, past = false;
+    // the first hop back from the device that answered keeps its decision on show
+    if (s.ev === 'hop' && !s.fwd && !s.result && s.pkt.kind !== 'request' && c.prev && c.prev.decision) {
+      s = Object.assign({}, s, { ev: 'decide', decision: c.prev.decision });
+      past = true;
+    }
+    var who = function (id) { return id === 'S' ? t('serverName') : id === 'PC' ? 'PC' : id; };
+    if (s.ev === 'decide' && s.decision.node === 'S') {
+      title = t('decTitle', { who: who('S') });
+      items = [li('ok', t('cEcho')), li('ok', t('cEchoTtl'))];
+    } else if (s.ev === 'decide' && s.decision.node === 'PC') {
+      title = t('decTitle', { who: 'PC' });
+      items = [li('ok', t.parts('cLocalNet', { dst: data(s.target), net: data('192.168.1.0') })), li('fail', t.parts('cLocalArp', { ip: data(s.target) })), li('fail', t('cLocalGive'))];
+    } else if (s.ev === 'decide') {
+      title = t('decTitle', { who: s.decision.node });
+      items = s.decision.checks.map(checkItem);
+    } else if (s.ev === 'arp' && s.arp.local) {
+      title = t('decTitle', { who: 'PC' });
+      items = [li('ok', t.parts('cLocalNet', { dst: data(s.target), net: data(s.arp.local.net) })), li('wait', t.parts('cLocalArp', { ip: data(s.arp.ip) }))];
+    } else if (s.ev === 'arp') {
+      title = t('decTitle', { who: s.arp.node });
+      items = s.arp.checks.map(function (x) { return checkItem(x.k === 'arp' ? Object.assign({}, x, { st: 'wait' }) : x); });
+    } else if (s.result) {
+      title = t('decTitle', { who: 'PC' });
+      var r = s.result.kind;
+      items = r === 'timeout' ? [li('fail', t(os === 'linux' ? 'cTimeoutLinux' : 'cTimeout'))] : [li('ok', t(r === 'reply' ? 'cMatch' : 'cMatchErr'))];
+    } else if (s.ev === 'wait') {
+      title = t('decTitle', { who: 'PC' });
+      items = [li('wait', t('cWait'))];
+    } else if (s.fwd) {
+      title = t('decFwd', { who: s.fwd.node });
+      items = s.fwd.checks.map(checkItem);
+      past = true;
+    } else if (s.ev === 'hop' && s.pkt.from === 'PC') {
+      title = t('decTitle', { who: 'PC' });
+      items = [li('ok', t.parts('cPcRemote', { dst: data(s.target), net: data('192.168.1.0/24'), gw: data('192.168.1.1') }))];
+      past = true;
+    }
+    var box = h('section', { class: 'im-box im-dec', dataset: past ? { past: '1' } : {} });
+    if (!items) {
+      box.append(h('h2', null, t('decIdle')), h('p', null, t('decIdleText')));
+      return box;
+    }
+    box.append(h('h2', null, title), h('ol', { class: 'im-checks' }, items));
+    return box;
+  }
+
+  // ── the console ──
+
+  function renderConsole(c) {
+    var s = c.state, os = c.params.os, con = L.consoleOf(s.result, os, s.target);
+    var fresh = !!s.result && !!c.prev && !c.prev.result;
+    var waiting = !s.result && s.ev !== 'start';
+    var clock = h('div', { class: 'im-clock' },
+      h('span', null, t.parts('conTimer', { t: b(when(s.t)) })),
+      h('span', { class: 'im-meter', 'aria-hidden': 'true' }, h('i', { style: { width: Math.min(100, 100 * s.t / L.TIMEOUT) + '%' } })),
+      os === 'linux' ? null : h('span', { class: 'im-muted' }, t.parts('conLimit', { t: data(when(L.TIMEOUT), '') })));
+    var term = h('div', { class: 'im-term', translate: 'no' });
+    var line = function (text, cls) { term.append(h('div', { class: cls || null }, text)); };
+    line(os === 'linux' ? '$ ping -c 4 ' + s.target : '> ping ' + s.target, 'im-cmd');
+    line(con.head);
+    if (!s.result) {
+      if (waiting) term.append(h('div', { class: 'im-note', translate: null }, t('conWaiting')));
+    } else {
+      if (con.lines[0] === null) term.append(h('div', { class: 'im-note' + (fresh ? ' sd-changed' : ''), translate: null }, t('conNoLine')));
+      else {
+        line(con.lines[0], fresh ? 'sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : null);
+        con.lines.slice(1).forEach(function (x) { line(x, 'im-rep'); });
+        term.append(h('div', { class: 'im-note', translate: null }, t('conSame')));
+      }
+      term.append(h('div', { class: 'im-gap' }));
+      con.summary.forEach(function (x, i) { line(x, i === 1 && fresh ? 'sd-changed' : null); });
+    }
+    return h('section', { class: 'im-box im-con' }, h('h2', null, t('conTitle')), clock, term);
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, os = c.params.os, p = s.pkt, r = s.result, d = s.decision;
+    var D = function (v) { return data(v); }, B = function (v) { return b(v); };
+    switch (s.ev) {
+      case 'start':
+        return s.scenario === 'local' ? rich('capStartLocal', { dst: B(s.target) }) : rich('capStart', { dst: B(s.target), ttl: D(s.ttl) });
+      case 'arp':
+        return s.arp.local ? rich('capLocalArp', { dst: B(s.arp.ip) }) : rich('capArp', { r: data(s.arp.node, ''), ip: B(s.arp.ip) });
+      case 'wait':
+        return rich(os === 'linux' ? 'capWaitLinux' : 'capWait');
+      case 'print':
+        return rich(os === 'linux' ? 'capTimeoutLinux' : 'capTimeout');
+      case 'decide':
+        var src = s.answer ? s.answer.src : null;
+        switch (d.rule) {
+          case 'echo': return rich('capEcho');
+          case 'net': return rich('capNet');
+          case 'ttl': return rich('capTtl', { r: data(d.node, ''), a: D(d.ttlIn), src: B(src) });
+          case 'host': return rich('capHost', { r: data(d.node, ''), src: B(src) });
+          case 'drop': return rich('capDrop');
+          case 'reject': return rich('capReject');
+          case 'local': return rich(os === 'linux' ? 'capLocalLinux' : 'capLocal', { src: B(r.from) });
+        }
+        return '';
+      case 'hop':
+        if (p.kind === 'request') {
+          if (p.from === 'PC') return rich('capOut', { dst: D(s.target), ttl: B(p.ttl) });
+          return rich('capFwd', { r: data(s.fwd.node, ''), net: D(s.fwd.checks[0].net), ttl: B(p.ttl) });
+        }
+        if (r) {
+          var T = B(when(r.time));
+          switch (r.kind) {
+            case 'reply': return rich('capPrintReply', { src: D(r.from), time: T, ttl: B(r.ttl) });
+            case 'net': return rich('capPrintNet', { src: B(r.from), time: T });
+            case 'host': return rich('capPrintHost', { src: B(r.from), time: T, dst: D(s.target) });
+            case 'ttl': return rich('capPrintTtl', { src: B(r.from), k: D(r.from === IFS.R1[0] ? 1 : 2) });
+            case 'prohibited': return rich(os === 'linux' ? 'capPrintRejectLinux' : 'capPrintReject', { time: T });
+          }
+        }
+        if (!s.fwd) return rich('capBackFirst', { who: data(senderOf(p) === 'S' ? t('serverName') : senderOf(p), ''), what: what(p), dst: D(p.dst), src: B(p.src) });
+        return rich('capBack', { r: data(s.fwd.node, ''), what: what(p), ttl: B(p.ttl) });
+    }
+    return '';
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('scenario'), resets: true,
+        options: [['ok', t('scOk')], ['noRoute', t('scNoRoute')], ['hostDown', t('scHostDown')], ['fwDrop', t('scFwDrop')], ['fwReject', t('scFwReject')], ['local', t('scLocal')]] },
+      { key: 'ttl', type: 'range', label: t('ttl'), min: 1, max: 64 },
+      { key: 'os', type: 'choice', label: t('os'), options: [['win', t('osWin')], ['linux', t('osLinux')]] }
+    ],
+
+    presets: [
+      { id: 'echo-ok', label: t('presetOk'), params: { scenario: 'ok', ttl: 64 }, hint: t('presetOkHint') },
+      { id: 'no-route', label: t('presetNoRoute'), params: { scenario: 'noRoute', ttl: 64 }, hint: t('presetNoRouteHint') },
+      { id: 'host-down', label: t('presetHostDown'), params: { scenario: 'hostDown', ttl: 64 }, hint: t('presetHostDownHint') },
+      { id: 'firewall-drop', label: t('presetFwDrop'), params: { scenario: 'fwDrop', ttl: 64 }, hint: t('presetFwDropHint') },
+      { id: 'firewall-reject', label: t('presetFwReject'), params: { scenario: 'fwReject', ttl: 64 }, hint: t('presetFwRejectHint') },
+      { id: 'ttl-low', label: t('presetTtl'), params: { scenario: 'ok', ttl: 1 }, hint: t('presetTtlHint') },
+      { id: 'local-down', label: t('presetLocal'), params: { scenario: 'local', ttl: 64 }, hint: t('presetLocalHint') }
+    ],
+
+    legend: [
+      { c: 1, label: t('legReq') },
+      { c: 2, label: t('legReply') },
+      { c: 5, label: t('legErr') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'broken', label: t('legBroken') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'im' },
+        renderTopo(c),
+        h('div', { class: 'im-bottom' }, renderWire(c), renderDecision(c), renderConsole(c))));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
