@@ -1,0 +1,471 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- dns-ttl-cache: the address of posluzitelj.lab.example changes at t = 0 (or a new name is added), and three busy
+     caching resolvers keep handing out what they cached until its TTL runs out. A stepper over a time axis: each row
+     is a resolver's cache over time (one bar per fetched record, hollow = old address, filled = new, hatched =
+     NXDOMAIN), with the resolver's card on the left (what is cached, the TTL left, what its client gets).
+     Drawn by the page (no kit view has a time axis). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="dns-ttl-cache">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: TTL i selidba adrese · simdeck</title>
+<meta name="description" content="Adresa se promijeni u 0, a tri rezolvera daju staru dok im zapis ne istekne; TTL snižen na vrijeme skraćuje prozor na pet minuta.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dns-ttl-cache",
+  "title": {
+    "hr": "DNS: TTL i selidba adrese",
+    "en": "DNS: TTL and the cutover"
+  },
+  "concept": {
+    "hr": "Stari odgovor živi dok mu TTL ne istekne: TTL se snizuje prije selidbe",
+    "en": "Old answers live until their TTL expires: lower the TTL before you move"
+  },
+  "summary": {
+    "hr": "Adresa se promijeni u 0, a tri rezolvera daju staru dok im zapis ne istekne. TTL snižen na vrijeme skraćuje prozor na pet minuta.",
+    "en": "The address changes at 0, and three resolvers hand out the old one until their record expires. A TTL lowered in time cuts the window to minutes."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 12
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="dns-ttl-cache"]; colours only from kit tokens.
+   Layout: a grid of rows (axis, zone, R1–R3); the left column holds the cards, the right one the tracks over time. */
+[data-sim="dns-ttl-cache"] .tc {
+  display: grid;
+  grid-template-columns: minmax(0, 23rem) minmax(0, 1fr);
+  grid-template-rows: auto auto repeat(3, minmax(0, 1fr));
+  gap: 1.1cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.4cqw 1.8cqh;
+  font-size: 1rem;
+}
+[data-sim="dns-ttl-cache"] .tc-mono { font-family: var(--mono); }
+[data-sim="dns-ttl-cache"] .tc-muted { color: var(--muted); }
+[data-sim="dns-ttl-cache"] .tc-sm { font-size: var(--fs-sm); }
+
+/* cards */
+[data-sim="dns-ttl-cache"] .tc-card {
+  min-height: 0;
+  padding: 0.35rem 0.6rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  line-height: 1.3;
+  overflow: hidden;
+}
+[data-sim="dns-ttl-cache"] .tc-card h2 { margin: 0 0 0.15rem; font-size: 1em; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="dns-ttl-cache"] .tc-card h2 .tc-badge { margin-left: auto; }
+[data-sim="dns-ttl-cache"] .tc-card.sd-changed { background: var(--hl); color: var(--on-hl); outline: var(--line-w) solid var(--ink); }
+[data-sim="dns-ttl-cache"] .tc-card.sd-changed .tc-muted { color: var(--on-hl); }
+[data-sim="dns-ttl-cache"] .tc-line { display: flex; flex-wrap: wrap; gap: 0 0.45rem; align-items: center; }
+[data-sim="dns-ttl-cache"] .tc-badge {
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="dns-ttl-cache"] .tc-badge[data-k="old"] { border-style: dashed; }
+[data-sim="dns-ttl-cache"] .tc-bar { flex: 1 1 5rem; min-width: 4rem; height: 0.55rem; border: 1px solid var(--line); background: var(--bg); }
+[data-sim="dns-ttl-cache"] .tc-bar > span { display: block; height: 100%; background: var(--ink); }
+[data-sim="dns-ttl-cache"] .tc-bar[data-k="nx"] > span { background: repeating-linear-gradient(45deg, var(--ink) 0 0.2rem, var(--bg) 0.2rem 0.4rem); }
+
+/* the address mark: hollow circle = old, filled = new, hatched = no such name */
+[data-sim="dns-ttl-cache"] .tc-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 0.18rem solid var(--ink);
+  border-radius: 50%;
+  vertical-align: -0.1rem;
+  background: var(--bg);
+}
+[data-sim="dns-ttl-cache"] .tc-dot[data-k="new"] { background: var(--c3); border-color: var(--c3); }
+[data-sim="dns-ttl-cache"] .tc-dot[data-k="nx"] { border-radius: 0.15rem; background: repeating-linear-gradient(45deg, var(--ink) 0 0.15rem, var(--bg) 0.15rem 0.3rem); }
+
+/* tracks */
+[data-sim="dns-ttl-cache"] .tc-track {
+  position: relative;
+  min-height: 0;
+  border-bottom: var(--line-w) solid var(--line);
+}
+[data-sim="dns-ttl-cache"] .tc-seg {
+  position: absolute;
+  top: 18%;
+  bottom: 18%;
+  box-sizing: border-box;
+  border: 0.18rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 0.3rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+[data-sim="dns-ttl-cache"] .tc-seg[data-k="new"] { background: var(--c3); border-color: var(--c3); color: var(--on-series); }
+[data-sim="dns-ttl-cache"] .tc-seg[data-k="nx"] { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--ink) 55%, transparent) 0 0.25rem, var(--bg) 0.25rem 0.55rem); }
+[data-sim="dns-ttl-cache"] .tc-seg[data-k="none"] { border-style: dotted; color: var(--muted); font-family: var(--sans); }
+[data-sim="dns-ttl-cache"] .tc-seg[data-future] { opacity: 0.5; border-style: dashed; }
+[data-sim="dns-ttl-cache"] .tc-seg[data-cut-l] { border-left-width: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+[data-sim="dns-ttl-cache"] .tc-seg[data-cut-r] { border-right-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+[data-sim="dns-ttl-cache"] .tc-seg.sd-changed { outline: 0.25rem solid var(--hl); outline-offset: 0.1rem; }
+[data-sim="dns-ttl-cache"] .tc-vline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 0.2rem solid var(--ink); pointer-events: none; }
+[data-sim="dns-ttl-cache"] .tc-vline[data-k="change"] { border-left-style: solid; border-left-color: var(--danger); }
+[data-sim="dns-ttl-cache"] .tc-vline[data-k="lower"] { border-left-style: dashed; border-left-color: var(--c1); }
+[data-sim="dns-ttl-cache"] .tc-vline[data-k="now"] { border-left-width: 0.35rem; margin-left: -0.175rem; border-left-color: var(--ink); }
+
+/* the axis */
+[data-sim="dns-ttl-cache"] .tc-axis { height: 4.6rem; border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="dns-ttl-cache"] .tc-tick { position: absolute; bottom: 0; height: 0.5rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="dns-ttl-cache"] .tc-tlabel { position: absolute; bottom: 0.55rem; transform: translateX(-50%); font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="dns-ttl-cache"] .tc-mark { position: absolute; top: 0; transform: translateX(-50%); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; padding: 0 0.25rem; border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="dns-ttl-cache"] .tc-mark[data-k="change"] { color: var(--danger); }
+[data-sim="dns-ttl-cache"] .tc-mark[data-k="lower"] { color: var(--c1); top: 1.25rem; }
+[data-sim="dns-ttl-cache"] .tc-seg[data-k="nx"] > span { background: var(--bg); padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="dns-ttl-cache"] .tc-mark[data-edge="l"] { transform: none; }
+[data-sim="dns-ttl-cache"] .tc-mark[data-edge="r"] { transform: translateX(-100%); }
+[data-sim="dns-ttl-cache"] .tc-now { display: flex; flex-direction: column; justify-content: flex-end; }
+[data-sim="dns-ttl-cache"] .tc-now b { font-size: 1.5rem; font-family: var(--mono); }
+
+/* legend swatches the kit lacks */
+[data-sim="dns-ttl-cache"] .sd-swatch[data-shape="old"] { border-radius: 50%; background: var(--bg); border: 0.18rem solid var(--ink); }
+[data-sim="dns-ttl-cache"] .sd-swatch[data-shape="new"] { border-radius: 50%; background: var(--c3); border-color: var(--c3); }
+[data-sim="dns-ttl-cache"] .sd-swatch[data-shape="nx"] { background: repeating-linear-gradient(45deg, var(--ink) 0 0.15rem, var(--bg) 0.15rem 0.3rem); }
+[data-sim="dns-ttl-cache"] .sd-swatch[data-shape="bar"] { height: 0.55rem; border: 1px solid var(--line); background: linear-gradient(90deg, var(--ink) 0 60%, var(--bg) 60%); border-radius: 0; }
+[data-sim="dns-ttl-cache"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the kit's .sd-ctl { display: flex } beats [hidden], so visible: () => false would not hide (NOTES.md, Shared requests) */
+[data-sim="dns-ttl-cache"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; each card sits above its track. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dns-ttl-cache"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dns-ttl-cache"] .tc { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.4rem; }
+  [data-sim="dns-ttl-cache"] .tc-track { height: 3rem; margin-bottom: 0.5rem; }
+  [data-sim="dns-ttl-cache"] .tc-axis { height: 4.6rem; }
+  /* narrow: only the first, the last and the change keep their numbers; segments keep no label */
+  [data-sim="dns-ttl-cache"] .tc-tlabel:not([data-key]) { display: none; }
+  [data-sim="dns-ttl-cache"] .tc-seg > span { display: none; }
+  [data-sim="dns-ttl-cache"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: TTL i selidba adrese</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var MIN = 60;
+
+  /** Data (names, addresses, resolver ids) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'tc-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Seconds relative to the change → "−50 min", "0 min", "+40 min". */
+  function signed(min) { return min > 0 ? '+' + min : min < 0 ? '−' + -min : '0'; }
+  function at(x) { return t('tMin', { v: signed(Math.round(x / MIN * 10) / 10) }); }
+  function dur(x) { return t('tMin', { v: String(Math.round(x / MIN * 10) / 10) }); }
+  function sec(v) { return t('sec', { v: v }); }
+  function kindOf(addr) { return addr === null ? 'nx' : addr === L.ADDR.old ? 'old' : 'new'; }
+  function word(k) { return t({ old: 'wOld', new: 'wNew', nx: 'wNx' }[k]); }
+  function dot(k) { return h('span', { class: 'tc-dot', dataset: { k: k }, 'aria-hidden': 'true' }); }
+  /** A dataset without the keys whose value is null: h() would write them as "null", and [data-x] would match. */
+  function ds(o) {
+    var out = {};
+    Object.keys(o).forEach(function (k) { if (o[k] !== null && o[k] !== undefined) out[k] = o[k]; });
+    return out;
+  }
+  function list(items) {
+    var out = [];
+    items.forEach(function (x, i) { if (i) out.push(', '); out.push(x); });
+    return out;
+  }
+
+  /** The run's window in seconds and a position on it in percent. */
+  function frame(p) {
+    var w = L.windowOf(p), st = L.stepSec(p);
+    var to = w.from + w.steps * st;
+    return { from: w.from, to: to, step: st, steps: w.steps, x: function (x) { return (x - w.from) / (to - w.from) * 100; } };
+  }
+  function pct(v) { return Math.max(0, Math.min(100, v)) + '%'; }
+
+  /** The vertical lines every track carries: the change, the lowering, now. */
+  function vlines(f, p, s) {
+    var out = [];
+    if (p.scenario === 'move' && p.lower && p.lowerAt * MIN >= f.from) out.push(h('span', { class: 'tc-vline', dataset: { k: 'lower' }, style: { left: pct(f.x(p.lowerAt * MIN)) } }));
+    if (f.from <= 0 && f.to >= 0) out.push(h('span', { class: 'tc-vline', dataset: { k: 'change' }, style: { left: pct(f.x(0)) } }));
+    out.push(h('span', { class: 'tc-vline', dataset: { k: 'now' }, style: { left: pct(f.x(s.t)) } }));
+    return out;
+  }
+
+  // ── axis ──
+  function renderAxis(f, p, s) {
+    var ax = h('div', { class: 'tc-track tc-axis' });
+    var every = f.steps > 12 ? 2 : 1;
+    for (var i = 0; i <= f.steps; i++) {
+      var tick = f.from + i * f.step;
+      ax.append(h('span', { class: 'tc-tick', style: { left: pct(f.x(tick)) } }));
+      if (i % every === 0 || i === f.steps) {
+        ax.append(h('span', { class: 'tc-tlabel', dataset: ds({ key: i === 0 || i === f.steps || tick === 0 ? '' : null }), style: { left: pct(f.x(tick)) } }, signed(tick / MIN)));
+      }
+    }
+    ax.append.apply(ax, vlines(f, p, s));
+    function mark(k, when, text) {
+      var x = f.x(when);
+      ax.append(h('span', { class: 'tc-mark', dataset: ds({ k: k, edge: x < 8 ? 'l' : x > 92 ? 'r' : null }), style: { left: pct(x) } }, text));
+    }
+    if (f.from <= 0 && f.to >= 0) mark('change', 0, p.scenario === 'move' ? t('markChange') + ' · ' + t('tuesday') : t('markAdd'));
+    if (p.scenario === 'move' && p.lower) mark('lower', Math.max(p.lowerAt * MIN, f.from), (p.lowerAt * MIN < f.from ? '← ' : '') + t('markLower') + ' ' + sec(p.newTtl));
+    return ax;
+  }
+
+  // ── zone ──
+  function zonePeriods(f, p, s) {
+    // the zone's answer for the name the clients ask, between its edits, up to now
+    var qname = p.scenario === 'newname' ? L.NEW_NAME : L.NAME;
+    var z = L.zone0(p), times = [f.from - 1e9], states = [JSON.parse(JSON.stringify(z))];
+    L.edits(p).forEach(function (e) { z = L.applyEdit(z, e); times.push(e.at); states.push(JSON.parse(JSON.stringify(z))); });
+    var out = [];
+    for (var i = 0; i < states.length; i++) {
+      var a = Math.max(times[i], f.from), e = Math.min(i + 1 < times.length ? times[i + 1] : Infinity, s.t);
+      if (e <= a) continue;
+      var addr = states[i].records[qname] || null;
+      if (out.length && out[out.length - 1].addr === addr && out[out.length - 1].ttl === states[i].ttl) out[out.length - 1].to = e;
+      else out.push({ from: a, to: e, addr: addr, ttl: states[i].ttl });
+    }
+    return out;
+  }
+  function renderZone(f, p, s) {
+    var qname = p.scenario === 'newname' ? L.NEW_NAME : L.NAME;
+    var addr = s.zone.records[qname] || null;
+    var card = h('div', { class: 'tc-card' },
+      h('h2', null, t('zoneTitle'), h('span', { class: 'tc-muted tc-mono', translate: 'no' }, L.ZONE)),
+      h('div', { class: 'tc-line' }, addr ? dot(kindOf(addr)) : null, data(qname.replace('.' + L.ZONE, '') + ' A'),
+        addr ? b(addr) : h('span', { class: 'tc-muted' }, t('zoneMissing'))),
+      h('div', { class: 'tc-line tc-sm' }, h('span', null, t('zoneTtl') + ' ' + sec(s.zone.ttl)), h('span', { class: 'tc-muted' }, '· ' + t('zoneNeg') + ' ' + sec(s.zone.negTtl))));
+    var tr = h('div', { class: 'tc-track' });
+    zonePeriods(f, p, s).forEach(function (z) {
+      var k = z.addr === null ? 'none' : kindOf(z.addr);
+      tr.append(h('div', { class: 'tc-seg', dataset: ds({ k: k, cutL: z.from <= f.from ? '' : null }), style: { left: pct(f.x(z.from)), width: pct(f.x(z.to) - f.x(z.from)) } },
+        f.x(z.to) - f.x(z.from) < 18 ? null : z.addr === null ? t('zoneMissing') : h('span', { translate: 'no' }, z.addr + ' · ' + sec(z.ttl))));
+    });
+    tr.append.apply(tr, vlines(f, p, s));
+    return [card, tr];
+  }
+
+  // ── resolvers ──
+  function renderResolver(f, p, s, r, c) {
+    var e = r.cache && L.valid(r.cache, s.t) ? r.cache : null;
+    var k = e ? kindOf(e.addr) : null;
+    var until = L.oldUntil(r, s.t);
+    var head = h('h2', null, data(r.id), h('span', { class: 'tc-muted' }, t('office', { n: r.id.slice(1) })),
+      r.refetches ? h('span', { class: 'tc-badge' }, '↻ ' + t.n('refetches', r.refetches)) : null);
+    var cache = e
+      ? [h('div', { class: 'tc-line' }, h('span', { class: 'tc-muted' }, t('cacheLbl')), dot(k), e.addr ? b(e.addr) : b('NXDOMAIN'),
+          h('span', { class: 'tc-badge', dataset: { k: k } }, word(k)), h('span', { class: 'tc-muted tc-sm' }, t('fetchedAt', { at: at(e.fetchedAt) }))),
+        h('div', { class: 'tc-line tc-sm' }, h('span', { class: 'tc-bar', dataset: { k: k } }, h('span', { style: { width: pct(L.left(e, s.t) / e.ttl * 100) } })),
+          h('span', null, t('ttlLeft', { left: sec(L.left(e, s.t)), ttl: sec(e.ttl) })))]
+      : [h('div', { class: 'tc-line' }, h('span', { class: 'tc-muted' }, t('cacheLbl')), h('span', null, t('cacheEmpty')))];
+    var client = r.answer
+      ? h('div', { class: 'tc-line' }, h('span', { class: 'tc-muted' }, t('clientGets')), dot(k), h('b', null, word(k)),
+          h('span', { class: 'tc-muted tc-sm' }, '· ' + t(r.source === 'auth' ? 'fromAuth' : 'fromCache')),
+          until !== null && s.t >= 0 ? h('span', { class: 'tc-badge', dataset: { k: 'old' } }, t('oldUntil', { at: at(until) })) : null)
+      : h('div', { class: 'tc-line' }, h('span', { class: 'tc-muted' }, t('clientGets')), h('span', null, t('notAsked')));
+    var card = h('div', { class: 'tc-card' + (r.changed ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') }, head, cache, client);
+
+    var tr = h('div', { class: 'tc-track' });
+    r.history.forEach(function (x) {
+      if (x.expiresAt <= f.from) return;
+      var a = Math.max(x.fetchedAt, f.from), z = Math.min(x.expiresAt, f.to), mid = Math.min(Math.max(s.t, a), z);
+      var kk = kindOf(x.addr);
+      var fresh = r.changed && x === r.history[r.history.length - 1];
+      var label = f.x(z) - f.x(a) > 7 ? h('span', { translate: 'no' }, sec(x.ttl)) : null;
+      if (mid > a) {
+        tr.append(h('div', { class: 'tc-seg' + (fresh ? ' sd-changed' : ''), dataset: ds({ k: kk, cutL: x.fetchedAt < f.from ? '' : null, cutR: z < x.expiresAt && mid === z ? '' : null }),
+          style: { left: pct(f.x(a)), width: pct(f.x(mid) - f.x(a)) } }, label));
+        label = null;
+      }
+      if (z > mid) {
+        tr.append(h('div', { class: 'tc-seg', dataset: ds({ k: kk, future: '', cutL: mid === a && x.fetchedAt < f.from ? '' : null, cutR: z < x.expiresAt ? '' : null }), style: { left: pct(f.x(mid)), width: pct(f.x(z) - f.x(mid)) } }, label));
+      }
+    });
+    tr.append.apply(tr, vlines(f, p, s));
+    return [card, tr];
+  }
+
+  // ── captions ──
+  /** The entry that expired before the first fetch of this step that brought the current value. */
+  function expiredBefore(r, tPrev) {
+    for (var i = 1; i < r.history.length; i++) {
+      if (r.history[i].fetchedAt > tPrev && r.history[i].addr === r.answer.addr) return r.history[i - 1];
+    }
+    return null;
+  }
+  function untilList(rs) {
+    return h('span', null, list(rs.map(function (r) { return t.parts('until', { r: data(r.id), at: at(r.cache.expiresAt) }); })));
+  }
+  function caption(c) {
+    var s = c.state, p = c.params;
+    var qname = p.scenario === 'newname' ? L.NEW_NAME : L.NAME;
+    if (c.first) {
+      if (p.scenario === 'newname') {
+        return t.parts('capStartNew', { t: at(s.t), name: b(L.NEW_NAME), neg: sec(s.zone.negTtl), min: sec(s.zone.minimum), soa: sec(p.oldTtl) }).concat([' ', t('capPress')]);
+      }
+      var parts0 = t.parts('capStart', { t: at(s.t), name: b(L.NAME), addr: b(L.ADDR.old), ttl: sec(p.oldTtl), new: b(L.ADDR.new) });
+      if (p.lower) parts0.push(' ', t(p.lowerAt * MIN <= s.t ? 'capStartLowered' : 'capStartLower', { ttl: sec(p.newTtl), at: at(p.lowerAt * MIN) }));
+      parts0.push(' ', t('capPress'));
+      return parts0;
+    }
+    var tPrev = c.prev.t;
+    var parts = [t('capStep', { t: at(s.t) })];
+    function say(x) { parts.push(' '); parts.push(x); }
+    var edited = false;
+    (s.stepLog || []).forEach(function (ev) {
+      if (ev.kind !== 'edit') return;
+      edited = true;
+      if (ev.edit === 'ttl') {
+        say(t.parts('capEditTtl', { ttl: sec(s.zone.ttl) }));
+        var long = s.resolvers.filter(function (r) { return r.cache && r.cache.ttl > p.newTtl && r.cache.fetchedAt <= ev.at && r.cache.expiresAt > ev.at; });
+        if (long.length) say(t.parts('capKeepLong', { list: untilList(long) }));
+      } else if (ev.edit === 'addr') say(t.parts('capEditAddr', { name: b(L.NAME), addr: b(L.ADDR.new) }));
+      else say(t.parts('capEditAdd', { name: b(L.NEW_NAME), addr: b(L.ADDR.novi) }));
+    });
+    // the resolvers that switched this step, each with the entry that expired; several alike are said once
+    var switched = s.resolvers.map(function (r, i) {
+      return r.changed && r.answer && c.prev.resolvers[i].answer ? { r: r, old: expiredBefore(r, tPrev) } : null;
+    }).filter(function (x) { return x && x.old; });
+    var alike = switched.length > 1 && switched.every(function (x) { return x.old.addr !== null && x.old.ttl === switched[0].old.ttl; });
+    if (alike) {
+      say(t.parts('capSwitchMany', { list: h('span', null, list(switched.map(function (x) { return data(x.r.id); }))), ttl: sec(switched[0].old.ttl),
+        addr: b(switched[0].r.answer.addr) }));
+    }
+    s.resolvers.forEach(function (r, i) {
+      var before = c.prev.resolvers[i];
+      if (r.changed && r.answer) {
+        if (!before.answer) { say(t.parts('capFirstAsk', { r: data(r.id), name: b(qname), addr: b(r.answer.addr) })); return; }
+        var old = expiredBefore(r, tPrev);
+        if (old) {
+          if (!alike) say(t.parts(old.addr === null ? 'capSwitchNx' : 'capSwitch',
+            { r: data(r.id), at: at(old.fetchedAt), ttl: sec(old.ttl), addr: b(r.answer.addr) }));
+          return;
+        }
+      }
+      if (r.answer && r.answer.addr === null && s.zone.records[qname]) { say(t.parts('capNxStill', { r: data(r.id), left: sec(r.answer.ttlLeft) })); return; }
+      if (r.answer && before.answer && r.answer.ttl < before.answer.ttl) say(t.parts('capShorter', { r: data(r.id), ttl: sec(r.answer.ttl) }));
+    });
+    if (p.scenario === 'move') {
+      if (s.t < 0 && !edited) say(t.parts('capBefore', { in: dur(-s.t), list: untilList(s.resolvers) }));
+      else if (s.t >= 0) {
+        var olds = s.resolvers.filter(function (r) { return L.oldUntil(r, s.t) !== null; });
+        if (olds.length) say(t.parts('capStillOld', { list: untilList(olds) }));
+        else {
+          var last = Math.max.apply(null, s.resolvers.map(L.switchedAt));
+          say(t.parts('capAllNew', { at: at(last) }));
+        }
+      }
+    } else if (s.resolvers.every(function (r) { return r.answer && r.answer.addr; })) {
+      say(t.parts('capAllNewNx', { name: b(L.NEW_NAME) }));
+    }
+    return parts;
+  }
+
+  var minFormat = function (v) { return t('tMin', { v: signed(v) }); };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'choice', label: t('scenario'), resets: true, options: [['move', t('scMove')], ['newname', t('scNew')]] },
+      { key: 'oldTtl', type: 'choice', label: t('oldTtl'), resets: true, options: [[3600, sec(3600)], [1800, sec(1800)], [300, sec(300)]] },
+      { key: 'lower', type: 'toggle', label: t('lower'), resets: true, visible: function (p) { return p.scenario === 'move'; } },
+      { key: 'lowerAt', type: 'range', label: t('lowerAt'), min: -120, max: 0, step: 10, format: minFormat, resets: true,
+        visible: function (p) { return p.scenario === 'move' && p.lower; } },
+      { key: 'newTtl', type: 'choice', label: t('newTtl'), resets: true, options: [[300, sec(300)], [60, sec(60)]],
+        visible: function (p) { return p.scenario === 'move' && p.lower; } },
+      { key: 'stepMin', type: 'choice', label: t('stepMin'), resets: true, options: [[5, t('tMin', { v: 5 })], [10, t('tMin', { v: 10 })]] }
+    ],
+
+    presets: [
+      { id: 'book-naive', label: t('presetNaive'), hint: t('presetNaiveHint'), params: { scenario: 'move', oldTtl: 3600, lower: false, stepMin: 10 } },
+      { id: 'book-lowered', label: t('presetLowered'), hint: t('presetLoweredHint'), params: { scenario: 'move', oldTtl: 3600, lower: true, lowerAt: -70, newTtl: 300, stepMin: 5 } },
+      { id: 'lowered-too-late', label: t('presetLate'), hint: t('presetLateHint'), params: { scenario: 'move', oldTtl: 3600, lower: true, lowerAt: -10, newTtl: 300, stepMin: 10 } },
+      { id: 'negative', label: t('presetNeg'), hint: t('presetNegHint'), params: { scenario: 'newname', oldTtl: 3600, stepMin: 5 } }
+    ],
+
+    legend: [
+      { shape: 'old', label: t('legendOld') },
+      { shape: 'new', label: t('legendNew') },
+      { shape: 'nx', label: t('legendNx') },
+      { shape: 'bar', label: t('legendBar') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var p = c.params, s = c.state, f = frame(p);
+      var kids = [h('div', { class: 'tc-now' }, h('span', { class: 'tc-muted tc-sm' }, t('axisNow')), h('b', null, at(s.t))), renderAxis(f, p, s)];
+      kids = kids.concat(renderZone(f, p, s));
+      s.resolvers.forEach(function (r) { kids = kids.concat(renderResolver(f, p, s, r, c)); });
+      c.stage.replaceChildren(h('div', { class: 'tc' }, kids));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
