@@ -119,13 +119,17 @@
 [data-sim="stp"] .sd-swatch[data-shape="stp-star"] { background: var(--ink); border-radius: 1rem; }
 [data-sim="stp"] .sd-swatch[data-shape="stp-star"]::after { content: '★'; color: var(--bg); }
 
+/* nine presets in two columns, as other sims with many presets do, so the panel fits at 1920×1080 */
+[data-sim="stp"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="stp"] .sd-preset { line-height: 1.15; }
+
 /* the panel: the three priorities share one row */
 [data-sim="stp"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 0.5rem; }
 [data-sim="stp"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
 [data-sim="stp"] [data-sd-controls] .sd-group > .sd-ctl[data-key^="prio"] { grid-column: auto; min-width: 0; }
 [data-sim="stp"] [data-sd-controls] .sd-group > .sd-ctl[data-key^="prio"] .sd-select { min-width: 0; width: 100%; }
 
-[data-sim="stp"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="stp"] [data-sd-controls] .sd-ctl[hidden], [data-sim="stp"] [data-sd-controls] .sd-btn[hidden] { display: none; }
 
 /* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
@@ -135,6 +139,7 @@
   [data-sim="stp"] .stp-sw td { white-space: normal; }
   [data-sim="stp"] .stp-sw td:first-child { white-space: nowrap; }
   [data-sim="stp"] .stp-sw td.stp-stored { overflow-wrap: anywhere; }
+  [data-sim="stp"] .sd-presets { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -178,7 +183,8 @@
   var L = window.SimLogic;
   var h = Simdeck.h;
   var t = Simdeck.useStrings(window.SimStrings);
-  var COLOUR = { S1: '1', S2: '2', S3: '3', H1: '8', H2: '8', H3: '8' };
+  var COLOUR = { S1: '1', S2: '2', S3: '3', S4: '4', H1: '8', H2: '8', H3: '8', H4: '8', R: '5' };
+  var note = null;   // why the last N was refused (the caption says it once)
   var PRIOS = [];
   for (var pr = 4096; pr <= 61440; pr += 4096) PRIOS.push([pr, String(pr)]);
 
@@ -219,19 +225,35 @@
   function pidText(pid) { return '128.' + (pid - 32768); }
   function vecText(scene, v) { return t('chipBpdu', { r: nameOfBid(scene, v.root), c: v.cost, b: nameOfBid(scene, v.bridge), p: pidText(v.port) }); }
   function portName(bridge, port) { return t('portOf', { b: bridge, p: port }); }
-  function lowestBid(scene) {
-    return scene.nodes.filter(function (n) { return n.kind === 'switch'; }).map(function (n) { return n.bid; }).sort()[0];
-  }
   var SYM = { root: 'symR', designated: 'symD', blocked: 'symX', disabled: 'symOff' };
   var STATE = { blocking: 'stBlocking', listening: 'stListening', learning: 'stLearning', forwarding: 'stForwarding', disabled: 'stDisabled' };
 
   // ── the drawing (kit view K2) ──
 
   function layoutOf(topo) {
-    return topo === 'pair'
-      ? { cols: 9, pos: { H1: [0, 0, 1], S1: [3, 0, 2], L1: [1, 1, 2], L2: [6, 1, 2], S2: [3, 2, 2], H2: [8, 2, 1] } }
-      : { cols: 9, pos: { H1: [0, 0, 1], S1: [3, 0, 2], S2: [0, 2, 2], S3: [5, 2, 2], H3: [8, 2, 1] } };
+    var rows = ['auto', 'minmax(3rem, 1fr)', 'auto'];
+    if (topo === 'pair') return { cols: 9, rows: rows, pos: { H1: [0, 0, 1], S1: [3, 0, 2], L1: [1, 1, 2], L2: [6, 1, 2], S2: [3, 2, 2], H2: [8, 2, 1] } };
+    // the mesh: the triangle with S4 in its middle, so no two links cross
+    if (topo === 'mesh') return { cols: 9, rows: ['auto', 'minmax(2rem, 2fr)', 'auto', 'minmax(2rem, 1fr)', 'auto'],
+      pos: { H1: [0, 0, 1], S1: [3, 0, 2], S4: [3, 2, 2], S2: [0, 4, 2], S3: [5, 4, 2], H3: [8, 4, 1] } };
+    if (topo === 'tree') return { cols: 9, rows: rows, pos: { H1: [0, 0, 1], S1: [3, 0, 2], H2: [0, 2, 1], S2: [2, 2, 2], S3: [5, 2, 2], H3: [8, 2, 1] } };
+    // the triangle on the left; R between it and the second network (S4, H4) on the right
+    if (topo === 'routed') return { cols: 9, rows: rows, pos: { H1: [0, 0, 1], S1: [2, 0, 2], S2: [0, 2, 2], S3: [3, 2, 2], R: [6, 1, 1], S4: [7, 0, 2], H4: [8, 2, 1] } };
+    return { cols: 9, rows: rows, pos: { H1: [0, 0, 1], S1: [3, 0, 2], S2: [0, 2, 2], S3: [5, 2, 2], H3: [8, 2, 1] } };
   }
+
+  /** A switch is shown as the root when it believes it is and every switch linked to it agrees (one tree per network). */
+  function isAgreedRoot(scene, s, id) {
+    var br = L.bridgeOf(s, id);
+    if (br.root !== br.bid || s.phase === 'power') return false;
+    return scene.links.every(function (l) {
+      var other = l.a === id ? l.b : l.b === id ? l.a : null;
+      if (!other || !linkUpIn(s, l.id)) return true;
+      var ob = L.bridgeOf(s, other);
+      return !ob || ob.root === br.bid;
+    });
+  }
+  function linkUpIn(s, id) { return s.links.filter(function (x) { return x.id === id; })[0].up; }
 
   function endText(s, bridge, port) {
     if (s.mode !== 'stp') return t('endBare', { p: port });
@@ -243,7 +265,6 @@
   function renderTopo(c, scene) {
     var s = c.state;
     var lay = layoutOf(scene.topo);
-    var low = lowestBid(scene);
     var activeB = {};
     (s.changes || []).forEach(function (ch) { activeB[ch.bridge] = true; });
     var frameHops = s.phase === 'frame' && s.frame ? s.frame.hops : null;
@@ -255,12 +276,16 @@
       if (n.kind === 'switch') {
         if (s.mode === 'stp') {
           var br = L.bridgeOf(s, n.id);
-          if (br.root === br.bid) badges.push(br.bid === low && s.phase !== 'power' ? { text: t('bRoot'), k: 'fill' } : { text: t('bClaims'), k: 'dashed' });
+          if (br.root === br.bid) badges.push(isAgreedRoot(scene, s, n.id) ? { text: t('bRoot'), k: 'fill' } : { text: t('bClaims'), k: 'dashed' });
         }
         return { id: n.id, kind: 'switch', col: P[0], row: P[1], span: P[2], c: COLOUR[n.id],
           lines: [{ text: bidText(n), kind: 'addr' }], badges: badges, state: activeB[n.id] ? 'active' : null };
       }
-      var sending = (frameHops && n.id === scene.sender) || (s.mode === 'flood' && s.wave === 1 && n.id === scene.sender);
+      if (n.kind === 'router') {
+        if (s.mode === 'flood' && recv[n.id]) badges.push({ text: t('bDropped', { n: recv[n.id] }), k: 'dashed' });
+        return { id: n.id, kind: 'router', col: P[0], row: P[1], span: P[2], c: COLOUR[n.id], badges: badges, align: 'center' };
+      }
+      var sending = (frameHops && n.id === scene.sender) || (s.mode === 'flood' && (s.wave === 1 || s.injected) && n.id === scene.sender);
       if (sending) badges.push({ text: t('bSends'), k: 'fill' });
       else if (recv[n.id]) badges.push({ text: t('bGot', { n: recv[n.id] }), k: 'solid' });
       return { id: n.id, kind: 'host', col: P[0], row: P[1], span: P[2], c: COLOUR[n.id], badges: badges, align: 'center',
@@ -313,12 +338,14 @@
       });
       Object.keys(groups).forEach(function (k) {
         var g = groups[k];
-        packets.push({ from: g.f.from, to: g.f.to, label: t('chipCopies', { n: g.n }), cast: 'broadcast', c: '8' });
+        // a copy on its way to the router ends in a cross there: a router does not forward a broadcast
+        packets.push({ from: g.f.from, to: g.f.to, label: t('chipCopies', { n: g.n }), cast: 'broadcast', c: '8',
+          drop: L.nodeOf(scene, g.f.to).kind === 'router' });
       });
     }
     // phone order: H1, S1, the segments, S2, …
     nodes.sort(function (x, y) { var px = lay.pos[x.id], py = lay.pos[y.id]; return px[1] - py[1] || px[0] - py[0]; });
-    return Simdeck.topology({ cols: lay.cols, rows: ['auto', 'minmax(3rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+    return Simdeck.topology({ cols: lay.cols, rows: lay.rows, dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
   }
 
   // ── the side column ──
@@ -369,15 +396,17 @@
 
   function renderFloodSide(c, scene) {
     var s = c.state, prev = c.prev;
-    var hosts = scene.nodes.filter(function (n) { return n.kind === 'host'; });
+    var hosts = scene.nodes.filter(function (n) { return n.kind === 'host' || n.kind === 'router'; });
     var dl = h('dl', { class: 'stp-count' },
       h('dt', null, t('inFlight')), h('dd', { translate: 'no' }, String(s.inFlight)),
+      scene.topo === 'mesh' ? [h('dt', null, t('inLoop')), h('dd', { translate: 'no' }, String(s.inLoop))] : null,
       h('dt', null, t('total')), h('dd', { translate: 'no' }, String(s.total)),
       hosts.map(function (n) {
         var got = s.recv[n.id] || 0, before = prev && prev.recv ? prev.recv[n.id] || 0 : 0;
-        return [h('dt', null, t('recvBy', { h: n.id })), h('dd', { translate: 'no', class: got !== before ? 'sd-changed' : null }, String(got))];
+        return [h('dt', null, t(n.kind === 'router' ? 'dropBy' : 'recvBy', n.kind === 'router' ? { r: n.id } : { h: n.id })),
+          h('dd', { translate: 'no', class: got !== before ? 'sd-changed' : null }, String(got))];
       }));
-    return [h('h2', null, t('floodTitle')), dl, h('p', { class: 'stp-note' }, t('noTtl'))];
+    return [h('h2', null, t('floodTitle')), dl, scene.topo === 'tree' ? null : h('p', { class: 'stp-note' }, t('noTtl'))];
   }
 
   // ── captions ──
@@ -522,11 +551,27 @@
     var bc = h('i', null, t('wBroadcast'));
     if (s.wave === 1) return parts('capFlood1', { h: name(scene.sender), bc: bc });
     var out = [parts('capFlood', { f: b(s.inFlight), total: b(s.total) })];
-    var watch = scene.nodes.filter(function (n) { return n.kind === 'host' && n.id !== scene.sender; })[0];
-    if (s.recv[watch.id]) out.push(parts('floodRecv', { h: name(watch.id), n: b(s.recv[watch.id]) }));
-    if (s.wave >= 4) out.push(t('floodNever'));
+    if (scene.topo === 'mesh') {
+      var seq = s.loops.filter(function (x) { return x > 0; }).map(function (x) { return String(x); }).join(t('seqSep'));
+      out = [parts('capFloodMesh', { seq: b(seq) })];
+      if (s.end === 'cap') out.push(parts('capFloodCap', { f: b(s.inFlight), cap: data(s.cappedAt) }));
+    } else if (scene.topo === 'tree') {
+      if (s.end === 'over') out.push(t('capFloodOver'));
+    } else if (scene.topo === 'routed') {
+      var r = scene.nodes.filter(function (n) { return n.kind === 'router'; })[0];
+      var far = scene.nodes.filter(function (n) { return n.kind === 'host' && n.id !== scene.sender; })[0];
+      if (s.recv[r.id]) out.push(parts('capFloodRouter', { r: name(r.id), n: b(t.n('copies', s.recv[r.id])), h: name(far.id) }));
+    } else {
+      var watch = scene.nodes.filter(function (n) { return n.kind === 'host' && n.id !== scene.sender; })[0];
+      // n is the number itself: t.parts picks the plural form from it (a node would always give the first form)
+      if (s.recv[watch.id]) out.push(parts('floodRecv', { h: name(watch.id), n: s.recv[watch.id] }));
+      if (s.wave >= 4) out.push(t('floodNever'));
+    }
+    if (s.injected) out.unshift(parts('capInject', { h: name(scene.sender) }));
     return join(out);
   }
+
+  var PRE = { mesh: 'capFloodPreMesh', tree: 'capFloodPreTree', routed: 'capFloodPreRouted' };
 
   Simdeck.mount({
     steps: L.steps,
@@ -535,7 +580,8 @@
     step: L.step,
 
     params: [
-      { key: 'stp', type: 'toggle', label: t('pStp'), resets: true },
+      // the storm scenes (mesh, tree, routed) run without STP: four switch blocks would not fit the side column
+      { key: 'stp', type: 'toggle', label: t('pStp'), resets: true, visible: function (p) { return p.topo === 'triangle' || p.topo === 'pair'; } },
       { key: 'prioS1', type: 'select', label: t('pPrio', { s: 'S1' }), options: PRIOS, resets: true, visible: function (p) { return p.stp; } },
       { key: 'prioS2', type: 'select', label: t('pPrio', { s: 'S2' }), options: PRIOS, resets: true, visible: function (p) { return p.stp; } },
       { key: 'prioS3', type: 'select', label: t('pPrio', { s: 'S3' }), options: PRIOS, resets: true,
@@ -544,7 +590,20 @@
         options: [['none', t('cutNone')], ['S1-S2', 'S1–S2'], ['S1-S3', 'S1–S3'], ['S2-S3', 'S2–S3']],
         visible: function (p) { return p.stp && p.topo === 'triangle'; } },
       { key: 'slowLink', type: 'choice', label: t('pSlow'), resets: true, options: [['none', t('slowNone')], ['S1-S3', 'S1–S3']],
-        visible: function (p) { return p.stp && p.topo === 'triangle'; } }
+        visible: function (p) { return p.stp && p.topo === 'triangle'; } },
+      { key: 'cap', type: 'choice', label: t('pCap'), resets: true, options: [[16, '16'], [32, '32'], [64, '64'], [128, '128']],
+        visible: function (p) { return !p.stp && p.topo === 'mesh'; } },
+      // N: one more broadcast from H1 at the next step (STP off); the page hides the button while STP is on
+      { type: 'button', label: t('bInject'), key: 'n', run: function (sim) {
+          var p = sim.params, at = sim.n + 1;
+          if (p.stp) { note = parts('injectStp', {}); sim.render(); return; }
+          if (sim.state.end === 'cap') { note = parts('injectCap', {}); sim.render(); return; }
+          if (at > L.LAST_INJECT) { note = parts('injectLate', { n: data(L.LAST_INJECT) }); sim.render(); return; }
+          var list = L.injectsOf(p);
+          if (at >= 2 && list.indexOf(at) < 0) list.push(at);
+          sim.set({ inject: list.sort(function (x, y) { return x - y; }).join(',') }, { preset: sim.preset });
+          sim.next();
+        } }
     ],
 
     presets: [
@@ -553,7 +612,11 @@
       { id: 'priority', label: t('prPriority'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 4096, cutLink: 'none', slowLink: 'none' } },
       { id: 'cost-wins', label: t('prCost'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'S1-S3' } },
       { id: 'port-id', label: t('prPortId'), params: { stp: true, topo: 'pair', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none' } },
-      { id: 'reconverge', label: t('prReconverge'), hint: t('prReconvergeHint'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'S1-S2', slowLink: 'none' } }
+      { id: 'reconverge', label: t('prReconverge'), hint: t('prReconvergeHint'), params: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'S1-S2', slowLink: 'none' } },
+      // broadcast-storm presets (task docs/tasks/w3/broadcast-storm.md)
+      { id: 'storm', label: t('prStorm'), hint: t('prStormHint'), params: { stp: false, topo: 'mesh', cap: 64, inject: '' } },
+      { id: 'no-loop', label: t('prNoLoop'), params: { stp: false, topo: 'tree', inject: '' } },
+      { id: 'router-boundary', label: t('prRouter'), hint: t('prRouterHint'), params: { stp: false, topo: 'routed', inject: '' } }
     ],
 
     legend: [
@@ -570,12 +633,16 @@
       var scene = L.sceneOf(c.params), s = c.state;
       var side = h('div', { class: 'stp-side' }, s.mode === 'stp' ? [renderTime(s)].concat(renderSwitches(c, scene)) : renderFloodSide(c, scene));
       c.stage.replaceChildren(h('div', { class: 'stp' }, h('div', { class: 'stp-draw' }, renderTopo(c, scene)), side));
+      var nb = document.querySelector('[data-sd-controls] button[aria-keyshortcuts="n"]');
+      if (nb) nb.hidden = !!c.params.stp;   // the kit's buttons take no visible(): the page hides it (NOTES.md)
     },
 
     caption: function (c) {
       var scene = L.sceneOf(c.params);
-      if (c.state.mode === 'flood') return c.first ? t('capFloodPre') : capFlood(c, scene);
-      return capStp(c, scene);
+      var said = note;
+      note = null;
+      var cap = c.state.mode === 'flood' ? (c.first ? t(PRE[scene.topo] || 'capFloodPre') : capFlood(c, scene)) : capStp(c, scene);
+      return said ? join([said, cap]) : cap;
     }
   });
 })();

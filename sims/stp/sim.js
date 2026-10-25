@@ -7,14 +7,17 @@
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. The engine (scene, BPDU
    compare, tick, flood) takes plain data and holds no strings, so it can move to models/ unchanged; the
-   broadcast-storm presets add scenes (more switches, a router, a loop-free tree) to sceneOf. */
+   broadcast-storm presets add scenes to sceneOf: a mesh where every switch has three ports into the loop, a loop-free
+   tree, and two networks joined by a router. */
 (function (root) {
   'use strict';
 
   var HELLO = 2, MAX_AGE = 20, FWD_DELAY = 15;
   var CUT_AT = 40;          // when cutLink takes effect: 10 s after the tree is forwarding (t = 30 s)
   var HORIZON = 200;        // no scene here needs more; a guard against a run that never settles
-  var FLOOD_STEPS = 6;      // STP off: steps of the endless flood shown
+  var FLOOD_STEPS = 6;      // STP off: steps of the endless flood shown on a loop where copies do not multiply
+  var MAX_FLOOD = 20;       // STP off: no run is longer (contract: a stepper has at most 20 steps)
+  var LAST_INJECT = 18;     // the last step a further broadcast may be sent at, so the run still ends by MAX_FLOOD
   var COST = { 10: 100, 100: 19, 1000: 4, 10000: 2 };   // rule 7: 802.1D-1998 short path costs, by Mb/s
 
   // ── scene ──
@@ -43,10 +46,44 @@
         sender: 'H1'
       };
     }
+    var three = [sw('S1', 1, Number(p.prioS1)), sw('S2', 2, Number(p.prioS2)), sw('S3', 3, Number(p.prioS3))];
+    var host = function (id) { return { id: id, kind: 'host' }; };
+    if (p.topo === 'mesh') {
+      // broadcast-storm preset storm: the triangle and a fourth switch linked to all three (a square with its
+      // diagonals), so every switch has three ports into the loop and every copy that arrives leaves on two of them
+      return {
+        topo: 'mesh', floodSteps: MAX_FLOOD,
+        nodes: three.concat([sw('S4', 4, 32768), host('H1'), host('H3')]),
+        links: [link('S1-S2', 'S1', 1, 'S2', 1, 1000), link('S1-S3', 'S1', 2, 'S3', 1, 1000), link('S2-S3', 'S2', 2, 'S3', 2, 1000),
+          link('S1-S4', 'S1', 4, 'S4', 1, 1000), link('S2-S4', 'S2', 3, 'S4', 2, 1000), link('S3-S4', 'S3', 4, 'S4', 3, 1000),
+          link('h1', 'H1', null, 'S1', 3, 1000), link('h3', 'S3', 3, 'H3', null, 1000)],
+        sender: 'H1'
+      };
+    }
+    if (p.topo === 'tree') {
+      // broadcast-storm preset no-loop: the triangle without S2–S3, a host on every switch
+      return {
+        topo: 'tree', floodSteps: MAX_FLOOD,
+        nodes: three.concat([host('H1'), host('H2'), host('H3')]),
+        links: [link('S1-S2', 'S1', 1, 'S2', 1, 1000), link('S1-S3', 'S1', 2, 'S3', 1, 1000),
+          link('h1', 'H1', null, 'S1', 3, 1000), link('h2', 'S2', 3, 'H2', null, 1000), link('h3', 'S3', 3, 'H3', null, 1000)],
+        sender: 'H1'
+      };
+    }
+    if (p.topo === 'routed') {
+      // broadcast-storm preset router-boundary: the triangle, and behind router R a second network (S4, H4)
+      return {
+        topo: 'routed', floodSteps: FLOOD_STEPS,
+        nodes: three.concat([{ id: 'R', kind: 'router' }, sw('S4', 4, 32768), host('H1'), host('H4')]),
+        links: [link('S1-S2', 'S1', 1, 'S2', 1, 1000), link('S1-S3', 'S1', 2, 'S3', 1, 1000), link('S2-S3', 'S2', 2, 'S3', 2, 1000),
+          link('h1', 'H1', null, 'S1', 3, 1000), link('r3', 'S3', 3, 'R', null, 1000), link('r4', 'R', null, 'S4', 1, 1000),
+          link('h4', 'S4', 2, 'H4', null, 1000)],
+        sender: 'H1'
+      };
+    }
     return {
-      topo: 'triangle',
-      nodes: [sw('S1', 1, Number(p.prioS1)), sw('S2', 2, Number(p.prioS2)), sw('S3', 3, Number(p.prioS3)),
-        { id: 'H1', kind: 'host' }, { id: 'H3', kind: 'host' }],
+      topo: 'triangle', floodSteps: FLOOD_STEPS,
+      nodes: three.concat([host('H1'), host('H3')]),
       links: [link('S1-S2', 'S1', 1, 'S2', 1, 1000), link('S1-S3', 'S1', 2, 'S3', 1, p.slowLink === 'S1-S3' ? 100 : 1000),
         link('S2-S3', 'S2', 2, 'S3', 2, 1000), link('h1', 'H1', null, 'S1', 3, 1000), link('h3', 'S3', 3, 'H3', null, 1000)],
       sender: 'H1'
@@ -361,31 +398,65 @@
   // ── STP off: the endless flood (rule 9) ──
 
   function initialFlood(scene) {
-    return { mode: 'flood', t: 0, phase: 'power', frames: [], recv: {}, total: 0, inFlight: 0, wave: 0, done: false };
+    return { mode: 'flood', t: 0, phase: 'power', frames: [], recv: {}, total: 0, inFlight: 0, inLoop: 0, loops: [], wave: 0,
+      sent: 0, injected: false, cappedAt: null, done: false };
   }
-  /** One step: every frame on the wire arrives; every switch that got one floods it on (all from one snapshot). */
-  function stepFlood(scene, s0) {
+  /**
+   * One step: every frame on the wire arrives; every switch that got one floods it on (all from one snapshot: copies
+   * made in this step move in the next). The sender puts its broadcast on the wire at the first step, and again when
+   * inject is true (a further broadcast, the page's N). A frame sent to a host or router counts as received there.
+   * inLoop: the copies on links between two switches; loops: inLoop at every step so far.
+   */
+  function stepFlood(scene, s0, inject) {
     var st = JSON.parse(JSON.stringify(s0));
     var recv = st.recv;
     var next = [];
-    if (st.phase === 'power') next = firstFrame(scene) ? [firstFrame(scene)] : [];
-    else st.frames.forEach(function (f) { next = next.concat(arrive(scene, f, {}, function () { return true; }, function () { return true; })); });
+    if (st.phase !== 'power') st.frames.forEach(function (f) { next = next.concat(arrive(scene, f, {}, function () { return true; }, function () { return true; })); });
+    st.injected = st.phase !== 'power' && !!inject;
+    if ((st.phase === 'power' || inject) && firstFrame(scene)) { next.push(firstFrame(scene)); st.sent += 1; }
     next.forEach(function (f) { if (!isSwitch(scene, f.to)) recv[f.to] = (recv[f.to] || 0) + 1; });
     st.phase = 'flood';
     st.wave += 1;
     st.frames = next;
     st.inFlight = next.length;
+    st.inLoop = next.filter(function (f) { return isSwitch(scene, f.from) && isSwitch(scene, f.to); }).length;
+    st.loops.push(st.inLoop);
     st.total += next.length;
     st.recv = recv;
     return st;
+  }
+
+  /** The steps the page's N sent a further broadcast at: p.inject is "4,7"; only steps 2…LAST_INJECT count. */
+  function injectsOf(p) {
+    var out = [];
+    String(p.inject || '').split(',').forEach(function (x) {
+      var n = Number(x);
+      if (x !== '' && Math.floor(n) === n && n >= 2 && n <= LAST_INJECT && out.indexOf(n) < 0) out.push(n);
+    });
+    return out.sort(function (a, b) { return a - b; });
+  }
+
+  /**
+   * When the flood run ends: past the cap (the count would grow without limit; a further broadcast planned after it is
+   * never sent), or, after the last further broadcast, when nothing is in flight any more (no loop) or after the
+   * scene's steps (a loop where the copies only circle).
+   */
+  function floodDone(scene, st, n, p) {
+    var inj = injectsOf(p), lastInj = inj.length ? inj[inj.length - 1] : 1;
+    if (st.inFlight > Number(p.cap)) return 'cap';
+    if (n < lastInj) return false;
+    if (st.inFlight === 0) return 'over';
+    return n >= Math.min(MAX_FLOOD, Math.max(scene.floodSteps, lastInj + 2)) ? 'limit' : false;
   }
 
   // ── the stepper ──
 
   var logic = {
     HELLO: HELLO, MAX_AGE: MAX_AGE, FWD_DELAY: FWD_DELAY, CUT_AT: CUT_AT, COST: COST, FLOOD_STEPS: FLOOD_STEPS,
+    MAX_FLOOD: MAX_FLOOD, LAST_INJECT: LAST_INJECT,
 
-    defaults: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none' },
+    defaults: { stp: true, topo: 'triangle', prioS1: 32768, prioS2: 32768, prioS3: 32768, cutLink: 'none', slowLink: 'none',
+      cap: 64, inject: '' },
 
     /** Steps for these params: replay to the end (the run settles; SPEC.md "Steps"). */
     steps: function (p) {
@@ -405,8 +476,11 @@
     step: function (s, n, p) {
       var scene = sceneOf(p);
       if (s.mode === 'flood') {
-        var f = stepFlood(scene, s);
-        f.done = n >= FLOOD_STEPS;
+        var f = stepFlood(scene, s, injectsOf(p).indexOf(n) >= 0);
+        var end = floodDone(scene, f, n, p);
+        f.done = !!end;
+        f.end = end || null;
+        f.cappedAt = end === 'cap' ? Number(p.cap) : null;
         return f;
       }
       return stepStp(scene, s);
@@ -414,7 +488,7 @@
 
     sceneOf: sceneOf, portsOf: portsOf, bidOf: bidOf, portIdOf: portIdOf, cmpVec: cmpVec, decidedBy: decidedBy,
     offerOf: offerOf, recompute: recompute, round: round, tick: tick, floodTree: floodTree, arrive: arrive,
-    initialStp: initialStp, stepStp: stepStp, initialFlood: initialFlood, stepFlood: stepFlood,
+    initialStp: initialStp, stepStp: stepStp, initialFlood: initialFlood, stepFlood: stepFlood, injectsOf: injectsOf,
     bridgeOf: bridgeOf, portAt: portAt, nodeOf: nodeOf, linkOf: linkOf
   };
   var stepsCache = {};

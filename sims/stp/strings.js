@@ -45,6 +45,7 @@
       bClaims: 'misli: korijen',
       bSends: 'šalje',
       bGot: '✓ {n}×',
+      bDropped: '✕ {n}×',
       chipBpdu: '⟨{r}, {c}, {b}, {p}⟩',
       chipFrame: '#{k}',
       chipCopies: '×{n}',
@@ -113,6 +114,27 @@
       copies: ['{n} kopiju', '{n} kopije', '{n} kopija'],
       listSep: '; ',
       andSep: ' i ',
+      pCap: 'Prikaz staje na (kopija u letu)',
+      bInject: 'Još jedan broadcast',
+      injectStp: 'Tipka N radi samo bez STP-a: sa STP-om broadcast ide stablom u zadnjem koraku.',
+      injectLate: 'Novi broadcast može se poslati najkasnije u koraku {n}.',
+      injectCap: 'Prikaz je stao na granici; novi broadcast tu ništa ne bi promijenio: oluja već raste bez granice.',
+      prStorm: 'Oluja: kopije se množe',
+      prStormHint: 'Četiri preklopnika, svaki spojen sa svakim; STP isključen.',
+      prNoLoop: 'Bez petlje nema oluje',
+      prRouter: 'Usmjernik kao granica',
+      prRouterHint: 'Oluja u lijevoj mreži ne prelazi usmjernik.',
+      inLoop: 'Od toga između preklopnika',
+      dropBy: '{r} odbacio',
+      capFloodPreMesh: 'STP je isključen. Četiri preklopnika spojena su svaki sa svakim, pa svaki ima tri priključka u petlji. Pritisni → i H1 šalje jedan broadcast okvir.',
+      capFloodPreTree: 'STP je isključen, ali petlje nema: između S2 i S3 nema veze. Pritisni → i H1 šalje jedan broadcast okvir.',
+      capFloodPreRouted: 'STP je isključen. Lijevo su tri preklopnika u petlji, a iza usmjernika R druga mreža: S4 i H4. Pritisni → i H1 šalje jedan broadcast okvir.',
+      capFloodMesh: 'Svaka kopija koja stigne do preklopnika izlazi na dva druga priključka u petlji, pa se broj kopija između preklopnika udvostručuje: {seq}.',
+      capFloodCap: 'U letu: {f}, više od granice prikaza ({cap}). Prikaz tu staje, mreža ne: broj se udvostručuje dalje, bez granice. Ništa nije pokvareno; dovoljan je jedan običan broadcast.',
+      capFloodOver: 'Nijedna kopija više nije u letu: svaka je grana završila na računalu. Svako je računalo okvir primilo jednom. Bez petlje nema oluje i STP ne treba.',
+      capFloodRouter: '{r} ne prosljeđuje broadcast: dosad je odbacio {n}, a {h} iza njega nije primio ništa. Lijeva mreža i dalje ima oluju: usmjernik je samo granica, petlju popravlja STP.',
+      capInject: '{h} šalje još jedan broadcast.',
+      seqSep: ' → ',
 
       explain: '<p>STP, [[spanning tree protocol]], od mreže preklopnika s petljom pravi stablo: na svakoj petlji ' +
         'jedan priključak blokira. Bez toga bi jedan <i>broadcast</i> kružio zauvijek, jer Ethernet okvir nema TTL: ' +
@@ -129,7 +151,12 @@
         'Priključak koji postane R ili D ide kroz [[listening]] (15 s) i [[learning]] (15 s) do [[forwarding]]. Lošiji BPDU ' +
         'na blokiranom priključku zanemaruje se dok pohranjeni ne istekne (max age, 20 s): neizravni kvar traje oko ' +
         '20 + 15 + 15 = 50 s, izravni oko 30 s.</p>' +
-        '<p>Imena S1, S2, S3 na BPDU-ovima stoje umjesto punog [[=bridge ID]] (prioritet.MAC). Klasični STP, ne RSTP.</p>'
+        '<p>Imena S1, S2, S3 na BPDU-ovima stoje umjesto punog [[=bridge ID]] (prioritet.MAC). Klasični STP, ne RSTP.</p>' +
+        '<p>Bez STP-a ([[=broadcast storm]]): preklopnik okvir upućen svima šalje na sve ostale priključke, a okvir nema TTL. ' +
+        'U trokutu svaki preklopnik ima samo jedan drugi priključak u petlji, pa dvije kopije kruže zauvijek. Kad preklopnik ' +
+        'ima tri priključka u petlji, svaka kopija postaje dvije i broj se udvostručuje sa svakim korakom. Bez petlje ' +
+        '[[flooding]] završi kad svako računalo dobije okvir jednom. Usmjernik ne prosljeđuje broadcast pa omeđuje ' +
+        '<i>broadcast domain</i> (<i>broadcast</i> domenu), ali petlju u njoj ne popravlja: to radi STP.</p>'
     },
     en: {
       stage: 'Switches, links and BPDUs',
@@ -168,6 +195,7 @@
       bClaims: 'thinks: root',
       bSends: 'sends',
       bGot: '✓ {n}×',
+      bDropped: '✕ {n}×',
       chipBpdu: '⟨{r}, {c}, {b}, {p}⟩',
       chipFrame: '#{k}',
       chipCopies: '×{n}',
@@ -236,6 +264,27 @@
       copies: ['{n} copy', '{n} copies'],
       listSep: '; ',
       andSep: ' and ',
+      pCap: 'The view stops at (copies in flight)',
+      bInject: 'Another broadcast',
+      injectStp: 'N works only with STP off: with STP on the broadcast crosses the tree in the last step.',
+      injectLate: 'A further broadcast can be sent up to step {n} only.',
+      injectCap: 'The view has stopped at its limit; another broadcast would change nothing here: the storm already grows without limit.',
+      prStorm: 'Storm: the copies multiply',
+      prStormHint: 'Four switches, each linked to every other; STP off.',
+      prNoLoop: 'No loop, no storm',
+      prRouter: 'A router as the boundary',
+      prRouterHint: 'The storm in the left network does not cross the router.',
+      inLoop: 'Of these, between switches',
+      dropBy: '{r} discarded',
+      capFloodPreMesh: 'STP is off. Four switches are each linked to every other, so each has three ports into the loop. Press → and H1 sends one broadcast frame.',
+      capFloodPreTree: 'STP is off, but there is no loop: S2 and S3 are not linked. Press → and H1 sends one broadcast frame.',
+      capFloodPreRouted: 'STP is off. On the left, three switches form a loop; behind router R is a second network: S4 and H4. Press → and H1 sends one broadcast frame.',
+      capFloodMesh: 'Every copy that reaches a switch leaves on its two other ports into the loop, so the copies between the switches double: {seq}.',
+      capFloodCap: 'In flight: {f}, more than the view\'s limit ({cap}). The view stops here, the network does not: the count keeps doubling, without limit. Nothing is broken; one ordinary broadcast is enough.',
+      capFloodOver: 'No copy is in flight any more: every branch ended at a host. Each host received the frame once. Without a loop there is no storm, and no STP is needed.',
+      capFloodRouter: '{r} does not forward a broadcast: it has discarded {n} so far, and {h} behind it has received nothing. The left network still storms: the router is only the boundary; STP is what fixes the loop.',
+      capInject: '{h} sends another broadcast.',
+      seqSep: ' → ',
 
       explain: '<p>The <i>spanning tree protocol</i> (STP) turns a network of switches with a loop into a tree: on every ' +
         'loop one port blocks. Without it one broadcast would circle forever (a broadcast storm), because an Ethernet ' +
@@ -252,7 +301,12 @@
         'becomes R or D goes through listening (15 s) and learning (15 s) to forwarding. An inferior BPDU on a blocked ' +
         'port is ignored until the stored one expires (max age, 20 s): an indirect failure takes about 20 + 15 + 15 = ' +
         '50 s, a direct one about 30 s.</p>' +
-        '<p>The names S1, S2, S3 on the BPDUs stand for the full bridge ID (priority.MAC). Classic STP, not RSTP.</p>'
+        '<p>The names S1, S2, S3 on the BPDUs stand for the full bridge ID (priority.MAC). Classic STP, not RSTP.</p>' +
+        '<p>Without STP (broadcast storm): a switch sends a broadcast frame out of every other port, and a frame has no TTL. ' +
+        'In the triangle each switch has only one other port into the loop, so two copies circle forever. When a switch ' +
+        'has three ports into the loop, every copy becomes two and the count doubles at every step. Without a loop the ' +
+        '<i>flooding</i> ends once every host has the frame. A router does not forward a broadcast, so it bounds the ' +
+        '<i>broadcast domain</i>, but it does not fix a loop inside it: STP does.</p>'
     }
   };
 

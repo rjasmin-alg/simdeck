@@ -63,7 +63,51 @@ New stepper (task `docs/tasks/w2/stp.md`, catalogue `net-stp`, §4.1 and §5.10,
 The engine is promotable: `sceneOf`, `arrive`, `stepFlood`, `floodTree` and the STP functions take plain data and no
 strings. The flood supports any scene: more than two inter-switch ports per switch (copies multiply: tested on a
 four-switch mesh), a `router` node that absorbs broadcasts, and a loop-free tree (the flood ends). A preset task adds
-a `topo` value to `sceneOf` and a layout in `index.html` `layoutOf`. If `storm` lands it replaces `no-stp` (task).
+a `topo` value to `sceneOf` and a layout in `index.html` `layoutOf`. (`storm` landed as its own mesh scene and `no-stp`
+stays: see "Broadcast-storm presets".)
+
+## Broadcast-storm presets (task `docs/tasks/w3/broadcast-storm.md`, thread t-0172)
+
+Three presets on this page, keys 7–9: `storm`, `no-loop`, `router-boundary`, with entries in `sim.json`. Rules and
+numbers: SPEC.md "Broadcast storm presets".
+
+- **Decisions.**
+  - **`storm` runs on a mesh, not the triangle.** The task's "triangle: 1 → 2 → 4 doubling" is wrong: a script
+    showed the triangle's copies only circle (each switch has one other loop port; in flight 1, 2, 3, 3, 4, 3). Copies
+    multiply where a switch has three loop ports, so `storm` adds S4 in the middle of the triangle, linked to all
+    three (the task's `switches: 4`, a square with its diagonals, drawn without crossings). The copies between switches
+    double: 3, 6, 12, 24, 48, 96.
+  - **`no-stp` stays** (the host's triangle, STP off): it shows the other half of the concept, that copies never die,
+    on the same triangle the STP presets fix (§5.10). The earlier note "storm replaces no-stp" assumed storm was the
+    triangle.
+  - **No `stp-on` preset**: it is the host's `triangle` (the task's own note says so).
+  - **STP toggle hidden on the storm scenes**: four switch blocks do not fit the side column at 1920×1080. The engine
+    runs STP on any scene (tested on the mesh: S3 p2, S4 p2, S4 p3 block); the page offers STP on the triangle and
+    pair only. `prioS3` likewise stays triangle-only.
+  - **`switches` is not a control**: the scene is set by the presets (`topo`), as the host already does for `pair`.
+  - **Cap**: a choice 16 | 32 | 64 | 128 (default 64; the task said a range 16–128), shown on `storm` only; the run
+    stops at the first step whose count is above it (so each value gives a different length: 5, 6, 7, 8 steps).
+  - **N (inject)**: the kit's button sets a hidden param `inject` (the steps at which H1 sends again) and steps on, so
+    replay stays pure. Refused with a caption line when STP is on, after step 18 (the run must end by step 20), or at
+    the cap. Pressing N keeps the active preset (R resets to it).
+  - **Router**: a copy towards R ends in a cross at R (K2 `drop`); R's card counts them (`✕ n×`), the side box says
+    "R discarded". The root badge now means "every linked switch agrees" (so S4 behind a router would show as its own
+    network's root); for the host's scenes it gives the same badges as before.
+  - Presets in two columns (page CSS, as `amdahl`, `dns-records`, `dns-resolution` do), one column on the phone: nine
+    presets did not fit the panel.
+- **Deviations from the task.** Storm scene (above); `storm` 7 steps at cap 64, not about 8; `stp-on` not added;
+  `switches` not a control; cap a choice. The URM book's storm paragraph describes one device sending broadcasts
+  without end, not a loop; the loop mechanism (rules 2, 3, 6) is derived and marked so in SPEC.md.
+- **Kit view K2**: used as is. **Shared request (kit):** a button param has no `visible()` (or `disabled()`); the page
+  hides the N button itself while STP is on (`hidden` on the kit's button). Wanted: `visible` on `type: 'button'`.
+- **Term pairs** (not in `kit/glossary.js`; written out in the explanation): broadcast domain — *broadcast* domena
+  (URM ch07); switching loop — petlja u preklapanju *(check: from the task file; the page says "petlja")*. Already in
+  the glossary: broadcast storm, flooding, frame.
+- **Checks.** 11 tests added (one per storm rule, the snapshot tie-break first, cap, inject, steps ≤ 20 over cap ×
+  inject × scene). Mutation run: rule 1 (flood back out of the arrival port), 2 (a TTL of 4 hops), 3 (one copy per
+  arrival), 4 (the router floods), 5 (the blocked port forwards), 6 (no snapshot), 7 (flood never over), cap at ≥,
+  inject ignored, inject range unchecked: all caught (1, 4 and 5 by a test-run timeout: the flood never ends).
+- **Time:** start 10:39, done 11:01 (one session).
 
 ## Term pairs (added to kit/glossary.js with "src": "simdeck" on the owner's request, 2026-10-05)
 

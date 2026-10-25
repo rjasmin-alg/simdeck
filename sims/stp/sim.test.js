@@ -271,6 +271,138 @@ test('flood engine (for broadcast-storm): more than two inter-switch ports multi
   assert.equal(s.inFlight, 0, 'no loop, no storm');
 });
 
+// ── broadcast-storm presets (SPEC.md "Broadcast storm"): tie-breaks first ──
+
+const flood = (over, n) => at(Object.assign({ stp: false }, over), n);
+const floodRun = (over) => {
+  const p = P(Object.assign({ stp: false }, over));
+  const out = [];
+  for (let n = 1; n <= logic.steps(p); n++) out.push(kit.stateAt(logic, p, n));
+  return out;
+};
+
+test('storm rule 6: all switches flood from one snapshot; a copy made in a step moves one hop, in the next step', () => {
+  // mesh, step 2: S1's three copies are on the wire and have reached no further switch yet
+  const s2 = flood({ topo: 'mesh' }, 2);
+  assert.deepEqual(s2.frames.map((f) => f.from + '>' + f.to).sort(), ['S1>S2', 'S1>S3', 'S1>S4']);
+  // step 3: exactly the copies those three make, nothing from a copy made in step 3 itself
+  const s3 = flood({ topo: 'mesh' }, 3);
+  assert.deepEqual(s3.frames.map((f) => f.from + '>' + f.to).sort(),
+    ['S2>S3', 'S2>S4', 'S3>H3', 'S3>S2', 'S3>S4', 'S4>S2', 'S4>S3']);
+  // the order of frames on the wire does not change the counts (same snapshot for every switch)
+  const scene = logic.sceneOf(P({ stp: false, topo: 'mesh' }));
+  const rev = Object.assign({}, s2, { frames: s2.frames.slice().reverse() });
+  assert.equal(logic.stepFlood(scene, rev).inFlight, s3.inFlight);
+});
+
+test('storm rule 1: a switch floods a broadcast out of every port except the one it came in on', () => {
+  const scene = logic.sceneOf(P({ stp: false, topo: 'mesh' }));
+  const out = logic.arrive(scene, { from: 'S1', to: 'S2', toPort: 1, link: 'S1-S2' }, {}, () => true, () => true);
+  assert.deepEqual(out.map((f) => f.to).sort(), ['S3', 'S4'], 'S2 has ports to S1, S3, S4: not back to S1');
+  const atS3 = logic.arrive(scene, { from: 'S4', to: 'S3', toPort: 4, link: 'S3-S4' }, {}, () => true, () => true);
+  assert.deepEqual(atS3.map((f) => f.to).sort(), ['H3', 'S1', 'S2'], 'every other port, the host port included');
+});
+
+test('storm rule 2: a frame has no TTL: on a loop the flood never reaches zero (triangle and mesh)', () => {
+  for (const topo of ['triangle', 'mesh', 'routed']) {
+    const scene = logic.sceneOf(P({ stp: false, topo }));
+    let s = logic.initialFlood(scene);
+    for (let n = 1; n <= 30; n++) {
+      s = logic.stepFlood(scene, s);
+      assert.ok(s.inLoop > 0 || n === 1, `${topo} step ${n}`);
+      if (s.inFlight > 5000) break;
+    }
+    assert.ok(!s.frames.some((f) => 'ttl' in f), 'nothing in the frame counts down');
+  }
+});
+
+test('storm rule 3: with three ports into the loop the copies between switches double; with two they only circle', () => {
+  const mesh = floodRun({ topo: 'mesh', cap: 128 });
+  assert.deepEqual(mesh.map((s) => s.inLoop), [0, 3, 6, 12, 24, 48, 96, 192]);
+  assert.deepEqual(mesh.map((s) => s.inFlight), [1, 3, 7, 14, 32, 60, 116, 244]);
+  assert.deepEqual(mesh.at(-1).loops, [0, 3, 6, 12, 24, 48, 96, 192]);
+  // the triangle: one other loop port per switch, so the two copies circle and never multiply
+  const tri = floodRun({ topo: 'triangle' });
+  assert.deepEqual(tri.map((s) => s.inLoop), [0, 2, 2, 2, 2, 2]);
+});
+
+test('storm rule 4: a router does not forward a broadcast; the storm stays on its side and goes on (preset router-boundary)', () => {
+  const run = floodRun({ topo: 'routed' });
+  assert.equal(run.length, 6);
+  assert.deepEqual(run.map((s) => s.inFlight), [1, 2, 3, 3, 4, 3]);
+  const end = run.at(-1);
+  assert.equal(end.recv.H4, undefined, 'H4 behind the router receives nothing');
+  assert.equal(end.recv.R, 3, 'R has discarded a copy every lap');
+  assert.ok(!end.frames.some((f) => f.from === 'R'), 'nothing ever leaves the router');
+  assert.ok(end.inLoop > 0, 'the left network still storms');
+});
+
+test('storm rule 5: with STP on, the triangle\'s blocked port discards its copy; the broadcast reaches each switch once', () => {
+  // the page's STP-on scene (preset triangle): four segments carry the frame, the fifth copy dies at S3 p2
+  const hops = last({}).frame.hops;
+  assert.deepEqual(hops.map((hp) => hp.wave), [0, 1, 1, 2, 2], 'in flight per wave: 1, 2, 2, then none');
+  assert.deepEqual(hops.filter((hp) => hp.drop).map((hp) => hp.from + '>' + hp.to), ['S2>S3']);
+  assert.equal(hops.filter((hp) => !hp.drop).length, 4);
+  for (const id of ['S1', 'S2', 'S3']) assert.equal(hops.filter((hp) => hp.to === id && !hp.drop).length, 1, id);
+});
+
+test('storm rule 5 (engine): STP on the mesh blocks three ports and the broadcast reaches each switch once', () => {
+  const s = last({ topo: 'mesh' });
+  assert.deepEqual(s.ports.filter((q) => q.role === 'blocked').map((q) => q.key), ['S3:2', 'S4:2', 'S4:3']);
+  const hops = s.frame.hops;
+  for (const id of ['S1', 'S2', 'S3', 'S4']) assert.equal(hops.filter((hp) => hp.to === id && !hp.drop).length, 1, id);
+  assert.deepEqual(s.frame.recv, { H3: 1 });
+  assert.equal(logic.steps(P({ topo: 'mesh' })), 6);
+});
+
+test('storm rule 7: on a loop-free tree one broadcast reaches every host once and dies (preset no-loop)', () => {
+  const run = floodRun({ topo: 'tree' });
+  assert.deepEqual(run.map((s) => s.inFlight), [1, 2, 2, 0]);
+  assert.deepEqual(run.at(-1).recv, { H2: 1, H3: 1 });
+  assert.equal(run.at(-1).end, 'over');
+  // STP on the tree blocks nothing
+  assert.ok(!last({ topo: 'tree' }).ports.some((q) => q.role === 'blocked'));
+});
+
+test('storm cap: the run stops at the first step whose count is above the cap (preset storm)', () => {
+  const steps = (cap) => logic.steps(P({ stp: false, topo: 'mesh', cap }));
+  assert.deepEqual([16, 32, 64, 128].map(steps), [5, 6, 7, 8]);
+  const end = flood({ topo: 'mesh' }, 7);
+  assert.equal(end.end, 'cap');
+  assert.equal(end.cappedAt, 64);
+  assert.equal(end.inFlight, 116);
+  assert.equal(flood({ topo: 'mesh' }, 6).done, false);
+  assert.equal(logic.steps(P({ stp: false, topo: 'mesh', inject: '12' })), 7, 'a broadcast planned after the cap is never sent');
+  // the triangle never reaches a cap: it shows its fixed steps
+  assert.equal(flood({}, 6).end, 'limit');
+});
+
+test('storm inject (N): a further broadcast at a step adds one frame from H1; repeated or stray values are ignored', () => {
+  assert.deepEqual(logic.injectsOf({ inject: '5,3,3,x,1,0,19,2.5,18' }), [3, 5, 18]);
+  assert.deepEqual(logic.injectsOf({ inject: '' }), []);
+  const base = flood({}, 3), more = flood({ inject: '3' }, 3);
+  assert.equal(more.inFlight, base.inFlight + 1);
+  assert.equal(more.injected, true);
+  assert.equal(more.sent, 2);
+  assert.deepEqual(more.frames.at(-1), { from: 'H1', to: 'S1', toPort: 3, link: 'h1' });
+  // on the triangle each further broadcast adds two copies that circle for good
+  assert.deepEqual(floodRun({ inject: '3' }).map((s) => s.inLoop), [0, 2, 2, 4, 4, 4]);
+  // the run goes on two steps past the last one; on the tree it ends when the second flood is over too
+  assert.equal(logic.steps(P({ stp: false, inject: '9' })), 11);
+  assert.deepEqual(floodRun({ topo: 'tree', inject: '4' }).map((s) => s.inFlight), [1, 2, 2, 1, 2, 2, 0]);
+});
+
+test('storm presets: steps (storm 7, no-loop 4, router-boundary 6), and never more than 20 with STP off', () => {
+  assert.equal(logic.steps(P({ stp: false, topo: 'mesh' })), 7);
+  assert.equal(logic.steps(P({ stp: false, topo: 'tree' })), 4);
+  assert.equal(logic.steps(P({ stp: false, topo: 'routed' })), 6);
+  for (const topo of ['triangle', 'mesh', 'tree', 'routed']) for (const cap of [16, 32, 64, 128])
+    for (const inject of ['', '2', '9', '18', '2,4,6,8,10,12,14,16,18']) {
+      const n = logic.steps(P({ stp: false, topo, cap, inject }));
+      assert.ok(n > 0 && n <= 20, `${topo} ${cap} ${inject}: ${n}`);
+    }
+});
+
 // ── presets: expected numbers (SPEC.md "Presets") ──
 
 test('preset triangle: root S1, root ports face S1 (cost 4), S3 p2 blocks', () => {
@@ -296,7 +428,7 @@ test('steps: per preset, and never more than 20 for any params', () => {
   assert.equal(steps({ topo: 'pair' }), 5);
   assert.equal(steps({ cutLink: 'S1-S2' }), 12);
   assert.equal(steps({ stp: false }), 6);
-  for (const topo of ['triangle', 'pair']) for (const cutLink of ['none', 'S1-S2', 'S1-S3', 'S2-S3'])
+  for (const topo of ['triangle', 'pair', 'mesh', 'tree', 'routed']) for (const cutLink of ['none', 'S1-S2', 'S1-S3', 'S2-S3'])
     for (const slowLink of ['none', 'S1-S3']) for (const pr of [[32768, 32768, 32768], [4096, 32768, 32768], [32768, 4096, 32768], [32768, 32768, 4096], [61440, 4096, 8192]]) {
       const n = steps({ topo, cutLink, slowLink, prioS1: pr[0], prioS2: pr[1], prioS3: pr[2] });
       assert.ok(n > 0 && n <= 20, `${topo} ${cutLink} ${slowLink} ${pr}: ${n}`);
@@ -307,7 +439,7 @@ test('steps: per preset, and never more than 20 for any params', () => {
 // ── generic checks every sim keeps ──
 
 test('state is JSON-safe at every step', () => {
-  for (const over of [{}, { cutLink: 'S1-S2' }, { stp: false }, { topo: 'pair' }]) {
+  for (const over of [{}, { cutLink: 'S1-S2' }, { stp: false }, { topo: 'pair' }, { stp: false, topo: 'mesh', inject: '3' }, { topo: 'routed' }]) {
     for (let n = 0; n <= logic.steps(P(over)); n++) {
       const s = at(over, n);
       assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
