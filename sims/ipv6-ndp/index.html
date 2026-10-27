@@ -1,0 +1,428 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ipv6-ndp: host A looks up a neighbour's MAC with ARP (top lane, IPv4) and with NDP (bottom lane, IPv6), one
+     event per step, the lanes alternating: lookup miss, request, which network cards take it, who answers, the
+     reply, the cache entry. Drawn with kit view K2 (topology with moving packets), one per lane. Model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ipv6-ndp">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPv6 NDP umjesto ARP-a · simdeck</title>
+<meta name="description" content="Isti traženi susjed dvaput: ARP zahtjev moraju pogledati svi, NS samo računalo u grupi traženog čvora. Kad nitko ne odgovori i kad oglas stigne izvana.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ipv6-ndp",
+  "title": {
+    "hr": "IPv6 NDP umjesto ARP-a",
+    "en": "IPv6 NDP instead of ARP"
+  },
+  "concept": {
+    "hr": "Traženje susjeda ide na multicast adresu traženog čvora, ne svima",
+    "en": "Neighbour solicitation goes to the solicited-node multicast, not to all"
+  },
+  "summary": {
+    "hr": "Isti traženi susjed dvaput: ARP zahtjev moraju pogledati svi, NS samo računalo u grupi traženog čvora. Kad nitko ne odgovori i kad oglas stigne izvana.",
+    "en": "One neighbour looked up twice: every CPU looks at the ARP request, only the solicited-node group's at the NS. With no answer, and a forged advertisement."
+  },
+  "tags": [
+    "ipv6"
+  ],
+  "class": "stepper",
+  "steps": 12,
+  "entries": [
+    {
+      "preset": "absent"
+    },
+    {
+      "preset": "forged"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ipv6-ndp"]; colours only from kit tokens.
+   Layout: one lane per protocol (IPv4 on top, IPv6 below, or IPv6 alone). Each lane: a head line (name, counter,
+   time), the kit's K2 topology (cards with the card filter, the bus, a table under each host) and the frame card. */
+[data-sim="ipv6-ndp"] .nd {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 0.8cqh;
+  --nd-rows: minmax(0, 48fr) minmax(0, 52fr);  /* both lanes: the IPv6 lane has the longer cards and tables */
+  height: 100%;
+  padding: 0.6cqh 0.6cqw;
+  font-size: 1rem;
+}
+[data-sim="ipv6-ndp"] .nd[data-lanes="both"] { grid-template-rows: var(--nd-rows); }
+[data-sim="ipv6-ndp"] .nd-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19.5rem;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.4rem 1cqw;
+  min-height: 0;
+  padding: 0.3rem 0.6rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+}
+[data-sim="ipv6-ndp"] .nd-lane[data-now] { border-color: var(--ink); border-width: 0.2rem; }
+[data-sim="ipv6-ndp"] .nd-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1.4rem; }
+[data-sim="ipv6-ndp"] .nd-name { font-size: 1.15rem; font-weight: 700; }
+[data-sim="ipv6-ndp"] .nd-lane.nd-stack { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
+[data-sim="ipv6-ndp"] .nd-stack .nd-side { max-width: 34rem; }
+[data-sim="ipv6-ndp"] .nd-now { align-self: center; padding: 0 0.45rem; border-radius: 1rem; background: var(--ink); color: var(--bg); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="ipv6-ndp"] .nd-count, [data-sim="ipv6-ndp"] .nd-time { padding: 0 0.35rem; border-radius: var(--radius-sm); }
+[data-sim="ipv6-ndp"] .nd-count b { font-size: 1.15em; }
+[data-sim="ipv6-ndp"] .nd-count.sd-changed, [data-sim="ipv6-ndp"] .nd-time.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="ipv6-ndp"] .nd-who { font-family: var(--mono); font-weight: 700; }
+
+/* the topology: smaller type so a link-local address fits a column */
+[data-sim="ipv6-ndp"] .nd-topo { min-width: 0; font-size: max(16px, 0.85rem); }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-addr { font-size: var(--fs-sm); letter-spacing: -0.04em; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-card { padding: 0.25rem 0.4rem; column-gap: 0.4rem; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-badges { grid-column: 2 / -1; min-height: 1.6rem; margin-top: 0.1rem; }
+[data-sim="ipv6-ndp"] .nd-side .sd-topo-hdr > b { margin-bottom: 0.2rem; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-tab li { font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-tab li span span { display: inline; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-mark { min-width: 2rem; height: 2rem; font-size: 1.1rem; }
+[data-sim="ipv6-ndp"] .nd-topo .sd-topo-mark[data-hollow] { background: var(--bg); color: var(--ink); border: 0.2rem dashed var(--ink); }
+
+/* the card filter: the MACs a network card passes up to the CPU */
+[data-sim="ipv6-ndp"] .nd-nic { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.35rem; margin-top: 0.1rem; line-height: 1.3; font-size: var(--fs-sm); }
+[data-sim="ipv6-ndp"] .nd-nic > span:first-child { color: var(--muted); }
+[data-sim="ipv6-ndp"] .nd-mac { padding: 0 0.25rem; line-height: 1.2; letter-spacing: -0.02em; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); font-family: var(--mono); }
+[data-sim="ipv6-ndp"] .nd-mac.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); font-weight: 700; }
+
+/* chips on the wire: broadcast dashed, multicast dotted, unicast solid (the colour is the page's c 1, 2, 3) */
+[data-sim="ipv6-ndp"] .sd-topo-chip { border: 0.15rem solid var(--ink); }
+[data-sim="ipv6-ndp"] .sd-topo-chip[data-c="1"] { border-style: dashed; }
+[data-sim="ipv6-ndp"] .sd-topo-chip[data-c="2"] { border-style: dotted; }
+
+/* the frame card */
+[data-sim="ipv6-ndp"] .nd-side { min-width: 0; min-height: 0; overflow: hidden; font-size: var(--fs-sm); }
+[data-sim="ipv6-ndp"] .nd-side h3 { margin: 0 0 0.2rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="ipv6-ndp"] .nd-side .sd-topo-hdr { padding: 0.15rem 0.5rem 0.2rem; }
+[data-sim="ipv6-ndp"] .nd-side .sd-topo-layer { margin-top: 0.2rem; padding: 0.1rem 0.35rem 0.2rem; }
+[data-sim="ipv6-ndp"] .nd-side .sd-topo-kv { gap: 0.12rem 0.5rem; }
+[data-sim="ipv6-ndp"] .nd-side .sd-topo-kv dd { overflow-wrap: anywhere; letter-spacing: -0.03em; }
+[data-sim="ipv6-ndp"] .nd-st { font-weight: 700; }
+[data-sim="ipv6-ndp"] .nd-none { color: var(--muted); }
+
+/* legend swatches: chips like the ones on the wire */
+[data-sim="ipv6-ndp"] .sd-swatch[data-shape^="chip"] { width: 1.6em; border-radius: 1em; border-width: 0.15rem; }
+[data-sim="ipv6-ndp"] .sd-swatch[data-shape="chip-bc"] { border-style: dashed; }
+[data-sim="ipv6-ndp"] .sd-swatch[data-shape="chip-mc"] { border-style: dotted; }
+[data-sim="ipv6-ndp"] .sd-swatch[data-shape="round-ink"] { border-radius: 50%; background: var(--ink); }
+[data-sim="ipv6-ndp"] .sd-swatch[data-shape="round-hollow"] { border-radius: 50%; background: var(--bg); border-style: dashed; }
+
+/* Phone and portrait: the stage grows with its content; each lane is a list of hosts, the frame card under it. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ipv6-ndp"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ipv6-ndp"] .nd, [data-sim="ipv6-ndp"] .nd[data-lanes="both"] { height: auto; grid-template-rows: none; grid-auto-rows: auto; padding: 0.4rem; gap: 0.8rem; }
+  [data-sim="ipv6-ndp"] .nd-lane { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="ipv6-ndp"] .nd-side { overflow: visible; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">IPv6 NDP umjesto ARP-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HC = { A: 4, B: 5, C: 6, R: 8 };          // host marks; 1, 2, 3 are the chips (broadcast, multicast, unicast)
+  var CAST = { broadcast: 1, multicast: 2, unicast: 3 };
+
+  /** Data (addresses, MACs, host letters) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function list(ids) {
+    if (!ids.length) return t('nobody');
+    var items = ids.slice();
+    if (items.length === 1) return items[0];
+    var last = items.pop();
+    var head = items.reduce(function (acc, it) { return acc === null ? it : t('listMore', { a: acc, b: it }); }, null);
+    return t('list2', { a: head, b: last });
+  }
+  function D(v) { return data(v); }
+  function B(v) { return h('b', null, data(v)); }
+  function hosts(ids) { return data(list(ids), ''); }
+
+  /** What a host does in this event of its lane: [text key, kit badge style]. */
+  function badgesFor(id, ls) {
+    var f = ls.frame, out = [];
+    switch (ls.phase) {
+      case 'req': if (id === 'A') out.push(['bSends', 'fill']); break;
+      case 'filter':
+        if (ls.accepted.indexOf(id) >= 0) out.push(['bAccepts', 'solid']);
+        if (ls.dropped.indexOf(id) >= 0) out.push(['bDrops', 'muted']);
+        if (ls.verdicts[id] === 'notMine') out.push(['bNotMine', 'dashed']);
+        break;
+      case 'check':
+        if (ls.verdicts[id] === 'mine') out.push(['bMine', 'fill']);
+        if (ls.verdicts[id] === 'notMine') out.push(['bNotMine', 'dashed']);
+        if (ls.dropped.indexOf(id) >= 0) out.push(['bDrops', 'muted']);
+        break;
+      case 'reply': if (f && id === f.from) out.push(['bSends', 'fill']); break;
+      case 'cache': if (id === 'A') out.push(['bReceives', 'solid'], ['bWrites', 'fill']); break;
+      case 'giveup': if (id === 'A') out.push(['bGivesUp', 'fill']); break;
+      case 'forward': if (id === 'R') out.push(['bForwards', 'fill']); break;
+      case 'accept': if (id === 'A') out.push(['bAccepts', 'solid']); break;
+      case 'drop': if (id === 'A') out.push(['bHopDrop', 'fill']); break;
+    }
+    return out;
+  }
+
+  /** The card filter: which destination MACs this host's network card passes up. In the step a frame reaches the
+      cards, the MAC that matched is marked (a card with no match has the badge "card drops"). */
+  function nicBox(H, id, ls, kind, now) {
+    var macs = kind === 'v4' ? H[id].nic4 : H[id].nic6;
+    var reach = now && (ls.phase === 'filter' || ls.phase === 'accept') && ls.frame;
+    var hit = reach && ls.accepted.indexOf(id) >= 0 ? ls.frame.dstMac : null;
+    return h('div', { class: 'nd-nic' },
+      h('span', null, t('nicTitle')),
+      macs.map(function (m) { return h('span', { class: 'nd-mac' + (m === hit ? ' sd-changed' : ''), translate: 'no' }, m); }));
+  }
+
+  function tableFor(H, id, ls, kind, now, dir) {
+    var owner = function (ip) { return ['A', 'B', 'C'].filter(function (k) { return H[k].v4 === ip || H[k].v6.indexOf(ip) >= 0; })[0]; };
+    return Simdeck.topology.table({
+      title: kind === 'v4' ? t('arpTable') : t('ndCache'),
+      empty: t('empty'),
+      rows: ls.table[id].map(function (e) {
+        var mark = now ? e.mark : null;
+        var note = mark === 'new' ? t('entryNew') : mark === 'refreshed' ? t('entryRefreshed') : mark === 'hit' ? t('entryKept') : null;
+        var mac = e.mac ? data(e.mac, '') : h('span', null, t('noMac'));
+        // on the MAC's line: IPv6 the state (INCOMPLETE, REACHABLE, STALE), ARP the word "new" or "refreshed"
+        var word = kind === 'v6' ? t('st' + e.state) : note;      // a kept entry (hit) is marked by its border alone
+        return { cells: [e.ip, h('span', null, mac, word ? [' ', h('b', { class: 'nd-st' }, word)] : null)],
+          c: owner(e.ip) ? HC[owner(e.ip)] : null, mark: mark };
+      })
+    }, now ? dir : null);
+  }
+
+  function packetsFor(ls, ids) {
+    var f = ls.frame;
+    if (!f) return [];
+    var moving = { req: 1, reply: 1, forge: 1, forward: 1 }[ls.phase] === 1;
+    var label = { 'arp-req': t('chipArpReq'), 'arp-rep': t('chipArpRep'), ns: t('chipNs'), na: f.forged ? t('chipFake') : t('chipNa') }[f.kind];
+    var to = f.to || ids.filter(function (id) { return id !== f.from; });
+    return [{ from: f.from, to: to, label: label, c: CAST[f.cast], cast: f.cast === 'broadcast' ? 'broadcast' : null, chip: moving }];
+  }
+
+  function frameCard(H, ls, now, dir) {
+    var f = ls.frame;
+    var box = h('section', { class: 'nd-side' }, h('h3', null, t('frameTitle')));
+    if (!f) { box.append(h('p', { class: 'nd-none' }, t('frameNone'))); return box; }
+    var p = ls.phase, layers = [];
+    var eth = f.dstMac
+      ? { title: t('eth'), dashed: f.cast === 'broadcast', fields: [
+        [t('dstMac'), f.cast === 'broadcast' ? [data(f.dstMac, ''), h('span', null, ' (' + t('toAll') + ')')] : f.dstMac,
+          { changed: now && (p === 'req' || p === 'forward') }],
+        [t('srcMac'), f.srcMac, { changed: now && p === 'forward' }]] }
+      : { title: t('frameBeyond') };
+    layers.push(eth);
+    if (f.kind === 'arp-req' || f.kind === 'arp-rep') {
+      layers.push({ title: f.kind === 'arp-req' ? t('arpReq') : t('arpRep'), c: CAST[f.cast], fields: [
+        [t('senderIp'), f.senderIp], [t('senderMac'), f.senderMac, { changed: now && p === 'reply' }],
+        [f.kind === 'arp-req' ? t('targetIp') : t('targetIpRep'), f.targetIp]] });
+    } else {
+      layers.push({ title: t('ipv6'), c: CAST[f.cast], fields: [
+        [t('src'), f.src], [t('dst'), f.dst, { changed: now && p === 'req' }],
+        [t('hopLimit'), String(f.hopLimit), { changed: now && (p === 'forward' || p === 'drop') }]] });
+      var icmp = f.kind === 'ns'
+        ? { title: t('ns'), c: CAST[f.cast], fields: [[t('tgt'), f.target], [t('slla'), f.slla]] }
+        : { title: f.forged ? t('naForged') : t('na'), c: CAST[f.cast], fields: [[t('tgt'), f.target],
+          [t('flags'), 'S=' + f.S + ' O=' + f.O + ' R=' + f.R], [t('tlla'), f.tlla, { changed: now && p === 'reply' }]] };
+      layers.push(icmp);
+    }
+    box.append(Simdeck.topology.headers(layers, now && dir === 'forward' && ({ req: 1, reply: 1, forge: 1, forward: 1 }[p]) ? 'forward' : null));
+    return box;
+  }
+
+  function laneEl(c, kind) {
+    var s = c.state, p = c.params, ls = s[kind];
+    var H = L.hosts(p), now = s.lane === kind, dir = c.dir;
+    var forged = !!p.forged && kind === 'v6';
+    var ids = forged ? ['A', 'B', 'R'] : ['A', 'B', 'C'];     // C plays no part in the forged run
+    // hollow: once a request has reached the cards, every host whose CPU has not looked at any of them
+    var reached = ['filter', 'check', 'reply', 'cache', 'giveup'].indexOf(ls.phase) >= 0 || (ls.phase === 'req' && ls.k > 1);
+    var hollow = !forged && reached ? ['B', 'C'].filter(function (id) { return ls.inspected.indexOf(id) < 0; }) : [];
+
+    var nodes = (forged ? ['A', 'B'] : ['A', 'B', 'C']).map(function (id, col) {
+      var badges = badgesFor(id, ls);
+      // the host's own MAC is the first in its card filter, so the card shows only the address (A's global as small)
+      var lines = kind === 'v4' ? [{ text: H[id].v4, kind: 'addr' }] : H[id].v6.map(function (a, i) { return { text: a, kind: i ? 'sub' : 'addr' }; });
+      return {
+        id: id, kind: 'host', col: col, row: 0, c: HC[id], lines: lines,
+        badges: badges.map(function (b) { return { text: t(b[0]), k: b[1], anim: now }; }),
+        state: now && badges.some(function (b) { return b[1] === 'fill'; }) ? 'active' : null,
+        extra: nicBox(H, id, ls, kind, now),
+        table: tableFor(H, id, ls, kind, now, dir), tableRow: 2
+      };
+    });
+    var links = [{ id: 'lan', bus: ids, row: 1 }];
+    if (forged) {
+      var rb = badgesFor('R', ls);
+      nodes.push({ id: 'R', kind: 'router', col: 2, row: 0, c: HC.R, lines: [{ text: L.MAC.R, kind: 'sub' }, { text: t('router'), kind: 'role' }],
+        badges: rb.map(function (b) { return { text: t(b[0]), k: b[1], anim: now }; }), state: rb.length ? 'active' : null });
+      nodes.push({ id: 'X', kind: 'cloud', col: 3, row: 0, name: t('cloud'), changed: now && ls.phase === 'forge',
+        lines: [{ text: 'X', kind: 'addr' }, { text: L.X_ADDR, kind: 'sub' }] });
+      links.push({ id: 'wan', a: 'R', b: 'X' });
+    }
+    var topo = Simdeck.topology({
+      cols: forged ? 4 : 3, rows: ['auto', '3.7rem', 'auto'], gap: '1.4cqw', dir: now ? dir : null, className: 'nd-topo',
+      nodes: nodes, links: links, packets: packetsFor(ls, ids)
+    });
+    hollow.forEach(function (id) {
+      var m = topo.querySelector('.sd-topo-card[data-id="' + id + '"] .sd-topo-mark');
+      if (m) m.dataset.hollow = 'true';
+    });
+
+    var counted = { filter: 1, accept: 1 }[ls.phase] === 1 && ls.accepted.length > 0;
+    var head = h('div', { class: 'nd-head' },
+      h('span', { class: 'nd-name' }, t(kind === 'v4' ? 'laneV4' : 'laneV6')),
+      now ? h('span', { class: 'nd-now' }, t('now')) : null,
+      h('span', { class: 'nd-count' + (now && counted ? ' sd-changed' : '') }, t(forged ? 'counterForged' : 'counter') + ' ', h('b', null, t.n('counterN', ls.inspected.length)),
+        ls.inspected.length ? [' (', h('span', { class: 'nd-who', translate: 'no' }, ls.inspected.join(' ')), ')'] : null),
+      forged ? null : h('span', { class: 'nd-time' + (now && (ls.phase === 'req' && ls.k > 1 || ls.phase === 'giveup') ? ' sd-changed' : ''), translate: 'no' }, 't = ' + ls.t + ' s'),
+      kind === 'v6' && ls.timer ? h('span', null, t('timer') + ': ' + t(ls.timer === 'running' ? 'timerRunning' : ls.timer === 'stopped' ? 'timerStopped' : 'timerExpired', { s: L.C.retransTimer })) : null);
+    return h('div', { class: 'nd-lane' + (forged ? ' nd-stack' : ''), dataset: { lane: kind, now: now ? 'true' : null } }, head, topo, frameCard(H, ls, now, dir));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'target', type: 'choice', label: t('target'), resets: true,
+        options: [['B', t('targetB')], ['C', t('targetC')], ['absent', t('targetAbsent')]],
+        disabled: function (p) { return p.forged ? t('forgedOn') : false; } },
+      { key: 'collide', type: 'toggle', label: t('collide'), hint: t('collideHint'), resets: true,
+        disabled: function (p) { return p.forged ? t('forgedOn') : false; } },
+      { key: 'lanes', type: 'choice', label: t('lanes'), resets: true,
+        options: [['both', t('lanesBoth')], ['v6', t('lanesV6')]],
+        disabled: function (p) { return p.forged ? t('forgedOn') : false; } },
+      { key: 'forged', type: 'toggle', label: t('forged'), hint: t('forgedHint'), resets: true }
+    ],
+
+    presets: [
+      { id: 'side-by-side', label: t('presetSide'), params: { target: 'B' } },
+      { id: 'same-group', label: t('presetGroup'), params: { collide: true, lanes: 'v6' } },
+      { id: 'absent', label: t('presetAbsent'), params: { target: 'absent', lanes: 'v6' } },
+      { id: 'forged', label: t('presetForged'), params: { forged: true } }
+    ],
+
+    legend: [
+      { shape: 'chip-bc', c: 1, label: t('legBroadcast') },
+      { shape: 'chip-mc', c: 2, label: t('legMulticast') },
+      { shape: 'chip', c: 3, label: t('legUnicast') },
+      { shape: 'round-ink', label: t('legInspected') },
+      { shape: 'round-hollow', label: t('legFiltered') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      c.stage.replaceChildren(h('div', { class: 'nd', dataset: { lanes: s.v4 ? 'both' : 'v6' } }, s.v4 ? laneEl(c, 'v4') : null, laneEl(c, 'v6')));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, H = L.hosts(p), T = L.target(p, H);
+      if (!s.lane) {
+        if (p.forged) return rich('capStartForged');
+        return s.v4 ? rich('capStart', { who: p.target === 'absent' ? data(T.v4 + ' / ' + T.v6) : data(T.owner, '') }) : rich('capStartV6', { ip: D(T.v6) });
+      }
+      var v4 = s.lane === 'v4', ls = s[s.lane], f = ls.frame, ph = ls.phase;
+      var ip = v4 ? T.v4 : T.v6, o = T.owner ? H[T.owner] : null;
+      var others = function () { return Object.keys(ls.verdicts).filter(function (id) { return ls.verdicts[id] === 'notMine'; }); };
+      switch (ph) {
+        case 'miss': return rich(v4 ? 'cap4Miss' : 'cap6Miss', { ip: D(ip) });
+        case 'req':
+          if (ls.k > 1) return rich(v4 ? 'cap4ReqAgain' : 'cap6ReqAgain', { k: ls.k, t: ls.t, s: L.C.retransTimer, max: L.C.maxMulticastSolicit });
+          return v4 ? rich('cap4Req', { ip: B(ip), mac: D(f.dstMac) })
+            : rich('cap6Req', { group: B(f.dst), mac: B(f.dstMac) });
+        case 'filter':
+          if (v4) return o ? rich('cap4Filter', { who: hosts(ls.accepted) }) : rich('cap4FilterNone', { who: hosts(ls.accepted), ip: D(ip) });
+          if (!ls.accepted.length) return rich('cap6FilterNone', { group: B(f.dst) });
+          if (ls.accepted.length > 1) return rich('cap6FilterBoth', { who: hosts(ls.accepted), group: B(f.dst) });
+          if (s.v4 && s.v4.phase === 'filter') return rich('capVs', { v4: hosts(s.v4.accepted), group: B(f.dst), dropped: hosts(ls.dropped) });
+          return rich('cap6Filter', { who: hosts(ls.accepted), group: B(f.dst), dropped: hosts(ls.dropped) });
+        case 'check':
+          if (v4) return rich('cap4Check', { owner: data(o.id, ''), others: hosts(others()) });
+          return rich('cap6Check', { owner: data(o.id, '') }).concat(others().length ? [' '].concat(rich('cap6CheckOthers', { others: hosts(others()) })) : []);
+        case 'reply':
+          return v4 ? rich('cap4Reply', { owner: data(o.id, ''), ip: D(o.v4), mac: B(o.mac) }) : rich('cap6Reply', { owner: data(o.id, ''), mac: B(o.mac) });
+        case 'cache':
+          return rich(v4 ? 'cap4Cache' : 'cap6Cache', { ip: D(ip), mac: B(o.mac), n: h('b', null, String(ls.inspected.length)), hl: f.hopLimit });
+        case 'giveup': return rich(v4 ? 'cap4Giveup' : 'cap6Giveup', { n: h('b', null, t.n('counterN', ls.inspected.length)), s: L.C.retransTimer, max: L.C.maxMulticastSolicit });
+        case 'forge': return rich('capForge', { ip: D(f.target), mac: B(f.tlla), hl: f.hopLimit });
+        case 'forward': return rich('capForward', { hl: B(f.hopLimit) });
+        case 'accept': return rich('capAccept');
+        case 'drop': return rich('capDrop', { hl: B(f.hopLimit), need: L.C.ndpHopLimit, mac: B(H.B.mac) });
+      }
+      return [];
+    }
+  });
+})();
+</script>
+</body>
+</html>
