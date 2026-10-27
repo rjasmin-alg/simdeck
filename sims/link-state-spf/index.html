@@ -1,0 +1,525 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- link-state-spf: link-state routing on five routers. Each router writes one LSA with its own links, the LSAs flood
+     round by round (the kit's view K2: topology, the copies as chips on the links, an LSDB strip in every router card),
+     then the selected source runs Dijkstra on its own copy, one router made final per step, with its Dijkstra table and
+     routing table beside the drawing. Change B–C's cost or fail a link: new LSAs, a new SPF run.
+     Model: sim.js; rules and numbers: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="link-state-spf">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stanje veze i Dijkstrin algoritam · simdeck</title>
+<meta name="description" content="Preplavljivanjem LSA svi usmjernici dobiju istu kartu, a onda svaki Dijkstrinim algoritmom računa svoje najkraće puteve. Promijeni cijenu ili prekini vezu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "link-state-spf",
+  "title": {
+    "hr": "Stanje veze i Dijkstrin algoritam",
+    "en": "Link state and Dijkstra"
+  },
+  "concept": {
+    "hr": "Preplavljivanje LSA gradi jednu kartu, SPF bira puteve",
+    "en": "LSA flooding builds one map; SPF picks paths"
+  },
+  "summary": {
+    "hr": "Preplavljivanjem LSA svi usmjernici dobiju istu kartu, a onda svaki Dijkstrinim algoritmom računa svoje najkraće puteve. Promijeni cijenu ili prekini vezu.",
+    "en": "Routers flood LSAs until all hold the same map, then each computes its own shortest paths with Dijkstra. Change a link's cost or fail a link."
+  },
+  "tags": [
+    "routing"
+  ],
+  "class": "stepper",
+  "steps": 9
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="link-state-spf"]; colours only from kit tokens.
+   Layout: a status line over two columns, the K2 drawing (routers with their LSDB strip, links with their cost, the LSA
+   copies of a flood round as chips) and the source's Dijkstra table over its routing table. */
+[data-sim="link-state-spf"] .ls {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.5cqh 1.5cqw;
+  height: 100%;
+  padding: 2cqh 1.2cqw;
+}
+[data-sim="link-state-spf"] .ls-status { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1rem; font-size: var(--fs-lg); }
+[data-sim="link-state-spf"] .ls-status b { font-weight: 700; }
+[data-sim="link-state-spf"] .ls-chg { padding: 0 0.5rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="link-state-spf"] .ls-done { padding: 0 0.5rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="link-state-spf"] .ls-draw { display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+[data-sim="link-state-spf"] .ls-draw .sd-topo { height: 100%; align-content: space-between; row-gap: 0; }
+
+/* router card: mark and "LSDB" on top, the strip of five LSDB cells under them */
+[data-sim="link-state-spf"] .sd-topo-card[data-kind="router"] { justify-self: center; row-gap: 0.3rem; padding: 0.4rem 0.6rem 0.5rem; }
+[data-sim="link-state-spf"] .sd-topo-card[data-kind="router"] .sd-topo-mark { grid-row: auto; min-width: 2.2rem; height: 2.2rem; }
+[data-sim="link-state-spf"] .sd-topo-card[data-spf="tent"] .sd-topo-mark { background: var(--bg); color: var(--ink); border: 0.22rem solid var(--sw); }
+[data-sim="link-state-spf"] .sd-topo-card[data-spf="none"] .sd-topo-mark { background: var(--bg); color: var(--muted); border: var(--line-w) dashed var(--muted); }
+[data-sim="link-state-spf"] .ls-dbx { display: contents; }
+[data-sim="link-state-spf"] .ls-dbh { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="link-state-spf"] .ls-db { grid-column: 1 / -1; display: flex; gap: 0.2rem; }
+[data-sim="link-state-spf"] .ls-cell {
+  display: grid;
+  justify-items: center;
+  min-width: 1.45rem;
+  padding: 0 0.05rem 0.05rem;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1.15;
+}
+[data-sim="link-state-spf"] .ls-cell small { font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="link-state-spf"] .ls-cell[data-held="no"] { border-style: dashed; border-color: var(--line); color: var(--muted); font-weight: 400; }
+[data-sim="link-state-spf"] .ls-cell[data-held="old"] { background: var(--bg); color: var(--ink); }
+[data-sim="link-state-spf"] .ls-cell[data-held="old"] small { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="link-state-spf"] .ls-own { display: none; grid-column: 1 / -1; font-size: var(--fs-sm); }
+[data-sim="link-state-spf"] .ls-own b { font-family: var(--mono); }
+[data-sim="link-state-spf"] .ls-cell.ls-new { outline: 0.2rem solid var(--ink); outline-offset: 0.08rem; box-shadow: 0 0 0 0.4rem var(--hl); }
+
+/* links: the shortest-path tree thick, ECMP as a double line (a gap drawn along the middle), the cost on each link */
+[data-sim="link-state-spf"] .sd-topo-link.sd-topo-active { stroke-width: 0.8rem; }
+[data-sim="link-state-spf"] .ls-over { position: absolute; inset: 0; pointer-events: none; }
+[data-sim="link-state-spf"] .ls-costs { z-index: 3; }
+[data-sim="link-state-spf"] .ls-over svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="link-state-spf"] .ls-gap { stroke: var(--bg); stroke-width: 0.3rem; }
+[data-sim="link-state-spf"] .ls-cost {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 1.9rem;
+  padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.5;
+}
+[data-sim="link-state-spf"] .ls-cost[data-down] { border-style: dashed; border-color: var(--muted); color: var(--muted); text-decoration: line-through; }
+[data-sim="link-state-spf"] .ls-cost.ls-new { background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink); }
+
+/* the LSA copies of a flood round: neutral chips holding one coloured letter per LSA; a dropped copy is hollow, struck */
+[data-sim="link-state-spf"] .sd-topo-chip { padding: 0.1rem 0.2rem; background: var(--bg); color: var(--ink); border: var(--line-w) solid var(--ink); line-height: 1.2; }
+[data-sim="link-state-spf"] .ls-env { display: inline-flex; gap: 0.15rem; }
+[data-sim="link-state-spf"] .ls-lsa { display: inline-block; min-width: 1.3rem; padding: 0 0.15rem; border: var(--line-w) solid var(--sw); border-radius: 0.15rem; text-align: center; font-family: var(--mono); }
+[data-sim="link-state-spf"] .ls-lsa[data-dup] { background: var(--bg); color: var(--muted); border-style: dashed; font-weight: 400; }
+
+/* the side: Dijkstra table and routing table */
+[data-sim="link-state-spf"] .ls-side { display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
+[data-sim="link-state-spf"] .ls-side h3 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+[data-sim="link-state-spf"] .ls-side h3 small { display: block; color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="link-state-spf"] .ls-tab { display: grid; column-gap: 0.8rem; row-gap: 0.15rem; align-items: center; }
+[data-sim="link-state-spf"] .ls-tab[data-cols="4"] { grid-template-columns: auto auto auto 1fr; }
+[data-sim="link-state-spf"] .ls-tab[data-cols="3"] { grid-template-columns: auto auto 1fr; }
+[data-sim="link-state-spf"] .ls-th { align-self: end; color: var(--muted); font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="link-state-spf"] .ls-tr {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: 0 0.4rem;
+  margin: 0 -0.4rem;
+  border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm);
+}
+[data-sim="link-state-spf"] .ls-tr .ls-d { font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="link-state-spf"] .ls-tr .ls-w { font-size: var(--fs-sm); }
+[data-sim="link-state-spf"] .ls-tr[data-st="none"] { color: var(--muted); }
+[data-sim="link-state-spf"] .ls-tr.ls-picked { border: 0.22rem solid var(--ink); }
+[data-sim="link-state-spf"] .ls-tr.ls-new { background: var(--hl); color: var(--on-hl); }
+[data-sim="link-state-spf"] .ls-who { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="link-state-spf"] .ls-dot { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; font-size: var(--fs-md); border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="link-state-spf"] .ls-dot[data-st="tent"] { background: var(--bg); color: var(--ink); border: 0.2rem solid var(--sw); }
+[data-sim="link-state-spf"] .ls-dot[data-st="none"] { background: var(--bg); color: var(--muted); border: var(--line-w) dashed var(--muted); }
+[data-sim="link-state-spf"] .ls-empty { color: var(--muted); font-size: var(--fs-sm); }
+
+/* legend swatches */
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-cost"] { background: var(--bg); border-color: var(--ink); border-radius: var(--radius-sm); }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-lsa"] { background: var(--c2); border-color: var(--c2); border-radius: 0.15rem; }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-dup"] { background: var(--bg); border-style: dashed; border-color: var(--c2); border-radius: 0.15rem; }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-tent"] { background: var(--bg); border: 0.2rem solid var(--c1); border-radius: var(--radius-sm); }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-final"] { background: var(--c1); border-color: var(--c1); border-radius: var(--radius-sm); }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-tree"] { height: 0.6rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="link-state-spf"] .sd-swatch[data-shape="ls-ecmp"] { height: 0.7rem; border: 0; border-radius: 0; background: linear-gradient(var(--ink) 0 35%, transparent 35% 65%, var(--ink) 65%); }
+
+/* Phone and portrait: the kit lists the routers as cards (no drawing); the stage grows with them, the tables follow. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="link-state-spf"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="link-state-spf"] .ls { display: flex; flex-direction: column; height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="link-state-spf"] .ls-draw .sd-topo { height: auto; }
+  [data-sim="link-state-spf"] .ls-over { display: none; }
+  [data-sim="link-state-spf"] .ls-own { display: block; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Stanje veze i Dijkstrin algoritam</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var R = L.ROUTERS;
+  var NS = 'http://www.w3.org/2000/svg';
+
+  // Where each router sits in the grid: [col, row], every card spanning two of ten columns. A zigzag of three triangles
+  // (A-B-C, B-C-D, C-D-E): B and D on top, A, C and E below, row 1 a spacer, so every link is long enough for its cost
+  // in the middle and a chip near each end.
+  var POS = { A: [0, 2], B: [2, 0], C: [4, 2], D: [6, 0], E: [8, 2] };
+  var ROWS = ['auto', 'minmax(2rem, 1fr)', 'auto'];
+
+  function colour(r) { return R.indexOf(r) + 1; }
+  function data(x) { return h('b', { translate: 'no' }, String(x)); }
+  function dash(id) { return id.replace('-', '–'); }
+  function list(names, word) {
+    var out = [];
+    names.forEach(function (r, i) {
+      if (i > 0) out.push(i === names.length - 1 ? t(word || 'and') : t('listSep'));
+      out.push(data(r));
+    });
+    return h('span', null, out);
+  }
+  function hops(nh) { return nh.length ? nh.join(', ') : '—'; }
+  function term(key) { return h('i', null, t(key)); }
+  /** t.parts, with a fresh copy of a node that a string uses twice ("{r} … {r}"): a node can stand in one place only. */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function inSpf(s) { return s.kind === 'spf' || s.kind === 'table'; }
+  function spfState(s, r) {
+    if (!s.spf) return 'none';
+    if (s.spf.final.indexOf(r) >= 0) return 'final';
+    return s.spf.dist[r] == null ? 'none' : 'tent';
+  }
+
+  // ── stage ──
+
+  function lsdbEl(s, r) {
+    var latest = L.latestOf(s.lsas);
+    var fresh = {};
+    s.inFlight.forEach(function (c) { if (c.to === r && c.fate === 'new') fresh[c.o] = true; });
+    if (s.kind === 'originate' || s.kind === 'change') s.originated.forEach(function (o) {
+      if (s.kind === 'originate' ? o === r : true) fresh[o] = true;
+    });
+    var cells = R.map(function (o) {
+      var seq = s.lsdb[r] ? s.lsdb[r][o] : null;
+      var held = seq == null ? 'no' : seq < latest[o] ? 'old' : 'yes';
+      return h('span', { class: 'ls-cell' + (held === 'yes' ? ' sd-fill' : '') + (fresh[o] ? ' ls-new' : ''), dataset: { c: colour(o), held: held }, translate: 'no' },
+        o, h('small', null, seq == null ? '·' : String(seq)));
+    });
+    // the router's own links and costs: shown only where the drawing is hidden (phone), so the costs stay visible
+    var own = L.lsaOf(s.links, r, 0).links.map(function (e) { return e[0] + ' ' + e[1]; }).join(' · ');
+    return h('div', { class: 'ls-dbx' }, h('span', { class: 'ls-dbh' }, t('lsdbHead')),
+      h('div', { class: 'ls-db', role: 'group', 'aria-label': t('lsdbOf', { r: r }) }, cells),
+      h('span', { class: 'ls-own' }, t('ownLinks'), ' ', h('b', { translate: 'no' }, own)));
+  }
+
+  function chipEl(copies) {
+    return h('span', { class: 'ls-env', translate: 'no' }, copies.map(function (c) {
+      var ds = { c: colour(c.o) };
+      if (c.fate === 'dup') ds.dup = '';
+      return h('span', { class: 'ls-lsa' + (c.fate === 'dup' ? '' : ' sd-fill'), dataset: ds }, c.o);
+    }));
+  }
+
+  /** The cost on every link and the gap that makes an ECMP tree link double: drawn over K2's links after layout. */
+  function overlay(topo, links, ecmp, changed) {
+    var svgEl = document.createElementNS(NS, 'svg');
+    var labels = links.map(function (l) {
+      var ds = {};
+      if (!l.up) ds.down = '';
+      return h('span', { class: 'ls-cost' + (changed.indexOf(l.id) >= 0 ? ' ls-new' : ''), dataset: ds, translate: 'no' }, String(l.cost));
+    });
+    topo.append(h('div', { class: 'ls-over', 'aria-hidden': 'true' }, svgEl), h('div', { class: 'ls-over ls-costs', 'aria-hidden': 'true' }, labels));
+    function centre(id) {
+      var c = topo.querySelector('.sd-topo-card[data-id="' + id + '"]');
+      var a = c.getBoundingClientRect(), b = topo.getBoundingClientRect();
+      return { x: a.left - b.left + a.width / 2, y: a.top - b.top + a.height / 2 };
+    }
+    function place() {
+      if (!topo.getBoundingClientRect().width) return;
+      svgEl.replaceChildren();
+      links.forEach(function (l, i) {
+        var a = centre(l.a), b = centre(l.b);
+        labels[i].style.left = (a.x + b.x) / 2 + 'px';
+        labels[i].style.top = (a.y + b.y) / 2 + 'px';
+        if (ecmp.indexOf(l.id) >= 0) {
+          var line = document.createElementNS(NS, 'line');
+          line.setAttribute('x1', a.x); line.setAttribute('y1', a.y); line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+          line.setAttribute('class', 'ls-gap');
+          svgEl.append(line);
+        }
+      });
+    }
+    if (typeof ResizeObserver === 'function') {
+      var ro = new ResizeObserver(function () { if (!topo.isConnected) { ro.disconnect(); return; } place(); });
+      ro.observe(topo);
+    } else requestAnimationFrame(place);
+  }
+
+  function drawEl(c) {
+    var s = c.state, p = c.params;
+    var spf = inSpf(s);
+    var treeIds = s.tree.map(function (e) { return L.linkId(e.a, e.b); });
+    var ecmpIds = s.tree.filter(function (e) { return e.ecmp; }).map(function (e) { return L.linkId(e.a, e.b); });
+    var changedLinks = [];
+    if (s.kind === 'change' && s.change) {
+      if (s.change.cost) changedLinks.push('B-C');
+      if (s.change.fail) changedLinks.push(s.change.fail);
+    }
+    var nodes = R.map(function (r) {
+      return { id: r, kind: 'router', col: POS[r][0], row: POS[r][1], span: 2, mark: r, c: colour(r),
+        state: spf && r === p.source ? 'active' : null, extra: lsdbEl(s, r) };
+    });
+    var links = s.links.map(function (l) {
+      return { id: l.id, a: l.a, b: l.b, state: l.up ? 'up' : 'down', active: l.up && treeIds.indexOf(l.id) >= 0 };
+    });
+    var groups = {}, order = [];
+    s.inFlight.forEach(function (cp) {
+      var k = cp.from + '>' + cp.to;
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(cp);
+    });
+    var packets = order.map(function (k) {
+      var g = groups[k];
+      return { from: g[0].from, to: g[0].to, label: chipEl(g), at: 0.2 };
+    });
+    var topo = Simdeck.topology({ cols: 10, rows: ROWS, dir: c.dir, nodes: nodes, links: links, packets: packets });
+    if (spf) R.forEach(function (r) {
+      var card = topo.querySelector('.sd-topo-card[data-id="' + r + '"]');
+      if (card) card.dataset.spf = spfState(s, r);
+    });
+    overlay(topo, s.links, ecmpIds, changedLinks);
+    return h('div', { class: 'ls-draw' }, topo);
+  }
+
+  function statusEl(c) {
+    var s = c.state, p = c.params;
+    var what = s.kind === 'start' ? t(s.change ? 'phConv' : 'phStart') : s.kind === 'change' ? t('phChange') :
+      s.kind === 'originate' ? t('phOrig') : s.kind === 'flood' ? t('phFlood', { k: s.round }) :
+      s.kind === 'spf' ? t('phSpf', { k: s.spf.final.length }) : t('phTable');
+    var chg = [];
+    if (s.change && s.change.cost) chg.push(h('span', { class: 'ls-chg' }, parts('chgCost', { from: data(s.change.cost.from), to: data(s.change.cost.to) })));
+    if (s.change && s.change.fail) chg.push(h('span', { class: 'ls-chg' }, parts('chgFail', { l: data(dash(s.change.fail)) })));
+    return h('div', { class: 'ls-status' }, h('b', null, what), chg, s.end ? h('span', { class: 'ls-done' }, t('phDone')) : null);
+  }
+
+  function spfTable(c) {
+    var s = c.state, p = c.params;
+    var head = h('h3', null, parts('spfTitle', { r: data(p.source) }));
+    if (!s.spf) return h('section', null, head, h('p', { class: 'ls-empty' }, parts('spfWait', { r: data(p.source) })));
+    var touched = {};
+    // marked: a row whose distance or next hops changed this step (an equal path that adds no next hop is not)
+    if (s.kind === 'spf') s.spf.relaxed.forEach(function (x) {
+      if (x.how === 'new' || x.how === 'better' || (x.how === 'equal' && x.old.nextHop.join() !== s.spf.nextHop[x.r].join())) touched[x.r] = true;
+    });
+    var rows = R.map(function (r) {
+      var st = spfState(s, r), d = s.spf.dist[r];
+      var cls = 'ls-tr' + (s.kind === 'spf' && s.spf.picked === r ? ' ls-picked' : '') + (touched[r] ? ' ls-new' : '');
+      return h('div', { class: cls, dataset: { st: st } },
+        h('span', { class: 'ls-who' }, h('span', { class: 'ls-dot' + (st === 'final' ? ' sd-fill' : ''), dataset: { c: colour(r), st: st }, translate: 'no' }, r)),
+        h('span', { class: 'ls-d', translate: 'no' }, d == null ? '∞' : String(d)),
+        h('span', { class: 'ls-d', translate: 'no' }, r === p.source ? '—' : hops(s.spf.nextHop[r])),
+        h('span', { class: 'ls-w' }, t(st === 'final' ? 'stFinal' : st === 'tent' ? 'stTent' : 'stNone')));
+    });
+    return h('section', null, head, h('div', { class: 'ls-tab', dataset: { cols: 4 } },
+      h('span', { class: 'ls-th' }, t('colRouter')), h('span', { class: 'ls-th' }, t('colDist')),
+      h('span', { class: 'ls-th' }, t('colVia')), h('span', { class: 'ls-th' }, t('colState')), rows));
+  }
+
+  function sameRow(a, b) { return !!a && !!b && a.cost === b.cost && a.via.join() === b.via.join(); }
+  function oldRow(s, dest) { return (s.oldTable || []).filter(function (x) { return x.dest === dest; })[0]; }
+
+  function routeTable(c) {
+    var s = c.state, p = c.params;
+    var old = s.kind !== 'table' && s.oldTable;
+    var head = h('h3', null, parts('rtTitle', { r: data(p.source) }), old ? h('small', null, t('rtOld')) : null);
+    if (!s.table.length) return h('section', null, head, h('p', { class: 'ls-empty' }, t('rtEmpty')));
+    var rows = s.table.map(function (x) {
+      var isNew = s.kind === 'table' && !sameRow(x, oldRow(s, x.dest));
+      return h('div', { class: 'ls-tr' + (isNew ? ' ls-new' : '') },
+        h('span', { class: 'ls-who' }, h('span', { class: 'ls-dot sd-fill', dataset: { c: colour(x.dest) }, translate: 'no' }, x.dest)),
+        h('span', { class: 'ls-d', translate: 'no' }, String(x.cost)),
+        h('span', { class: 'ls-d', translate: 'no' }, hops(x.via)));
+    });
+    return h('section', null, head, h('div', { class: 'ls-tab', dataset: { cols: 3 } },
+      h('span', { class: 'ls-th' }, t('colDest')), h('span', { class: 'ls-th' }, t('colCost')), h('span', { class: 'ls-th' }, t('colVia')), rows));
+  }
+
+  // ── caption ──
+
+  function changeWords(ch) {
+    var out = [];
+    if (ch.cost) out.push(parts('chgCostLong', { from: data(ch.cost.from), to: data(ch.cost.to) }));
+    if (ch.fail) {
+      if (out.length) out.push([t('and')]);
+      out.push(parts('chgFailLong', { l: data(dash(ch.fail)) }));
+    }
+    return h('span', null, out);
+  }
+
+  /** The path to u along first parents, then v: "A–B–C–D". */
+  function pathTo(spf, u, v) {
+    var chain = [v, u];
+    while (spf.parents[chain[chain.length - 1]].length) chain.push(spf.parents[chain[chain.length - 1]][0]);
+    return data(chain.reverse().join('–'));
+  }
+
+  function relaxWords(s, x) {
+    var sp = s.spf, two = sp.nextHop[x.r].length > 1;
+    var v = { v: data(x.r), u: data(x.via), d: data(x.offer), nh: two ? list(sp.nextHop[x.r]) : data(hops(sp.nextHop[x.r])) };
+    if (x.how === 'new') return parts(two ? 'relNewTwo' : 'relNew', v);
+    v.path = pathTo(sp, x.via, x.r);
+    v.old = data(x.old.dist);
+    if (x.how === 'worse') return parts('relWorse', v);
+    if (x.how === 'better') {
+      v.oldLink = data(dash(L.linkId(x.old.parents[0], x.r)));
+      if (two) return parts('relBetterTwo', v);
+      return parts(x.old.nextHop.join() === sp.nextHop[x.r].join() ? 'relBetterSame' : 'relBetterNew', v);
+    }
+    if (x.old.nextHop.join() === sp.nextHop[x.r].join()) return parts('relEqualSame', v);
+    v.term = term('termEcmp');
+    return parts('relEqual', v);
+  }
+
+  function capFor(c) {
+    var s = c.state, p = c.params, n = c.n, out = [];
+    var push = function (ps) { if (!ps) return; if (out.length) out.push(' '); out.push.apply(out, ps); };
+    if (s.kind === 'start') {
+      if (s.change) push(parts('capStartConv', { r: data(p.source), change: changeWords(s.change) }));
+      else if (!p.showFlood) push(parts('capStartFull', { r: data(p.source) }));
+      else push(parts('capStartCold', { term: term('termMetric') }));
+    } else if (s.kind === 'change') {
+      push(parts('capChange', { n: n, change: changeWords(s.change), ends: list(s.change.ends) }));
+      if (!p.showFlood) push(parts('capChangeHidden', { seq: data(s.lsdb[s.change.ends[0]][s.change.ends[0]]) }));
+    } else if (s.kind === 'originate') {
+      if (!s.change) push(parts('capOrigCold', { n: n, term: term('termLsa') }));
+      else {
+        var seq = s.lsdb[s.originated[0]][s.originated[0]];
+        push(parts('capOrigChange', { n: n, ends: list(s.originated), seq: data(seq), old: data(seq - 1) }));
+      }
+    } else if (s.kind === 'flood') {
+      var dups = s.inFlight.filter(function (x) { return x.fate === 'dup'; }).length;
+      var copies = t.n('copies', s.inFlight.length);
+      if (!dups) push(parts('capFloodFirst', { k: s.round, copies: copies, term: term('termFlood') }));
+      else push(parts('capFlood', { k: s.round, copies: copies, fresh: data(s.inFlight.length - dups), dups: data(dups) }));
+      if (s.inFlight.some(function (x) { return x.fate === 'new' && x.held != null; })) push([t('capFloodNewer')]);
+      if (L.complete(s.lsdb, s.lsas)) push(s.change ? parts('capFloodDoneChange', { ends: list(s.change.ends) }) : [t('capFloodDone')]);
+    } else if (s.kind === 'spf') {
+      var sp = s.spf;
+      push(sp.picked === p.source ? parts('capSpfFirst', { n: n, r: data(sp.picked) }) : parts('capPick', { n: n, r: data(sp.picked), d: data(sp.dist[sp.picked]) }));
+      sp.relaxed.forEach(function (x) { push(relaxWords(s, x)); });
+      if (L.pickOf(sp) == null) push([t('capAllFinal')]);
+      else if (!sp.relaxed.length) push([t('capNoNews')]);
+    } else {
+      push(parts('capTable', { n: n, r: data(p.source) }));
+      var vias = {};
+      s.table.forEach(function (x) { x.via.forEach(function (v) { vias[v] = true; }); });
+      var ecmp = s.table.filter(function (x) { return x.via.length > 1; }).map(function (x) { return x.dest; });
+      if (Object.keys(vias).length === 1) push(parts('capTableOne', { h: data(Object.keys(vias)[0]) }));
+      if (ecmp.length) push(parts('capTableEcmp', { ds: list(ecmp) }));
+      if (s.oldTable) {
+        var moved = s.table.filter(function (x) { return !sameRow(x, oldRow(s, x.dest)); }).map(function (x) { return x.dest; });
+        push(moved.length ? parts('capTableChanged', { ds: list(moved) }) : [t('capTableSame')]);
+      }
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'source', type: 'choice', label: t('pSource'), options: R.map(function (r) { return [r, r]; }) },
+      { key: 'costBC', type: 'range', label: t('pCost'), min: 1, max: 10, step: 1, resets: true },
+      { key: 'fail', type: 'choice', label: t('pFail'), resets: true,
+        options: L.FAILS.map(function (f) { return [f, f === 'none' ? t('failNone') : dash(f)]; }) },
+      { key: 'showFlood', type: 'toggle', label: t('pFlood'), hint: t('pFloodHint'), resets: true }
+    ],
+
+    presets: [
+      { id: 'spf-from-a', label: t('prA'), hint: t('prAHint'), params: { source: 'A', costBC: 1, fail: 'none', showFlood: true } },
+      { id: 'cost-change', label: t('prCost'), hint: t('prCostHint'), params: { source: 'A', costBC: 5, fail: 'none', showFlood: true } },
+      { id: 'link-fails', label: t('prFail'), hint: t('prFailHint'), params: { source: 'A', costBC: 1, fail: 'C-D', showFlood: true } },
+      { id: 'spf-from-e', label: t('prE'), hint: t('prEHint'), params: { source: 'E', costBC: 1, fail: 'none', showFlood: true } }
+    ],
+
+    legend: [
+      { shape: 'ls-cost', label: t('legCost') },
+      { shape: 'ls-lsa', label: t('legLsa') },
+      { shape: 'ls-dup', label: t('legDup') },
+      { shape: 'ls-tent', label: t('legTent') },
+      { shape: 'ls-final', label: t('legFinal') },
+      { shape: 'ls-tree', label: t('legTree') },
+      { shape: 'ls-ecmp', label: t('legEcmp') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'ls' }, statusEl(c), drawEl(c),
+        h('div', { class: 'ls-side' }, spfTable(c), routeTable(c))));
+    },
+
+    caption: function (c) { return capFor(c); }
+  });
+})();
+</script>
+</body>
+</html>
