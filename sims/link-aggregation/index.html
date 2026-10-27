@@ -1,0 +1,466 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- link-aggregation: clients send flows through switch SW to server S over N member links of 1 Gbit/s. An explorer:
+     members, hash policy, flows, a failed link, same client and demand recompute the assignment and the rates at once.
+     Left the hash calculator (one row per flow), then the strands into SW, the lanes (each a pipe of 1 Gbit/s whose
+     bands are the flows' rates, the rest hatched), and S. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="link-aggregation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Udruživanje veza i raspodjela tokova · simdeck</title>
+<meta name="description" content="Dodaj tokove, promijeni pravilo sažetka, ugasi vezu: svaki tok ide jednom vezom, pa 2 × 1 Gbit/s nije 2 Gbit/s za jedan prijenos.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "link-aggregation",
+  "class": "explorer",
+  "title": { "hr": "Udruživanje veza i raspodjela tokova", "en": "Link aggregation and flow hashing" },
+  "concept": { "hr": "Zašto jedan tok nikad ne premaši brzinu jedne članske veze", "en": "Why one flow never exceeds one member link" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="link-aggregation"]; colours only from kit tokens.
+   Layout: the formula line, the fabric (calculator | strands | SW | lanes | S), the totals. Inside the fabric every
+   vertical position is a percentage of its height, so the strands (an SVG stretched over its column) meet the table
+   rows and the lane bands without measuring anything. */
+[data-sim="link-aggregation"] .sd-legend { flex: 0 1 42rem; justify-content: flex-end; }
+[data-sim="link-aggregation"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="link-aggregation"] .sd-preset { line-height: 1.15; }
+[data-sim="link-aggregation"] .sd-panel { gap: 0.5rem; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="link-aggregation"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+[data-sim="link-aggregation"] .la {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="link-aggregation"] .la-formula { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.9rem; margin: 0; line-height: 1.3; }
+[data-sim="link-aggregation"] .la-pol { padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="link-aggregation"] .la-simpl { padding: 0 0.4rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="link-aggregation"] .la-formula .la-f { font-family: var(--mono); }
+[data-sim="link-aggregation"] .la-formula .la-note { color: var(--muted); font-size: var(--fs-sm); }
+
+[data-sim="link-aggregation"] .la-fab {
+  display: grid;
+  grid-template-columns: 31rem minmax(2.5rem, 6%) 6.5rem minmax(0, 1fr) 10rem;
+  min-height: 0;
+}
+[data-sim="link-aggregation"] .la-col { position: relative; min-width: 0; }
+
+/* ── hash calculator: header slot 0, flows in slots 1…8 of 9 ── */
+[data-sim="link-aggregation"] .la-row {
+  position: absolute;
+  left: 0;
+  right: 0.3rem;
+  display: grid;
+  grid-template-columns: 5.4rem 2.6rem 2.6rem 3.9rem minmax(0, 1fr) 2.4rem;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.1rem 0.3rem;
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+[data-sim="link-aggregation"] .la-row.la-head { font-family: var(--sans); font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="link-aggregation"] .la-row.sd-changed { outline: 0; box-shadow: none; background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="link-aggregation"] .la-row > * { overflow: hidden; text-overflow: ellipsis; }
+[data-sim="link-aggregation"] .la-fl { display: flex; align-items: center; gap: 0.35rem; font-family: var(--sans); }
+[data-sim="link-aggregation"] .la-fchip { padding: 0 0.35rem; border: var(--line-w) solid; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="link-aggregation"] .la-cl { font-size: var(--fs-sm); }
+[data-sim="link-aggregation"] .la-off { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+[data-sim="link-aggregation"] .la-row.sd-changed .la-off { color: var(--on-hl); }
+[data-sim="link-aggregation"] .la-lk { display: grid; place-items: center; height: 1.7rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font-weight: 700; }
+[data-sim="link-aggregation"] .la-lk[data-down] { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+
+/* ── strands ── */
+[data-sim="link-aggregation"] .la-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="link-aggregation"] .la-svg path { fill: none; stroke: var(--sw, var(--ink)); stroke-width: 5; stroke-linecap: round; }
+[data-sim="link-aggregation"] .la-svg path.la-under { stroke: var(--hl); stroke-width: 13; }
+[data-sim="link-aggregation"] .la-svg path.la-lost { stroke-dasharray: 6 6; }
+
+/* ── switch and server ── */
+[data-sim="link-aggregation"] .la-box {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+[data-sim="link-aggregation"] .la-box b { font-size: 1.6rem; }
+[data-sim="link-aggregation"] .la-box .la-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="link-aggregation"] .la-box .la-kv { display: grid; gap: 0.1rem; margin-top: 0.4rem; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="link-aggregation"] .la-sw { margin: 0 0.3rem; }
+[data-sim="link-aggregation"] .la-sw .la-down { color: var(--danger); font-size: 2rem; font-weight: 700; }
+[data-sim="link-aggregation"] .la-srv { margin-left: 0.3rem; }
+
+/* ── lanes: label band, then the pipe (1 Gbit/s high), bands = flows, hatch = idle ── */
+[data-sim="link-aggregation"] .la-lbl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-left: 0.3rem;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+[data-sim="link-aggregation"] .la-lbl .la-lk { flex: 0 0 auto; padding: 0 0.45rem; height: 1.5rem; font-size: var(--fs-sm); }
+[data-sim="link-aggregation"] .la-lbl .la-load { font-family: var(--mono); font-weight: 700; }
+[data-sim="link-aggregation"] .la-lbl .la-ids { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+[data-sim="link-aggregation"] .la-lbl .la-state { padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); }
+[data-sim="link-aggregation"] .la-lbl .la-state[data-k='down'] { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+[data-sim="link-aggregation"] .la-pipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: var(--line-w) solid var(--ink);
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background-color: var(--bg);
+}
+[data-sim="link-aggregation"] .la-pipe[data-down] { border: var(--line-w) dashed var(--danger); border-left: 0; background-image: none; display: grid; place-items: center; }
+[data-sim="link-aggregation"] .la-pipe[data-down]::after { content: '✕'; color: var(--danger); font-size: 2rem; font-weight: 700; line-height: 1; }
+[data-sim="link-aggregation"] .la-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 0.5rem;
+  box-shadow: inset 0 -2px 0 var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+[data-sim="link-aggregation"] .la-band.sd-changed { z-index: 2; outline-offset: -3px; box-shadow: inset 0 0 0 0.4rem var(--hl); }
+
+/* ── totals ── */
+[data-sim="link-aggregation"] .la-sum { display: flex; flex-wrap: wrap; gap: 0.3rem 1.6rem; margin: 0; }
+[data-sim="link-aggregation"] .la-sum b { font-family: var(--mono); }
+[data-sim="link-aggregation"] .la-sum .la-cap { color: var(--muted); }
+
+/* legend swatches */
+[data-sim="link-aggregation"] .sd-swatch[data-shape='la-lane'] { background: var(--bg); border-color: var(--ink); border-radius: 0; }
+[data-sim="link-aggregation"] .sd-swatch[data-shape='la-idle'] { background-color: var(--bg); border-color: var(--ink); border-radius: 0; background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="link-aggregation"] .sd-swatch[data-shape='la-down'] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); border-radius: 0; }
+[data-sim="link-aggregation"] .sd-swatch[data-shape='la-down']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+
+/* Phone and portrait: the fabric gets a fixed height; the calculator keeps the flow and its link. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="link-aggregation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="link-aggregation"] .la { height: auto; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="link-aggregation"] .la-fab { height: 26rem; grid-template-columns: 7rem 1.6rem 2.6rem minmax(0, 1fr) 2.6rem; }
+  [data-sim="link-aggregation"] .la-row { grid-template-columns: minmax(0, 1fr) 2.8rem; gap: 0.2rem; padding: 0 0.1rem; }
+  [data-sim="link-aggregation"] .la-row > .la-x { display: none; }
+  [data-sim="link-aggregation"] .la-cl { display: none; }
+  [data-sim="link-aggregation"] .la-box { padding: 0.2rem; }
+  [data-sim="link-aggregation"] .la-box .la-sub,
+  [data-sim="link-aggregation"] .la-box .la-kv { display: none; }
+  [data-sim="link-aggregation"] .la-box b { font-size: 1.1rem; }
+  [data-sim="link-aggregation"] .la-sw { margin: 0 0.15rem; }
+  [data-sim="link-aggregation"] .la-lbl .la-ids,
+  [data-sim="link-aggregation"] .la-lbl .la-load { display: none; }
+  [data-sim="link-aggregation"] .la-band { padding-left: 0.2rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Udruživanje veza i raspodjela tokova</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SLOTS = 9;          // calculator: header + up to 8 flows
+  var LBL = 8;            // lane label band, % of the fabric's height
+  var GAP = 3;            // gap under each pipe, %
+  var BAND_LABEL = 4.5;   // a band shows its label from this height (% of the fabric) up
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /** Data (addresses, ports, ids, policy names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function colourOf(fid) { return String(((Number(fid.slice(1)) - 1) % 8) + 1); }
+  /** Mbit/s → Gbit/s, at most 3 decimals, decimal comma in Croatian. */
+  function G(mbit) {
+    var s = String(Math.round(mbit) / 1000);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** "1", "1 i 3", "1, 3 i 4". */
+  function list(ids) {
+    if (ids.length < 2) return ids.join('');
+    return ids.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + ids[ids.length - 1];
+  }
+  function rowY(i) { return (i + 0.5) * 100 / SLOTS; }
+  function lane(p, id) {
+    var slot = 100 / p.members, top = (id - 1) * slot;
+    return { top: top, pipeTop: top + LBL, pipeH: slot - LBL - GAP };
+  }
+  /** Where a flow's band sits in its pipe: top and height in % of the fabric. */
+  function bands(s, p) {
+    var out = {};
+    s.members.forEach(function (m) {
+      var g = lane(p, m.id), cum = 0;
+      s.perMember[m.id].forEach(function (fid) {
+        var hgt = g.pipeH * s.rate[fid] / L.CAPACITY;
+        out[fid] = { top: g.pipeTop + g.pipeH * cum / L.CAPACITY, h: hgt };
+        cum += s.rate[fid];
+      });
+    });
+    return out;
+  }
+
+  // ── "changed": against the state before the last input (SPEC.md rule 5) ──
+  var lastParams = null, lastState = null, delta = { moved: [], policy: false };
+  /** Rule 5's caption is for a change of policy alone: true when the policy is the only param that changed. */
+  function policyOnly(a, b) {
+    return !!a && a.policy !== b.policy && Object.keys(L.defaults).every(function (k) { return k === 'policy' || a[k] === b[k]; });
+  }
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    delta = { moved: L.changed(lastState, c.state), policy: policyOnly(lastParams, c.params) };
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+
+  // ── stage ──
+
+  function formula(s, p) {
+    var pick = s.up.length ? t('pick', { m: s.up.length, list: list(s.up) }) : t('pickNone');
+    return h('p', { class: 'la-formula' },
+      data(p.policy, 'la-pol'), h('span', { class: 'la-simpl' }, t('simplified')),
+      h('span', { class: 'la-f' }, t('formula_' + p.policy)), h('span', { class: 'la-note' }, '(' + t('lastByte') + ')'),
+      h('span', { class: 'la-f' }, pick));
+  }
+
+  function table(s, p) {
+    var used = L.INPUTS[p.policy];
+    var off = function (k) { return used.indexOf(k) < 0 ? ' la-off' : ''; };
+    var m = s.up.length;
+    var rows = [h('div', { class: 'la-row la-head', style: { top: rowY(0) + '%' } },
+      h('span', null, t('thFlow')), h('span', { class: 'la-x' + off('mac') }, t('thMac')), h('span', { class: 'la-x' + off('ip') }, t('thIp')),
+      h('span', { class: 'la-x' + off('port') }, t('thPort')), h('span', { class: 'la-x' }, t('thHash', { m: m })), h('span', null, t('thLink')))];
+    s.flows.forEach(function (f, i) {
+      var link = s.assignment[f.id];
+      rows.push(h('div', { class: 'la-row' + (delta.moved.indexOf(f.id) >= 0 ? ' sd-changed' : ''), style: { top: rowY(i + 1) + '%' } },
+        h('span', { class: 'la-fl' },
+          h('span', { class: 'la-fchip sd-fill', dataset: { c: colourOf(f.id) }, translate: 'no' }, f.id),
+          data(f.client, 'la-cl')),
+        data('…' + f.srcMac.slice(-2), 'la-x' + off('mac')),
+        data('.' + L.lastOctet(f.srcIp), 'la-x' + off('ip')),
+        data(f.srcPort, 'la-x' + off('port')),
+        data(m ? s.hash[f.id] + ' mod ' + m + ' = ' + s.index[f.id] : s.hash[f.id] + ' —', 'la-x'),
+        link ? data(link, 'la-lk') : h('span', { class: 'la-lk', dataset: { down: '' }, 'aria-hidden': 'true' }, '✕')));
+    });
+    return h('div', { class: 'la-col la-tbl' }, rows);
+  }
+
+  function strands(s, p, b) {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'la-svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    function path(d, cls, colour) {
+      var e = document.createElementNS(SVG_NS, 'path');
+      e.setAttribute('d', d);
+      e.setAttribute('vector-effect', 'non-scaling-stroke');
+      if (cls) e.setAttribute('class', cls);
+      if (colour) e.setAttribute('data-c', colour);
+      svg.appendChild(e);
+    }
+    s.flows.forEach(function (f, i) {
+      var y1 = rowY(i + 1);
+      var y2 = b[f.id] ? b[f.id].top + b[f.id].h / 2 : y1;
+      var d = 'M0,' + y1 + ' C55,' + y1 + ' 45,' + y2 + ' 100,' + y2;
+      if (delta.moved.indexOf(f.id) >= 0) path(d, 'la-under');
+      path(d, b[f.id] ? null : 'la-lost', colourOf(f.id));
+    });
+    return h('div', { class: 'la-col' }, svg);
+  }
+
+  function lanes(s, p, b) {
+    var kids = [];
+    s.members.forEach(function (m) {
+      var g = lane(p, m.id), ids = s.perMember[m.id];
+      var lbl = [data(t('laneName', { k: m.id }), 'la-lk')];
+      if (!m.up) lbl.push(h('span', { class: 'la-state', dataset: { k: 'down' } }, t('laneFailed')));
+      else {
+        lbl.push(h('span', { class: 'la-load' }, t('gbit', { v: G(s.memberLoad[m.id]) + ' / 1' })));
+        if (ids.length > 5) lbl.push(h('span', { class: 'la-ids' }, t.n('nFlows', ids.length)));
+        else if (ids.length) lbl.push(data(ids.join(' '), 'la-ids'));
+        else lbl.push(h('span', { class: 'la-state' }, t('laneIdle')));
+      }
+      kids.push(h('div', { class: 'la-lbl', style: { top: g.top + '%', height: LBL + '%' } }, lbl));
+      var pipe = h('div', { class: 'la-pipe' + (m.up ? ' sd-hatch' : ''), style: { top: g.pipeTop + '%', height: g.pipeH + '%' },
+        dataset: m.up ? {} : { down: '' } });
+      kids.push(pipe);
+      ids.forEach(function (fid) {
+        var x = b[fid];
+        kids.push(h('div', {
+          class: 'la-band sd-fill' + (delta.moved.indexOf(fid) >= 0 ? ' sd-changed' : ''), dataset: { c: colourOf(fid) },
+          style: { top: x.top + '%', height: x.h + '%' }, translate: 'no'
+        }, x.h >= BAND_LABEL ? fid + ' · ' + G(s.rate[fid]) : ''));
+      });
+    });
+    return h('div', { class: 'la-col la-lanes' }, kids);
+  }
+
+  function boxes(s) {
+    var sw = h('div', { class: 'la-col la-sw' }, h('div', { class: 'la-box' },
+      h('b', { translate: 'no' }, 'SW'), h('span', { class: 'la-sub' }, t('sw')),
+      s.bondDown ? h('span', { class: 'la-down', 'aria-hidden': 'true' }, '✕') : null));
+    var srv = h('div', { class: 'la-col la-srv' }, h('div', { class: 'la-box' },
+      h('b', { translate: 'no' }, 'S'), h('span', { class: 'la-sub' }, t('server')),
+      h('span', { class: 'la-kv', translate: 'no' },
+        h('span', null, L.SERVER.mac), h('span', null, L.SERVER.ip), h('span', null, ':' + L.SERVER.port))));
+    return { sw: sw, srv: srv };
+  }
+
+  function totals(s) {
+    var item = function (key, v, cls) { return h('span', { class: cls || null }, t.parts(key, { v: h('b', null, t('gbit', { v: v })) })); };
+    return h('p', { class: 'la-sum' },
+      item('sumOffered', G(s.offered)), item('sumDelivered', G(s.delivered)), item('sumFastest', G(s.fastest)),
+      h('span', { class: 'la-cap' }, t('sumCapacity', { n: s.up.length })));
+  }
+
+  // ── caption ──
+
+  function failCaption(s) {
+    var fo = s.failover, nf = s.flows.length;
+    var moved = fo.moved.length ? t.n('moved', fo.moved.length) : t('movedNone');
+    var hl = fo.fromHealthy.length;
+    if (hl) moved += ' (' + (hl === fo.moved.length ? t.n('movedHealthyAll', hl) : t.n('movedHealthy', hl)) + ')';
+    var rate = t('gbit', { v: G(s.rate.F1) });
+    var out = s.up.length === 1
+      ? t.parts('capFailOne', { k: fo.failed[0], all: t.n('allFlows', nf, { to: s.up[0] }), share: nf > 1 ? nf + ' × ' + rate : rate, moved: moved })
+      : t.parts('capFail', { n: nf, k: fo.failed[0], onto: t.n('ontoLinks', s.up.length, { list: list(s.up) }), m: s.up.length, moved: moved });
+    return out.concat(' ', t('capTotals', { d: G(s.delivered), o: G(s.offered) }));
+  }
+
+  function situation(s, p) {
+    var idle = L.idleMembers(s), over = L.overloaded(s), nf = s.flows.length, nu = s.up.length;
+    var idleTxt = t.n('idleLinks', idle.length, { list: list(idle) });
+    var busiest = s.up.slice().sort(function (a, b) { return s.perMember[b].length - s.perMember[a].length || a - b; })[0];
+    if (nf === 1) return t.parts('sitOne', { k: s.assignment.F1, r: G(s.rate.F1), idle: idleTxt, n: nu });
+    if (s.samePair && idle.length) {
+      return t.parts('sitSame', { k: busiest, flows: t.n('nFlows', nf), r: G(s.rate.F1), idle: idleTxt,
+        policy: data(p.policy), inputs: t('inputs_' + p.policy) });
+    }
+    if (nf < nu) return t.parts('sitFewer', { flows: t.n('nFlows', nf), links: t.n('onLinks', nu), idle: idleTxt });
+    if (idle.length) {
+      var first = idleTxt.charAt(0).toUpperCase() + idleTxt.slice(1);
+      return t.parts('sitIdle', { idle: first, k: busiest, flows: t.n('nFlows', s.perMember[busiest].length) });
+    }
+    var spare = s.up.filter(function (id) { return s.memberLoad[id] < L.CAPACITY - 0.5; })
+      .sort(function (a, b) { return s.memberLoad[a] - s.memberLoad[b] || a - b; });
+    if (over.length && spare.length) {
+      var k = over[0];
+      return t.parts('sitUneven', { k: k, flows: t.n('nFlows', s.perMember[k].length), r: G(s.rate[s.perMember[k][0]]),
+        j: spare[0], spare: G(L.CAPACITY - s.memberLoad[spare[0]]) });
+    }
+    return t.parts('sitEven', { d: G(s.delivered), o: G(s.offered), f: G(s.fastest) });
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'members', type: 'range', label: t('members'), min: L.RANGES.members[0], max: L.RANGES.members[1], step: 1 },
+      { key: 'policy', type: 'choice', label: t('policy'), hint: t('policyHint'), options: L.POLICIES.map(function (x) { return [x, t('pol_' + x)]; }) },
+      { key: 'flows', type: 'range', label: t('flows'), min: L.RANGES.flows[0], max: L.RANGES.flows[1], step: 1 },
+      { key: 'fail', type: 'choice', label: t('fail'), options: L.FAILS.map(function (x) { return [x, t('fail_' + x)]; }) },
+      { key: 'sameClient', type: 'toggle', label: t('sameClient'), hint: t('sameClientHint') },
+      { key: 'demand', type: 'range', label: t('demand'), min: L.RANGES.demand[0], max: L.RANGES.demand[1],
+        step: L.RANGES.demand[2], format: function (v) { return t('gbit', { v: G(v) }); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'la-lane', label: t('legLane') },
+      { c: 1, label: t('legFlow') },
+      { shape: 'la-idle', label: t('legIdle') },
+      { shape: 'la-down', label: t('legFailed') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      track(c);
+      var s = c.state, p = c.params, b = bands(s, p), bx = boxes(s);
+      c.stage.replaceChildren(h('div', { class: 'la' },
+        formula(s, p),
+        h('div', { class: 'la-fab' }, table(s, p), strands(s, p, b), bx.sw, lanes(s, p, b), bx.srv),
+        totals(s)));
+    },
+    caption: function (c) {
+      track(c);
+      var s = c.state, p = c.params;
+      if (s.bondDown) return t('capDown', { flows: t.n('nFlows', s.flows.length) });
+      if (s.failover) return failCaption(s);
+      var out = [];
+      if (delta.moved.length) out.push(t.n('capMoved', delta.moved.length), ' ');
+      else if (delta.policy) out = out.concat(t.parts('capSame', { policy: data(p.policy) }), ' ');
+      return out.concat(situation(s, p));
+    }
+  });
+})();
+</script>
+</body>
+</html>
