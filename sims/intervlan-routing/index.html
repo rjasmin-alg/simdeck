@@ -1,0 +1,467 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- intervlan-routing: one frame from P1 (VLAN 10) to Q1 (VLAN 20) in the Grafo d.o.o. head office, routed either by
+     R1 on a stick (up the trunk tagged VID 10, back down tagged VID 20) or inside SW1 by its VLAN interfaces (no tag
+     on any wire). A stepper: the frame crosses one link or one device decides. The field strip shows the frame and
+     what this step changed; kit view K2 draws the office; beside it SW1's MAC table, R1's subinterfaces (or SW1's
+     SVIs) and the crossings per link. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="intervlan-routing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usmjeravanje između VLAN-ova · simdeck</title>
+<meta name="description" content="Okvir iz VLAN-a 10 u VLAN 20: kroz usmjernik na štapu (trunk gore s VID 10, dolje s VID 20, TTL 64 → 63) ili kroz sučelja VLAN-ova L3 preklopnika, bez oznake na žici.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "intervlan-routing",
+  "title": {
+    "hr": "Usmjeravanje između VLAN-ova",
+    "en": "Inter-VLAN routing"
+  },
+  "concept": {
+    "hr": "Usmjernik na štapu ili sučelja VLAN-ova L3 preklopnika",
+    "en": "Router on a stick vs L3 switch VLAN interfaces (SVIs)"
+  },
+  "summary": {
+    "hr": "Okvir iz VLAN-a 10 u VLAN 20: R1 ga prima s oznakom VID 10 i vraća istim trunkom s VID 20, ili ga L3 preklopnik usmjeri u sebi, bez oznake.",
+    "en": "A frame from VLAN 10 to VLAN 20: R1 takes it tagged VID 10 and sends it back down the same trunk as VID 20, or an L3 switch routes it inside, untagged."
+  },
+  "tags": [
+    "routing",
+    "vlan"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="intervlan-routing"]; colours only from kit tokens.
+   Layout: the field strip on top; under it the K2 drawing (R1 above SW1, the hosts below) beside a column with P1's
+   decision, SW1's MAC table, R1's subinterfaces (or SW1's SVIs) and the crossings per link. */
+[data-sim="intervlan-routing"] .sd-ctl[hidden] { display: none; }  /* kit .sd-ctl display beats [hidden] (NOTES.md) */
+[data-sim="intervlan-routing"] .ir {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.6cqh;
+  height: 100%;
+  padding: 1.6cqh 1.4cqw;
+  font-size: 1rem;
+}
+[data-sim="intervlan-routing"] .ir-main { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 1.4cqw; min-height: 0; }
+[data-sim="intervlan-routing"] .ir-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.7rem 0.45rem;
+  min-width: 0;
+}
+[data-sim="intervlan-routing"] .ir-box h2 { margin: 0 0 0.25rem; font-size: 1em; font-weight: 700; }
+[data-sim="intervlan-routing"] .ir-box h2[data-dead] { color: var(--danger); }
+
+/* field strip: one cell per field, label above the value */
+[data-sim="intervlan-routing"] .ir-frame { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.3rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="intervlan-routing"] .ir-frame[data-dead] { border-style: dashed; border-color: var(--danger); }
+[data-sim="intervlan-routing"] .ir-f { display: grid; grid-template-rows: auto auto; padding: 0.05rem 0.45rem 0.1rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); min-width: 0; }
+[data-sim="intervlan-routing"] .ir-fl { display: flex; gap: 0.5rem; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="intervlan-routing"] .ir-fv { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="intervlan-routing"] .ir-fv small { margin-left: 0.3rem; font-family: var(--sans); font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="intervlan-routing"] .ir-old { font-family: var(--mono); }
+[data-sim="intervlan-routing"] .ir-f.sd-changed { outline: none; box-shadow: none; background: var(--hl); color: var(--on-hl); border-color: var(--ink); border-width: 3px; }
+[data-sim="intervlan-routing"] .ir-f.sd-changed .ir-fl,
+[data-sim="intervlan-routing"] .ir-f.sd-changed .ir-fv small { color: var(--on-hl); }
+[data-sim="intervlan-routing"] .ir-none { margin: 0.2rem 0 0; color: var(--muted); }
+
+/* the tag: a flag in the VLAN's colour (VLAN 20 hatched), or a hollow dashed box when there is none */
+[data-sim="intervlan-routing"] .ir-tag { display: inline-block; padding: 0 0.45rem; border: var(--line-w) solid var(--sw, var(--ink)); border-radius: 0.2rem 0.9rem 0.9rem 0.2rem; }
+[data-sim="intervlan-routing"] .ir-tag[data-none] { border-style: dashed; border-color: var(--muted); border-radius: var(--radius-sm); color: var(--muted); font-weight: 400; }
+[data-sim="intervlan-routing"] .sd-fill[data-c='2'],
+[data-sim="intervlan-routing"] .ir-row[data-c='2'] > :first-child {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 40%, transparent) 0.3em 0.45em);
+}
+
+/* the column beside the drawing */
+[data-sim="intervlan-routing"] .ir-side { display: flex; flex-direction: column; gap: 0.9cqh; min-height: 0; }
+[data-sim="intervlan-routing"] .ir-box[data-past] { opacity: 0.8; }
+[data-sim="intervlan-routing"] .ir-host p { margin: 0; font-size: var(--fs-sm); }
+[data-sim="intervlan-routing"] .ir-host p b { font-family: var(--mono); }
+[data-sim="intervlan-routing"] .ir-tab { width: 100%; border-collapse: separate; border-spacing: 0 0.12rem; font-size: var(--fs-sm); }
+[data-sim="intervlan-routing"] .ir-tab th { text-align: left; font-weight: 700; color: var(--muted); padding: 0 0.4rem; white-space: nowrap; }
+[data-sim="intervlan-routing"] .ir-tab td { padding: 0.02rem 0.4rem; border-top: var(--line-w) solid transparent; border-bottom: var(--line-w) solid transparent; font-family: var(--mono); white-space: nowrap; }
+[data-sim="intervlan-routing"] .ir-row > :first-child { border-left: 0.45rem solid var(--sw, var(--line)); font-weight: 700; }
+[data-sim="intervlan-routing"] .ir-row[data-c='1'] > :first-child { background-color: color-mix(in srgb, var(--c1) 16%, var(--bg)); }
+[data-sim="intervlan-routing"] .ir-row[data-c='2'] > :first-child { background-color: color-mix(in srgb, var(--c2) 16%, var(--bg)); }
+[data-sim="intervlan-routing"] .ir-row[data-other] td { color: var(--muted); }
+[data-sim="intervlan-routing"] .ir-row[data-hit] td { border-color: var(--ink); border-top-width: 3px; border-bottom-width: 3px; background: var(--hl); color: var(--on-hl); font-weight: 700; }
+[data-sim="intervlan-routing"] .ir-row[data-hit] td:last-child { border-right: 3px solid var(--ink); }
+[data-sim="intervlan-routing"] .ir-row[data-hit] > td:first-child { background-color: var(--hl); background-image: none; }
+[data-sim="intervlan-routing"] .ir-row td small { margin-left: 0.3rem; font-family: var(--sans); font-size: var(--fs-sm); color: inherit; }
+[data-sim="intervlan-routing"] .ir-row td[data-bad] { text-decoration: underline wavy var(--danger); text-decoration-thickness: 2px; }
+[data-sim="intervlan-routing"] .ir-note { margin: 0.2rem 0 0; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="intervlan-routing"] .ir-note[data-dead] { padding: 0 0.4rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); }
+[data-sim="intervlan-routing"] .ir-count ul { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="intervlan-routing"] .ir-count li { padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="intervlan-routing"] .ir-count li b { margin-left: 0.4rem; font-family: var(--mono); }
+[data-sim="intervlan-routing"] .ir-count li[data-zero] { color: var(--muted); }
+[data-sim="intervlan-routing"] .ir-count li.sd-changed { outline: none; box-shadow: none; background: var(--hl); color: var(--on-hl); border-color: var(--ink); border-width: 3px; }
+
+/* topology tweaks: hosts of VLAN 20 carry the hatched mark (the .sd-fill rule above); end labels in the small size */
+[data-sim="intervlan-routing"] .sd-topo-card .sd-topo-addr,
+[data-sim="intervlan-routing"] .sd-topo-card .sd-topo-sub { grid-column: 1 / -1; white-space: nowrap; }
+
+/* legend swatches: VLAN 20 hatched, the tag flag, the drop cross */
+[data-sim="intervlan-routing"] .sd-swatch[data-shape='v20'] { background-color: var(--c2); border-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 40%, transparent) 0.3em 0.45em); }
+[data-sim="intervlan-routing"] .sd-swatch[data-shape='tag'] { background: var(--bg); border-color: var(--ink); border-radius: 0.15rem 0.7rem 0.7rem 0.15rem; border-width: 3px; }
+[data-sim="intervlan-routing"] .sd-swatch[data-shape='x'] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); }
+[data-sim="intervlan-routing"] .sd-swatch[data-shape='x']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+
+/* Phone and portrait: the stage grows with its content; the drawing becomes the kit's list, the column goes under it. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="intervlan-routing"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="intervlan-routing"] .ir { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="intervlan-routing"] .ir-main { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  [data-sim="intervlan-routing"] .ir-tab-wrap { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Usmjeravanje između VLAN-ova</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var VLAN_C = { 10: '1', 20: '2' };
+  var NODE_C = { P1: '1', P2: '1', Q1: '2', R1: '4', SW1: '8' };
+  var OWNER = {};
+  Object.keys(L.MAC).forEach(function (k) { OWNER[L.MAC[k]] = k; });
+
+  /** Data (addresses, MACs, port names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text)); }
+  /** A MAC as the page shows it: the last octet. */
+  function short(mac) { return '…:' + mac.slice(-2); }
+  function vlanC(v) { return VLAN_C[v] || '8'; }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  function hostOf(scene, id) { return scene.hosts.filter(function (x) { return x.id === id; })[0]; }
+  /** The two ends of a link as the page names them: "P1", "SW1 Fa0/1". */
+  function endsOf(scene, id) {
+    var l = scene.links[id];
+    return { a: l.a + (l.aPort ? ' ' + l.aPort : ''), b: l.b + (l.bPort ? ' ' + l.bPort : '') };
+  }
+  /** The VLAN a frame on a link belongs to (for its colour): the tag's, else the access port's. */
+  function vlanOnLink(scene, link, frame) {
+    if (frame.vid !== null) return frame.vid;
+    if (link === 'trunk') return 10;
+    return scene.hosts.filter(function (x) { return x.link === link; })[0].vlan;
+  }
+
+  // ── field strip ──
+
+  function field(label, value, o) {
+    o = o || {};
+    var mark = o.old != null ? h('s', { class: 'ir-old', translate: 'no' }, o.old) : null;
+    return h('div', { class: 'ir-f' + (o.changed ? ' sd-changed' : '') },
+      h('span', { class: 'ir-fl' }, h('span', null, label), mark),
+      h('span', { class: 'ir-fv' }, value, o.sub ? h('small', null, o.sub) : null));
+  }
+  function tagEl(vid) {
+    if (vid === null) return h('span', { class: 'ir-tag', dataset: { none: '1' } }, t('tagNone'));
+    return h('span', { class: 'ir-tag sd-fill', dataset: { c: vlanC(vid) } }, t('tagVid', { v: vid }));
+  }
+
+  function renderStrip(c, scene) {
+    var s = c.state, f = s.frame;
+    var box = h('section', { class: 'ir-box ir-strip' });
+    var title;
+    if (!f) title = t.parts('stripNone', { dst: data(hostOf(scene, scene.target).ip) });
+    else if (s.outcome === 'dropped') title = t.parts('stripDropped', { d: data(s.at, '') });
+    else if (s.phase === 'wire') { var e = endsOf(scene, s.at); title = t.parts('stripOnLink', { a: data(e.a, ''), b: data(e.b, '') }); }
+    else if (s.vlan) title = t.parts('stripInVlan', { d: data(s.at, ''), v: data(s.vlan, '') });
+    else title = t.parts('stripInDev', { d: data(s.at, '') });
+    box.append(h('h2', { dataset: s.outcome === 'dropped' ? { dead: '1' } : {} }, title));
+    if (!f) { box.append(h('p', { class: 'ir-none' }, t('hostIdle'))); return box; }
+    var old = c.prev && c.prev.frame;
+    var ch = s.changed;
+    var cmp = function (k, fmt) {
+      if (ch.indexOf(k) < 0 || !old) return {};
+      return { changed: true, old: fmt ? fmt(old[k]) : String(old[k]) };
+    };
+    var tagOld = ch.indexOf('vid') >= 0 && old ? { changed: true } : {};
+    box.append(h('div', { class: 'ir-frame', dataset: s.outcome === 'dropped' ? { dead: '1' } : {} },
+      field(t('fDstMac'), data(short(f.dstMac), ''), Object.assign({ sub: data(OWNER[f.dstMac], '') }, cmp('dstMac', short))),
+      field(t('fSrcMac'), data(short(f.srcMac), ''), Object.assign({ sub: data(OWNER[f.srcMac], '') }, cmp('srcMac', short))),
+      field(t('fTag'), tagEl(f.vid), tagOld),
+      field(t('fSrcIp'), data(f.srcIp, ''), cmp('srcIp')),
+      field(t('fDstIp'), data(f.dstIp, ''), cmp('dstIp')),
+      field(t('fTtl'), data(f.ttl, ''), cmp('ttl')),
+      field(t('fSize'), t('bytes', { n: f.size }), cmp('size'))));
+    return box;
+  }
+
+  // ── the column beside the drawing ──
+
+  function renderHost(c) {
+    var s = c.state, d = s.decision;
+    var box = h('section', { class: 'ir-box ir-host', dataset: d && c.n > 1 ? { past: '1' } : {} }, h('h2', null, t('hostTitle')));
+    if (!d) { box.append(h('p', null, t('hostIdle'))); return box; }
+    var gw = '192.168.1.1';
+    box.append(
+      h('p', null, t.parts('hostAnd', { dst: b(s.frame ? s.frame.dstIp : ''), mask: data(d.mask), theirs: b(d.theirs) })),
+      h('p', null, d.local ? t.parts('hostLocal', { own: b(d.own) }) : t.parts('hostRemote', { own: b(d.own), gw: b(gw) })));
+    return box;
+  }
+
+  function row(cells, o) {
+    var ds = {};
+    if (o.c) ds.c = o.c;
+    if (o.hit) ds.hit = '1';
+    if (o.other) ds.other = '1';
+    return h('tr', { class: 'ir-row', dataset: ds }, cells.map(function (x) { return h('td', x && x.bad ? { dataset: { bad: '1' } } : null, x && x.node ? x.node : x); }));
+  }
+
+  function renderMac(c, scene) {
+    var s = c.state, lk = s.lookup;
+    var vlanNow = lk && lk.table === 'mac' ? lk.vlan : s.macHit ? s.macHit.vlan : null;
+    var hitRow = lk && lk.table === 'mac' ? lk.row : s.macHit ? s.macHit.row : null;
+    var rows = scene.sw.macTable.map(function (r, i) {
+      return row([data(r.vlan, ''), [data(short(r.mac), ''), h('small', null, data(OWNER[r.mac], ''))],
+        r.self ? t.parts('selfPort', { p: data(r.port, '') }) : data(r.port, '')],
+        { c: vlanC(r.vlan), hit: i === hitRow, other: vlanNow !== null && r.vlan !== vlanNow });
+    });
+    var box = h('section', { class: 'ir-box ir-mac' }, h('h2', null, t('macTitle')),
+      h('div', { class: 'ir-tab-wrap' }, h('table', { class: 'ir-tab' },
+        h('thead', null, h('tr', null, h('th', null, t('colVlan')), h('th', null, t('colMac')), h('th', null, t('colPort')))),
+        h('tbody', null, rows))));
+    if (s.dropReason === 'unknown-vlan') box.append(h('p', { class: 'ir-note', dataset: { dead: '1' } }, parts('noVlan', { v: data(s.frame.vid, '') })));
+    return box;
+  }
+
+  function renderRouter(c, scene) {
+    var s = c.state, lk = s.lookup;
+    var roas = scene.mode === 'roas';
+    var ifs = roas ? scene.router.subifs : scene.sw.svis;
+    var rows = ifs.map(function (f, i) {
+      var name = roas ? f.name : 'vlan ' + f.vlan;
+      var vid = roas ? f.vid : f.vlan;
+      var hit = lk && ((lk.table === 'subif' && lk.row === i) || (lk.table === 'route' && lk.iface === i));
+      var cells = [data(name, ''), { node: data(vid, ''), bad: roas && f.vid !== Number(f.name.split('.')[1]) }, data(f.ip + '/' + f.prefix, '')];
+      return row(roas ? cells : [cells[0], cells[2]], { c: vlanC(roas ? Number(f.name.split('.')[1]) : f.vlan), hit: !!hit });
+    });
+    var head = roas ? [t('colSubif'), t('colVid'), t('colAddr')] : [t('colSvi'), t('colAddr')];
+    var box = h('section', { class: 'ir-box ir-router' }, h('h2', null, t(roas ? 'subifTitle' : 'sviTitle')),
+      h('div', { class: 'ir-tab-wrap' }, h('table', { class: 'ir-tab' },
+        h('thead', null, h('tr', null, head.map(function (x) { return h('th', null, x); }))),
+        h('tbody', null, rows))));
+    if (lk && lk.table === 'route') box.append(h('p', { class: 'ir-note' }, t.parts('routeHit', { dst: data(s.frame.dstIp, ''), net: data(lk.net, '') })));
+    if (s.dropReason === 'untagged') box.append(h('p', { class: 'ir-note', dataset: { dead: '1' } }, t('noMatch')));
+    return box;
+  }
+
+  function renderCount(c, scene) {
+    var s = c.state;
+    var order = ['p1', 'trunk', 'q1', 'p2'].filter(function (k) { return k in s.linkUses; });
+    return h('section', { class: 'ir-box ir-count' }, h('h2', null, t('countTitle')),
+      h('ul', null, order.map(function (k) {
+        var e = endsOf(scene, k), n = s.linkUses[k];
+        var ds = n ? {} : { zero: '1' };
+        return h('li', { class: s.linkChanged === k ? 'sd-changed' : null, dataset: ds },
+          data(e.a + ' – ' + e.b, ''), h('b', { translate: 'no' }, '×' + n));
+      })));
+  }
+
+  // ── topology (kit view K2) ──
+
+  var BADGE = { bSends: 'fill', bTakes: 'solid', bVlan: 'solid', bRoutes: 'fill', bDrops: 'solid', bGot: 'solid' };
+  function badgesFor(id, s, scene) {
+    var out = [];
+    if (s.phase === 'wire' && s.hops.length === 1 && id === 'P1') out.push(['bSends']);
+    if (s.at === id && s.outcome === 'dropped') out.push(['bDrops']);
+    else if (s.at === id && s.outcome === 'delivered') out.push(['bGot']);
+    else if (s.at === id && s.phase === 'switched' && s.lookup.table === 'mac') out.push(['bVlan', { v: s.vlan }]);
+    else if (s.at === id && s.phase === 'to-svi') out.push(['bVlan', { v: s.vlan }]);
+    else if (s.at === id && s.phase === 'switched') out.push(['bRoutes']);
+    else if (s.at === id && s.phase === 'received') out.push(['bTakes']);
+    if (s.phase === 'wire' && s.at === 'trunk' && id === 'R1' && s.toward.node === 'SW1') out.push(['bRoutes']);
+    return out;
+  }
+
+  function renderTopo(c, scene) {
+    var s = c.state, roas = scene.mode === 'roas';
+    var off = roas ? 2 : 0;
+    var nodes = [];
+    if (roas) nodes.push({ id: 'R1', kind: 'router', col: 1, row: 0, c: NODE_C.R1,
+      lines: [{ text: t('roleRouter'), kind: 'role' }, { text: 'Gi0/0 · MAC ' + short(L.MAC.R1), kind: 'sub' }] });
+    var gi = roas ? L.parseLink(scene.sw.ports['Gi0/1']) : null;
+    nodes.push({ id: 'SW1', kind: 'switch', col: 1, row: off, c: NODE_C.SW1,
+      lines: [{ text: t(roas ? 'roleSwitch' : 'roleL3'), kind: 'role' },
+        roas ? { text: t.parts(gi.mode === 'trunk' ? 'portToR1Trunk' : 'portToR1Access', { p: data('Gi0/1', ''), v: data(gi.vlan, '') }), kind: 'role' }
+          : { text: 'MAC ' + short(L.MAC.SW1), kind: 'sub' }] });
+    ['P1', 'P2', 'Q1'].forEach(function (id, i) {
+      var x = hostOf(scene, id);
+      nodes.push({ id: id, kind: 'host', col: i === 2 ? 2 : i, row: off + 2, c: NODE_C[id], name: t(x.vlan === 10 ? 'nameP' : 'nameQ'),
+        lines: [{ text: x.ip + '/' + x.prefix, kind: 'addr' }, { text: 'VLAN ' + x.vlan + ' · MAC ' + short(x.mac), kind: 'sub' }] });
+    });
+    nodes.forEach(function (n) {
+      var bs = badgesFor(n.id, s, scene);
+      n.badges = bs.map(function (x) { return { text: t(x[0], x[1]), k: BADGE[x[0]] }; });
+      n.state = bs.length ? 'active' : null;
+    });
+    var links = scene.hosts.map(function (x) {
+      return { id: x.link, a: x.id, b: 'SW1', active: s.phase === 'wire' && s.at === x.link, ends: { b: data(x.port, '') } };
+    });
+    if (roas) links.push({ id: 'trunk', a: 'SW1', b: 'R1', active: s.phase === 'wire' && s.at === 'trunk' });
+    var packets = [];
+    if (s.phase === 'wire') {
+      var l = scene.links[s.at], from = l.a === s.toward.node ? l.b : l.a;
+      // the short vertical link to P2: the chip keeps clear of the port label at SW1
+      packets.push({ from: from, to: s.toward.node, at: s.at === 'p2' && from === 'SW1' ? 0.75 : 0.5, c: vlanC(vlanOnLink(scene, s.at, s.frame)),
+        label: s.frame.vid === null ? t('chipUntagged') : t('chipTag', { v: s.frame.vid }) });
+    } else if (s.outcome === 'dropped' && c.prev && c.prev.phase === 'wire') {
+      var pl = scene.links[c.prev.at], pf = pl.a === s.at ? pl.b : pl.a;
+      packets.push({ from: pf, to: s.at, drop: true, move: false, at: 0.5, c: vlanC(vlanOnLink(scene, c.prev.at, s.frame)),
+        label: s.frame.vid === null ? t('chipUntagged') : t('chipTag', { v: s.frame.vid }) });
+    }
+    return Simdeck.topology({ cols: 3, rows: roas ? ['auto', '4.5rem', 'auto', '5rem', 'auto'] : ['auto', '5rem', 'auto'],
+      dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['roas', t('modeRoas')], ['l3', t('modeL3')]], resets: true },
+      { key: 'dst', type: 'choice', label: t('dst'), options: [['q1', t('dstQ1')], ['p2', t('dstP2')]], resets: true },
+      { key: 'fault', type: 'choice', label: t('fault'), hint: t('faultHint'), resets: true,
+        options: [['none', t('faultNone')], ['access-port', t('faultAccess')], ['vid-mismatch', t('faultVid')]],
+        visible: function (p) { return p.mode === 'roas'; } }
+    ],
+
+    presets: [
+      { id: 'roas', label: t('presetRoas'), params: { mode: 'roas', dst: 'q1', fault: 'none' } },
+      { id: 'l3-svi', label: t('presetL3'), params: { mode: 'l3', dst: 'q1', fault: 'none' } },
+      { id: 'same-vlan', label: t('presetSame'), params: { mode: 'roas', dst: 'p2', fault: 'none' } },
+      { id: 'access-port', label: t('presetAccess'), params: { mode: 'roas', dst: 'q1', fault: 'access-port' }, hint: t('presetAccessHint') },
+      { id: 'vid-mismatch', label: t('presetVid'), params: { mode: 'roas', dst: 'q1', fault: 'vid-mismatch' }, hint: t('presetVidHint') }
+    ],
+
+    legend: [
+      { c: 1, label: t('legV10') },
+      { shape: 'v20', label: t('legV20') },
+      { shape: 'hollow', label: t('legUntagged') },
+      { shape: 'tag', label: t('legTagged') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'ir' },
+        renderStrip(c, scene),
+        h('div', { class: 'ir-main' },
+          renderTopo(c, scene),
+          h('div', { class: 'ir-side' }, renderHost(c), renderMac(c, scene), renderRouter(c, scene), renderCount(c, scene)))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, scene = L.sceneOf(p), f = s.frame, n = c.n;
+      var D = function (v) { return data(v); };
+      var N = function (v) { return data(v, ''); };
+      var target = hostOf(scene, scene.target);
+      if (n === 0) return parts('capStart', { dst: D(target.ip) });
+      if (s.outcome === 'dropped') {
+        if (s.dropReason === 'untagged') return parts('capDropUntagged', { n: N(n) });
+        if (s.dropReason === 'unknown-vlan') return parts('capDropVid', { n: N(n), v: b(f.vid) });
+        return parts('capDrop', { n: N(n), d: N(s.at) });
+      }
+      if (s.outcome === 'delivered') {
+        var key = s.decision.local ? 'capDeliverLocal' : scene.mode === 'roas' ? 'capDeliverRoas' : 'capDeliverL3';
+        return parts(key, { n: N(n), host: N(s.at), ttl: b(f.ttl), k: b(s.linkUses.trunk || 0) });
+      }
+      if (n === 1) {
+        var d = s.decision;
+        return d.local
+          ? parts('capSendLocal', { dst: D(target.ip), own: D(d.own), mac: b(short(f.dstMac)) })
+          : parts('capSendRemote', { dst: D(target.ip), theirs: b(d.theirs), own: D(d.own), gw: D(d.nextHop), mac: b(short(f.dstMac)) });
+      }
+      if (s.at === 'SW1' && s.phase === 'to-svi') return parts('capSwInSelf', { n: N(n), port: N(s.inPort), v: N(s.vlan), mac: b(short(f.dstMac)) });
+      if (s.at === 'SW1' && s.phase === 'switched' && s.lookup && s.lookup.table === 'mac') {
+        var trunkIn = L.parseLink(scene.sw.ports[s.inPort]).mode === 'trunk';
+        return parts(trunkIn ? 'capSwInTrunk' : 'capSwInAccess', { n: N(n), port: N(s.inPort), v: N(s.vlan), mac: b(short(f.dstMac)), out: b(s.outPort) });
+      }
+      if (s.at === 'SW1' && s.phase === 'switched') {
+        return parts('capSviRoute', { n: N(n), dst: D(f.dstIp), net: b(s.lookup.net), v: N(s.vlan), a: D(c.prev.frame.ttl), b: b(f.ttl),
+          mac: D(short(f.dstMac)), out: b(s.outPort) });
+      }
+      if (s.at === 'R1' && s.phase === 'received') return parts('capR1In', { n: N(n), v: b(f.vid), subif: b(scene.router.subifs[s.inSubif].name) });
+      if (s.phase === 'wire' && s.at === 'trunk' && s.toward.node === 'SW1') {
+        return parts('capR1Route', { n: N(n), subif: b(scene.router.subifs[s.outSubif].name), a: D(c.prev.frame.ttl), b: b(f.ttl), v: b(f.vid) });
+      }
+      if (s.phase === 'wire') {
+        var prev = c.prev, port = prev.outPort, to = s.toward.node;
+        if (f.vid !== null) return parts('capSwOutTag', { n: N(n), port: b(port), v: b(f.vid) });
+        if (prev.frame.vid !== null) return parts('capSwOutUntag', { n: N(n), port: b(port), v: N(prev.frame.vid), to: N(to) });
+        return parts('capSwOutPlain', { n: N(n), port: b(port), v: N(prev.vlan), to: N(to) });
+      }
+      return '';
+    }
+  });
+})();
+</script>
+</body>
+</html>
