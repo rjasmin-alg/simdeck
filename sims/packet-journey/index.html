@@ -1,0 +1,562 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- packet-journey: one click on example.com from a classroom laptop, the URM ch16 path (computer, access point,
+     switch, router with NAT, the Internet, the server), phase by phase: DHCP, DNS, local or remote, ARP, TCP, TLS,
+     HTTP, closing. A stepper: one message or one decision per step. Kit view K2 draws the path; under it the chain
+     strip (each phase pending, done, absent; each a link to its own sim), the packet's headers, the computer's DNS
+     cache, ARP table and connections, the router's NAT table, and the capture on the computer.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="packet-journey">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cijeli put: od adrese do stranice · simdeck</title>
+<meta name="description" content="Jedan klik na example.com, korak po korak: DHCP, DNS, ARP, TCP, TLS i HTTP redom, kroz access point, preklopnik i usmjernik s NAT-om; što snimka na računalu pokazuje, a što zapamćen odgovor izostavi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "packet-journey",
+  "title": {
+    "hr": "Cijeli put: od adrese do stranice",
+    "en": "The whole journey: from URL to page"
+  },
+  "concept": {
+    "hr": "DNS, ARP, TCP, TLS i HTTP redom, kroz stvarni put",
+    "en": "DNS, ARP, TCP, TLS, HTTP in order, across the real path"
+  },
+  "summary": {
+    "hr": "Jedan klik na example.com, korak po korak: koji paketi idu žicom, što mijenjaju usmjernik i NAT i zašto zapamćen odgovor neki korak izostavi iz snimke.",
+    "en": "One click on example.com, step by step: which packets go on the wire, what the router and NAT change, and why a remembered answer drops a step from the capture."
+  },
+  "tags": [
+    "encapsulation"
+  ],
+  "class": "stepper",
+  "steps": 13
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="packet-journey"]; colours only from kit tokens.
+   Layout: the K2 drawing on top (a zigzag, so packet chips sit in the lane between the two rows of cards), the chain
+   strip under it, then the packet's headers and the tables beside the capture list. */
+[data-sim="packet-journey"] .pj {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1cqh;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="packet-journey"] .pj-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.3rem 0.6rem 0.4rem;
+  min-width: 0;
+}
+[data-sim="packet-journey"] .pj-box h2 { margin: 0 0 0.2rem; font-size: 1em; font-weight: 700; }
+[data-sim="packet-journey"] .pj-low { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 1cqw; min-height: 0; }
+[data-sim="packet-journey"] .pj-left { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+
+/* topology: the cloud keeps its own width; the computer's address in the small size */
+[data-sim="packet-journey"] .sd-topo-card { padding: 0.2rem 0.45rem; }
+[data-sim="packet-journey"] .sd-topo-card .sd-topo-sub { grid-column: 1 / -1; white-space: nowrap; }
+[data-sim="packet-journey"] .sd-topo-mark { min-width: 2.1rem; height: 2.1rem; font-size: 1.1rem; }
+[data-sim="packet-journey"] .sd-topo-card[data-kind='switch'] .sd-topo-mark { min-width: 2.8rem; height: 1.8rem; }
+[data-sim="packet-journey"] .sd-topo-card[data-kind='server'] .sd-topo-mark { min-width: 1.8rem; height: 2.3rem; }
+[data-sim="packet-journey"] .sd-topo-card[data-kind='ap'] .sd-topo-mark { min-width: 1.7rem; height: 1.7rem; }
+[data-sim="packet-journey"] .sd-topo-badges { min-height: 1.7rem; margin-top: 0.1rem; }
+
+/* chain strip: one link per phase, state as border style and a word */
+[data-sim="packet-journey"] .pj-chain { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="packet-journey"] .pj-chain a {
+  display: flex; flex-direction: column; justify-content: center;
+  height: 100%; box-sizing: border-box;
+  padding: 0.1rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+  line-height: 1.25;
+}
+[data-sim="packet-journey"] .pj-chain a:hover, [data-sim="packet-journey"] .pj-chain a:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+[data-sim="packet-journey"] .pj-chain b { font-size: 1rem; white-space: nowrap; }
+[data-sim="packet-journey"] .pj-chain small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="packet-journey"] .pj-chain a[data-st='pending'] b { color: var(--muted); font-weight: 400; }
+[data-sim="packet-journey"] .pj-chain a[data-st='done'] { border-color: var(--ink); background: color-mix(in srgb, var(--ok) 14%, var(--bg)); }
+[data-sim="packet-journey"] .pj-chain a[data-st='done'] small::before { content: '✓ '; color: var(--ok); font-weight: 700; }
+[data-sim="packet-journey"] .pj-chain a[data-st='absent'] { border-style: dashed; border-color: var(--ink); }
+[data-sim="packet-journey"] .pj-chain a[data-st='absent'] small { color: var(--ink); font-weight: 700; }
+[data-sim="packet-journey"] .pj-chain a[data-st='unused'] { border-style: dotted; }
+[data-sim="packet-journey"] .pj-chain a[data-st='unused'] b { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+[data-sim="packet-journey"] .pj-chain a[data-now] { border-width: 0.22rem; border-color: var(--ink); }
+[data-sim="packet-journey"] .pj-chain a.sd-changed { outline: none; box-shadow: none; background: var(--hl); color: var(--on-hl); }
+[data-sim="packet-journey"] .pj-chain a.sd-changed small, [data-sim="packet-journey"] .pj-chain a.sd-changed b { color: var(--on-hl); }
+
+/* headers: each layer one line, the title before its fields */
+[data-sim="packet-journey"] .pj-pkt .sd-topo-hdr { padding: 0.15rem 0.45rem 0.3rem; }
+[data-sim="packet-journey"] .pj-pkt .sd-topo-layer { margin-top: 0.2rem; padding: 0.1rem 0.45rem 0.15rem; }
+[data-sim="packet-journey"] .pj-pkt .sd-topo-hdr > b, [data-sim="packet-journey"] .pj-pkt .sd-topo-layer > b { display: inline; margin-right: 0.6rem; font-size: var(--fs-sm); }
+[data-sim="packet-journey"] .pj-pkt .sd-topo-kv { display: inline-flex; flex-wrap: wrap; gap: 0 0.9rem; font-size: var(--fs-sm); }
+[data-sim="packet-journey"] .pj-pkt .sd-topo-kv dt { display: none; }
+[data-sim="packet-journey"] .pj-pkt .pj-f { display: inline-flex; gap: 0.3rem; align-items: baseline; }
+[data-sim="packet-journey"] .pj-pkt .pj-f > span:first-child { color: var(--muted); font-family: var(--sans); font-weight: 400; }
+[data-sim="packet-journey"] .pj-pkt .pj-f s { color: var(--muted); font-weight: 400; }
+[data-sim="packet-journey"] .pj-pkt .pj-body { display: inline; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="packet-journey"] .pj-pkt .pj-note { margin: 0.2rem 0 0; font-size: var(--fs-sm); }
+[data-sim="packet-journey"] .pj-nat {
+  padding: 0 0.25rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 22%, transparent) 0.3em 0.45em);
+}
+[data-sim="packet-journey"] .pj-none { margin: 0.1rem 0 0; color: var(--muted); font-size: var(--fs-sm); }
+
+/* tables: the computer's three and the router's one, in a 2 × 2 grid */
+[data-sim="packet-journey"] .pj-tabs { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); grid-auto-flow: column; grid-template-rows: auto auto; gap: 0.2rem 0.8rem; }
+[data-sim="packet-journey"] .pj-tabs .sd-topo-tab li { font-size: var(--fs-sm); }
+[data-sim="packet-journey"] .pj-tabs .sd-topo-tab li { padding: 0.05rem 0.4rem; }
+[data-sim="packet-journey"] .pj-look { display: block; margin-top: 0.2rem; padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="packet-journey"] .pj-look[data-hit='true'] { border-style: dashed; }
+
+/* capture list */
+[data-sim="packet-journey"] .pj-cap { display: flex; flex-direction: column; min-height: 0; }
+[data-sim="packet-journey"] .pj-cap table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); line-height: 1.12; }
+[data-sim="packet-journey"] .pj-cap th { text-align: left; color: var(--muted); font-weight: 700; padding: 0 0.3rem; white-space: nowrap; }
+[data-sim="packet-journey"] .pj-cap td { padding: 0 0.3rem; white-space: nowrap; font-family: var(--mono); border-top: var(--line-w) solid transparent; border-bottom: var(--line-w) solid transparent; }
+[data-sim="packet-journey"] .pj-cap td:last-child { white-space: normal; font-family: var(--sans); }
+[data-sim="packet-journey"] .pj-cap tr.sd-changed { outline: none; box-shadow: none; }
+[data-sim="packet-journey"] .pj-cap tr.sd-changed td { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="packet-journey"] .pj-filt { display: inline-block; min-width: 2.6em; padding: 0 0.3rem; border-left: 0.35rem solid var(--sw, var(--line)); font-weight: 700; }
+
+/* legend swatches: hatched NAT field, dashed absent */
+[data-sim="packet-journey"] .sd-swatch[data-shape='nat'] { background: var(--bg); border-color: var(--ink);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 45%, transparent) 0.2em 0.32em); }
+[data-sim="packet-journey"] .sd-swatch[data-shape='absent'] { background: var(--bg); border-style: dashed; border-color: var(--ink); }
+[data-sim="packet-journey"] .sd-swatch[data-shape='decide'] { background: var(--bg); border-color: var(--ink); border-radius: 1rem; }
+
+/* Phone and portrait: the stage grows with its content; the drawing becomes the kit's list, the columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="packet-journey"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="packet-journey"] .pj { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="packet-journey"] .pj-chain { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-sim="packet-journey"] .pj-chain b { white-space: normal; }
+  [data-sim="packet-journey"] .pj-low, [data-sim="packet-journey"] .pj-tabs { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: minmax(0, 1fr); }
+  [data-sim="packet-journey"] .sd-topo-card .sd-topo-sub { white-space: normal; }
+  [data-sim="packet-journey"] .pj-cap-wrap { overflow-x: auto; }
+  [data-sim="packet-journey"] .pj-cap td, [data-sim="packet-journey"] .pj-cap th { white-space: normal; }
+  [data-sim="packet-journey"] .pj-filt { min-width: 0; white-space: nowrap; }
+  [data-sim="packet-journey"] .pj-cap thead { display: none; }
+  [data-sim="packet-journey"] .pj-cap tr { display: grid; grid-template-columns: 2rem 4.2rem minmax(0, 1fr); padding: 0.15rem 0; border-bottom: var(--line-w) solid var(--line); }
+  [data-sim="packet-journey"] .pj-cap td:last-child { grid-column: 2 / -1; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Cijeli put: od adrese do stranice</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Protocol colours: always paired with the protocol's name (chip, filter word, layer title). */
+  var PROTO_C = { dhcp: '5', arp: '3', dns: '2', tcp: '1', tls: '6', http: '4' };
+  /** The path as a zigzag: chips sit in the lane between the rows, clear of the cards. */
+  var NODES = [
+    { id: 'PC', kind: 'host', col: 0, row: 0, c: 1 },
+    { id: 'AP', kind: 'ap', col: 1, row: 2, c: 8 },
+    { id: 'SW', kind: 'switch', col: 2, row: 0, c: 8 },
+    { id: 'R', kind: 'router', col: 3, row: 2, c: 4 },
+    { id: 'NET', kind: 'cloud', col: 4, row: 0 },
+    { id: 'SRV', kind: 'server', col: 5, row: 2, c: 2 }
+  ];
+  var LINKS = [['PC', 'AP'], ['AP', 'SW'], ['SW', 'R'], ['R', 'NET'], ['NET', 'SRV']];
+  var CHAIN_KEY = { dhcp: 'chDhcp', dns: 'chDns', local: 'chLocal', arp: 'chArp', 'switch': 'chSwitch', router: 'chRouter',
+    nat: 'chNat', tcp: 'chTcp', tls: 'chTls', http: 'chHttp', close: 'chClose' };
+  /** Each phase's own simulator (task file "Reuse"); a preset where one shows this case. */
+  var CHAIN_SIM = { dhcp: ['dhcp-dora'], dns: ['dns-resolution', 'cold'], local: ['arp-local-remote', 'remote'],
+    arp: ['arp-local-remote', 'cache-hit'], 'switch': ['mac-table'], router: ['hop-rewrite', 'book'], nat: ['nat', 'book'],
+    tcp: ['tcp-handshake', 'book'], tls: ['tls-handshake'], http: ['http-exchange'], close: ['tcp-handshake'] };
+  /** The chain phase a step belongs to (its outline). */
+  var PHASE_CHAIN = { dhcp1: 'dhcp', dhcp2: 'dhcp', click: 'dns', decide: 'local', 'arp-req': 'arp', 'arp-rep': 'arp',
+    'dns-q': 'dns', 'dns-a': 'dns', syn: 'tcp', hop: 'router', synack: 'tcp', ack: 'tcp', tls1: 'tls', tls2: 'tls',
+    req: 'http', resp: 'http', 'fin-c': 'close', 'fin-s': 'close' };
+  var STATE_KEY = { pending: 'stPending', done: 'stDone', absent: 'stAbsent', unused: 'stUnused' };
+
+  /** Data (addresses, MACs, ports, protocol names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text)); }
+  function sock(ip, port) { return ip + ':' + port; }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  function protoOf(k) { return k.app ? k.app.proto : 'tcp'; }
+  function httpWhat(app) { return app.msg === 'get' ? 'GET ' + app.path : '200 OK'; }
+
+  /** The chip of a packet: the message's name. */
+  function chipOf(k) {
+    var a = k.app;
+    if (a && a.proto === 'dhcp') return data(a.msg.toUpperCase(), '');
+    if (a && a.proto === 'arp') return t(a.op === 'request' ? 'kArpReq' : 'kArpRep');
+    if (a && a.proto === 'dns') return t(a.qr === 'query' ? 'kDnsQ' : 'kDnsA');
+    if (a && a.proto === 'tls') return a.msg === 'client-hello' ? data('ClientHello', '') : a.msg === 'server-hello' ? data('ServerHello …', '') : t('kEnc');
+    if (a && a.proto === 'http') return data(httpWhat(a), '');
+    return data(k.l4.flags.indexOf('SYN') >= 0 ? k.l4.flags.join('-') : k.l4.flags.indexOf('FIN') >= 0 ? 'FIN' : 'ACK', '');
+  }
+  function flagsText(f) { return f.join(', '); }
+
+  /** The application line of a packet, in words. */
+  function appText(a) {
+    if (!a) return null;
+    if (a.proto === 'arp') return a.op === 'request' ? parts('aArpReq', { ip: data(a.tpa, ''), asker: data(a.spa, '') }) : parts('aArpRep', { ip: data(a.spa, ''), mac: data(a.sha, '') });
+    if (a.proto === 'dhcp') {
+      if (a.msg === 'discover') return parts('aDiscover');
+      if (a.msg === 'offer') return parts('aOffer', { ip: data(a.yiaddr, '') });
+      if (a.msg === 'request') return parts('aRequest', { ip: data(a.requested, '') });
+      return parts('aAck', { ip: data(a.yiaddr, ''), p: data(a.prefix, ''), gw: data(a.router, ''), dns: data(a.dns, '') });
+    }
+    if (a.proto === 'dns') return a.qr === 'query' ? parts('aDnsQ', { name: data(a.name, '') }) : parts('aDnsA', { name: data(a.name, ''), ip: data(a.ip, ''), ttl: data(a.ttl, '') });
+    if (a.proto === 'http') return a.msg === 'get' ? parts('aGet', { path: data(a.path, ''), host: data(a.host, '') }) : parts('aOk', { path: data(a.path, '') });
+    if (a.msg === 'client-hello') return parts('aHello');
+    if (a.msg === 'server-hello') return parts('aServerHello');
+    return parts('aEnc', { inner: data(a.inner.msg === 'get' ? 'GET' : '200 OK', '') });
+  }
+
+  // ── topology (kit view K2) ──
+
+  function badgesFor(id, s) {
+    var out = [], k = s.packets[0], ph = s.phase;
+    var on = function (key, kind) { out.push({ text: t(key), k: kind }); };
+    if (ph === 'click' && id === 'PC') on(s.lookup.hit ? 'bHit' : 'bCache', s.lookup.hit ? 'dashed' : 'solid');
+    if (ph === 'decide' && id === 'PC') { on('bAnd', 'solid'); if (s.lookup.hit) on('bHit', 'dashed'); }
+    if (k && ph !== 'hop') {
+      var first = k.path[0], last = k.path[k.path.length - 1];
+      if (id === first) on((first === 'SRV' || first === 'R') && !(k.l4 && k.l4.flags && k.l4.flags.indexOf('FIN') >= 0) ? 'bAnswers' : 'bSends', 'fill');
+      if (id === last) on('bGets', 'solid');
+      if (id === 'AP' && k.path.indexOf('AP') >= 0) on('bBridge', 'muted');
+      if (id === 'SW' && s.sw) on(s.sw.flood ? 'bFlood' : 'bForward', 'muted');
+      if (id === 'R' && k.path.indexOf('R') > 0 && k.path.indexOf('R') < k.path.length - 1) on(k.dir === 'in' ? 'bReverse' : 'bNat', 'solid');
+    }
+    if (ph === 'hop') { if (id === 'R') on('bNat', 'fill'); if (id === 'SRV') on('bGets', 'solid'); }
+    return out;
+  }
+
+  function nodeLines(id, s) {
+    if (id === 'PC') return [s.host ? { text: s.host.ip + ' · ' + L.HOST.mac, kind: 'sub' } : { text: t('noAddr'), kind: 'role' }];
+    if (id === 'AP') return [{ text: t('roleAp'), kind: 'role' }];
+    if (id === 'SW') return [];
+    if (id === 'R') return [{ text: L.ROUTER.lan + ' · ' + L.ROUTER.lanMac, kind: 'sub' }, { text: L.ROUTER.pub + ' · ' + L.ROUTER.wanMac, kind: 'sub' }];
+    if (id === 'SRV') return [{ text: L.SERVER.ip, kind: 'sub' }];
+    return [];
+  }
+  var NAME = { PC: 'nPc', AP: 'nAp', SW: 'nSw', R: 'nR', SRV: 'nSrv' };
+
+  function renderTopo(c) {
+    var s = c.state;
+    var nodes = NODES.map(function (n) {
+      if (n.id === 'NET') return { id: 'NET', kind: 'cloud', col: n.col, row: n.row, name: t('nNet'), lines: [{ text: t.n('roleNet', L.INTERNET_HOPS), kind: 'role' }], badges: [] };
+      var bs = badgesFor(n.id, s);
+      return { id: n.id, kind: n.kind, col: n.col, row: n.row, c: n.c, mark: n.id === 'SRV' ? 'S' : n.id, name: n.id === 'SRV' ? data(L.SERVER.name, '') : t(NAME[n.id]),
+        lines: nodeLines(n.id, s), badges: bs, state: bs.length ? 'active' : null, align: 'start' };
+    });
+    var used = {};
+    s.packets.forEach(function (k) { for (var i = 0; i + 1 < k.path.length; i++) used[[k.path[i], k.path[i + 1]].sort().join('-')] = true; });
+    var links = LINKS.map(function (l) {
+      return { id: l.join('-'), a: l[0], b: l[1], style: l[0] === 'PC' ? 'dashed' : null, active: !!used[l.slice().sort().join('-')] };
+    });
+    var packets = [];
+    s.packets.forEach(function (k) {
+      for (var i = 0; i + 1 < k.path.length; i++) {
+        packets.push({ from: k.path[i], to: k.path[i + 1], c: PROTO_C[protoOf(k)], cast: k.cast, label: chipOf(k), chip: i === 0, at: 0.5 });
+      }
+    });
+    return Simdeck.topology({ cols: 6, rows: ['auto', '2.2rem', 'auto'], gap: '1.6cqw', dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  // ── chain strip ──
+
+  function renderChain(c) {
+    var s = c.state, now = c.n > 0 ? PHASE_CHAIN[s.phase] : null;
+    return h('ol', { class: 'pj-chain' }, L.CHAIN.map(function (id) {
+      var st = s.chain[id], to = CHAIN_SIM[id];
+      var href = '../' + to[0] + '/index.html?lang=' + Simdeck.lang + (to[1] ? '&preset=' + to[1] : '');
+      var ds = { st: st };
+      if (id === now) ds.now = '1';
+      return h('li', null, h('a', { href: href, class: s.chainChanged.indexOf(id) >= 0 ? 'sd-changed' : null, dataset: ds,
+        title: t('chainOpen', { name: to[0] }) },
+        h('b', null, t(CHAIN_KEY[id])), h('small', null, t(STATE_KEY[st]))));
+    }));
+  }
+
+  // ── the packet's headers ──
+
+  function mainPacket(s) {
+    if (!s.packets.length) return null;
+    return s.phase === 'dhcp1' || s.phase === 'dhcp2' ? s.packets[s.packets.length - 1] : s.packets[0];
+  }
+
+  function fieldOf(label, value, o) {
+    o = o || {};
+    var v = [h('span', null, label), o.nat ? h('span', { class: 'pj-nat' }, data(value, '')) : data(value, '')];
+    if (o.was != null) v.push(h('s', { translate: 'no' }, String(o.was)));
+    return v;
+  }
+
+  function renderPacket(c) {
+    var s = c.state, k = mainPacket(s);
+    var box = h('section', { class: 'pj-box pj-pkt' });
+    if (!k) {
+      box.append(h('h2', null, t('hdrLan')), h('p', { class: 'pj-none' }, t(c.n === 0 ? 'hdrIdle' : 'hdrNone')));
+      if (s.lookup) box.append(lookFoot(s, s.lookup.table, c));
+      return box;
+    }
+    box.append(h('h2', null, t(k.view === 'wan' ? 'hdrWan' : 'hdrLan')));
+    var ch = function (f) { return k.changed.indexOf(f) >= 0; };
+    var was = function (f) { return ch(f) && k.was ? k.was[f] : null; };
+    var natF = k.nat ? k.nat.field : null;
+    var row = function (label, value, key, nat) { return [h('span', { class: 'pj-f' }, fieldOf(label, value, { nat: nat, was: was(key) })), null, { changed: ch(key) }]; };
+    var kv = function (fields) { return fields.map(function (f) { return ['', f[0], f[2]]; }); };
+    var proto = protoOf(k);
+    var layers = [{ title: t('lEth'), dashed: k.cast === 'broadcast', fields: kv([
+      row(t('fDstMac'), k.l2.dst, 'l2.dst'), row(t('fSrcMac'), k.l2.src, 'l2.src')]) }];
+    if (k.l3) layers.push({ title: t('lIp'), c: 8, fields: kv([
+      row(t('fSrc'), k.l3.src, 'l3.src', natF === 'src'), row(t('fDst'), k.l3.dst, 'l3.dst', natF === 'dst'), row(t('fTtl'), k.l3.ttl, 'l3.ttl')]) });
+    if (k.l4) {
+      var f4 = [row(t('fSport'), k.l4.sport, 'l4.sport', natF === 'src'), row(t('fDport'), k.l4.dport, 'l4.dport', natF === 'dst')];
+      if (k.l4.flags) f4.push(row(t('fFlags'), flagsText(k.l4.flags), 'l4.flags'));
+      layers.push({ title: t(k.l4.proto === 'tcp' ? 'lTcp' : 'lUdp'), c: 1, fields: kv(f4) });
+    }
+    if (k.app) layers.push({ title: data(proto.toUpperCase(), ''), c: PROTO_C[proto], body: h('span', { class: 'pj-body' }, appText(k.app)) });
+    box.append(Simdeck.topology.headers(layers, c.dir === 'forward' ? 'forward' : null));
+    if (k.nat) {
+      var key = k.view === 'wan' ? 'natHop' : k.nat.field === 'src' ? 'natOut' : 'natIn';
+      box.append(h('p', { class: 'pj-note' }, h('span', { class: 'pj-nat' }, parts(key, { pub: data(k.nat.pub, ''), priv: data(k.nat.wire, '') }))));
+    }
+    if (s.packets.length > 1) {
+      var other = s.packets[0] === k ? s.packets[1] : s.packets[0];
+      box.append(h('p', { class: 'pj-note' }, parts(s.packets[0] === k ? 'hdrTwo' : 'hdrReplyTo', { what: h('b', null, chipOf(other)) })));
+    }
+    return box;
+  }
+
+  // ── tables ──
+
+  function wrote(s, table, key) { return s.wrote.some(function (w) { return w.table === table && String(w.key) === String(key); }); }
+  function lookFoot(s, table, c) {
+    var lk = s.lookup;
+    if (!lk || lk.table !== table) return null;
+    var nodes;
+    if (table === 'dns') nodes = parts(lk.hit ? 'dnsHit' : 'dnsMiss', { name: data(lk.key, ''), ip: data(lk.hit ? s.dnsCache[lk.key].ip : '', '') });
+    else if (table === 'arp') {
+      var d = s.decision;
+      nodes = [h('span', { style: { display: 'block' } }, d.local
+        ? parts('andLocal', { dst: data(d.dst, ''), mask: data(d.mask, ''), theirs: data(d.theirs, '') })
+        : parts('andRemote', { dst: data(d.dst, ''), mask: data(d.mask, ''), theirs: data(d.theirs, ''), own: data(d.own, ''), gw: data(d.nextHop, '') })),
+        h('span', { style: { display: 'block' } }, parts(lk.hit ? 'arpHit' : 'arpMiss', { ip: data(lk.key, ''), mac: data(lk.hit ? s.arp[lk.key] : '', '') }))];
+    } else return null;
+    return h('div', { class: 'pj-look sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { hit: String(!!lk.hit) } }, nodes);
+  }
+
+  /** The last cell of a row, with "novo" after it on the same line when the row was just written. */
+  function last(text, isNew) { return h('span', null, data(text, ''), isNew ? [' ', h('b', null, t('noteNew'))] : null); }
+
+  function renderTables(c) {
+    var s = c.state;
+    var hitRow = function (table, key) { return s.lookup && s.lookup.table === table && s.lookup.hit && String(s.lookup.key) === String(key); };
+    var mk = function (table, key) { return wrote(s, table, key) ? 'new' : hitRow(table, key) ? 'hit' : null; };
+    var dns = Simdeck.topology.table({ title: t('tDns'), empty: t('empty'),
+      rows: Object.keys(s.dnsCache).map(function (n) {
+        return { cells: [n, last(s.dnsCache[n].ip + ' · TTL ' + s.dnsCache[n].ttl, wrote(s, 'dns', n))], c: 2, mark: mk('dns', n) };
+      }) }, c.dir);
+    var arp = Simdeck.topology.table({ title: t('tArp'), empty: t('empty'),
+      rows: Object.keys(s.arp).map(function (ip) {
+        return { cells: [last(ip + ' → ' + s.arp[ip], wrote(s, 'arp', ip))], c: 4, mark: mk('arp', ip) };
+      }) }, c.dir);
+    var conn = Simdeck.topology.table({ title: t('tConn'), empty: t('empty'),
+      rows: s.conns.map(function (x) {
+        return { cells: [':' + x.sport + ' → ' + sock(x.dst, x.dport), last(x.state.toUpperCase(), s.phase === 'syn')], c: 1, mark: mk('conn', x.sport) };
+      }) }, c.dir);
+    var nu = s.natUse;
+    var nat = Simdeck.topology.table({ title: t('tNat'), empty: t('empty'),
+      rows: s.nat.map(function (x, i) {
+        return { cells: [x.priv, last('↔ ' + x.pub, wrote(s, 'nat', i))], c: 4, mark: wrote(s, 'nat', i) ? 'new' : nu && nu.row === i ? 'hit' : null };
+      }) }, c.dir);
+    return h('section', { class: 'pj-box' }, h('div', { class: 'pj-tabs' }, dns, arp, conn, nat));
+  }
+
+  // ── capture ──
+
+  function capInfo(e) {
+    var a = e.app;
+    if (a && a.proto === 'http') return data(httpWhat(a), '');
+    if (a && a.proto === 'tls') return a.msg === 'app-data' ? t('kEnc') : data(a.msg === 'client-hello' ? 'ClientHello' : 'ServerHello … Finished', '');
+    if (a && a.proto === 'dhcp') return data(a.msg.toUpperCase() + (a.msg === 'offer' || a.msg === 'ack' ? ' ' + a.yiaddr : ''), '');
+    if (a && a.proto === 'arp') return a.op === 'request' ? parts('cArpReq', { ip: data(a.tpa, '') }) : parts('aArpRep', { ip: data(a.spa, ''), mac: data(a.sha, '') });
+    if (a && a.proto === 'dns') return a.qr === 'query' ? parts('cDnsQ', { name: data(a.name, '') }) : parts('cDnsA', { name: data(a.name, ''), ip: data(a.ip, '') });
+    return data(e.sport + ' → ' + e.dport + ' [' + flagsText(e.flags) + ']', '');
+  }
+
+  function renderCapture(c) {
+    var s = c.state;
+    var box = h('section', { class: 'pj-box pj-cap' }, h('h2', null, t('capTitle')));
+    if (!s.capture.length) { box.append(h('p', { class: 'pj-none' }, t('capEmpty'))); return box; }
+    box.append(h('div', { class: 'pj-cap-wrap' }, h('table', null,
+      h('thead', null, h('tr', null, h('th', null, t('colNo')), h('th', null, t('colFilter')), h('th', null, t('colSrcDst')), h('th', null, t('colInfo')))),
+      h('tbody', null, s.capture.map(function (e, i) {
+        var src = e.src, dst = e.dst === L.BCAST_MAC ? 'ff:ff:…' : e.dst;
+        return h('tr', { class: s.newCapture.indexOf(i) >= 0 ? 'sd-changed' : null },
+          h('td', null, data(e.n, '')),
+          h('td', null, h('span', { class: 'pj-filt', dataset: { c: PROTO_C[e.filter] } }, data(e.filter, ''))),
+          h('td', null, data(src + ' → ' + dst, '')),
+          h('td', null, capInfo(e)));
+      })))));
+    return box;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scheme', type: 'choice', label: t('scheme'), options: [['http', 'http://'], ['https', 'https://']], resets: true },
+      { key: 'joined', type: 'toggle', label: t('joined'), hint: t('joinedHint'), resets: true },
+      { key: 'dnsWarm', type: 'toggle', label: t('dnsWarm'), resets: true,
+        disabled: function (p) { return p.joined && p.connOpen ? t('dnsWarmHint') : false; } },
+      { key: 'arpWarm', type: 'toggle', label: t('arpWarm'), resets: true },
+      { key: 'connOpen', type: 'toggle', label: t('connOpen'), hint: t('connOpenHint'), resets: true,
+        disabled: function (p) { return p.joined ? false : t('connOpenHint'); } },
+      { key: 'close', type: 'toggle', label: t('close'), resets: true }
+    ],
+
+    presets: [
+      { id: 'prvi-student', label: t('presetFirst'), hint: t('presetFirstHint'), params: { scheme: 'http', joined: true, dnsWarm: false, arpWarm: false, connOpen: false, close: false } },
+      { id: 'drugi-student', label: t('presetSecond'), hint: t('presetSecondHint'), params: { scheme: 'http', joined: true, dnsWarm: true, arpWarm: true, connOpen: false, close: false } },
+      { id: 'arp-istekao', label: t('presetArp'), hint: t('presetArpHint'), params: { scheme: 'https', joined: true, dnsWarm: true, arpWarm: false, connOpen: false, close: false } },
+      { id: 'novo-spajanje', label: t('presetJoin'), hint: t('presetJoinHint'), params: { scheme: 'https', joined: false, dnsWarm: false, arpWarm: false, connOpen: false, close: false } },
+      { id: 'otvorena-veza', label: t('presetOpen'), hint: t('presetOpenHint'), params: { scheme: 'http', joined: true, dnsWarm: true, arpWarm: true, connOpen: true, close: false } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legWire') },
+      { shape: 'dash', label: t('legBcast') },
+      { shape: 'decide', label: t('legDecide') },
+      { shape: 'absent', label: t('legAbsent') },
+      { shape: 'nat', label: t('legNat') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'pj' },
+        renderTopo(c),
+        renderChain(c),
+        h('div', { class: 'pj-low' },
+          h('div', { class: 'pj-left' }, renderPacket(c), renderTables(c)),
+          renderCapture(c))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = L.norm(c.params), n = c.n, k = mainPacket(s);
+      var N = function (v) { return data(v, ''); };
+      var D = function (v) { return data(v); };
+      if (n === 0) return s.host ? parts('capStart', { url: D(p.scheme + '://example.com'), ip: D(s.host.ip) }) : parts('capStartNew');
+      var ph = s.phase, out;
+      if (ph === 'dhcp1') return parts('capDhcp1', { n: N(n), ip: b(L.HOST.ip) });
+      if (ph === 'dhcp2') return parts('capDhcp2', { n: N(n), ip: b(s.host.ip), p: N(s.host.prefix), gw: b(s.host.gw), dns: b(s.host.dns) });
+      if (ph === 'click') {
+        out = s.lookup.hit ? parts('capClickHit', { n: N(n), name: D(L.SERVER.name), ip: b(s.dnsCache[L.SERVER.name].ip) }) : parts('capClickMiss', { n: N(n), name: D(L.SERVER.name) });
+        if (p.joined) out = out.concat(' ', parts('capNoDhcp'));
+        return out;
+      }
+      if (ph === 'decide') {
+        var d = s.decision, hit = s.lookup.hit;
+        var v = { n: N(n), dst: D(d.dst), mask: D(d.mask), theirs: b(d.theirs), own: D(d.own), gw: b(d.nextHop), mac: b(hit ? s.arp[d.nextHop] : '') };
+        var learnt = c.prev && c.prev.chain.arp === 'done';
+        return parts(d.local ? (hit ? 'capLocalHit' : 'capLocalMiss')
+          : hit ? (learnt ? 'capRemoteLearnt' : 'capRemoteHit') : (p.joined ? 'capRemoteMiss' : 'capRemoteMissNew'), v);
+      }
+      if (ph === 'arp-req') return parts('capArpReq', { n: N(n), ip: b(k.app.tpa) });
+      if (ph === 'arp-rep') return parts('capArpRep', { n: N(n), ip: D(k.app.spa), mac: b(k.app.sha) });
+      if (ph === 'dns-q') return parts('capDnsQ', { n: N(n), name: D(k.app.name), ip: b(k.l3.dst) });
+      if (ph === 'dns-a') return parts('capDnsA', { n: N(n), name: D(k.app.name), addr: b(k.app.ip), ttl: N(k.app.ttl) });
+      if (ph === 'syn') return parts('capSyn', { n: N(n), sport: b(k.l4.sport), dport: b(k.l4.dport), src: D(k.l2.src), dst: D(k.l2.dst), ttl: b(k.l3.ttl) });
+      if (ph === 'hop') return parts('capHop', { n: N(n), a: N(k.was['l3.ttl']), b: b(k.l3.ttl), pub: b(k.nat.pub) });
+      if (ph === 'synack') return parts('capSynAck', { n: N(n), pub: D(k.nat.pub), priv: b(k.nat.wire) });
+      if (ph === 'ack') return parts('capAck', { n: N(n) });
+      if (ph === 'tls1') return parts('capTls1', { n: N(n) });
+      if (ph === 'tls2') return parts('capTls2', { n: N(n) });
+      if (ph === 'req') {
+        var open = s.lookup && s.lookup.table === 'conn', enc = k.app.proto === 'tls';
+        var what = enc ? null : b(httpWhat(k.app));
+        if (enc) return parts(open ? 'capReqEncOpen' : 'capReqEnc', { n: N(n), dport: b(k.l4.dport) });
+        return parts(open ? 'capReqOpen' : 'capReq', { n: N(n), what: what, sport: b(k.l4.sport), dport: b(k.l4.dport) });
+      }
+      if (ph === 'resp') {
+        out = k.app.proto === 'tls' ? parts('capRespEnc', { n: N(n) }) : parts('capResp', { n: N(n), what: b(httpWhat(k.app)) });
+        if (s.next === 'req') out = out.concat(' ', parts('capMore'));
+        else if (!s.next) out = out.concat(' ', parts('capStaysOpen'));
+        return out;
+      }
+      if (ph === 'fin-c') return parts('capFinC', { n: N(n) });
+      if (ph === 'fin-s') return parts('capFinS', { n: N(n) });
+      return '';
+    }
+  });
+})();
+</script>
+</body>
+</html>
