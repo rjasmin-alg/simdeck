@@ -1,0 +1,599 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Wi-Fi channels and overlap: an explorer. Three or four access points on a floor plan, each with its coverage
+     circle, channel and airtime; the pairs that hear each other, by kind of conflict; and the band's spectrum with
+     every AP's block over its frequencies, the DFS sub-bands hatched at 5 GHz.
+     The model is in sim.js (rules: SPEC.md), the words in strings.js. -->
+<html lang="hr" data-sim="wifi-channels">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wi-Fi kanali i preklapanje · simdeck</title>
+<meta name="description" content="Postavi access pointove na kanale: isti kanal znači izmjenu u eteru, djelomično preklapanje kvari okvire, a šire kanale na 5 GHz plaćaš manjim brojem kanala.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "wifi-channels",
+  "title": {
+    "hr": "Wi-Fi kanali i preklapanje",
+    "en": "Wi-Fi channels and overlap"
+  },
+  "concept": {
+    "hr": "2,4 GHz 1/6/11, širine kanala na 5 GHz, smetnje na istom kanalu",
+    "en": "2.4 GHz 1/6/11, 5 GHz channel widths, co-channel interference"
+  },
+  "summary": {
+    "hr": "Postavi access pointove na kanale: isti kanal znači izmjenu u eteru, djelomično preklapanje kvari okvire, a šire kanale na 5 GHz plaćaš manjim brojem kanala.",
+    "en": "Put access points on channels: the same channel means taking turns, a partial overlap corrupts frames, and wider 5 GHz channels cost you channels."
+  },
+  "tags": [
+    "wifi"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="wifi-channels"]; colours only from kit tokens. */
+[data-sim="wifi-channels"] .wc {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4cqh;
+  height: 100%;
+  padding: 1.2cqh 1.4cqw;
+}
+[data-sim="wifi-channels"] .wc-h { display: flex; align-items: baseline; gap: 1rem; font-size: var(--fs-md); font-weight: 700; }
+[data-sim="wifi-channels"] .wc-h small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+
+/* ── top: floor plan (left) and the pairs (right) ── */
+[data-sim="wifi-channels"] .wc-top { flex: 0 0 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2cqw; }
+[data-sim="wifi-channels"] .wc-floorcol { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; min-height: 0; }
+[data-sim="wifi-channels"] .wc-floor {
+  --fh: min(calc(56cqh - 3.4rem), calc(54cqw / var(--ratio)));
+  position: relative;
+  height: var(--fh);
+  width: calc(var(--fh) * var(--ratio));
+  margin-inline: auto;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="wifi-channels"] .wc-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+[data-sim="wifi-channels"] .wc-walls { fill: var(--panel); stroke: var(--ink); stroke-width: 0.25rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-cover { fill: var(--sw); fill-opacity: 0.09; stroke: var(--sw); stroke-width: 0.14rem; stroke-dasharray: 0.5rem 0.35rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-cci { fill: none; stroke: var(--ink); stroke-width: 0.42rem; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-ovl { fill: none; stroke: var(--warn); stroke-width: 0.24rem; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-halo { fill: none; stroke: var(--hl); stroke-width: 1.1rem; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-scale { stroke: var(--ink); stroke-width: 0.18rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-channels"] .wc-scalelab { position: absolute; transform: translateY(-50%); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+
+/* an AP: its letter on the dot at its position, its channel and airtime beside it */
+[data-sim="wifi-channels"] .wc-ap { position: absolute; width: 0; height: 0; }
+[data-sim="wifi-channels"] .wc-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0.18rem solid var(--ink);
+  border-radius: 50%;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+[data-sim="wifi-channels"] .wc-info {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.15rem 0.45rem;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+[data-sim="wifi-channels"] .wc-info b { font-size: var(--fs-md); }
+[data-sim="wifi-channels"] .wc-ap-below .wc-info { top: 1.6rem; left: 0; transform: translateX(-50%); }
+[data-sim="wifi-channels"] .wc-ap-left .wc-info { right: 1.6rem; top: 0; transform: translateY(-50%); }
+[data-sim="wifi-channels"] .wc-ap-right .wc-info { left: 1.6rem; top: 0; transform: translateY(-50%); }
+[data-sim="wifi-channels"] .wc-info.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="wifi-channels"] .wc-air { display: flex; align-items: center; gap: 0.35rem; }
+[data-sim="wifi-channels"] .wc-bar { width: 3.6rem; height: 0.7rem; border: var(--line-w) solid var(--ink); border-radius: 3px; background: var(--bg); overflow: hidden; }
+[data-sim="wifi-channels"] .wc-bar > span { display: block; height: 100%; }
+[data-sim="wifi-channels"] .wc-warn { color: var(--warn); font-weight: 700; }
+/* the APs as a list: only on a phone, where the boxes beside the dots do not fit */
+[data-sim="wifi-channels"] .wc-aplist { display: none; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="wifi-channels"] .wc-aplist li { display: flex; align-items: center; gap: 0.3rem; }
+[data-sim="wifi-channels"] .wc-info.sd-changed .wc-warn { color: var(--on-hl); }
+
+/* the pairs */
+[data-sim="wifi-channels"] .wc-pairs { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+[data-sim="wifi-channels"] .wc-table { border-collapse: collapse; font-size: var(--fs-md); }
+[data-sim="wifi-channels"] .wc-table th {
+  text-align: left;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-bottom: var(--line-w) solid var(--ink);
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+[data-sim="wifi-channels"] .wc-table td { padding: 0.12rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="wifi-channels"] .wc-table td.wc-num { text-align: right; font-family: var(--mono); }
+[data-sim="wifi-channels"] .wc-table tr.wc-far td { color: var(--muted); }
+[data-sim="wifi-channels"] .wc-kind { display: inline-block; padding: 0 0.4rem; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="wifi-channels"] .wc-kind-cci { background: var(--ink); color: var(--bg); }
+[data-sim="wifi-channels"] .wc-kind-overlap { border: var(--line-w) solid var(--warn); color: var(--warn); }
+[data-sim="wifi-channels"] .wc-table tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="wifi-channels"] .wc-table tr.sd-changed td:last-child { box-shadow: inset -0.35rem 0 0 var(--ink); }
+[data-sim="wifi-channels"] .wc-table tr.sd-changed .wc-kind-overlap { color: var(--on-hl); border-color: var(--on-hl); }
+[data-sim="wifi-channels"] .wc-dotsm { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: var(--fs-sm); font-weight: 700; }
+
+/* ── bottom: the spectrum ── */
+[data-sim="wifi-channels"] .wc-spec { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="wifi-channels"] .wc-sgrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1.6rem minmax(0, 1fr) 1.1rem 1.7rem 1.5rem;
+  column-gap: 0.6rem;
+}
+[data-sim="wifi-channels"] .wc-gut { align-self: center; font-size: var(--fs-sm); color: var(--muted); text-align: right; }
+[data-sim="wifi-channels"] .wc-row { position: relative; min-width: 0; }
+[data-sim="wifi-channels"] .wc-lanes { display: flex; flex-direction: column; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; }
+[data-sim="wifi-channels"] .wc-lane { position: relative; flex: 1; min-height: 0; }
+[data-sim="wifi-channels"] .wc-lane + .wc-lane { border-top: 1px dashed var(--line); }
+[data-sim="wifi-channels"] .wc-sub { position: absolute; top: 0; bottom: 0; }
+[data-sim="wifi-channels"] .wc-sub-dfs { background-image: repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--ink) 22%, transparent) 0.4em 0.55em); }
+[data-sim="wifi-channels"] .wc-sub-closed {
+  background-color: var(--panel);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--ink) 22%, transparent) 0.4em 0.55em),
+    repeating-linear-gradient(-45deg, transparent 0 0.4em, color-mix(in srgb, var(--ink) 22%, transparent) 0.4em 0.55em);
+}
+[data-sim="wifi-channels"] .wc-sub + .wc-sub, [data-sim="wifi-channels"] .wc-sub-edge { border-left: var(--line-w) solid var(--ink); }
+[data-sim="wifi-channels"] .wc-sublab { position: absolute; bottom: 0.1rem; transform: translateX(-50%); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="wifi-channels"] .wc-sublab.wc-quiet { font-weight: 400; color: var(--muted); }
+[data-sim="wifi-channels"] .wc-block {
+  position: absolute;
+  top: 12%;
+  bottom: 12%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  overflow: hidden;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="wifi-channels"] .wc-block small { font-size: var(--fs-sm); font-family: var(--mono); }
+[data-sim="wifi-channels"] .wc-block.sd-changed { z-index: 2; }
+/* the overlap of a pair that hears each other: warn-hatched across every lane */
+[data-sim="wifi-channels"] .wc-ovcol {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  border-inline: 0.2rem dashed var(--warn);
+  pointer-events: none;
+}
+[data-sim="wifi-channels"] .wc-ovseg {
+  position: absolute;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  background-image: repeating-linear-gradient(-45deg, transparent 0 0.3em, var(--warn) 0.3em 0.5em);
+  border: var(--line-w) solid var(--warn);
+}
+[data-sim="wifi-channels"] .wc-axis { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="wifi-channels"] .wc-axis span { position: absolute; top: 0.3rem; transform: translateX(-50%); white-space: nowrap; }
+[data-sim="wifi-channels"] .wc-axis span::before { content: ''; position: absolute; left: 50%; top: -0.35rem; height: 0.3rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="wifi-channels"] .wc-mhz span { top: 0; color: var(--muted); }
+[data-sim="wifi-channels"] .wc-mhz span::before { display: none; }
+[data-sim="wifi-channels"] .wc-axis span.wc-l { transform: none; }
+[data-sim="wifi-channels"] .wc-axis span.wc-r { transform: translateX(-100%); }
+
+/* legend swatches of the page's own marks */
+[data-sim="wifi-channels"] .sd-swatch[data-shape='ovl'] { background: var(--bg); background-image: repeating-linear-gradient(-45deg, transparent 0 0.18em, var(--warn) 0.18em 0.3em); border-color: var(--warn); }
+[data-sim="wifi-channels"] .sd-swatch[data-shape='dfs'] { background: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 45%, transparent) 0.2em 0.32em); }
+/* panel: presets in two columns, a channel's label beside its slider, so six presets and nine controls fit at 1920×1080 */
+[data-sim="wifi-channels"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="wifi-channels"] .sd-preset { line-height: 1.15; }
+[data-sim="wifi-channels"] .sd-ctl-range[data-key^="ch"] { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); align-items: center; column-gap: 0.8rem; }
+[data-sim="wifi-channels"] .sd-ctl-range[data-key^="ch"] .sd-hint { grid-column: 1 / -1; }
+[data-sim="wifi-channels"] .sd-ctl[hidden] { display: none; } /* the kit's .sd-ctl display beats [hidden] */
+
+/* Phone and portrait: the stage grows with its content; the pairs go under the floor plan. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="wifi-channels"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="wifi-channels"] .wc { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="wifi-channels"] .wc-top { display: flex; flex-direction: column; gap: 1rem; }
+  [data-sim="wifi-channels"] .wc-floor { --fh: calc((100cqw - 1rem) / var(--ratio)); }
+  [data-sim="wifi-channels"] .wc-dot { width: 1.8rem; height: 1.8rem; font-size: var(--fs-md); }
+  [data-sim="wifi-channels"] .wc-info { display: none; }
+  [data-sim="wifi-channels"] .wc-aplist { display: flex; }
+  [data-sim="wifi-channels"] .wc-table { width: 100%; }
+  [data-sim="wifi-channels"] .wc-table td:last-child { white-space: normal; }
+  [data-sim="wifi-channels"] .wc-table th, [data-sim="wifi-channels"] .wc-table td { padding: 0.12rem 0.25rem; }
+  [data-sim="wifi-channels"] .wc-sgrid { grid-template-rows: 1.6rem 12rem 1.7rem 1.5rem; }
+  [data-sim="wifi-channels"] .wc-block small { display: none; }
+  [data-sim="wifi-channels"] .wc-axis span.wc-thin { display: none; }
+  [data-sim="wifi-channels"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Wi-Fi kanali i preklapanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var cur = L.defaults; // params of the last render: the channel sliders' read-out depends on band and width
+
+  function num(x) { return String(x).replace('.', t('decimal')); }
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function bold(text) { return h('b', { translate: 'no' }, String(text)); }
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, String(attrs[k])); });
+    return el;
+  }
+  function colourOf(id) { return String('ABCD'.indexOf(id) + 1); }
+  var FRACTION = ['1', '½', '⅓', '¼'];
+  function share(s, id) { return FRACTION[s.sharers[id]] || '1/' + (s.sharers[id] + 1); }
+  /** "A", "A i B", "A, B i C", as nodes. */
+  function listOf(nodes) {
+    var out = [];
+    nodes.forEach(function (n, i) {
+      if (i) out.push(i === nodes.length - 1 ? ' ' + t('and') + ' ' : ', ');
+      out.push(n);
+    });
+    return h('span', null, out);
+  }
+  function apById(s, id) { return s.aps.filter(function (a) { return a.id === id; })[0]; }
+
+  // ── "changed": against the state before the last input ──
+  var lastParams = null, lastState = null, delta = { aps: [], pairs: [] };
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    delta = L.changed(lastState, c.state);
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+
+  // ── floor plan ──
+
+  /** The visible part of the floor in metres: the building plus room for the labels beside the APs. */
+  var VIEW = { row3: { x: -8, y: -6, w: 76, h: 34 }, square4: { x: -26, y: -5, w: 92, h: 50 } };
+  var SIDE = { row3: { A: 'below', B: 'below', C: 'below' }, square4: { A: 'left', B: 'right', C: 'left', D: 'right' } };
+
+  /** Points along the pair's line; it bows out when another AP sits on the straight line between them. */
+  function pairPath(s, a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    var blocked = s.aps.some(function (c) {
+      if (c === a || c === b) return false;
+      var cross = (c.x - a.x) * dy - (c.y - a.y) * dx, dot = (c.x - a.x) * dx + (c.y - a.y) * dy;
+      return Math.abs(cross) < 1e-9 && dot > 0 && dot < len * len;
+    });
+    var nx = dy / len, ny = -dx / len; // the normal to the left of a → b (up for a row left to right)
+    var bow = blocked ? 0.4 * len : 0;
+    var cx = (a.x + b.x) / 2 + nx * bow, cy = (a.y + b.y) / 2 + ny * bow;
+    var n = Math.max(2, Math.round(len / 1.6)), pts = [];
+    for (var i = 0; i <= n; i++) {
+      var u = i / n, v = 1 - u;
+      // a quadratic through the control point (a straight line when bow is 0); its tangent for the zig-zag's normal
+      var x = v * v * a.x + 2 * v * u * cx + u * u * b.x, y = v * v * a.y + 2 * v * u * cy + u * u * b.y;
+      var tx = 2 * v * (cx - a.x) + 2 * u * (b.x - cx), ty = 2 * v * (cy - a.y) + 2 * u * (b.y - cy), tl = Math.hypot(tx, ty);
+      pts.push({ x: x, y: y, nx: ty / tl, ny: -tx / tl });
+    }
+    return pts;
+  }
+  function polyline(pts, zig) {
+    return pts.map(function (p, i) {
+      var k = zig && i > 0 && i < pts.length - 1 ? (i % 2 ? 0.8 : -0.8) : 0;
+      return (p.x + p.nx * k).toFixed(2) + ',' + (p.y + p.ny * k).toFixed(2);
+    }).join(' ');
+  }
+
+  function floorView(s) {
+    var v = VIEW[s.layout];
+    var pct = function (x, y) { return { left: ((x - v.x) / v.w * 100) + '%', top: ((y - v.y) / v.h * 100) + '%' }; };
+    var g = svg('svg', { viewBox: [v.x, v.y, v.w, v.h].join(' '), preserveAspectRatio: 'none', class: 'wc-svg', 'aria-hidden': 'true' });
+    g.append(svg('rect', { x: 0, y: 0, width: s.floor.w, height: s.floor.h, class: 'wc-walls' }));
+    s.aps.forEach(function (a) {
+      g.append(svg('circle', { cx: a.x, cy: a.y, r: s.range, class: 'wc-cover', 'data-c': colourOf(a.id) }));
+    });
+    s.pairs.forEach(function (q) {
+      if (q.kind === 'none') return;
+      var pts = pairPath(s, apById(s, q.a), apById(s, q.b));
+      if (delta.pairs.indexOf(q.a + q.b) >= 0) g.append(svg('polyline', { points: polyline(pts, false), class: 'wc-halo' }));
+      g.append(svg('polyline', { points: polyline(pts, q.kind === 'overlap'), class: q.kind === 'cci' ? 'wc-cci' : 'wc-ovl' }));
+    });
+    // a 10 m scale bar under the building's left corner
+    var sy = s.floor.h + (v.y + v.h - s.floor.h) / 2 + 0.6;
+    g.append(svg('line', { x1: 0, y1: sy, x2: 10, y2: sy, class: 'wc-scale' }));
+    var kids = [g, h('span', { class: 'wc-scalelab', style: pct(11, sy) }, t('scale', { m: 10 }))];
+    s.aps.forEach(function (a) {
+      var ch = delta.aps.indexOf(a.id) >= 0, c = colourOf(a.id);
+      var air = s.airtime[a.id];
+      kids.push(h('div', { class: 'wc-ap wc-ap-' + SIDE[s.layout][a.id], style: pct(a.x, a.y) },
+        h('span', { class: 'wc-dot sd-fill', dataset: { c: c }, translate: 'no',
+          'aria-label': t('apAria', { ap: a.id, ch: a.label, lo: num(a.lo), hi: num(a.hi) }) }, a.id),
+        h('div', { class: 'wc-info' + (ch ? ' sd-changed' : ''), dataset: { c: c } },
+          h('b', null, t.parts('apChannel', { ch: data(a.label) })),
+          h('span', { class: 'wc-air' },
+            t('airtime'),
+            h('span', { class: 'wc-bar', 'aria-hidden': 'true' }, h('span', { class: 'sd-fill', dataset: { c: c }, style: { width: (air * 100) + '%' } })),
+            bold(share(s, a.id))),
+          s.warned[a.id] ? h('span', { class: 'wc-warn' }, t('corrupt')) : null)));
+    });
+    var list = h('ul', { class: 'wc-aplist' }, s.aps.map(function (a) {
+      return h('li', null, h('span', { class: 'wc-dotsm sd-fill', dataset: { c: colourOf(a.id) }, translate: 'no' }, a.id),
+        t.parts('apChannel', { ch: data(a.label) }), ' · ', t('airtime'), ' ', bold(share(s, a.id)),
+        s.warned[a.id] ? h('span', { class: 'wc-warn' }, '⚠') : null);
+    }));
+    return h('section', { class: 'wc-floorcol' },
+      h('div', { class: 'wc-h' }, h('span', null, t('floorTitle'))),
+      h('div', { class: 'wc-floor', style: { '--ratio': String(v.w / v.h) } }, kids), list);
+  }
+
+  function pairsView(s) {
+    return h('section', { class: 'wc-pairs' },
+      h('div', { class: 'wc-h' }, h('span', null, t('pairsTitle'))),
+      h('table', { class: 'wc-table' },
+        h('thead', null, h('tr', null, h('th', null, t('colPair')), h('th', null, t('colDist')), h('th', null, t('colHear')), h('th', null, t('colKind')))),
+        h('tbody', null, s.pairs.map(function (q) {
+          var a = apById(s, q.a), b = apById(s, q.b);
+          var kind;
+          if (q.kind === 'cci') kind = h('span', { class: 'wc-kind wc-kind-cci' }, t('kindCci'));
+          else if (q.kind === 'overlap') kind = h('span', { class: 'wc-kind wc-kind-overlap' }, t('kindOverlap', { mhz: num(q.overlap) }));
+          else kind = !q.inRange && L.kindOf(a, b, true) !== 'none' ? t('kindFar') : t('kindNone');
+          return h('tr', { class: (q.inRange ? '' : 'wc-far') + (delta.pairs.indexOf(q.a + q.b) >= 0 ? ' sd-changed' : '') },
+            h('td', null,
+              h('span', { class: 'wc-dotsm sd-fill', dataset: { c: colourOf(q.a) }, translate: 'no' }, q.a), ' ',
+              h('span', { class: 'wc-dotsm sd-fill', dataset: { c: colourOf(q.b) }, translate: 'no' }, q.b)),
+            h('td', { class: 'wc-num' }, t.parts('dist', { d: data(num(q.dist)) })),
+            h('td', null, q.inRange ? t('yes') : t('no')),
+            h('td', null, kind));
+        }))));
+  }
+
+  // ── spectrum ──
+
+  /** Ticks under the strip: the band's 20 MHz channel numbers, then MHz at the edges (and sub-band edges at 5 GHz). */
+  var MHZ = { '2.4': [2400, 2420, 2440, 2460, 2483.5], '5': [5150, 5250, 5350, 5470, 5725] };
+
+  function specView(s) {
+    var span = s.span, wid = span.hi - span.lo;
+    var at = function (f) { return ((f - span.lo) / wid * 100) + '%'; };
+    var w = function (lo, hi) { return ((hi - lo) / wid * 100) + '%'; };
+    var back = [], labels = [];
+    if (s.band === '5') {
+      L.SUBBANDS.forEach(function (sb, i) {
+        back.push(h('div', { class: 'wc-sub' + (sb.kind === 'dfs' ? ' wc-sub-dfs' : sb.kind === 'closed' ? ' wc-sub-closed' : '') + (i ? ' wc-sub-edge' : ''),
+          style: { left: at(sb.lo), width: w(sb.lo, sb.hi) } }));
+        var word = sb.kind === 'dfs' ? t('subDfs') : sb.kind === 'closed' ? t('subClosed') : t('subIndoor');
+        labels.push(h('span', { class: 'wc-sublab' + (sb.kind === 'dfs' ? '' : ' wc-quiet'), style: { left: at((sb.lo + sb.hi) / 2) } }, word));
+      });
+    }
+    var lanes = [];
+    for (var i = 0; i < s.aps.length; i++) lanes.push(h('div', { class: 'wc-lane' }));
+    // narrow blocks (5 GHz at 20 MHz) show the letter only; the channel number is on the axis under them
+    var narrow = (s.width / wid) < 0.06;
+    s.aps.forEach(function (a) {
+      var ch = delta.aps.indexOf(a.id) >= 0;
+      lanes[a.lane].append(h('div', {
+        class: 'wc-block sd-fill' + (ch ? ' sd-changed' : ''), dataset: { c: colourOf(a.id) },
+        style: { left: at(a.lo), width: w(a.lo, a.hi) },
+        'aria-label': t('blockAria', { ap: a.id, ch: a.label, lo: num(a.lo), hi: num(a.hi) })
+      }, data(a.id), narrow ? null : h('small', { translate: 'no' }, a.label)));
+    });
+    var ovl = s.pairs.filter(function (q) { return q.kind === 'overlap'; });
+    var over = ovl.map(function (q) { return h('div', { class: 'wc-ovcol', style: { left: at(q.from), width: w(q.from, q.to) } }); });
+    var segs = ovl.map(function (q) { return h('div', { class: 'wc-ovseg', style: { left: at(q.from), width: w(q.from, q.to) } }); });
+    var chans = L.channels(s.band, 20);
+    var axis = chans.map(function (c, i) {
+      // every channel number; on a phone every other one
+      return h('span', { translate: 'no', class: i % 2 ? 'wc-thin' : null, style: { left: at(c.centre) } }, String(c.ch));
+    });
+    var mhz = MHZ[s.band].map(function (f, i, all) {
+      return h('span', { translate: 'no', class: i === 0 ? 'wc-l' : i === all.length - 1 ? 'wc-r' : i % 2 ? 'wc-thin' : null, style: { left: at(f) } }, num(f));
+    });
+    return h('section', { class: 'wc-spec' },
+      h('div', { class: 'wc-h' }, h('span', null, t('specTitle', { band: s.band === '5' ? t('band5') : t('band24') })),
+        h('small', null, t.parts('specRange', { lo: data(num(span.lo)), hi: data(num(span.hi)), w: data(s.width) }))),
+      h('div', { class: 'wc-sgrid' },
+        h('span'), h('div', { class: 'wc-row' }, labels),
+        h('span'), h('div', { class: 'wc-row wc-lanes', style: { position: 'relative' } }, back, lanes, over),
+        h('span', { class: 'wc-gut wc-warn', 'aria-hidden': 'true' }, s.band === '5' ? '' : '⚠'), h('div', { class: 'wc-row' }, segs),
+        h('span', { class: 'wc-gut' }, t('axisCh')), h('div', { class: 'wc-row wc-axis' }, axis),
+        h('span', { class: 'wc-gut' }, 'MHz'), h('div', { class: 'wc-row wc-axis wc-mhz' }, mhz)));
+  }
+
+  // ── params and presets ──
+
+  function chSlider(id) {
+    return {
+      key: L.CH_KEYS[id], type: 'range', label: t('chLabel', { ap: id }), min: 0, step: 1,
+      max: function (p) { return L.listFor(p).length - 1; },
+      format: function (v) {
+        var c = L.listFor(cur)[v];
+        return c ? t('chValue', { ch: c.label }) : String(v);
+      },
+      visible: id === 'D' ? function (p) { return p.layout === 'square4'; } : null
+    };
+  }
+
+  // ── a change of width or band keeps the plan: back to a band/width left unedited, its old channels come back;
+  // otherwise, within one band, every AP moves to the channel holding its old primary (L.remap). The kit has already
+  // clamped the channel indices by then, so the listener puts the right ones in with one more set(). ──
+  var CHS = ['chA', 'chB', 'chC', 'chD'];
+  var memory = {}, arrived = {}, prev = null;
+  function planOf(p) { var o = {}; CHS.forEach(function (k) { o[k] = p[k]; }); return o; }
+  function untouched(at, p) { return !!at && Object.keys(at).every(function (k) { return at[k] === p[k]; }); }
+  function bandKey(s) { return s.band + '/' + s.width; }
+  /** Only band and width changed (the channels at most clamped by the kit): not a preset, a reset or a slider. */
+  function isSwitch(a, b) {
+    var max = L.listFor(b).length - 1, moved = false;
+    for (var k in L.defaults) {
+      if (CHS.indexOf(k) >= 0) { if (b[k] !== Math.min(a[k], max)) return false; }
+      else if (a[k] !== b[k]) { if (['band', 'width24', 'width5'].indexOf(k) < 0) return false; moved = true; }
+    }
+    return moved;
+  }
+  function keepPlan(sim, c) {
+    var key = bandKey(c.state);
+    if (prev && !c.preset && isSwitch(prev.params, c.params)) {
+      var from = bandKey(prev.state), target = null;
+      var sameBand = prev.state.band === c.state.band;
+      if (memory[key] && (!sameBand || untouched(arrived[from], prev.params))) target = memory[key];
+      else if (sameBand) target = L.remap(prev.state.aps, c.state.band, c.state.width);
+      if (target && from !== key) {
+        memory[from] = planOf(prev.params);
+        arrived[key] = target;
+        lastParams = prev.params; // "changed" compares with the plan before the switch, not the clamped one
+        lastState = prev.state;
+        prev = null;
+        sim.set(target);
+        return;
+      }
+    }
+    memory[key] = planOf(c.params);
+    prev = { params: Object.assign({}, c.params), state: c.state };
+  }
+
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'band', type: 'choice', label: t('band'), options: [['2.4', t('band24')], ['5', t('band5')]] },
+      { key: 'width24', type: 'choice', label: t('width'), options: [[20, '20'], [22, t('w22')], [40, '40']],
+        visible: function (p) { return p.band !== '5'; } },
+      { key: 'width5', type: 'choice', label: t('width'), options: [[20, '20'], [40, '40'], [80, '80'], [160, '160']],
+        visible: function (p) { return p.band === '5'; } },
+      { key: 'layout', type: 'choice', label: t('layout'), options: [['row3', t('layoutRow')], ['square4', t('layoutSquare')]] },
+      { key: 'range', type: 'range', label: t('range'), min: 10, max: 60, step: 5, unit: 'm' },
+      chSlider('A'), chSlider('B'), chSlider('C'), chSlider('D')
+    ],
+
+    presets: L.presets.map(function (p) {
+      return { id: p.id, label: t('preset_' + p.id), hint: t('presetHint_' + p.id), params: p.params };
+    }),
+
+    legend: [
+      { c: 1, label: t('legendAp') },
+      { shape: 'line', label: t('legendCci') },
+      { shape: 'ovl', label: t('legendOverlap') },
+      { shape: 'dfs', label: t('legendDfs') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      cur = c.params;
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'wc' },
+        h('div', { class: 'wc-top' }, floorView(s), pairsView(s)),
+        specView(s)));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      var ap = function (id) { return bold(id); };
+      var out = [];
+      var ovl = s.pairs.filter(function (q) { return q.kind === 'overlap'; });
+      var cci = s.pairs.filter(function (q) { return q.kind === 'cci'; });
+      if (ovl.length) {
+        var o = ovl[0], oa = apById(s, o.a), ob = apById(s, o.b);
+        out = out.concat(t.parts('capOverlap', { cha: bold(oa.label), chb: bold(ob.label), a: ap(o.a), b: ap(o.b), mhz: bold(num(o.overlap)) }));
+        if (ovl.length > 1) out.push(t.n('capMoreOverlap', ovl.length - 1, { n: ovl.length - 1 }));
+        cci.slice(0, 2).forEach(function (c2) {
+          out = out.concat(t.parts('capCciAlso', { a: ap(c2.a), b: ap(c2.b), ch: bold(apById(s, c2.a).label) }));
+        });
+        if (s.band === '2.4') out.push(s.width === 40 ? t('capUse40') : t('capUse1611'));
+        return out;
+      }
+      if (cci.length) {
+        var q = cci[0], vars = { a: ap(q.a), b: ap(q.b), ch: bold(apById(s, q.a).label) };
+        if (cci.length === 1) return t.parts('capHalf', vars);
+        // the APs that share each channel, in channel order of first appearance
+        var groups = [];
+        s.aps.forEach(function (a) {
+          if (!s.sharers[a.id]) return;
+          var g = groups.filter(function (x) { return x.label === a.label; })[0];
+          if (!g) groups.push(g = { label: a.label, ids: [] });
+          g.ids.push(a.id);
+        });
+        out = [];
+        groups.forEach(function (g, i) {
+          out = out.concat(t.parts(i ? 'capShareMore' : 'capShareFirst', { aps: listOf(g.ids.map(ap)), ch: bold(g.label) }));
+        });
+        var shared = s.aps.filter(function (a) { return s.sharers[a.id] > 0; });
+        return out.concat(t.parts('capShareEnd', {}), t.parts('capAirtime', {
+          list: h('span', null, shared.map(function (a, i) { return [i ? ', ' : '', ap(a.id), ' ', bold(share(s, a.id))]; }))
+        }));
+      }
+      out = s.pairs.some(function (p) { return p.inRange; }) ? [t('capClean')] : t.parts('capAlone', { m: bold(s.range) });
+      var dfs = [];
+      s.aps.forEach(function (a) { if (a.dfs && dfs.indexOf(a.label) < 0) dfs.push(a.label); });
+      if (dfs.length) out = out.concat(t.parts('capDfs', { list: listOf(dfs.map(bold)), n: dfs.length }));
+      return out;
+    }
+  });
+  prev = { params: sim.params, state: sim.state };
+  sim.on(function (c) { keepPlan(sim, c); });
+})();
+</script>
+</body>
+</html>
