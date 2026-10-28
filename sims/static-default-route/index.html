@@ -1,0 +1,452 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- static-default-route: a ping from A over A — R1 — R2 — R3 — ISP (B behind R2), with static and default routes the
+     student switches on. A stepper: one node handles one packet per step (send, forward, drop, or the ISP takes it).
+     Kit view K2 draws the chain; under it the packet, the three routing tables with the matched row, and the packet's
+     path with what A sees. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="static-default-route">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statički i zadani put · simdeck</title>
+<meta name="description" content="Dodaj statičke i zadane putove na tri usmjernika i pošalji ping: odgovor treba put natrag, /24 pobjeđuje /0, a krivi zadani put vrti petlju do isteka TTL-a.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "static-default-route",
+  "title": {
+    "hr": "Statički i zadani put",
+    "en": "Static and default routes"
+  },
+  "concept": {
+    "hr": "Zadani put hvata sve što ništa specifičnije ne hvata; petlju zaustavlja TTL",
+    "en": "The default route catches what nothing more specific does; TTL ends a loop"
+  },
+  "summary": {
+    "hr": "Dodaj statičke i zadane putove na tri usmjernika i pošalji ping: odgovor treba put natrag, /24 pobjeđuje /0, a krivi zadani put vrti petlju do isteka TTL-a.",
+    "en": "Add static and default routes on three routers and ping: the reply needs its own way back, /24 beats /0, and a wrong default route loops until the TTL runs out."
+  },
+  "tags": [
+    "routing"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="static-default-route"]; colours only from kit tokens.
+   Layout: the K2 chain on top (B in row 0 above R2; A, R1, R2, R3, ISP in row 1, an empty column between neighbours
+   for the packet chips); under it five columns sized 1.5 : 2 : 2 : 2 : 1.5 of the nine topology columns, so each
+   router's table sits under its router: the packet on the left, the tables, the path and what A sees on the right. */
+[data-sim="static-default-route"] .sr {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="static-default-route"] .sr .sd-topo { row-gap: 2rem; }
+[data-sim="static-default-route"] .sr-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 2fr) minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr);
+  gap: 0.8cqw;
+  min-height: 0;
+}
+[data-sim="static-default-route"] .sr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem 0.5rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-sim="static-default-route"] .sr-box h2 { margin: 0 0 0.3rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="static-default-route"] .sr-box[data-active] { border-color: var(--ink); border-width: 3px; }
+[data-sim="static-default-route"] .sr-muted { color: var(--muted); }
+[data-sim="static-default-route"] .sr-none { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+
+/* the packet: label above value, one pair per line */
+[data-sim="static-default-route"] .sr-kv { margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="static-default-route"] .sr-kv dt { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="static-default-route"] .sr-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
+[data-sim="static-default-route"] .sr-kv .sr-ttl { display: inline-block; padding: 0 0.35rem; border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; font-size: 1.15rem; }
+[data-sim="static-default-route"] .sr-kind { display: inline-block; padding: 0 0.45rem; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="static-default-route"] .sr-kind[data-k="icmp"] { background: var(--bg); color: var(--ink); border: 0.15rem dashed var(--danger); }
+[data-sim="static-default-route"] .sr-fate[data-k="drop"] { color: var(--danger); font-weight: 700; }
+[data-sim="static-default-route"] .sr-fate[data-k="drop"]::before { content: '✕ '; }
+[data-sim="static-default-route"] .sr-fate[data-k="ok"]::before { content: '✓ '; font-weight: 700; }
+
+/* a routing table: one entry per item, the kind tag as text, the hop under the network, the mark under that */
+[data-sim="static-default-route"] .sr-tab ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="static-default-route"] .sr-tab li {
+  display: grid;
+  grid-template-columns: 2.1rem minmax(0, 1fr);
+  column-gap: 0.3rem;
+  padding: 0.1rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  line-height: 1.2;
+}
+[data-sim="static-default-route"] .sr-tag { grid-row: span 2; align-self: start; font-family: var(--mono); font-weight: 700; }
+[data-sim="static-default-route"] .sr-net { font-family: var(--mono); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+[data-sim="static-default-route"] .sr-hop { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="static-default-route"] .sr-mark { grid-column: 1 / -1; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="static-default-route"] .sr-tab li[data-m="win"] { border-color: var(--ink); border-width: 0.22rem; }
+[data-sim="static-default-route"] .sr-tab li[data-m="win"] .sr-mark::before { content: '▶ '; }
+[data-sim="static-default-route"] .sr-tab li[data-m="beaten"] { border-style: dashed; border-color: var(--ink); }
+[data-sim="static-default-route"] .sr-tab li[data-m="beaten"] .sr-mark { font-weight: 400; }
+[data-sim="static-default-route"] .sr-tab li[data-m="beaten"] .sr-mark::before { content: '▽ '; }
+[data-sim="static-default-route"] .sr-tab li[data-m="refused"] { border-style: dashed; color: var(--muted); background: var(--panel); }
+[data-sim="static-default-route"] .sr-tab li[data-m="refused"] .sr-net { text-decoration: line-through; }
+[data-sim="static-default-route"] .sr-tab li[data-m="refused"] .sr-mark { font-weight: 400; }
+[data-sim="static-default-route"] .sr-tab li.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="static-default-route"] .sr-tab li.sd-changed .sr-hop { color: var(--on-hl); }
+[data-sim="static-default-route"] .sr-nomatch { margin: 0.35rem 0 0; padding: 0.15rem 0.4rem; border: 0.2rem solid var(--danger); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="static-default-route"] .sr-nomatch::before { content: '✕ '; color: var(--danger); }
+
+/* the path of this packet and what A sees */
+[data-sim="static-default-route"] .sr-right { display: flex; flex-direction: column; gap: 0.8cqh; min-height: 0; }
+[data-sim="static-default-route"] .sr-right .sr-path { flex: 1 1 auto; }
+[data-sim="static-default-route"] .sr-trail { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.2rem 0.15rem; font-size: var(--fs-sm); }
+[data-sim="static-default-route"] .sr-trail li { display: flex; align-items: baseline; gap: 0.15rem; }
+[data-sim="static-default-route"] .sr-trail li + li::before { content: '→'; color: var(--muted); margin-right: 0.15rem; }
+[data-sim="static-default-route"] .sr-trail b { font-family: var(--mono); }
+[data-sim="static-default-route"] .sr-trail span { font-family: var(--mono); color: var(--muted); }
+[data-sim="static-default-route"] .sr-trail li[data-zero] span { color: var(--danger); font-weight: 700; }
+[data-sim="static-default-route"] .sr-sees p { margin: 0; font-weight: 700; line-height: 1.3; }
+[data-sim="static-default-route"] .sr-sees p[data-k="wait"] { font-weight: 400; color: var(--muted); }
+[data-sim="static-default-route"] .sr-sees p[data-k="silence"] { padding: 0.1rem 0.35rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); }
+
+/* K2: an ICMP error's chip is dashed with a danger border (its arrow is dashed by the view); short cards */
+[data-sim="static-default-route"] .sr-icmp .sd-topo-chip { background: var(--bg); color: var(--ink); border: 0.15rem dashed var(--danger); }
+[data-sim="static-default-route"] .sd-topo-card .sd-topo-mark { grid-row: auto; }
+[data-sim="static-default-route"] .sd-topo-card .sd-topo-sub { grid-column: 1 / -1; white-space: nowrap; }
+/* six route switches: a tighter column, so the panel fits at 1920×1080 */
+[data-sim="static-default-route"] [data-sd-controls] .sd-group { gap: 0.1rem; }
+[data-sim="static-default-route"] [data-sd-controls] .sd-ctl-toggle { gap: 0; }
+[data-sim="static-default-route"] .sd-presets { gap: 0.25rem; }
+[data-sim="static-default-route"] [data-sd-controls] .sd-ctl-choice { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 0.8rem; }
+[data-sim="static-default-route"] [data-sd-controls] .sd-ctl-choice .sd-seg { flex: 1 1 14rem; }
+
+/* legend swatches the kit does not have: the ICMP error, the drop, the kind tags */
+[data-sim="static-default-route"] .sd-swatch[data-shape="icmp"] { background: var(--bg); border: 0.15rem dashed var(--danger); }
+[data-sim="static-default-route"] .sd-swatch[data-shape="x"] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); }
+[data-sim="static-default-route"] .sd-swatch[data-shape="x"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+[data-sim="static-default-route"] .sd-swatch[data-shape="tag"] { background: var(--bg); border-color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content and the boxes stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="static-default-route"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="static-default-route"] .sr { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="static-default-route"] .sr-bottom { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+  [data-sim="static-default-route"] .sd-topo-card .sd-topo-sub { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Statički i zadani put</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { A: '3', R1: '4', R2: '6', R3: '5', B: '7' };
+  var KIND_C = { echo: '1', reply: '2' };
+  var COL = { A: 0, R1: 2, R2: 4, R3: 6, ISP: 8, B: 4 };
+  var ROUTER_OF = {};                                       // next-hop address → router name, for "192.168.100.2 (R2)"
+  Object.keys(L.ROUTERS).forEach(function (r) { L.ROUTERS[r].forEach(function (f) { ROUTER_OF[f.ip] = r; }); });
+  ROUTER_OF[L.ISP_IP] = 'ISP';
+
+  /** Data (addresses, node ids, prefixes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule); a placeholder used twice is cloned. */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function tc(m) { return m.type + '/' + m.code; }
+  function icmpWhat(m) { return t(m.type === 11 ? 'i110' : 'i30'); }
+  function kindWord(m) { return t(m.kind === 'echo' ? 'wEcho' : m.kind === 'reply' ? 'wReply' : 'wIcmp'); }
+  function chipOf(m) {
+    if (m.kind === 'icmp') return t('chipIcmp', { tc: tc(m), ttl: m.ttl });
+    return t(m.kind === 'echo' ? 'chipEcho' : 'chipReply', { ttl: m.ttl });
+  }
+  /** "192.168.100.2 (R2)" for a static route's next hop. */
+  function hopOf(row) { return row.via + ' (' + ROUTER_OF[row.via] + ')'; }
+  function routeText(row) { return row.net + '/' + row.prefix; }
+
+  // ── topology (kit view K2) ──
+
+  /** The node acting in this step, and the host that receives. */
+  function badgesFor(id, s) {
+    var out = [];
+    if (s.ev === 'start' && id === 'A') out.push({ text: t('bSends'), k: 'fill' });
+    if (s.node === id && s.ev === 'send') out.push({ text: t('bSends'), k: 'fill' });
+    if (s.node === id && s.ev === 'forward') out.push({ text: t('bForwards'), k: 'solid' });
+    if (s.node === id && s.ev === 'drop') out.push({ text: t('bDrops'), k: 'dashed' });
+    if (s.node === id && s.ev === 'out') out.push({ text: t('bTakes'), k: 'solid' });
+    if (s.arrive === id) out.push({ text: t('bGets'), k: 'fill' });
+    if (s.node === id && s.visit > 1) out.push({ text: t('bVisit', { k: s.visit }), k: 'muted' });
+    return out;
+  }
+
+  function renderTopo(c) {
+    var s = c.state;
+    function node(id, kind, row, lines, extra) {
+      var acting = s.ev !== 'start' && (s.node === id || s.arrive === id);
+      return Object.assign({ id: id, kind: kind, col: COL[id], row: row, c: COLOUR[id], lines: lines, badges: badgesFor(id, s),
+        state: acting || (s.ev === 'start' && id === 'A') ? 'active' : null, changed: acting }, extra || {});
+    }
+    var nodes = [                                           // path order: the phone list reads A, R1, R2, B, R3, ISP
+      node('A', 'host', 1, [{ text: t('host'), kind: 'role' }, { text: L.HOSTS.A.ip, kind: 'sub' }]),
+      node('R1', 'router', 1, [{ text: t('router'), kind: 'role' }]),
+      node('R2', 'router', 1, [{ text: t('router'), kind: 'role' }]),
+      node('B', 'host', 0, [{ text: t('host'), kind: 'role' }, { text: L.HOSTS.B.ip, kind: 'sub' }]),
+      node('R3', 'router', 1, [{ text: t('router'), kind: 'role' }]),
+      node('ISP', 'cloud', 1, [{ text: L.ISP_IP, kind: 'sub' }], { name: t('isp'), c: null })
+    ];
+    var links = [{ id: 'aR1', a: 'A', b: 'R1' }, { id: 'r12', a: 'R1', b: 'R2' }, { id: 'r2B', a: 'R2', b: 'B' },
+      { id: 'r23', a: 'R2', b: 'R3' }, { id: 'r3I', a: 'R3', b: 'ISP' }];
+    var packets = [], p = s.packet;
+    var on = function (a, z) { links.forEach(function (l) { if ((l.a === a && l.b === z) || (l.b === a && l.a === z)) l.active = true; }); };
+    if (p && (s.ev === 'send' || s.ev === 'forward')) {
+      packets.push({ from: s.node, to: s.to, label: chipOf(p), c: KIND_C[p.kind] || null, cast: p.kind === 'icmp' ? 'broadcast' : null });
+      on(s.node, s.to);
+    } else if (p && (s.ev === 'drop' || s.ev === 'out')) {
+      // the packet as it arrived (a drop for TTL shows the 1 it came with), crossed out where it died
+      var arrived = Object.assign({}, p, { ttl: s.ev === 'drop' ? s.ttlIn : p.ttl });
+      packets.push({ from: s.from, to: s.node, label: chipOf(arrived), c: KIND_C[p.kind] || null, cast: p.kind === 'icmp' ? 'broadcast' : null,
+        drop: s.ev === 'drop' || s.lost, move: false });
+    }
+    return Simdeck.topology({ cols: 9, rows: ['auto', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets,
+      className: p && p.kind === 'icmp' ? 'sr-icmp' : null });
+  }
+
+  // ── the packet ──
+
+  function renderPacket(c) {
+    var s = c.state, m = s.packet;
+    var box = h('section', { class: 'sr-box sr-pkt' }, h('h2', null, t('pktTitle')));
+    if (!m) { box.append(h('p', { class: 'sr-none' }, t('pktNone'))); return box; }
+    var kind = m.kind === 'icmp'
+      ? h('span', { class: 'sr-kind', dataset: { k: 'icmp' } }, t('kIcmp', { tc: tc(m) }))
+      : h('span', { class: 'sr-kind sd-fill', dataset: { c: KIND_C[m.kind], k: m.kind } }, t(m.kind === 'echo' ? 'kEcho' : 'kReply'));
+    var ttlChanged = s.ev === 'forward' || s.ev === 'drop' && s.outcome === 'ttl-expired';
+    var ttl = h('span', { class: 'sr-ttl' + (ttlChanged ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''), translate: 'no' },
+      ttlChanged ? s.ttlIn + ' → ' + m.ttl : String(m.ttl));
+    var fate, fk = null;
+    if (s.outcome === 'delivered') { fate = t('oDelivered', { node: s.arrive }); fk = 'ok'; }
+    else if (s.outcome === 'no-route') { fate = t('oNoRoute', { node: s.node }); fk = 'drop'; }
+    else if (s.outcome === 'ttl-expired') { fate = t('oTtl', { node: s.node }); fk = 'drop'; }
+    else if (s.outcome === 'left') { fate = t(s.lost ? 'oLost' : 'oLeft'); fk = s.lost ? 'drop' : null; }
+    else fate = t('oFlight', { node: s.to });
+    var row = function (label, value) { return [h('dt', null, t(label)), h('dd', null, value)]; };
+    box.append(h('dl', { class: 'sr-kv' },
+      row('fKind', [kind, m.kind === 'icmp' ? h('div', { class: 'sr-muted' }, icmpWhat(m)) : null]),
+      row('fSrcDst', [data(m.src), h('br'), '→ ', data(m.dst)]),
+      row('fTtl', ttl),
+      row('fFate', h('span', { class: 'sr-fate', dataset: fk ? { k: fk } : {} }, fate))));
+    return box;
+  }
+
+  // ── the routing tables ──
+
+  function renderTable(r, c) {
+    var s = c.state, rows = s.tables[r], look = s.lookup && s.lookup.node === r ? s.lookup : null;
+    var items = rows.map(function (row, i) {
+      var m = null, mark = null;
+      if (look && i === look.winner) { m = 'win'; mark = t(look.matches.length === 1 ? 'markOnly' : 'markWin'); }
+      else if (look && look.matches.indexOf(i) >= 0) { m = 'beaten'; mark = t('markBeaten'); }
+      return h('li', { class: m === 'win' ? 'sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : null, dataset: m ? { m: m } : {} },
+        h('span', { class: 'sr-tag', translate: 'no' }, row.kind),
+        h('span', { class: 'sr-net', translate: 'no' }, routeText(row)),
+        h('span', { class: 'sr-hop' }, row.via ? data(hopOf(row), '') : t.parts('direct', { iface: data(row.iface, '') })),
+        mark ? h('span', { class: 'sr-mark' }, mark) : null);
+    });
+    s.refused.filter(function (x) { return x.router === r; }).forEach(function (x) {
+      var o = L.OPTIONS[L.KEYS.indexOf(x.key)];
+      items.push(h('li', { dataset: { m: 'refused' } },
+        h('span', { class: 'sr-tag', translate: 'no' }, 'S*'),
+        h('span', { class: 'sr-net', translate: 'no' }, routeText(o)),
+        h('span', { class: 'sr-hop' }, data(hopOf(o), '')),
+        h('span', { class: 'sr-mark' }, t('refused'))));
+    });
+    var box = h('section', { class: 'sr-box sr-tab', dataset: look ? { active: '1' } : {} },
+      h('h2', null, t.parts('tabTitle', { r: data(r, '') })), h('ol', null, items));
+    if (look && look.winner < 0) box.append(h('p', { class: 'sr-nomatch' }, t('noMatch')));
+    return box;
+  }
+
+  // ── the path and what A sees ──
+
+  function renderRight(c) {
+    var s = c.state;
+    var path = h('section', { class: 'sr-box sr-path' }, h('h2', null, t('pathTitle')));
+    if (!s.path.length) path.append(h('p', { class: 'sr-none' }, '–'));
+    else path.append(h('ol', { class: 'sr-trail', translate: 'no' }, s.path.map(function (x) {
+      return h('li', { dataset: x.dropped ? { zero: '1' } : {} }, h('b', null, x.node), h('span', null, String(x.ttl) + (x.dropped ? ' ✕' : '')));
+    })));
+    var seen = s.seen, p;
+    if (!seen) p = h('p', { dataset: { k: 'wait' } }, t('aWait'));
+    else if (seen.kind === 'reply') p = h('p', null, '✓ ', t('aReply'));
+    else if (seen.kind === 'icmp') p = h('p', null, t.parts('aIcmp', { tc: data(seen.type + '/' + seen.code, ''), src: data(seen.src) }));
+    else if (seen.kind === 'left') p = h('p', null, t('aLeft'));
+    else p = h('p', { dataset: { k: 'silence' } }, t('aSilence'));
+    if (seen && c.prev && !c.prev.seen) p.classList.add('sd-changed');
+    return h('div', { class: 'sr-right' }, path, h('section', { class: 'sr-box sr-sees' }, h('h2', null, t('aTitle')), p));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, m = s.packet, D = function (v) { return data(v); }, B = function (v) { return b(v); };
+    var out = [];
+    var add = function (parts) { if (out.length) out.push(' '); out.push.apply(out, parts); };
+    if (s.ev === 'start') {
+      if (s.refused.length) add(rich('capRefused'));
+      add(rich('capStart', { dst: B(s.dst), ttl: D(s.ttl0) }));
+      return out;
+    }
+    var look = s.lookup, table = look ? s.tables[look.node] : null, row = look && look.winner >= 0 ? table[look.winner] : null;
+    if (s.ev === 'send') {
+      if (s.node === 'A') add(rich('capSendA', { dst: D(m.dst), net: D(s.host.net), gw: D(s.host.gw), ttl: B(m.ttl) }));
+      else if (s.node === 'B') add(rich('capSendB', { dst: D(m.dst), gw: D(s.host.gw) }));
+      else add(rich(m.dst === L.HOSTS.B.ip && m.about === 'reply' ? 'capSendIcmpB' : 'capSendIcmp',
+        { r: data(s.node, ''), tc: D(tc(m)), what: icmpWhat(m), dst: D(m.dst), src: B(m.src) }));
+      if (row) {                                            // the error is looked up like any packet: which entry sends it
+        var ev = { dst: D(m.dst), net: B(routeText(row)), iface: D(row.iface), via: row.via ? D(hopOf(row)) : null };
+        add(rich(row.kind === 'C' ? 'errViaC' : row.kind === 'S' ? 'errViaS' : 'errViaD', ev));
+      }
+    } else if (s.ev === 'forward') {
+      var v = { r: data(s.node, ''), dst: D(m.dst), net: B(routeText(row)), a: D(s.ttlIn), b: B(m.ttl) };
+      if (row.kind === 'C') add(rich('capFwdC', Object.assign(v, { iface: D(row.iface) })));
+      else add(rich(row.kind === 'S' ? 'capFwdS' : 'capFwdD', Object.assign(v, { via: D(hopOf(row)) })));
+      if (look.matches.length > 1) add(beat(look, table, row));
+      if (s.visit > 1) add(rich('capLoop', { r: data(s.node, ''), k: D(s.visit) }));
+    } else if (s.ev === 'drop') {
+      if (s.outcome === 'no-route') {
+        add(rich('capDropNoRoute', { r: data(s.node, ''), dst: D(m.dst), what: kindWord(m) }));
+        if (m.kind === 'reply') add(rich('capDropReplyTail'));
+      } else {
+        add(rich('capDropTtl', { r: data(s.node, ''), dst: D(m.dst), what: kindWord(m) }));
+        if (s.visit > 1) add(rich('capDropTtlLoop'));
+      }
+      if (s.noError === 'about-icmp') add(rich('capNoErrIcmp'));
+      if (s.noError === 'no-route-to-source') add(rich('capNoErrRoute', { r: data(s.node, ''), src: D(m.src) }));
+    } else if (s.ev === 'out') {
+      add(rich(s.lost ? 'capOutLost' : 'capOut', { dst: D(m.dst) }));
+    }
+    if (s.arrive) {
+      if (m.kind === 'echo') add(rich('capArriveEcho'));
+      else if (m.kind === 'reply') add(rich('capArriveReply', { ttl: B(m.ttl) }));
+      else if (s.arrive === 'A') add(rich('capArriveIcmpA', { tc: D(tc(m)), src: B(m.src), what: icmpWhat(m) }));
+      else add(rich('capArriveIcmpB', { tc: D(tc(m)) }));
+    }
+    if (s.refused.length) add(rich('capRefused'));        // rule 9: a refused route stays named while the switch reads "on"
+    return out;
+  }
+
+  /** "0.0.0.0/0 matches too, but 192.168.1.0/24 has the longer prefix and wins …" */
+  function beat(look, table, row) {
+    var other = look.matches.filter(function (i) { return i !== look.winner; }).map(function (i) { return routeText(table[i]); }).join(', ');
+    return rich('capBeat', { other: data(other), win: data(routeText(row)) });
+  }
+
+  function routeToggle(key) {
+    return { key: key, type: 'toggle', label: t(key), disabled: function (p) { return L.blockedBy(p, key) ? t('blocked') : false; } };
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: L.KEYS.map(routeToggle).concat([
+      { key: 'dst', type: 'choice', label: t('dst'), options: [['B', t('dstB')], ['8.8.8.8', '8.8.8.8'], ['198.51.100.7', '198.51.100.7']] },
+      { key: 'ttl', type: 'range', label: t('ttl'), min: L.TTL_MIN, max: L.TTL_MAX }
+    ]),
+
+    presets: [
+      { id: 'both-ways', label: t('presetBoth'), params: { r1Static: true, r1Default: false, r2Static: true, r2Default: false, r3Default: false, r3Back: false, dst: 'B', ttl: 64 }, hint: t('presetBothHint') },
+      { id: 'one-way', label: t('presetOne'), params: { r1Static: true, r1Default: false, r2Static: false, r2Default: false, r3Default: false, r3Back: false, dst: 'B', ttl: 64 }, hint: t('presetOneHint') },
+      { id: 'default', label: t('presetDefault'), params: { r1Static: false, r1Default: true, r2Static: true, r2Default: false, r3Default: false, r3Back: false, dst: 'B', ttl: 64 }, hint: t('presetDefaultHint') },
+      { id: 'to-internet', label: t('presetInternet'), params: { r1Static: false, r1Default: true, r2Static: false, r2Default: true, r3Default: true, r3Back: false, dst: '8.8.8.8', ttl: 64 }, hint: t('presetInternetHint') },
+      { id: 'loop', label: t('presetLoop'), params: { r1Static: false, r1Default: true, r2Static: true, r2Default: true, r3Default: false, r3Back: true, dst: '198.51.100.7', ttl: 8 }, hint: t('presetLoopHint') }
+    ],
+
+    legend: [
+      { c: 1, label: t('legReq') },
+      { c: 2, label: t('legReply') },
+      { shape: 'icmp', label: t('legIcmp') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'tag', label: t('legKinds') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'sr' },
+        renderTopo(c),
+        h('div', { class: 'sr-bottom' }, renderPacket(c), renderTable('R1', c), renderTable('R2', c), renderTable('R3', c), renderRight(c))));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
