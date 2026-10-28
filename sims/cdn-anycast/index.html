@@ -1,0 +1,409 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cdn-anycast: three PoPs of one CDN network announce the same prefix; every other AS reaches the PoP at the end of
+     its best BGP path. An explorer: the params (which PoPs announce, which links are up, one local preference) give
+     the converged tables at once. Kit view K2 draws the PoPs, the ASes, the links and the chosen paths; the side column
+     holds each AS's stored paths with the best marked. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cdn-anycast">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anycast i rubna mjesta CDN-a · simdeck</title>
+<meta name="description" content="Tri PoP-a najavljuju isti prefiks; svaki AS ide na kraj svog najboljeg BGP puta. Povuci PoP, prekini vezu ili promijeni lokalnu prednost.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cdn-anycast",
+  "title": {
+    "hr": "Anycast i rubna mjesta CDN-a",
+    "en": "Anycast and CDN edges"
+  },
+  "concept": {
+    "hr": "Jedna adresa na više mjesta; BGP bira najbliže",
+    "en": "One address, many places; BGP picks the nearest"
+  },
+  "summary": {
+    "hr": "Tri PoP-a najavljuju isti prefiks; svaki AS ide na kraj svog najboljeg BGP puta. Povuci PoP, prekini vezu ili promijeni lokalnu prednost.",
+    "en": "Three PoPs announce one prefix; each AS goes to the end of its best BGP path. Withdraw a PoP, fail a link or change a local preference."
+  },
+  "tags": [
+    "bgp",
+    "http"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cdn-anycast"]; colours only from kit tokens.
+   Layout: the K2 drawing on the left (PoPs on top, the ASes below, the chosen paths in ink with arrows towards the
+   PoP), the side column on the right (the address, then one block per AS: its stored paths, the best marked). */
+[data-sim="cdn-anycast"] .ca {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="cdn-anycast"] .ca-draw { min-width: 0; min-height: 0; display: flex; }
+[data-sim="cdn-anycast"] .ca-draw .sd-topo { flex: 1; height: 100%; align-content: stretch; }
+/* PoP: a hexagon mark (K2 has none; shared request in NOTES.md) */
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='server'] .sd-topo-mark {
+  min-width: 3.6rem; height: 2.8rem; border-radius: 0;
+  clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%);
+  grid-row: auto;
+}
+/* the PoP's city, AS number and address under the mark, at full card width */
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='server'] .sd-topo-name,
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='server'] .sd-topo-addr,
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='server'] .sd-topo-sub { grid-column: 1 / -1; }
+/* an AS: the ASN in the mark, smaller so five digits fit a circle (client group) or a square (transit) */
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='host'] .sd-topo-mark,
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='router'] .sd-topo-mark { min-width: 3.9rem; height: 3.9rem; font-size: var(--fs-sm); }
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='host'] .sd-topo-mark[data-c=''] { background: var(--panel); color: var(--ink); border: var(--line-w) dashed var(--muted); }
+[data-sim="cdn-anycast"] .sd-topo-card[data-kind='router'] .sd-topo-mark[data-c=''] { background: var(--panel); color: var(--ink); border: var(--line-w) dashed var(--muted); }
+
+[data-sim="cdn-anycast"] .ca-side { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; min-height: 0; }
+[data-sim="cdn-anycast"] .ca-addr { font-size: var(--fs-sm); padding: 0.2rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="cdn-anycast"] .ca-addr b { font-family: var(--mono); }
+[data-sim="cdn-anycast"] .ca-side h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+/* paths in the caption: the monospace space is wide */
+[data-sim="cdn-anycast"] .sd-caption .sd-mono { word-spacing: -0.3em; white-space: nowrap; }
+[data-sim="cdn-anycast"] .ca-nw { white-space: nowrap; }
+
+/* one block per AS */
+[data-sim="cdn-anycast"] .ca-as { padding: 0.15rem 0.6rem 0.25rem; border: var(--line-w) solid var(--line);
+  border-left: 0.45rem solid var(--sw, var(--line)); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="cdn-anycast"] .ca-as[data-moved] { border-color: var(--ink); border-left-color: var(--sw, var(--ink)); border-width: 0.2rem 0.2rem 0.2rem 0.45rem; }
+[data-sim="cdn-anycast"] .ca-head { display: flex; flex-wrap: wrap; gap: 0 0.7rem; align-items: baseline; }
+[data-sim="cdn-anycast"] .ca-head .ca-city { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cdn-anycast"] .ca-to { font-weight: 700; padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="cdn-anycast"] .ca-head .sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="cdn-anycast"] .ca-by { font-size: var(--fs-sm); margin-left: auto; padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); }
+[data-sim="cdn-anycast"] .ca-as table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+[data-sim="cdn-anycast"] .ca-as td { padding: 0 0.5rem 0 0; white-space: nowrap; vertical-align: middle; }
+[data-sim="cdn-anycast"] .ca-as td.ca-path { font-family: var(--mono); width: 100%; }
+[data-sim="cdn-anycast"] .ca-as td.ca-star { width: 1.4em; text-align: center; font-weight: 700; }
+[data-sim="cdn-anycast"] .ca-as tr[data-best] td { font-weight: 700; }
+[data-sim="cdn-anycast"] .ca-as tr[data-best] td.ca-path { text-decoration: underline; text-decoration-thickness: 0.15em; text-underline-offset: 0.2em; }
+[data-sim="cdn-anycast"] .ca-as tr:not([data-best]) td { color: var(--muted); }
+[data-sim="cdn-anycast"] .ca-none { font-size: var(--fs-sm); color: var(--danger); font-weight: 700; }
+
+/* legend swatches the kit lacks: the PoP hexagon, the transit square, the thick chosen path, down */
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-pop"] { border: 0; border-radius: 0; width: 1.3em;
+  clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%); }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-pop"],
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-client"],
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-transit"] { background: var(--ink); }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-client"] { border-radius: 50%; }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-transit"] { border-radius: var(--radius-sm); }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-path"] { height: 0.5rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-down"] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--muted); }
+[data-sim="cdn-anycast"] .sd-swatch[data-shape="ca-down"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--danger); }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cdn-anycast"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cdn-anycast"] .ca { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="cdn-anycast"] .ca-draw .sd-topo { height: auto; }
+  [data-sim="cdn-anycast"] .ca-as td.ca-path { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Anycast i rubna mjesta CDN-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  // series colour per PoP; an AS takes the colour of the PoP it reaches (with "→ PoP" written beside it)
+  var COLOUR = { ZG: '1', VIE: '2', FRA: '3' };
+  // the drawing: PoPs on top (west to east), the access ASes below them, the transit AS64503 at the bottom, and
+  // AS64505 under Zagreb, wired only to AS64503; [col, row, span] in 11 columns, an empty column between linked cards
+  var POS = { FRA: [0, 0, 3], VIE: [4, 0, 3], ZG: [8, 0, 3],
+    '64504': [0, 2, 2], '64502': [6, 2, 2], '64501': [9, 2, 2], '64503': [3, 4, 2], '64505': [9, 4, 2] };
+  var CITY = { ZG: 'cityZG', VIE: 'cityVIE', FRA: 'cityFRA', '64501': 'cityZG', '64502': 'cityVIE', '64503': 'cityFRA', '64504': 'cityMUC', '64505': 'cityZG' };
+  var BY = { only: 'byOnly', local: 'byOnly', lp: 'byLp', len: 'byLen', rid: 'byRid', order: 'byOrder' };
+  var SIDE = ['64501', '64502', '64503', '64504', '64505'];
+  var LINK_PARAM = { link64501_64502: '64501-64502', link64503VIE: 'VIE-64503', link64503FRA: 'FRA-64503' };
+  var POP_OF_PARAM = { popZG: 'ZG', popVIE: 'VIE', popFRA: 'FRA' };
+
+  /** Data (ASNs, paths, addresses, PoP codes) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'sd-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function pathText(path) { return '[' + path.join(' ') + ']'; }
+  function asName(id) { return /^\d+$/.test(id) ? 'AS' + id : id; }
+  /** A link as the controls name it: the AS first, a PoP last. */
+  function linkName(id) {
+    var l = L.LINKS.filter(function (x) { return x.id === id; })[0];
+    return /^\d+$/.test(l.a) ? asName(l.a) + '–' + asName(l.b) : asName(l.b) + '–' + asName(l.a);
+  }
+  /** Nodes separated by words: "A, B i C". */
+  function sepList(nodes) {
+    var out = h('span', null);
+    nodes.forEach(function (n, i) { if (i) out.append(t(i === nodes.length - 1 ? 'andSep' : 'listSep')); out.append(n); });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+
+  // ── "moved": against the state before the last change; a preset against the defaults (SPEC.md "State") ──
+  var last = null, track = { moved: [], from: null, before: null };
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function update(c) {
+    if (last && last.preset === c.preset && sameParams(last.params, c.params)) return;
+    var baseParams = c.preset ? L.defaults : last && last.params;
+    var base = c.preset ? L.initial(L.defaults) : last && last.state;
+    var before = null;
+    if (base) { before = {}; Object.keys(base.best).forEach(function (id) { before[id] = base.best[id] ? base.best[id].pop : null; }); }
+    track = { moved: L.moved(base, c.state), from: baseParams || null, before: before };
+    last = { params: Object.assign({}, c.params), state: c.state, preset: c.preset };
+  }
+
+  // ── the drawing (kit view K2) ──
+
+  function renderTopo(c) {
+    var s = c.state;
+    var load = L.loadOf(s);
+    var used = {}, packets = [];
+    SIDE.forEach(function (id) {
+      var bst = s.best[id];
+      if (!bst) return;
+      for (var i = 0; i + 1 < bst.hops.length; i++) {
+        var key = bst.hops[i] + '>' + bst.hops[i + 1];
+        if (used[key]) continue;
+        used[key] = true;
+        used[[bst.hops[i], bst.hops[i + 1]].sort().join('|')] = true;
+        packets.push({ from: bst.hops[i], to: bst.hops[i + 1], chip: false, move: false });
+      }
+    });
+    var nodes = L.ASES.map(function (a) {
+      var P = POS[a.id];
+      if (a.pop) {
+        var up = s.announcements.filter(function (x) { return x.pop === a.id; })[0].up;
+        return { id: a.id, kind: 'server', col: P[0], row: P[1], span: P[2], c: COLOUR[a.id], mark: a.id, name: t(CITY[a.id]),
+          lines: [{ text: 'AS' + a.asn, kind: 'addr' }, { text: s.address, kind: 'sub' }],
+          badges: [up ? { text: t.n('serves', load[a.id]), k: load[a.id] ? 'fill' : 'muted' } : { text: t('bWithdrawn'), k: 'dashed' }],
+          state: up ? null : 'down' };
+      }
+      var bst = s.best[a.id], moved = track.moved.indexOf(a.id) >= 0;
+      return { id: a.id, kind: a.client ? 'host' : 'router', col: P[0], row: P[1], span: P[2], c: bst ? COLOUR[bst.pop] : '', mark: String(a.asn),
+        lines: [{ text: t(CITY[a.id]), kind: 'role' }, a.client ? null : { text: t('transit'), kind: 'role' }],
+        badges: [bst ? { text: t('bTo', { pop: bst.pop }), k: 'fill' } : { text: t('bNoPath'), k: 'dashed' }],
+        state: moved ? 'active' : null, changed: moved };
+    });
+    var links = s.links.map(function (l) {
+      return { id: l.id, a: l.a, b: l.b, state: l.up ? 'up' : 'down', active: l.up && !!used[[l.a, l.b].sort().join('|')] };
+    });
+    // phone order: top to bottom, left to right
+    nodes.sort(function (x, y) { return POS[x.id][1] - POS[y.id][1] || POS[x.id][0] - POS[y.id][0]; });
+    return Simdeck.topology({ cols: 11, rows: ['auto', 'minmax(2rem, 1fr)', 'auto', 'minmax(2rem, 1fr)', 'auto'], dir: c.dir,
+      nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  // ── the side column: the address, then one block per AS ──
+
+  function renderSide(c) {
+    var s = c.state;
+    var out = [h('div', { class: 'ca-addr' }, t.parts('addrHead', { addr: b(s.address), p: b(s.prefix) })),
+      h('h2', null, t('sideTitle', { p: s.prefix }))];
+    SIDE.forEach(function (id) {
+      var st = s.ases[id], bst = s.best[id], moved = track.moved.indexOf(id) >= 0;
+      var rows = st.rib.map(function (e) {
+        var isBest = bst && e.from === bst.from;
+        return h('tr', { dataset: isBest ? { best: '1' } : {} },
+          h('td', { class: 'ca-star', translate: 'no' }, isBest ? '★' : ''),
+          h('td', { translate: 'no' }, asName(e.from)),
+          h('td', { class: 'ca-path' }, data(pathText(e.path))),
+          h('td', { translate: 'no' }, t('lpVal', { lp: e.lp })));
+      });
+      out.push(h('section', { class: 'ca-as', dataset: Object.assign({ c: bst ? COLOUR[bst.pop] : '' }, moved ? { moved: '1' } : {}) },
+        h('div', { class: 'ca-head' }, b('AS' + id), h('span', { class: 'ca-city' }, t(CITY[id])),
+          bst ? h('span', { class: 'ca-to' + (moved ? ' sd-changed' : ''), translate: 'no' }, t('bTo', { pop: bst.pop })) : null,
+          bst && st.rib.length ? h('span', { class: 'ca-by' }, t(BY[bst.by])) : null),
+        rows.length ? h('table', null, h('tbody', null, rows)) : null,
+        !bst ? h('div', { class: 'ca-none' + (moved ? ' sd-changed' : '') }, t('noPath')) : null));
+    });
+    return out;
+  }
+
+  // ── captions ──
+
+  var CAPTION_MAX = 300;
+  function textLength(list) {
+    return list.reduce(function (n, x) {
+      return n + 1 + [].concat(x).reduce(function (m, y) { return m + (typeof y === 'string' ? y : y.textContent || '').length; }, 0);
+    }, 0);
+  }
+
+  /** What changed between the base params and now: one sentence, or null. */
+  function cause(from, p, s) {
+    if (!from) return null;
+    var keys = Object.keys(L.defaults).filter(function (k) { return from[k] !== p[k]; });
+    if (!keys.length) return null;
+    if (keys.length > 1) return [t('causeMany')];
+    var k = keys[0];
+    if (POP_OF_PARAM[k]) return t.parts(p[k] ? 'causeAnnounce' : 'causeWithdraw', { pop: b(POP_OF_PARAM[k]), p: data(s.prefix) });
+    if (LINK_PARAM[k]) return t.parts(p[k] ? 'causeLinkUp' : 'causeLinkDown', { l: b(linkName(LINK_PARAM[k])) });
+    return t.parts('causeLp', { lp: data(p[k]) });
+  }
+
+  /** One sentence on where an AS went, given its PoP before (or null). */
+  function movedSentence(s, id, before) {
+    var bst = s.best[id], x = b('AS' + id);
+    if (!bst) return t.parts('movedNone', { x: x, p: data(s.prefix), addr: data(s.address) });
+    var vars = { x: x, pop: b(bst.pop), path: data(pathText(bst.path)), addr: data(s.address) };
+    return t.parts(before ? 'movedTo' : 'movedBack', vars);
+  }
+
+  /** AS64503's choice between VIE and FRA, when the local preference changed. */
+  function lpSentence(s) {
+    var st = s.ases['64503'], bst = s.best['64503'], x = b('AS64503');
+    var fromFra = st.rib.filter(function (e) { return e.from === 'FRA'; })[0];
+    var fromVie = st.rib.filter(function (e) { return e.from === 'VIE'; })[0];
+    if (!fromFra) return t.parts('lpNoPath', { x: x });
+    if (!fromVie || !bst) return null;
+    if (bst.by === 'lp') return t.parts('lpDecides', { x: x, path: data(pathText(fromFra.path)), lp: data(bst.lp) });
+    if (bst.by === 'rid') {
+      var r = L.ASES.filter(function (a) { return a.id === bst.from; })[0].routerId;
+      return t.parts('ridDecides', { x: x, path: data(pathText(fromVie.path)), r: data(r), pop: b(bst.from) });
+    }
+    return null;
+  }
+
+  function capOverview(s) {
+    var n = s.announcements.filter(function (x) { return x.up; }).length;
+    var list = sepList(SIDE.filter(function (id) { return id !== '64503'; }).map(function (id) {
+      var bst = s.best[id];
+      return h('span', { class: 'ca-nw' }, bst ? t.parts('capTo', { x: b('AS' + id), pop: b(bst.pop) }) : t.parts('capToNone', { x: b('AS' + id) }));
+    }));
+    var lead = t.n('capOverview', n, { addr: s.address }).split(s.address);
+    return join([[lead[0], data(s.address), lead[1]], t.parts('capOverviewList', { list: list })]);
+  }
+
+  function capNearest(s) {
+    var bst = s.best['64505'], x = b('AS64505');
+    if (!bst) return t.parts('capNearestNone', { x: x, addr: data(s.address) });
+    return t.parts('capNearest', { x: x, path: data(pathText(bst.path)), pop: b(bst.pop) });
+  }
+
+  function capChange(c) {
+    var s = c.state, p = c.params;
+    var lead = cause(track.from, p, s);
+    if (!lead) return null;
+    var out = [lead];
+    var moved = track.moved.slice();
+    // a client group first (AS64503 has none of its own)
+    moved.sort(function (x, y) { return (x === '64503') - (y === '64503'); });
+    var extra = [];
+    if (moved.length) {
+      var first = moved[0];
+      var was = track.before[first];
+      out.push(movedSentence(s, first, was));
+      if (moved.length > 1) extra.push(t.parts('alsoMoved', { list: sepList(moved.slice(1).map(function (id) { return b('AS' + id); })) }));
+      if (was && s.best[first]) extra.push(t.parts('tcpNote', { old: b(was), pop: b(s.best[first].pop) }));
+    } else {
+      out.push([t('nobodyMoved')]);
+    }
+    if (track.from.lpAs64503 !== p.lpAs64503) {
+      var lp = lpSentence(s);
+      if (lp) out.push(lp);
+    }
+    // the cause, the move and the local-preference sentence always; the rest only while the caption stays short
+    extra.forEach(function (x) { if (textLength(out) + textLength([x]) <= CAPTION_MAX) out.push(x); });
+    return join(out);
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'popZG', type: 'toggle', label: t('pZG') },
+      { key: 'popVIE', type: 'toggle', label: t('pVIE') },
+      { key: 'popFRA', type: 'toggle', label: t('pFRA') },
+      { key: 'link64501_64502', type: 'toggle', label: t('pL0102') },
+      { key: 'link64503VIE', type: 'toggle', label: t('pL03VIE') },
+      { key: 'link64503FRA', type: 'toggle', label: t('pL03FRA') },
+      { key: 'lpAs64503', type: 'choice', label: t('pLp'), options: [[100, '100'], [200, '200']] }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: Object.assign({}, L.defaults, x.params) };
+    }),
+
+    legend: [
+      { shape: 'ca-pop', label: t('legPop') },
+      { shape: 'ca-client', label: t('legClient') },
+      { shape: 'ca-transit', label: t('legTransit') },
+      { shape: 'ca-path', label: t('legPath') },
+      { shape: 'ca-down', label: t('legDown') },
+      { shape: 'hl', label: t('legMoved') }
+    ],
+
+    render: function (c) {
+      update(c);
+      c.stage.replaceChildren(h('div', { class: 'ca' },
+        h('div', { class: 'ca-draw' }, renderTopo(c)),
+        h('div', { class: 'ca-side' }, renderSide(c))));
+    },
+
+    caption: function (c) {
+      update(c);
+      // preset 3's own caption, only while its params hold (a hand-made URL can keep the preset with other params)
+      if (c.preset === 'nearest-is-not-closest' && sameParams(c.params, L.defaults)) return capNearest(c.state);
+      return capChange(c) || capOverview(c.state);
+    }
+  });
+})();
+</script>
+</body>
+</html>
