@@ -1,0 +1,486 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- tcp-vs-udp-loss: the same stream over TCP and over UDP, with the same losses, side by side. An explorer: the params
+     drive one pure function (sim.js simulate), and the time cursor t reveals the run up to a slot. Each side: the
+     exchange as kit view K1 (kit/sequence.js), lanes A (sender) and B (receiver); under it the delivery strip (one cell
+     per unit, what the application has at slot t; click a cell to lose it) and a summary. Model: sim.js; rules:
+     SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="tcp-vs-udp-loss">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP i UDP pri gubitku · simdeck</title>
+<meta name="description" content="Isti podaci i isti gubici, jedno uz drugo: TCP čeka ponovni prijenos pa predaje sve, pravim redoslijedom; UDP predaje što stigne, bez zastoja.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tcp-vs-udp-loss",
+  "title": {
+    "hr": "TCP i UDP pri gubitku",
+    "en": "TCP vs UDP under loss"
+  },
+  "concept": {
+    "hr": "Isti niz: TCP šalje ponovno i zastaje, UDP gubi i nastavlja",
+    "en": "The same stream: TCP retransmits and stalls, UDP drops and continues"
+  },
+  "summary": {
+    "hr": "Isti podaci i isti gubici, jedno uz drugo: TCP čeka ponovni prijenos pa predaje sve, pravim redoslijedom; UDP predaje što stigne, bez zastoja.",
+    "en": "The same data and the same losses, side by side: TCP waits for the resend and then delivers everything in order; UDP delivers what arrives, without a stall."
+  },
+  "tags": [
+    "tcp",
+    "udp"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tcp-vs-udp-loss"]; colours only from kit tokens.
+   Layout: two columns, TCP left and UDP right, each a K1 chart over its delivery strip and summary. A and its data are
+   c1, B and its ACKs c2; on the strips, on time is c3 and late c4 (each also marked by shape or text). */
+[data-sim="tcp-vs-udp-loss"] .tu {
+  display: flex;
+  flex-direction: column;
+  gap: 1cqh;
+  height: 100%;
+  padding: 1.2cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="tcp-vs-udp-loss"] .tu-cols { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.4cqw; }
+[data-sim="tcp-vs-udp-loss"] .tu-bar { display: flex; align-items: center; gap: 1.2rem; }
+[data-sim="tcp-vs-udp-loss"] .tu-bar .sd-btn { min-height: var(--hit); flex: none; }
+[data-sim="tcp-vs-udp-loss"] .tu-time { flex: 1 1 auto; min-width: 6rem; max-width: 40rem; }
+[data-sim="tcp-vs-udp-loss"] .tu-now { flex: none; font-size: 1.1rem; }
+/* losses: loss and seed share a row, so random mode fits the panel */
+[data-sim="tcp-vs-udp-loss"] [data-sd-controls] .sd-group { flex-direction: row; flex-wrap: wrap; column-gap: 1rem; }
+[data-sim="tcp-vs-udp-loss"] [data-sd-controls] .sd-group > * { flex: 1 1 100%; }
+[data-sim="tcp-vs-udp-loss"] [data-sd-controls] .sd-ctl[data-key="loss"],
+[data-sim="tcp-vs-udp-loss"] [data-sd-controls] .sd-ctl[data-key="seed"] { flex: 1 1 0; min-width: 0; }
+[data-sim="tcp-vs-udp-loss"] .tu-col { display: flex; flex-direction: column; gap: 0.9cqh; min-height: 0; }
+[data-sim="tcp-vs-udp-loss"] .tu-col > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="tcp-vs-udp-loss"] .tu-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+[data-sim="tcp-vs-udp-loss"] .tu-head h2 { margin: 0; font-size: 1.4rem; font-weight: 700; }
+[data-sim="tcp-vs-udp-loss"] .tu-head span { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="tcp-vs-udp-loss"] .tu-mono { font-family: var(--mono); }
+[data-sim="tcp-vs-udp-loss"] .sd-seq-cause { font-size: var(--fs-sm); }
+/* the kit's .sd-ctl display beats [hidden]: a param's visible() would not hide it otherwise */
+[data-sim="tcp-vs-udp-loss"] .sd-ctl[hidden] { display: none; }
+
+/* the delivery strip: one cell per unit */
+[data-sim="tcp-vs-udp-loss"] .tu-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem 0.5rem;
+}
+[data-sim="tcp-vs-udp-loss"] .tu-box h3 { margin: 0 0 0.3rem; font-size: 0.9rem; font-weight: 700; }
+[data-sim="tcp-vs-udp-loss"] .tu-box h3 span { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="tcp-vs-udp-loss"] .tu-cells { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+[data-sim="tcp-vs-udp-loss"] .tu-cell {
+  position: relative;
+  display: grid; place-items: center; align-content: center;
+  width: 2.4rem; height: 2.5rem; padding: 0;
+  border: 0.15rem solid var(--ink); border-radius: var(--radius-sm);
+  background-color: var(--bg); color: var(--ink);
+  font: 700 var(--fs-sm) / 1.05 var(--mono);
+  cursor: pointer;
+}
+[data-sim="tcp-vs-udp-loss"] .tu-cell small { font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="wait"] { border-style: dashed; border-color: var(--line); color: var(--muted); }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="gap"],
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="never"] { border-style: dashed; }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="never"] > b { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="gap"]::after,
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="never"]::after {
+  content: '✕'; position: absolute; top: -0.1rem; right: 0.1rem; font-size: max(16px, 0.75rem); line-height: 1;
+}
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="held"] { border-color: var(--c2); }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="done"] { --sw: var(--c3); background-color: var(--sw); border-color: var(--sw); color: var(--on-series); }
+[data-sim="tcp-vs-udp-loss"] .tu-cell[data-fate="done"][data-late] { --sw: var(--c4); }
+[data-sim="tcp-vs-udp-loss"] .tu-cell.sd-changed { outline: 0.25rem solid var(--ink); outline-offset: 0.1rem; }
+[data-sim="tcp-vs-udp-loss"] .tu-cell:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="tcp-vs-udp-loss"] .tu-sum { margin: 0.35rem 0 0; font-size: var(--fs-sm); }
+[data-sim="tcp-vs-udp-loss"] .tu-sum b { font-family: var(--mono); }
+
+/* legend swatches (the kit has line and dash) */
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="thin"] { height: 0.15rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="lost"] { position: relative; background: transparent; border-style: dashed; }
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="lost"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="held"] { background-color: var(--bg); border-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 30%, transparent) 0.2em 0.3em); }
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="late"] { position: relative; }
+[data-sim="tcp-vs-udp-loss"] .sd-swatch[data-shape="late"]::after { content: '+'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--on-series); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tcp-vs-udp-loss"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tcp-vs-udp-loss"] .tu { height: auto; padding: 0.4rem; gap: 1rem; font-size: 1rem; }
+  [data-sim="tcp-vs-udp-loss"] .tu-cols { flex: none; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  [data-sim="tcp-vs-udp-loss"] .tu-bar { flex-wrap: wrap; }
+  [data-sim="tcp-vs-udp-loss"] .tu-col > .sd-seq { flex: none; }
+  [data-sim="tcp-vs-udp-loss"] .tu-col .sd-seq-list { padding-bottom: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">TCP i UDP pri gubitku</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (octet numbers, slots, unit numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'tu-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  function range(p, k) { var s = L.seqOf(p, k); return s + '–' + (s + p.size - 1); }
+  function span(p, a, b) { return L.seqOf(p, a) + '–' + (L.seqOf(p, b) + p.size - 1); }
+  function word(key, vars) { return h('span', null, t(key, vars)); }
+  function slotWord(n) { return h('span', null, t('slot', { n: String(n) })); }
+  function dgram(k) { return h('b', null, t('dgram', { k: String(k) })); }
+  function deliveredOf(side, k) { return side.delivered.filter(function (d) { return d.unit === k; })[0] || null; }
+
+  // ── the charts (K1) ──
+
+  /** Rows in time order: per slot, the ACKs sent in it, then the sends (a resend before the new unit). */
+  function tcpRows(r, p, T) {
+    var items = [];
+    r.tcp.acks.forEach(function (a) { if (a.slot <= T) items.push({ slot: a.slot, o: 0, a: a }); });
+    r.tcp.sends.forEach(function (m) { if (m.slot <= T) items.push({ slot: m.slot, o: 1, m: m }); });
+    items.sort(function (x, y) { return x.slot - y.slot || x.o - y.o; });   // stable: the model's order within a kind
+    return items.map(function (it) {
+      if (it.a) {
+        var a = it.a, flying = T < a.arrive;
+        return { from: 'B', to: 'A', c: 2, weight: 'thin', label: 'ACK ' + a.n, time: slotWord(a.slot),
+          cause: a.dup ? t('cAgain') : undefined, muted: flying, re: flying ? { A: t('reFlight') } : {}, changed: a.slot === T };
+      }
+      var m = it.m, fly = T < m.arrive, w = null;
+      if (fly) w = t('reFlight');
+      else if (!m.lost && m.held) w = t('reHeld');
+      else if (!m.lost && fills(r, m)) w = t('reFills');
+      return { from: 'A', to: 'B', c: 1, label: range(p, m.unit), line: m.tx > 0 ? 'dashed' : undefined, time: slotWord(m.slot),
+        cause: m.tx > 0 ? t('cResend') : undefined, muted: fly, drop: m.lost && !fly, re: w ? { B: w } : {}, changed: m.slot === T };
+    });
+  }
+  /** m arrives as the missing unit: units that waited behind it go up in the same slot. */
+  function fills(r, m) {
+    var same = r.tcp.delivered.filter(function (d) { return d.slot === m.arrive; });
+    return same.length > 0 && same[0].unit === m.unit && same.some(function (d) { return d.arrived < d.slot; });
+  }
+  function udpRows(r, T) {
+    return r.udp.sends.filter(function (m) { return m.slot <= T; }).map(function (m) {
+      var fly = T < m.arrive;
+      return { from: 'A', to: 'B', c: 1, label: word('dgram', { k: String(m.unit) }), time: slotWord(m.slot),
+        muted: fly, drop: m.lost && !fly, re: fly ? { B: t('reFlight') } : {}, changed: m.slot === T };
+    });
+  }
+  function chart(c, rows) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '6.2rem',
+      lanes: [
+        { id: 'A', c: 1, name: t('laneA') },
+        { id: 'B', c: 2, name: t('laneB') }
+      ],
+      rows: rows,
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── the delivery strips and summaries ──
+
+  function fateText(r, proto, k, T, f) {
+    var d = deliveredOf(r[proto], k);
+    if (f === 'done') {
+      var late = d.slot - (k + 1);
+      return late > 0 ? t('fLate', { n: String(d.slot), d: t.n('slots', late) }) : t('fDone', { n: String(d.slot) });
+    }
+    return t({ wait: 'fWait', gap: 'fGap', held: 'fHeld', never: 'fNever' }[f]);
+  }
+  function strip(c, r, proto, T) {
+    var p = c.params, cells = [];
+    for (var k = 1; k <= p.n; k++) {
+      var f = L.fateAt(r, proto, k, T);
+      var d = deliveredOf(r[proto], k), late = f === 'done' ? d.slot - (k + 1) : 0;
+      var cls = 'tu-cell' + (f === 'done' ? ' sd-fill' : f === 'held' ? ' sd-hatch' : '') + (marks[proto].indexOf(k) >= 0 ? ' sd-changed' : '');
+      cells.push(h('button', {
+        type: 'button', class: cls, dataset: late > 0 ? { fate: f, late: '' } : { fate: f },
+        'aria-label': t('cell', { k: String(k), fate: fateText(r, proto, k, T, f) }), title: t('modeHint'),
+        onmousedown: function (e) { e.preventDefault(); },   // keep keyboard focus where it was (docs/sim-ui.md §3)
+        onclick: (function (unit) { return function () { clickUnit(unit); }; })(k)
+      }, B(k), late > 0 ? h('small', { translate: 'no' }, '+' + late) : null));
+    }
+    return h('section', { class: 'tu-box' }, h('h3', null, t('strip'), ' ', h('span', null, t('modeHint'))), h('div', { class: 'tu-cells' }, cells), summary(c, r, proto, T));
+  }
+  function summary(c, r, proto, T) {
+    var p = c.params, side = r[proto];
+    var got = side.delivered.filter(function (d) { return d.slot <= T; });
+    var parts = [t.parts('got', { got: B(got.length), total: B(p.n), bytes: B(got.length * p.size) })];
+    if (side.finish !== null && T >= side.finish) parts.push(' · ', t.parts('finish', { slot: B(side.finish) }));
+    if (proto === 'tcp') {
+      var re = side.sends.filter(function (m) { return m.tx > 0 && m.slot <= T; }).length;
+      var st = 0;
+      // the longest wait so far: delivered units, and units still held in the buffer at t
+      side.delivered.forEach(function (d) { if (d.arrived <= T) st = Math.max(st, Math.min(d.slot, T) - d.arrived); });
+      if (re) parts.push(' · ', t.n('retx', re));
+      parts.push(' · ', st ? t.n('stall', st) : t('noStall'));
+    } else {
+      var gone = side.missing.filter(function (k) { return k + 1 <= T; }).length;
+      if (gone) parts.push(' · ', t.n('lostN', gone));
+      parts.push(' · ', t('noStall'));
+    }
+    return h('p', { class: 'tu-sum' }, parts);
+  }
+
+  // ── clicking a unit cycles its loss: arrives → lost → lost with its first resend → arrives ──
+
+  function clickUnit(k) {
+    var sim = window.simdeck, p = sim.params;
+    var base = p.mode === 'random' ? L.masks(p) : { lose: p.lose, lose2: p.lose2 };
+    var m = L.cycle(base, k);
+    sim.set({ mode: 'pattern', lose: m.lose, lose2: m.lose2 });
+  }
+
+  // ── "changed": the units whose fate changed when a param other than t moved by hand ──
+
+  var marks = { tcp: [], udp: [] }, last = null, pinning = false;
+  function keyOf(p) { var q = Object.assign({}, p); delete q.t; return JSON.stringify(q); }
+  function sig(r, proto, k) { var d = deliveredOf(r[proto], k); return d ? d.slot : -1; }
+  function updateMarks(c) {
+    var key = keyOf(c.params), r = c.state;
+    if (last && key !== last.key && !c.preset) {
+      marks = { tcp: [], udp: [] };
+      for (var k = 1; k <= Math.min(c.params.n, last.n); k++) {
+        ['tcp', 'udp'].forEach(function (x) { if (sig(r, x, k) !== sig(last.r, x, k)) marks[x].push(k); });
+      }
+    } else if (pinning) pinning = false;   // the follow-up that keeps t at the end: the marks stay
+    else if (!last || key !== last.key || c.params.t !== last.t) marks = { tcp: [], udp: [] };
+    var keepEnd = last && key !== last.key && last.t >= last.r.end && c.params.t < r.end;
+    if (keepEnd) pinning = true;
+    last = { key: key, r: r, n: c.params.n, t: c.params.t };
+    return keepEnd;
+  }
+
+  // ── captions ──
+
+  function lostList(p) {
+    var items = [], count = 0;
+    for (var k = 1; k <= p.n; k++) {
+      if (!L.bit(p.lose, k)) continue;
+      count++;
+      items.push(L.bit(p.lose2, k) ? t('lostTwice', { k: String(k) }) : String(k));
+    }
+    if (!count) return [t('lostNone')];
+    var list = items.length === 1 ? items[0] : items.slice(0, -1).join(', ') + t('and') + items[items.length - 1];
+    return t.parts(count > 1 ? 'lostMany' : 'lostOne', { list: h('span', null, list) });
+  }
+
+  function tcpNow(r, p, T) {
+    var S = r.tcp.sends, A = r.tcp.acks;
+    var resend = S.filter(function (m) { return m.slot === T && m.tx > 0; })[0];
+    if (resend) {
+      // the timeout that runs after this resend: doubled, or held at the cap
+      var nextRto = L.rtoAfter(p, resend.tx + 1), doubled = nextRto === 2 * L.rtoAfter(p, resend.tx);
+      return t.parts(doubled ? 'tResend' : 'tResendCap', { seg: B(range(p, resend.unit)), rto: h('span', null, t.n('slots', nextRto)) });
+    }
+    var arr = S.filter(function (m) { return m.arrive === T; });
+    var fill = arr.filter(function (m) { return !m.lost && fills(r, m); })[0];
+    if (fill) {
+      var n = r.tcp.delivered.filter(function (d) { return d.slot === T; }).length;
+      return t.parts('tFills', { seg: B(range(p, fill.unit)), units: h('span', null, t.n('unitsAcc', n)) });
+    }
+    var lost = arr.filter(function (m) { return m.lost; })[0];
+    if (lost) return t.parts('tLost', { seg: B(range(p, lost.unit)) });
+    // a resend that arrives is always the oldest missing unit, so it goes up at once; say that before a held arrival
+    var okResend = arr.filter(function (m) { return !m.lost && !m.held && m.tx > 0; })[0];
+    if (okResend) return t.parts('tInorder', { seg: B(range(p, okResend.unit)) });
+    var held = arr.filter(function (m) { return m.held; })[0];
+    if (held) return t.parts('tHeld', { seg: B(range(p, held.unit)), ack: B(r.tcp.acks.filter(function (a) { return a.slot === T && a.of === held.unit; })[0].n) });
+    var dup = A.filter(function (a) { return a.arrive === T && a.dup; })[0];
+    if (dup) return t.parts('tDupAck', { ack: B(dup.n) });
+    var ok = arr.filter(function (m) { return !m.lost; })[0];
+    if (ok) return t.parts('tInorder', { seg: B(range(p, ok.unit)) });
+    if (T >= r.tcp.finish) return t.parts('tDone', { slot: B(r.tcp.finish) });
+    var first = S.filter(function (m) { return m.slot === T; })[0];
+    if (first && T === 1) return t.parts('tSend', { seg: B(range(p, first.unit)) });
+    // waiting: the oldest unit the application does not have yet
+    for (var k = 1; k <= p.n; k++) if (!r.tcp.delivered.some(function (d) { return d.unit === k && d.slot <= T; })) break;
+    return t.parts('tWait', { seg: B(range(p, k)) });
+  }
+  function udpNow(r, p, T) {
+    var m = r.udp.sends.filter(function (x) { return x.arrive === T; })[0];
+    if (m) return m.lost ? t.parts('uLost', { dg: dgram(m.unit) }) : t.parts('uArrive', { dg: dgram(m.unit) });
+    if (T >= r.udp.finish) return t.parts('uDone', { slot: B(r.udp.finish) });
+    return t.parts('uSend', { dg: dgram(T) });
+  }
+
+  function endCaption(r, p) {
+    var firstLost = r.tcp.sends.filter(function (m) { return m.tx === 0 && m.lost; });
+    if (!firstLost.length) return t.parts('endNoLoss', { finish: B(r.tcp.finish) });
+    var g = firstLost[0].unit, dg = deliveredOf(r.tcp, g);
+    var out = t.parts('endTcp', { ack: B(L.seqOf(p, g)), seg: B(range(p, g)) });
+    var after = r.tcp.delivered.filter(function (d) { return d.slot === dg.slot && d.unit > g && d.arrived < d.slot; });
+    if (after.length) {
+      out = out.concat(' ', t.parts(after.length > 1 ? 'endHeldMany' : 'endHeldOne', { next: B(span(p, after[0].unit, after[after.length - 1].unit)), slot: B(dg.slot) }));
+    }
+    if (firstLost.length > 1) out = out.concat(' ', t.n('endTcpMore', firstLost.length - 1));
+    var miss = r.udp.missing.length, got = String(r.udp.delivered.length * p.size), total = String(p.n * p.size);
+    out.push(h('br'));
+    return out.concat(miss === 1 ? t.parts('endUdp1', { dg: dgram(r.udp.missing[0]), got: B(got), total: B(total) })
+      : t.parts('endUdpN', { n: miss, got: B(got), total: B(total) }));
+  }
+
+  function caption(c) {
+    var r = c.state, p = c.params, T = Math.min(p.t, r.end);
+    if (T >= r.end) return endCaption(r, p);
+    if (T === 0) {
+      var lost = p.mode === 'random' ? [t('lostRandom', { loss: String(p.loss), seed: String(p.seed) })] : lostList(p);
+      return t.parts('capStart', { units: h('span', null, t.n('units', p.n)), size: B(p.size), lost: h('span', null, lost) });
+    }
+    return t.parts('capSlot', { t: B(T) }).concat(' ', tcpNow(r, p, T), ' ', udpNow(r, p, T));
+  }
+
+  // ── play: t runs to the end, one slot per tick; a long run plays in about 20 s ──
+
+  var timer = 0, expected = null;
+  function delay(end) { return Math.max(80, Math.min(700, Math.round(20000 / Math.max(1, end)))); }
+  function stopPlay() { var was = !!timer; window.clearTimeout(timer); timer = 0; expected = null; if (was) window.setTimeout(function () { window.simdeck.render(); }, 0); }
+  function tick() {
+    var sim = window.simdeck, end = sim.state.end;
+    if (sim.params.t >= end) { stopPlay(); return; }
+    expected = sim.params.t + 1;
+    sim.set({ t: expected }, { preset: sim.preset });
+    timer = window.setTimeout(tick, delay(end));
+  }
+  function togglePlay(sim) {
+    if (timer) { stopPlay(); return; }
+    if (sim.params.t >= sim.state.end) { expected = 0; sim.set({ t: 0 }, { preset: sim.preset }); }
+    timer = window.setTimeout(tick, delay(sim.state.end));
+    sim.render();
+  }
+
+  // the default t (L.END) is clamped to the end only once a param changes: render draws min(t, end) meanwhile
+  // ── the time bar on the stage: play and the cursor (the kit's t control is hidden; this one sets it). Built once, so a
+  // drag is not cut short by the re-render it causes. ──
+
+  var bar = null, dragging = false;
+  function timeBar(stage) {
+    if (bar && stage.contains(bar.root)) return bar;
+    var btn = h('button', { type: 'button', 'aria-keyshortcuts': 'P', onmousedown: function (e) { e.preventDefault(); },
+      onclick: function () { togglePlay(window.simdeck); } });
+    var range = h('input', { type: 'range', class: 'sd-range tu-time', min: '0', step: '1', 'aria-label': t('t') });
+    range.addEventListener('pointerdown', function () { dragging = true; });
+    range.addEventListener('input', function () { var s = window.simdeck; s.set({ t: Number(range.value) }, { preset: s.preset }); });
+    range.addEventListener('change', function () { if (dragging) { dragging = false; range.blur(); } });   // a clicker's keys go back to the page
+    var now = h('span', { class: 'tu-now' });
+    var cols = h('div', { class: 'tu-cols' });
+    bar = { btn: btn, range: range, now: now, cols: cols, root: h('div', { class: 'tu' }, h('div', { class: 'tu-bar' }, btn, range, now), cols) };
+    stage.replaceChildren(bar.root);
+    return bar;
+  }
+
+  var mask = { min: 0, max: Math.pow(2, 30) - 1, visible: function () { return false; } };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['pattern', t('modePattern')], ['random', t('modeRandom')]] },
+      { key: 'n', type: 'range', label: t('n'), min: 3, max: 30 },
+      { key: 'size', type: 'choice', label: t('size'), options: [[100, '100 B'], [500, '500 B'], [1000, '1000 B']] },
+      { key: 'loss', type: 'range', label: t('loss'), min: 0, max: 40, unit: '%', visible: function (p) { return p.mode === 'random'; } },
+      { key: 'seed', type: 'range', label: t('seed'), min: 1, max: 9, visible: function (p) { return p.mode === 'random'; } },
+      { key: 'rto', type: 'range', label: t('rto'), min: 2, max: 8, format: function (v) { return t.n('slots', v); } },
+      { key: 't', type: 'range', label: t('t'), visible: function () { return false; }, min: 0, max: function (p) { return L.simulate(p).end; } },
+      Object.assign({ key: 'lose', type: 'range', label: t('lose') }, mask),
+      Object.assign({ key: 'lose2', type: 'range', label: t('lose2') }, mask),
+    ],
+
+    keys: [{ key: 'p', label: t('play'), run: togglePlay }],
+
+    presets: L.presets.map(function (x) {
+      var w = { 'book-example': 'Book', 'call-vs-file': 'Call', 'retransmit-lost': 'Retx', 'no-loss': 'NoLoss', 'random-20': 'Random' }[x.id];
+      return { id: x.id, label: t('preset' + w), hint: t('preset' + w + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'line', label: t('legSeg') },
+      { shape: 'thin', label: t('legAck') },
+      { shape: 'lost', label: t('legLost') },
+      { shape: 'dash', label: t('legRetx') },
+      { shape: 'held', label: t('legHeld') },
+      { c: 3, label: t('legDone') },
+      { c: 4, shape: 'late', label: t('legLate') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      if (expected !== null && c.params.t !== expected) stopPlay();   // moved by hand while playing
+      if (updateMarks(c)) { window.setTimeout(function () { window.simdeck.set({ t: L.END }, { preset: window.simdeck.preset }); }, 0); }
+      var r = c.state, p = c.params, T = Math.min(p.t, r.end);
+      var a = chart(c, tcpRows(r, p, T)), b = chart(c, udpRows(r, T));
+      var playing = !!timer, u = timeBar(c.stage);
+      u.btn.className = 'sd-btn' + (playing ? '' : ' sd-btn--primary');
+      u.btn.setAttribute('aria-pressed', String(playing));
+      u.btn.replaceChildren(Simdeck.icon(playing ? 'pause' : 'play'), h('span', null, t(playing ? 'pause' : 'playBtn')), h('kbd', { translate: 'no' }, 'P'));
+      u.range.max = String(r.end);
+      if (!dragging) u.range.value = String(T);
+      u.range.setAttribute('aria-valuetext', t('now', { t: String(T), end: String(r.end) }));
+      u.now.replaceChildren.apply(u.now, t.parts('now', { t: B(T), end: B(r.end) }));
+      u.cols.replaceChildren(
+        h('div', { class: 'tu-col' }, h('div', { class: 'tu-head' }, h('h2', null, t('colTcp')), h('span', null, t('colTcpSub'))), a, strip(c, r, 'tcp', T)),
+        h('div', { class: 'tu-col' }, h('div', { class: 'tu-head' }, h('h2', null, t('colUdp')), h('span', null, t('colUdpSub'))), b, strip(c, r, 'udp', T)));
+      a.fit();
+      b.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
