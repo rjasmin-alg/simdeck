@@ -41,10 +41,8 @@ drawn with a `viewBox`. The simdeck copy is canonical from here on.
   hatched, the expected one framed and tagged. Checked in grayscale.
 - **The sequence chart is drawn by the page** (HTML, text at 1:1), since the kit view K1 (`w0/kit-sequence-chart`) does
   not exist yet. When it does, this page is one of its consumers.
-- **Teardown** (catalogue §5.8 "a second mode of the ported handshake page") is not here: it is the later preset task
-  `w3/tcp-teardown`. The model is ready for it: `segments` is plain data with flags (FIN already counts one number in
-  `seqLen`), and `sides` replays any list of segments. The step count is fixed at 3 in `sim.json`, so a teardown preset
-  with more messages needs either a longer `steps` with idle steps or a per-preset step count; that is for that task.
+- **Teardown** (catalogue §5.8 "a second mode of the ported handshake page") was added by the preset task
+  `w3/tcp-teardown`: see "Closing modes (task tcp-teardown)" below and `SPEC.md`.
 - Numbers, flags and A/B are data (`translate="no"`). The model (`seqAdd`, `seqLen`, `segments`, `sides`) is pure over
   plain data, ready for `models/` (catalogue §5.8 asks for one TCP model: `tcp-teardown`, `tcp-retransmit`,
   `tcp-states`, `flow-control`, `tcp-window`).
@@ -79,7 +77,14 @@ The glossary has *handshake* = rukovanje (`src: uvod-u-linux`); OPEN.md already 
 - **Kit:** a control with `visible: () => false` stays on screen: `syncState` sets `wrap.hidden`, but `.sd-ctl {
   display: flex }` in `kit.css` overrides the `hidden` attribute (only `.sd-blank[hidden]` has a rule). Smallest fix:
   `.sd-ctl[hidden] { display: none; }`. This page uses `disabled` with a reason instead, which needs no workaround.
-- **Glossary:** add the pairs above with `"src": "simdeck"`.
+- **Glossary:** add the pairs above with `"src": "simdeck"`, and the teardown pairs under "Closing modes".
+- **Kit, `t.parts`:** a node passed as a placeholder value that occurs twice in a string (`{c}` twice in one caption)
+  lands only in its last place (the same node is appended twice). Smallest fix: clone a node already used. The page
+  works around it with `partsOnce` in `index.html`.
+- **Kit, K1:** (1) a `weight: 'thick'` for data segments (the task's legend asks for "data: thicker arrow"); (2) on a
+  phone a note whose text wraps in the last row hangs below the list, so `fit()` drops rows although the page scrolls
+  there; the page keeps its notes short instead.
+- **Host:** the handshake's own chart could move to K1 like the closing modes, so the page has one chart.
 
 ## Checks not done here
 
@@ -89,6 +94,86 @@ The glossary has *handshake* = rukovanje (`src: uvod-u-linux`); OPEN.md already 
   each made its tests fail.
 - Freezing the original (a note in the URM book's repo pointing here) is outside simdeck; OPEN.md already has "one home
   for networking interactives".
+
+## Closing modes (task tcp-teardown)
+
+Task `docs/tasks/w3/tcp-teardown.md`, catalogue `net-tcp-teardown`: five presets, `close-client`, `close-server`,
+`half-close`, `fin-ack-combined`, `simultaneous` (5, 5, 7, 4, 3 steps), each with a `sim.json` entry. Rules,
+tie-breaks, numbers and sources: `SPEC.md`.
+
+### Decisions
+
+- **The host model could express it with additive changes in this folder**, so no shared request blocked the task:
+  (a) a step list per mode (`SCRIPTS`, `stepsFor(params)`, mounted as `steps`; `logic.steps` stays 3 so the
+  handshake's own tests are untouched, and `sim.json` `steps` stays 3, the default's count); (b) a state per end after
+  every step; (c) a timeout step; (d) step 0 = both ESTABLISHED with A from X+1 and B from Y+1. New params `mode`
+  (default `open`) and `closer` (default `A`); the handshake's `defaults` test now lists them.
+- **K1 for the closing modes, the page's own chart for the handshake.** K1 exists now, so the closing modes use it
+  (lanes with the state in the card, receiver's new state at the tip, a TIME-WAIT timer, a note for 2×MSL). The
+  handshake's own chart is the host's; moving it to K1 too is a change to the host, not to this preset.
+- **State changes on receipt**, in the step a segment arrives (RFC 9293 §3.10.7.4 and the task's "one step"). So
+  in `close-client` A is in TIME-WAIT already after step 3 (B's FIN arrives) and *stays* there in step 4; the task's
+  caption for step 4 ("A potvrđuje B-ov FIN brojem 9502 i ulazi u TIME-WAIT") became "… i ostaje u TIME-WAIT". The
+  same rule gives the task's CLOSING after step 1 of `simultaneous` and FIN-WAIT-1 → TIME-WAIT in step 2 of
+  `fin-ack-combined`.
+- **Flags as the task writes them:** FIN, ACK, FIN+ACK, data (no flag, a "podaci" chip and `len`). Every segment after
+  the handshake really carries the ACK bit; the page writes FIN+ACK only where that ACK acknowledges the peer's FIN.
+  The fields (`seq= ack=`) are on every arrow, so the ack value is always there.
+- **Arrows:** a pure ACK is K1's thin line (legend "čisti ACK"); FIN and data are the normal line. K1 has no thicker
+  weight for data (Shared requests); data is told apart by its chip and `len`.
+- **The numbers under the chart** continue the host's octet lines: SYN took X, the FIN takes the next number (dashed
+  "tu bi došao FIN" until sent), the FIN's ACK carries the one after. In `half-close` B's line shows the 200 data
+  octets 9501–9700 before its FIN at 9701. This puts rule 2 (FIN takes a number) on the stage.
+- **Each lane card says whether the end may still send and receive data** (✓/✕ with da/ne), for misconception 2
+  ("after sending FIN a side can no longer receive").
+- **Panel space.** Eleven presets did not fit at 1920×1080 (1368 px of 926). The page now has two preset columns
+  (as `db-replication` and `win-wsus-flow`), a panel of up to 28rem (`--panel-w`), slightly tighter preset buttons,
+  and no control for `mode` (the presets set it; presets 1–6 and R go back to the handshake). The `closer` choice is
+  shown only in `close`, `half` and `finack` (page CSS `.sd-ctl[hidden] { display: none; }`, the kit fix asked for
+  above). Measured in all 11 presets at the last step, hr and en: the panel fits in every one.
+- **Keys 1–9** reach the first nine presets; `fin-ack-combined` and `simultaneous` are clicked (the host's six come
+  first).
+- **The half-close hint** says "A has nothing more to send", not "has sent the whole file": the task fixes A's FIN at
+  4001, i.e. no data octets from A, and a file would move that number. The book's file story is in the explanation.
+- **TIME-WAIT duration on the page:** 2×MSL = 4 min from the standard, "many systems wait less, e.g. 60 s" in the
+  explanation; no operating system is named (concepts, not tools).
+- **The explanation switches with the mode:** `explain` for the handshake, `explainClose` for a close.
+- **Phone:** the cards stack and the chart grows (no dropped rows; checked in `half-close`, `simultaneous`,
+  `close-client`, hr and en, no sideways scroll). Long field labels are clipped at the lane edge and run under the step
+  numbers, as K1 does on a phone. The 2×MSL note is short ("2×MSL prošlo") because a wrapped note in the last row hangs
+  below the list and makes `fit()` drop rows on a phone (Shared requests).
+
+### Rules checked by breaking them
+
+Each change made at least one test fail: the ACK of a FIN+ACK ignored; FIN-WAIT-1 + FIN → TIME-WAIT instead of
+CLOSING; each segment delivered before the next is sent (FINs cannot cross); FIN takes no number; no CLOSE-WAIT; no
+FIN-WAIT-2; LAST-ACK → TIME-WAIT instead of CLOSED; no receiving after FIN; the timeout does nothing; no LAST-ACK.
+
+### Sources
+
+- URM ch. 13 (`book/chapters/13-transportni-sloj.md`), "TCP: zatvaranje veze" (CLOSE sends FIN, simplex close,
+  half-closed connection, the file-upload story, "Zatvaranje, drugim riječima, nije otvaranje unatrag") and Primjer 3
+  (X = 4000, Y = 9500).
+- RFC 9293 §3.3.2 Figure 5 (states), §3.4 (FIN takes a number), §3.4.2 (MSL 2 min), §3.6 and §3.6.1 (closing,
+  half-closed), Figure 13 (simultaneous close), §3.10.7.4 (order: ACK, text, FIN).
+- Linux `tcp(7)` (`tcp_fin_timeout`) for the 60 s *(check: OS-specific, not named on the page)*.
+
+### Term pairs (missing from kit/glossary.js; written out in strings.js)
+
+| en | hr (URM book) |
+|---|---|
+| connection teardown | zatvaranje veze |
+| half-closed connection | poluzatvorena veza |
+| flag | zastavica |
+| simplex | simpleksno (jednosmjerno) |
+| maximum segment lifetime (MSL) | najdulje vrijeme života segmenta (the page explains MSL in words) |
+
+State names (ESTABLISHED, FIN-WAIT-1, …) stay in English as data (`translate="no"`), as the standard names them; the
+book does not name them.
+
+### Time
+
+Start 2026-10-28 12:57, done 13:20 (about 25 minutes, one session).
 
 ## Time
 

@@ -3,7 +3,8 @@
 <!-- TCP three-way handshake: adopted from the URM book's web edition (uvod-u-racunalne-mreze,
      ugradbeno/trostruko-rukovanje.html) into the simdeck kit (docs/sim-ui.md). A stepper: A sends SYN, B answers
      SYN+ACK, A sends ACK; each side's octet line shows why the acknowledgment is X+1. The model is in sim.js, the
-     words in strings.js. The sequence chart is drawn here until the kit has its own (kit-sequence-chart). -->
+     words in strings.js. The handshake's sequence chart is drawn here (it predates the kit's K1). The closing modes
+     (task tcp-teardown: FIN/ACK both ways, half close, TIME-WAIT) draw with the kit's K1 view, kit/sequence.js. -->
 <html lang="hr" data-sim="tcp-handshake">
 <head>
 <meta charset="utf-8">
@@ -12,6 +13,7 @@
 <meta name="description" content="SYN, SYN+ACK, ACK: zašto je broj potvrde za jedan veći od rednog broja koji potvrđuje (X = 4000, Y = 9500).">
 <link rel="stylesheet" href="../../kit/kit.css">
 <script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
 
 <!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
      block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
@@ -134,6 +136,38 @@
 [data-sim="tcp-handshake"] .th-box.th-wait { border: 0.3rem solid var(--ink); }
 [data-sim="tcp-handshake"] .th-cap { font-size: var(--fs-sm); color: var(--muted); text-align: center; }
 
+/* the closing modes: the K1 chart fills the stage; each lane card holds the end's state, its numbers and what it may do */
+[data-sim="tcp-handshake"] .td { display: flex; flex-direction: column; height: 100%; padding: 1.5cqh 1.5cqw; font-size: 1.25rem; }
+[data-sim="tcp-handshake"] .td { gap: 2cqh; }
+[data-sim="tcp-handshake"] .td > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="tcp-handshake"] .td-state {
+  justify-self: start;
+  margin: 0.2rem 0 0.35rem;
+  padding: 0.05rem 0.5rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+[data-sim="tcp-handshake"] .td-state[data-closed] { border-style: dashed; color: var(--muted); }
+[data-sim="tcp-handshake"] .td-kv { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 0 0.6rem; margin: 0; }
+[data-sim="tcp-handshake"] .td-kv dt { font-size: var(--fs-sm); color: var(--muted); align-self: center; }
+[data-sim="tcp-handshake"] .td-kv dd { margin: 0; justify-self: start; padding: 0 0.2rem; border-radius: 0.15em; font-weight: 700; }
+/* changed: highlighted and framed tightly (the kit's halo would cover the neighbouring rows) */
+[data-sim="tcp-handshake"] .td-state.sd-changed, [data-sim="tcp-handshake"] .td-kv dd.sd-changed {
+  background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); outline-offset: 0; box-shadow: none;
+}
+[data-sim="tcp-handshake"] .td-kv { row-gap: 0.15rem; }
+[data-sim="tcp-handshake"] .td-no { font-weight: 400; color: var(--muted); }
+/* eleven presets: two columns, as db-replication and win-wsus-flow; a control with visible: false really hidden
+   (the kit's .sd-ctl display wins over [hidden]; see NOTES.md, Shared requests) */
+[data-sim="tcp-handshake"] { --panel-w: minmax(17rem, 28rem); }
+[data-sim="tcp-handshake"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+[data-sim="tcp-handshake"] .sd-preset { padding: 0 0.55rem; line-height: 1.15; }
+[data-sim="tcp-handshake"] .sd-ctl[hidden] { display: none; }
+[data-sim="tcp-handshake"] .sd-swatch[data-shape="thin"] { height: 0.15rem; border: 0; border-radius: 0; background: var(--ink); }
+
 /* Phone and portrait: the stage grows with its content; the ends stack, the arrows span the width. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
   [data-sim="tcp-handshake"] .sd-stage { height: auto; container-type: inline-size; }
@@ -151,6 +185,11 @@
   [data-sim="tcp-handshake"] .th-lines { grid-template-columns: 1fr; gap: 0.8rem; }
   [data-sim="tcp-handshake"] .th-cells { gap: 0.25rem; }
   [data-sim="tcp-handshake"] .th-box { padding: 0.2rem 0.1rem; font-size: var(--fs-sm); }
+  [data-sim="tcp-handshake"] .td { height: auto; padding: 0.4rem; }
+  [data-sim="tcp-handshake"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="tcp-handshake"] .td > .sd-seq { flex: none; }
+  /* a receiver word hangs a few px below the last row; without room fit() drops rows on a phone too (as tcp-retransmit) */
+  [data-sim="tcp-handshake"] .td .sd-seq-list { padding-bottom: 1.5rem; }
 }
 </style>
 </head>
@@ -179,6 +218,7 @@
       <details class="sd-explain">
         <summary></summary>
         <div data-t-html="explain"></div>
+        <div data-t-html="explainClose" hidden></div>
       </details>
     </aside>
   </main>
@@ -212,8 +252,139 @@
     { id: 'merged', label: t('presetMerged'), hint: t('presetMergedHint'), params: { isn: 'own', x: 4000, y: 9500 }, step: 2 },
     { id: 'own-number', label: t('presetOwn'), hint: t('presetOwnHint'), params: { isn: 'own', x: 4000, y: 4000 } },
     { id: 'real', label: t('presetReal'), hint: t('presetRealHint'), params: { isn: 'real', x: 4000, y: 9500 } },
-    { id: 'wrap', label: t('presetWrap'), hint: t('presetWrapHint'), params: { isn: 'wrap', x: 4000, y: 9500 } }
+    { id: 'wrap', label: t('presetWrap'), hint: t('presetWrapHint'), params: { isn: 'wrap', x: 4000, y: 9500 } },
+    // the closing modes (task tcp-teardown): they continue the book's numbers, X = 4000 and Y = 9500
+    { id: 'close-client', label: t('presetCloseClient'), hint: t('presetCloseClientHint'), params: { isn: 'own', x: 4000, y: 9500, mode: 'close', closer: 'A' } },
+    { id: 'close-server', label: t('presetCloseServer'), hint: t('presetCloseServerHint'), params: { isn: 'own', x: 4000, y: 9500, mode: 'close', closer: 'B' } },
+    { id: 'half-close', label: t('presetHalf'), hint: t('presetHalfHint'), params: { isn: 'own', x: 4000, y: 9500, mode: 'half', closer: 'A' } },
+    { id: 'fin-ack-combined', label: t('presetFinack'), hint: t('presetFinackHint'), params: { isn: 'own', x: 4000, y: 9500, mode: 'finack', closer: 'A' } },
+    { id: 'simultaneous', label: t('presetSimul'), hint: t('presetSimulHint'), params: { isn: 'own', x: 4000, y: 9500, mode: 'simul', closer: 'A' } }
   ];
+
+  // ── the closing modes (task tcp-teardown) ──
+
+  /** The caption keys of each closing mode, one per segment step; the timeout step has its own. */
+  var CLOSE_CAPS = {
+    close: ['capFin1', 'capClose2', 'capClose3', 'capClose4'],
+    half: ['capFin1', 'capHalf2', 'capHalf3', 'capHalf4', 'capHalf5', 'capHalf6'],
+    finack: ['capFin1', 'capFinack2', 'capFinack3'],
+    simul: ['capSimul1', 'capSimul2']
+  };
+
+  function yesNo(v, pv) {
+    return h('dd', { class: (v ? '' : 'td-no') + (pv !== null && pv !== v ? ' sd-changed' : '') }, v ? '✓ ' + t('yes') : '✕ ' + t('no'));
+  }
+
+  /** One end's lane: its state (dashed once CLOSED), the next number it sends, the one it expects, and whether it may
+      still send and receive data. */
+  function closeLane(k, e, pe) {
+    function ch(f) { return pe && pe[f] !== e[f] ? ' sd-changed' : ''; }
+    return {
+      id: k, c: Number(COLOUR[k]), name: t(k === 'A' ? 'client' : 'server'),
+      state: e.state === 'CLOSED' ? 'down' : null,
+      changed: !!(pe && pe.state !== e.state),
+      body: [
+        h('div', { class: 'td-state' + ch('state'), translate: 'no', dataset: { closed: e.state === 'CLOSED' ? 'true' : null } }, e.state),
+        h('dl', { class: 'td-kv' },
+          h('dt', null, t('sendsFrom')), h('dd', { class: 'th-num' + ch('sndNxt'), translate: 'no' }, String(e.sndNxt)),
+          h('dt', null, t('expectsFrom')), h('dd', { class: 'th-num' + ch('rcvNxt'), translate: 'no' }, String(e.rcvNxt)),
+          h('dt', null, t('maySend')), yesNo(L.canSend(e.state), pe ? L.canSend(pe.state) : null),
+          h('dt', null, t('mayReceive')), yesNo(L.canReceive(e.state), pe ? L.canReceive(pe.state) : null))
+      ]
+    };
+  }
+
+  /** The K1 chart of a close: one row per segment (two FINs crossing are two rows of one step), a note where 2×MSL
+      ends TIME-WAIT, a TIME-WAIT timer on each end that enters it; the receiver's new state at the arrow's tip. */
+  function closeChart(s, c) {
+    var pv = c.prev && c.prev.ends ? c.prev.ends : null;
+    var rows = [], entered = {}, ended = {}, was = { A: 'ESTABLISHED', B: 'ESTABLISHED' };
+    s.chart.forEach(function (r) {
+      var now = r.step === s.sent;
+      if (r.timeout) {
+        r.closed.forEach(function (k) {
+          ended[k] = rows.length;
+          rows.push({ kind: 'note', lane: k, k: 'solid', text: t('noteTimeout'), time: h('span', null, '+' + t('tw')), changed: now });
+        });
+      } else {
+        r.segs.forEach(function (g) {
+          var re = {};
+          if (r.after[g.to] !== was[g.to]) re[g.to] = '→ ' + r.after[g.to];
+          if (r.after[g.to] === 'TIME-WAIT' && was[g.to] !== 'TIME-WAIT') entered[g.to] = rows.length;
+          var pure = g.flags.join() === 'ACK';
+          rows.push({
+            from: g.from, to: g.to, c: Number(COLOUR[g.from]),
+            label: g.flags.length ? g.flags.join('+') : h('span', null, t('dataChip')),
+            fields: 'seq=' + g.seq + ' ack=' + g.ack + (g.len ? ' len=' + g.len : ''),
+            weight: pure ? 'thin' : undefined, re: re, time: String(r.step), changed: now
+          });
+        });
+      }
+      was = r.after;
+    });
+    var timers = ['A', 'B'].filter(function (k) { return k in entered; }).map(function (k) {
+      return { lane: k, from: entered[k], to: k in ended ? ended[k] : undefined, end: k in ended ? 'expired' : undefined, label: 'TIME-WAIT', side: k === 'B' ? 'r' : 'l' };
+    });
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '5.6rem',
+      lanes: ['A', 'B'].map(function (k) { return closeLane(k, s.ends[k], pv && pv[k]); }),
+      rows: rows,
+      timers: timers,
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  /** The numbers end k sends, continuing the handshake's octet lines: what came before the FIN (its SYN, or the data it
+      sent), the number the FIN takes (dashed until sent: the number it would take now) and the one after it, which the
+      FIN's ACK carries. "B čeka" sits on the number the other end expects. */
+  function closeLine(k, s) {
+    var e = s.ends[k], waits = s.ends[OTHER[k]].rcvNxt, sent = e.finSeq !== null, fin = sent ? e.finSeq : e.sndNxt;
+    var data = [];
+    s.chart.forEach(function (r) { r.segs.forEach(function (g) { if (g.from === k && g.len) data.push(g); }); });
+    var first = data.length
+      ? { text: data[0].seq + '–' + L.seqAdd(data[data.length - 1].seq, data[data.length - 1].len - 1), v: null, cap: t('cellData', { n: data.reduce(function (a, g) { return a + g.len; }, 0) }), cls: '' }
+      : { text: String(k === 'A' ? s.x : s.y), v: k === 'A' ? s.x : s.y, cap: t('cellSyn'), cls: ' th-syn th-used sd-hatch' };
+    var cells = [
+      first,
+      { text: String(fin), v: fin, cap: t(sent ? 'cellFin' : 'cellFinNot'), cls: ' th-syn' + (sent ? ' th-used sd-hatch' : '') },
+      { text: String(L.seqAdd(fin, 1)), v: L.seqAdd(fin, 1), cap: t('cellAfterFin'), cls: '' }
+    ].map(function (cell) {
+      var wait = cell.v !== null && cell.v === waits;
+      return h('div', { class: 'th-cell' },
+        h('span', { class: 'th-mark' }, wait ? t('expects', { who: OTHER[k] }) : ''),
+        h('span', { class: 'th-box th-num' + cell.cls + (wait ? ' th-wait' : ''), translate: 'no', dataset: { c: COLOUR[k] } }, h('span', { class: 'th-chip' }, cell.text)),
+        h('span', { class: 'th-cap' }, cell.cap));
+    });
+    return h('div', { class: 'th-seq' }, h('span', { class: 'th-small' }, t(k === 'A' ? 'closeLineA' : 'closeLineB')), h('div', { class: 'th-cells' }, cells));
+  }
+
+  /** t.parts with a node used twice: the kit puts the same node in both places, so it ends up in the last one only.
+      Clone the repeats (Shared requests in NOTES.md). */
+  function partsOnce(key, v) {
+    var seen = [];
+    return t.parts(key, v).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+
+  function closeCaption(c) {
+    var s = c.state, cl = s.closer || 'A', op = cl === 'A' ? 'B' : 'A';
+    var v = { x: bold(s.x), y: bold(s.y), a1: bold(L.seqAdd(s.x, 1)), b1: bold(L.seqAdd(s.y, 1)), c: bold(cl), o: bold(op), tw: t('tw'), step: bold(s.sent) };
+    if (c.first) return partsOnce(s.mode === 'simul' ? 'capSimulStart' : 'capCloseStart', v);
+    var r = s.chart[s.sent - 1];
+    if (r.timeout) return partsOnce(s.mode === 'simul' ? 'capSimul3' : 'capTimeout', v);
+    var g = r.segs[0], by = {};
+    r.segs.forEach(function (x) { by[x.from] = x; });
+    var dataSeg = s.chart.map(function (x) { return x.segs.filter(function (y) { return y.len; })[0]; }).filter(Boolean)[0];
+    Object.assign(v, { seq: bold(g.seq), ack: bold(g.ack), fin: bold(L.seqAdd(g.ack, -1)), len: bold(dataSeg ? dataSeg.len : 0), dseq: bold(dataSeg ? dataSeg.seq : 0) });
+    if (by.A && by.B) Object.assign(v, { seqA: bold(by.A.seq), seqB: bold(by.B.seq), ackA: bold(by.A.ack), ackB: bold(by.B.ack) });
+    return partsOnce(CLOSE_CAPS[s.mode][s.sent - 1], v);
+  }
 
   /** One side's card: name and role, its ISN, the next number it sends, what it expects, whether it is confirmed. */
   function end(k, side, prev) {
@@ -266,12 +437,14 @@
   }
 
   Simdeck.mount({
-    steps: L.steps,
+    steps: L.stepsFor,
     defaults: L.defaults,
     initial: L.initial,
     step: L.step,
 
     params: [
+      { key: 'closer', type: 'choice', label: t('closer'), options: [['A', t('legendA')], ['B', t('legendB')]],
+        visible: function (p) { return p.mode !== 'open' && p.mode !== 'simul'; } },
       { key: 'isn', type: 'choice', label: t('isn'), options: [['own', t('isnOwn')], ['real', t('isnReal')], ['wrap', t('isnWrap')]] },
       { key: 'x', type: 'range', label: t('x'), min: L.min, max: L.max, step: 1, disabled: ownOnly },
       { key: 'y', type: 'range', label: t('y'), min: L.min, max: L.max, step: 1, disabled: ownOnly }
@@ -283,11 +456,22 @@
       { c: 1, label: t('legendA') },
       { c: 2, label: t('legendB') },
       { shape: 'hl', label: t('legendNow') },
-      { shape: 'hollow', label: t('legendLater') }
+      { shape: 'hollow', label: t('legendLater') },
+      { shape: 'thin', label: t('legendAck') }
     ],
 
     render: function (c) {
-      var s = c.state, p = c.prev;
+      var s = c.state, p = c.prev, closeMode = !!s.ends;
+      document.querySelector('[data-t-html="explain"]').hidden = closeMode;
+      document.querySelector('[data-t-html="explainClose"]').hidden = !closeMode;
+      c.stage.setAttribute('data-t-label', closeMode ? 'stageClose' : 'stage');
+      c.stage.setAttribute('aria-label', t(closeMode ? 'stageClose' : 'stage'));
+      if (closeMode) {
+        var chartEl = closeChart(s, c);
+        c.stage.replaceChildren(h('div', { class: 'td' }, chartEl, h('div', { class: 'th-lines' }, closeLine('A', s), closeLine('B', s))));
+        chartEl.fit();
+        return;
+      }
       var chart = h('div', { class: 'th-chart' },
         h('div', { class: 'th-lane th-a', 'aria-hidden': 'true' }),
         h('div', { class: 'th-lane th-b', 'aria-hidden': 'true' }),
@@ -301,6 +485,7 @@
 
     caption: function (c) {
       var s = c.state;
+      if (s.ends) return closeCaption(c);
       var v = { x: bold(s.x), x1: bold(L.seqAdd(s.x, 1)), y: bold(s.y), y1: bold(L.seqAdd(s.y, 1)) };
       if (c.first) return t.parts('captionStart', v);
       var out = t.parts('caption' + s.sent, v);

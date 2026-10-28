@@ -5,7 +5,9 @@
    Each side keeps its own initial sequence number (ISN), the next number it will send from and the next number it
    expects from the other side. Sequence numbers are 32 bits (RFC 9293 §3.1, §3.4), so X+1 wraps to 0 at 2^32 - 1.
    Pure: no DOM, no Math.random, no Date, no timers; state is plain JSON. seqAdd, segments and sides are pure
-   functions over plain data, ready for models/ (tcp-teardown, tcp-retransmit and tcp-states continue from here). */
+   functions over plain data, ready for models/ (tcp-teardown, tcp-retransmit and tcp-states continue from here).
+   The closing modes (task tcp-teardown: FIN/ACK both ways, half close, TIME-WAIT) start from the handshake's end
+   state; their rules are in SPEC.md and in closing() and receive() below. */
 (function (root) {
   'use strict';
 
@@ -64,8 +66,114 @@
     return s;
   }
 
+  // ── teardown (task tcp-teardown): FIN/ACK in both directions, half close, TIME-WAIT ──
+  // URM ch. 13 "TCP: zatvaranje veze"; RFC 9293 §3.6, §3.6.1, Figure 5, Figure 13, §3.10.7.4. The states and TIME-WAIT
+  // come from the RFC (the book does not name them).
+
+  /** The modes: 'open' is the handshake above; the others close an established connection. */
+  var MODES = ['open', 'close', 'half', 'finack', 'simul'];
+
+  /** MSL, the maximum segment lifetime: 2 minutes (RFC 9293 §3.4.2). TIME-WAIT lasts 2 × MSL. */
+  var MSL = 120;
+
+  /** Each closing mode as a list of steps. A step is either the segments sent in it (all from the state before the
+      step, then all delivered in the same step, so two FINs can cross) or 'timeout' (2 × MSL passes). c is the end
+      that closes first, o the other. kind: fin (FIN), ack (a pure ACK), finack (FIN and the ACK of the peer's FIN in
+      one segment), data (len octets). */
+  var SCRIPTS = {
+    close: [[['c', 'fin']], [['o', 'ack']], [['o', 'fin']], [['c', 'ack']], 'timeout'],
+    half: [[['c', 'fin']], [['o', 'ack']], [['o', 'data', 200]], [['c', 'ack']], [['o', 'fin']], [['c', 'ack']], 'timeout'],
+    finack: [[['c', 'fin']], [['o', 'finack']], [['c', 'ack']], 'timeout'],
+    simul: [[['A', 'fin'], ['B', 'fin']], [['A', 'ack'], ['B', 'ack']], 'timeout']
+  };
+
+  /** Steps of a mode: 3 for the handshake, the script's length for a close. */
+  function stepsFor(p) { return SCRIPTS[p.mode] ? SCRIPTS[p.mode].length : 3; }
+
+  /** May an end in this state still send data? Until it has sent its own FIN (RFC 9293 §3.6.1, half close). */
+  function canSend(state) { return state === 'ESTABLISHED' || state === 'CLOSE-WAIT'; }
+  /** May it still receive data? Until the peer's FIN has arrived (RFC 9293 §3.10.7.4, "seventh, process the
+      segment text": ESTABLISHED, FIN-WAIT-1, FIN-WAIT-2). Sending a FIN does not stop receiving. */
+  function canReceive(state) { return state === 'ESTABLISHED' || state === 'FIN-WAIT-1' || state === 'FIN-WAIT-2'; }
+
+  /** The flags of a closing action. */
+  var KIND_FLAGS = { fin: ['FIN'], ack: ['ACK'], finack: ['FIN', 'ACK'], data: [] };
+
+  function copyEnds(e) {
+    return { A: Object.assign({}, e.A), B: Object.assign({}, e.B) };
+  }
+
+  /** One end receives one segment (RFC 9293 §3.10.7.4 order: the ACK field, then the text, then the FIN bit).
+      The ACK of its own FIN (ack = the number after the FIN): FIN-WAIT-1 → FIN-WAIT-2, CLOSING → TIME-WAIT,
+      LAST-ACK → CLOSED. Data in order and while it may receive: rcvNxt moves past it. The peer's FIN in order:
+      it takes one number (rcvNxt + 1); ESTABLISHED → CLOSE-WAIT, FIN-WAIT-1 → CLOSING, FIN-WAIT-2 → TIME-WAIT.
+      So a FIN+ACK in FIN-WAIT-1 goes to FIN-WAIT-2 and on to TIME-WAIT in the same segment (the tie-break). */
+  function receive(rx, g) {
+    if (rx.finSent && g.ack === rx.sndNxt) {
+      if (rx.state === 'FIN-WAIT-1') rx.state = 'FIN-WAIT-2';
+      else if (rx.state === 'CLOSING') rx.state = 'TIME-WAIT';
+      else if (rx.state === 'LAST-ACK') rx.state = 'CLOSED';
+    }
+    if (g.len && g.seq === rx.rcvNxt && canReceive(rx.state)) rx.rcvNxt = seqAdd(rx.rcvNxt, g.len);
+    if (g.flags.indexOf('FIN') >= 0 && seqAdd(g.seq, g.len) === rx.rcvNxt) {
+      rx.rcvNxt = seqAdd(rx.rcvNxt, 1);
+      if (rx.state === 'ESTABLISHED') rx.state = 'CLOSE-WAIT';
+      else if (rx.state === 'FIN-WAIT-1') rx.state = 'CLOSING';
+      else if (rx.state === 'FIN-WAIT-2') rx.state = 'TIME-WAIT';
+    }
+  }
+
+  /** A close after the handshake with ISNs x and y, through step n of `mode`, `closer` closing first. Both ends start
+      ESTABLISHED with the handshake's end numbers (A sends from x+1 and expects y+1, B the other way round). A segment
+      carries seq = the sender's sndNxt and ack = its rcvNxt; a FIN takes one number (RFC 9293 §3.4), so its ACK is
+      FIN.seq + 1. CLOSE sends the FIN: ESTABLISHED → FIN-WAIT-1, CLOSE-WAIT → LAST-ACK. The timeout step closes every
+      end in TIME-WAIT. chart: one entry per step, with its segments (or timeout), and both ends' states after it. */
+  function closing(x, y, mode, closer, n) {
+    var script = SCRIPTS[mode], other = closer === 'B' ? 'A' : 'B';
+    var who = { c: closer === 'B' ? 'B' : 'A', o: other, A: 'A', B: 'B' };
+    var ends = {
+      A: { state: 'ESTABLISHED', sndNxt: seqAdd(x, 1), rcvNxt: seqAdd(y, 1), finSent: false, finSeq: null, timeWait: null },
+      B: { state: 'ESTABLISHED', sndNxt: seqAdd(y, 1), rcvNxt: seqAdd(x, 1), finSent: false, finSeq: null, timeWait: null }
+    };
+    var chart = [];
+    for (var k = 0; k < n && k < script.length; k++) {
+      var st = script[k], before = copyEnds(ends), row;
+      if (st === 'timeout') {
+        var closed = [];
+        ['A', 'B'].forEach(function (id) {
+          if (ends[id].state === 'TIME-WAIT') { ends[id].state = 'CLOSED'; closed.push(id); }
+        });
+        row = { step: k + 1, timeout: true, closed: closed, segs: [] };
+      } else {
+        var segs = st.map(function (a) {
+          var id = who[a[0]], e = before[id];
+          return { from: id, to: id === 'A' ? 'B' : 'A', flags: KIND_FLAGS[a[1]].slice(), seq: e.sndNxt, ack: e.rcvNxt, len: a[2] || 0 };
+        });
+        segs.forEach(function (g) {
+          var tx = ends[g.from];
+          tx.sndNxt = seqAdd(g.seq, seqLen(g));
+          if (g.flags.indexOf('FIN') >= 0) {
+            tx.finSent = true;
+            tx.finSeq = seqAdd(g.seq, g.len);
+            if (tx.state === 'ESTABLISHED') tx.state = 'FIN-WAIT-1';
+            else if (tx.state === 'CLOSE-WAIT') tx.state = 'LAST-ACK';
+          }
+        });
+        segs.forEach(function (g) { receive(ends[g.to], g); });
+        row = { step: k + 1, timeout: false, closed: [], segs: segs };
+      }
+      ['A', 'B'].forEach(function (id) {
+        if (ends[id].state === 'TIME-WAIT' && ends[id].timeWait === null) ends[id].timeWait = k + 1;
+      });
+      row.after = { A: ends.A.state, B: ends.B.state };
+      chart.push(row);
+    }
+    return { ends: ends, chart: chart, closer: who.c, steps: script.length };
+  }
+
   /** Everything the page shows after step n (0 = nothing sent yet). */
   function analyze(p, n) {
+    if (SCRIPTS[p.mode]) return analyzeClose(p, n);
     var v = isns(p), segs = segments(v.x, v.y), s = sides(v.x, v.y, segs, n);
     return {
       x: v.x,
@@ -82,16 +190,26 @@
     };
   }
 
+  /** The close after step n: the ISNs in use, the mode, the closer, both ends and the chart so far. */
+  function analyzeClose(p, n) {
+    var v = isns(p), c = closing(v.x, v.y, p.mode, p.closer, n);
+    return { x: v.x, y: v.y, mode: p.mode, closer: p.mode === 'simul' ? null : c.closer, sent: c.chart.length, ends: c.ends, chart: c.chart };
+  }
+
   var logic = {
-    /** The book's worked example: X = 4000, Y = 9500 (URM ch. 13, Primjer 3; the fragment's defaults). */
-    defaults: { isn: 'own', x: 4000, y: 9500 },
+    /** The book's worked example: X = 4000, Y = 9500 (URM ch. 13, Primjer 3; the fragment's defaults). The mode is the
+        handshake; a close starts from its end state, closer A unless chosen otherwise. */
+    defaults: { isn: 'own', x: 4000, y: 9500, mode: 'open', closer: 'A' },
 
     isnModes: ['own', 'real', 'wrap'],
+    modes: MODES,
     /** The fragment's sliders: 0 to 9999, step 1. */
     min: 0,
     max: 9999,
 
+    /** The handshake's three messages; the page mounts stepsFor, which gives each close its own length. */
     steps: 3,
+    stepsFor: stepsFor,
 
     initial: function (p) { return analyze(p, 0); },
 
@@ -105,7 +223,13 @@
     isns: isns,
     segments: segments,
     sides: sides,
-    analyze: analyze
+    analyze: analyze,
+    MSL: MSL,
+    scripts: SCRIPTS,
+    canSend: canSend,
+    canReceive: canReceive,
+    receive: receive,
+    closing: closing
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;
