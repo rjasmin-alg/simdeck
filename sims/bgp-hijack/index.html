@@ -1,0 +1,519 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- bgp-hijack: AS64511 announces a prefix of AS64496 (the same /24 or a longer /25); route origin validation drops
+     it where it is on. A stepper: one step is one synchronous round of BGP announcements. Kit view K2 draws the eight
+     ASes, the links, the announcements on the wire and each AS's forwarding for 203.0.113.10; the side column holds
+     the ROA and each AS's best path per prefix with its validation state. Model: sim.js; rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="bgp-hijack">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BGP: otmica prefiksa i provjera izvorišta · simdeck</title>
+<meta name="description" content="AS64511 najavljuje tuđi prefiks: isti /24 osvaja samo bliže AS-ove, dulji /25 sve. Objavi ROA, uključi provjeru izvorišta i gledaj gdje promet ipak curi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "bgp-hijack",
+  "title": {
+    "hr": "BGP: otmica prefiksa i provjera izvorišta",
+    "en": "BGP hijack and route origin validation"
+  },
+  "concept": {
+    "hr": "Specifičniji prefiks pobjeđuje; provjera izvorišta puta (ROA, ROV)",
+    "en": "A more-specific prefix wins; route origin validation (ROA, ROV)"
+  },
+  "summary": {
+    "hr": "AS64511 najavljuje tuđi prefiks: isti /24 osvaja samo bliže AS-ove, dulji /25 sve. Objavi ROA, uključi provjeru izvorišta i gledaj gdje promet ipak curi.",
+    "en": "AS64511 announces someone else's prefix: the same /24 wins nearer ASes, a longer /25 all. Publish a ROA, turn on validation, see where traffic still leaks."
+  },
+  "tags": [
+    "bgp",
+    "attacks"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="bgp-hijack"]; colours only from kit tokens.
+   Layout: the K2 drawing on the left (AS cards with their forwarding, links, announcements beside the links), the side
+   column on the right (the round and the ROA, then one block per AS: best path per prefix, validation, forwarding). */
+[data-sim="bgp-hijack"] .hj {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="bgp-hijack"] .hj-draw { min-width: 0; min-height: 0; display: flex; }
+[data-sim="bgp-hijack"] .hj-draw .sd-topo { flex: 1; height: 100%; align-content: stretch; }
+[data-sim="bgp-hijack"] .sd-topo-chip { font-family: var(--mono); }
+[data-sim="bgp-hijack"] .sd-topo-badge { font-family: var(--sans); }
+[data-sim="bgp-hijack"] .hj-side { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; min-height: 0; }
+[data-sim="bgp-hijack"] .hj-side h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="bgp-hijack"] .hj-top { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; align-items: baseline; }
+[data-sim="bgp-hijack"] .hj-round { font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="bgp-hijack"] .sd-caption .sd-mono { word-spacing: -0.3em; }
+
+/* the ROA card */
+[data-sim="bgp-hijack"] .hj-roa { padding: 0.2rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  border-left: 0.45rem solid var(--sw, var(--ink)); font-size: var(--fs-sm); }
+[data-sim="bgp-hijack"] .hj-roa[data-none] { border-style: dashed; border-left-style: dashed; color: var(--muted); }
+[data-sim="bgp-hijack"] .hj-roa b { margin-right: 0.5rem; }
+[data-sim="bgp-hijack"] .hj-roa .sd-mono { font-weight: 700; }
+[data-sim="bgp-hijack"] .hj-rov { font-size: var(--fs-sm); color: var(--muted); }
+
+/* one block per AS, two columns */
+[data-sim="bgp-hijack"] .hj-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 0.6rem; }
+[data-sim="bgp-hijack"] .hj-as { padding: 0.15rem 0.5rem 0.25rem; border: var(--line-w) solid var(--line);
+  border-left: 0.45rem solid var(--sw, var(--line)); border-radius: var(--radius-sm); background: var(--bg); min-width: 0; }
+[data-sim="bgp-hijack"] .hj-as[data-active] { border-color: var(--ink); border-left-color: var(--sw, var(--ink)); }
+[data-sim="bgp-hijack"] .hj-head { display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; }
+[data-sim="bgp-hijack"] .hj-head .hj-tag { margin-left: auto; font-size: var(--fs-sm); padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="bgp-hijack"] .hj-as table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+[data-sim="bgp-hijack"] .hj-as td { padding: 0 0.4rem 0 0; white-space: nowrap; vertical-align: middle; }
+[data-sim="bgp-hijack"] .hj-as td.hj-path { font-family: var(--mono); width: 100%; word-spacing: -0.3em; white-space: normal; }
+[data-sim="bgp-hijack"] .hj-as td.hj-pfx { font-family: var(--mono); font-weight: 700; }
+[data-sim="bgp-hijack"] .hj-as tr[data-gone] td { color: var(--muted); }
+[data-sim="bgp-hijack"] .hj-as tr[data-gone] td.hj-path { text-decoration: line-through; }
+[data-sim="bgp-hijack"] .hj-as tr[data-gone] small { font-family: var(--sans); font-size: 1em; margin-left: 0.4rem; word-spacing: normal; }
+[data-sim="bgp-hijack"] .hj-fwd { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.3rem; margin-top: 0.1rem; border-radius: var(--radius-sm); }
+[data-sim="bgp-hijack"] .hj-fwd[data-dest="X"] { background: var(--ink); color: var(--bg); }
+[data-sim="bgp-hijack"] .hj-fwd[data-dest="none"] { border: var(--line-w) dashed var(--muted); color: var(--muted); }
+[data-sim="bgp-hijack"] .hj-fwd.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); }
+
+/* validation badges: shape and text, never colour alone */
+[data-sim="bgp-hijack"] .hj-v { display: inline-block; min-width: 2.2em; text-align: center; padding: 0 0.25rem; border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm); font-weight: 700; font-family: var(--sans); line-height: 1.4; }
+[data-sim="bgp-hijack"] .hj-v[data-v="valid"] { border-color: var(--ok); color: var(--ok); }
+[data-sim="bgp-hijack"] .hj-v[data-v="invalid"] { background: var(--danger); border-color: var(--danger); color: var(--bg); }
+[data-sim="bgp-hijack"] .hj-v[data-v="notfound"] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; }
+
+/* legend swatches the kit lacks */
+[data-sim="bgp-hijack"] .sd-swatch[data-shape^="hj-"] { position: relative; background: var(--bg); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape^="hj-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-real"]::after { content: '●'; }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-false"] { background: var(--ink); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-false"]::after { content: '▲'; color: var(--bg); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-drop"] { border-color: var(--danger); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-drop"]::after { content: '✕'; color: var(--danger); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-v"] { background: var(--danger); border-color: var(--danger); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-v"]::after { content: 'I'; color: var(--bg); }
+[data-sim="bgp-hijack"] .sd-swatch[data-shape="hj-captured"] { height: 0.55rem; border: 0; border-radius: 0; background: var(--ink); }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the side column follows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="bgp-hijack"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="bgp-hijack"] .hj { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="bgp-hijack"] .hj-draw .sd-topo { height: auto; }
+  [data-sim="bgp-hijack"] .hj-grid { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="bgp-hijack"] .hj-as td.hj-path { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">BGP: otmica prefiksa i provjera izvorišta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { O: '1', X: '2', A: '3', B: '4', C: '5', D: '6', E: '7', F: '8' };
+  // the drawing, top to bottom: O | A C B | E D F | X; [col, row, span] in a grid of 11 columns, cards in rows 0, 2, 4, 6
+  var POS = { O: [4, 0, 3], A: [0, 2, 3], C: [4, 2, 3], B: [8, 2, 3], E: [0, 4, 3], D: [4, 4, 3], F: [8, 4, 3], X: [4, 6, 3] };
+  var MARK = { real: '●', false: '▲' };
+  var VSHORT = { valid: 'V', invalid: 'I', notfound: 'NF' };
+  var CAPTION_MAX = 300;
+
+  /** Data (letters, ASNs, paths, addresses, numbers) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'sd-mono' }, String(text)); }
+  function name(text) { return h('span', { translate: 'no' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Nodes separated by words: "A, B i C". */
+  function sepList(nodes) {
+    var out = h('span', null);
+    nodes.forEach(function (n, i) { if (i) out.append(t(i === nodes.length - 1 ? 'andSep' : 'listSep')); out.append(n); });
+    return out;
+  }
+  function textLength(list) {
+    return list.reduce(function (n, x) {
+      return n + 1 + [].concat(x).reduce(function (m, y) { return m + (typeof y === 'string' ? y : y.textContent || '').length; }, 0);
+    }, 0);
+  }
+  /** The lead always; each optional part only while the caption stays within three lines at 1920×1080. */
+  function fit(lead, optional) {
+    var keep = lead.filter(Boolean);
+    optional.forEach(function (x) { if (x && textLength(keep) + textLength([x]) <= CAPTION_MAX) keep.push(x); });
+    return join(keep);
+  }
+
+  // ── names for the data ──
+
+  function pathText(path) { return '[' + path.join(' ') + ']'; }
+  function short(prefix) { return '/' + prefix.split('/')[1]; }
+  function asnName(scene, id) { return 'AS' + L.asOf(scene, id).asn; }
+  function destMark(scene, dest) { return dest === scene.home ? MARK.real : MARK.false; }
+  /** Is X announcing yet (from round 1 of a conflict)? */
+  function announcing(scene, s) { return !!scene.hijack && !s.pending; }
+
+  // ── the drawing (kit view K2) ──
+
+  function renderTopo(c, scene) {
+    var s = c.state;
+    var captured = {};
+    scene.ases.forEach(function (a) {
+      var f = s.ases[a.id].fwd;
+      if (!f || f.dest !== 'X' || !scene.hijack) return;
+      for (var i = 0; i + 1 < f.hops.length; i++) captured[[f.hops[i], f.hops[i + 1]].sort().join('-')] = true;
+    });
+    var senders = s.msgs.map(function (m) { return m.from; });
+    var nodes = scene.ases.map(function (a) {
+      var P = POS[a.id], st = s.ases[a.id], f = st.fwd;
+      var badges = [];
+      var isFalse = scene.hijack && a.id === scene.hijack.as && announcing(scene, s);
+      if (a.id === scene.home) badges.push({ text: MARK.real + ' ' + t('bReal'), k: 'solid' });
+      else if (isFalse) badges.push({ text: MARK.false + ' ' + t('bFalse'), k: 'fill' });
+      else if (!f) badges.push({ text: t('bNoPath'), k: 'dashed' });
+      else badges.push({ text: h('span', { translate: 'no' }, '→ ' + f.via + ' ' + destMark(scene, f.dest)), k: f.dest === scene.home ? 'solid' : 'fill' });
+      if (st.rov) badges.push({ text: t('bRov'), k: 'muted' });
+      var lines = [{ text: 'AS' + a.asn, kind: 'sub' }];
+      if (a.id === scene.origin.as) lines.push({ text: short(scene.origin.prefix), kind: 'sub' });
+      if (isFalse) lines.push({ text: short(scene.hijack.prefix), kind: 'sub' });
+      return {
+        id: a.id, kind: 'router', col: P[0], row: P[1], span: P[2], c: COLOUR[a.id], lines: lines, badges: badges,
+        state: senders.indexOf(a.id) >= 0 ? 'active' : null, changed: s.changed.indexOf(a.id) >= 0
+      };
+    });
+    var links = scene.links.map(function (l) {
+      return { id: l.id, a: l.a, b: l.b, state: 'up', active: !!captured[[l.a, l.b].sort().join('-')] };
+    });
+    // a chip carries the prefix only: the AS path is in the receiver's table and in the caption, and a short chip fits
+    // between neighbouring cards
+    var packets = s.msgs.map(function (m) {
+      return m.kind === 'withdraw'
+        ? { from: m.from, to: m.to, label: short(m.prefix) + ' ✕', c: COLOUR[m.from], cast: 'broadcast' }
+        : { from: m.from, to: m.to, label: short(m.prefix) + (m.result === 'invalid' ? ' I' : ''),
+          c: COLOUR[m.from], drop: m.result === 'loop' || m.result === 'invalid' };
+    });
+    // phone order: top to bottom, left to right
+    nodes.sort(function (x, y) { return POS[x.id][1] - POS[y.id][1] || POS[x.id][0] - POS[y.id][0]; });
+    var gapRow = 'minmax(1.5rem, 1fr)';
+    return Simdeck.topology({ cols: 11, rows: ['auto', gapRow, 'auto', gapRow, 'auto', gapRow, 'auto'], dir: c.dir,
+      nodes: nodes, links: links, packets: packets, gap: '0.6cqw' });
+  }
+
+  // ── the side column ──
+
+  function roundLabel(s) {
+    if (s.phase === 'origin') return t('roundStart');
+    if (s.phase === 'ready') return t('roundReady');
+    var n = t('roundT', { n: s.round });
+    return s.phase === 'converged' ? n + ' · ' + t('roundDone') : n;
+  }
+
+  function vBadge(v) { return h('span', { class: 'hj-v', dataset: { v: v }, translate: 'no' }, VSHORT[v]); }
+
+  function roaCard(scene) {
+    if (!scene.roas.length) return h('div', { class: 'hj-roa', dataset: { none: '1' } }, h('b', null, t('roaTitle')), t('roaNone'));
+    var r = scene.roas[0];
+    return h('div', { class: 'hj-roa', dataset: { c: COLOUR[scene.home] } }, h('b', null, t('roaTitle')),
+      data(r.prefix), ' · ', t('roaMax', { m: r.maxLength }), ' · ', data('AS' + r.origin));
+  }
+
+  function rovLine(scene) {
+    if (!scene.rov.length) return h('div', { class: 'hj-rov' }, t('rovNobody'));
+    var all = scene.rov.length === scene.ases.length;
+    return h('div', { class: 'hj-rov' }, t.parts('rovWho', { list: all ? t('rovAll') : sepList(scene.rov.map(name)) }));
+  }
+
+  function fwdLine(scene, s, id) {
+    var f = s.ases[id].fwd;
+    var changed = s.changed.indexOf(id) >= 0;
+    var cls = 'hj-fwd' + (changed ? ' sd-changed' : '');
+    if (!f) return h('div', { class: cls, dataset: { dest: 'none' } }, t('fwdNone'));
+    if (!f.via) {
+      return h('div', { class: cls, dataset: { dest: id === scene.home ? 'O' : 'X' } }, name(destMark(scene, id) + ' '), t('fwdHome'));
+    }
+    return h('div', { class: cls, dataset: { dest: f.dest === scene.home ? 'O' : f.dest ? 'X' : 'none' } },
+      data(short(f.prefix) + ' → ' + f.via), '  ',
+      name(f.dest ? destMark(scene, f.dest) + ' AS' + L.asOf(scene, f.dest).asn : '?'));
+  }
+
+  function renderSide(c, scene) {
+    var s = c.state;
+    var blocks = scene.ases.map(function (a) {
+      var st = s.ases[a.id];
+      var rows = L.prefixesOf(st).filter(function (p) { return st.best[p]; }).map(function (p) {
+        var r = st.best[p];
+        return h('tr', null,
+          h('td', { class: 'hj-pfx', translate: 'no' }, short(p)),
+          h('td', { class: 'hj-path' }, r.local ? t('own') : data(pathText(r.path))),
+          h('td', null, st.rov && r.valid ? vBadge(r.valid) : null));
+      });
+      // announcements dropped as Invalid this round: struck through
+      s.msgs.forEach(function (m) {
+        if (m.to !== a.id || m.result !== 'invalid') return;
+        rows.push(h('tr', { dataset: { gone: '1' } },
+          h('td', { class: 'hj-pfx', translate: 'no' }, short(m.prefix)),
+          h('td', { class: 'hj-path' }, data(pathText(m.path)), h('small', null, t('dropped'))),
+          h('td', null, vBadge('invalid'))));
+      });
+      var sent = s.msgs.some(function (m) { return m.from === a.id; });
+      return h('section', { class: 'hj-as', dataset: Object.assign({ c: COLOUR[a.id] }, sent ? { active: '1' } : {}) },
+        h('div', { class: 'hj-head' }, b(a.id), h('span', { translate: 'no' }, 'AS' + a.asn),
+          st.rov ? h('span', { class: 'hj-tag' }, t('bRov')) : null),
+        rows.length ? h('table', null, h('tbody', null, rows)) : null,
+        fwdLine(scene, s, a.id));
+    });
+    return [
+      h('div', { class: 'hj-top' }, h('div', { class: 'hj-round' }, roundLabel(s)), rovLine(scene)),
+      roaCard(scene),
+      h('h2', null, t('sideTitle', { a: scene.target })),
+      h('div', { class: 'hj-grid' }, blocks)
+    ];
+  }
+
+  // ── captions ──
+
+  function capReady(scene) {
+    var lead = parts('capReady', { a: data(scene.target), o: b(asnName(scene, scene.home)), x: b(asnName(scene, scene.hijack.as)),
+      p: data(scene.hijack.prefix) });
+    var roa = null;
+    var list = scene.rov.length === scene.ases.length ? t('rovAll') : sepList(scene.rov.map(b));
+    if (scene.roas.length) roa = scene.rov.length ? parts('capReadyRoa', { list: list }) : [t('capReadyRoaNobody')];
+    else if (scene.rov.length) roa = scene.rov.length === scene.ases.length ? [t('capReadyNoRoaAll')] : parts('capReadyNoRoa', { list: list });
+    return fit([lead, roa], []);
+  }
+
+  /** The one AS the caption explains this round, and the sentence for it. */
+  function focusSentence(c, scene) {
+    var s = c.state, prev = c.prev;
+    var X = scene.hijack ? scene.hijack.as : null;
+    var cands = s.changed.filter(function (id) { return !(id === X && announcing(scene, s)) && id !== scene.home; });
+    if (!cands.length) return null;
+    var legitAsn = L.asOf(scene, scene.home).asn;
+    function kind(id) {
+      var f = s.ases[id].fwd, was = prev.ases[id].fwd;
+      if (!was) return 'first';
+      if (!f || !f.via) return 'to';
+      var pulled = f.dest === X && f.origin === legitAsn;
+      if (pulled && s.ases[id].rov) return 'pulledRov';
+      if (f.dest === X && X && f.prefix !== scene.origin.prefix) return 'longer';
+      if (pulled) return 'pulled';
+      if (s.ases[id].by[f.prefix] === 'len' && f.dest === X) return 'shorter';
+      return 'to';
+    }
+    var rank = ['pulledRov', 'longer', 'pulled', 'shorter', 'first', 'to'];
+    var focus = cands.slice().sort(function (x, y) { return rank.indexOf(kind(x)) - rank.indexOf(kind(y)); })[0];
+    var k = kind(focus), st = s.ases[focus], f = st.fwd;
+    var x = b(asnName(scene, focus)), a = data(scene.target);
+    var sentence;
+    if (k === 'first') sentence = parts('fwdFirst', { x: x, p: data(f.prefix), n: name(f.via), a: a });
+    else if (k === 'longer') {
+      var legit = st.best[scene.origin.prefix], hij = st.best[f.prefix];
+      var anyway = legit && hij.path.length > legit.path.length;
+      sentence = parts(anyway ? 'fwdLongerAnyway' : 'fwdLonger', { x: x, p1: data(scene.origin.prefix), p2: data(f.prefix), n: name(f.via), a: a,
+        k1: data(legit ? legit.path.length : 0), k2: data(hij.path.length) });
+    } else if (k === 'pulled' || k === 'pulledRov') {
+      sentence = parts('fwdPulled', { x: x, a: a, n: name(f.via), p: data(f.prefix), hp: data(s.ases[f.via].fwd.prefix),
+        xa: b(asnName(scene, X)) });
+    } else if (k === 'shorter') {
+      var rib = st.rib.filter(function (e) { return e.prefix === f.prefix; }).sort(function (u, v) { return L.cmpPath(scene, u, v); });
+      sentence = parts('fwdShorter', { x: x, p: data(f.prefix), path: data(pathText(rib[0].path)), n: name(rib[0].from),
+        path2: data(pathText(rib[1].path)), n2: name(rib[1].from), xa: b(asnName(scene, X)) });
+    } else {
+      sentence = f && f.via
+        ? parts('fwdTo', { x: x, a: a, n: name(f.via), d: b(f.dest ? asnName(scene, f.dest) : '?') })
+        : [t('fwdNone')];
+    }
+    var rest = cands.filter(function (id) { return id !== focus; });
+    var toX = rest.filter(function (id) { return s.ases[id].fwd && s.ases[id].fwd.dest === X && X; });
+    var other = rest.filter(function (id) { return toX.indexOf(id) < 0; });
+    var also = [];
+    if (toX.length) also.push(parts('alsoX', { xa: b(asnName(scene, X)), list: sepList(toX.map(b)) }));
+    if (other.length) also.push(parts('alsoOther', { list: sepList(other.map(b)) }));
+    return { sentence: sentence, also: also.length ? join(also) : null };
+  }
+
+  function capRound(c, scene) {
+    var s = c.state;
+    var X = scene.hijack ? scene.hijack.as : null;
+    var lead = [];
+    var senders = [];
+    s.msgs.forEach(function (m) { if (senders.indexOf(m.from) < 0) senders.push(m.from); });
+    if (s.started) {
+      lead.push(parts('capStart', { n: data(s.round), x: b(asnName(scene, s.started)), p: data(scene.hijack.prefix) }));
+      if (!scene.roas.length || !scene.rov.length) lead.push([t('capNoCheck')]);
+    } else if (senders.length === 1 && senders[0] === scene.origin.as && s.round === 1) {
+      lead.push(parts('capRoundOrigin', { n: data(s.round), o: b(asnName(scene, scene.origin.as)), p: data(scene.origin.prefix) }));
+    } else if (senders.length) {
+      lead.push(parts(senders.length === 1 ? 'capRound1' : 'capRoundN', { n: data(s.round), s: sepList(senders.map(b)) }));
+    }
+    // Invalid announcements dropped this round: one sentence for the first prefix and origin
+    var inv = s.msgs.filter(function (m) { return m.result === 'invalid'; });
+    if (inv.length) {
+      var m0 = inv[0], same = inv.filter(function (m) { return m.prefix === m0.prefix && m.path[m.path.length - 1] === m0.path[m0.path.length - 1]; });
+      var recv = [];
+      same.forEach(function (m) { if (recv.indexOf(m.to) < 0) recv.push(m.to); });
+      var roa = scene.roas[0];
+      lead.push(parts(recv.length === 1 ? 'capInvalid1' : 'capInvalidN', { r: sepList(recv.map(b)), p: data(m0.prefix), s: name(m0.from),
+        xo: data('AS' + m0.path[m0.path.length - 1]), o: data('AS' + roa.origin), m: data(roa.maxLength) }));
+    }
+    var opt = [];
+    var nf = s.msgs.filter(function (m) { return m.result === 'stored' && m.valid === 'notfound' && X && m.path[m.path.length - 1] === L.asOf(scene, X).asn; })[0];
+    if (nf) opt.push(parts('capNotFound', { r: b(nf.to), p: data(nf.prefix) }));
+    var focus = focusSentence(c, scene);
+    if (focus) lead.push(focus.sentence);
+    else if (s.send.length) {
+      var next = [];
+      s.send.forEach(function (x) { if (next.indexOf(x.id) < 0) next.push(x.id); });
+      lead.push(parts('quietSend', { list: sepList(next.map(b)) }));
+    } else lead.push([t(s.started ? 'quietStart' : 'quiet')]);
+    var home = s.msgs.filter(function (m) {
+      return m.to === scene.home && m.result === 'stored' && X && m.path[m.path.length - 1] === L.asOf(scene, X).asn;
+    })[0];
+    if (home) opt.push(parts('capHome', { o: b(asnName(scene, scene.home)), p: data(home.prefix), a: data(scene.target) }));
+    if (focus && focus.also) opt.unshift(focus.also);
+    return fit(lead, opt);
+  }
+
+  function capDone(c, scene) {
+    var s = c.state;
+    var lead = [parts('capDone', { n: data(s.round) })];
+    var o = b(asnName(scene, scene.home)), a = data(scene.target);
+    if (!scene.hijack) {
+      lead.push(parts('doneAllReal', { a: a, o: o }));
+      return fit(lead, []);
+    }
+    var X = scene.hijack.as;
+    var toO = L.endingAt(scene, s, scene.home), toX = L.endingAt(scene, s, X);
+    lead.push(parts('doneSplit', { a: a, o: o, xa: b(asnName(scene, X)),
+      k1: t.n('asCount', toO.length), l1: sepList(toO.map(name)),
+      k2: t.n('asCount', toX.length), l2: sepList(toX.map(name)) }));
+    // a validating AS (with a ROA to check against) whose own route has origin AS64496 and whose next hop does not
+    // validate, yet whose traffic ends at X: only then does the sentence hold
+    var legitAsn = L.asOf(scene, scene.home).asn;
+    var pulled = toX.filter(function (id) {
+      var f = s.ases[id].fwd;
+      return scene.roas.length && id !== X && s.ases[id].rov && f.origin === legitAsn && f.via && !s.ases[f.via].rov;
+    })[0];
+    if (pulled) {
+      var f = s.ases[pulled].fwd;
+      lead.push(parts('donePulled', { x: b(asnName(scene, pulled)), hp: data(scene.hijack.prefix), xa: b(asnName(scene, X)), n: name(f.via) }));
+    }
+    return fit(lead, []);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'conflict', type: 'choice', label: t('pConflict'), resets: true,
+        options: [['none', t('conflictNone')], ['same-prefix', t('conflictSame')], ['more-specific', t('conflictMore')]] },
+      { key: 'roa', type: 'toggle', label: t('pRoa'), resets: true },
+      { key: 'rovDeployment', type: 'choice', label: t('pRov'), hint: t('pRovHint'), resets: true,
+        options: [['none', t('rovNone')], ['half', t('rovHalf')], ['all', t('rovAllOpt')]] }
+    ],
+
+    presets: [
+      { id: 'normal', label: t('prNormal'), params: { conflict: 'none', roa: false, rovDeployment: 'none' } },
+      { id: 'same-prefix', label: t('prSame'), hint: t('prSameHint'), params: { conflict: 'same-prefix', roa: false, rovDeployment: 'none' } },
+      { id: 'more-specific', label: t('prMore'), hint: t('prMoreHint'), params: { conflict: 'more-specific', roa: false, rovDeployment: 'none' } },
+      { id: 'rov-all', label: t('prRovAll'), hint: t('prRovAllHint'), params: { conflict: 'more-specific', roa: true, rovDeployment: 'all' } },
+      { id: 'rov-half', label: t('prRovHalf'), hint: t('prRovHalfHint'), params: { conflict: 'more-specific', roa: true, rovDeployment: 'half' } }
+    ],
+
+    legend: [
+      { shape: 'hj-real', label: t('legReal') },
+      { shape: 'hj-false', label: t('legFalse') },
+      { shape: 'hj-captured', label: t('legCaptured') },
+      { shape: 'line', label: t('legAnnounce') },
+      { shape: 'hj-drop', label: t('legDrop') },
+      { shape: 'hj-v', label: t('legBadges') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'hj' },
+        h('div', { class: 'hj-draw' }, renderTopo(c, scene)),
+        h('div', { class: 'hj-side' }, renderSide(c, scene))));
+    },
+
+    caption: function (c) {
+      var scene = L.sceneOf(c.params), s = c.state;
+      switch (s.phase) {
+        case 'origin': return parts('capOrigin', { o: b(asnName(scene, scene.origin.as)), p: data(scene.origin.prefix), a: data(scene.target) });
+        case 'ready': return capReady(scene);
+        case 'converged': return capDone(c, scene);
+        default: return capRound(c, scene);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
