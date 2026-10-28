@@ -1,0 +1,509 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- vlan-trunk: frames cross between SW1 and SW2 over one cable Gi0/1–Gi0/1 (URM ch07 Primjer 5). A stepper: every
+     frame moves one hop per step. On top, each frame as a field strip (dst MAC, src MAC, the 802.1Q tag, type,
+     length) with what this step changed; under it kit view K2 draws the two switches and six hosts; under that each
+     switch's port table (mode, VLAN or native VLAN, allowed list). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="vlan-trunk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pristupni i trunk priključci, nativni VLAN · simdeck</title>
+<meta name="description" content="Okviri između dva preklopnika: trunk umeće 802.1Q oznaku VID (1518 → 1522 okteta), druga strana je skida; nativni VLAN ide bez oznake, a različiti nativni VLAN-ovi okvir puštaju u tuđi VLAN.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "vlan-trunk",
+  "title": {
+    "hr": "Pristupni i trunk priključci, nativni VLAN",
+    "en": "Access and trunk ports, native VLAN"
+  },
+  "concept": {
+    "hr": "Gdje okvir dobiva 802.1Q oznaku, a gdje je gubi",
+    "en": "802.1Q tags added and removed at trunk edges"
+  },
+  "summary": {
+    "hr": "Okviri između dva preklopnika: trunk umeće oznaku VID (1518 → 1522 okteta), nativni VLAN ide bez nje, a različiti nativni VLAN-ovi okvir puštaju u tuđi VLAN.",
+    "en": "Frames between two switches: the trunk inserts a VID tag (1518 → 1522 bytes), the native VLAN goes untagged, a native mismatch leaks frames across VLANs."
+  },
+  "tags": [
+    "vlan"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="vlan-trunk"]; colours only from kit tokens.
+   Layout: the field strips on top (one per frame); under them the K2 drawing (SW1 and SW2 on top, the hosts below);
+   under that the two port tables side by side. VLAN 10 is solid (c1), VLAN 20 hatched (c2), VLAN 1 dotted (c3), any
+   other VLAN (99) dotted in c5. */
+[data-sim="vlan-trunk"] .sd-ctl[hidden] { display: none; }  /* kit .sd-ctl display beats [hidden] */
+[data-sim="vlan-trunk"] .sd-presets { grid-template-columns: 1fr 1fr; }  /* six presets and five settings fit the panel */
+[data-sim="vlan-trunk"] .sd-preset { line-height: 1.15; }
+[data-sim="vlan-trunk"] .vt {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="vlan-trunk"] .vt-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.2rem 0.6rem 0.3rem;
+  min-width: 0;
+}
+[data-sim="vlan-trunk"] .vt-box h2 { margin: 0 0 0.2rem; font-size: 1em; font-weight: 700; }
+
+/* field strips: the frame's name and where it is, then its fields */
+[data-sim="vlan-trunk"] .vt-strips { display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="vlan-trunk"] .vt-idle { margin: 0; color: var(--muted); }
+[data-sim="vlan-trunk"] .vt-strip { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 0.6rem; align-items: center; }
+[data-sim="vlan-trunk"] .vt-strip[data-past] { opacity: 0.6; }
+[data-sim="vlan-trunk"] .vt-who { display: grid; gap: 0.05rem; padding-left: 0.5rem; border-left: 0.45rem solid var(--sw, var(--line)); line-height: 1.2; }
+[data-sim="vlan-trunk"] .vt-who b { font-family: var(--mono); }
+[data-sim="vlan-trunk"] .vt-who small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="vlan-trunk"] .vt-who small[data-dead] { color: var(--danger); font-weight: 700; }
+[data-sim="vlan-trunk"] .vt-frame { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0.25rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); min-width: 0; }
+[data-sim="vlan-trunk"] .vt-frame[data-dead] { border-style: dashed; border-color: var(--danger); }
+[data-sim="vlan-trunk"] .vt-f { display: grid; grid-template-rows: auto auto; padding: 0 0.4rem 0.05rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); min-width: 0; }
+[data-sim="vlan-trunk"] .vt-fl { display: flex; gap: 0.4rem; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="vlan-trunk"] .vt-fv { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="vlan-trunk"] .vt-fv small { margin-left: 0.3rem; font-family: var(--sans); font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="vlan-trunk"] .vt-old { font-family: var(--mono); }
+[data-sim="vlan-trunk"] .vt-f.sd-changed { outline: none; box-shadow: none; background: var(--hl); color: var(--on-hl); border-color: var(--ink); border-width: 3px; }
+[data-sim="vlan-trunk"] .vt-f.sd-changed .vt-fl,
+[data-sim="vlan-trunk"] .vt-f.sd-changed .vt-fv small { color: var(--on-hl); }
+/* the tag: four sub-fields with the VID as a flag in the VLAN's colour, or a hollow dashed "no tag" */
+[data-sim="vlan-trunk"] .vt-tag { display: flex; gap: 0.25rem; align-items: center; }
+[data-sim="vlan-trunk"] .vt-sub { display: grid; padding: 0 0.3rem; border-left: var(--line-w) solid var(--line); }
+[data-sim="vlan-trunk"] .vt-sub:first-child { border-left: 0; padding-left: 0; }
+[data-sim="vlan-trunk"] .vt-sub i { font-style: normal; font-size: var(--fs-sm); font-weight: 400; color: inherit; opacity: 0.8; }
+[data-sim="vlan-trunk"] .vt-flag { display: inline-block; padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: 0.2rem 0.9rem 0.9rem 0.2rem; }
+[data-sim="vlan-trunk"] .vt-none { display: inline-block; padding: 0 0.45rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); font-family: var(--sans); font-weight: 400; }
+
+/* VLAN patterns: 20 hatched, 1 and the rest dotted (grayscale tells them apart) */
+[data-sim="vlan-trunk"] .sd-fill[data-c='2'],
+[data-sim="vlan-trunk"] [data-vc='2'] > :first-child,
+[data-sim="vlan-trunk"] .vt-who[data-c='2'],
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='v20'] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 40%, transparent) 0.3em 0.45em);
+}
+[data-sim="vlan-trunk"] .sd-fill[data-c='3'], [data-sim="vlan-trunk"] .sd-fill[data-c='5'],
+[data-sim="vlan-trunk"] [data-vc='3'] > :first-child, [data-sim="vlan-trunk"] [data-vc='5'] > :first-child,
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='vn'], [data-sim="vlan-trunk"] .sd-swatch[data-shape='v99'] {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--bg) 60%, transparent) 0.1em, transparent 0.12em);
+  background-size: 0.4em 0.4em;
+}
+[data-sim="vlan-trunk"] .vt-who[data-c='1'] { --sw: var(--c1); }
+[data-sim="vlan-trunk"] .vt-who[data-c='2'] { --sw: var(--c2); background-size: auto; background-repeat: no-repeat; background-image: none; }
+[data-sim="vlan-trunk"] .vt-who[data-c='3'] { --sw: var(--c3); border-left-style: dotted; }
+[data-sim="vlan-trunk"] .vt-who[data-c='5'] { --sw: var(--c5); border-left-style: dotted; }
+[data-sim="vlan-trunk"] .vt-who[data-c='2'] { border-left-style: dashed; }
+
+/* port tables under the drawing */
+[data-sim="vlan-trunk"] .vt-cfg { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2cqw; }
+[data-sim="vlan-trunk"] .vt-tab { width: 100%; border-collapse: separate; border-spacing: 0 0.1rem; font-size: var(--fs-sm); }
+[data-sim="vlan-trunk"] .vt-tab th { text-align: left; font-weight: 700; color: var(--muted); padding: 0 0.4rem; white-space: nowrap; }
+[data-sim="vlan-trunk"] .vt-tab th b { color: var(--ink); }
+[data-sim="vlan-trunk"] .vt-tab td { padding: 0 0.4rem; border-top: var(--line-w) solid transparent; border-bottom: var(--line-w) solid transparent; white-space: nowrap; }
+[data-sim="vlan-trunk"] .vt-tab td:first-child { font-family: var(--mono); font-weight: 700; border-left: 0.45rem solid var(--line); }
+[data-sim="vlan-trunk"] .vt-row[data-vc='1'] > :first-child { border-left-color: var(--c1); background-color: color-mix(in srgb, var(--c1) 16%, var(--bg)); }
+[data-sim="vlan-trunk"] .vt-row[data-vc='2'] > :first-child { border-left-color: var(--c2); background-color: color-mix(in srgb, var(--c2) 16%, var(--bg)); }
+[data-sim="vlan-trunk"] .vt-row[data-vc='3'] > :first-child { border-left-color: var(--c3); background-color: color-mix(in srgb, var(--c3) 16%, var(--bg)); }
+[data-sim="vlan-trunk"] .vt-row[data-vc='5'] > :first-child { border-left-color: var(--c5); background-color: color-mix(in srgb, var(--c5) 16%, var(--bg)); }
+[data-sim="vlan-trunk"] .vt-row[data-vc='2'] > :first-child,
+[data-sim="vlan-trunk"] .vt-row[data-vc='3'] > :first-child,
+[data-sim="vlan-trunk"] .vt-row[data-vc='5'] > :first-child { background-image: none; }
+[data-sim="vlan-trunk"] .vt-row[data-trunk] > :first-child { border-left-style: double; border-left-color: var(--ink); }
+[data-sim="vlan-trunk"] .vt-row[data-hit] td { border-color: var(--ink); border-top-width: 3px; border-bottom-width: 3px; background: var(--hl); color: var(--on-hl); font-weight: 700; }
+[data-sim="vlan-trunk"] .vt-row[data-hit] td:last-child { border-right: 3px solid var(--ink); }
+[data-sim="vlan-trunk"] .vt-row[data-hit] > td:first-child { background-color: var(--hl); }
+[data-sim="vlan-trunk"] .vt-tab .sd-mono { font-family: var(--mono); }
+
+/* topology: the host card's VLAN line in full width */
+[data-sim="vlan-trunk"] .sd-topo-card .sd-topo-sub,
+[data-sim="vlan-trunk"] .sd-topo-card .sd-topo-role { grid-column: 1 / -1; white-space: nowrap; }
+
+/* legend swatches: VLAN 20 hatched, VLAN 1/99 dotted, the tag flag, the drop cross */
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='v20'] { background-color: var(--c2); border-color: var(--c2); }
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='vn'] { background-color: var(--c3); border-color: var(--c3); }
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='v99'] { background-color: var(--c5); border-color: var(--c5); }
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='tag'] { background: var(--bg); border-color: var(--ink); border-radius: 0.15rem 0.7rem 0.7rem 0.15rem; border-width: 3px; }
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='x'] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); }
+[data-sim="vlan-trunk"] .sd-swatch[data-shape='x']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+
+/* Phone and portrait: the stage grows with its content; the drawing becomes the kit's list, the tables stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="vlan-trunk"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="vlan-trunk"] .vt { height: auto; padding: 0.5rem; gap: 0.8rem; grid-template-rows: auto auto auto; }
+  [data-sim="vlan-trunk"] .vt-strip { grid-template-columns: minmax(0, 1fr); gap: 0.3rem; }
+  [data-sim="vlan-trunk"] .vt-cfg { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  [data-sim="vlan-trunk"] .vt-tab-wrap { overflow-x: auto; }
+  [data-sim="vlan-trunk"] .sd-presets { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Pristupni i trunk priključci, nativni VLAN</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var NAME = { Ra: 'nameRa', Pr: 'namePr', M: 'nameM' };
+  var FINAL = { delivered: 1, ignored: 1, dropped: 1 };
+  /** The native VLANs offered (the model takes 1–99): the default, the two VLANs in use, and the book's mismatch. */
+  var NATIVES = [[1, '1'], [10, '10'], [20, '20'], [99, '99']];
+  /** The chip of an untagged frame on a host link: a plain box in the VLAN's colour (legend: untagged = plain box). */
+  var HOST_CHIP = '\u00a0\u00a0\u00a0';
+
+  /** Data (MACs, port names, host ids) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text, '')); }
+  /** A MAC as the page shows it: the last octet. */
+  function short(mac) { return mac === L.bcast ? 'ff:…:ff' : '…:' + mac.slice(-2); }
+  /** VLAN colour: 10 solid c1, 20 hatched c2, 1 dotted c3, any other dotted c5. */
+  function vlanC(v) { return v === 10 ? '1' : v === 20 ? '2' : v === 1 ? '3' : '5'; }
+  /** t.parts, but a placeholder used twice is cloned (the same node appended twice would move). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || !p.nodeType || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  /** The frame as the page names it: "Ra1 → Ra2", "Pr1 → svima", a flood copy with its port. */
+  function frameName(f) {
+    var copy = f.id.indexOf('.') > 0 ? ' (' + f.id.split('.')[1] + ')' : '';
+    if (f.dst === 'broadcast') return h('span', null, data(f.src + ' → ', ''), t('bcastMac'), copy ? data(copy, '') : null);
+    return data(f.src + ' → ' + f.dst + copy, '');
+  }
+  /** The same frame (or the frame a copy was made from) in the previous step. */
+  function prevOf(c, f) {
+    if (!c.prev) return null;
+    var base = f.id.split('.')[0];
+    return c.prev.frames.filter(function (x) { return x.id === f.id; })[0] || c.prev.frames.filter(function (x) { return x.id === base; })[0] || null;
+  }
+  /** Frames that finished in an earlier step are drawn faded and get no caption. */
+  function pastDone(c, f) { var p = prevOf(c, f); return !!(p && FINAL[p.status] && p.id === f.id); }
+  /** The VLAN a frame stands for right now (its colour): the switch's choice, else the sender's. */
+  function vlanNow(f) { return f.vlan !== null ? f.vlan : f.srcVlan; }
+
+  // ── field strips ──
+
+  function field(label, value, o) {
+    o = o || {};
+    var mark = o.old != null ? h('s', { class: 'vt-old', translate: 'no' }, o.old) : null;
+    return h('div', { class: 'vt-f' + (o.changed ? ' sd-changed' : '') },
+      h('span', { class: 'vt-fl' }, h('span', null, label), mark),
+      h('span', { class: 'vt-fv' }, value, o.sub ? h('small', null, o.sub) : null));
+  }
+  function tagEl(f) {
+    if (f.tag === null) return h('span', { class: 'vt-none' }, t('tagNone'));
+    var sub = function (k, v) { return h('span', { class: 'vt-sub' }, h('i', { translate: 'no' }, k), data(v, '')); };
+    return h('span', { class: 'vt-tag' }, sub('TPID', L.tpid), sub('PCP', 0), sub('DEI', 0),
+      h('span', { class: 'vt-sub' }, h('i', { translate: 'no' }, 'VID'),
+        h('span', { class: 'vt-flag sd-fill', dataset: { c: vlanC(f.tag) } }, data(f.tag, ''))));
+  }
+  function whereText(f, scene) {
+    var w = f.where;
+    if (f.status === 'dropped') return t.parts('atDropped', { sw: data(w.sw, '') });
+    if (f.status === 'delivered') return t.parts('atGot', { h: data(w.to, '') });
+    if (f.status === 'ignored') return t.parts('atIgnored', { h: data(w.to, '') });
+    if (w.kind === 'host') return t.parts('atHost', { h: data(w.host, '') });
+    if (w.kind === 'switch') return t.parts('atSwitch', { sw: data(w.sw, ''), v: data(f.vlan, '') });
+    if (w.link === 'isl') return t.parts('atCable', { a: data('SW1 ' + L.uplink, ''), b: data('SW2 ' + L.uplink, '') });
+    var x = scene.hosts[w.link];
+    return t.parts('atLink', { a: data(w.link, ''), b: data(x.sw + ' ' + x.port, '') });
+  }
+
+  function renderStrip(c, f, scene) {
+    var prev = prevOf(c, f);
+    var tagChanged = f.change !== null;
+    var lenOld = prev && prev.len !== f.len ? String(prev.len) : null;
+    var dead = f.status === 'dropped';
+    var ds = pastDone(c, f) ? { past: '1' } : {};
+    return h('div', { class: 'vt-strip', dataset: ds },
+      h('div', { class: 'vt-who', dataset: { c: vlanC(vlanNow(f)) } }, h('b', null, frameName(f)),
+        h('small', { dataset: dead ? { dead: '1' } : {} }, whereText(f, scene))),
+      h('div', { class: 'vt-frame', dataset: dead ? { dead: '1' } : {} },
+        field(t('fDst'), data(short(f.dstMac), ''), { sub: f.dst === 'broadcast' ? t('bcastMac') : data(f.dst, '') }),
+        field(t('fSrc'), data(short(f.srcMac), ''), { sub: data(f.src, '') }),
+        field(t('fTag'), tagEl(f), { changed: tagChanged, old: tagChanged && prev && prev.tag !== null ? t('chipTag', { v: prev.tag }) : null }),
+        field(t('fType'), data('0x0800', '')),
+        field(t('fLen'), t('bytes', { n: f.len }), { changed: lenOld !== null, old: lenOld })));
+  }
+
+  function renderStrips(c, scene) {
+    var s = c.state;
+    var box = h('section', { class: 'vt-box vt-strips' });
+    if (c.n === 0) box.append(h('p', { class: 'vt-idle' }, t('stripIdle')));
+    s.frames.forEach(function (f) { box.append(renderStrip(c, f, scene)); });
+    return box;
+  }
+
+  // ── port tables ──
+
+  /** The ports this step uses on a switch: where a frame came in, where it went out or was stopped. */
+  function usedPorts(s, sw) {
+    var out = [];
+    s.events.forEach(function (e) { if (e.sw === sw && e.port && out.indexOf(e.port) < 0) out.push(e.port); });
+    return out;
+  }
+  function rangesText(rs) { return rs.map(function (r) { return r[0] === r[1] ? String(r[0]) : r[0] + '–' + r[1]; }).join(', '); }
+
+  function renderCfg(c, scene, sw) {
+    var used = usedPorts(c.state, sw);
+    var ports = scene.ports[sw];
+    var rows = Object.keys(ports).sort().map(function (n) {
+      var pt = ports[n], trunk = pt.mode === 'trunk';
+      var ds = {};
+      if (!trunk) ds.vc = vlanC(pt.vlan);
+      else ds.trunk = '1';
+      if (used.indexOf(n) >= 0) ds.hit = '1';
+      return h('tr', { class: 'vt-row', dataset: ds },
+        h('td', null, data(n, '')),
+        h('td', null, pt.host ? h('span', null, t(trunk ? 'modeTrunk' : 'modeAccess'), ' · ', data(pt.host, '')) : t(trunk ? 'modeTrunk' : 'modeAccess')),
+        h('td', null, trunk ? t.parts('nativeV', { v: data(pt.native, '') }) : data(pt.vlan, '')),
+        h('td', null, trunk ? data(rangesText(pt.allowed), '') : t('none')));
+    });
+    return h('section', { class: 'vt-box' },
+      h('div', { class: 'vt-tab-wrap' }, h('table', { class: 'vt-tab' },
+        h('thead', null, h('tr', null, h('th', null, t.parts('cfgTitle', { sw: h('b', null, data(sw, '')) })), h('th', null, t('colMode')), h('th', null, t('colVlan')), h('th', null, t('colAllowed')))),
+        h('tbody', null, rows))));
+  }
+
+  // ── topology (kit view K2) ──
+
+  var COL = { SW1: 1, SW2: 5, Ra1: 0, Pr1: 1, M1: 2, Ra2: 4, Pr2: 5, M2: 6 };
+
+  function badgesFor(id, c, scene) {
+    var s = c.state, out = [];
+    s.frames.forEach(function (f) {
+      var w = f.where, past = pastDone(c, f);
+      if (!past && c.n === 1 && f.src === id) out.push({ text: t('bSends'), k: 'fill' });
+      if (w.kind === 'switch' && w.sw === id && !past) {
+        if (f.status === 'dropped') out.push({ text: t('bDrops'), k: 'solid' });
+        else out.push({ text: t('bVlan', { v: f.vlan }), k: 'solid' });
+      }
+      if (w.kind === 'link' && w.to === id) {
+        if (f.status === 'delivered') out.push({ text: t(f.leak ? 'bLeak' : 'bGot'), k: f.leak ? 'dashed' : 'solid' });
+        else if (f.status === 'ignored') out.push({ text: t('bIgnored'), k: 'muted' });
+      }
+    });
+    return out;
+  }
+
+  function renderTopo(c, scene) {
+    var s = c.state;
+    var nodes = [];
+    ['SW1', 'SW2'].forEach(function (sw) {
+      var up = scene.ports[sw][L.uplink];
+      nodes.push({ id: sw, kind: 'switch', col: COL[sw], row: 0, c: '8',
+        lines: [{ text: up.mode === 'trunk' ? h('span', null, data(L.uplink + ': ', ''), t('modeTrunk'))
+            : h('span', null, data(L.uplink + ': ', ''), t('modeAccess'), data(' ' + up.vlan, '')), kind: 'role' }] });
+    });
+    Object.keys(scene.hosts).forEach(function (id) {
+      var x = scene.hosts[id];
+      // M is "in the native VLAN" only while the cable is a trunk; on an access cable its VLAN alone says it
+      var noRole = id.charAt(0) === 'M' && scene.ports[x.sw][L.uplink].mode !== 'trunk';
+      nodes.push({ id: id, kind: 'host', col: COL[id], row: 2, c: vlanC(x.vlan),
+        lines: [{ text: t('vlanOf', { v: x.vlan }), kind: 'addr' }, noRole ? null : { text: t(NAME[id.replace(/\d$/, '')]), kind: 'role' }] });
+    });
+    nodes.forEach(function (n) {
+      n.badges = badgesFor(n.id, c, scene);
+      n.state = n.badges.length ? 'active' : null;
+    });
+    var activeLinks = {};
+    s.frames.forEach(function (f) { if (f.where.kind === 'link' && !pastDone(c, f)) activeLinks[f.where.link] = 1; });
+    var links = Object.keys(scene.hosts).map(function (id) {
+      var x = scene.hosts[id];
+      return { id: id, a: id, b: x.sw, active: !!activeLinks[id], ends: { b: data(x.port, '') } };
+    });
+    links.push({ id: 'isl', a: 'SW1', b: 'SW2', active: !!activeLinks.isl, ends: { a: data(L.uplink, ''), b: data(L.uplink, '') } });
+
+    var packets = [], onIsl = 0;
+    var islCount = s.frames.filter(function (f) { return f.where.kind === 'link' && f.where.link === 'isl' && !pastDone(c, f); }).length;
+    s.frames.forEach(function (f) {
+      if (pastDone(c, f)) return;
+      var w = f.where;
+      var label = f.tag === null ? t('chipUntagged') : t('chipTag', { v: f.tag });
+      if (w.kind === 'link') {
+        // host links are always untagged (rule 1): a plain box, nearer the host than the port label
+        var at = scene.hosts[w.from] ? 0.4 : 0.6, chip = HOST_CHIP;
+        if (w.link === 'isl') { at = islCount > 1 ? (onIsl++ === 0 ? 0.3 : 0.7) : 0.5; chip = label; }
+        packets.push({ from: w.from, to: w.to, at: at, c: vlanC(vlanNow(f)), label: chip,
+          cast: f.dst === 'broadcast' ? 'broadcast' : null });
+      } else if (w.kind === 'switch' && f.status === 'dropped') {
+        // stopped on its way in (no port, not allowed): the arrow ends in a cross at the switch
+        var p = prevOf(c, f);
+        if (p && p.where.kind === 'link' && p.where.to === w.sw) {
+          packets.push({ from: p.where.from, to: w.sw, drop: true, move: false, at: 0.4, c: vlanC(vlanNow(p)),
+            label: scene.hosts[p.where.from] ? HOST_CHIP : label });
+        }
+      }
+    });
+    return Simdeck.topology({ cols: 7, rows: ['auto', 'minmax(2.6rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  // ── captions ──
+
+  function frameSentences(c, scene, f, evs) {
+    var out = [];
+    var N = function (v) { return data(v, ''); };
+    var prev = prevOf(c, f);
+    evs.forEach(function (e) {
+      if (e.code === 'send') {
+        var x = scene.hosts[e.host];
+        out.push(parts('cSend', { src: N(e.host), len: N(f.len), sw: N(x.sw), port: N(x.port) }));
+      } else if (e.code === 'in') {
+        var key = e.how === 'tag' ? 'cInTag' : e.how === 'native' ? 'cInNative' : 'cInPort';
+        out.push(parts(key, { sw: N(e.sw), port: b(e.port), v: b(e.vlan) }));
+        if (e.from !== null && e.from !== e.vlan) out.push(parts('cLeak', { a: b(f.srcVlan), b: b(e.vlan) }));
+        if (!e.out.length) out.push(parts('cFwdNone', { port: N(e.port), v: N(e.vlan) }));
+        else {
+          var outs = N(e.out.join(', '));
+          if (e.fwd === 'known') out.push(parts('cFwdKnown', { out: b(e.out.join(', ')) }));
+          else if (e.fwd === 'broadcast') out.push(parts('cFwdBcast', { v: N(e.vlan), out: outs }));
+          else out.push(parts('cFwdUnknown', { dst: N(f.dst), v: N(e.vlan), out: outs }));
+        }
+      } else if (e.code === 'out') {
+        var pt = scene.ports[e.sw][e.port];
+        if (pt.mode === 'trunk' && f.tag !== null) out.push(parts('cOutTag', { sw: N(e.sw), port: N(e.port), v: b(f.tag) }));
+        else if (pt.mode === 'trunk') out.push(parts('cOutNative', { sw: N(e.sw), port: N(e.port), v: b(f.vlan) }));
+        else out.push(parts('cOutAccess', { sw: N(e.sw), port: N(e.port), v: N(pt.vlan) }));
+      } else if (e.code === 'deliver') {
+        if (prev && prev.tag !== null) out.push(parts('cDeliverUntag', { sw: N(e.sw), v: b(prev.tag), port: N(e.port), host: N(e.host) }));
+        else out.push(parts('cDeliver', { sw: N(e.sw), port: N(e.port), host: N(e.host) }));
+        if (f.leak) out.push(parts('cDeliverLeak', { host: N(e.host), a: b(f.srcVlan), b: b(scene.hosts[e.host].vlan) }));
+      } else if (e.code === 'ignore') {
+        if (prev && prev.tag !== null) out.push(parts('cIgnoreUntag', { sw: N(e.sw), v: b(prev.tag), port: N(e.port), host: N(e.host) }));
+        else out.push(parts('cIgnore', { sw: N(e.sw), port: N(e.port), host: N(e.host) }));
+      } else if (e.code === 'drop-out') {
+        out.push(parts(e.reason === 'not-allowed' ? 'cDropOut' : 'cDropOther', { sw: N(e.sw), port: b(e.port), v: N(e.vlan) }));
+      } else if (e.code === 'drop-in') {
+        var dk = e.reason !== 'not-allowed' ? 'cDropTagged' : f.tag === null ? 'cDropInNative' : 'cDropIn';
+        out.push(parts(dk, { sw: N(e.sw), port: b(e.port), v: N(e.vlan) }));
+      }
+    });
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'link', type: 'choice', label: t('link'), resets: true,
+        options: [['trunk', t('linkTrunk')], ['access-10', t('linkAccess10')], ['access-20', t('linkAccess20')]] },
+      { key: 'native1', type: 'choice', label: t('native1'), resets: true, options: NATIVES },
+      { key: 'native2', type: 'choice', label: t('native2'), resets: true, options: NATIVES },
+      { key: 'allow20', type: 'toggle', label: t('allow20'), resets: true, visible: function (p) { return p.link === 'trunk'; } },
+      { key: 'send', type: 'choice', label: t('send'), resets: true,
+        options: [['both', t('sendBoth')], ['ra1-ra2', t('sendRa')], ['pr1-pr2', t('sendPr')], ['pr1-bcast', t('sendBcast')], ['m1-m2', t('sendM')]] }
+    ],
+
+    presets: [
+      { id: 'trunk', label: t('presetTrunk'), params: { link: 'trunk', native1: 1, native2: 1, allow20: true, send: 'both' } },
+      { id: 'access-link', label: t('presetAccess'), hint: t('presetAccessHint'),
+        params: { link: 'access-10', native1: 1, native2: 1, allow20: true, send: 'both' } },
+      { id: 'broadcast', label: t('presetBcast'), params: { link: 'trunk', native1: 1, native2: 1, allow20: true, send: 'pr1-bcast' } },
+      { id: 'native', label: t('presetNative'), params: { link: 'trunk', native1: 1, native2: 1, allow20: true, send: 'm1-m2' } },
+      { id: 'native-mismatch', label: t('presetMismatch'), hint: t('presetMismatchHint'),
+        params: { link: 'trunk', native1: 1, native2: 99, allow20: true, send: 'm1-m2' } },
+      { id: 'not-allowed', label: t('presetAllowed'), hint: t('presetAllowedHint'),
+        params: { link: 'trunk', native1: 1, native2: 1, allow20: false, send: 'both' } }
+    ],
+
+    legend: [
+      { c: 1, label: t('legV10') },
+      { shape: 'v20', label: t('legV20') },
+      { shape: 'vn', label: t('legVn') },
+      { shape: 'v99', label: t('legV99') },
+      { shape: 'tag', label: t('legTagged') },
+      { shape: 'hollow', label: t('legUntagged') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var scene = L.sceneOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'vt' },
+        renderStrips(c, scene),
+        renderTopo(c, scene),
+        h('div', { class: 'vt-cfg' }, renderCfg(c, scene, 'SW1'), renderCfg(c, scene, 'SW2'))));
+    },
+
+    caption: function (c) {
+      var s = c.state, scene = L.sceneOf(c.params);
+      if (c.n === 0) {
+        var list = [];
+        s.frames.forEach(function (f, i) { if (i) list.push(', '); list.push(frameName(f)); });
+        return parts('capStart', { list: h('span', null, list) });
+      }
+      var out = parts('capStep', { n: data(c.n, '') });
+      var many = s.frames.filter(function (f) { return !pastDone(c, f); }).length > 1;
+      s.frames.forEach(function (f) {
+        var evs = s.events.filter(function (e) { return e.f === f.id; });
+        if (!evs.length) return;
+        out.push(' ');
+        if (many) out.push(h('b', null, parts('capWho', { f: frameName(f) })), ' ');
+        frameSentences(c, scene, f, evs).forEach(function (p, i) { if (i) out.push(' '); out = out.concat(p); });
+      });
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
