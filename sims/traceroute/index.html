@@ -1,0 +1,367 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- traceroute: A traces the chain A — R1 — … — Rn — S. A stepper: one step is one TTL round (three probes out, they die
+     at hop k, hop k answers or stays silent, line k is printed). Kit view K2 draws the chain (two rows past seven
+     nodes); under it the round's four phases and the growing output. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="traceroute">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traceroute i TTL · simdeck</title>
+<meta name="description" content="Sonde s TTL-om 1, 2, 3 … umiru skok po skok i svaki usmjernik javlja tko je; jedan šuti, a put ipak radi. ICMP i UDP sonde, vatrozid na odredištu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "traceroute",
+  "title": {
+    "hr": "Traceroute i TTL",
+    "en": "Traceroute and TTL"
+  },
+  "concept": {
+    "hr": "Poruke o isteku TTL-a crtaju put, a zvjezdice nisu kvar",
+    "en": "TTL-exceeded replies map the path, and stars are not failures"
+  },
+  "summary": {
+    "hr": "Sonde s TTL-om 1, 2, 3 … umiru skok po skok i svaki usmjernik javlja tko je; jedan šuti, a put ipak radi. ICMP i UDP sonde, vatrozid na odredištu.",
+    "en": "Probes with TTL 1, 2, 3 … die hop by hop and each router says who it is; one stays silent, yet the path works. ICMP and UDP probes, a firewall at the end."
+  },
+  "tags": [
+    "routing"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="traceroute"]; colours only from kit tokens.
+   Layout: the K2 chain on top (one row up to seven nodes, else a second row running back right to left, with a
+   spacer row for the link between them); under it the round (its four phases) and the output, side by side. */
+[data-sim="traceroute"] .tr {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="traceroute"] .tr-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 1cqw;
+  min-height: 0;
+}
+[data-sim="traceroute"] .tr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-sim="traceroute"] .tr-box h2 { margin: 0 0 0.35rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="traceroute"] .tr-none { margin: 0; color: var(--muted); }
+[data-sim="traceroute"] .tr-nowrap { font-family: var(--mono); white-space: nowrap; }
+
+/* the chain: cards stacked (mark, address, badges), so seven fit in a row */
+[data-sim="traceroute"] .tr .sd-topo-card { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 0.3rem 0.25rem; }
+[data-sim="traceroute"] .tr .sd-topo-mark { grid-row: auto; }
+[data-sim="traceroute"] .tr .sd-topo-sub { color: var(--ink); }
+[data-sim="traceroute"] .tr .sd-topo-badges { justify-content: center; min-height: 1.7rem; gap: 0.2rem; }
+[data-sim="traceroute"] .tr .sd-topo-badge { line-height: 1.45; }
+[data-sim="traceroute"] .tr .tr-silent { border-style: solid; }
+/* Time Exceeded back: dashed (the view) in c2; the destination's answer dotted in ok, so the two differ in grayscale */
+[data-sim="traceroute"] .tr-te .sd-topo-path.sd-topo-dashed { stroke: var(--c2); }
+[data-sim="traceroute"] .tr-final .sd-topo-path.sd-topo-dashed { stroke: var(--ok); stroke-dasharray: 0.3rem 0.35rem; }
+
+/* the round: four phases, the word on the left */
+[data-sim="traceroute"] .tr-phases { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="traceroute"] .tr-phases li { display: grid; grid-template-columns: 6.2rem minmax(0, 1fr); column-gap: 0.5rem; align-items: baseline; line-height: 1.3; }
+[data-sim="traceroute"] .tr-phases b { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+[data-sim="traceroute"] .tr-phases li > span { min-width: 0; overflow-wrap: anywhere; }
+[data-sim="traceroute"] .tr-phases li[data-k="none"] > span { padding: 0 0.3rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); }
+[data-sim="traceroute"] .tr-phases li[data-k="drop"] > span::before { content: '✕ '; color: var(--danger); font-weight: 700; }
+[data-sim="traceroute"] .tr-phases li[data-k="ok"] > span::before { content: '✓ '; color: var(--ok); font-weight: 700; }
+
+/* the output: one pre, the command line muted, the new line marked */
+[data-sim="traceroute"] .tr-out { display: flex; flex-direction: column; }
+[data-sim="traceroute"] .tr-pre { margin: 0; flex: 1 1 auto; min-height: 0; padding: 0.3rem 0.5rem; border-radius: var(--radius-sm); background: var(--bg); border: var(--line-w) solid var(--line);
+  font-family: var(--mono); font-size: 1rem; line-height: 1.25; white-space: pre; overflow: hidden; }
+[data-sim="traceroute"] .tr-pre span { display: block; }
+[data-sim="traceroute"] .tr-pre .tr-cmd { color: var(--muted); }
+[data-sim="traceroute"] .tr-pre .tr-stars { font-weight: 700; }
+[data-sim="traceroute"] .tr-pre .sd-changed { outline-offset: 0; box-shadow: none; background: var(--hl); color: var(--on-hl); }
+[data-sim="traceroute"] .tr-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 1rem; margin-bottom: 0.3rem; }
+[data-sim="traceroute"] .tr-head h2 { margin: 0; }
+[data-sim="traceroute"] .tr-status { margin: 0; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="traceroute"] .tr-status[data-k="wait"] { font-weight: 400; color: var(--muted); }
+[data-sim="traceroute"] .tr-status[data-k="max"] { padding: 0 0.35rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); }
+[data-sim="traceroute"] .tr-status[data-k="reply"]::before { content: '✓ '; color: var(--ok); }
+
+/* legend swatches the kit does not have */
+[data-sim="traceroute"] .sd-swatch[data-shape="te"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--c2) 0 0.3em, transparent 0.3em 0.48em); }
+[data-sim="traceroute"] .sd-swatch[data-shape="final"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ok) 0 0.15em, transparent 0.15em 0.32em); }
+[data-sim="traceroute"] .sd-swatch[data-shape="silent"] { background-color: var(--bg); border-color: var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="traceroute"] .sd-swatch[data-shape="x"] { position: relative; background: var(--bg); border-color: var(--danger); }
+[data-sim="traceroute"] .sd-swatch[data-shape="x"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+
+/* Phone and portrait: the stage grows with its content and the boxes stack; the output scrolls sideways in its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="traceroute"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="traceroute"] .tr { height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="traceroute"] .tr-bottom { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+  [data-sim="traceroute"] .tr-pre { overflow-x: auto; font-size: var(--fs-sm); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Traceroute i TTL</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PER_ROW = 7;                                          // nodes in the first row; the rest run back below
+  var SHOWN = 12;                                           // output lines that fit under the command line
+
+  /** Data (addresses, node ids, numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'sd-mono' : cls || null }, String(text)); }
+  function b(text, cls) { return h('b', null, data(text, cls)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule); a placeholder used twice is cloned. */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function anim(c) { return c.dir === 'forward' && !Simdeck.reducedMotion(); }
+  /** The first and last sequence number or port of the round's probes. */
+  function range(r) {
+    var k = r.probes[0].kind === 'echo' ? 'seq' : 'port';
+    return { a: r.probes[0][k], b: r.probes[r.probes.length - 1][k] };
+  }
+
+  // ── the chain (kit view K2) ──
+
+  /** Grid place of node i: two columns per card and one for the link after it; the first PER_ROW left to right, the
+      rest right to left in row 2 (row 1 is the spacer). */
+  function place(i) {
+    return i < PER_ROW ? { col: 3 * i, row: 0 } : { col: 3 * (PER_ROW - 1 - (i - PER_ROW)), row: 2 };
+  }
+
+  /** One badge per card, so the two rows stay short: silent, or what the node does in this round. */
+  function badgesFor(node, s) {
+    var r = s.round;
+    if (s.silent.indexOf(node.id) >= 0) return [{ text: t('bSilent'), k: 'dashed', anim: false }];
+    if (!r) return [];
+    if (node.id === 'A') return [r.reply ? { text: t('bGot', { k: r.ttl }), k: 'solid' } : { text: t('bGotNone'), k: 'dashed' }];
+    if (node.id !== r.at) return [];
+    if (node.id !== 'S') return [{ text: t('bTe'), k: 'fill' }];
+    if (r.why === 'filtered') return [{ text: t('bFiltered'), k: 'dashed' }];
+    return [{ text: t(r.reply === 'echo-reply' ? 'bEcho' : 'bPort'), k: 'fill' }];
+  }
+
+  function renderTopo(c) {
+    var s = c.state, r = s.round, chain = L.chain(s.routers);
+    var two = chain.length > PER_ROW;
+    var nodes = chain.map(function (x, i) {
+      var at = place(i);
+      var role = x.id === 'A' ? t('src') : x.id === 'S' ? t('dest') : null;
+      return { id: x.id, kind: x.kind, col: at.col, row: at.row, span: 2, c: x.id === 'A' ? 3 : x.id === 'S' ? 7 : 4,
+        lines: [{ text: x.addr, kind: 'sub' }, role ? { text: role, kind: 'role' } : null], badges: badgesFor(x, s),
+        state: r && r.at === x.id ? 'active' : null, changed: !!(r && r.at === x.id) };
+    });
+    var links = [];
+    for (var i = 1; i < chain.length; i++) links.push({ id: 'l' + i, a: chain[i - 1].id, b: chain[i].id, active: !!(r && i <= r.hop) });
+    var packets = [];
+    if (r) {
+      var dropAt = !r.reply || r.at !== 'S';              // the probe dies (router) or is dropped (filter); else S takes it
+      for (var j = 1; j <= r.hop; j++) {
+        packets.push({ from: chain[j - 1].id, to: chain[j].id, label: t('chipTtl', { ttl: r.links[j - 1] }), c: 1,
+          drop: j === r.hop && dropAt, at: 0.5 });
+      }
+      if (r.reply) for (var k = r.hop; k >= 1; k--) packets.push({ from: chain[k].id, to: chain[k - 1].id, chip: false, cast: 'broadcast' });
+    }
+    var el = Simdeck.topology({ cols: 3 * Math.min(chain.length, PER_ROW) - 1, rows: two ? ['auto', '2.4rem', 'auto'] : ['auto'],
+      gap: '0.35rem', dir: c.dir, nodes: nodes, links: links, packets: packets,
+      className: r && r.reply ? (r.at === 'S' ? 'tr-final' : 'tr-te') : null });
+    s.silent.forEach(function (id) {                          // a silent router works: hatched, but not "down"
+      var card = el.querySelector('.sd-topo-card[data-id="' + id + '"]');
+      if (card) card.classList.add('sd-hatch', 'tr-silent');
+    });
+    return el;
+  }
+
+  // ── the round ──
+
+  function renderRound(c) {
+    var s = c.state, r = s.round;
+    var box = h('section', { class: 'tr-box tr-round' });
+    if (!r) {
+      box.append(h('h2', null, t('roundTitle', { k: '…' })), h('p', { class: 'tr-none' }, t('roundNone')));
+      return box;
+    }
+    box.append(h('h2', null, rich('roundTitle', { k: data(r.ttl, '') })));
+    var rg = range(r), D = function (v) { return data(v); };
+    var out = t.parts(r.probes[0].kind === 'echo' ? 'kEcho' : 'kUdp', { a: D(rg.a), b: D(rg.b) });
+    var die = r.at === 'S' ? t.parts('dDest', { s: data('S', ''), ttl: D(r.ttlIn) }) : t.parts('dRouter', { r: data(r.at, '') });
+    var reply, rk;
+    if (r.reply === 'time-exceeded') { reply = t.parts('rTe', { r: data(r.at, ''), addr: D(r.from) }); rk = null; }
+    else if (r.reply === 'echo-reply') { reply = t('rEcho'); rk = 'ok'; }
+    else if (r.reply === 'port-unreachable') { reply = t('rPort'); rk = 'ok'; }
+    else if (r.why === 'silent') { reply = t.parts('rSilent', { r: data(r.at, '') }); rk = 'none'; }
+    else { reply = t('rFiltered'); rk = 'none'; }
+    var print = r.reply ? t.parts('pLine', { k: D(r.ttl), addr: D(r.from) }) : t.parts('pStars', { k: D(r.ttl) });
+    var dieKind = r.at === 'S' && r.reply ? null : 'drop';
+    var row = function (word, body, k) { return h('li', { dataset: k ? { k: k } : {} }, h('b', null, t(word)), h('span', null, body)); };
+    box.append(h('ol', { class: 'tr-phases' },
+      row('phOut', out), row(r.at === 'S' ? 'phArrive' : 'phDie', die, dieKind), row('phReply', reply, rk), row('phPrint', print)));
+    return box;
+  }
+
+  // ── the output ──
+
+  function renderOutput(c) {
+    var s = c.state, a = anim(c);
+    var prompt = s.tool === 'tracert' ? '> ' : '$ ';
+    var lines = [h('span', { class: 'tr-cmd' }, prompt + L.command(c.params))];
+    var from = s.lines.length > SHOWN ? s.lines.length - (SHOWN - 1) : 0;  // a long trace: "…", then the last lines
+    if (from) lines.push(h('span', { class: 'tr-cmd' }, '   …'));
+    s.lines.forEach(function (l, i) {
+      if (i < from) return;
+      var fresh = i === s.lines.length - 1 && s.round;
+      var cls = (l.addr ? '' : 'tr-stars') + (fresh ? ' sd-changed' + (a ? ' sd-anim-in' : '') : '');
+      lines.push(h('span', { class: cls.trim() || null }, L.formatLine(l, s.tool)));
+    });
+    var status;
+    if (!s.done) status = h('p', { class: 'tr-status', dataset: { k: 'wait' } }, t('outWait'));
+    else if (s.end === 'reply') status = h('p', { class: 'tr-status', dataset: { k: 'reply' } }, t('outReply'));
+    else status = h('p', { class: 'tr-status', dataset: { k: 'max' } }, t.parts('outMax', { max: data(s.maxHops, '') }));
+    return h('section', { class: 'tr-box tr-out' }, h('div', { class: 'tr-head' }, h('h2', null, t('outTitle')), status),
+      h('pre', { class: 'tr-pre', translate: 'no' }, lines));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, r = s.round, D = function (v) { return data(v); }, B = function (v) { return b(v); };
+    var N = function (id) { return data(id, ''); };
+    var out = [];
+    var add = function (parts) { if (out.length) out.push(' '); out.push.apply(out, parts); };
+    if (!r) {
+      add(rich('capStart', { dst: B(s.dst), hops: t.n('hopsN', s.maxHops) }));
+      if (s.silentOff) add(rich('capSilentOff', { r: N(s.silentOff), n: D(s.routers) }));
+      return out;
+    }
+    var k = r.ttl;
+    if (r.why === 'ttl') add(rich(k === 1 ? 'capTeFirst' : 'capTe', { k: B(k), r: N(r.at), addr: B(r.from) }));
+    else if (r.why === 'silent') {
+      add(rich('capSilent', { k: B(k), r: N(r.at), stars: b('* * *', 'tr-nowrap') }));
+      if (!s.done) add(rich('capSilentTail', { r: N(r.at) }));  // at max hops no later probe comes
+    }
+    else if (r.why === 'dest') {
+      var rg = range(r);
+      add(rich(r.reply === 'echo-reply' ? 'capEcho' : 'capPort', { k: B(k), dst: B(s.dst), ttl: D(r.ttlIn), a: D(rg.a), b: D(rg.b) }));
+    } else add(rich('capFiltered', { k: B(k), dst: B(s.dst), ttl: D(r.ttlIn), stars: b('* * *', 'tr-nowrap') }));
+    // rule 6: the round right after a silent hop passed it
+    var quiet = s.silent[0], qi = quiet ? Number(quiet.slice(1)) : 0;
+    if (quiet && r.hop === qi + 1) add(rich('capPassed', { k: B(k), r: N(quiet), a: D(r.links[qi - 1]), b: D(r.links[qi - 1] - 1), next: N(r.at) }));
+    // rule 8: a line faster than the one before
+    var prev = s.lines[s.lines.length - 2], cur = s.lines[s.lines.length - 1];
+    if (prev && prev.rtts && cur.rtts && cur.rtts[0] < prev.rtts[0]) {
+      add(rich('capFaster', { p: D(prev.ttl), r: N(r.at), q: N(k - 1 > s.routers ? 'S' : 'R' + (k - 1)) }));
+    }
+    if (s.done && s.end === 'max-hops') add(r.at === 'S' ? rich('capMax', { max: D(s.maxHops) }) : rich('capMaxRouter', { max: D(s.maxHops), r: N(r.at) }));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'tool', type: 'choice', label: t('tool'), options: [['tracert', t('toolEcho')], ['traceroute', t('toolUdp')]] },
+      { key: 'routers', type: 'range', label: t('routers'), min: L.MIN_R, max: L.MAX_R, resets: true },
+      { key: 'silent', type: 'select', label: t('silent'), options: L.SILENT.map(function (id) { return [id, id === 'none' ? t('silentNone') : id]; }) },
+      { key: 'destFilter', type: 'toggle', label: t('destFilter') },
+      { key: 'maxHops', type: 'range', label: t('maxHops'), min: L.MIN_HOPS, max: L.MAX_HOPS }
+    ],
+
+    presets: [
+      { id: 'basic', label: t('presetBasic'), params: { tool: 'tracert', routers: 5, silent: 'none', destFilter: false, maxHops: 30 }, hint: t('presetBasicHint') },
+      { id: 'stars', label: t('presetStars'), params: { tool: 'tracert', routers: 11, silent: 'R9', destFilter: false, maxHops: 30 }, hint: t('presetStarsHint') },
+      { id: 'tools', label: t('presetTools'), params: { tool: 'traceroute', routers: 5, silent: 'none', destFilter: false, maxHops: 30 }, hint: t('presetToolsHint') },
+      { id: 'filtered', label: t('presetFiltered'), params: { tool: 'tracert', routers: 5, silent: 'none', destFilter: true, maxHops: 8 }, hint: t('presetFilteredHint') }
+    ],
+
+    legend: [
+      { c: 1, label: t('legProbe') },
+      { shape: 'te', label: t('legExceeded') },
+      { shape: 'final', label: t('legFinal') },
+      { shape: 'silent', label: t('legSilent') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'tr' },
+        renderTopo(c),
+        h('div', { class: 'tr-bottom' }, renderRound(c), renderOutput(c))));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
