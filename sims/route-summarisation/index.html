@@ -1,0 +1,556 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Route summarisation: an explorer. Pick blocks of Grafo d.o.o.'s 192.168.1.0/24 (URM ch. 9, Primjer 1) or four /24s;
+     the page shows their summary over the address strip, what it over-covers, the lowest and highest address bit by
+     bit, and router R2's routing table before and after the summary replaces the picked routes via R1.
+     The model is in sim.js (rules: SPEC.md), the words in strings.js. -->
+<html lang="hr" data-sim="route-summarisation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sažimanje puteva · simdeck</title>
+<meta name="description" content="Odaberi mreže tvrtke Grafo d.o.o.: sažetak je najdulji zajednički prefiks, R2 umjesto više zapisa ima jedan, a višak sažetka vidi se na traci.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "route-summarisation",
+  "title": {
+    "hr": "Sažimanje puteva",
+    "en": "Route summarisation"
+  },
+  "concept": {
+    "hr": "Susjedni prefiksi u jednom zapisu, i što taj zapis pokriva viška",
+    "en": "Neighbouring prefixes in one route, and what it over-covers"
+  },
+  "summary": {
+    "hr": "Odaberi mreže tvrtke Grafo d.o.o.: sažetak je najdulji zajednički prefiks, R2 umjesto više zapisa ima jedan, a višak sažetka vidi se na traci.",
+    "en": "Pick Grafo Ltd's networks: the summary is the longest shared prefix, R2 keeps one route instead of several, and the strip shows what it over-covers."
+  },
+  "tags": [
+    "routing",
+    "ip-addressing"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="route-summarisation"]; colours only from kit tokens. */
+[data-sim="route-summarisation"] .rs {
+  display: flex;
+  flex-direction: column;
+  gap: 2.4cqh;
+  height: 100%;
+  padding: 1.6cqh 1.6cqw;
+}
+[data-sim="route-summarisation"] .rs-h { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-size: var(--fs-md); font-weight: 700; }
+[data-sim="route-summarisation"] .rs-h small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="route-summarisation"] .rs-mono { font-family: var(--mono); }
+
+/* ── a strip: blocks to scale, over-covered parts hatched on top ── */
+[data-sim="route-summarisation"] .rs-strip {
+  position: relative;
+  height: 9cqh;
+  min-height: 2.6rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="route-summarisation"] .rs-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-right: var(--line-w) solid var(--ink);
+  line-height: 1.1;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+}
+[data-sim="route-summarisation"] .rs-seg b { font-size: var(--fs-md); }
+[data-sim="route-summarisation"] .rs-seg small { font-size: var(--fs-sm); }
+[data-sim="route-summarisation"] .rs-seg .rs-name + small + .rs-no, [data-sim="route-summarisation"] .rs-seg .rs-name + .rs-no { display: none; }
+/* a block that is not picked: dashed outline in its colour, ink text */
+[data-sim="route-summarisation"] .rs-seg.rs-off {
+  inset-block: 0.35rem;
+  border: var(--line-w) dashed var(--sw);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+[data-sim="route-summarisation"] .rs-seg.sd-changed { z-index: 1; }
+/* a block's label stays readable over the hatching of an over-covered range */
+[data-sim="route-summarisation"] .rs-seg.rs-off > * { position: relative; z-index: 3; padding: 0 0.2rem; border-radius: 3px; background: var(--bg); }
+/* over-covered: hatched in --warn; a risk: cross-hatched in --danger, so the two differ in grayscale too */
+[data-sim="route-summarisation"] .rs-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, var(--warn) 0.3em 0.5em);
+  border-inline: var(--line-w) solid var(--warn);
+  pointer-events: none;
+}
+[data-sim="route-summarisation"] .rs-over.rs-risk {
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.35em, var(--danger) 0.35em 0.55em),
+    repeating-linear-gradient(-45deg, transparent 0 0.35em, var(--danger) 0.35em 0.55em);
+  border-inline-color: var(--danger);
+}
+[data-sim="route-summarisation"] .rs-scale { position: relative; height: 1.4rem; margin-top: 0.25rem; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="route-summarisation"] .rs-scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+[data-sim="route-summarisation"] .rs-scale span.rs-l { transform: none; }
+[data-sim="route-summarisation"] .rs-scale span.rs-r { transform: translateX(-100%); }
+
+/* the summary bracket over the strip */
+[data-sim="route-summarisation"] .rs-brow { position: relative; height: 3.6rem; }
+[data-sim="route-summarisation"] .rs-bracket {
+  position: absolute;
+  bottom: 0;
+  height: 1rem;
+  border: 0.3rem solid var(--ink);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+[data-sim="route-summarisation"] .rs-btag {
+  position: absolute;
+  bottom: 1.3rem;
+  transform: translateX(-50%);
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="route-summarisation"] .rs-btag.rs-l { transform: none; }
+[data-sim="route-summarisation"] .rs-btag.rs-r { transform: translateX(-100%); }
+[data-sim="route-summarisation"] .rs-empty { font-style: italic; color: var(--muted); }
+[data-sim="route-summarisation"] .rs-none { position: absolute; bottom: 0.4rem; left: 0; font-style: italic; color: var(--muted); }
+
+/* ── lower half: the summary up close (left), R2's tables (right) ── */
+[data-sim="route-summarisation"] .rs-lower { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 2cqw; }
+[data-sim="route-summarisation"] .rs-sum { display: flex; flex-direction: column; gap: 1.6cqh; min-width: 0; }
+[data-sim="route-summarisation"] .rs-zoom .rs-strip { height: 8cqh; }
+[data-sim="route-summarisation"] .rs-pieces { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); }
+[data-sim="route-summarisation"] .rs-pieces li { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+[data-sim="route-summarisation"] .rs-sw { flex: none; width: 1.6rem; height: 1.1rem; border-radius: 3px; position: relative; }
+[data-sim="route-summarisation"] .rs-kind { padding: 0 0.4rem; border-radius: var(--radius-sm); font-weight: 700; font-size: var(--fs-sm); border: var(--line-w) solid var(--warn); }
+[data-sim="route-summarisation"] .rs-kind.rs-k-risk { border-color: var(--danger); color: var(--danger); }
+[data-sim="route-summarisation"] .rs-kind.rs-k-risk::before { content: '⚠ '; }
+[data-sim="route-summarisation"] .rs-kind.rs-k-safe { border-color: var(--ok); color: var(--ok); }
+[data-sim="route-summarisation"] .rs-kind.rs-k-safe::before { content: '✓ '; }
+[data-sim="route-summarisation"] .rs-kind.rs-k-same { border-style: dashed; border-color: var(--line); }
+
+/* bits: the 3rd and 4th octets of the lowest, the highest address and the summary's network */
+[data-sim="route-summarisation"] .rs-bits {
+  display: grid;
+  grid-template-columns: auto auto repeat(8, var(--bw)) 0.4rem repeat(8, var(--bw)) auto;
+  column-gap: 0.12rem;
+  row-gap: 0.35rem;
+  align-items: center;
+  justify-content: start;
+  --bw: min(1.55rem, calc((100cqw * 0.53 - 22rem) / 16));
+}
+[data-sim="route-summarisation"] .rs-bits > .rs-blab { font-size: var(--fs-sm); color: var(--muted); padding-right: 0.5rem; white-space: nowrap; }
+[data-sim="route-summarisation"] .rs-bits > .rs-bpre { font-family: var(--mono); font-size: var(--fs-md); text-align: right; padding-right: 0.3rem; }
+[data-sim="route-summarisation"] .rs-bits > .rs-bend { font-family: var(--mono); font-size: var(--fs-md); font-weight: 700; padding-left: 0.5rem; white-space: nowrap; }
+[data-sim="route-summarisation"] .rs-bit {
+  display: grid;
+  place-items: center;
+  height: 1.7rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="route-summarisation"] .rs-bit.rs-open { border-style: dashed; color: var(--muted); }
+[data-sim="route-summarisation"] .rs-bit.rs-first { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+/* the boundary: a thick ink bar left of the first bit after the prefix */
+[data-sim="route-summarisation"] .rs-bit.rs-cut { box-shadow: -0.3rem 0 0 -0.08rem var(--ink); }
+[data-sim="route-summarisation"] .rs-bnote { font-size: var(--fs-md); }
+[data-sim="route-summarisation"] .rs-bnote b { font-family: var(--mono); }
+[data-sim="route-summarisation"] .rs-res { display: flex; flex-wrap: wrap; gap: 0.6rem; font-size: var(--fs-md); font-weight: 700; }
+[data-sim="route-summarisation"] .rs-chip { padding: 0.15rem 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="route-summarisation"] .rs-chip.rs-ok { border-left: 0.45rem solid var(--ok); }
+[data-sim="route-summarisation"] .rs-chip.rs-ok::before { content: '✓ '; color: var(--ok); }
+[data-sim="route-summarisation"] .rs-chip.rs-warn { border-left: 0.45rem solid var(--warn); }
+
+/* ── R2's routing tables ── */
+[data-sim="route-summarisation"] .rs-tables { display: flex; flex-direction: column; gap: 1.6cqh; min-width: 0; }
+[data-sim="route-summarisation"] .rs-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+[data-sim="route-summarisation"] .rs-table caption { text-align: left; font-weight: 700; padding-bottom: 0.2rem; }
+[data-sim="route-summarisation"] .rs-table caption small { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="route-summarisation"] .rs-table th {
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+  border-bottom: var(--line-w) solid var(--ink);
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+[data-sim="route-summarisation"] .rs-table td { padding: 0.08rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="route-summarisation"] .rs-table td.rs-net { font-family: var(--mono); }
+[data-sim="route-summarisation"] .rs-dot { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 50%; margin-right: 0.45rem; vertical-align: 0.05em; }
+[data-sim="route-summarisation"] .rs-table tr.rs-gone td { color: var(--muted); }
+[data-sim="route-summarisation"] .rs-table tr.rs-gone td.rs-net, [data-sim="route-summarisation"] .rs-table tr.rs-gone td.rs-pre { text-decoration: line-through; }
+[data-sim="route-summarisation"] .rs-tag { display: inline-block; margin-left: 0.5rem; padding: 0 0.35rem; font-size: var(--fs-sm); font-weight: 700; border-radius: var(--radius-sm); }
+[data-sim="route-summarisation"] .rs-tag.rs-t-gone { border: var(--line-w) dashed var(--muted); }
+[data-sim="route-summarisation"] .rs-tag.rs-t-sum { background: var(--ink); color: var(--bg); }
+[data-sim="route-summarisation"] .rs-table tr.rs-sumrow td { font-weight: 700; }
+[data-sim="route-summarisation"] .rs-table tr.rs-sumrow td:first-child { box-shadow: inset 0.35rem 0 0 var(--ink); }
+[data-sim="route-summarisation"] .rs-table tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="route-summarisation"] .rs-table tr.sd-changed td:last-child { box-shadow: inset -0.35rem 0 0 var(--ink); }
+[data-sim="route-summarisation"] .rs-table tr.sd-changed .rs-tag.rs-t-sum { background: var(--on-hl); color: var(--hl); }
+
+/* legend swatches of the page's own shapes */
+[data-sim="route-summarisation"] .sd-swatch[data-shape='over'] { background-image: repeating-linear-gradient(45deg, transparent 0 0.18em, var(--warn) 0.18em 0.3em); border-color: var(--warn); }
+[data-sim="route-summarisation"] .sd-swatch[data-shape='risk'] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, var(--danger) 0.2em 0.32em),
+    repeating-linear-gradient(-45deg, transparent 0 0.2em, var(--danger) 0.2em 0.32em);
+  border-color: var(--danger);
+}
+[data-sim="route-summarisation"] .sd-swatch[data-shape='bracket'] { background: transparent; border: 0.22rem solid var(--ink); border-bottom: 0; border-radius: 3px 3px 0 0; }
+[data-sim="route-summarisation"] .rs-sw.rs-over { position: relative; inset: auto; border: var(--line-w) solid var(--warn); }
+[data-sim="route-summarisation"] .rs-sw.rs-over.rs-risk { border-color: var(--danger); }
+
+/* toggles: one line each, so six of them, the plan and five presets fit the panel at 1920×1080 */
+[data-sim="route-summarisation"] .sd-ctl[hidden] { display: none; } /* the kit's .sd-ctl display beats [hidden] */
+
+/* Phone and portrait: the stage grows with its content; tables go under the summary. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="route-summarisation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="route-summarisation"] .rs { height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="route-summarisation"] .rs-strip, [data-sim="route-summarisation"] .rs-zoom .rs-strip { height: 3rem; }
+  [data-sim="route-summarisation"] .rs-seg small, [data-sim="route-summarisation"] .rs-seg.rs-mid .rs-name { display: none; }
+  [data-sim="route-summarisation"] .rs-seg.rs-mid .rs-name + small + .rs-no, [data-sim="route-summarisation"] .rs-seg.rs-mid .rs-name + .rs-no { display: inline; }
+  [data-sim="route-summarisation"] .rs-table td.rs-net { white-space: nowrap; }
+  [data-sim="route-summarisation"] .rs-seg b { font-size: var(--fs-sm); }
+  [data-sim="route-summarisation"] .rs-lower { display: flex; flex-direction: column; gap: 1rem; }
+  /* the "192.168." column goes, so the grid loses that column too */
+  [data-sim="route-summarisation"] .rs-bits { grid-template-columns: auto repeat(8, var(--bw)) 0.3rem repeat(8, var(--bw)) auto; --bw: calc((100cqw - 8.5rem) / 16); column-gap: 0.05rem; }
+  [data-sim="route-summarisation"] .rs-bits > .rs-blab { padding-right: 0.25rem; }
+  [data-sim="route-summarisation"] .rs-bits > .rs-bend { padding-left: 0.25rem; font-size: var(--fs-sm); }
+  [data-sim="route-summarisation"] .rs-bits > .rs-bpre { display: none; }
+  [data-sim="route-summarisation"] .rs-bit { font-size: var(--fs-sm); height: 1.5rem; }
+  [data-sim="route-summarisation"] .rs-table th, [data-sim="route-summarisation"] .rs-table td { padding: 0.15rem 0.2rem; white-space: normal; }
+  [data-sim="route-summarisation"] .rs-tables { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Sažimanje puteva</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function bold(text) { return h('b', { translate: 'no' }, String(text)); }
+  function addrs(n) { return t.n('addrN', n, { count: n }); }
+  function prefixOf(net, len) { return L.format(net) + '/' + len; }
+
+  // Grafo's blocks are written the book's short way (.64/27); the four /24s in full.
+  function short(s, a) { return s.plan === 'grafo' ? '.' + (a & 255) : L.format(a); }
+  function rangeText(s, first, last) { return short(s, first) + '–' + short(s, last); }
+  function blockName(s, b) { return s.plan === 'grafo' ? t('block_' + b.id) : prefixOf(b.net, b.len); }
+  function isData(s) { return s.plan !== 'grafo'; }
+  function nameNode(s, b) { return isData(s) ? data(blockName(s, b)) : h('span', null, blockName(s, b)); }
+  function colourOf(s, id) { return String(s.blocks.findIndex(function (b) { return b.id === id; }) + 1); }
+  /** "A", "A i B", "A, B i C", as nodes. */
+  function listOf(nodes) {
+    var out = [];
+    nodes.forEach(function (n, i) {
+      if (i) out.push(i === nodes.length - 1 ? ' ' + t('and') + ' ' : ', ');
+      out.push(n);
+    });
+    return h('span', null, out);
+  }
+
+  // ── "changed": against the state before the last input ──
+  var lastParams = null, lastState = null, delta = { blocks: [], rows: [] };
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    delta = L.changed(lastState, c.state);
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+
+  // ── stage ──
+
+  /** One strip over [from, to]: the plan's blocks inside it, then the over-covered pieces hatched on top. */
+  function strip(s, from, to, wide) {
+    var span = to - from + 1, kids = [];
+    var pct = function (a) { return ((a - from) / span * 100) + '%'; };
+    s.blocks.forEach(function (b, i) {
+      var last = b.net + b.size - 1;
+      if (last < from || b.net > to) return;
+      var f = Math.max(from, b.net), l = Math.min(to, last), frac = (l - f + 1) / span;
+      var ch = delta.blocks.indexOf(b.id) >= 0;
+      // wide: name (and, for Grafo, its short prefix); narrower: the block's number; under 2.5 %: nothing.
+      // A block under 20 % shows its number instead of its name on a phone.
+      var no = h('b', { translate: 'no', class: 'rs-no' }, String(i + 1));
+      var label = frac >= wide ? [h('b', { class: 'rs-name' }, nameNode(s, b)), isData(s) ? null : h('small', { translate: 'no' }, short(s, b.net) + '/' + b.len), frac < 0.2 ? no : null]
+        : frac >= 0.025 ? [no] : [];
+      kids.push(h('div', {
+        class: 'rs-seg' + (b.selected ? ' sd-fill' : ' rs-off') + (ch ? ' sd-changed' : '') + (frac >= wide && frac < 0.2 ? ' rs-mid' : ''),
+        dataset: { c: String(i + 1) },
+        style: { left: pct(f), width: ((l - f + 1) / span * 100) + '%' },
+        title: blockName(s, b) + ' ' + prefixOf(b.net, b.len)
+      }, label));
+    });
+    s.pieces.forEach(function (pc) {
+      if (pc.last < from || pc.first > to) return;
+      kids.push(h('div', { class: 'rs-over' + (pc.risk ? ' rs-risk' : ''), style: { left: pct(pc.first), width: (pc.count / span * 100) + '%' } }));
+    });
+    return h('div', { class: 'rs-strip' }, kids);
+  }
+
+  function scale(s, from, to, ticks) {
+    var span = to - from + 1;
+    return h('div', { class: 'rs-scale', 'aria-hidden': 'true' }, ticks.map(function (a, i) {
+      return h('span', { translate: 'no', class: i === 0 ? 'rs-l' : i === ticks.length - 1 ? 'rs-r' : null,
+        style: { left: ((a - from) / span * 100) + '%' } }, short(s, a));
+    }));
+  }
+
+  function spaceView(s) {
+    var from = s.space.net, to = s.space.net + s.space.size - 1, sum = s.summary;
+    var brow;
+    if (sum) {
+      var l = (sum.first - from) / s.space.size * 100, w = sum.size / s.space.size * 100, mid = l + w / 2;
+      var align = mid < 14 ? 'rs-l' : mid > 86 ? 'rs-r' : '';
+      var at = align === 'rs-l' ? l : align === 'rs-r' ? l + w : mid;
+      brow = h('div', { class: 'rs-brow' },
+        h('div', { class: 'rs-bracket', style: { left: l + '%', width: w + '%' } }),
+        h('div', { class: 'rs-btag ' + align, style: { left: at + '%' } }, t('sumTag') + ' ', data(prefixOf(sum.net, sum.len))));
+    } else {
+      brow = h('div', { class: 'rs-brow' }, h('span', { class: 'rs-none' }, t('noSummary')));
+    }
+    var ticks = s.plan === 'grafo' ? [0, 64, 128, 192, 255] : [0, 256, 512, 768, 1023];
+    return h('section', { class: 'rs-space' },
+      h('div', { class: 'rs-h' }, h('span', null, t.parts('spaceTitle', { space: data(prefixOf(s.space.net, s.space.len)) })),
+        h('small', null, addrs(s.space.size))),
+      brow,
+      strip(s, from, to, 0.1),
+      scale(s, from, to, ticks.map(function (k) { return from + k; })));
+  }
+
+  /** The 3rd and 4th octet of an address as 16 bit cells; `kind` low/high/net decides the look. */
+  function bitRow(s, label, addr, end, kind) {
+    var sum = s.summary, len = sum.len, b = L.bits(addr), cells = [];
+    var octs = L.format(addr).split('.');
+    cells.push(h('span', { class: 'rs-blab' }, label));
+    cells.push(h('span', { class: 'rs-bpre', translate: 'no' }, octs[0] + '.' + octs[1] + '.'));
+    for (var i = 16; i < 32; i++) {
+      if (i === 24) cells.push(h('span', { 'aria-hidden': 'true' }));
+      var cls = 'rs-bit';
+      if (i < len) cls += ' sd-fill';
+      else if (i === len && kind !== 'net') cls += ' rs-first';
+      else cls += ' rs-open';
+      if (i === len) cls += ' rs-cut';
+      cells.push(h('span', { class: cls, dataset: i < len ? { c: '8' } : null, translate: 'no', 'aria-hidden': 'true' }, b[i]));
+    }
+    cells.push(h('span', { class: 'rs-bend', translate: 'no' }, end));
+    return cells;
+  }
+
+  function sumView(s) {
+    var sum = s.summary;
+    if (!sum) return h('section', { class: 'rs-sum' }, h('div', { class: 'rs-h' }, t('zoomTitle')), h('p', { class: 'rs-empty' }, t('noSummary')));
+    // the over-covered pieces, one line per kind: touching ranges joined, the owners listed, one count
+    var groups = [];
+    s.pieces.forEach(function (pc) {
+      // a block behind R2 is a risk only while the summary is installed (via R1); without it, it is only behind R2
+      var key = pc.risk ? 'risk' : pc.kind === 'risk' ? 'r2' : pc.kind;
+      var g = groups.filter(function (x) { return x.key === key; })[0];
+      if (!g) groups.push(g = { key: key, ranges: [], count: 0, owners: [], safe: true });
+      var last = g.ranges[g.ranges.length - 1];
+      if (last && last.last + 1 === pc.first) last.last = pc.last;
+      else g.ranges.push({ first: pc.first, last: pc.last });
+      g.count += pc.count;
+      if (pc.owner) g.owners.push(s.blocks.filter(function (b) { return b.id === pc.owner; })[0]);
+      g.safe = g.safe && pc.safeOnR2;
+    });
+    var ORDER = ['risk', 'r2', 'same', 'unused'];
+    groups.sort(function (x, y) { return ORDER.indexOf(x.key) - ORDER.indexOf(y.key); });
+    var WORD = { risk: 'kindRisk', r2: 'kindR2', same: 'kindSame', unused: 'kindUnused' };
+    var pieces = groups.map(function (g) {
+      var kinds = [h('span', { class: 'rs-kind rs-k-' + (g.key === 'r2' ? 'same' : g.key) }, t(WORD[g.key]))];
+      if (g.key === 'risk' && g.safe) {
+        var own = s.tableAfter.filter(function (r) { return r.block === g.owners[0].id; })[0];
+        kinds.push(h('span', { class: 'rs-kind rs-k-safe' }, t('kindSafe', { len: own ? own.prefix : '' })));
+      }
+      return h('li', null,
+        h('span', { class: 'rs-sw rs-over' + (g.key === 'risk' ? ' rs-risk' : ''), 'aria-hidden': 'true' }),
+        listOf(g.ranges.map(function (r) { return bold(rangeText(s, r.first, r.last)); })), h('span', null, '· ' + addrs(g.count)),
+        g.owners.length ? h('span', null, '· ', listOf(g.owners.map(function (b) { return nameNode(s, b); }))) : null, kinds);
+    });
+    var bits = h('div', { class: 'rs-bits' },
+      bitRow(s, t('bitsLow'), sum.low, '', 'low'),
+      bitRow(s, t('bitsHigh'), sum.high, '', 'high'),
+      bitRow(s, t('bitsNet'), sum.net, '/' + sum.len, 'net'));
+    var res = h('div', { class: 'rs-res' },
+      s.exact ? h('span', { class: 'rs-chip rs-ok' }, t('resExact')) : h('span', { class: 'rs-chip rs-warn' }, t('resOver', { count: addrs(s.overCount) })),
+      h('span', { class: 'rs-chip' }, t('resCovered', { covered: s.covered, size: addrs(sum.size) })));
+    return h('section', { class: 'rs-sum' },
+      h('div', { class: 'rs-h' }, h('span', null, t('zoomTitle'), ' ', data(prefixOf(sum.net, sum.len))),
+        h('small', null, t.parts('zoomRange', { range: data(rangeText(s, sum.first, sum.last)), count: addrs(sum.size) }))),
+      h('div', { class: 'rs-zoom' }, strip(s, sum.first, sum.last, 0.16), scale(s, sum.first, sum.last, [sum.first, sum.last])),
+      pieces.length ? h('ul', { class: 'rs-pieces' }, pieces) : null,
+      h('div', { class: 'rs-h' }, h('span', null, t('bitsTitle'))),
+      bits,
+      h('p', { class: 'rs-bnote' }, t.parts('bitsShared', { n: bold(sum.len), len: bold(sum.len) }), sum.aligned ? ' · ' + t('bitsAligned') : null),
+      res);
+  }
+
+  function hopText(r) { return r.hop === 'R1' ? t.parts('hopVia', { r: data('R1') }) : t('hopConnected'); }
+  function rowKey(r) { return r.net + '/' + r.prefix + '/' + r.hop; }
+
+  function table(s, rows, title, after) {
+    return h('table', { class: 'rs-table' },
+      h('caption', null, title, ' ', h('small', null, '· ' + t.n('routesCount', rows.length, { n: rows.length }))),
+      h('thead', null, h('tr', null, h('th', null, t('colNet')), h('th', null, t('colPrefix')), h('th', null, t('colHop')))),
+      h('tbody', null, rows.map(function (r) {
+        var gone = !after && s.replaced.indexOf(r.block) >= 0;
+        var ch = after && delta.rows.indexOf(rowKey(r)) >= 0;
+        var dot = r.block ? h('span', { class: 'rs-dot sd-fill', dataset: { c: colourOf(s, r.block) }, 'aria-hidden': 'true' }) : null;
+        return h('tr', { class: (gone ? 'rs-gone' : '') + (r.summary ? ' rs-sumrow' : '') + (ch ? ' sd-changed' : '') },
+          h('td', { class: 'rs-net' }, dot, data(L.format(r.net))),
+          h('td', { class: 'rs-pre' }, data('/' + r.prefix)),
+          h('td', null, hopText(r),
+            gone ? h('span', { class: 'rs-tag rs-t-gone' }, t('tagReplaced')) : null,
+            r.summary ? h('span', { class: 'rs-tag rs-t-sum' }, t('tagSummary')) : null));
+      })));
+  }
+
+  // ── presets and params ──
+
+  var presets = L.presets.map(function (p) {
+    return { id: p.id, label: t('preset_' + p.id), hint: t('presetHint_' + p.id), params: p.params };
+  });
+
+  var toggles = L.PLANS.grafo.blocks.map(function (b, i) {
+    var net = L.parse(b.net);
+    return { key: b.id, type: 'toggle', label: (i + 1) + '. ' + t('toggleLabel', { name: t('block_' + b.id), net: '.' + (net & 255) + '/' + b.len }),
+      visible: function (p) { return p.plan !== 'four24'; } };
+  }).concat(L.PLANS.four24.blocks.map(function (b) {
+    return { key: b.id, type: 'toggle', label: t('netToggle', { net: b.net + '/' + b.len }),
+      visible: function (p) { return p.plan === 'four24'; } };
+  }));
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [{ key: 'plan', type: 'choice', label: t('plan'), hint: t('planHint'), options: [['grafo', t('planGrafo')], ['four24', t('planFour')]] }]
+      .concat(toggles),
+
+    presets: presets,
+
+    legend: [
+      { c: 1, label: t('legendOn') },
+      { shape: 'hollow', label: t('legendOff') },
+      { shape: 'bracket', label: t('legendSummary') },
+      { shape: 'over', label: t('legendOver') },
+      { shape: 'risk', label: t('legendRisk') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'rs' },
+        spaceView(s),
+        h('div', { class: 'rs-lower' },
+          sumView(s),
+          h('section', { class: 'rs-tables' },
+            table(s, s.tableBefore, t('tblBefore'), false),
+            table(s, s.tableAfter, t('tblAfter'), true)))));
+    },
+
+    caption: function (c) {
+      var s = c.state, sum = s.summary;
+      if (!sum) return t('capNone');
+      var picked = s.blocks.filter(function (b) { return b.selected; });
+      var sumNode = bold(prefixOf(sum.net, sum.len));
+      if (picked.length === 1) return t.parts('capOne', { block: nameNode(s, picked[0]), sum: sumNode });
+      var k = s.replaced.length;
+      var out = t.parts('capSum', {
+        list: listOf(picked.map(function (b) { return nameNode(s, b); })),
+        sum: sumNode,
+        routes: k ? h('span', null, t.n('capRoutes', k, { k: k })) : h('span', null, t('capNoRoutes'))
+      });
+      if (s.exact) return out.concat(t.parts('capExact', { size: addrs(sum.size) }));
+      var over = {
+        ranges: listOf(s.overCovered.map(function (r) { return bold(rangeText(s, r.first, r.last)); })),
+        count: addrs(s.overCount)
+      };
+      // no summary route on R2: the over-coverage is arithmetic only, nothing is sent anywhere
+      if (!s.installed) return out.concat(t.parts('capOverIdle', over));
+      out = out.concat(t.parts('capOver', over));
+      // one sentence per kind present, each naming only its own blocks: a risk, then blocks R1 reaches, then nobody's
+      var of = function (kind) { return s.pieces.filter(function (p) { return p.kind === kind; }); };
+      var names = function (kind) {
+        return listOf(of(kind).map(function (p) { return nameNode(s, s.blocks.filter(function (b) { return b.id === p.owner; })[0]); }));
+      };
+      var unused = of('unused').reduce(function (a, p) { return a + p.count; }, 0);
+      if (of('risk').length) out = out.concat(t.parts('capRisk', { names: names('risk') }));
+      // blocks R1 reaches anyway are harmless: said only when nothing else is over-covered (the stage lists them)
+      if (of('same').length && !of('risk').length && !unused) out = out.concat(t.parts('capSame', { names: names('same') }));
+      if (unused) out = out.concat(t.parts('capUnused', { count: addrs(unused) }));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
