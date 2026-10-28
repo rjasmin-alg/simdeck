@@ -1,0 +1,529 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- dns-secondary-expiry: a primary P and a secondary S of one zone. S checks P's serial every REFRESH, retries every
+     RETRY when P does not answer, and answers SERVFAIL once EXPIRE has passed since its last successful check. A
+     stepper over "interesting moments": the servers and the client in the top row, S's three timers and a log below.
+     Drawn by the page (no kit view has a time axis). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="dns-secondary-expiry">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS: sekundarni poslužitelj i istek zone · simdeck</title>
+<meta name="description" content="SOA serijski broj, osvježavanje, ponovni pokušaj i istek: sekundarni odgovara iz kopije dok mu ne istekne rok, pa SERVFAIL.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "dns-secondary-expiry",
+  "title": {
+    "hr": "DNS: sekundarni poslužitelj i istek zone",
+    "en": "DNS: the secondary and zone expiry"
+  },
+  "concept": {
+    "hr": "Sekundarni je predmemorija s rokom: mrtvi primarni obori zonu, samo kasnije",
+    "en": "A secondary is a cache with a timer: a dead primary takes the zone down later"
+  },
+  "summary": {
+    "hr": "SOA serijski broj, osvježavanje, ponovni pokušaj i istek. Isključi primarni i pusti vrijeme: sekundarni odgovara iz kopije dok mu ne istekne rok, pa SERVFAIL.",
+    "en": "SOA serial, refresh, retry and expire. Switch the primary off and let time run: the secondary answers from its copy until its timer runs out, then SERVFAIL."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="dns-secondary-expiry"]; colours only from kit tokens.
+   Layout: row 1 is P, the check between S and P, S, the query, the client; row 2 is S's timers and the log. */
+[data-sim="dns-secondary-expiry"] .se {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.45fr) minmax(0, 1.5fr) minmax(0, 0.22fr) minmax(0, 0.9fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.6cqh 1cqw;
+  height: 100%;
+  padding: 1.6cqh 1.4cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+[data-sim="dns-secondary-expiry"] .se-mono { font-family: var(--mono); }
+[data-sim="dns-secondary-expiry"] .se-muted { color: var(--muted); }
+[data-sim="dns-secondary-expiry"] .se-sm { font-size: var(--fs-sm); }
+
+/* server and client cards */
+[data-sim="dns-secondary-expiry"] .se-card {
+  min-height: 0;
+  padding: 0.5rem 0.7rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+[data-sim="dns-secondary-expiry"] .se-card.sd-changed { outline: 0.3rem solid var(--hl); outline-offset: 0.1rem; }
+[data-sim="dns-secondary-expiry"] .se-card[data-down] { border-style: dashed; background: var(--bg); }
+[data-sim="dns-secondary-expiry"] .se-card[data-down] .se-recs { opacity: 0.55; }
+[data-sim="dns-secondary-expiry"] .se-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+[data-sim="dns-secondary-expiry"] .se-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 1.3rem;
+}
+[data-sim="dns-secondary-expiry"] .se-name { font-weight: 700; font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="dns-secondary-expiry"] .se-badge {
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="dns-secondary-expiry"] .se-badge[data-k="ok"] { border-color: var(--ok); color: var(--ok); }
+[data-sim="dns-secondary-expiry"] .se-badge[data-k="retrying"] { border-style: dashed; }
+[data-sim="dns-secondary-expiry"] .se-badge[data-k="expired"],
+[data-sim="dns-secondary-expiry"] .se-badge[data-k="down"] { border-color: var(--danger); background: var(--danger); color: var(--on-accent); }
+[data-sim="dns-secondary-expiry"] .se-serial { display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; padding: 0.1rem 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="dns-secondary-expiry"] .se-serial b { font-family: var(--mono); font-size: 1.25em; }
+[data-sim="dns-secondary-expiry"] .se-recs { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 1.1rem; }
+[data-sim="dns-secondary-expiry"] .se-recs td { padding: 0.1rem 0.3rem; border-top: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+[data-sim="dns-secondary-expiry"] .se-recs td:last-child { width: 100%; }
+[data-sim="dns-secondary-expiry"] .se-hl { background: var(--hl); color: var(--on-hl); }
+[data-sim="dns-secondary-expiry"] .se-hl .se-muted { color: var(--on-hl); }
+[data-sim="dns-secondary-expiry"] .se-diff { display: inline-block; margin-left: 0.25rem; padding: 0 0.2rem; border: 1px dashed var(--ink); border-radius: var(--radius-sm); font-family: var(--sans); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="dns-secondary-expiry"] .se-copy { position: relative; }
+[data-sim="dns-secondary-expiry"] .se-copy[data-expired] {
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--danger) 30%, transparent) 0 0.3rem, transparent 0.3rem 0.7rem);
+}
+[data-sim="dns-secondary-expiry"] .se-copy[data-expired] .se-recs { text-decoration: line-through; }
+[data-sim="dns-secondary-expiry"] .se-facts { display: grid; grid-template-columns: auto 1fr; gap: 0 0.5rem; font-size: var(--fs-sm); margin-top: auto; }
+[data-sim="dns-secondary-expiry"] .se-facts dt { color: var(--muted); }
+[data-sim="dns-secondary-expiry"] .se-facts dd { margin: 0; font-family: var(--mono); }
+[data-sim="dns-secondary-expiry"] .se-answer { font-size: 1.2rem; font-weight: 700; font-family: var(--mono); padding: 0.2rem 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="dns-secondary-expiry"] .se-answer[data-k="SERVFAIL"] { color: var(--on-accent); background: var(--danger); }
+
+/* links between the cards */
+[data-sim="dns-secondary-expiry"] .se-link { display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 0.3rem; text-align: center; min-width: 0; }
+[data-sim="dns-secondary-expiry"] .se-arrow { position: relative; height: 0; border-top: 0.22rem solid var(--ink); margin: 0.6rem 0.5rem; }
+[data-sim="dns-secondary-expiry"] .se-arrow::after { content: ''; position: absolute; top: -0.6rem; width: 0; height: 0; border: 0.5rem solid transparent; }
+[data-sim="dns-secondary-expiry"] .se-arrow[data-dir="l"]::after { left: -0.6rem; border-right: 0.7rem solid var(--ink); border-left: 0; }
+[data-sim="dns-secondary-expiry"] .se-arrow[data-dir="r"]::after { right: -0.6rem; border-left: 0.7rem solid var(--ink); border-right: 0; }
+[data-sim="dns-secondary-expiry"] .se-arrow[data-k="fail"] { border-top-style: dashed; border-top-color: var(--danger); }
+[data-sim="dns-secondary-expiry"] .se-arrow[data-k="idle"] { border-top-style: dotted; border-top-color: var(--line); }
+[data-sim="dns-secondary-expiry"] .se-arrow[data-k="idle"]::after { display: none; }
+[data-sim="dns-secondary-expiry"] .se-outcome { align-self: center; }
+[data-sim="dns-secondary-expiry"] .se-outcome[data-k="fail"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="dns-secondary-expiry"] .se-count { font-size: 1.4rem; font-weight: 700; font-family: var(--mono); }
+
+/* timers and log */
+[data-sim="dns-secondary-expiry"] .se-timers { display: flex; flex-direction: column; gap: 0.2rem; margin-top: auto; padding-top: 0.3rem; border-top: var(--line-w) solid var(--line); }
+[data-sim="dns-secondary-expiry"] .se-log h2 { margin: 0 0 0.2rem; font-size: 1em; }
+[data-sim="dns-secondary-expiry"] .se-tm { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "label text" "bar bar"; gap: 0.15rem 0.6rem; align-items: baseline; padding: 0.2rem 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="dns-secondary-expiry"] .se-tm.se-hl .se-bar { background: var(--bg); }
+[data-sim="dns-secondary-expiry"] .se-tm-text { grid-area: text; text-align: right; }
+[data-sim="dns-secondary-expiry"] .se-tm-label { grid-area: label; display: flex; flex-wrap: wrap; gap: 0 0.4rem; align-items: baseline; }
+[data-sim="dns-secondary-expiry"] .se-bar { grid-area: bar; position: relative; height: 1.4rem; border: 0.18rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; }
+[data-sim="dns-secondary-expiry"] .se-bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c1); }
+[data-sim="dns-secondary-expiry"] .se-bar[data-k="retry"] { border-style: dashed; }
+[data-sim="dns-secondary-expiry"] .se-bar[data-k="retry"] > span { background: var(--c2); }
+[data-sim="dns-secondary-expiry"] .se-bar[data-k="expire"] { border-color: var(--danger); border-width: 0.25rem; }
+[data-sim="dns-secondary-expiry"] .se-bar[data-k="expire"] > span { background: color-mix(in srgb, var(--danger) 55%, var(--bg)); }
+[data-sim="dns-secondary-expiry"] .se-bar[data-off] { border-style: dotted; border-color: var(--line); }
+[data-sim="dns-secondary-expiry"] .se-bar[data-expired] > span { background: repeating-linear-gradient(45deg, var(--danger) 0 0.3rem, var(--bg) 0.3rem 0.6rem); }
+[data-sim="dns-secondary-expiry"] .se-clock { display: inline-block; width: 1.1rem; height: 1.1rem; border: 0.16rem solid var(--danger); border-radius: 50%; position: relative; vertical-align: -0.15rem; }
+[data-sim="dns-secondary-expiry"] .se-clock::before,
+[data-sim="dns-secondary-expiry"] .se-clock::after { content: ''; position: absolute; left: 50%; bottom: 50%; width: 0.13rem; background: var(--danger); transform-origin: bottom center; }
+[data-sim="dns-secondary-expiry"] .se-clock::before { height: 0.38rem; margin-left: -0.065rem; }
+[data-sim="dns-secondary-expiry"] .se-clock::after { height: 0.3rem; margin-left: -0.065rem; transform: rotate(90deg); }
+[data-sim="dns-secondary-expiry"] .se-log { grid-column: 1 / -1; min-width: 0; padding: 0.4rem 0.6rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); }
+[data-sim="dns-secondary-expiry"] .se-log ol { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); columns: 2; column-gap: 2rem; }
+[data-sim="dns-secondary-expiry"] .se-log li { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.4rem; break-inside: avoid; padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="dns-secondary-expiry"] .se-log li[aria-current] { font-weight: 700; outline: var(--line-w) solid var(--ink); }
+
+/* legend swatches the kit lacks */
+[data-sim="dns-secondary-expiry"] .sd-swatch[data-shape="se-refresh"] { height: 0.7rem; border-radius: 0.15rem; background: var(--c1); border: 0.15rem solid var(--ink); }
+[data-sim="dns-secondary-expiry"] .sd-swatch[data-shape="se-retry"] { height: 0.7rem; border-radius: 0.15rem; background: var(--c2); border: 0.15rem dashed var(--ink); }
+[data-sim="dns-secondary-expiry"] .sd-swatch[data-shape="se-expire"] { height: 0.7rem; border-radius: 0.15rem; background: var(--bg); border: 0.22rem solid var(--danger); }
+[data-sim="dns-secondary-expiry"] .sd-swatch[data-shape="se-expired"] { background: repeating-linear-gradient(45deg, var(--danger) 0 0.15rem, var(--bg) 0.15rem 0.3rem); }
+[data-sim="dns-secondary-expiry"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the kit's .sd-ctl { display: flex } beats [hidden], so visible: () => false would not hide (as in dns-ttl-cache) */
+[data-sim="dns-secondary-expiry"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; everything in one column. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="dns-secondary-expiry"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="dns-secondary-expiry"] .se { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.5rem; }
+  [data-sim="dns-secondary-expiry"] .se-log { grid-column: auto; }
+  [data-sim="dns-secondary-expiry"] .se-log ol { columns: 1; }
+  [data-sim="dns-secondary-expiry"] .se-tm { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "text" "bar"; }
+  [data-sim="dns-secondary-expiry"] .se-tm-text { text-align: left; }
+  [data-sim="dns-secondary-expiry"] .se-arrow { display: none; }
+  [data-sim="dns-secondary-expiry"] .se-link { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  [data-sim="dns-secondary-expiry"] .se-log li { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="dns-secondary-expiry"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DNS: sekundarni poslužitelj i istek zone</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var ACTS = ['edit', 'kill', 'revive'];
+  var note = null; // a rejected button press: said once in the next caption
+
+  /** t.parts with every node copied: a DOM node stands in one place only, and a caption uses a name several times. */
+  function parts(key, vars) {
+    return t.parts(key, vars).map(function (x) { return typeof x === 'object' && x !== null ? x.cloneNode(true) : x; });
+  }
+
+  /** Data (names, addresses, serials) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'se-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** An address that may wrap after a dot only. */
+  function breakable(x) {
+    var out = [];
+    String(x).split('.').forEach(function (p, i) { if (i) out.push('.', h('wbr')); out.push(p); });
+    return out;
+  }
+  function upper(x) { return x.charAt(0).toUpperCase() + x.slice(1); }
+
+  // ── numbers and time ──
+  /** Thousands grouped as the language writes them: "604 800" / "604,800". */
+  function num(v) {
+    var g = String(v).replace(/\B(?=(\d{3})+(?!\d))/g, '|').split('|');
+    return g.reduce(function (a, x) { return t('group', { a: a, b: x }); });
+  }
+  function two(v) { return (v < 10 ? '0' : '') + v; }
+  /** A duration: "7 d", "2 h 58 min", "15 min"; seconds only under a minute. */
+  function dur(x) {
+    x = Math.max(0, Math.round(x));
+    if (x < 60) return t('sec', { v: x });
+    var d = Math.floor(x / 86400), hh = Math.floor(x % 86400 / 3600), m = Math.floor(x % 3600 / 60), out = [];
+    if (d) out.push(t('dD', { v: d }));
+    if (hh) out.push(t('dH', { v: hh }));
+    if (m) out.push(t('dMin', { v: m }));
+    return out.join(' ');
+  }
+  /** Seconds as in the SOA record, with the duration: "3600 s (1 h)". */
+  function secs(v) { return t('sec', { v: num(v) }) + (v >= 60 ? ' (' + dur(v) + ')' : ''); }
+  /** A moment of the run: "dan 7, 00:00" from the start, or the date in the estate's calendar. */
+  function when(sc, x) {
+    if (sc.epoch) {
+      var d = new Date(Date.parse(sc.epoch + ':00Z') + Math.floor(x) * 1000);
+      return t('dateAt', { wd: t('weekdays').split(',')[d.getUTCDay()], d: d.getUTCDate(), m: t('months').split(',')[d.getUTCMonth()],
+        hm: two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()) });
+    }
+    var day = Math.floor(x / 86400), r = x - day * 86400;
+    return t('dayAt', { d: day, hm: two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)) });
+  }
+  function span(sc, from, to) { return from === to ? when(sc, to) : t('span', { from: when(sc, from), to: when(sc, to) }); }
+
+  // ── the stage ──
+  function records(sc, recs, other, prevRecs, isS) {
+    return h('table', { class: 'se-recs' }, h('tbody', null, sc.records.map(function (r) {
+      var v = recs[r[0]], changed = prevRecs && prevRecs[r[0]] !== v;
+      return h('tr', { class: changed ? 'se-hl' : null },
+        h('td', { translate: 'no' }, r[0]),
+        h('td', null, h('span', { translate: 'no' }, v), isS && other[r[0]] !== v ? h('span', { class: 'se-diff' }, t('differs')) : null));
+    })));
+  }
+  function serialLine(serial, changed) {
+    return h('div', { class: 'se-serial' + (changed ? ' se-hl' : '') }, h('span', { class: 'se-muted' }, 'SOA ' + t('serialLbl')), b(serial));
+  }
+  function zoneLine(sc) {
+    return h('div', { class: 'se-muted se-sm' }, h('span', { translate: 'no' }, sc.zone), ' · ', t('recsA'));
+  }
+  function primaryCard(c, sc, s, prev) {
+    var P = s.primary;
+    return h('div', { class: 'se-card' + (has(c, 'primary') ? ' sd-changed' : ''), dataset: P.up ? {} : { down: '' } },
+      h('div', { class: 'se-head' }, h('span', { class: 'se-letter', translate: 'no' }, 'P'), h('span', { class: 'se-muted' }, t('roleP')),
+        h('span', { class: 'se-badge', dataset: { k: P.up ? 'ok' : 'down' } }, t(P.up ? 'pUp' : 'pDown'))),
+      h('div', { class: 'se-name', translate: 'no' }, sc.primary),
+      serialLine(P.serial, prev && prev.primary.serial !== P.serial),
+      zoneLine(sc),
+      records(sc, P.records, null, prev && prev.primary.records, false));
+  }
+  function secondaryCard(c, sc, s, prev) {
+    var S = s.secondary, k = S.expired ? 'expired' : S.mode;
+    return h('div', { class: 'se-card' + (has(c, 'secondary') ? ' sd-changed' : '') },
+      h('div', { class: 'se-head' }, h('span', { class: 'se-letter', translate: 'no' }, 'S'), h('span', { class: 'se-muted' }, t('roleS')),
+        h('span', { class: 'se-badge', dataset: { k: k } }, t({ ok: 'sOk', retrying: 'sRetry', expired: 'sExpired' }[k]))),
+      h('div', { class: 'se-name', translate: 'no' }, sc.secondary),
+      h('div', { class: 'se-copy', dataset: S.expired ? { expired: '' } : {} },
+        serialLine(S.serial, prev && prev.secondary.serial !== S.serial),
+        zoneLine(sc),
+        records(sc, S.records, s.primary.records, prev && prev.secondary.records, true)),
+      h('dl', { class: 'se-facts' },
+        h('dt', null, t('lastXfer')), h('dd', { translate: 'no' }, when(sc, S.lastXfer)),
+        h('dt', null, t('lastOk')), h('dd', { translate: 'no' }, when(sc, S.lastOk))),
+      timers(c, sc, s));
+  }
+  function clientCard(c, sc, s) {
+    var a = s.client;
+    return h('div', { class: 'se-card' + (has(c, 'client') ? ' sd-changed' : '') },
+      h('div', { class: 'se-head' }, h('strong', null, t(s.scene === 'estate' ? 'clientEstate' : 'clientLab'))),
+      h('div', null, h('span', { class: 'se-muted' }, t('clientAsks') + ' '), h('span', { translate: 'no', class: 'se-mono' }, breakable(a.qname + '.' + sc.zone), ' A?')),
+      h('div', { class: 'se-muted' }, t('clientGets')),
+      h('div', { class: 'se-answer', translate: 'no', dataset: { k: a.rcode } }, a.rcode === 'SERVFAIL' ? '✕ SERVFAIL' : breakable(a.value)));
+  }
+  /** The check between S and P in this step (none for an action or the start). */
+  function checkLink(c, s) {
+    var e = s.ev, ck = e.kind === 'moment' || e.kind === 'run' ? e.check : null;
+    if (!ck) {
+      return h('div', { class: 'se-link' }, h('div', { class: 'se-arrow', dataset: { k: 'idle' } }), h('span', { class: 'se-muted se-sm' }, t('linkIdle')));
+    }
+    var o = ck.outcome;
+    return h('div', { class: 'se-link' },
+      h('span', { class: 'se-sm' }, t('linkAsk')),
+      h('div', { class: 'se-arrow', dataset: { dir: 'l', k: o === 'fail' ? 'fail' : 'ok' } }),
+      e.kind === 'run' ? h('span', { class: 'se-count', translate: 'no' }, '× ' + e.count) : null,
+      h('strong', null, t(ck.kind === 'refresh' ? 'kRefresh' : 'kRetry')),
+      h('span', { class: 'se-badge se-outcome', dataset: { k: o } }, t({ transfer: 'oTransfer', current: 'oCurrent', fail: 'oFail' }[o])));
+  }
+  function queryLink(s) {
+    var fail = s.client.rcode === 'SERVFAIL';
+    return h('div', { class: 'se-link' },
+      h('div', { class: 'se-arrow', dataset: { dir: 'l', k: 'ok' } }),
+      h('div', { class: 'se-arrow', dataset: { dir: 'r', k: fail ? 'fail' : 'ok' } }));
+  }
+  function timerRow(c, key, label, soaKey, value, bar, text) {
+    return h('div', { class: 'se-tm' + (has(c, key) ? ' se-hl' : '') },
+      h('div', { class: 'se-tm-label' }, key === 'expire' ? h('span', { class: 'se-clock', 'aria-hidden': 'true' }) : null, h('strong', null, t(label)),
+        h('span', { class: 'se-muted se-sm', translate: 'no' }, soaKey + ' ' + t('sec', { v: num(value) }))),
+      bar, h('div', { class: 'se-sm se-tm-text' }, text));
+  }
+  function bar(k, frac, attrs) {
+    return h('div', { class: 'se-bar', dataset: Object.assign({ k: k }, attrs || {}) },
+      h('span', { style: { width: Math.max(0, Math.min(100, frac * 100)) + '%' } }));
+  }
+  function timers(c, sc, s) {
+    var S = s.secondary, soa = s.soa;
+    var rows = [];
+    rows.push(S.nextRefresh !== null
+      ? timerRow(c, 'refresh', 'tmRefresh', 'REFRESH', soa.refresh, bar('refresh', 1 - (S.nextRefresh - s.t) / soa.refresh), t('tmNextRefresh', { at: when(sc, S.nextRefresh) }))
+      : timerRow(c, 'refresh', 'tmRefresh', 'REFRESH', soa.refresh, bar('refresh', 0, { off: '' }), t('tmOffRefresh')));
+    rows.push(S.nextRetry !== null
+      ? timerRow(c, 'retry', 'tmRetry', 'RETRY', soa.retry, bar('retry', 1 - (S.nextRetry - s.t) / soa.retry), t('tmNextRetry', { at: when(sc, S.nextRetry) }))
+      : timerRow(c, 'retry', 'tmRetry', 'RETRY', soa.retry, bar('retry', 0, { off: '' }), t('tmOffRetry')));
+    rows.push(S.expired
+      ? timerRow(c, 'expire', 'tmExpire', 'EXPIRE', soa.expire, bar('expire', 1, { expired: '' }), t('tmExpiredAt', { at: when(sc, S.expiredAt) }))
+      : timerRow(c, 'expire', 'tmExpire', 'EXPIRE', soa.expire, bar('expire', (s.t - S.lastOk) / soa.expire), t('tmExpireAt', { at: when(sc, S.expireAt), left: dur(S.expireAt - s.t) })));
+    return h('div', { class: 'se-timers', 'aria-label': t('tmTitle') }, rows);
+  }
+  function logText(e) {
+    if (e.kind === 'action') {
+      if (!e.applied) return t('lgNoop');
+      return t({ edit: e.bumped ? 'lgEdit' : 'lgEditNo', kill: 'lgKill', revive: 'lgRevive' }[e.act]);
+    }
+    var out = [];
+    if (e.expired) out.push(t('lgExpired'));
+    if (e.check) {
+      out.push(t(e.check === 'refresh' ? 'kRefresh' : 'kRetry') + (e.kind === 'run' ? ' ×' + e.count : '') + ' ' +
+        t({ transfer: 'oTransfer', current: 'oCurrent', fail: 'oFail' }[e.outcome]));
+    }
+    return out.join(' · ');
+  }
+  function log(c, sc, s) {
+    var items = [{ t: 0, text: t('lgStart') }].concat(s.log.map(function (e) { return { t: e.t, text: logText(e) }; }));
+    var shown = items.slice(-8);
+    return h('section', { class: 'se-log' }, h('h2', null, t('logTitle')),
+      h('ol', null, shown.map(function (it, i) {
+        return h('li', { 'aria-current': i === shown.length - 1 ? 'step' : null }, h('span', { translate: 'no', class: 'se-mono' }, when(sc, it.t)), h('span', null, it.text));
+      })));
+  }
+  function has(c, k) { return !c.first && c.state.changed.indexOf(k) >= 0; }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, sc = L.SCENES[s.scene], prev = c.prev, e = s.ev, S = s.secondary, Pr = s.primary;
+    // the lab's long names are on the cards; captions say P and S (the estate's short names stay)
+    var q = sc.qname, nP = b(s.scene === 'estate' ? sc.primary : 'P'), nS = b(s.scene === 'estate' ? sc.secondary : 'S'), out = [];
+    function say(parts) { if (out.length) out.push(' '); out.push.apply(out, parts); }
+    var now = upper(when(sc, s.t));
+    if (c.first) {
+      say(parts('capStart', { t: now, s: nS, p: nP, zone: b(sc.zone), serial: b(S.serial) }));
+      if (sc.lastXfer !== 0) say(parts('capXfer', { xfer: when(sc, sc.lastXfer) }));
+      say(parts('capTimers', { refresh: secs(p.refresh), retry: secs(p.retry), expire: secs(p.expire), at: when(sc, S.expireAt), p: nP }));
+      if (!s.done) say([t(Pr.up && p.killAt === L.NONE ? 'capPressK' : 'capPress')]);
+    } else if (e.kind === 'action') {
+      if (e.act === 'edit') {
+        if (!e.applied) say(parts('capEditSkip', { t: now, p: nP }));
+        else {
+          say(parts(e.bumped ? 'capEdit' : 'capEditNoBump', { t: now, p: nP, name: b(sc.edit.name), value: b(sc.edit.value), serial: b(Pr.serial) }));
+          if (S.records[q] !== Pr.records[q]) say(parts('capNotYet', { s: nS, old: b(S.records[q]) }));
+        }
+      } else if (!e.applied) say(parts('capNoop', { t: now }));
+      else if (e.act === 'kill') say(parts('capKill', { t: now, p: nP, s: nS }));
+      else if (S.nextRetry === null) say(parts('capReviveQuiet', { t: now, p: nP, s: nS }));
+      else say(parts('capRevive', { t: now, p: nP, s: nS, next: when(sc, L.nextCheckAt(S)) }));
+    } else if (e.kind === 'moment') {
+      var ck = e.check;
+      if (e.expired) {
+        say(parts('capExpired', { t: now, expire: t('sec', { v: num(p.expire) }) }));
+        if (ck && ck.outcome === 'fail') say(parts('capExpiredMore', { s: nS, retry: secs(p.retry) }));
+      } else {
+        say(parts('capCheck', { t: now, kind: t(ck.kind === 'refresh' ? 'kRefresh' : 'kRetry') }));
+      }
+      if (ck && (!e.expired || ck.outcome !== 'fail')) {
+        if (ck.outcome === 'transfer') {
+          say(prev.secondary.expired || e.expired ? parts('capReload', { p: nP, s: nS })
+            : parts('capTransfer', { p: nP, s: nS, sp: b(ck.serialP), ss: b(prev.secondary.serial), value: b(S.records[q]) }));
+          say(parts('capRestart', { exp: when(sc, S.expireAt) }));
+        } else if (ck.outcome === 'current') {
+          say(S.records[q] !== Pr.records[q]
+            ? parts('capCurrentDiff', { sp: b(ck.serialP), p: nP, s: nS, name: b(q), pv: b(Pr.records[q]), sv: b(S.records[q]) })
+            : parts('capCurrent', { sp: b(ck.serialP), p: nP, s: nS }));
+          say(parts('capRestart', { exp: when(sc, S.expireAt) }));
+        } else if (S.expired) say(parts('capFailExpired', { p: nP, s: nS }));
+        else if (ck.kind === 'refresh') say(parts('capFailRefresh', { p: nP, s: nS, retry: secs(p.retry), exp: when(sc, S.expireAt) }));
+        else say(parts('capFailRetry', { p: nP, retry: secs(p.retry), left: dur(S.expireAt - s.t) }));
+      }
+    } else if (e.kind === 'run') {
+      var sp = upper(span(sc, e.from, e.t));
+      if (e.check.outcome === 'fail') {
+        say(parts(S.expired ? 'capRunRetryExpired' : 'capRunRetry', { span: sp, n: t.n('retries', e.count), p: nP, s: nS, left: dur(S.expireAt - s.t) }));
+      } else {
+        say(parts('capRunRefresh', { span: sp, n: t.n(e.check.kind === 'refresh' ? 'refreshes' : 'retries', e.count), serial: b(S.serial), exp: when(sc, S.expireAt) }));
+        if (S.records[q] !== Pr.records[q]) say(parts('capRunDiff', { s: nS, p: nP, sv: b(S.records[q]), pv: b(Pr.records[q]) }));
+      }
+    }
+    if (s.done && !c.first) {
+      if (!Pr.up) say(parts('capEndDown', { p: nP, s: nS }));
+      else {
+        // offer only the actions this run still has
+        var keys = ['edit', 'kill'].filter(function (k) { return s.acted.indexOf(k) < 0; }).map(function (k) { return k === 'edit' ? 'E' : 'K'; });
+        say([keys.length ? t('capEndUp', { keys: keys.join(', ') }) : t('capEndUpR')]);
+      }
+    }
+    if (note) { out.unshift(note, ' '); note = null; }
+    return out;
+  }
+
+  // ── buttons: an action at the moment shown, processed as the next step; later scheduled actions are dropped ──
+  function act(sim, kind) {
+    var s = sim.state, p = sim.params, why = null;
+    if (kind === 'kill' && !s.primary.up) why = 'noteKillDown';
+    else if (kind === 'revive' && s.primary.up) why = 'noteReviveUp';
+    else if (kind === 'edit' && !s.primary.up) why = 'noteEditDown';
+    else if (s.acted.indexOf(kind) >= 0) why = 'noteOnce';
+    else if (sim.n >= L.MAX_STEPS) why = 'noteLimit';
+    if (why) { note = t(why); sim.render(); return; }
+    // after an action at this same moment the new one comes a second later, so the steps shown so far stay as they are
+    var at = s.lastActionAt === s.t ? s.t + 1 : s.t;
+    var patch = {};
+    ACTS.forEach(function (k) { if (s.acted.indexOf(k) < 0 && p[k + 'At'] !== L.NONE) patch[k + 'At'] = L.NONE; });
+    patch[kind + 'At'] = at;
+    sim.set(patch, { preset: sim.preset });
+    sim.next();
+  }
+
+  var hidden = function () { return false; };
+  var atParam = function (key, label) {
+    return { key: key, type: 'range', label: t(label), min: L.NONE, max: 99999999, step: 1, visible: hidden };
+  };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'refresh', type: 'range', label: t('pRefresh'), min: 900, max: 86400, step: 300, format: secs, resets: true },
+      { key: 'retry', type: 'range', label: t('pRetry'), min: 300, max: 7200, step: 300, format: secs, resets: true },
+      { key: 'expire', type: 'choice', label: t('pExpire'), resets: true, options: [[604800, secs(604800)], [1209600, secs(1209600)]] },
+      { key: 'bumpSerial', type: 'toggle', label: t('pBump'), resets: true },
+      { type: 'button', label: t('bEdit'), hint: t('bHint'), key: 'e', run: function (sim) { act(sim, 'edit'); } },
+      { type: 'button', label: t('bKill'), hint: t('bHint'), key: 'k', run: function (sim) { act(sim, 'kill'); } },
+      { type: 'button', label: t('bRevive'), hint: t('bHint'), key: 'v', run: function (sim) { act(sim, 'revive'); } },
+      // the zone and the actions (set by presets and the buttons): hidden, but kept in the URL so a link, a reload or
+      // L keeps a run the buttons made
+      { key: 'scene', type: 'choice', label: t('pScene'), resets: true, visible: hidden, options: [['lab', 'lab.example'], ['estate', 'qm.internal']] },
+      atParam('editAt', 'pEditAt'),
+      atParam('killAt', 'pKillAt'),
+      atParam('reviveAt', 'pReviveAt')
+    ],
+
+    presets: [
+      { id: 'book-edit', label: t('prEdit'), hint: t('prEditHint'),
+        params: { scene: 'lab', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: 600, killAt: -1, reviveAt: -1 } },
+      { id: 'no-serial-bump', label: t('prNoBump'), hint: t('prNoBumpHint'),
+        params: { scene: 'lab', refresh: 3600, retry: 900, expire: 604800, bumpSerial: false, editAt: 600, killAt: -1, reviveAt: -1 } },
+      { id: 'primary-dies', label: t('prDies'), hint: t('prDiesHint'),
+        params: { scene: 'lab', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: -1, killAt: 0, reviveAt: -1 } },
+      { id: 'estate-14-days', label: t('prEstate'), hint: t('prEstateHint'),
+        params: { scene: 'estate', refresh: 10800, retry: 3600, expire: 1209600, bumpSerial: true, editAt: -1, killAt: 10680, reviveAt: -1 } },
+      { id: 'revived-in-time', label: t('prRevived'), hint: t('prRevivedHint'),
+        params: { scene: 'lab', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: -1, killAt: 0, reviveAt: 432000 } }
+    ],
+
+    legend: [
+      { shape: 'se-refresh', label: t('lgdRefresh') },
+      { shape: 'se-retry', label: t('lgdRetry') },
+      { shape: 'se-expire', label: t('lgdExpire') },
+      { shape: 'se-expired', label: t('lgdExpired') },
+      { shape: 'hl', label: t('lgdChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, sc = L.SCENES[s.scene], prev = c.first ? null : c.prev;
+      c.stage.replaceChildren(h('div', { class: 'se' },
+        primaryCard(c, sc, s, prev), checkLink(c, s), secondaryCard(c, sc, s, prev), queryLink(s), clientCard(c, sc, s),
+        log(c, sc, s)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
