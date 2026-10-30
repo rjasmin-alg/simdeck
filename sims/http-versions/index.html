@@ -1,0 +1,328 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- HTTP/1.1 vs HTTP/2 vs HTTP/3 (task docs/tasks/w3/http-versions.md). An explorer: the params drive three waterfalls
+     on one time axis live; bars whose end moved with the last change are marked. The model is in sim.js (rules in
+     SPEC.md), the words in strings.js. No kit view fits (a timeline), so the page draws in HTML and CSS. -->
+<html lang="hr" data-sim="http-versions">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP/1.1, HTTP/2 i HTTP/3 · simdeck</title>
+<meta name="description" content="Ista stranica preko HTTP/1.1, HTTP/2 i HTTP/3: multipleksiranje i zastoj na čelu reda kod TCP-a i QUIC-a.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "http-versions",
+  "title": {
+    "hr": "HTTP/1.1, HTTP/2 i HTTP/3",
+    "en": "HTTP/1.1 vs HTTP/2 vs HTTP/3"
+  },
+  "concept": {
+    "hr": "Multipleksiranje i zastoj na čelu reda: TCP naspram QUIC-a",
+    "en": "Multiplexing, and head-of-line blocking at TCP vs QUIC"
+  },
+  "summary": {
+    "hr": "Ista stranica preko tri inačice HTTP-a na jednoj vremenskoj crti: veze i rukovanja, tokovi na jednoj vezi i što zaustavi jedan izgubljeni segment.",
+    "en": "The same page over three HTTP versions on one timeline: connections and handshakes, streams on one connection, and what one lost segment holds up."
+  },
+  "tags": [
+    "http"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "one-connection"
+    },
+    {
+      "preset": "loss"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="http-versions"]; colours only from kit tokens. */
+[data-sim="http-versions"] .sd-legend { flex: 0 1 46rem; justify-content: flex-end; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="http-versions"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+[data-sim="http-versions"] .hv {
+  display: grid;
+  grid-template-columns: 9.5rem 1.4rem minmax(0, 1fr) 8rem;
+  column-gap: 0.6rem;
+  align-content: center;
+  height: 100%;
+  padding: 0.6rem 1.2rem 0.4rem;
+}
+[data-sim="http-versions"] .hv-block { display: contents; }
+[data-sim="http-versions"] .hv-label { display: grid; align-content: center; gap: 0.15rem; padding: 0.3rem 0; border-top: var(--line-w) solid var(--line); }
+[data-sim="http-versions"] .hv-label b { font-size: var(--fs-lg); }
+[data-sim="http-versions"] .hv-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.2; }
+[data-sim="http-versions"] .hv-nums { position: relative; border-top: var(--line-w) solid var(--line); }
+[data-sim="http-versions"] .hv-num { position: absolute; right: 0; display: grid; align-items: center; font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); line-height: 1; }
+[data-sim="http-versions"] .hv-track { position: relative; border-top: var(--line-w) solid var(--line); }
+[data-sim="http-versions"] .hv-lanes { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); }
+[data-sim="http-versions"] .hv-grid { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--line); }
+[data-sim="http-versions"] .hv-done { display: grid; align-content: center; justify-items: end; gap: 0.1rem; padding: 0.3rem 0.4rem 0.3rem 0; border-top: var(--line-w) solid var(--line); text-align: right; }
+[data-sim="http-versions"] .hv-done span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="http-versions"] .hv-done b { font-family: var(--mono); font-size: var(--fs-lg); white-space: nowrap; }
+[data-sim="http-versions"] .hv-done .hv-was { color: var(--ink); }
+[data-sim="http-versions"] .hv-doneline { position: absolute; top: -0.3rem; bottom: -0.3rem; width: 0; border-left: 3px solid var(--ink); }
+
+/* bars */
+[data-sim="http-versions"] .hv-bar {
+  position: absolute; display: flex; align-items: stretch; overflow: hidden;
+  border: var(--line-w) solid var(--ink); border-radius: 0.2rem;
+  font-size: var(--fs-sm); line-height: 1; font-weight: 700;
+}
+[data-sim="http-versions"] .hv-bar > span { display: grid; place-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+[data-sim="http-versions"] .hv-setup { background: repeating-linear-gradient(45deg, var(--muted) 0 2px, var(--bg) 2px 7px); }
+[data-sim="http-versions"] .hv-setup > span { flex: 1; }
+[data-sim="http-versions"] .hv-setup > span + span { border-left: var(--line-w) solid var(--ink); }
+[data-sim="http-versions"] .hv-tag { padding: 0.05rem 0.25rem; background: var(--bg); color: var(--ink); border-radius: 0.2rem; }
+[data-sim="http-versions"] .hv-solid { background: var(--sc); color: var(--on-series); }
+[data-sim="http-versions"] .hv-wait {
+  background:
+    repeating-linear-gradient(45deg, var(--sc) 0 2px, transparent 2px 8px),
+    repeating-linear-gradient(-45deg, var(--sc) 0 2px, transparent 2px 8px),
+    var(--bg);
+  border-left: var(--line-w) dashed var(--ink);
+}
+[data-sim="http-versions"] .hv-lost {
+  position: absolute; display: grid; place-items: center; width: 1.3rem; height: 1.3rem; margin: -0.65rem 0 0 -0.65rem;
+  border: var(--line-w) solid var(--ink); border-radius: 50%; background: var(--bg); color: var(--danger);
+  font-size: var(--fs-sm); font-weight: 700; line-height: 1; z-index: 2;
+}
+[data-sim="http-versions"] .hv-end {
+  position: absolute; width: 0.55rem; margin-left: 0.15rem;
+  background: var(--hl); border: var(--line-w) solid var(--ink); border-radius: 0.15rem;
+}
+[data-sim="http-versions"] .hv-tight .hv-bar > span:not(.hv-keep) { color: transparent; }
+[data-sim="http-versions"] .hv-tight .hv-tag { background: transparent; }
+[data-sim="http-versions"] .hv-narrow .hv-tag { color: transparent; background: transparent; }
+[data-sim="http-versions"] [data-v='h1'] { --sc: var(--c1); }
+[data-sim="http-versions"] [data-v='h2'] { --sc: var(--c2); }
+[data-sim="http-versions"] [data-v='h3'] { --sc: var(--c3); }
+
+/* axis */
+[data-sim="http-versions"] .hv-axis { position: relative; height: 1.6rem; border-top: 3px solid var(--ink); font-size: var(--fs-sm); }
+[data-sim="http-versions"] .hv-axis span { position: absolute; top: 0.2rem; transform: translateX(-50%); font-family: var(--mono); white-space: nowrap; }
+[data-sim="http-versions"] .hv-axis span:last-child { transform: translateX(-100%); }
+[data-sim="http-versions"] .hv-axis span:last-child::before { left: auto; right: 0; }
+[data-sim="http-versions"] .hv-axis span:first-child { transform: none; }
+[data-sim="http-versions"] .hv-axis span:first-child::before { left: 0; }
+[data-sim="http-versions"] .hv-axis span::before { content: ''; position: absolute; left: 50%; top: -0.45rem; height: 0.35rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="http-versions"] .hv-axislbl { grid-column: 4; align-self: start; font-size: var(--fs-sm); color: var(--muted); text-align: right; padding-top: 0.2rem; }
+
+/* Legend swatches: the same patterns as the bars, so they read in grayscale too. */
+[data-sim="http-versions"] .sd-swatch[data-shape='hv-setup'] { background: repeating-linear-gradient(45deg, var(--muted) 0 0.1em, var(--bg) 0.1em 0.3em); }
+[data-sim="http-versions"] .sd-swatch[data-shape='hv-obj'] { background: linear-gradient(90deg, var(--c1) 0 33%, var(--c2) 33% 67%, var(--c3) 67%); }
+[data-sim="http-versions"] .sd-swatch[data-shape='hv-wait'] { background: repeating-linear-gradient(45deg, var(--ink) 0 0.08em, transparent 0.08em 0.3em), repeating-linear-gradient(-45deg, var(--ink) 0 0.08em, transparent 0.08em 0.3em), var(--bg); }
+[data-sim="http-versions"] .sd-swatch[data-shape='hv-lost'] { position: relative; border-radius: 50%; background: var(--bg); }
+[data-sim="http-versions"] .sd-swatch[data-shape='hv-lost']::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.7em; font-weight: 700; line-height: 1; color: var(--danger); }
+
+/* Phone and portrait: the stage grows with its content; the label sits above its block. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="http-versions"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="http-versions"] .hv { height: auto; grid-template-columns: 1.2rem minmax(0, 1fr) 4.6rem; column-gap: 0.3rem; padding: 0.4rem; }
+  [data-sim="http-versions"] .hv-label { height: auto !important; grid-column: 1 / -1; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 0.5rem; }
+  [data-sim="http-versions"] .hv-nums, [data-sim="http-versions"] .hv-track, [data-sim="http-versions"] .hv-done { border-top: 0; }
+  [data-sim="http-versions"] .hv-done b { font-size: var(--fs-sm); }
+  [data-sim="http-versions"] .hv-pad2 { display: none; }
+  [data-sim="http-versions"] .hv-axislbl { grid-column: 3; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">HTTP/1.1, HTTP/2 i HTTP/3</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SUB = { h1: 'sub1', h2: 'sub2', h3: 'sub3' };
+  var SETUP = { tcp: 'setupTcp', tls: 'setupTls', quic: 'setupQuic' };
+  var MIN_BLOCK = 4.6;   // rem: the done box's three lines
+
+  // ── "changed" marks: compare with the state shown before the last param change (SPEC tie-break 6) ──
+  var shownKey = null, shownState = null, base = null;
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== shownKey) { base = shownState; shownKey = key; shownState = c.state; }
+  }
+
+  function pct(ms, end) { return (100 * ms / end) + '%'; }
+
+  /** Lane geometry: lane i of n, as top/height in % of the lanes box. */
+  function lane(i, n) { return { top: (100 * i / n) + '%', height: 'calc(' + (100 / n) + '% - 0.25rem)' }; }
+
+  function setupBar(r, end, pos) {
+    var a = r.setup[0].startMs, b = r.setup[r.setup.length - 1].endMs;
+    return h('div', { class: 'hv-bar hv-setup', style: Object.assign({ left: pct(a, end), width: pct(b - a, end) }, pos) },
+      r.setup.map(function (s) { return h('span', null, h('span', { class: 'hv-tag', translate: 'no' }, t(SETUP[s.kind]))); }));
+  }
+
+  function objectBar(o, end, pos) {
+    var solid = o.endMs - o.startMs - o.blockedMs;
+    var title = o.blockedMs ? t('objWait', { id: o.id, s: o.startMs, e: o.endMs, w: o.blockedMs }) : t('objTitle', { id: o.id, s: o.startMs, e: o.endMs });
+    return h('div', { class: 'hv-bar', title: title, style: Object.assign({ left: pct(o.startMs, end), width: pct(o.endMs - o.startMs, end) }, pos) },
+      h('span', { class: 'hv-solid', style: { flex: solid + ' 0 0' } }, String(o.id)),
+      o.blockedMs ? h('span', { class: 'hv-wait', style: { flex: o.blockedMs + ' 0 0' } }, h('span', { class: 'hv-tag' }, t('waits'))) : null);
+  }
+
+  function block(r, ch, end, ticks, laneRem, rem, trackPx, rtt) {
+    var many = r.version === 'h1';
+    var n = many ? r.conns : r.objects.length;
+    var lanes = h('div', { class: 'hv-lanes' });
+    var nums = h('div', { class: 'hv-lanes' });
+    var rttPx = trackPx * rtt / end;
+    var tight = laneRem < 1.05 || rttPx < 1.6 * rem;     // no room for an object's number
+    var narrow = rttPx < 3 * rem;                          // no room for TCP, TLS, QUIC or 'waits'
+    ticks.forEach(function (ms) { lanes.appendChild(h('div', { class: 'hv-grid', style: { left: pct(ms, end) } })); });
+    if (many) {
+      for (var c = 0; c < n; c++) {
+        var pos = lane(c, n);
+        lanes.appendChild(setupBar(r, end, pos));
+        if (!tight) nums.appendChild(h('div', { class: 'hv-num', title: t('connTitle', { n: c + 1 }), style: pos }, String(c + 1)));
+      }
+    } else {
+      lanes.appendChild(setupBar(r, end, { top: '0', height: 'calc(100% - 0.25rem)' }));
+    }
+    r.objects.forEach(function (o, i) {
+      var pos = lane(many ? o.conn - 1 : i, n);
+      lanes.appendChild(objectBar(o, end, pos));
+      if (o.lost) {
+        lanes.appendChild(h('div', { class: 'hv-lost', style: { left: pct(o.endMs - o.blockedMs, end), top: 'calc(' + pos.top + ' + ' + (50 / n) + '% - 0.125rem)' } }, '✕'));
+      }
+      if (ch.objects.indexOf(o.id) >= 0) lanes.appendChild(h('div', { class: 'hv-end', style: { left: pct(o.endMs, end), top: pos.top, height: pos.height } }));
+    });
+    lanes.appendChild(h('div', { class: 'hv-doneline', style: { left: pct(r.doneMs, end) } }));
+    // A block is at least tall enough for its label and its done box (three lines); its lanes sit in the middle.
+    var height = { height: Math.max(n * laneRem + 0.6, MIN_BLOCK) + 'rem' };
+    lanes.style.height = nums.style.height = (n * laneRem) + 'rem';
+    return h('div', { class: 'hv-block' + (tight ? ' hv-tight' : '') + (narrow ? ' hv-narrow' : ''), dataset: { v: r.version } },
+      h('div', { class: 'hv-label', style: height }, h('b', { translate: 'no' }, t(r.version)), h('span', { class: 'hv-sub' }, t.n(SUB[r.version], many ? r.conns : r.objects.length))),
+      h('div', { class: 'hv-nums', style: height }, nums),
+      h('div', { class: 'hv-track', style: height }, lanes),
+      h('div', { class: 'hv-done' + (ch.done ? ' sd-changed' : ''), style: height },
+        h('span', null, t('done')), h('b', null, t('ms', { v: r.doneMs })),
+        ch.done ? h('span', { class: 'hv-was' }, t('was', { v: ch.was })) : null));
+  }
+
+  function axis(ticks, end) {
+    return [h('div'), h('div', { class: 'hv-pad2' }),
+      h('div', { class: 'hv-axis' }, ticks.map(function (ms) { return h('span', { style: { left: pct(ms, end) } }, String(ms)); })),
+      h('div', { class: 'hv-axislbl' }, t('axis'))];
+  }
+
+  var root = null, lastCtx = null;
+  function draw(c) {
+    var st = c.state;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    var phone = window.matchMedia('(max-width: 900px), (max-aspect-ratio: 1/1)').matches;
+    var lanesTotal = st.rows.reduce(function (s, r) { return s + (r.version === 'h1' ? r.conns : r.objects.length); }, 0);
+    // Lanes share the stage height left after the axis and the blocks' padding; at most 2.6rem, at least 0.9rem.
+    var avail = c.stage.clientHeight / rem - 1.6 - 3 * 0.6 - 1.4;
+    st.rows.forEach(function (r) { var k = r.version === 'h1' ? r.conns : r.objects.length; if (k * 2.6 + 0.6 < MIN_BLOCK) { avail -= MIN_BLOCK; lanesTotal -= k; } });
+    var laneRem = phone ? 1.5 : Math.max(0.9, Math.min(2.6, avail / Math.max(lanesTotal, 1)));
+    var trackPx = Math.max(150, c.stage.clientWidth - (phone ? 6.8 : 21) * rem);
+    var ax = L.ticks(st, c.params.rtt, Math.max(2, Math.floor(trackPx / (3.6 * rem))));
+    var end = ax.endMs;
+    var ch = L.changed(base, st);
+    var out = [];
+    st.rows.forEach(function (r) { out.push(block(r, ch[r.version], end, ax.ticks, laneRem, rem, trackPx, c.params.rtt)); });
+    root.replaceChildren.apply(root, out.concat(axis(ax.ticks, end)));
+  }
+
+  // ── caption ──
+  function caption(c) {
+    var st = c.state, p = c.params;
+    var done = st.rows.map(function (r) { return r.doneMs; });
+    var key = L.captionKey(p);
+    if (key === 'capLoss') {
+      var clean = L.initial(Object.assign({}, p, { loss: false }));
+      return t(key, { k: st.lost, all: p.objects === 2 ? t('bothStreams') : t.n('allStreams', p.objects), a: done[1], b: clean.rows[1].doneMs, c: done[2] });
+    }
+    if (key === 'capSerial') return t(key, { k: L.h1Depth(st), a: done[0], n: p.objects, b: done[1] });
+    if (key === 'capLossOne') return t(key);
+    return t(key, { a: done[0], b: done[1], c: done[2] });
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'rtt', type: 'range', label: t('rtt'), min: L.RTT_MIN, max: L.RTT_MAX, step: L.RTT_STEP, format: function (v) { return t('ms', { v: v }); } },
+      { key: 'objects', type: 'range', label: t('objects'), min: L.OBJ_MIN, max: L.OBJ_MAX, step: 1 },
+      { key: 'h1conns', type: 'choice', label: t('h1conns'), hint: t('h1connsHint'), options: L.H1_CONNS.map(function (v) { return [v, String(v)]; }) },
+      { key: 'loss', type: 'toggle', label: t('loss'), hint: t('lossHint') },
+      { key: 'lostObject', type: 'range', label: t('lostObject'), min: 1, max: function (p) { return p.objects; }, step: 1,
+        disabled: function (p) { return p.loss ? false : t('lostOff'); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'hv-setup', label: t('legSetup') },
+      { shape: 'hv-obj', label: t('legObject') },
+      { shape: 'hv-wait', label: t('legBlocked') },
+      { shape: 'hv-lost', label: t('legLost') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      if (!root) {
+        root = h('div', { class: 'hv' });
+        c.stage.replaceChildren(root);
+        var w = 0, hh = 0;
+        new ResizeObserver(function () {
+          var nw = c.stage.clientWidth, nh = c.stage.clientHeight;
+          if (lastCtx && (nw !== w || nh !== hh)) { w = nw; hh = nh; draw(lastCtx); }
+        }).observe(c.stage);
+      }
+      track(c);
+      lastCtx = c;
+      draw(c);
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
