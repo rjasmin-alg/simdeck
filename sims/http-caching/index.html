@@ -1,0 +1,436 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- http-caching: Cache-Control, ETag, 304 and what a CDN edge keeps. A stepper, one event per step (a browser asks
+     for /katalog, or the file at the origin changes). The stage is kit view K1 (kit/sequence.js): lanes browser(s),
+     CDN edge, origin; each lane card shows what that cache holds (filled = fresh, hatched = stale, dashed = nothing),
+     and the rows are the messages, as far as each request had to go. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="http-caching">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP predmemoriranje · simdeck</title>
+<meta name="description" content="Preglednik, rubni poslužitelj CDN-a i ishodišni poslužitelj: Cache-Control, svjež i zastario zapis, ETag, If-None-Match i 304.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "http-caching",
+  "title": {
+    "hr": "HTTP predmemoriranje",
+    "en": "HTTP caching"
+  },
+  "concept": {
+    "hr": "Cache-Control, ETag i 304: što drži preglednik, a što rubni poslužitelj CDN-a",
+    "en": "Cache-Control, ETag and 304: what the browser and the CDN edge keep"
+  },
+  "summary": {
+    "hr": "Pitaj za istu stranicu iznova: svjež zapis odgovara sam, zastario se provjerava s If-None-Match i dobiva 304 bez tijela. no-cache, no-store, private.",
+    "en": "Ask for the same page again and again: a fresh copy answers alone, a stale one is checked with If-None-Match and gets 304, no body. no-cache, no-store, private."
+  },
+  "tags": [
+    "http"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="http-caching"]; colours only from kit tokens.
+   Browsers c1/c2, edge c5, origin c6; requests c1, a 200 c3 (solid: with a body), a 304 c4 (dashed, thin: no body). */
+[data-sim="http-caching"] .hc { display: flex; flex-direction: column; height: 100%; padding: 1.2cqh 1cqw; font-size: 0.95rem; }
+[data-sim="http-caching"] .hc > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="http-caching"] .hc-mono { font-family: var(--mono); }
+[data-sim="http-caching"] .hc-muted { color: var(--muted); }
+[data-sim="http-caching"] .hc-sm { font-size: var(--fs-sm); }
+
+/* a cache entry in a lane card: filled = fresh, hatched = stale, dashed and empty = nothing stored */
+[data-sim="http-caching"] .hc-entry {
+  margin-top: 0.45rem;
+  padding: 0.3rem 0.5rem 0.35rem;
+  border: 0.18rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="http-caching"] .hc-entry[data-st="fresh"] { --sw: var(--c3); background: color-mix(in srgb, var(--c3) 16%, var(--bg)); border-color: var(--c3); }
+[data-sim="http-caching"] .hc-entry[data-st="stale"] {
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.45rem, color-mix(in srgb, var(--ink) 18%, var(--bg)) 0.45rem 0.7rem);
+}
+[data-sim="http-caching"] .hc-entry[data-st="none"] { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+[data-sim="http-caching"] .hc-entry[data-st="origin"] { border-color: var(--c6); }
+[data-sim="http-caching"] .hc-entry p { margin: 0; }
+[data-sim="http-caching"] .hc-entry p + p { margin-top: 0.1rem; }
+[data-sim="http-caching"] .hc-entry .hc-on { display: inline; padding: 0 0.15rem; border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="http-caching"] .hc-entry.sd-changed { outline: 0.25rem solid var(--ink); outline-offset: 0.05rem; box-shadow: 0 0 0 0.55rem var(--hl); }
+[data-sim="http-caching"] .hc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.45rem; }
+[data-sim="http-caching"] .hc-badge {
+  padding: 0 0.35rem;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="http-caching"] .hc-badge[data-st="stale"] { border-style: dashed; }
+[data-sim="http-caching"] .hc-badge[data-st="new"] { background: var(--hl); color: var(--on-hl); }
+[data-sim="http-caching"] .hc-entry p.hc-bar { height: 0.5rem; margin-top: 0.2rem; border: 1px solid var(--ink); background: var(--bg); }
+[data-sim="http-caching"] .hc-bar > span { display: block; height: 100%; background: var(--ink); }
+[data-sim="http-caching"] .hc-nw { white-space: nowrap; }
+[data-sim="http-caching"] .hc-next { margin-top: 0.25rem; padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--on-hl); font-size: var(--fs-sm); }
+[data-sim="http-caching"] .sd-seq-cause { font-size: var(--fs-sm); }
+
+/* legend swatches the kit lacks */
+[data-sim="http-caching"] .sd-swatch[data-shape="fresh"] { background: color-mix(in srgb, var(--c3) 16%, var(--bg)); border: 0.15rem solid var(--c3); }
+[data-sim="http-caching"] .sd-swatch[data-shape="stale"] { background: repeating-linear-gradient(45deg, var(--bg) 0 0.15rem, var(--ink) 0.15rem 0.25rem); border: 0.15rem solid var(--ink); }
+[data-sim="http-caching"] .sd-swatch[data-shape="empty"] { background: transparent; border: 0.15rem dashed var(--muted); }
+
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as in http-exchange). */
+[data-sim="http-caching"] .sd-panel [hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="http-caching"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="http-caching"] .hc { height: auto; padding: 0.4rem; font-size: 1rem; }
+  [data-sim="http-caching"] .hc > .sd-seq { flex: none; }
+  [data-sim="http-caching"] .hc .sd-seq-list { padding-bottom: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">HTTP predmemoriranje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var note = null;   // a button press to report: said once in the next caption
+
+  /** Data (header values, ETags, paths, numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'hc-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  /** A time or a number in a caption: bold, in the body font. */
+  function N(text) { return h('b', null, data(text, '')); }
+  /** t.parts, with a placeholder node used twice cloned (appending the same node twice would move it). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (x) {
+      if (typeof x === 'string' || x.nodeType === 3) return x;
+      var out = seen.indexOf(x) >= 0 ? x.cloneNode(true) : x;
+      seen.push(x);
+      return out;
+    });
+  }
+  function sec(v) { return t('sec', { v: v }); }
+  /** 48213 → "48 213" (a narrow space between thousands, in both languages). */
+  function grp(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+  function size(n) { return t('bytes', { n: grp(n) }); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function shared(id) { return id === 'edge'; }
+  function two(p) { return p.browsers === 2; }
+  /** Who, in a caption: "the browser" with one, "browser A" with two; "the edge", "the origin". */
+  function who(id, p) {
+    if (id === 'edge') return t('whoEdge');
+    if (id === 'origin') return t('whoOrigin');
+    return two(p) ? t('whoBrowserX', { x: id }) : t('whoBrowser');
+  }
+  function Who(id, p) { var w = who(id, p); return w.charAt(0).toUpperCase() + w.slice(1); }
+  /** A Cache-Control value, each directive kept whole on a narrow card ("max-age=60" never breaks at its hyphen). */
+  function directives(cc) {
+    var ds = cc.split(', ');
+    return h('span', { class: 'hc-on hc-mono', translate: 'no' }, 'Cache-Control: ', ds.map(function (x, i) {
+      return [i ? ', ' : '', h('span', { class: 'hc-nw' }, x)];
+    }));
+  }
+  function maxName(id, cc) { return shared(id) && L.parseCC(cc)['s-maxage'] !== undefined ? 's-maxage' : 'max-age'; }
+
+  // ── lane cards ──
+
+  /** The entry box of a cache at `now` (null before the first request). */
+  function entryBox(c, id) {
+    var s = c.state, p = c.params, e = s.caches[id];
+    var w = s.written[id];
+    var cls = 'hc-entry' + (w ? ' sd-changed' + anim(c) : '');
+    if (!e) {
+      var why = L.storable(p.cacheControl, shared(id)) ? 'emptyNone' : L.parseCC(p.cacheControl)['no-store'] ? 'emptyNoStore' : 'emptyPrivate';
+      return h('div', { class: 'hc-entry', dataset: { st: 'none' } }, h('p', null, t('empty')), s.now === null ? null : h('p', null, t(why)));
+    }
+    var now = s.now;
+    var life = L.lifetime(e.cacheControl, shared(id));
+    var age = L.ageOf(e, now);
+    var fresh = L.isFresh(e, now, shared(id));
+    var nc = L.noCache(e);
+    var st = fresh && !nc ? 'fresh' : 'stale';
+    var fill = life > 0 ? Math.min(1, age / life) : 1;
+    return h('div', { class: cls, dataset: { st: st } },
+      h('p', { class: 'hc-head' }, h('span', { class: 'hc-badge', dataset: { st: st } }, t(st === 'fresh' ? 'fresh' : 'stale')),
+        h('span', { class: 'hc-on' }, data('ETag: ' + e.etag)),
+        w ? h('span', { class: 'hc-badge', dataset: { st: 'new' } }, t(w === 'stored' ? 'wStored' : 'wRevalidated')) : null),
+      h('p', null, directives(e.cacheControl)),
+      h('p', null, h('span', { class: 'hc-on' }, t('storedAt', { t: sec(e.storedAt) }), e.initAge ? [' · ', t('arrivedAge', { a: sec(e.initAge) })] : null)),
+      h('p', null, h('span', { class: 'hc-on' }, nc ? t('ageNoCache', { a: sec(age) }) : t('ageOf', { a: sec(age), l: sec(life), d: maxName(id, e.cacheControl) }))),
+      h('p', { class: 'hc-bar', 'aria-hidden': 'true' }, h('span', { style: { width: (fill * 100) + '%' } })));
+  }
+
+  function originBox(c) {
+    var s = c.state, p = c.params;
+    var next = L.schedule(p)[c.n];
+    var changed = s.ev.kind === 'change';
+    return [
+      h('div', { class: 'hc-entry' + (changed ? ' sd-changed' + anim(c) : ''), dataset: { st: 'origin' } },
+        h('p', { class: 'hc-head' }, h('span', { class: 'hc-badge' }, t('file')), h('span', { class: 'hc-on' }, data('ETag: ' + s.origin.etag)),
+          changed ? h('span', { class: 'hc-badge', dataset: { st: 'new' } }, t('wChanged')) : null),
+        h('p', null, data(L.PATH + ' · '), size(s.origin.bytes)),
+        h('p', null, t('sends'), ' ', directives(p.cacheControl))),
+      next && next.kind === 'change' ? h('p', { class: 'hc-next' }, t('nextChange', { tag: '"v' + (s.origin.version + 1) + '"', t: sec(next.t) })) : null
+    ];
+  }
+
+  function lanes(c) {
+    var p = c.params, out = [];
+    L.browsersOf(p).forEach(function (id, i) {
+      out.push({ id: id, mark: id, c: i + 1, shape: 'square', name: t('laneBrowser'), tags: h('span', { class: 'hc-sm hc-muted' }, t('tagPrivate')), body: entryBox(c, id) });
+    });
+    out.push({ id: 'edge', mark: null, c: 5, name: t('laneEdge'), tags: h('span', { class: 'hc-sm hc-muted' }, t('tagShared')), body: entryBox(c, 'edge') });
+    out.push({ id: 'origin', mark: null, c: 6, name: t('laneOrigin'), tags: data(L.HOST, 'hc-mono hc-sm'), body: originBox(c) });
+    return out;
+  }
+
+  // ── rows: every step's messages, the last step's marked ──
+
+  function respFields(m) {
+    var out = [];
+    if (m.code === 200) out.push(data('ETag: ' + m.etag), ' · ', size(m.bytes));
+    else out.push(t('noBody'));
+    if (m.age !== null) out.push(' · ', data('Age: ' + m.age));
+    return h('span', null, out);
+  }
+
+  function rows(c) {
+    var s = c.state, out = [];
+    s.log.forEach(function (x, i) {
+      var changed = i === s.log.length - 1;
+      var time = sec(x.t);
+      if (x.ev.kind === 'change') {
+        out.push({ kind: 'note', lane: 'origin', k: 'fill', text: h('span', null, t('rowChanged'), ' ', data('ETag: "v' + x.version + '"', '')), time: time, changed: changed });
+        return;
+      }
+      if (!x.hops.length) {
+        out.push({ kind: 'note', lane: x.ev.who, k: 'solid', text: h('span', null, t('rowHit'), ' · ', data('Age: ' + x.got.age, '')), time: time, changed: changed });
+        return;
+      }
+      x.hops.forEach(function (m, j) {
+        var row = { from: m.from, to: m.to, time: j ? '' : time, changed: changed };
+        if (m.dir === 'req') {
+          row.label = 'GET ' + L.PATH;
+          row.c = 1;
+          if (m.inm) row.fields = 'If-None-Match: ' + m.inm;
+        } else {
+          row.label = m.code + ' ' + L.REASON[m.code];
+          row.c = m.code === 200 ? 3 : 4;
+          row.fields = respFields(m);
+          if (m.code === 304) { row.line = 'dashed'; row.weight = 'thin'; }
+        }
+        out.push(row);
+      });
+    });
+    return out;
+  }
+
+  // ── captions ──
+
+  function browserPart(c, id, prevE) {
+    var s = c.state, p = c.params, d = s.decisions[id], now = s.now;
+    var v = { who: Who(id, p) };
+    if (d === 'miss') return parts('capMiss', v);
+    v.age = N(sec(L.ageOf(prevE, now)));
+    v.dir = B('max-age=' + L.lifetime(prevE.cacheControl, false));
+    v.tag = B(prevE.etag);
+    v.a = N(L.ageOf(prevE, now));
+    if (d === 'fresh') return parts('capHit', v);
+    if (d === 'nocache') return parts('capNoCache', v);
+    return parts('capStale', v);
+  }
+
+  function edgePart(c, prevE, inm) {
+    var s = c.state, p = c.params, d = s.decisions.edge, now = s.now, last = s.hops[s.hops.length - 1];
+    if (d === undefined) return [];
+    if (d === 'miss') return parts(L.parseCC(p.cacheControl)['private'] ? 'capEdgePrivate' : 'capEdgeMiss', {});
+    var v = { age: N(sec(L.ageOf(prevE, now))), dir: B(maxName('edge', prevE.cacheControl) + '=' + L.lifetime(prevE.cacheControl, true)), tag: B(prevE.etag) };
+    if (d === 'fresh') {
+      v.a = N(last.age);
+      if (last.code === 304) return parts('capEdge304', v);
+      return parts(inm === null ? 'capEdge200' : 'capEdge200Diff', Object.assign(v, { mine: B(inm) }));
+    }
+    if (d === 'nocache') return parts('capEdgeNoCache', v);
+    return parts('capEdgeStale', v);
+  }
+
+  function originPart(c) {
+    var s = c.state, d = s.decisions.origin;
+    if (d === undefined) return [];
+    var v = { tag: B(s.origin.etag), size: N(size(s.origin.bytes)) };
+    if (d === 'match') return parts('capOrigin304', v);
+    if (d === 'changed') return parts('capOriginNew', v);
+    return parts('capOrigin200', v);
+  }
+
+  function resultPart(c) {
+    var s = c.state, p = c.params, g = s.got, id = g.who, e = s.caches[id];
+    var out = [];
+    if (g.status === 'hit') return out;
+    if (s.written.edge === 'revalidated' && g.by === 'edge') {
+      var key = g.status === 304 ? (L.noCache(s.caches.edge) ? 'capBothChecked' : 'capBothFresh')
+        : s.hops[0].inm === null ? 'capEdgeAfter200Miss' : 'capEdgeAfter200';
+      return out.concat(' ', parts(key, { who: who(id, p) }));
+    }
+    if (!e) {
+      if (L.parseCC(p.cacheControl)['no-store']) out = out.concat(' ', parts('capNoStore', {}));
+      return out;
+    }
+    if (!L.isFresh(e, s.now, false) && !L.noCache(e)) {
+      out = out.concat(' ', parts(s.written[id] === 'stored' ? 'capStaleOnArrival' : 'capStillStale', { who: Who(id, p), a: N(e.initAge), dir: B('max-age=' + L.lifetime(e.cacheControl, false)) }));
+    } else if (c.prev.caches[id] && c.prev.caches[id].version !== e.version) {
+      out = out.concat(' ', parts('capNowHolds', { who: Who(id, p), tag: B(e.etag) }));
+    } else if (g.status === 304 && !L.noCache(e)) {
+      out = out.concat(' ', parts('capFreshAgain', { who: Who(id, p) }));
+    }
+    return out;
+  }
+
+  function caption(c) {
+    var s = c.state, p = c.params, out;
+    if (c.first) {
+      out = parts('capStart', { url: B(L.URL), cc: B('Cache-Control: ' + p.cacheControl) });
+    } else if (s.ev.kind === 'change') {
+      var holders = Object.keys(s.caches).filter(function (id) { var e = s.caches[id]; return e && L.usable(e, s.now, shared(id)); });
+      out = parts('capChange', { t: N(sec(s.now)), tag: B(s.origin.etag), old: B('"v' + (s.origin.version - 1) + '"') });
+      if (holders.length) {
+        out = out.concat(' ', parts('capHidden', { list: h('span', null, holders.map(function (id, i) {
+          var e = s.caches[id], left = L.lifetime(e.cacheControl, shared(id)) - L.ageOf(e, s.now);
+          return [i ? ', ' : '', parts('capHolder', { who: who(id, p), left: N(sec(left)) })];
+        })) }));
+      } else out = out.concat(' ', t('capNobody'));
+    } else {
+      var prev = c.prev, id = s.ev.who;
+      var inm = s.hops.length ? s.hops[0].inm : null;
+      out = [h('b', null, data(sec(s.now), '')), ': '].concat(browserPart(c, id, prev.caches[id]));
+      var ep = edgePart(c, prev.caches.edge, inm);
+      if (ep.length) out = out.concat(' ', ep);
+      var op = originPart(c);
+      if (op.length) out = out.concat(' ', op);
+      out = out.concat(resultPart(c));
+    }
+    if (c.last && !c.first) out = out.concat(' ', t(L.changeRefused(p, c.n) ? 'capEndFull' : 'capEnd'));
+    var said = note;
+    note = null;
+    if (said) out = out.concat(' ', h('b', null, said));
+    return out;
+  }
+
+  // ── the hidden `changes` param: kept in the URL so a link, a reload or L keeps a run the button made ──
+
+  function changeOptions() {
+    var codes = [0, 2];
+    var raw = new URLSearchParams(window.location.search).get('changes'), v = Number(raw);
+    if (raw && /^\d+$/.test(raw) && v < Math.pow(2, 20) && codes.indexOf(v) < 0) codes.push(v);
+    return codes.map(function (x) { return [x, String(x)]; });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'cacheControl', type: 'choice', label: t('pCc'),
+        options: L.CACHE_CONTROLS.map(function (x) { return [x, data(x, '')]; }) },
+      { key: 'interval', type: 'range', label: t('pInterval'), min: 10, max: 120, step: 10, format: function (v) { return sec(v); } },
+      { key: 'browsers', type: 'choice', label: t('pBrowsers'), resets: true, options: [[1, t('oneBrowser')], [2, t('twoBrowsers')]] },
+      { type: 'button', label: t('bChange'), key: 'o', run: function (sim) {
+          var why = L.changeRefused(sim.params, sim.n);
+          if (why) { note = t({ first: 'noteFirst', already: 'noteAlready', full: 'noteFull' }[why]); sim.render(); return; }
+          note = t('noteSet');
+          sim.set({ changes: L.withChange(sim.params, sim.n) }, { preset: sim.preset });
+        } },
+      { key: 'changes', type: 'choice', label: t('pChanges'), visible: function () { return false; }, options: changeOptions() }
+    ],
+
+    presets: [
+      { id: 'max-age', label: t('prMaxAge'), hint: t('prMaxAgeHint'), params: { cacheControl: 'max-age=60', interval: 30, browsers: 1, changes: 0 } },
+      { id: 'changed-file', label: t('prChanged'), hint: t('prChangedHint'), params: { cacheControl: 'max-age=60', interval: 30, browsers: 1, changes: 2 } },
+      { id: 'no-cache', label: t('prNoCache'), hint: t('prNoCacheHint'), params: { cacheControl: 'no-cache', interval: 30, browsers: 1, changes: 0 } },
+      { id: 'no-store', label: t('prNoStore'), hint: t('prNoStoreHint'), params: { cacheControl: 'no-store', interval: 30, browsers: 1, changes: 0 } },
+      { id: 'edge-vs-browser', label: t('prEdge'), hint: t('prEdgeHint'), params: { cacheControl: 'max-age=60, s-maxage=300', interval: 30, browsers: 2, changes: 0 } }
+    ],
+
+    legend: [
+      { shape: 'fresh', label: t('legFresh') },
+      { shape: 'stale', label: t('legStale') },
+      { shape: 'empty', label: t('legEmpty') },
+      { shape: 'line', label: t('legBody') },
+      { shape: 'dash', label: t('legNoBody') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = Simdeck.sequence({
+        dir: c.dir,
+        timeWidth: '5rem',
+        lanes: lanes(c),
+        rows: rows(c),
+        empty: t('chartEmpty'),
+        earlier: function (n) { return t.n('earlier', n); }
+      });
+      c.stage.replaceChildren(h('div', { class: 'hc' }, chart));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
