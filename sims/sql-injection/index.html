@@ -1,0 +1,496 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SQL injection: a native explorer (docs/sim-ui.md). Left, a login form whose two fields are the page's own text
+     inputs (the kit has no text param); they write params user and pass. Middle, the application's code, the text the
+     database receives drawn as tokens (input-derived tinted, code outlined, quotes marked, comments struck), the values
+     sent separately in param mode, and each statement with its status. Right, the users table with the returned rows
+     and the one the application takes. Model: sim.js; words: strings.js; rules and numbers: SPEC.md. -->
+<html lang="hr" data-sim="sql-injection">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Umetanje SQL-a · simdeck</title>
+<meta name="description" content="Upiši korisničko ime i lozinku i gledaj upit koji aplikacija gradi: navodnik u unosu mijenja što baza čita kao kod, a parametrizirani upit ne.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "sql-injection",
+  "title": {
+    "hr": "Umetanje SQL-a",
+    "en": "SQL injection"
+  },
+  "concept": {
+    "hr": "Unos zalijepljen u upit postaje kod; parametri to sprječavaju",
+    "en": "Concatenated input becomes code; parameters fix it"
+  },
+  "summary": {
+    "hr": "Upiši korisničko ime i lozinku i gledaj upit koji aplikacija gradi: navodnik u unosu mijenja što baza čita kao kod, a parametrizirani upit ne.",
+    "en": "Type a username and password and watch the query the app builds: a quote in the input changes what the database reads as code; a parameterized query does not."
+  },
+  "tags": [
+    "attacks"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "or-true"
+    },
+    {
+      "preset": "fixed"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="sql-injection"]; colours only from kit tokens. */
+[data-sim="sql-injection"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="sql-injection"] .sd-preset { line-height: 1.15; }
+[data-sim="sql-injection"] .sd-explain code { font-family: var(--mono); font-size: 1em; }
+[data-sim="sql-injection"] .qi {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.75fr) minmax(0, 1fr);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="sql-injection"] .qi-box {
+  display: flex; flex-direction: column; gap: 0.6rem;
+  min-width: 0; min-height: 0;
+  padding: 0.5rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="sql-injection"] .qi-h { font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="sql-injection"] .qi-sub { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.25; }
+[data-sim="sql-injection"] .qi-mono { font-family: var(--mono); font-weight: 700; }
+[data-sim="sql-injection"] [hidden] { display: none !important; }
+
+/* the login form */
+[data-sim="sql-injection"] .qi-field { display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="sql-injection"] .qi-field label { font-weight: 700; }
+[data-sim="sql-injection"] .qi-input {
+  width: 100%;
+  min-height: var(--hit);
+  padding: 0.1rem 0.5rem;
+  font-family: var(--mono); font-size: var(--fs-md); font-weight: 700;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--c2) 18%, var(--bg));
+  border: var(--line-w) solid var(--ink);
+  border-bottom: 0.25rem dashed var(--c2);
+  border-radius: var(--radius-sm);
+}
+[data-sim="sql-injection"] .qi-input:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="sql-injection"] .qi-res {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  font-weight: 700; line-height: 1.25;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="sql-injection"] .qi-res.qi-ok { border-color: var(--ok); }
+[data-sim="sql-injection"] .qi-res.qi-bad { border-color: var(--danger); border-width: 0.3rem; }
+[data-sim="sql-injection"] .qi-res.qi-ok .qi-sym { color: var(--ok); }
+[data-sim="sql-injection"] .qi-res.qi-bad .qi-sym { color: var(--danger); }
+[data-sim="sql-injection"] .qi-sym { margin-right: 0.35em; }
+[data-sim="sql-injection"] .qi-res .qi-sub { display: block; margin-top: 0.2rem; }
+
+/* the application and the query */
+[data-sim="sql-injection"] .qi-code {
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--mono); font-size: var(--fs-md); font-weight: 700; line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  border-left: 0.3rem solid var(--muted);
+  background: var(--bg);
+}
+[data-sim="sql-injection"] .qi-var { background: color-mix(in srgb, var(--c2) 22%, var(--bg)); border-bottom: 0.2rem dashed var(--c2); }
+[data-sim="sql-injection"] .qi-sql {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--mono); font-size: 1.45rem; line-height: 2.1;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="sql-injection"] .qi-t { padding: 0.05em 0.12em; margin: 0 0.07em; border-radius: 3px; }
+[data-sim="sql-injection"] .qi-t.qi-code-t { font-weight: 700; outline: 2px solid var(--ink); outline-offset: -1px; }
+[data-sim="sql-injection"] .qi-t.qi-data { background: color-mix(in srgb, var(--c2) 22%, var(--bg)); border-bottom: 0.2rem dashed var(--c2); }
+[data-sim="sql-injection"] .qi-t.qi-data.qi-code-t { outline: 0.2rem solid var(--danger); }
+[data-sim="sql-injection"] .qi-t.qi-quote { font-weight: 700; font-size: 1.35em; line-height: 1; vertical-align: -0.12em; color: var(--c4); padding: 0 0.12em; }
+[data-sim="sql-injection"] .qi-t.qi-quote.qi-data { outline: 0.2rem solid var(--danger); outline-offset: -1px; }
+[data-sim="sql-injection"] .qi-t.qi-comment { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 0.12em; font-style: italic; outline: 0; }
+[data-sim="sql-injection"] .qi-t.qi-comment.qi-data { color: var(--ink); text-decoration: none; font-style: normal; font-weight: 700; outline: 0.2rem solid var(--danger); }
+[data-sim="sql-injection"] .qi-t.qi-param { font-weight: 700; outline: 0.2rem dashed var(--ink); outline-offset: -1px; padding: 0.05em 0.3em; }
+[data-sim="sql-injection"] .qi-t.qi-chg { box-shadow: 0 -0.35rem 0 0 var(--hl); }
+[data-sim="sql-injection"] .qi-tag { display: flex; align-items: baseline; gap: 0.4rem; font-weight: 700; line-height: 1.25; }
+[data-sim="sql-injection"] .qi-tag.qi-bad { color: var(--danger); }
+[data-sim="sql-injection"] .qi-tag.qi-good { color: var(--ok); }
+[data-sim="sql-injection"] .qi-tag .qi-sub { margin-left: auto; }
+[data-sim="sql-injection"] .qi-vals { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.3rem 0.6rem; align-items: center; }
+[data-sim="sql-injection"] .qi-val {
+  justify-self: start;
+  max-width: 100%;
+  padding: 0.1rem 0.5rem;
+  font-family: var(--mono); font-weight: 700; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--c2) 22%, var(--bg));
+  border: var(--line-w) solid var(--ink);
+  border-bottom: 0.2rem dashed var(--c2);
+  border-radius: var(--radius-sm);
+}
+[data-sim="sql-injection"] .qi-val.qi-empty { min-width: 2rem; min-height: 1.6rem; }
+[data-sim="sql-injection"] .qi-run { display: flex; flex-direction: column; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="sql-injection"] .qi-run li { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+[data-sim="sql-injection"] .qi-run .qi-n { color: var(--muted); font-weight: 700; }
+[data-sim="sql-injection"] .qi-run .qi-st { font-weight: 700; }
+[data-sim="sql-injection"] .qi-run .qi-st.qi-bad { color: var(--danger); }
+[data-sim="sql-injection"] .qi-run .qi-st.qi-good { color: var(--ok); }
+[data-sim="sql-injection"] .qi-run .qi-st.qi-off { color: var(--muted); }
+
+/* the table */
+[data-sim="sql-injection"] .qi-table { border-collapse: separate; border-spacing: 0; width: 100%; }
+[data-sim="sql-injection"] .qi-table th,
+[data-sim="sql-injection"] .qi-table td {
+  padding: 0.3rem 0.4rem;
+  text-align: left; vertical-align: middle;
+  border-bottom: var(--line-w) solid var(--line);
+  white-space: nowrap;
+}
+[data-sim="sql-injection"] .qi-table th { font-family: var(--mono); color: var(--muted); }
+[data-sim="sql-injection"] .qi-table td { font-family: var(--mono); font-weight: 700; }
+[data-sim="sql-injection"] .qi-table .qi-mark { width: 1.6rem; padding: 0; text-align: center; }
+[data-sim="sql-injection"] .qi-table tr.qi-ret td { background: color-mix(in srgb, var(--c3) 22%, var(--bg)); border-top: 0.15rem solid var(--ink); border-bottom: 0.15rem solid var(--ink); }
+[data-sim="sql-injection"] .qi-table tr.qi-ret td:first-child { border-left: 0.3rem solid var(--ink); }
+[data-sim="sql-injection"] .qi-table tr.qi-gone td { color: var(--muted); text-decoration: line-through; }
+[data-sim="sql-injection"] .qi-first td.qi-firsttag { padding: 0 0.4rem 0.3rem; font-family: inherit; font-size: var(--fs-sm); font-weight: 700; border-bottom: var(--line-w) solid var(--line); text-align: right; }
+[data-sim="sql-injection"] .qi-tablewrap { position: relative; }
+[data-sim="sql-injection"] .qi-tablewrap.qi-dropped .qi-table { opacity: 0.55; }
+[data-sim="sql-injection"] .qi-dropbanner {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-6deg);
+  padding: 0.2rem 0.8rem;
+  font-weight: 700; font-size: var(--fs-lg); white-space: nowrap;
+  color: var(--bg); background: var(--danger);
+  border: 0.2rem solid var(--ink); border-radius: var(--radius-sm);
+}
+[data-sim="sql-injection"] .qi-count { font-weight: 700; }
+[data-sim="sql-injection"] .qi-plain { margin-top: auto; }
+
+/* legend swatches */
+[data-sim="sql-injection"] .sd-swatch[data-shape='qi-data'] { background: color-mix(in srgb, var(--c2) 22%, var(--bg)); border: 0; border-bottom: 0.2rem dashed var(--c2); border-radius: 0; }
+[data-sim="sql-injection"] .sd-swatch[data-shape='qi-code'] { background: var(--bg); border: 2px solid var(--ink); }
+[data-sim="sql-injection"] .sd-swatch[data-shape='qi-quote'] { background: transparent; border: 0; position: relative; }
+[data-sim="sql-injection"] .sd-swatch[data-shape='qi-quote']::after { content: "'"; position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 1.6em; line-height: 1; color: var(--c4); }
+[data-sim="sql-injection"] .sd-swatch[data-shape='qi-ret'] { background: color-mix(in srgb, var(--c3) 22%, var(--bg)); border: 0.15rem solid var(--ink); border-left-width: 0.3rem; border-radius: 0; }
+
+/* Phone and portrait: the three boxes stack and the stage grows with them. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="sql-injection"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="sql-injection"] .qi { grid-template-columns: 1fr; height: auto; gap: 0.6rem; padding: 0.4rem; }
+  [data-sim="sql-injection"] .qi-box { padding: 0.4rem 0.5rem; }
+  [data-sim="sql-injection"] .qi-sql { font-size: var(--fs-md); }
+  [data-sim="sql-injection"] .qi-table td, [data-sim="sql-injection"] .qi-table th { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Umetanje SQL-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var CODE = { keyword: 1, ident: 1, op: 1, other: 1 };
+  var KIND = { select: 'SELECT', delete: 'DELETE', drop: 'DROP TABLE' };
+  var ERR = { syntax: 'errSyntax', column: 'errColumn', table: 'errTable', denied: 'errDenied' };
+
+  function ctl() { return sim || window.simdeck; }
+  function data(text, cls) { return h('b', { translate: 'no', class: cls || null }, String(text)); }
+  function sym(s) { return h('span', { class: 'qi-sym', 'aria-hidden': 'true' }, s); }
+  /** Replace el's children with items, nested arrays flattened and nulls dropped. */
+  function put(el, items) {
+    var out = [];
+    (function walk(x) { if (Array.isArray(x)) x.forEach(walk); else if (x !== null && x !== undefined) out.push(x); })(items);
+    el.replaceChildren.apply(el, out);
+  }
+
+  // ---- the stage is built once and updated in place, so the fields keep their caret and focus while typing ----
+  var ui = null;
+
+  function field(key, label) {
+    var id = 'qi-' + key;
+    var input = h('input', {
+      id: id, type: 'text', class: 'qi-input', maxlength: '60', spellcheck: 'false', autocomplete: 'off',
+      autocapitalize: 'off', translate: 'no', title: t('fieldHint')
+    });
+    input.addEventListener('input', function () {
+      ctl().set(key === 'user' ? { user: input.value, payload: 'none' } : { pass: input.value });
+    });
+    return { input: input, el: h('div', { class: 'qi-field' }, h('label', { for: id }, t(label)), input) };
+  }
+
+  function build(stage) {
+    var user = field('user', 'fieldUser'), pass = field('pass', 'fieldPass');
+    var res = h('div', { class: 'qi-res', role: 'status' });
+    var form = h('section', { class: 'qi-box' }, h('div', { class: 'qi-h' }, t('formTitle')), user.el, pass.el, res);
+
+    var codeSub = h('div', { class: 'qi-sub' });
+    var code = h('pre', { class: 'qi-code', translate: 'no' });
+    var sentSub = h('div', { class: 'qi-sub' });
+    var sql = h('pre', { class: 'qi-sql', translate: 'no' });
+    var tag = h('div', { class: 'qi-tag' });
+    var vals = h('div', { class: 'qi-vals' });
+    var valsBox = h('div', null, h('div', { class: 'qi-sub' }, t('valuesTitle')), vals);
+    var run = h('ol', { class: 'qi-run' });
+    var app = h('section', { class: 'qi-box' },
+      h('div', { class: 'qi-h' }, t('codeTitle')), codeSub, code, sentSub, sql, tag, valsBox,
+      h('div', { class: 'qi-sub' }, t('runTitle')), run);
+
+    var head = h('tr', null, h('th', { class: 'qi-mark' }), h('th', { translate: 'no' }, 'id'), h('th', { translate: 'no' }, 'name'), h('th', { translate: 'no' }, 'pass'));
+    var body = h('tbody');
+    var wrap = h('div', { class: 'qi-tablewrap' }, h('table', { class: 'qi-table' }, h('thead', null, head), body));
+    var count = h('div', { class: 'qi-count' });
+    var db = h('section', { class: 'qi-box' },
+      h('div', { class: 'qi-h' }, t.parts('tableTitle', { name: h('code', { class: 'qi-mono', translate: 'no' }, 'users') })),
+      wrap, count, h('div', { class: 'qi-sub qi-plain' }, t('tablePlain')));
+
+    var root = h('div', { class: 'qi' }, form, app, db);
+    stage.replaceChildren(root);
+    return { root: root, user: user.input, pass: pass.input, res: res, codeSub: codeSub, code: code, sentSub: sentSub, sql: sql,
+      tag: tag, vals: vals, valsBox: valsBox, run: run, body: body, wrap: wrap, count: count };
+  }
+
+  function fillForm(s) {
+    if (ui.user.value !== s.inputs.user) ui.user.value = s.inputs.user;
+    if (ui.pass.value !== s.inputs.pass) ui.pass.value = s.inputs.pass;
+    var r = ui.res;
+    if (s.outcome === 'login') {
+      var bad = s.injected;
+      r.className = 'qi-res ' + (bad ? 'qi-bad' : 'qi-ok');
+      put(r, [sym(bad ? '⚠' : '✓'), t.parts(bad ? 'resLoginInjected' : 'resLogin', { name: data(s.authenticated) })]);
+    } else if (s.outcome === 'nomatch') {
+      r.className = 'qi-res';
+      r.replaceChildren(sym('✗'), t('resNoMatch'));
+    } else {
+      r.className = 'qi-res qi-bad';
+      r.replaceChildren(sym('⚠'), t('resError'), h('span', { class: 'qi-sub' }, t(ERR[s.error])));
+    }
+  }
+
+  // tokens that differ from the last render: everything between the common head and the common tail
+  var lastTokens = null;
+  function changedRange(prev, next) {
+    if (!prev) return [next.length, next.length];
+    var same = function (a, b) { return a.text === b.text && a.role === b.role && a.origin === b.origin; };
+    var i = 0;
+    while (i < prev.length && i < next.length && same(prev[i], next[i])) i++;
+    var j = 0;
+    while (j < prev.length - i && j < next.length - i && same(prev[prev.length - 1 - j], next[next.length - 1 - j])) j++;
+    return [i, next.length - j];
+  }
+
+  function fillApp(s) {
+    var param = s.mode === 'param';
+    ui.codeSub.textContent = t(param ? 'codeParam' : 'codeConcat');
+    if (param) {
+      ui.code.replaceChildren('q = prepare("' + s.template[0].code + '")\nq.run(', h('span', { class: 'qi-var' }, 'user'), ', ', h('span', { class: 'qi-var' }, 'pass'), ')');
+    } else {
+      put(ui.code, ['q = '].concat(s.template.map(function (part, i) {
+        var plus = i ? ' + ' : '';
+        return part.code !== undefined ? plus + JSON.stringify(part.code) : [plus, h('span', { class: 'qi-var' }, part.field)];
+      })));
+    }
+    ui.sentSub.textContent = t(param ? 'sentParam' : 'sentConcat');
+    var range = changedRange(lastTokens, s.tokens);
+    ui.sql.replaceChildren.apply(ui.sql, s.tokens.map(function (tok, i) {
+      if (tok.role === 'space') return tok.text;
+      var cls = 'qi-t qi-' + tok.role + (tok.origin === 'data' ? ' qi-data' : '') + (CODE[tok.role] ? ' qi-code-t' : '') +
+        (i >= range[0] && i < range[1] ? ' qi-chg' : '');
+      return h('span', { class: cls, title: tok.role === 'comment' ? t('tagIgnored') : null }, tok.text);
+    }));
+    lastTokens = s.tokens;
+    ui.tag.className = 'qi-tag ' + (s.injected ? 'qi-bad' : 'qi-good');
+    var hidden = s.tokens.some(function (x) { return x.role === 'comment' && x.origin === 'code'; });
+    put(ui.tag, [sym(s.injected ? '⚠' : '✓'), t(s.injected ? 'tagInjected' : 'tagValue'),
+      hidden ? h('span', { class: 'qi-sub' }, t('tagIgnored')) : null]);
+    ui.valsBox.hidden = !param;
+    if (param) {
+      ui.vals.replaceChildren.apply(ui.vals, s.values.map(function (v, i) {
+        return [h('span', { class: 'qi-sub' }, t('valueFor', { i: i + 1 })), h('span', { class: 'qi-mono', translate: 'no' }, i ? 'pass' : 'name'),
+          h('span', { class: 'qi-val' + (v ? '' : ' qi-empty'), translate: 'no' }, v)];
+      }).reduce(function (a, b) { return a.concat(b); }, []));
+    }
+    if (!s.statements.length) {
+      ui.run.replaceChildren(h('li', null, h('span', { class: 'qi-st qi-bad' }, sym('⚠'), t('stNothing'))));
+      return;
+    }
+    ui.run.replaceChildren.apply(ui.run, s.statements.map(function (st, i) {
+      var text, cls;
+      if (st.status === 'ran') {
+        cls = st.kind === 'select' ? 'qi-good' : 'qi-bad';
+        text = st.kind === 'select' ? t.n('stRows', st.rows) : st.kind === 'drop' ? t('stDropped') : t.n('stDeleted', st.rows);
+      } else if (st.status === 'denied') { cls = 'qi-good'; text = t('stDenied'); }
+      else if (st.status === 'error') { cls = 'qi-bad'; text = t('stError'); }
+      else { cls = 'qi-off'; text = t('stSkipped'); }
+      return h('li', null, h('span', { class: 'qi-n' }, (i + 1) + '.'), h('code', { class: 'qi-mono', translate: 'no' }, KIND[st.kind]),
+        h('span', { class: 'qi-st ' + cls }, '→ ', text));
+    }));
+  }
+
+  var lastRet = null;
+  function fillTable(s) {
+    var rows = [];
+    s.rows.forEach(function (r) {
+      var was = lastRet && lastRet[r.id];
+      var now = (r.returned ? 'r' : '') + (r.deleted ? 'd' : '');
+      var mark = h('td', { class: 'qi-mark' + (lastRet && was !== now ? ' sd-changed' : '') },
+        r.returned ? h('span', { 'aria-label': t('returnedTag'), title: t('returnedTag') }, '▶') : r.deleted ? h('span', { title: t('deletedTag') }, '✗') : '');
+      rows.push(h('tr', { class: (r.returned ? 'qi-ret' : '') + (r.deleted || s.dropped ? ' qi-gone' : '') },
+        mark, h('td', { translate: 'no' }, String(r.id)), h('td', { translate: 'no' }, r.name), h('td', { translate: 'no' }, r.pass)));
+      if (r.first) rows.push(h('tr', { class: 'qi-first' }, h('td', { colspan: '4', class: 'qi-firsttag' }, '▲ ' + t('firstTag'))));
+    });
+    lastRet = {};
+    s.rows.forEach(function (r) { lastRet[r.id] = (r.returned ? 'r' : '') + (r.deleted ? 'd' : ''); });
+    ui.body.replaceChildren.apply(ui.body, rows);
+    ui.wrap.classList.toggle('qi-dropped', s.dropped);
+    var banner = ui.wrap.querySelector('.qi-dropbanner');
+    if (s.dropped && !banner) ui.wrap.appendChild(h('div', { class: 'qi-dropbanner' }, '✗ ' + t('dropped')));
+    if (!s.dropped && banner) banner.remove();
+    ui.count.textContent = s.returned.length ? t.n('rowsReturned', s.returned.length) : t('rowsNone');
+  }
+
+  function stackedDetail(s) {
+    // the statement that matters: the first later one that writes (DROP, DELETE), else the second
+    var later = s.statements.slice(1);
+    var second = later.filter(function (x) { return x.kind !== 'select'; })[0] || later[0];
+    var stmt = h('code', { translate: 'no' }, KIND[second.kind]);
+    if (second.status === 'denied') return t.parts('capStackedDenied', { stmt: stmt });
+    if (second.status === 'ran' && second.kind !== 'select') {
+      var what = second.kind === 'drop' ? t('stDropped') : t.n('stDeleted', second.rows);
+      return t.parts('capStackedRan', { stmt: stmt, what: what });
+    }
+    return t.parts('capStackedOk', { stmt: stmt });
+  }
+
+  function caption(s) {
+    var name = s.authenticated ? data(s.authenticated, 'sd-hl') : null;
+    switch (s.note) {
+      case 'normal': return t.parts('capNormal', { name: name });
+      case 'wrong': return t.parts('capWrong');
+      case 'error': return t.parts('capError');
+      case 'paramMatch': return t.parts('capParamMatch', { name: name });
+      case 'paramFixed': return t.parts('capParamFixed');
+      case 'paramNoMatch': return t.parts('capParamNoMatch');
+    }
+    var detail;
+    if (s.note === 'stacked') detail = stackedDetail(s);
+    else if (s.outcome !== 'login') detail = t.parts('capNone');
+    else if (s.note === 'comment') detail = t.parts('capComment', { name: name });
+    else detail = t.parts('capRows', { n: s.returned.length, count: data(s.returned.length), name: name });
+    return t.parts('capQuote').concat(' ', detail);
+  }
+
+  var labels = { normal: 'presetNormal', 'or-true': 'presetOrTrue', 'admin-comment': 'presetAdminComment', stacked: 'presetStacked', fixed: 'presetFixed' };
+  var payloadLabel = { none: 'optNone', 'or-true': 'optOrTrue', 'admin-comment': 'optAdminComment', stacked: 'optStacked' };
+  var sim;
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      // value: what a bad URL value falls back to (the kit's coerce and normalise use the spec's value)
+      { key: 'mode', type: 'choice', label: t('mode'), value: L.defaults.mode,
+        options: [['concat', t('optConcat')], ['param', t('optParam')]] },
+      { key: 'payload', type: 'choice', label: t('payload'), hint: t('payloadHint'), value: L.defaults.payload,
+        options: L.PAYLOAD_IDS.map(function (id) { return [id, t(payloadLabel[id])]; }) },
+      { key: 'role', type: 'choice', label: t('role'), hint: t('roleHint'), value: L.defaults.role,
+        options: [['login', t('optLogin')], ['owner', t('optOwner')]] }
+    ],
+
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { shape: 'qi-data', label: t('legendData') },
+      { shape: 'qi-code', label: t('legendCode') },
+      { shape: 'qi-quote', label: t('legendQuote') },
+      { shape: 'qi-ret', label: t('legendReturned') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      if (!ui || !c.stage.contains(ui.root)) { ui = build(c.stage); lastTokens = null; lastRet = null; }
+      fillForm(s);
+      fillApp(s);
+      fillTable(s);
+    },
+
+    caption: function (c) { return caption(c.state); }
+  });
+
+  // ---- the typed fields survive a reload (the language switch reloads the page; text is not in the URL) ----
+  // Saved on leaving, restored once and only into the same address apart from ?lang=, so a later link to another
+  // preset never gets old text. Storage may be unavailable (private mode, file://): then the fields start fresh.
+  var KEEP = 'simdeck.sql-injection.text';
+  function here() { var u = new URLSearchParams(window.location.search); u.delete('lang'); return window.location.pathname + '?' + u.toString(); }
+  window.addEventListener('pagehide', function () {
+    try { window.sessionStorage.setItem(KEEP, JSON.stringify({ at: here(), user: sim.params.user, pass: sim.params.pass })); } catch (e) { /* no storage */ }
+  });
+  try {
+    var kept = JSON.parse(window.sessionStorage.getItem(KEEP) || 'null');
+    window.sessionStorage.removeItem(KEEP);
+    if (kept && kept.at === here() && typeof kept.user === 'string' && typeof kept.pass === 'string' &&
+        (kept.user !== sim.params.user || kept.pass !== sim.params.pass)) {
+      lastTokens = null; lastRet = null;
+      sim.set({ user: kept.user, pass: kept.pass });
+    }
+  } catch (e) { /* no storage */ }
+})();
+</script>
+</body>
+</html>
