@@ -1,0 +1,564 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Storing passwords: a native explorer (docs/sim-ui.md). Top, the server's table: four users, each stored four ways
+     (plain, fast hash, salted fast hash, slow salted hash); the column the attacker stole is outlined, equal stored
+     values are marked and linked. Bottom left, a precomputed (rainbow) table of common passwords and what it finds in
+     the stolen column; bottom right, the worst-case time to guess one password per scheme on a log scale.
+     Luka's password is the page's own text field (the kit has no text param); it writes params password, length,
+     alphabet and inBreachList. Model: sim.js; words: strings.js; rules and numbers: SPEC.md. -->
+<html lang="hr" data-sim="password-storage">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spremanje lozinki · simdeck</title>
+<meta name="description" content="Četiri korisnika spremljena na četiri načina: isti zapisi bez soli, prethodno izračunata tablica i vrijeme pogađanja od mikrosekundi do tisućljeća.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "password-storage",
+  "title": {
+    "hr": "Spremanje lozinki",
+    "en": "Storing passwords"
+  },
+  "concept": {
+    "hr": "Lozinka, sažetak, sol i spori sažetak: što napadač dobije i koliko pogađa",
+    "en": "Plain, hashed, salted, slow-hashed: what an attacker gets and how long it takes"
+  },
+  "summary": {
+    "hr": "Četiri korisnika spremljena na četiri načina: isti zapisi bez soli, prethodno izračunata tablica i vrijeme pogađanja od mikrosekundi do tisućljeća.",
+    "en": "Four users stored four ways: equal values without a salt, a precomputed table, and guessing times from microseconds to millennia."
+  },
+  "tags": [
+    "authentication"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "same-password"
+    },
+    {
+      "preset": "four-chars"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="password-storage"]; colours only from kit tokens. */
+[data-sim="password-storage"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="password-storage"] .sd-preset { line-height: 1.15; }
+[data-sim="password-storage"] .sd-explain code { font-family: var(--mono); font-size: 1em; }
+[data-sim="password-storage"] .ps {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="password-storage"] .ps-box {
+  display: flex; flex-direction: column; gap: 0.5cqh;
+  min-width: 0; min-height: 0;
+  padding: 0.4rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="password-storage"] .ps-headline { display: flex; align-items: baseline; gap: 0.4rem 1.2rem; flex-wrap: wrap; }
+[data-sim="password-storage"] .ps-h { font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="password-storage"] .ps-sub { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.25; }
+[data-sim="password-storage"] .ps-sub b { color: var(--ink); }
+[data-sim="password-storage"] .ps-mono { font-family: var(--mono); font-weight: 700; }
+[data-sim="password-storage"] .ps-same { display: inline-flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; margin-left: auto; font-size: var(--fs-sm); font-weight: 700; }
+
+/* the server's table */
+[data-sim="password-storage"] .ps-table { border-collapse: separate; border-spacing: 0; width: 100%; }
+[data-sim="password-storage"] .ps-table th,
+[data-sim="password-storage"] .ps-table td {
+  position: relative;
+  padding: 0.25rem 0.6rem;
+  text-align: left; vertical-align: middle;
+  border-bottom: var(--line-w) solid var(--line);
+  white-space: nowrap;
+}
+[data-sim="password-storage"] .ps-table th { vertical-align: bottom; border-top: 0.4rem solid var(--sw, transparent); }
+[data-sim="password-storage"] .ps-table th .ps-sub { display: block; font-weight: 700; }
+[data-sim="password-storage"] .ps-table th.ps-sel,
+[data-sim="password-storage"] .ps-table td.ps-sel {
+  background: color-mix(in srgb, var(--sw) 14%, var(--bg));
+  border-left: 0.25rem solid var(--ink);
+  border-right: 0.25rem solid var(--ink);
+}
+[data-sim="password-storage"] .ps-table tr:last-child td.ps-sel { border-bottom: 0.25rem solid var(--ink); }
+[data-sim="password-storage"] .ps-stolen {
+  display: inline-block; margin-bottom: 0.15rem; padding: 0 0.4rem;
+  font-size: var(--fs-sm); font-weight: 700;
+  color: var(--bg); background: var(--ink); border-radius: var(--radius-sm);
+}
+[data-sim="password-storage"] .ps-stolen[hidden] { display: none; }
+[data-sim="password-storage"] .ps-name { font-weight: 700; }
+[data-sim="password-storage"] .ps-val { font-family: var(--mono); font-weight: 700; }
+[data-sim="password-storage"] .ps-val.sd-hl::before { content: attr(data-mark) ' '; }
+[data-sim="password-storage"] .ps-salt,
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-salt'] {
+  display: inline-block;
+  margin-right: 0.4rem; padding: 0 0.25rem;
+  font-family: var(--mono); font-weight: 700;
+  border: 2px solid var(--ink); border-radius: 3px;
+  background-color: var(--bg);
+}
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-salt'] { padding: 0; margin: 0; }
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-stored'] { background: var(--bg); border: 2px solid var(--ink); position: relative; }
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-stored']::after { content: '#'; position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 0.75em; color: var(--ink); }
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-same'] { background: var(--hl); border: 0; position: relative; }
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-same']::after { content: '◆'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.7em; color: var(--on-hl); }
+[data-sim="password-storage"] .sd-swatch[data-shape='ps-bar'] { height: 0.6rem; border: 2px solid var(--ink); border-radius: 0; background: var(--c2); }
+[data-sim="password-storage"] .ps-input {
+  width: 15.5ch;
+  min-height: 2.2rem;
+  padding: 0.05rem 0.4rem;
+  font-family: var(--mono); font-size: var(--fs-md); font-weight: 700;
+  color: var(--ink);
+  background: var(--bg);
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="password-storage"] .ps-input:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+/* the bracket lane that links users with the same stored value in the stolen column */
+[data-sim="password-storage"] .ps-table .ps-lane { width: 3.2rem; padding: 0; border-bottom-color: transparent; }
+[data-sim="password-storage"] .ps-br { position: absolute; top: 0; bottom: 0; width: 1.2rem; }
+[data-sim="password-storage"] .ps-br[data-lane='0'] { left: 0.3rem; }
+[data-sim="password-storage"] .ps-br[data-lane='1'] { left: 1.7rem; }
+[data-sim="password-storage"] .ps-br::before { content: ''; position: absolute; left: 0.3rem; border-left: 0.25rem solid var(--ink); }
+[data-sim="password-storage"] .ps-br.ps-top::before { top: 50%; bottom: 0; }
+[data-sim="password-storage"] .ps-br.ps-mid::before { top: 0; bottom: 0; }
+[data-sim="password-storage"] .ps-br.ps-bot::before { top: 0; bottom: 50%; }
+[data-sim="password-storage"] .ps-br.ps-mem::after {
+  content: attr(data-mark); position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 1.2rem; height: 1.2rem; display: grid; place-items: center;
+  font-size: 0.85rem; line-height: 1; color: var(--on-hl); background: var(--hl); border: 2px solid var(--ink); border-radius: 50%;
+}
+
+/* the attacker */
+[data-sim="password-storage"] .ps-attack {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.4fr);
+  gap: 1.2cqw;
+  min-height: 0;
+}
+[data-sim="password-storage"] .ps-rb-list {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.05rem 0.6rem; align-items: baseline;
+  font-size: var(--fs-sm);
+}
+[data-sim="password-storage"] .ps-rb-list > .ps-rb-head { color: var(--muted); font-weight: 700; }
+[data-sim="password-storage"] .ps-rb-hit { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="password-storage"] .ps-rb-off .ps-rb-list > :not(.ps-rb-head) { color: var(--muted); }
+[data-sim="password-storage"] .ps-status { font-weight: 700; line-height: 1.25; margin-top: auto; }
+[data-sim="password-storage"] .ps-status.ps-bad { color: var(--danger); }
+[data-sim="password-storage"] .ps-status.ps-good { color: var(--ok); }
+[data-sim="password-storage"] .ps-sym { margin-right: 0.35em; }
+
+[data-sim="password-storage"] .ps-bars { display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.3rem; }
+[data-sim="password-storage"] .ps-bl { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.8rem; line-height: 1.2; margin-top: 0.35rem; }
+[data-sim="password-storage"] .ps-bl > span { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="password-storage"] .ps-track {
+  position: relative; height: 1.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="password-storage"] .ps-track.ps-selt { border: 0.2rem solid var(--ink); }
+[data-sim="password-storage"] .ps-fill { position: absolute; inset: 0 auto 0 0; background: var(--sw); border-right: var(--line-w) solid var(--ink); }
+[data-sim="password-storage"] .ps-fill.ps-over { border-right: 0; }
+[data-sim="password-storage"] .ps-fill.ps-over::after { content: '▶'; position: absolute; right: 0.2rem; top: 50%; transform: translateY(-50%); color: var(--on-series); font-size: 0.9rem; }
+[data-sim="password-storage"] .ps-gridline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--muted); }
+[data-sim="password-storage"] .ps-bl > .ps-bv { display: flex; align-items: baseline; gap: 0.8rem; margin-left: auto; color: var(--ink); }
+[data-sim="password-storage"] .ps-bv b { white-space: nowrap; font-size: var(--fs-md); }
+[data-sim="password-storage"] .ps-bv span { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="password-storage"] .ps-axis { position: relative; height: 1.3rem; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="password-storage"] .ps-tick { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+[data-sim="password-storage"] [hidden] { display: none !important; }
+
+/* Phone and portrait: the stage grows with its content; only the stolen column stays next to the passwords. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="password-storage"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="password-storage"] .ps { height: auto; gap: 0.6rem; padding: 0.4rem; }
+  [data-sim="password-storage"] .ps-attack { grid-template-columns: 1fr; gap: 0.6rem; }
+  [data-sim="password-storage"] .ps-box { padding: 0.4rem 0.5rem; }
+  [data-sim="password-storage"] .ps-table th:not(.ps-sel):not(.ps-keep),
+  [data-sim="password-storage"] .ps-table td:not(.ps-sel):not(.ps-keep) { display: none; }
+  [data-sim="password-storage"] .ps-table th, [data-sim="password-storage"] .ps-table td { padding: 0.2rem 0.3rem; white-space: normal; }
+  [data-sim="password-storage"] .ps-table .ps-val { word-break: break-all; }
+  [data-sim="password-storage"] .ps-table .ps-lane { width: 1.8rem; }
+  [data-sim="password-storage"] .ps-input { width: 100%; }
+  [data-sim="password-storage"] .ps-salt { display: block; width: max-content; margin: 0 0 0.1rem; }
+  [data-sim="password-storage"] .ps-tick:not(:nth-child(odd)) { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Spremanje lozinki</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var SCHEMES = L.SCHEMES;
+  var NAME = { plain: 'schemePlain', hash: 'schemeHash', salted: 'schemeSalted', slow: 'schemeSlow' };
+  var SUB = { plain: 'subPlain', hash: 'subHash', salted: 'subSalted', slow: 'subSlow' };
+  var CAPNAME = { hash: 'capHashName', salted: 'capSaltedName', slow: 'capSlowName' };
+  var COLOUR = { plain: 'var(--c5)', hash: 'var(--c2)', salted: 'var(--c3)', slow: 'var(--c1)' };
+  var MARKS = ['◆', '●'];
+
+  function ctl() { return sim || window.simdeck; }
+  function data(text, cls) { return h('b', { translate: 'no', class: cls || null }, String(text)); }
+
+  // ---- numbers in the page language: Croatian 456 976 and 6,1; English 456,976 and 6.1 ----
+  var SEP = Simdeck.lang === 'hr' ? ['\u00a0', ','] : [',', '.'];
+  function num(v) { return L.fmtNum(v, SEP[0], SEP[1]); }
+  function big(x) {
+    if (x < 1e7 && Number.isInteger(x)) return num(x);
+    var s = L.sci(x);
+    return num(s.m) + ' · 10' + L.sup(s.e);
+  }
+  function approx(x) { return x < 1e7 && Number.isInteger(x) ? ' = ' : ' ≈ '; }
+  /** 456 976, or ≈ 2,18 · 10¹⁴ when rounded (SPEC.md, Tie-breaks). */
+  function about(x) { return (approx(x) === ' = ' ? '' : '≈ ') + big(x); }
+  function dur(seconds, long) {
+    var p = L.timeParts(seconds), pre = long ? 'l_' : 'u_';
+    if (p.unit === 'now') return t(pre + 'now');
+    if (p.m !== undefined) return t(pre + 'y', { n: 5, v: num(p.m) + ' · 10' + L.sup(p.e) });
+    return t(pre + p.unit, { n: Number.isInteger(p.value) ? p.value : 5, v: num(p.value) });
+  }
+  function names(list) {
+    if (list.length < 2) return list.join('');
+    return list.slice(0, -1).join(t('listSep')) + t('and') + list[list.length - 1];
+  }
+
+  // ---- the stage is built once and updated in place, so Luka's box keeps its caret and focus while typing ----
+  var ui = null;
+
+  function build(stage) {
+    var head = h('tr', null,
+      h('th', { class: 'ps-lane ps-keep', 'aria-label': t('sameLane') }),
+      h('th', { class: 'ps-keep' }, t('colUser')));
+    var cols = {};
+    SCHEMES.forEach(function (s) {
+      var stolen = h('span', { class: 'ps-stolen' }, '▼ ' + t('stolen'));
+      var th = h('th', { style: { '--sw': COLOUR[s] }, dataset: { s: s }, class: s === 'plain' ? 'ps-keep' : null },
+        stolen, h('div', null, t(NAME[s])), h('span', { class: 'ps-sub' }, t(SUB[s])));
+      head.appendChild(th);
+      cols[s] = { th: th, stolen: stolen, cells: [] };
+    });
+    var rows = [], lanes = [];
+    var body = h('tbody');
+    L.initial(L.defaults).users.forEach(function (u, i) {
+      var lane = h('td', { class: 'ps-lane ps-keep' });
+      lanes.push(lane);
+      var tr = h('tr', null, lane, h('td', { class: 'ps-name ps-keep', translate: 'no' }, u.name));
+      SCHEMES.forEach(function (s) {
+        var td = h('td', { style: { '--sw': COLOUR[s] }, dataset: { s: s }, class: s === 'plain' ? 'ps-keep' : null });
+        tr.appendChild(td);
+        cols[s].cells.push(td);
+      });
+      body.appendChild(tr);
+      rows.push(tr);
+    });
+    var input = h('input', {
+      type: 'text', class: 'ps-input', maxlength: '40', spellcheck: 'false', autocomplete: 'off', translate: 'no',
+      'aria-label': t('lukaInput'), title: t('lukaHint')
+    });
+    input.addEventListener('input', function () {
+      var p = { password: input.value };
+      var shape = L.shapeOf(input.value);
+      if (shape) Object.assign(p, shape);
+      ctl().set(p);
+    });
+    var same = h('span', { class: 'ps-same' });
+    var server = h('section', { class: 'ps-box' },
+      h('div', { class: 'ps-headline' }, h('span', { class: 'ps-h' }, t('tableTitle')), h('span', { class: 'ps-sub' }, t('cut')), same),
+      h('table', { class: 'ps-table' }, h('thead', null, head), body));
+
+    // the precomputed table
+    var rbRows = [];
+    var rbList = h('div', { class: 'ps-rb-list' },
+      h('span', { class: 'ps-rb-head' }, t('rainbowHash')), h('span', { class: 'ps-rb-head' }, t('rainbowPassword')), h('span', { class: 'ps-rb-head' }));
+    L.rainbowTable().forEach(function (e) {
+      var hash = h('span', { class: 'ps-mono', translate: 'no' }, e.hash.slice(0, L.SHOW));
+      var hit = h('span', { class: 'ps-rb-hit' });
+      rbList.append(hash, h('span', { class: 'ps-mono', translate: 'no' }, e.password), hit);
+      rbRows.push({ hash: hash, hit: hit, entry: e });
+    });
+    var rbStatus = h('div', { class: 'ps-status' });
+    var term = h('i', { lang: 'en' }, t('rainbowTerm'));
+    var rainbow = h('section', { class: 'ps-box' },
+      h('div', { class: 'ps-h' }, t('rainbowTitle')),
+      h('div', { class: 'ps-sub' }, t.parts('rainbowSub', { term: term })),
+      rbList,
+      h('div', { class: 'ps-sub' }, t('rainbowSize')),
+      rbStatus);
+
+    // the time bars
+    var spaceLine = h('div', { class: 'ps-sub' });
+    var breachLine = h('div', { class: 'ps-sub' });
+    var bars = h('div', { class: 'ps-bars', role: 'img', 'aria-label': t('axisLabel') });
+    var barUi = {};
+    SCHEMES.forEach(function (s) {
+      var rate = h('span');
+      var track = h('div', { class: 'ps-track', style: { '--sw': COLOUR[s] } });
+      L.TICKS.forEach(function (tk) { track.appendChild(h('span', { class: 'ps-gridline', style: { left: (100 * L.axisPos(tk[0]).pos) + '%' } })); });
+      var fill = h('div', { class: 'ps-fill' });
+      track.appendChild(fill);
+      var value = h('b', { translate: 'no' });
+      var note = h('span');
+      bars.append(h('div', { class: 'ps-bl' }, h('b', null, t(NAME[s])), rate, h('span', { class: 'ps-bv' }, value, note)), track);
+      barUi[s] = { rate: rate, track: track, fill: fill, value: value, note: note };
+    });
+    var axis = h('div', { class: 'ps-axis', 'aria-hidden': 'true' });
+    // the right end (10¹² years) has a gridline and no label: it would collide with 10⁹
+    L.TICKS.slice(0, -1).forEach(function (tk) { axis.appendChild(h('span', { class: 'ps-tick', style: { left: (100 * L.axisPos(tk[0]).pos) + '%' } }, t('t_' + tk[1]))); });
+    bars.append(axis);
+    var time = h('section', { class: 'ps-box' },
+      h('div', { class: 'ps-headline' }, h('span', { class: 'ps-h' }, t('timeTitle')), h('span', { class: 'ps-sub' }, t('timeAvg'))),
+      spaceLine, breachLine, bars);
+
+    var root = h('div', { class: 'ps' }, server, h('div', { class: 'ps-attack' }, rainbow, time));
+    stage.replaceChildren(root);
+    return { root: root, same: same, cols: cols, lanes: lanes, input: input, rbRows: rbRows, rbList: rainbow, rbStatus: rbStatus,
+      spaceLine: spaceLine, breachLine: breachLine, bars: barUi };
+  }
+
+  var lastStored = null;
+
+  function fillTable(s, password) {
+    var changed = {};
+    SCHEMES.forEach(function (sc) {
+      var col = ui.cols[sc], sel = sc === s.scheme;
+      col.th.classList.toggle('ps-sel', sel);
+      col.stolen.hidden = !sel;
+      var mark = {};
+      s.groups[sc].forEach(function (g, gi) { g.forEach(function (n) { mark[n] = MARKS[gi]; }); });
+      s.table.forEach(function (row, i) {
+        var td = col.cells[i], v = row.stored[sc];
+        td.classList.toggle('ps-sel', sel);
+        var key = row.name + '/' + sc;
+        td.classList.toggle('sd-changed', !!lastStored && lastStored[key] !== v);
+        changed[key] = v;
+        if (sc === 'plain' && row.name === 'Luka') {
+          if (!td.contains(ui.input)) td.replaceChildren(ui.input);
+          if (ui.input.value !== password) ui.input.value = password;
+          ui.input.classList.toggle('sd-hl', !!mark[row.name]);
+          return;
+        }
+        var val = h('span', { class: 'ps-val' + (mark[row.name] ? ' sd-hl' : ''), translate: 'no', dataset: mark[row.name] ? { mark: mark[row.name] } : {} }, v);
+        if (sc === 'salted' || sc === 'slow') {
+          td.replaceChildren(h('span', { class: 'ps-salt sd-hatch', translate: 'no', title: t('saltTitle') }, s.users[i].salt), val);
+        } else {
+          td.replaceChildren(val);
+        }
+      });
+    });
+    lastStored = changed;
+    // the group labels: "◆ same hash: Ana and Marko" for each group in the stolen column
+    ui.same.replaceChildren.apply(ui.same, s.groups[s.scheme].map(function (g, gi) {
+      return h('span', { class: 'sd-hl' }, t.parts('sameLine', { mark: MARKS[gi], names: h('span', { translate: 'no' }, names(g)) }));
+    }));
+    // the bracket lane: the stolen column's groups, linked from their first to their last row
+    ui.lanes.forEach(function (l) { l.replaceChildren(); });
+    s.groups[s.scheme].forEach(function (g, gi) {
+      var idx = g.map(function (n) { return s.table.findIndex(function (r) { return r.name === n; }); }).sort(function (x, y) { return x - y; });
+      var lo = idx[0], hi = idx[idx.length - 1];
+      for (var i = lo; i <= hi; i++) {
+        var pos = i === lo ? 'ps-top' : i === hi ? 'ps-bot' : 'ps-mid';
+        var member = idx.indexOf(i) >= 0;
+        ui.lanes[i].appendChild(h('span', {
+          class: 'ps-br ' + pos + (member ? ' ps-mem' : ''), dataset: { lane: String(gi), mark: member ? MARKS[gi] : '' },
+          title: member ? t('sameTag') : null, 'aria-label': member ? t('sameTag') : null, role: member ? 'img' : null
+        }));
+      }
+    });
+  }
+
+  function fillRainbow(s) {
+    var hits = s.hits[s.scheme];
+    var on = s.scheme === 'hash';
+    ui.rbList.classList.toggle('ps-rb-off', !on);
+    ui.rbRows.forEach(function (r) {
+      var who = on ? s.users.filter(function (u) { return L.sha256(u.password) === r.entry.hash; }).map(function (u) { return u.name; }) : [];
+      r.hash.classList.toggle('sd-hl', who.length > 0);
+      r.hit.replaceChildren(who.length ? h('span', null, h('span', { 'aria-hidden': 'true' }, '✓ '), who.join(t('listSep'))) : '');
+    });
+    var st = ui.rbStatus;
+    if (s.scheme === 'plain') { st.className = 'ps-status ps-bad'; st.textContent = t('rbPlain'); }
+    else if (on && hits.length) { st.className = 'ps-status ps-bad'; st.replaceChildren(h('span', { class: 'ps-sym', 'aria-hidden': 'true' }, '✓'), t.n('rbHits', hits.length)); }
+    else if (on) { st.className = 'ps-status ps-good'; st.replaceChildren(h('span', { class: 'ps-sym', 'aria-hidden': 'true' }, '✗'), t('rbNone')); }
+    else { st.className = 'ps-status ps-good'; st.replaceChildren(h('span', { class: 'ps-sym', 'aria-hidden': 'true' }, '✗'), t('rbSalted')); }
+  }
+
+  function fillTime(s) {
+    var a = s.attack, p = s.policy;
+    ui.spaceLine.replaceChildren.apply(ui.spaceLine, t.parts('timeSpace', {
+      len: t.n('len' + p.alphabet, p.length),
+      calc: data(p.alphabet + L.sup(p.length) + approx(a.space) + big(a.space))
+    }));
+    ui.breachLine.hidden = !p.inBreachList;
+    ui.breachLine.replaceChildren.apply(ui.breachLine, t.parts('timeBreach', { list: data(big(a.listSize)) }));
+    a.schemes.forEach(function (r) {
+      var b = ui.bars[r.scheme];
+      b.track.classList.toggle('ps-selt', r.scheme === s.scheme);
+      var ax = L.axisPos(r.seconds);
+      b.fill.style.width = (100 * ax.pos) + '%';
+      b.fill.classList.toggle('ps-over', ax.over);
+      b.value.textContent = dur(r.seconds) + (ax.over ? ' ▶' : '');
+      if (r.scheme === 'plain') {
+        b.rate.textContent = t('rowRead');
+        b.note.textContent = '';
+      } else {
+        b.rate.textContent = t('rowRate', { rate: '10' + L.sup(Math.round(Math.log10(r.rate))) });
+        b.note.textContent = r.scheme === 'hash' ? t('rowTableSame') : t('rowTableEach', { time: dur(r.table) });
+      }
+      b.value.title = ax.over ? t('over') : '';
+    });
+  }
+
+  // ---- caption focus: table after a scheme change or the same-password preset, time after the rest (sim.js) ----
+  var focus = null, last = null, lastPreset = null, keepFocus = null;
+  function track(c) {
+    focus = keepFocus || L.nextFocus(focus, last, c.params, c.preset, lastPreset);
+    keepFocus = null;
+    last = Object.assign({}, c.params);
+    lastPreset = c.preset;
+  }
+
+  function tableCaption(s) {
+    if (s.scheme === 'plain') return t.parts('capPlain');
+    if (s.scheme === 'hash') {
+      var g = s.groups.hash[0];
+      var first = g ? t.parts(g.length === 2 ? 'capSame2' : 'capSameMore', { names: data(names(g)) }) : t.parts('capHashOnly');
+      var n = s.hits.hash.length;
+      return first.concat(' ', n ? t.parts('capHits', { n: n, count: data(n, 'sd-hl') }) : t.parts('capNoHits'));
+    }
+    if (s.scheme === 'salted') {
+      var pg = s.groups.plain[0];
+      return pg ? t.parts('capSalted', { names: data(names(pg)) }) : t.parts('capSaltedNone');
+    }
+    return t.parts('capSlow', { ratio: data('10' + L.sup(Math.round(Math.log10(s.rate.fast / s.rate.slow)))) });
+  }
+
+  function timeCaption(s) {
+    var p = s.policy;
+    var len = t.n('lenOf' + p.alphabet, p.length);
+    if (s.scheme === 'plain') return t.parts('capTimePlain', { len: len });
+    var r = s.attack.schemes[SCHEMES.indexOf(s.scheme)];
+    var vars = { len: len, space: data(about(s.attack.space)), list: data(big(s.attack.listSize)), scheme: t(CAPNAME[s.scheme]), time: data(dur(r.seconds, true), 'sd-hl') };
+    return t.parts(p.inBreachList ? 'capTimeBreach' : 'capTime', vars);
+  }
+
+  var labels = { 'four-chars': 'presetFour', 'same-password': 'presetSame', 'eight-alnum': 'presetEight', passphrase15: 'presetPass15', breached: 'presetBreached' };
+  var sim;
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      // value: what a bad URL value falls back to (the kit's coerce and normalise use the spec's value)
+      { key: 'scheme', type: 'choice', label: t('scheme'), value: L.defaults.scheme,
+        options: [['plain', t('optPlain')], ['hash', t('optHash')], ['salted', t('optSalted')], ['slow', t('optSlow')]] },
+      { key: 'length', type: 'range', label: t('length'), min: 4, max: 20, step: 1, value: L.defaults.length },
+      { key: 'alphabet', type: 'choice', label: t('alphabet'), hint: t('alphabetHint'), value: L.defaults.alphabet,
+        options: L.ALPHABETS.map(function (a) { return [a, t('alpha' + a)]; }) },
+      { key: 'inBreachList', type: 'toggle', label: t('inBreachList'), value: L.defaults.inBreachList },
+      { key: 'fastRate', type: 'choice', label: t('fastRate'), value: L.defaults.fastRate,
+        options: L.FAST_RATES.map(function (r) { return [r, '10' + L.sup(Math.round(Math.log10(r)))]; }) },
+      { key: 'slowRate', type: 'choice', label: t('slowRate'), value: L.defaults.slowRate,
+        options: L.SLOW_RATES.map(function (r) { return [r, '10' + L.sup(Math.round(Math.log10(r)))]; }) }
+    ],
+
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { shape: 'ps-stored', label: t('legendStored') },
+      { shape: 'ps-salt', label: t('legendSalt') },
+      { shape: 'ps-same', label: t('legendSame') },
+      { shape: 'ps-bar', label: t('legendBar') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      track(c);
+      var s = c.state;
+      if (!ui || !c.stage.contains(ui.root)) { ui = build(c.stage); lastStored = null; }
+      fillTable(s, String(c.params.password));
+      fillRainbow(s);
+      fillTime(s);
+    },
+
+    caption: function (c) {
+      return focus === 'time' ? timeCaption(c.state) : tableCaption(c.state);
+    }
+  });
+
+  // ---- Luka's password survives a reload (the language switch reloads the page; it is not in the URL) ----
+  // Saved on leaving, restored once and only into the same address apart from ?lang=, so a later link to another
+  // preset never gets an old password. Storage may be unavailable (private mode, file://): then the box starts fresh.
+  var KEEP = 'simdeck.password-storage.text';
+  function here() { var u = new URLSearchParams(window.location.search); u.delete('lang'); return window.location.pathname + '?' + u.toString(); }
+  window.addEventListener('pagehide', function () {
+    try { window.sessionStorage.setItem(KEEP, JSON.stringify({ at: here(), password: sim.params.password, focus: focus })); } catch (e) { /* no storage */ }
+  });
+  try {
+    var kept = JSON.parse(window.sessionStorage.getItem(KEEP) || 'null');
+    window.sessionStorage.removeItem(KEEP);
+    if (kept && kept.at === here() && typeof kept.password === 'string' && kept.password !== sim.params.password) {
+      keepFocus = kept.focus === 'time' ? 'time' : 'table';
+      lastStored = null;
+      sim.set({ password: kept.password });
+    }
+  } catch (e) { /* no storage */ }
+})();
+</script>
+</body>
+</html>
