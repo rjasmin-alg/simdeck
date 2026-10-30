@@ -1,0 +1,427 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- wireguard: two tunnel peers. A 1-RTT handshake, cryptokey routing (AllowedIPs as routing table and inbound filter)
+     and roaming (the endpoint learned from the latest authenticated packet). A stepper, one message or one decision per
+     step. Drawn with kit view K1 (message sequence chart, kit/sequence.js): lanes A and B, the lane cards hold each
+     peer's address, keys, the peer it knows and its session keys. Beside it each peer's AllowedIPs as kit view K4 (rule
+     table, kit/ruletable.js, most specific prefix wins) and the packet of the latest step. Model: sim.js; rules:
+     SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="wireguard">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WireGuard: rukovanje, AllowedIPs i roaming · simdeck</title>
+<meta name="description" content="Korak po korak kroz rukovanje dvaju sudionika, paket koji AllowedIPs usmjerava i filtrira, i sudionika koji promijeni adresu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "wireguard",
+  "title": {
+    "hr": "WireGuard: rukovanje, AllowedIPs i roaming",
+    "en": "WireGuard: handshake, AllowedIPs and roaming"
+  },
+  "concept": {
+    "hr": "Rukovanje u jednom povratnom putu, usmjeravanje po ključu, adresa naučena u hodu",
+    "en": "A 1-RTT handshake, cryptokey routing, and an endpoint learned on the move"
+  },
+  "summary": {
+    "hr": "Korak po korak kroz rukovanje dvaju sudionika, paket koji AllowedIPs usmjerava i filtrira, i sudionika koji promijeni adresu.",
+    "en": "Step through two peers' handshake, a packet that AllowedIPs routes and filters, and a peer that changes its address."
+  },
+  "tags": [
+    "vpn"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="wireguard"]; colours only from kit tokens.
+   Layout: the K1 chart on the left; on the right A's AllowedIPs (K4), the packet card, B's AllowedIPs (K4). */
+[data-sim="wireguard"] .wg {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="wireguard"] .wg > .sd-seq { min-height: 0; }
+[data-sim="wireguard"] .wg-side { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; min-height: 0; }
+[data-sim="wireguard"] .wg-mono { font-family: var(--mono); }
+[data-sim="wireguard"] .wg-muted { color: var(--muted); }
+[data-sim="wireguard"] .wg-hl { padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="wireguard"] .wg-hl.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="wireguard"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* lane cards: one row per item; dd wraps its chips */
+[data-sim="wireguard"] .wg-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.2rem 0.5rem; margin: 0.3rem 0 0; align-items: center; }
+[data-sim="wireguard"] .wg-card dt { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="wireguard"] .wg-card dd { display: flex; flex-wrap: wrap; gap: 0.15rem 0.35rem; align-items: center; margin: 0; min-width: 0; font-size: var(--fs-sm); }
+[data-sim="wireguard"] .wg-none { padding: 0 0.3rem; border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); color: var(--muted); }
+[data-sim="wireguard"] .wg-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem; max-width: 100%;
+  padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); white-space: nowrap; line-height: 1.45;
+}
+[data-sim="wireguard"] .wg-chip.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="wireguard"] .wg-chip[data-k="priv"] { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 25%, transparent) 0.35em 0.5em); }
+[data-sim="wireguard"] .wg-chip[data-k="eph"] { border-style: dashed; }
+[data-sim="wireguard"] .wg-chip[data-k="stale"] { border-style: dashed; color: var(--muted); }
+
+/* icons drawn in CSS: key (ring + shaft), pin (a drop), the kit's lock */
+[data-sim="wireguard"] .wg-key { position: relative; display: inline-block; flex: none; width: 1.05em; height: 0.6em; }
+[data-sim="wireguard"] .wg-key::before { content: ''; position: absolute; left: 0; top: 0; width: 0.6em; height: 0.6em; box-sizing: border-box; border: 0.14em solid currentColor; border-radius: 50%; }
+[data-sim="wireguard"] .wg-key::after { content: ''; position: absolute; left: 0.55em; top: 0.23em; width: 0.5em; height: 0.14em; background: currentColor; }
+[data-sim="wireguard"] .wg-key[data-eph]::before { border-style: dashed; }
+[data-sim="wireguard"] .wg-pin { display: inline-block; flex: none; width: 0.6em; height: 0.6em; margin: 0 0.1em 0.15em; box-sizing: border-box; border: 0.14em solid currentColor; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+[data-sim="wireguard"] .wg-card .sd-seq-lock, [data-sim="wireguard"] .wg-pk .sd-seq-lock { margin: 0; }
+
+/* chart: rows a little lower than K1's 2.75rem at projector size */
+@media (min-width: 901px) and (min-aspect-ratio: 1/1) { [data-sim="wireguard"] .sd-seq { --sd-seq-row: 2.45rem; } }
+
+/* K4 tables: compact */
+[data-sim="wireguard"] .wg-side .sd-rt { flex: none; padding: 0.35rem 0.7rem 0.45rem; }
+[data-sim="wireguard"] .wg-side .sd-rt-title { margin-bottom: 0.2rem; }
+[data-sim="wireguard"] .wg-side .sd-rt-table td { padding-top: 0.12rem; padding-bottom: 0.12rem; }
+
+/* packet card: the outer envelope around the WireGuard message, the inner packet inside it */
+[data-sim="wireguard"] .wg-pk { flex: none; min-height: 0; overflow: hidden; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.35rem 0.7rem 0.5rem; }
+[data-sim="wireguard"] .wg-pk h2 { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; }
+[data-sim="wireguard"] .wg-env { border: 0.2rem solid var(--ink); border-radius: var(--radius); padding: 0.25rem 0.45rem 0.4rem; background: var(--bg); }
+[data-sim="wireguard"] .wg-hdr { display: flex; flex-wrap: wrap; gap: 0.1rem 0.9rem; font-size: var(--fs-sm); }
+[data-sim="wireguard"] .wg-hdr b { font-family: var(--mono); }
+[data-sim="wireguard"] .wg-msg { margin-top: 0.3rem; padding: 0.2rem 0.45rem 0.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="wireguard"] .wg-msg > b { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="wireguard"] .wg-fields { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="wireguard"] .wg-enc { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 25%, transparent) 0.35em 0.5em); }
+[data-sim="wireguard"] .wg-inner { margin-top: 0.3rem; padding: 0.2rem 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-size: var(--fs-sm); }
+[data-sim="wireguard"] .wg-inner.wg-enc { border-style: double; border-width: 0.25rem; }
+[data-sim="wireguard"] .wg-inner .wg-cap { display: block; color: var(--muted); }
+[data-sim="wireguard"] .wg-verdict { margin: 0.35rem 0 0; font-weight: 700; }
+[data-sim="wireguard"] .wg-verdict[data-ok="true"] { color: var(--ok); }
+[data-sim="wireguard"] .wg-verdict[data-ok="false"] { color: var(--danger); }
+
+/* legend swatches of this page (the kit has round, hollow, hl, dash, line) */
+[data-sim="wireguard"] .sd-swatch[data-shape^="wg-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-key"]::before, [data-sim="wireguard"] .sd-swatch[data-shape="wg-eph"]::before { content: ''; position: absolute; left: 12%; top: 28%; width: 44%; height: 44%; box-sizing: border-box; border: 0.12em solid var(--ink); border-radius: 50%; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-key"]::after, [data-sim="wireguard"] .sd-swatch[data-shape="wg-eph"]::after { content: ''; position: absolute; left: 52%; top: 45%; width: 36%; height: 0.12em; background: var(--ink); }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-eph"] { border-style: dashed; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-eph"]::before { border-style: dashed; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-lock"]::after { content: ''; position: absolute; left: 50%; top: 58%; width: 0.5em; height: 0.38em; transform: translate(-50%, -50%); background: var(--ink); border-radius: 0.06em; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-lock"]::before { content: ''; position: absolute; left: 50%; top: 18%; width: 0.32em; height: 0.3em; transform: translateX(-50%); box-sizing: border-box; border: 0.09em solid var(--ink); border-bottom: 0; border-radius: 0.2em 0.2em 0 0; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-env"] { border-width: 0.18rem; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-env"]::after { content: ''; position: absolute; inset: 22%; border: 0.1em double var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.12em, var(--ink) 0.12em 0.2em); }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-match"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.85em; font-weight: 700; color: var(--ink); letter-spacing: -0.05em; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-pin"] { border: 0; background: transparent; }
+[data-sim="wireguard"] .sd-swatch[data-shape="wg-pin"]::after { content: ''; position: absolute; left: 22%; top: 12%; width: 56%; height: 56%; box-sizing: border-box; border: 0.14em solid var(--ink); border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+
+/* Phone and portrait: the stage grows with its content; the side panels go under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="wireguard"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="wireguard"] .wg { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="wireguard"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="wireguard"] .wg-pk { overflow: visible; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">WireGuard: rukovanje, AllowedIPs i roaming</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { A: '1', B: '2', C: '3' };
+  var MSG = { init: 'Initiation', resp: 'Response', data: 'Data' };
+
+  /** Data (addresses, keys, prefixes, message names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'wg-mono' : cls || null }, String(text)); }
+  function short(key) { return key.slice(0, 6) + '…'; }
+  function has(s, id) { return s.changed.indexOf(id) >= 0; }
+  function chg(on) { return on ? ' sd-changed' : ''; }
+  function keyIcon(eph) { return h('span', { class: 'wg-key', dataset: eph ? { eph: '' } : {}, 'aria-hidden': 'true' }); }
+  function pin() { return h('span', { class: 'wg-pin', 'aria-hidden': 'true' }); }
+  function lock() { return h('span', { class: 'sd-seq-lock', 'aria-hidden': 'true' }); }
+  function none(key) { return h('span', { class: 'wg-none' }, t(key || 'kNone')); }
+  function keyChip(pub, changed) { return h('span', { class: 'wg-chip' + chg(changed), title: pub }, keyIcon(), data(short(pub))); }
+  function pinChip(ep, changed, k) { return h('span', { class: 'wg-chip' + chg(changed), dataset: k ? { k: k } : {} }, pin(), data(ep)); }
+
+  // ── lane cards ──
+  function card(s, side) {
+    var n = side === 'a' ? s.a : s.b, other = side === 'a' ? 'B' : 'A';
+    var peer = L.peerOf(n, other);
+    var roamedAway = side === 'b' && s.roamed && peer && peer.endpoint && peer.endpoint !== s.a.endpoint;
+    var epChanged = side === 'a' ? has(s, 'a.endpoint') : false;
+    var peerChanged = has(s, side + '.peers');
+    var learned = side === 'b' && has(s, 'b.endpointA');
+    var rows = [
+      h('dt', null, t('kAddr')), h('dd', null, pinChip(n.endpoint, epChanged)),
+      h('dt', null, t('kKeys')), h('dd', null,
+        h('span', { class: 'wg-chip', dataset: { k: 'priv' } }, lock(), t('kPriv')), keyChip(n.staticPub)),
+      h('dt', null, t('kPeer', { p: other })), h('dd', null, peer
+        ? [keyChip(peer.pub, peerChanged),
+          peer.endpoint ? pinChip(peer.endpoint, learned || peerChanged, roamedAway ? 'stale' : null)
+            : h('span', { class: 'wg-none' + chg(peerChanged) }, pin(), ' ', t(side === 'b' ? 'kUnknown' : 'kNone'))]
+        : none()),
+      h('dt', null, t('kSession')), h('dd', null, n.session
+        ? h('span', { class: 'wg-chip' + chg(has(s, side + '.session')) }, lock(),
+          h('span', null, t('kSend', { k: n.session.send })), h('span', { class: 'wg-muted' }, '·'), h('span', null, t('kRecv', { k: n.session.recv })))
+        : none())
+    ];
+    return h('dl', { class: 'wg-card' }, rows);
+  }
+
+  // ── chart rows ──
+  function noteText(r) {
+    switch (r.what) {
+      case 'keys': return h('span', null, lock(), t('noteKeys'));
+      case 'lookup': return h('span', null, t.parts('noteLookup', { ip: data(r.ip) }), ' → ', r.peer ? data(r.peer) : t('noteNoPeer'));
+      case 'noPeer': return t('noteNoPeer');
+      case 'otherPeer': return t('noteOther');
+      case 'noEndpoint': return t('noteNoEp');
+      case 'delivered': return t('noteOk');
+      case 'dropped': return t('noteDrop');
+      case 'roam': return h('span', null, pin(), ' ', t('noteRoam'), ' ', data(r.endpoint));
+    }
+    return '';
+  }
+  function chart(c) {
+    var s = c.state, shown = {};
+    var rows = s.rows.map(function (r) {
+      var changed = r.step === c.n;
+      var time = shown[r.step] ? null : String(r.step);
+      shown[r.step] = true;
+      if (r.kind === 'note') {
+        var bad = r.what === 'dropped' || r.what === 'noPeer' || r.what === 'noEndpoint';
+        return { kind: 'note', lane: r.lane, text: noteText(r), k: bad ? 'fill' : r.what === 'keys' || r.what === 'delivered' ? 'solid' : null,
+          time: time, changed: changed };
+      }
+      var re = {};
+      if (r.msg === 'init' && r.recognised) re.B = t('reKnows');
+      if (r.msg === 'data' && r.learned) re.B = t('reNewAddr');
+      var fields = r.msg === 'data' ? t('ctr', { n: r.counter }) : null;   // the handshake's fields are in the packet card
+      return { from: r.from, to: r.to, label: MSG[r.msg], c: COLOUR[r.from], fields: fields, lock: !!r.lock, re: re,
+        time: time, changed: changed };
+    });
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: [
+        { id: 'A', c: COLOUR.A, shape: 'square', name: t('peerA'), tags: h('span', { class: 'wg-muted' }, t('initiator')), body: card(s, 'a') },
+        { id: 'B', c: COLOUR.B, name: t('peerB'), tags: h('span', { class: 'wg-muted' }, t('responder')), body: card(s, 'b') }
+      ],
+      rows: rows,
+      timeWidth: '2.2rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── AllowedIPs tables (K4, most specific) ──
+  function verdict(ok, text) { return h('span', { class: 'sd-rt-verdict', dataset: { ok: String(ok) } }, ok ? '✓ ' : '✕ ', text); }
+  function allowedTable(c, side) {
+    var s = c.state;
+    var table = side === 'a' ? s.routing : s.routingB;
+    var res = side === 'a' ? s.lookup : s.check;
+    var touched = has(s, side === 'a' ? 'tableA' : 'tableB');
+    var rows = table.map(function (r, i) {
+      return { no: i + 1, cells: { prefix: r.prefix }, action: r.peer + ' · ' + short(L.KEYS[r.peer]), rank: r.len, hit: res ? res.hits[i] : null,
+        tags: r.peer === 'C' ? [{ k: 'muted', text: t('notDrawn') }] : null };
+    });
+    var mark = res ? data((side === 'a' ? '→ ' : '← ') + res.ip) : t('markIdle');   // A: the destination; B: the inner source
+    return RT({
+      dir: c.dir,
+      mode: 'specific',
+      title: h('span', { class: 'wg-hl' + chg(touched) }, t(side === 'a' ? 'tabA' : 'tabB')),
+      columns: [{ key: 'prefix', label: t('colPrefix') }],
+      actionLabel: t('colPeer'),
+      markLabel: mark,
+      rows: rows,
+      implicit: side === 'a' ? { text: t('implA'), action: t('implAAct') } : { text: t('implB'), action: t('implBAct') },
+      at: res ? 'all' : -1,
+      done: !!res,
+      outcome: function (i) {
+        if (i >= table.length) return verdict(false, side === 'a' ? t('outNone') : t('outDrop'));
+        return side === 'a' ? verdict(true, t('outEncrypt', { p: table[i].peer })) : verdict(res.ok, res.ok ? t('outAccept') : t('outDrop'));
+      },
+      words: { win: t('wWin'), beaten: t('wBeaten') },
+      changed: false
+    });
+  }
+
+  // ── packet card ──
+  function split(ep) { var i = ep.lastIndexOf(':'); return [ep.slice(0, i), ep.slice(i + 1)]; }
+  function outer(p) {
+    var src = split(p.outerSrc), dst = split(p.outerDst);
+    return h('div', { class: 'wg-hdr' },
+      h('span', null, h('b', { translate: 'no' }, 'IP'), ' ', data(src[0] + ' → ' + dst[0])),
+      h('span', null, h('b', { translate: 'no' }, 'UDP'), ' ', data(src[1] + ' → ' + dst[1])));
+  }
+  function innerLine(p) { return h('span', null, h('b', { translate: 'no' }, 'IP'), ' ', data(p.innerSrc + ' → ' + p.innerDst), ' · ', t('pkData')); }
+  function packet(c) {
+    var s = c.state, p = s.packet;
+    var title, body = [];
+    if (!p) { title = t('pkTitle'); body.push(h('p', { class: 'wg-muted', style: { margin: 0 } }, t('pkNone'))); }
+    else if (p.kind === 'init' || p.kind === 'resp') {
+      title = t('pkWire');
+      var f = p.kind === 'init'
+        ? [h('span', { class: 'wg-chip', dataset: { k: 'eph' } }, keyIcon(true), t('pkEph'), ' ', data('eA')),
+          h('span', { class: 'wg-chip wg-enc' }, lock(), t('pkStatic')),
+          h('span', { class: 'wg-chip wg-enc' }, lock(), t('pkTime'))]
+        : [h('span', { class: 'wg-chip', dataset: { k: 'eph' } }, keyIcon(true), t('pkEph'), ' ', data('eB')),
+          h('span', { class: 'wg-chip wg-enc' }, lock(), t('pkEmpty'))];
+      body.push(h('div', { class: 'wg-env' }, outer(p), h('div', { class: 'wg-msg' }, data(MSG[p.kind], ''), h('div', { class: 'wg-fields' }, f))));
+    } else if (p.where === 'atA') {
+      title = t('pkAtA');
+      body.push(h('div', { class: 'wg-inner' }, innerLine(p)));
+      if (p.dropReason) body.push(h('p', { class: 'wg-verdict', dataset: { ok: 'false' } }, p.dropReason === 'otherPeer' ? t('pkForC') : t('pkNotSent')));
+    } else if (p.where === 'wire') {
+      title = t('pkWire');
+      body.push(h('div', { class: 'wg-env' }, outer(p),
+        h('div', { class: 'wg-msg' }, data(MSG.data, ''), ' ', h('span', { class: 'wg-muted' }, t('pkRecv', { n: p.counter })),
+          h('div', { class: 'wg-inner wg-enc' }, h('span', { class: 'wg-cap' }, lock(), ' ', t('pkEncWith', { k: 'k1' })), innerLine(p)))));
+      if (p.dropReason === 'allowedIPs') body.push(h('p', { class: 'wg-verdict', dataset: { ok: 'false' } }, t.parts('pkDropped', { src: data(p.innerSrc) })));
+      else if (p.delivered) body.push(h('p', { class: 'wg-verdict', dataset: { ok: 'true' } }, t.parts('pkDelivered', { dst: data(p.innerDst) })));
+    } else {
+      title = t('pkAtB');
+      body.push(h('div', { class: 'wg-inner' }, innerLine(p)));
+      body.push(p.delivered
+        ? h('p', { class: 'wg-verdict', dataset: { ok: 'true' } }, t.parts('pkDelivered', { dst: data(p.innerDst) }))
+        : h('p', { class: 'wg-verdict', dataset: { ok: 'false' } }, t.parts('pkDropped', { src: data(p.innerSrc) })));
+    }
+    return h('section', { class: 'wg-pk' }, h('h2', null, h('span', { class: 'wg-hl' + chg(has(s, 'packet')) }, title)), body);
+  }
+
+  function render(c) {
+    var ch = chart(c);
+    c.stage.replaceChildren(h('div', { class: 'wg' }, ch,
+      h('div', { class: 'wg-side' }, allowedTable(c, 'a'), packet(c), allowedTable(c, 'b'))));
+    ch.fit();
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = s.packet;
+    var oldA = L.SCENE.A.endpoint;
+    switch (s.phase) {
+      case 'start': return t('capStart');
+      case 'configure': return c.params.endpointKnown ? t('cap1') : [t('cap1'), ' ', t('cap1NoEp')];
+      case 'initiation': return s.handshake.init ? t.parts('cap2', { ep: data(oldA) }) : t('cap2NoEp');
+      case 'response': return s.handshake.resp ? t('cap3') : t('cap3None');
+      case 'keys': return s.handshake.established ? t('cap4') : t('cap4None');
+      case 'lookup':
+        var lk = s.lookup;
+        if (lk.win < 0) return t.parts('cap5None', { dst: data(lk.ip) });
+        var out = t.parts('cap5', { dst: data(lk.ip), prefix: data(s.routing[lk.win].prefix), peer: data(lk.peer) });
+        var other = lk.hits.map(function (hit, i) { return hit && i !== lk.win ? i : -1; }).filter(function (i) { return i >= 0; })[0];
+        if (other != null) out = out.concat(' ', t.parts('cap5Beaten', { other: data(s.routing[other].prefix) }));
+        return out;
+      case 'send':
+        if (p.dropReason === 'noPeer') return t.parts('cap6NoPeer', { dst: data(p.innerDst) });
+        if (p.dropReason === 'otherPeer') return t('cap6Other');
+        if (p.dropReason === 'noEndpoint') return t('cap6NoEp');
+        return t.parts('cap6', { dst: data(p.innerDst), ep: data(p.outerDst) });
+      case 'check':
+        if (!s.check) return t('cap7None');
+        return s.check.ok ? t.parts('cap7', { src: data(p.innerSrc), dst: data(p.innerDst) }) : t.parts('cap7Drop', { src: data(p.innerSrc) });
+      case 'roam':
+        var had = L.peerOf(s.b, 'A').endpoint;
+        return had ? t.parts('cap8', { ep: data(s.a.endpoint), old: data(had) }) : t.parts('cap8Unknown', { ep: data(s.a.endpoint) });
+      case 'learn':
+        if (has(s, 'b.endpointA')) {
+          var parts = t.parts('cap9', { ep: data(s.lastSeenEndpoint) });
+          if (p.dropReason === 'allowedIPs') parts = parts.concat(' ', t.parts('cap9Drop', { src: data(p.innerSrc) }));
+          return parts;
+        }
+        var known = L.peerOf(s.b, 'A').endpoint;
+        return known ? t.parts('cap9None', { old: data(known) }) : t('cap9NoneUnknown');
+    }
+    return '';
+  }
+
+  var sendOnly = function (p) { return p.action === 'handshake' ? t('onlyWithSend') : false; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'action', type: 'choice', label: t('action'), resets: true,
+        options: [['handshake', t('actHandshake')], ['send', t('actSend')], ['roam', t('actRoam')]] },
+      { key: 'innerDst', type: 'select', label: t('innerDst'), hint: t('innerDstHint'),
+        options: L.INNER_DSTS.map(function (ip) { return [ip, ip]; }), disabled: sendOnly },
+      { key: 'allowedOk', type: 'toggle', label: t('allowedOk'), hint: t('allowedOkHint'), disabled: sendOnly },
+      { key: 'endpointKnown', type: 'toggle', label: t('endpointKnown'), hint: t('endpointKnownHint') }
+    ],
+
+    presets: [
+      { id: 'handshake', label: t('presetHandshake'), params: { action: 'handshake' }, hint: t('presetHandshakeHint') },
+      { id: 'routing', label: t('presetRouting'), params: { action: 'send', innerDst: '10.0.0.2' }, hint: t('presetRoutingHint') },
+      { id: 'allowedips-drop', label: t('presetDrop'), params: { action: 'send', allowedOk: false }, hint: t('presetDropHint') },
+      { id: 'roaming', label: t('presetRoaming'), params: { action: 'roam' }, hint: t('presetRoamingHint') }
+    ],
+
+    legend: [
+      { shape: 'wg-key', label: t('legKey') },
+      { shape: 'wg-eph', label: t('legEph') },
+      { shape: 'wg-lock', label: t('legSession') },
+      { shape: 'wg-env', label: t('legTunnel') },
+      { shape: 'wg-match', label: t('legMatch') },
+      { shape: 'wg-pin', label: t('legPin') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
