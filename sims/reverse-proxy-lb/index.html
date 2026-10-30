@@ -1,0 +1,531 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Reverse proxy and load balancing (task docs/tasks/w3/reverse-proxy-lb.md). An explorer: the params replay a fixed
+     trace of nine requests through the proxy live. Above, the scene (clients, the proxy, the backends with their
+     totals); below, a timeline with the request chips, each backend's bars, its health checks and the time it was
+     marked down. The model is in sim.js (rules in SPEC.md), the words in strings.js. No kit view fits (a scene over a
+     timeline), so the page draws in HTML and CSS. -->
+<html lang="hr" data-sim="reverse-proxy-lb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obrnuti proxy i raspodjela opterećenja · simdeck</title>
+<meta name="description" content="Devet zahtjeva kroz obrnuti proxy: kružna raspodjela, najmanje veza, hash izvora i kolačić; provjere ispravnosti, 502 i 504.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "reverse-proxy-lb",
+  "title": {
+    "hr": "Obrnuti proxy i raspodjela opterećenja",
+    "en": "Reverse proxy and load balancing"
+  },
+  "concept": {
+    "hr": "Kružno, najmanje veza, hash i kolačić; provjere ispravnosti",
+    "en": "Round robin vs least connections vs hash vs sticky; health checks"
+  },
+  "summary": {
+    "hr": "Devet zahtjeva kroz obrnuti proxy na dva do četiri poslužitelja. Promijeni raspodjelu, uspori ili sruši b2 i gledaj 502, 504 i provjere.",
+    "en": "Nine requests through a reverse proxy to two to four backends. Change the algorithm, slow or break b2, and watch 502, 504 and the checks."
+  },
+  "tags": [
+    "http"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "least-conn-slow"
+    },
+    {
+      "preset": "health-check"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="reverse-proxy-lb"]; colours only from kit tokens. */
+[data-sim="reverse-proxy-lb"] .sd-legend { flex: 0 1 50rem; justify-content: flex-end; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+/* Nine controls: the small ones share a row (two or three abreast) so the panel fits one screen. b2's failure mode
+   and recovery show only once a failure time is set. */
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-group { flex-direction: row; flex-wrap: wrap; column-gap: 1rem; }
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-group > * { flex: 1 1 100%; }
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="backends"],
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="slowB2"],
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="failAt"],
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="failFor"] { flex: 1 1 45%; min-width: 0; }
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="inter"],
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="fall"],
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="rise"] { flex: 1 1 25%; min-width: 0; }
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="algo"] .sd-seg { flex-wrap: nowrap; }
+[data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="algo"] .sd-seg button { padding-inline: 0.3rem; font-size: var(--fs-sm); white-space: nowrap; }
+/* the kit's .sd-ctl display beats [hidden]: a param's visible() would not hide it otherwise */
+[data-sim="reverse-proxy-lb"] .sd-ctl[hidden] { display: none; }
+
+[data-sim="reverse-proxy-lb"] .rp {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 1rem 0.3rem;
+}
+[data-sim="reverse-proxy-lb"] [data-b='1'] { --bc: var(--c1); }
+[data-sim="reverse-proxy-lb"] [data-b='2'] { --bc: var(--c2); }
+[data-sim="reverse-proxy-lb"] [data-b='3'] { --bc: var(--c3); }
+[data-sim="reverse-proxy-lb"] [data-b='4'] { --bc: var(--c4); }
+
+/* ── scene ── */
+[data-sim="reverse-proxy-lb"] .rp-scene {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) minmax(1.5rem, 1fr) minmax(0, 23rem) minmax(1.5rem, 1fr) minmax(0, 27rem);
+  align-items: center;
+}
+[data-sim="reverse-proxy-lb"] .rp-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+[data-sim="reverse-proxy-lb"] .rp-lines line { stroke: var(--ink); stroke-width: 2; }
+[data-sim="reverse-proxy-lb"] .rp-lines line.rp-off { stroke: var(--muted); stroke-dasharray: 6 6; }
+[data-sim="reverse-proxy-lb"] .rp-col { position: relative; display: grid; gap: 0.35rem; align-content: center; }
+[data-sim="reverse-proxy-lb"] .rp-col:nth-child(2) { grid-column: 1; }
+[data-sim="reverse-proxy-lb"] .rp-col:nth-child(3) { grid-column: 3; }
+[data-sim="reverse-proxy-lb"] .rp-col:nth-child(4) { grid-column: 5; }
+[data-sim="reverse-proxy-lb"] .rp-head { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="reverse-proxy-lb"] .rp-card {
+  position: relative; display: grid; gap: 0.1rem;
+  padding: 0.2rem 0.6rem 0.3rem; background: var(--bg);
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+}
+[data-sim="reverse-proxy-lb"] .rp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+[data-sim="reverse-proxy-lb"] .rp-name { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="reverse-proxy-lb"] .rp-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="reverse-proxy-lb"] .rp-tag { padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); line-height: 1.4; }
+[data-sim="reverse-proxy-lb"] .rp-tag.rp-bad { border-style: dashed; color: var(--danger); font-weight: 700; }
+[data-sim="reverse-proxy-lb"] .rp-proxy { border-width: 3px; padding: 0.4rem 0.8rem 0.5rem; }
+[data-sim="reverse-proxy-lb"] .rp-proxy b { font-size: var(--fs-lg); }
+[data-sim="reverse-proxy-lb"] .rp-algo { color: var(--accent); font-weight: 700; }
+[data-sim="reverse-proxy-lb"] .rp-server { border-left: 0.6rem solid var(--bc); }
+[data-sim="reverse-proxy-lb"] .rp-server.rp-isdown { border-style: dashed; border-left-style: solid; }
+[data-sim="reverse-proxy-lb"] .rp-health { font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="reverse-proxy-lb"] .rp-health[data-up='1'] { color: var(--ok); }
+[data-sim="reverse-proxy-lb"] .rp-health[data-up='0'] { color: var(--danger); }
+[data-sim="reverse-proxy-lb"] .rp-busy { height: 0.45rem; border: 1px solid var(--ink); border-radius: 0.2rem; overflow: hidden; }
+[data-sim="reverse-proxy-lb"] .rp-busy > span { display: block; height: 100%; background: var(--bc); }
+[data-sim="reverse-proxy-lb"] .rp-mini { display: flex; gap: 0.25rem; }
+
+/* ── chips and bars ── */
+[data-sim="reverse-proxy-lb"] .rp-chip {
+  position: relative; display: grid; place-items: center; min-width: 0; overflow: visible;
+  border: var(--line-w) solid var(--ink); border-radius: 0.3rem;
+  background: var(--bc); color: var(--on-series);
+  font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; line-height: 1; white-space: nowrap;
+}
+[data-sim="reverse-proxy-lb"] .rp-mini .rp-chip { width: 2.6rem; height: 1.5rem; }
+[data-sim="reverse-proxy-lb"] .rp-chip.rp-err {
+  background: repeating-linear-gradient(45deg, var(--danger) 0 2px, var(--bg) 2px 7px);
+  color: var(--ink); border-style: dashed;
+}
+[data-sim="reverse-proxy-lb"] .rp-chip.rp-err[data-s='504'] {
+  background: repeating-linear-gradient(-45deg, var(--danger) 0 2px, transparent 2px 8px), repeating-linear-gradient(45deg, var(--danger) 0 2px, var(--bg) 2px 8px);
+  border-style: dotted;
+}
+[data-sim="reverse-proxy-lb"] .rp-chip .rp-txt { padding: 0 0.2rem; background: var(--bc); border-radius: 0.2rem; overflow: hidden; max-width: 100%; }
+[data-sim="reverse-proxy-lb"] .rp-chip.rp-err .rp-txt { background: var(--bg); }
+[data-sim="reverse-proxy-lb"] .rp-moved {
+  position: absolute; top: -0.55rem; right: -0.45rem; display: grid; place-items: center;
+  width: 1.1rem; height: 1.1rem; border: var(--line-w) solid var(--ink); border-radius: 50%;
+  background: var(--bg); color: var(--ink); font-size: var(--fs-sm); line-height: 1; z-index: 2;
+}
+
+/* ── timeline ── */
+[data-sim="reverse-proxy-lb"] .rp-tl { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); align-content: end; row-gap: 0.25rem; min-height: 0; }
+[data-sim="reverse-proxy-lb"] .rp-lbl { display: grid; align-content: center; font-size: var(--fs-sm); font-weight: 700; padding-right: 0.4rem; }
+[data-sim="reverse-proxy-lb"] .rp-lbl .rp-name { font-size: var(--fs-md); }
+[data-sim="reverse-proxy-lb"] .rp-track { position: relative; border-top: var(--line-w) solid var(--line); }
+[data-sim="reverse-proxy-lb"] .rp-grid { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--line); }
+[data-sim="reverse-proxy-lb"] .rp-track > .rp-chip { position: absolute; }
+[data-sim="reverse-proxy-lb"] .rp-rq { position: absolute; font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); white-space: nowrap; line-height: 1; }
+[data-sim="reverse-proxy-lb"] .rp-downband {
+  position: absolute; top: 0; bottom: 0;
+  background: repeating-linear-gradient(45deg, var(--muted) 0 1px, transparent 1px 9px);
+  border-left: 3px solid var(--danger);
+}
+[data-sim="reverse-proxy-lb"] .rp-check { position: absolute; top: 0; transform: translateX(-50%); font-size: var(--fs-sm); font-weight: 700; line-height: 1.1; background: var(--bg); padding: 0 0.1rem; }
+[data-sim="reverse-proxy-lb"] .rp-check[data-pass='1'] { color: var(--ok); }
+[data-sim="reverse-proxy-lb"] .rp-check[data-pass='0'] { color: var(--danger); }
+[data-sim="reverse-proxy-lb"] .rp-check[data-mark] { border: var(--line-w) solid var(--ink); border-radius: 0.3rem; }
+[data-sim="reverse-proxy-lb"] .rp-axis { position: relative; height: 1.5rem; border-top: 3px solid var(--ink); font-size: var(--fs-sm); }
+[data-sim="reverse-proxy-lb"] .rp-axis span { position: absolute; top: 0.15rem; transform: translateX(-50%); font-family: var(--mono); }
+[data-sim="reverse-proxy-lb"] .rp-axis span:first-child { transform: none; }
+[data-sim="reverse-proxy-lb"] .rp-axis span:last-child { transform: translateX(-100%); }
+[data-sim="reverse-proxy-lb"] .rp-axislbl { font-size: var(--fs-sm); color: var(--muted); align-self: start; }
+[data-sim="reverse-proxy-lb"] .rp-narrow .rp-rq { display: none; }
+
+/* Legend swatches: the same patterns as on the stage, so they read in grayscale too. */
+[data-sim="reverse-proxy-lb"] .sd-swatch[data-shape='rp-chip'] { background: linear-gradient(90deg, var(--c1) 0 25%, var(--c2) 25% 50%, var(--c3) 50% 75%, var(--c4) 75%); }
+[data-sim="reverse-proxy-lb"] .sd-swatch[data-shape='rp-err'] { border-style: dashed; background: repeating-linear-gradient(45deg, var(--danger) 0 0.1em, var(--bg) 0.1em 0.3em); }
+[data-sim="reverse-proxy-lb"] .sd-swatch[data-shape='rp-down'] { border-left: 3px solid var(--danger); background: repeating-linear-gradient(45deg, var(--muted) 0 0.06em, transparent 0.06em 0.36em); }
+[data-sim="reverse-proxy-lb"] .sd-swatch[data-shape='rp-moved'] { border-radius: 50%; position: relative; background: var(--bg); }
+[data-sim="reverse-proxy-lb"] .sd-swatch[data-shape='rp-moved']::after { content: '↪'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; line-height: 1; color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the scene stacks and its lines go. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="reverse-proxy-lb"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="reverse-proxy-lb"] .rp { height: auto; padding: 0.4rem; }
+  [data-sim="reverse-proxy-lb"] .rp-scene { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+  [data-sim="reverse-proxy-lb"] .rp-col:nth-child(n) { grid-column: 1; }
+  [data-sim="reverse-proxy-lb"] .rp-lines { display: none; }
+  [data-sim="reverse-proxy-lb"] .rp-tl { grid-template-columns: 4.4rem minmax(0, 1fr); }
+  [data-sim="reverse-proxy-lb"] .rp-lbl .rp-sub { display: none; }
+  [data-sim="reverse-proxy-lb"] [data-sd-controls] .sd-ctl[data-key="slowB2"] { flex: 1 1 100%; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Obrnuti proxy i raspodjela opterećenja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var END = L.END;
+  var CHECK = 1.15, REQ = 3.1;   // rem: the check strip above a backend's lanes, the request row
+  var LANE_MIN = 1.4, LANE_MAX = 2.4;
+  var LANE = 1.6;                 // rem: a bar's lane; draw() grows it into the height the scene leaves free
+
+  // ── "changed" marks: compare with the state shown before the last param change ──
+  var shownKey = null, shownState = null, base = null;
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== shownKey) { base = shownState; shownKey = key; shownState = c.state; }
+  }
+
+  function pct(s) { return (100 * s / END) + '%'; }
+  function bn(b) { return 'b' + b; }
+  function cn(c) { return 'c' + c; }
+  function rn(k) { return 'r' + k; }
+  function list(items) {
+    if (items.length <= 1) return items.join('');
+    return t('list2', { a: items.slice(0, -1).join(t('listSep')), b: items[items.length - 1] });
+  }
+  function statusText(r) { return r.status === 200 ? '200' : String(r.status); }
+
+  /** A request chip: the backend's colour and name, or the hatched error code. */
+  function chip(r, opts) {
+    var err = r.status !== 200;
+    var title = r.backend === null
+      ? t('chipTitleNone', { k: r.req, c: cn(r.client), t: r.t, s: statusText(r) })
+      : t('chipTitle', { k: r.req, c: cn(r.client), t: r.t, b: bn(r.backend), s: statusText(r) });
+    var label = opts.narrow ? (err ? '✕' : String(r.backend)) : opts.mini && err ? String(r.status) : err ? '✕\u00a0' + r.status : bn(r.backend);
+    return h('div', {
+      class: 'rp-chip' + (err ? ' rp-err' : '') + (opts.changed ? ' sd-changed' : ''),
+      dataset: { b: r.backend === null ? '' : String(r.backend), s: String(r.status) },
+      title: title, style: opts.style || null
+    }, h('span', { class: 'rp-txt', translate: 'no' }, label), r.moved ? h('span', { class: 'rp-moved', 'aria-hidden': 'true' }, '↪') : null);
+  }
+
+  // ── scene ──
+  function clientCard(c, st, p, ch) {
+    var mine = st.assignments.filter(function (r) { return r.client === c; });
+    var extra = null;
+    if (p.algo === 'hash') extra = t('hashOf', { h: L.HASH[c - 1] });
+    if (p.algo === 'sticky') {
+      // the cookie the client holds at the end of the trace: from its last successful response
+      var ok = mine.filter(function (r) { return r.status === 200; });
+      if (ok.length) extra = t('cookieOf', { b: bn(ok[ok.length - 1].backend) });
+    }
+    return h('div', { class: 'rp-card rp-client', dataset: { c: String(c) } },
+      h('div', { class: 'rp-row' }, h('span', { class: 'rp-name', translate: 'no' }, cn(c)), extra ? h('span', { class: 'rp-sub', translate: 'no' }, extra) : null),
+      h('div', { class: 'rp-mini' }, mine.map(function (r) { return chip(r, { mini: true, changed: ch.indexOf(r.req) >= 0 }); })));
+  }
+
+  function proxyCard(p) {
+    return h('div', { class: 'rp-card rp-proxy' },
+      h('b', null, t('proxy')),
+      h('span', { class: 'rp-algo' }, t('name_' + p.algo)),
+      h('span', { class: 'rp-sub' }, t('rule_' + p.algo)),
+      h('span', { class: 'rp-sub' }, t('waits', { s: L.TIMEOUT })),
+      h('span', { class: 'rp-sub' }, t('checks', { i: p.inter, f: p.fall, r: p.rise })));
+  }
+
+  function healthText(b) {
+    if (!b.down.length) return t('up');
+    var d = b.down[b.down.length - 1];
+    return d[1] === null ? t('down', { t: d[0] }) : t('downBack', { a: d[0], b: d[1] });
+  }
+
+  function serverCard(b, p) {
+    var tags = [h('span', { class: 'rp-sub' }, t('service', { s: b.service }))];
+    if (b.id === 2 && p.slowB2) tags.push(h('span', { class: 'rp-tag' }, t('slowTag')));
+    if (b.id === 2 && p.failAt) {
+      tags.push(h('span', { class: 'rp-tag rp-bad' }, p.failFor ? t('failTagFor', { a: p.failAt, b: p.failAt + p.failFor }) : t('failTag', { t: p.failAt })));
+    }
+    var stats = [t.n('reqCount', b.count)];
+    if (b.errors) stats.push(t('errCount', { n: b.errors }));
+    if (b.maxOpen) stats.push(t.n('maxOpen', b.maxOpen));
+    return h('div', { class: 'rp-card rp-server' + (b.up ? '' : ' rp-isdown'), dataset: { b: String(b.id) } },
+      h('div', { class: 'rp-row' },
+        h('span', { class: 'rp-name', translate: 'no' }, bn(b.id)),
+        h('span', { class: 'rp-health', dataset: { up: b.up ? '1' : '0' } }, (b.up ? '▲ ' : '▼ ') + healthText(b)),
+        tags),
+      h('span', { class: 'rp-sub' }, stats.join(' · ')),
+      h('div', { class: 'rp-busy', 'aria-hidden': 'true' }, h('span', { style: { width: (100 * b.count / L.N_REQ) + '%' } })));
+  }
+
+  /** Lines client → proxy and proxy → backend; none from a client to a backend (SPEC rule 1). */
+  function lines(scene, svg) {
+    var box = scene.getBoundingClientRect();
+    var proxy = scene.querySelector('.rp-proxy').getBoundingClientRect();
+    var out = [];
+    function ln(x1, y1, x2, y2, off) {
+      var l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', x1 - box.left); l.setAttribute('y1', y1 - box.top);
+      l.setAttribute('x2', x2 - box.left); l.setAttribute('y2', y2 - box.top);
+      if (off) l.setAttribute('class', 'rp-off');
+      out.push(l);
+    }
+    var py = proxy.top + proxy.height / 2;
+    scene.querySelectorAll('.rp-client').forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      ln(r.right, r.top + r.height / 2, proxy.left, py, false);
+    });
+    scene.querySelectorAll('.rp-server').forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      ln(proxy.right, py, r.left, r.top + r.height / 2, el.classList.contains('rp-isdown'));
+    });
+    svg.replaceChildren.apply(svg, out);
+  }
+
+  // ── timeline ──
+  function grid() {
+    var out = [];
+    for (var s = 0; s <= END; s++) out.push(h('div', { class: 'rp-grid', style: { left: pct(s) } }));
+    return out;
+  }
+
+  function requestRow(st, ch, narrow) {
+    var kids = grid();
+    st.assignments.forEach(function (r) {
+      kids.push(h('span', { class: 'rp-rq', translate: 'no', style: { left: 'calc(' + pct(r.t) + ' + 0.15rem)', top: '0.25rem' } }, rn(r.req) + '·' + cn(r.client)));
+      kids.push(chip(r, { narrow: narrow, changed: ch.indexOf(r.req) >= 0,
+        style: { left: 'calc(' + pct(r.t) + ' + 0.1rem)', width: 'calc(' + pct(1) + ' - 0.2rem)', top: narrow ? '0.35rem' : '1.35rem', height: '1.55rem' } }));
+    });
+    return [h('div', { class: 'rp-lbl' }, t('requests')), h('div', { class: 'rp-track', style: { height: (narrow ? 2.2 : REQ) + 'rem' } }, kids)];
+  }
+
+  function backendRow(st, b, ch, narrow) {
+    var ln = L.lanes(st, b.id);
+    var kids = grid();
+    b.down.forEach(function (d) {
+      var to = d[1] === null ? END : d[1];
+      kids.push(h('div', { class: 'rp-downband', style: { left: pct(d[0]), width: pct(to - d[0]) } }));
+    });
+    st.assignments.forEach(function (r) {
+      if (r.backend !== b.id) return;
+      var lane = ln.of[r.req];
+      var end = Math.min(Math.max(r.end, r.t + 1), END);
+      var bar = chip(r, { narrow: true, changed: ch.indexOf(r.req) >= 0, style: {
+        left: 'calc(' + pct(r.t) + ' + 0.1rem)', width: 'calc(' + pct(end - r.t) + ' - 0.2rem)',
+        top: (CHECK + lane * LANE) + 'rem', height: (LANE - 0.25) + 'rem' } });
+      bar.title = t('barTitle', { k: r.req, c: cn(r.client), a: r.t, e: r.end, s: statusText(r) });
+      // a bar too short for its label keeps only its colour or hatch; the request row above names it
+      bar.firstChild.textContent = (end - r.t) * secPx < 2 * remPx ? '' : narrow ? rn(r.req) : rn(r.req) + (r.status === 200 ? '' : '\u00a0' + r.status);
+      kids.push(bar);
+    });
+    st.healthLog.forEach(function (c) {
+      if (c.backend !== b.id) return;
+      var glyph = c.mark === 'down' ? '▼' : c.mark === 'up' ? '▲' : c.pass ? '✓' : '✗';
+      var attrs = { class: 'rp-check', dataset: { pass: c.pass ? '1' : '0' }, title: t(c.pass ? 'checkPass' : 'checkFail', { t: c.t }), style: { left: pct(c.t) } };
+      if (c.mark) attrs.dataset.mark = c.mark;
+      kids.push(h('span', attrs, glyph));
+    });
+    var height = CHECK + ln.lanes * LANE;
+    return [h('div', { class: 'rp-lbl', dataset: { b: String(b.id) } }, h('span', { class: 'rp-name', translate: 'no' }, bn(b.id))),
+      h('div', { class: 'rp-track', dataset: { b: String(b.id) }, style: { height: height + 'rem' } }, kids)];
+  }
+
+  function axis(narrow) {
+    var ticks = [], every = narrow ? 3 : 1;   // narrow: every third second labelled, so the numbers do not collide
+    for (var s = 0; s <= END; s += every) ticks.push(h('span', { style: { left: pct(s) } }, String(s)));
+    return [h('div', { class: 'rp-axislbl' }, narrow ? t('axisShort') : t('axis')), h('div', { class: 'rp-axis' }, ticks)];
+  }
+
+  var root = null, lastCtx = null, secPx = 80, remPx = 20;
+  function draw(c) {
+    var st = c.state, p = c.params;
+    var ch = L.changed(base, st);
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    var narrow = (c.stage.clientWidth - 7 * rem) / END < 3.3 * rem;
+    secPx = (c.stage.clientWidth - (phone() ? 5.4 : 7.5) * rem) / END;
+    remPx = rem;
+
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'rp-lines');
+    svg.setAttribute('aria-hidden', 'true');
+    var clients = [];
+    for (var k = 1; k <= L.N_CLIENTS; k++) clients.push(clientCard(k, st, p, ch));
+    var scene = h('div', { class: 'rp-scene' }, svg,
+      h('div', { class: 'rp-col' }, h('span', { class: 'rp-head' }, t('clients')), clients),
+      h('div', { class: 'rp-col' }, proxyCard(p)),
+      h('div', { class: 'rp-col' }, h('span', { class: 'rp-head' }, t('servers')), st.perBackend.map(function (b) { return serverCard(b, p); })));
+
+    function timeline() {
+      var rows = requestRow(st, ch, narrow);
+      st.perBackend.forEach(function (b) { rows = rows.concat(backendRow(st, b, ch, narrow)); });
+      return h('div', { class: 'rp-tl' + (narrow ? ' rp-narrow' : '') }, rows.concat(axis(narrow)));
+    }
+    LANE = 1.6;
+    var tl = timeline();
+    root.replaceChildren(scene, tl);
+    if (!phone()) {
+      // Lanes share what the scene leaves free (its columns' own height is all it needs).
+      var need = 0;
+      scene.querySelectorAll('.rp-col').forEach(function (col) { need = Math.max(need, col.scrollHeight); });
+      var free = (scene.clientHeight - need) / rem - 1;
+      var lanes = st.perBackend.reduce(function (n, b) { return n + L.lanes(st, b.id).lanes; }, 0);
+      var lane = Math.max(LANE_MIN, Math.min(LANE_MAX, LANE + free / lanes));
+      if (Math.abs(lane - LANE) > 0.05) { LANE = lane; var tl2 = timeline(); root.replaceChild(tl2, tl); }
+    }
+    lines(scene, svg);
+  }
+  function phone() { return window.matchMedia('(max-width: 900px), (max-aspect-ratio: 1/1)').matches; }
+
+  // ── caption ──
+  function caption(c) {
+    var st = c.state, p = c.params;
+    var keys = L.captionKeys(p, st);
+    var pb = st.perBackend;
+    var counts = pb.map(function (b) { return bn(b.id) + ' ' + b.count; }).join(t('listSep'));
+    var map = [];
+    for (var k = 1; k <= L.N_CLIENTS; k++) {
+      var seen = [];
+      st.assignments.forEach(function (r) { if (r.client === k && r.backend !== null && seen.indexOf(r.backend) < 0) seen.push(r.backend); });
+      map.push(cn(k) + '→' + seen.map(bn).join('/'));
+    }
+    var d = L.downAt(st, 2);
+    var down;
+    if (d === null) down = p.failFor && p.failAt + p.failFor <= END ? t('backFirst', { b: p.failAt + p.failFor }) : t('notDown', { e: END });
+    else if (d === p.failAt) down = t('downNow', { d: d });
+    else if (p.fall === 1) down = t('downFirst', { d: d });
+    else down = t('downAfter', { d: d, k: t.n('fails', p.fall) });
+    var moved = st.assignments.filter(function (r) { return r.moved; });
+    var b2 = pb[1];
+    var errs = function (cut) { return st.assignments.filter(function (r) { return r.status !== 200 && r.cut === cut; }).map(function (r) { return rn(r.req); }); };
+    function fault(code) {
+      var out = [t('faultHead' + code, { f: p.failAt, down: down })];
+      var sent = errs(false), cut = errs(true);
+      if (sent.length) out.push(t.n('faultSent' + code, sent.length, { list: list(sent), w: L.TIMEOUT }));
+      if (cut.length) out.push(t.n('faultCut' + code, cut.length, { list: list(cut), w: L.TIMEOUT }));
+      out.push(t('faultTail'));
+      return out.join(' ');
+    }
+    return keys.map(function (key) {
+      switch (key) {
+        case 'capRR': case 'capLC': return t(key, { counts: counts });
+        case 'capRRSlow': return t(key, { n: b2.count, k: t.n('holds', b2.maxOpen) });
+        case 'capLCSlow': case 'capLCSlowEven':
+          return t(key, { n: b2.count, b: pb.length, counts: counts, m: L.initial(Object.assign({}, p, { algo: 'rr' })).perBackend[1].count });
+        case 'capHash': return t(key, { map: map.join(t('listSep')), n: pb.length });
+        case 'capSticky': return t(key, { map: map.join(t('listSep')) });
+        case 'capStickyRace': {
+          var race = L.raced(st), rr = st.assignments[race.req - 1];
+          return t(key, { c: cn(rr.client), r: rn(race.req), p: rn(race.prev), b: bn(rr.backend) });
+        }
+        case 'capMovedHash': {
+          var who = [];
+          moved.forEach(function (r) { if (who.indexOf(cn(r.client)) < 0) who.push(cn(r.client)); });
+          who.sort();
+          var iv = b2.down[0];
+          return t(key, { d: d, back: iv && iv[1] !== null ? t('movedBack', { u: iv[1] }) : '', who: t.n('movedWho', who.length, { list: list(who) }) });
+        }
+        case 'capMovedSticky': return t(key, { c: cn(moved[0].client), from: bn(moved[0].cookie), to: bn(moved[0].backend) });
+        case 'capFault502': return fault('502');
+        case 'capFault504': return fault('504');
+        default: return t(key, { f: p.failAt, down: down });
+      }
+    }).join(' ');
+  }
+
+  var sec = function (v) { return t('sec', { v: v }); };
+  var failSet = function (p) { return !!p.failAt; };
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'algo', type: 'choice', label: t('algo'), options: L.ALGOS.map(function (v) { return [v, t('algo_' + v)]; }) },
+      { key: 'backends', type: 'range', label: t('backends'), min: L.B_MIN, max: L.B_MAX, step: 1 },
+      { key: 'slowB2', type: 'toggle', label: t('slowB2') },
+      { key: 'failAt', type: 'range', label: t('failAt'), min: 0, max: L.N_REQ, step: 1, format: function (v) { return v ? t('atSec', { v: v }) : t('never'); } },
+      { key: 'failFor', type: 'range', label: t('failFor'), min: 0, max: 8, step: 1, visible: failSet, format: function (v) { return v ? t('afterSec', { v: v }) : t('never'); } },
+      { key: 'failMode', type: 'choice', label: t('failMode'), visible: failSet,
+        options: L.FAIL_MODES.map(function (v) { return [v, t('fail_' + v)]; }) },
+      { key: 'inter', type: 'range', label: t('inter'), min: 1, max: 5, step: 1, format: sec },
+      { key: 'fall', type: 'range', label: t('fall'), min: 1, max: 5, step: 1 },
+      { key: 'rise', type: 'range', label: t('rise'), min: 1, max: 5, step: 1 }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'rp-chip', label: t('legChip') },
+      { shape: 'rp-err', label: t('legErr') },
+      { shape: 'rp-down', label: t('legDown') },
+      { shape: 'rp-moved', label: t('legMoved') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      if (!root) {
+        root = h('div', { class: 'rp' });
+        c.stage.replaceChildren(root);
+        var w = 0, hh = 0;
+        new ResizeObserver(function () {
+          var nw = c.stage.clientWidth, nh = c.stage.clientHeight;
+          if (lastCtx && (nw !== w || nh !== hh)) { w = nw; hh = nh; draw(lastCtx); }
+        }).observe(c.stage);
+      }
+      track(c);
+      lastCtx = c;
+      draw(c);
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
