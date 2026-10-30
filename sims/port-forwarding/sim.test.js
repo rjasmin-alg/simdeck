@@ -30,7 +30,11 @@ const PRESETS = {
   'add-forward': { scene: 'outside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false },
   'reply-vs-forward': { scene: 'mixed', forward: true, proto: 'tcp', extPort: '8080', hairpin: false },
   'wrong-proto': { scene: 'outside', forward: true, proto: 'udp', extPort: '8080', hairpin: false },
-  hairpin: { scene: 'inside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false }
+  hairpin: { scene: 'inside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false },
+  'container-publish': { container: true, cscene: 'publish' },
+  'container-not-published': { container: true, cscene: 'unpublished' },
+  'container-loopback': { container: true, cscene: 'loopback' },
+  'container-port-taken': { container: true, cscene: 'taken' }
 };
 
 // ── tie-breaks ──
@@ -287,8 +291,100 @@ test('reply-vs-forward: two inbound packets, two reasons (row 1, then forward 1)
 
 test('the default is the book\'s example and sim.json\'s step count', () => {
   const meta = require('./sim.json');
-  assert.deepEqual(logic.defaults, PRESETS['book-no-forward']);
+  assert.deepEqual(logic.defaults, Object.assign({ container: false, cscene: 'publish' }, PRESETS['book-no-forward']));
   assert.equal(logic.steps(logic.defaults), meta.steps);
+});
+
+// ── container host (preset task lnx-container-ports, SPEC.md "Container host") ──
+
+const CN = logic.cnet;
+const HOST = CN.outside;                    // 192.0.2.10, the host's eth0
+const CLI = ep('203.0.113.7', 51000);
+const WEBC = ep('10.88.0.5', 80);
+const WEB2 = ep('10.88.0.6', 80);
+const chops = (cscene) => logic.walkContainer(P({ container: true, cscene })).hops;
+const flow = (h) => h.map((x) => x.cmd ? 'run ' + x.cmd.run + (x.cmd.refused ? ' refused' : '') : x.from + '>' + x.to + (x.pkt.flag ? ' ' + x.pkt.flag : ''));
+
+test('C tie-break: a publish on every address clashes with one bound to an address on the same port, both ways', () => {
+  const any = { proto: 'tcp', extPort: 8080, to: WEBC };
+  const lo = { proto: 'tcp', extPort: 8080, to: WEB2, addr: '127.0.0.1' };
+  assert.equal(logic.addForward(fwd(any), lo).refused, true);
+  assert.equal(logic.addForward(fwd(lo), any).refused, true);
+  assert.equal(logic.addForward(fwd(lo), lo).refused, true);
+  assert.equal(logic.addForward(fwd(lo), Object.assign({}, lo, { addr: HOST })).refused, false, 'two bound addresses do not clash');
+  assert.equal(logic.addForward(fwd(any), Object.assign({}, any, { proto: 'udp' })).refused, false, 'per protocol');
+  assert.equal(logic.addForward(fwd(any, Object.assign({}, any, { extPort: 8081 })), any).clash, 0, 'the first forward in the way');
+});
+
+test('C tie-break: a miss on the host\'s own address is refused on a container host, dropped on the router', () => {
+  assert.deepEqual(flow(chops('loopback')), ['run web', 'C>H', 'H>C rst']);
+  assert.equal(chops('loopback')[2].decision.rule, 'refused');
+  assert.equal(hops(PRESETS['wrong-proto'])[0].drop, 'R');
+});
+
+test('C1: publishing writes the DNAT rule by a step, tcp 8080 on every host address to 10.88.0.5:80', () => {
+  const o = PRESETS['container-publish'];
+  assert.deepEqual(at(o, 0).forwards, []);
+  assert.deepEqual(at(o, 1).forwards, [{ proto: 'tcp', extPort: 8080, to: WEBC }]);
+  assert.equal(at(o, 1).hop.cmd.fwd, 0);
+  const d = logic.classify(CN, [], at(o, 1).forwards, pkt('tcp', CLI, ep(HOST, 8080)), 'out', false);
+  assert.equal(d.rule, 'forward');
+  assert.deepEqual(d.out.dst, WEBC);
+});
+
+test('C2: no SNAT: web sees the client\'s own address; the reply leaves as 192.0.2.10:8080 (un-DNAT)', () => {
+  const h = chops('publish');
+  assert.deepEqual(flow(h), ['run web', 'C>H', 'H>web', 'web>H', 'H>C']);
+  assert.deepEqual(h[2].pkt, pkt('tcp', CLI, WEBC));
+  assert.deepEqual(h[3].pkt, pkt('tcp', WEBC, CLI));
+  assert.equal(h[4].decision.rule, 'row');
+  assert.deepEqual(h[4].pkt, pkt('tcp', ep(HOST, 8080), CLI));
+  assert.equal(h[4].deliver, true);
+  assert.equal(h[4].unexpected, false);
+});
+
+test('C3: without publishing the outside is refused, and the host reaches 10.88.0.5:80 directly', () => {
+  const h = chops('unpublished');
+  assert.deepEqual(flow(h), ['run web', 'C>H', 'H>C rst', 'H>web', 'web>H']);
+  assert.deepEqual(h[0].forwards, []);
+  assert.deepEqual(h[2].pkt, { proto: 'tcp', src: ep(HOST, 80), dst: CLI, flag: 'rst' });
+  assert.equal(h[3].local, true);
+  assert.deepEqual(h[3].pkt, pkt('tcp', ep('10.88.0.1', 52000), WEBC));
+  assert.equal(h[4].deliver, true);
+  assert.deepEqual(h[4].table, [], 'nothing translated');
+});
+
+test('C4: a rule bound to 127.0.0.1 does not match a packet to 192.0.2.10 (address struck)', () => {
+  const h = chops('loopback');
+  assert.deepEqual(h[0].forwards, [{ proto: 'tcp', extPort: 8080, to: WEBC, addr: '127.0.0.1' }]);
+  assert.deepEqual(h[2].decision.fwdCompare, [{ hit: false, miss: ['addr'] }]);
+  const bound = fwd({ proto: 'tcp', extPort: 8080, to: WEBC, addr: HOST });
+  assert.equal(logic.classify(CN, [], bound, pkt('tcp', CLI, ep(HOST, 8080)), 'out', false).rule, 'forward');
+});
+
+test('C5: a second publish on host port 8080 is refused and the table stays; 8081 works', () => {
+  const h = chops('taken');
+  assert.deepEqual(flow(h), ['run web2 refused', 'run web2', 'C>H', 'H>web2']);
+  assert.equal(h[0].cmd.clash, 0);
+  assert.deepEqual(h[0].forwards, at(PRESETS['container-port-taken'], 0).forwards);
+  assert.deepEqual(h[1].forwards.map((f) => f.extPort + '>' + sock(f.to)), ['8080>10.88.0.5:80', '8081>10.88.0.6:80']);
+  assert.deepEqual(h[3].pkt, pkt('tcp', CLI, WEB2));
+});
+
+test('C6: the rule is read before the host\'s own sockets, so a published port is never refused', () => {
+  for (const c of logic.cscenes) {
+    const h = chops(c);
+    for (const x of h) if (x.decision && x.decision.rule === 'refused') {
+      assert.ok(!x.forwards.some((f) => f.extPort === x.was.dst.port && (!f.addr || f.addr === x.was.dst.ip)), c);
+    }
+  }
+  assert.ok(!chops('publish').some((x) => x.decision && x.decision.rule === 'refused'));
+});
+
+test('container presets: step counts 5, 5, 3, 4; the router\'s presets are unchanged by the host param', () => {
+  assert.deepEqual(logic.cscenes.map((c) => logic.steps(P({ container: true, cscene: c }))), [5, 5, 3, 4]);
+  assert.equal(logic.steps(P({ container: false })), 5);
+  assert.equal(logic.steps(P({ container: true, cscene: 'publish', scene: 'inside', forward: true })), 5, 'router params are ignored');
 });
 
 // ── generic checks every sim keeps ──

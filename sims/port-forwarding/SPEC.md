@@ -125,3 +125,59 @@ The default `extPort` is 61050, not the task's 8080, so the default equals prese
 UPnP/PCP, CGNAT (→ `cgnat`), firewall rules on top (→ `stateful-firewall`), row timeouts, asymmetric return paths
 (→ `asymmetric-path`), container port publishing (→ preset task `lnx-container-ports` on this folder: `classify` takes
 the inside network as data, tested with 10.88.0.5).
+
+## Container host (preset task `lnx-container-ports`, `docs/tasks/w3/lnx-container-ports.md`)
+
+One concept: **`-p` is DNAT on the host.** The same rules as above with R as a Linux container host. Param
+`container` (toggle, resets to step 0) switches the scene; `cscene` picks one of four. The router's params are ignored
+and hidden while it is on. Model: `walkContainer` in `sim.js`, reusing `classify` and `addForward`; tests `C…` in
+`sim.test.js`.
+
+| Node | Kind (K2 mark) | Address | Source |
+|---|---|---|---|
+| `C` klijent / client | outside host (round, colour 5) | 203.0.113.7, port 51000 | task file |
+| `H` domaćin / host (`host1`) | router (square) | outside 192.0.2.10 (eth0), bridge 10.88.0.1 | task file |
+| `web` kontejner / container | inside host | 10.88.0.5, tcp/80 | task file |
+| `web2` kontejner / container | inside host (port-taken only) | 10.88.0.6, tcp/80 | derived (the second container) |
+
+10.88.0.0/16 is the container bridge (one example subnet, "the container bridge"); 192.0.2.0/24 and 203.0.113.0/24
+are documentation blocks (RFC 5737). H's own request in `unpublished` leaves from 10.88.0.1:52000 (chosen).
+
+A step is a publish command (`run -d [-p [addr:]hostPort:80] name`, shown on the packet card's place) or one packet one
+hop, as in the router scenes.
+
+Rules (task file numbering):
+
+- **C1** Publishing writes one forward (a DNAT rule) by a step: `-p 8080:80` gives `tcp, any host address, 8080 →
+  10.88.0.5:80`. Without `-p` no rule. *(check the wording against the engine's rule output; not opened here)*
+- **C2** DNAT only, no source rewrite: web sees 203.0.113.7:51000; the reply's source is rewritten back to
+  192.0.2.10:8080 by the connection's row (rule 5 above).
+- **C3** Not published: the host reaches 10.88.0.5:80 directly over the bridge (no rule, no row); a packet from outside
+  to 192.0.2.10:80 matches nothing (derived).
+- **C4** A forward may be bound to one host address (`addr`); a packet to another address misses it (column struck).
+- **C5** A publish whose protocol and host port clash with an existing forward is refused and the forwards stay as
+  they were: a forward without `addr` holds the port on every address, so it clashes with any forward on that port;
+  two forwards bound to different addresses do not clash (derived from bind semantics). *(check the error text: the
+  page says it in words, "host port 8080 is already allocated")*
+- **C6** The rule is read when the packet arrives (prerouting), before the host decides whether the packet is for
+  itself, so a published port goes on to the container and is never refused. A packet to the host's own address that
+  matches no row and no forward reaches the host's own stack; nothing listens on that port, so the host answers with a
+  reset (RST, "connection refused"), where the router drops (RFC 9293 §3.10.7.1: a segment to a closed port gets a
+  reset). Published ports therefore bypass a host firewall that filters only input (explanation only: the host
+  models no input filter) *(derived; check)*.
+
+Tie-breaks: a publish without an address and one bound to an address on the same port clash both ways (C5); the first
+forward in the way is reported. On a miss at the host: refused on the container host, dropped on the router.
+
+| Preset | `cscene` | Steps | Steps and outcome |
+|---|---|---|---|
+| `container-publish` | publish | 5 | run (rule 1), C→H (to 192.0.2.10:8080), H→web (dst 10.88.0.5:80, src stays 203.0.113.7:51000, row 1), web→H, H→C (src 192.0.2.10:8080) |
+| `container-not-published` | unpublished | 5 | run (no rule), C→H (to 192.0.2.10:80), H→C RST, H→web (10.88.0.1:52000 → 10.88.0.5:80), web→H |
+| `container-loopback` | loopback | 3 | run `-p 127.0.0.1:8080:80` (rule 1, addr 127.0.0.1), C→H (8080), H→C RST (address struck) |
+| `container-port-taken` | taken | 4 | starts with web on 8080; run web2 8080 refused (rule 1 taken), run web2 8081 (rule 2), C→H (8081), H→web2 (10.88.0.6:80) |
+
+Against the task: `publish` is 5 steps, not 7 (the host's hop granularity puts DNAT, forward and delivery on one hop
+H→web; the caption names prerouting and the forward path); `loopback` is 3, not 5 (the host has no output-path DNAT,
+so the task's second half is dropped as the task allows); `firewall-bypass` is not added (no input filter in the
+host). Out of scope: rootless publishing (named in the explanation as the exception), a user-space proxy, IPv6, UDP,
+random host ports, name resolution.

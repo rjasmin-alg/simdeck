@@ -100,6 +100,60 @@ Task `docs/tasks/w3/port-forwarding.md` (catalogue `net-port-forwarding`, §4.1,
   fallback of the miss tie-break) now have tests, and its caption fix ("no forward covers {dst}") is in.
 - Not done: a real projector and a lecturer with a clicker.
 
+## Container host presets (task `docs/tasks/w3/lnx-container-ports.md`, thread t-0214)
+
+Four presets, keys 6–9: `container-publish`, `container-not-published`, `container-loopback`, `container-port-taken`;
+one entry in `sim.json` (`container-publish`). Rules and numbers: SPEC.md "Container host".
+
+- **Decisions.**
+  - **The host is extended, not stopped.** The task says to stop if the host cannot express the preset. Items 1, 3,
+    4, 5 and 6 of its list were missing (a rule added by a step, "connection refused", an address-bound rule, a
+    refused add on the page, labels per preset), but the engine was built for this (`classify` takes the network as
+    data). As `broadcast-storm` did on `stp`, the additions are additive: `addForward` takes an optional `addr` and
+    returns `clash`; `classify` misses a forward on `addr`; a separate `walkContainer` reuses both. The router's
+    scenes, numbers and tests are unchanged (all old tests pass untouched, apart from the defaults test that now lists
+    the two new params).
+  - **A `container` toggle** (label "Domaćin kontejnera") switches the page; `cscene` picks the scene. The router's five
+    settings are hidden while it is on, `cscene` while it is off (`visible`; page CSS for `[hidden]`, as `cert-chain`).
+  - **Examples follow the toggle**: the page sets `data-pf-host` on `.sd-page` in `render` and CSS hides the other
+    host's presets (1–5 router, 6–9 container; the number keys reach all nine). Presets in two columns, the router's
+    fifth spanning both. This is what fits: with all nine shown the panel was 1166 px of 864; now 864 of 864 in both
+    languages (no margin left: a longer label overflows).
+  - **Refused, not dropped.** A packet to the host's own address that matches nothing gets a reset from the host (a
+    hop H → sender with the RST flag on the packet card, chip "RST"); the router keeps dropping. The tables show the
+    lookup on the RST hop, struck where the bound address differs.
+  - **Commands on the packet card's place**: "Naredba sustavu za kontejnere", the command in monospace, then "Dodano
+    pravilo n" / the refusal. The new rule is tagged "novi", the clashing one "zauzet". No engine name and no engine
+    error text (COMMON.md §1): the command is written `run -d -p 8080:80 web`, the refusal in words.
+  - **Legend labels cover both hosts** ("računalo u LAN-u, kontejner", "usmjernik, domaćin"): the kit builds the
+    legend once.
+  - **Names**: client `C`, host `H` with `host1` under its name, containers `web` and `web2` (marks are the names).
+- **Deviations from the task.** Step counts 5/5/3/4 instead of 7/5/5/4 (SPEC.md); no `firewall-bypass` preset (no
+  input filter in the host; rule 6 is in the explanation); one `sim.json` entry instead of four; the host's tags,
+  topic and level stay `nat` / `networks` / `intro` (the task's `linux-admin`, `containers`, `tcp`, `advanced` cannot
+  be set per entry; all four exist in `tags.json`).
+- **Sources.** The task file's mapping and rules; RFC 3022 (NAPT, the reply's rewrite); RFC 9293 §3.10.7.1 (reset for
+  a closed port); RFC 5737. Not opened here: nft(8), iptables-extensions(8), the engines' documentation, netavark's
+  rule output, the NLA chapters (not written yet).
+- **Unchecked *(check)*.** C1 rule wording against the engine's nat table; C5's error text; C6 (published ports bypass
+  input rules; an engine may add its own forward rules); the explanation's "127.0.0.1:8080 from the host reaches the
+  container" (needs the engine's local handling, not modelled); a host whose firewall drops instead of resetting
+  shows silence, not "refused".
+- **Term pairs** (written out; not in `kit/glossary.js`): port publishing — objava *porta*; container — kontejner;
+  container host — domaćin kontejnera; bridge — most; connection tracking — praćenje veza *(check)*; reset (RST) —
+  reset; connection refused — spoj odbijen; rootless — bez administratorskih ovlasti *(check)*.
+- **Shared requests.**
+  - **Kit:** a control hidden by `visible()` stays shown (`.sd-ctl`'s `display` beats `[hidden]`; as `cert-chain`).
+  - **Kit:** presets that follow a param (`visible(params)` on a preset, or preset groups); the page hides them with CSS.
+  - **models/:** when the NAT model is promoted, take `addForward`'s `addr`/`clash` and the "refused at the host"
+    outcome with it.
+- **Checks.** 9 tests added (two tie-breaks first, C1–C6, step counts). Mutation run, each caught: clash ignoring the
+  any-address rule, bound rules never clashing, `addr` not matched, refused turned into drop, publishing at load, a
+  source rewrite on publish, the host's sockets read before the rules, a refused add that changes the table, the
+  local answer run through the rules, no un-DNAT. `npm run gate -- port-forwarding` passes; every container step
+  screenshotted in hr and en at 1920×1080 and reviewed, plus the gate's light, dark, grayscale and 375×812 shots.
+- **Time:** start 2026-10-30 17:46, done 18:01 (one session).
+
 ## Time
 
 Start 2026-10-28 11:22, done 11:50 (one session).

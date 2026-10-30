@@ -94,11 +94,24 @@
 /* Five settings and five examples: the settings sit a little closer than the kit's 0.55rem so the panel fits. */
 [data-sim="port-forwarding"] [data-sd-controls] .sd-group { gap: 0.4rem; }
 
+/* Nine examples (the container host's four: preset task lnx-container-ports) in two columns, as stp does. */
+[data-sim="port-forwarding"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* The examples follow the container toggle: 1–5 the router's, 6–9 the container host's (keys reach all nine). */
+[data-sim="port-forwarding"] .sd-page[data-pf-host='router'] .sd-presets > :nth-child(n+6),
+[data-sim="port-forwarding"] .sd-page[data-pf-host='container'] .sd-presets > :nth-child(-n+5) { display: none; }
+[data-sim="port-forwarding"] .sd-page[data-pf-host='router'] .sd-presets > :nth-child(5) { grid-column: 1 / -1; }
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as cert-chain). */
+[data-sim="port-forwarding"] .sd-panel [hidden] { display: none; }
+[data-sim="port-forwarding"] .pf-cmd { display: block; margin: 0.3rem 0; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="port-forwarding"] .pf-res { margin: 0.2rem 0 0; }
+
 /* Phone and portrait: the stage grows with its content; everything stacks. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
   [data-sim="port-forwarding"] .sd-stage { height: auto; container-type: inline-size; }
   [data-sim="port-forwarding"] .pf { height: auto; gap: 0.8rem; padding: 0.4rem; }
   [data-sim="port-forwarding"] .pf-slot { grid-column: auto; grid-row: auto; grid-template-columns: minmax(0, 1fr); gap: 0.8rem; min-height: 0; }
+  [data-sim="port-forwarding"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="port-forwarding"] .pf-cmd { white-space: normal; overflow-wrap: anywhere; }
 }
 </style>
 </head>
@@ -145,7 +158,11 @@
   var N = L.nodes, NET = L.net;
 
   /** Series colour per node: the packet's chip and the table's subject take the opener's colour. */
-  var COLOUR = { A: 1, B: 2, S: 3, R: 8, K: 5, W: 6 };
+  var COLOUR = { A: 1, B: 2, S: 3, R: 8, K: 5, W: 6, C: 5, H: 8, web: 3, web2: 2 };
+  /** Container host (preset task lnx-container-ports): client C outside, host H, containers web and web2. */
+  var CN = L.cnodes, CNET = L.cnet;
+  function isRouter(p) { return !p.container; }
+  function isContainer(p) { return !!p.container; }
 
   function sock(e) { return e.ip + ':' + e.port; }
   function data(text) { return h('span', { translate: 'no', class: 'pf-addr' }, text); }
@@ -158,7 +175,11 @@
     { id: 'add-forward', label: t('presetAdd'), hint: t('presetAddHint'), params: { scene: 'outside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false } },
     { id: 'reply-vs-forward', label: t('presetMixed'), hint: t('presetMixedHint'), params: { scene: 'mixed', forward: true, proto: 'tcp', extPort: '8080', hairpin: false } },
     { id: 'wrong-proto', label: t('presetProto'), hint: t('presetProtoHint'), params: { scene: 'outside', forward: true, proto: 'udp', extPort: '8080', hairpin: false } },
-    { id: 'hairpin', label: t('presetHairpin'), hint: t('presetHairpinHint'), params: { scene: 'inside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false } }
+    { id: 'hairpin', label: t('presetHairpin'), hint: t('presetHairpinHint'), params: { scene: 'inside', forward: true, proto: 'tcp', extPort: '8080', hairpin: false } },
+    { id: 'container-publish', label: t('cPresetPublish'), hint: t('cPresetPublishHint'), params: { container: true, cscene: 'publish' } },
+    { id: 'container-not-published', label: t('cPresetUnpub'), hint: t('cPresetUnpubHint'), params: { container: true, cscene: 'unpublished' } },
+    { id: 'container-loopback', label: t('cPresetLoop'), hint: t('cPresetLoopHint'), params: { container: true, cscene: 'loopback' } },
+    { id: 'container-port-taken', label: t('cPresetTaken'), hint: t('cPresetTakenHint'), params: { container: true, cscene: 'taken' } }
   ];
 
   /** The opener of the packet R is deciding on: whoever handed it to R. */
@@ -168,6 +189,7 @@
       (room for the chip between R and K), so the packet card and the forwards table fit under the LAN, left of the
       link to W. */
   function drawing(c) {
+    if (c.state.host === 'container') return cdrawing(c);
     var s = c.state, hop = s.hop;
     function badges(id) {
       if (!hop) return [];
@@ -207,16 +229,18 @@
 
   /** The packet on the wire in this step: protocol, source, destination; a field R rewrote keeps its old value. */
   function packetCard(c) {
-    var s = c.state, hop = s.hop, kids = [h('h2', null, t('hdrTitle'))];
+    var s = c.state, hop = s.hop, kids = [h('h2', null, t(hop && hop.cmd ? 'cmdTitle' : 'hdrTitle'))];
     if (!hop) kids.push(h('p', { class: 'pf-none' }, t('hdrNone')));
+    else if (hop.cmd) kids.push(commandCard(hop.cmd));
     else {
+      var before = hop.refused ? null : hop.was;
       var field = function (k) {
-        var now = sock(hop.pkt[k]), was = hop.was ? sock(hop.was[k]) : now;
+        var now = sock(hop.pkt[k]), was = before ? sock(before[k]) : now;
         if (was === now) return [now, null];
         return [h('span', null, data(now), h('span', { class: 'pf-was' }, t('was'), ' ', h('s', { translate: 'no' }, was))), { changed: true }];
       };
       var src = field('src'), dst = field('dst');
-      kids.push(Simdeck.topology.headers([{ title: t('hdrLayer', { proto: proto(hop.pkt.proto) }), c: COLOUR[hop.opener],
+      kids.push(Simdeck.topology.headers([{ title: t(hop.pkt.flag ? 'hdrRst' : 'hdrLayer', { proto: proto(hop.pkt.proto) }), c: COLOUR[hop.opener],
         fields: [[t('fSrc'), src[0], src[1]], [t('fDst'), dst[0], dst[1]]] }], c.dir));
     }
     kids.push(h('div', { class: 'pf-side' },
@@ -232,7 +256,8 @@
 
   function translationTable(c) {
     var s = c.state, hop = s.hop, d = hop && hop.decision;
-    var inbound = d ? (hop.was || hop.pkt).dst.ip === NET.outside : true;
+    var box = s.host === 'container';
+    var inbound = d ? (hop.was || hop.pkt).dst.ip === (box ? CNET.outside : NET.outside) : true;
     var subject = subjectChip(hop);
 
     var trRows = s.table.map(function (r, i) {
@@ -258,17 +283,20 @@
       else { trAt = trRows.length; trOut = d.rule === 'new' ? Simdeck.ruleTable.verdict(true, t('outNew')) : h('span', null, t('outNext')); }
     }
     return Simdeck.ruleTable({
-      dir: c.dir, mode: 'first', title: h('span', null, t('tableTr'), ' · ', t('rNext'), data(String(s.nextPort))), stickyMark: true,
-      columns: [{ key: 'proto', label: t('colProto') }, { key: 'inside', label: t('colInside') }, { key: 'outside', label: t('colOutside') }, { key: 'remote', label: t('colRemote') }],
+      dir: c.dir, mode: 'first', stickyMark: true,
+      title: box ? t('cTableTr') : h('span', null, t('tableTr'), ' · ', t('rNext'), data(String(s.nextPort))),
+      columns: [{ key: 'proto', label: t('colProto') }, { key: 'inside', label: t(box ? 'cColInside' : 'colInside') },
+        { key: 'outside', label: t(box ? 'cColOutside' : 'colOutside') }, { key: 'remote', label: t('colRemote') }],
       actionLabel: '', markLabel: t('colMark'),
       rows: trRows,
-      implicit: { text: t('impTr'), action: h('span', null, t(inbound ? 'impTrIn' : 'impTrOut')) },
+      implicit: { text: t('impTr'), action: h('span', null, t(inbound ? (box ? 'cImpTrIn' : 'impTrIn') : 'impTrOut')) },
       at: trAt, subject: subject, done: !!d, outcome: function () { return trOut; },
       words: { skip: t('markSkip') }
     });
   }
 
   function forwardsTable(c) {
+    if (c.state.host === 'container') return publishedTable(c);
     var s = c.state, hop = s.hop, d = hop && hop.decision;
     var read = d && d.fwdCompare;
     var fwRows = s.forwards.map(function (f, i) {
@@ -345,6 +373,133 @@
     return out;
   }
 
+  // ── Container host (preset task lnx-container-ports): the same tables, R as host H, the LAN as the bridge ──
+
+  function pubText(pub) { return '-p ' + (pub.addr ? pub.addr + ':' : '') + pub.extPort + ':' + L.cport; }
+  function cmdText(cmd) { return 'run -d ' + (cmd.publish ? pubText(cmd.publish) + ' ' : '') + cmd.run; }
+  function cfwdText(f) { return proto(f.proto) + ' ' + (f.addr ? f.addr + ':' : '') + f.extPort + ' → ' + sock(f.to); }
+  function cnameOf(ip) { for (var k in CN) if (CN[k].ip === ip) return k; return null; }
+
+  /** The container host's network: the bridge as a bus (web2 only where the scene has it), the client on its link. */
+  function cdrawing(c) {
+    var s = c.state, hop = s.hop, two = s.scene === 'taken';
+    function badges(id) {
+      if (!hop) return [];
+      if (hop.cmd) return id === 'H' ? [{ text: t(hop.cmd.refused ? 'badgeRefuse' : 'badgePublish'), k: hop.cmd.refused ? 'dashed' : 'fill' }] : [];
+      if (hop.drop === id) return [{ text: t('badgeDrop'), k: 'dashed' }];
+      if (hop.from === id) return [{ text: t(hop.refused ? 'badgeRefuse' : hop.decision ? 'badgeTranslate' : 'badgeSend'), k: hop.refused ? 'dashed' : 'fill' }];
+      if (hop.to === id) return [{ text: t('badgeRecv'), k: 'solid' }];
+      return [];
+    }
+    function node(id, col, kind, name, lines) {
+      return { id: id, kind: kind, col: col, row: 0, c: COLOUR[id], mark: id, name: name, lines: lines, badges: badges(id),
+        state: hop && (hop.from === id || hop.drop === id) ? 'active' : null };
+    }
+    var host = node('H', 3, 'router', t('cHost'), [{ text: 'host1', kind: 'sub' }]);
+    host.extra = h('div', { class: 'pf-r' },
+      h('span', null, t('cOut')), data(CNET.outside),
+      h('span', null, t('cBridge')), data(CN.H.ip));
+    var nodes = [
+      node('web', 2, 'host', t('cContainer'), [CN.web.ip, { text: ':' + L.cport, kind: 'sub' }]),
+      host,
+      node('C', 4, 'host', t('client'), [CN.C.ip])
+    ];
+    if (two) nodes.unshift(node('web2', 1, 'host', t('cContainer'), [CN.web2.ip, { text: ':' + L.cport, kind: 'sub' }]));
+    var packets = [];
+    if (hop && !hop.cmd) {
+      packets.push({ from: hop.from, to: hop.to, label: hop.pkt.flag ? 'RST' : proto(hop.pkt.proto), c: COLOUR[hop.opener], drop: !!hop.drop, at: 0.5 });
+    }
+    var topo = Simdeck.topology({
+      cols: 5, rows: ['auto', '3.4rem', 'auto'], dir: c.dir, gap: '5.5cqw',
+      nodes: nodes,
+      links: [{ id: 'bridge', bus: two ? ['web2', 'web', 'H'] : ['web', 'H'], row: 1 }, { id: 'hc', a: 'H', b: 'C' }],
+      packets: packets
+    });
+    topo.append(h('div', { class: 'pf-slot' }, packetCard(c), forwardsTable(c)));
+    return topo;
+  }
+
+  /** A publish command and what the engine did with it. */
+  function commandCard(cmd) {
+    var res = !cmd.publish ? h('p', { class: 'pf-res' }, t('cmdNone'))
+      : cmd.refused ? h('span', { class: 'pf-drop' }, t('cmdRefused', { port: String(cmd.publish.extPort), row: String(cmd.clash + 1) }))
+      : h('p', { class: 'pf-res' }, t('cmdAdded', { row: String(cmd.fwd + 1) }));
+    return [h('code', { class: 'pf-cmd', translate: 'no' }, cmdText(cmd)), res];
+  }
+
+  /** The host's published ports: its DNAT rules, read in order like the router's forwards; no rule → the host's own
+      stack, where nothing listens, answers with a reset. */
+  function publishedTable(c) {
+    var s = c.state, hop = s.hop, d = hop && hop.decision, cmd = hop && hop.cmd;
+    var read = d && d.fwdCompare;
+    var rows = s.forwards.map(function (f, i) {
+      var cmp = read && d.fwdCompare[i];
+      var tags = cmd && cmd.fwd === i ? [{ k: 'hl', text: t('tagNew') }] : cmd && cmd.clash === i ? [{ k: 'dashed', text: t('tagTaken') }] : null;
+      return {
+        no: [String(i + 1), marker('fwd')],
+        cells: { proto: proto(f.proto), addr: f.addr || t('cAny'), extPort: String(f.extPort) },
+        action: h('span', null, data(sock(f.to)), ' ', h('span', { translate: 'no' }, cnameOf(f.to.ip))),
+        hit: cmp ? cmp.hit : null,
+        miss: cmp && !cmp.hit ? cmp.miss : [],
+        tags: tags,
+        mark: d && !read ? 'skip' : null
+      };
+    });
+    var at = -1;
+    if (read) at = d.rule === 'forward' ? d.fwd : rows.length;
+    return Simdeck.ruleTable({
+      dir: c.dir, mode: 'first', title: t('cTableFw'), className: 'pf-fw',
+      columns: [{ key: 'proto', label: t('colProto') }, { key: 'addr', label: t('cColAddr') }, { key: 'extPort', label: t('cColPort') }],
+      actionLabel: t('colTo'), markLabel: t('colMark'),
+      rows: rows,
+      implicit: { text: t('cImpFw'), action: h('span', null, t('cImpFwAct')), effect: 'deny' },
+      at: at, subject: read ? subjectChip(hop) : null, done: !!read,
+      outcome: function (i) { return Simdeck.ruleTable.verdict(i < rows.length, t(i < rows.length ? 'outFwd' : 'cOutRefused')); },
+      words: { skip: t('markSkip') }
+    });
+  }
+
+  function containerCaption(c) {
+    var s = c.state, hop = s.hop;
+    if (!hop) {
+      if (s.scene === 'taken') {
+        var f0 = s.forwards[0];
+        return t.parts('cStartTaken', { p: bold(pubText({ addr: f0.addr, extPort: f0.extPort })), port: bold(String(f0.extPort)) });
+      }
+      return t.parts('cStart', { out: bold(CNET.outside), bridge: bold('10.88.0.0/16') });
+    }
+    var out = [t('stepN', { n: c.n })], pkt = hop.pkt, d = hop.decision;
+    var add = function (parts) { out = out.concat(parts); };
+    if (hop.cmd) {
+      var cmd = hop.cmd, pub = cmd.publish;
+      if (!pub) add(t.parts('cCmdNone', { cmd: bold(cmdText(cmd)), to: bold(CN[cmd.run].ip + ':' + L.cport) }));
+      else if (cmd.refused) add(t.parts('cCmdRefused', { cmd: bold(cmdText(cmd)), port: bold(String(pub.extPort)), row: bold(String(cmd.clash + 1)) }));
+      else {
+        var f = s.forwards[cmd.fwd];
+        add(t.parts(pub.addr ? 'cCmdBound' : 'cCmdPublish', { p: bold(pubText(pub)), addr: bold(pub.addr || ''),
+          from: bold((pub.addr || CNET.outside) + ':' + pub.extPort), to: bold(sock(f.to)) }));
+      }
+      return out;
+    }
+    if (hop.refused) {
+      var bound = -1;
+      d.fwdCompare.forEach(function (x, i) { if (bound < 0 && x.miss.length === 1 && x.miss[0] === 'addr') bound = i; });
+      if (bound >= 0) add(t.parts('cRefusedAddr', { addr: bold(s.forwards[bound].addr), dst: bold(sock(hop.was.dst)) }));
+      else add(t.parts('cRefused', { dst: bold(sock(hop.was.dst)) }));
+      return out;
+    }
+    if (hop.local) {
+      add(t.parts('cLocal', { src: bold(sock(pkt.src)), dst: bold(sock(pkt.dst)) }));
+      return out;
+    }
+    var vars = { who: bold(hop.from), src: bold(sock(pkt.src)), dst: bold(sock(pkt.dst)) };
+    if (hop.from !== 'H') add(t.parts(!hop.answer ? 'cSend' : hop.opener === 'H' ? 'cAnswerLocal' : 'cAnswer', vars));
+    else if (d.rule === 'forward') add(t.parts('cForward', { f: bold(cfwdText(s.forwards[d.fwd])), to: bold(sock(pkt.dst)), src: bold(sock(pkt.src)), name: bold(cnameOf(pkt.dst.ip)) }));
+    else add(t.parts('cRowOut', { row: bold(String(d.row + 1)), from: bold(sock(hop.was.src)), to: bold(sock(pkt.src)) }));
+    if (hop.answer && hop.deliver && hop.opener === hop.to) add([' ', t.parts('cGot', { who: bold(hop.to) })]);
+    return out;
+  }
+
   Simdeck.mount({
     steps: L.steps,
     defaults: L.defaults,
@@ -352,12 +507,15 @@
     step: L.step,
 
     params: [
-      { key: 'scene', type: 'choice', label: t('scene'), resets: true,
+      { key: 'container', type: 'toggle', label: t('hostMode'), resets: true },
+      { key: 'scene', type: 'choice', label: t('scene'), resets: true, visible: isRouter,
         options: [['book', t('sceneBook')], ['mixed', t('sceneMixed')], ['outside', t('sceneOutside')], ['inside', t('sceneInside')]] },
-      { key: 'forward', type: 'toggle', label: t('forward') },
-      { key: 'proto', type: 'choice', label: t('proto'), options: [['tcp', 'TCP'], ['udp', 'UDP']] },
-      { key: 'extPort', type: 'choice', label: t('extPort'), options: L.extPorts.map(function (x) { return [x, x]; }) },
-      { key: 'hairpin', type: 'toggle', label: t('hairpin') }
+      { key: 'forward', type: 'toggle', label: t('forward'), visible: isRouter },
+      { key: 'proto', type: 'choice', label: t('proto'), visible: isRouter, options: [['tcp', 'TCP'], ['udp', 'UDP']] },
+      { key: 'extPort', type: 'choice', label: t('extPort'), visible: isRouter, options: L.extPorts.map(function (x) { return [x, x]; }) },
+      { key: 'hairpin', type: 'toggle', label: t('hairpin'), visible: isRouter },
+      { key: 'cscene', type: 'choice', label: t('cscene'), resets: true, visible: isContainer,
+        options: [['publish', t('cscenePublish')], ['unpublished', t('csceneUnpub')], ['loopback', t('csceneLoop')], ['taken', t('csceneTaken')]] }
     ],
 
     presets: presets,
@@ -373,11 +531,14 @@
     ],
 
     render: function (c) {
+      var page = c.stage.closest('.sd-page');
+      if (page) page.dataset.pfHost = c.state.host;
       c.stage.replaceChildren(h('div', { class: 'pf' }, drawing(c), translationTable(c)));
     },
 
     caption: function (c) {
       var s = c.state;
+      if (s.host === 'container') return containerCaption(c);
       if (!s.hop) {
         var probe = bold(NET.outside + ':' + c.params.extPort), web = bold(sock(L.web));
         var start = s.scene === 'book' ? t.parts('captionStartBook', { web: web, port: bold(String(L.srcPort)), probe: probe })

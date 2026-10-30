@@ -67,11 +67,19 @@
   function nextPort(net, table, forwards) { return freePort(usedOutside(net, table, forwards), net.outside, net.first); }
 
   /** Add a forward. A second forward on the same protocol and outside port is refused: one outside port names one
-      inside socket (rule 8). The same inside socket may have several forwards. Returns { forwards, refused }. */
+      inside socket (rule 8). The same inside socket may have several forwards. A forward may name one address of R
+      (`addr`, a container published on 127.0.0.1 only, C4); without it, it holds the port on every address, so it
+      clashes with any forward on that port, and two bound to different addresses do not (C5). Returns
+      { forwards, refused, clash (index of the forward in the way, or -1) }. */
   function addForward(forwards, f) {
-    var clash = forwards.some(function (g) { return g.proto === f.proto && g.extPort === f.extPort; });
-    if (clash) return { forwards: forwards, refused: true };
-    return { forwards: forwards.concat([{ proto: f.proto, extPort: f.extPort, to: ep(f.to.ip, f.to.port) }]), refused: false };
+    var clash = -1;
+    forwards.forEach(function (g, i) {
+      if (clash < 0 && g.proto === f.proto && g.extPort === f.extPort && (!g.addr || !f.addr || g.addr === f.addr)) clash = i;
+    });
+    if (clash >= 0) return { forwards: forwards, refused: true, clash: clash };
+    var made = { proto: f.proto, extPort: f.extPort, to: ep(f.to.ip, f.to.port) };
+    if (f.addr) made.addr = f.addr;
+    return { forwards: forwards.concat([made]), refused: false, clash: -1 };
   }
 
   /** How one row compares with a packet: hit (the packet is one direction of the row's connection), the direction
@@ -136,6 +144,7 @@
       for (i = 0; i < forwards.length; i++) {
         var f = forwards[i], miss = [];
         if (f.proto !== pkt.proto) miss.push('proto');
+        if (f.addr && f.addr !== pkt.dst.ip) miss.push('addr');
         if (f.extPort !== pkt.dst.port) miss.push('extPort');
         fwdCompare.push({ hit: !miss.length, miss: miss });
         if (!miss.length) {
@@ -250,22 +259,156 @@
     };
   }
 
+  // ── Container host (preset task lnx-container-ports, SPEC.md "Container host") ──
+  // The same rules with R as a container host: its outside address 192.0.2.10 (eth0), the container bridge
+  // 10.88.0.0/16 (host side 10.88.0.1) as the inside network, containers web 10.88.0.5 and web2 10.88.0.6 listening
+  // on tcp/80, and an outside client C. Publishing a port (`run -p 8080:80`) writes one forward (a DNAT rule) by a
+  // step. Two differences from a router: a forward may be bound to one host address, and a packet to the host's own
+  // address that matches nothing reaches the host's own stack, where nothing listens on that port, so the host
+  // answers with a reset ("connection refused") instead of dropping it. The host's own connections (C3) go straight
+  // onto the bridge and their answers come back to it, untranslated.
+
+  var CNODES = {
+    C: { ip: '203.0.113.7', side: 'out' },
+    H: { ip: '10.88.0.1', side: 'router' },
+    web: { ip: '10.88.0.5', side: 'in' },
+    web2: { ip: '10.88.0.6', side: 'in' }
+  };
+  var CNET = { outside: '192.0.2.10', inside: '10.88.', first: 61000 };
+  var C_PORT = 51000;            // the client's source port (task file)
+  var H_PORT = 52000;            // the host's own source port for its request to web (C3)
+  var CPORT = 80;                // both containers listen on tcp/80
+
+  function cnodeOf(ip) {
+    if (ip === CNET.outside) return 'H';
+    for (var k in CNODES) if (CNODES[k].ip === ip) return k;
+    return null;
+  }
+  /** A publish command: `run -d [-p [addr:]extPort:80] name`. */
+  function run(name, extPort, addr) {
+    return { run: name, publish: extPort ? { addr: addr || null, extPort: extPort } : null };
+  }
+  function probe(extPort, reply) {
+    return { from: 'C', src: ep(CNODES.C.ip, C_PORT), dst: ep(CNET.outside, extPort), reply: !!reply };
+  }
+
+  /** The four scenes: the commands and packets each runs, in order; `start` runs before step 1. */
+  var CSCENES = {
+    publish: { start: [], events: [run('web', 8080), probe(8080, true)] },
+    unpublished: { start: [], events: [run('web', null), probe(80, false),
+      { from: 'H', src: ep(CNODES.H.ip, H_PORT), dst: ep(CNODES.web.ip, CPORT), reply: true }] },
+    loopback: { start: [], events: [run('web', 8080, '127.0.0.1'), probe(8080, false)] },
+    taken: { start: [run('web', 8080)], events: [run('web2', 8080), run('web2', 8081), probe(8081, false)] }
+  };
+
+  /** Run one publish command on the forwards: { forwards, refused, clash, fwd (index of the new forward, or -1) }. */
+  function publish(forwards, cmd) {
+    if (!cmd.publish) return { forwards: forwards, refused: false, clash: -1, fwd: -1 };
+    var f = { proto: 'tcp', extPort: cmd.publish.extPort, to: ep(CNODES[cmd.run].ip, CPORT) };
+    if (cmd.publish.addr) f.addr = cmd.publish.addr;
+    var r = addForward(forwards, f);
+    return { forwards: r.forwards, refused: r.refused, clash: r.clash, fwd: r.refused ? -1 : r.forwards.length - 1 };
+  }
+
+  /** Every step of a container scene, in the hop shape of walk(), plus `cmd` hops ({ cmd, refused, clash, fwd }) and
+      `forwards` after each step. A packet that reaches H and matches nothing: H answers with a reset (hop H → sender,
+      `pkt.flag` 'rst', decision rule 'refused'). */
+  function walkContainer(p) {
+    var sc = CSCENES[p.cscene] || CSCENES.publish;
+    var forwards = [], table = [], hops = [];
+    sc.start.forEach(function (cmd) { forwards = publish(forwards, cmd).forwards; });
+    var start = { table: table, forwards: forwards };
+    function hopOf(from, to, pkt, flow, answer, who) {
+      return { from: from, to: to, came: from, opener: who, called: null, pkt: pkt, was: null, decision: null, drop: null,
+        deliver: false, flow: flow, answer: answer, unexpected: false, cmd: null, local: false, table: table, forwards: forwards };
+    }
+    sc.events.forEach(function (e, flow) {
+      if (e.run) {
+        var r = publish(forwards, e);
+        forwards = r.forwards;
+        var hop = hopOf('H', 'H', null, flow, false, 'H');
+        hop.cmd = { run: e.run, publish: e.publish, refused: r.refused, clash: r.clash, fwd: r.fwd };
+        hops.push(hop);
+        return;
+      }
+      var pkt = pk('tcp', e.src, e.dst), at = e.from, answer = false, opener = null;
+      for (;;) {
+        var to = at === 'H' ? cnodeOf(pkt.dst.ip) : 'H', h = hopOf(at, to, pkt, flow, answer, e.from);
+        if (at === 'H' && e.from === 'H' && !answer) h.local = true;
+        if (to === 'H' && !(answer && e.from === 'H')) {
+          var d = classify(CNET, table, forwards, pkt, CNODES[at].side, false);
+          hops.push(h);
+          if (d.rule === 'drop') {
+            // nothing matched and the packet is for the host itself: no socket listens there, the host resets it
+            var rst = { proto: pkt.proto, src: ep(pkt.dst.ip, pkt.dst.port), dst: ep(pkt.src.ip, pkt.src.port), flag: 'rst' };
+            var back = hopOf('H', at, rst, flow, true, e.from);
+            back.came = at;
+            back.was = pkt;
+            back.decision = Object.assign({}, d, { rule: 'refused' });
+            back.refused = true;
+            hops.push(back);
+            return;
+          }
+          table = d.table;
+          to = cnodeOf(d.out.dst.ip);
+          h = hopOf('H', to, d.out, flow, answer, e.from);
+          h.came = at;
+          h.was = pkt;
+          h.decision = d;
+          pkt = d.out;
+        }
+        hops.push(h);
+        if (opener) {
+          h.called = opener.dst;
+          h.unexpected = !(same(pkt.src, opener.dst) && same(pkt.dst, opener.src));
+          if (h.unexpected) { h.drop = to; return; }
+        }
+        h.deliver = true;
+        if (!e.reply || answer) return;
+        opener = { src: e.src, dst: e.dst };
+        answer = true;
+        pkt = pk(pkt.proto, pkt.dst, pkt.src);
+        at = to;
+      }
+    });
+    return { start: start, hops: hops };
+  }
+
+  function analyzeContainer(p, n) {
+    var w = walkContainer(p), hop = n > 0 ? w.hops[n - 1] : null;
+    return {
+      host: 'container',
+      scene: p.cscene,
+      hop: hop,
+      table: hop ? hop.table : w.start.table,
+      forwards: hop ? hop.forwards : w.start.forwards,
+      nextPort: null,
+      next: w.hops[n] ? { from: w.hops[n].from, to: w.hops[n].to } : null,
+      total: w.hops.length
+    };
+  }
+
   var logic = {
     /** The book's worked example (URM ch. 11, Primjer 4): A and B go out, a packet from outside reaches 61050. */
-    defaults: { scene: 'book', forward: false, proto: 'tcp', extPort: '61050', hairpin: false },
+    defaults: { container: false, scene: 'book', forward: false, proto: 'tcp', extPort: '61050', hairpin: false, cscene: 'publish' },
 
     scenes: ['book', 'mixed', 'outside', 'inside'],
     protos: ['tcp', 'udp'],
     /** Outside ports K calls: the forward's 8080, the book's 61050, and 61000, a port the table holds for A. */
     extPorts: ['8080', '61050', '61000'],
+    /** container: R is a container host (preset task lnx-container-ports) instead of the book's home router. */
+    cscenes: ['publish', 'unpublished', 'loopback', 'taken'],
 
     /** Steps depend on the scene and on what R decides; sim.json's 5 is the default's (the book's). */
-    steps: function (p) { return stepsFor(Object.assign({}, logic.defaults, p)); },
+    steps: function (p) {
+      var q = Object.assign({}, logic.defaults, p);
+      return q.container ? walkContainer(q).hops.length : stepsFor(q);
+    },
 
-    initial: function (p) { return Object.assign({ phase: 'start' }, analyze(p, 0)); },
+    initial: function (p) { return Object.assign({ phase: 'start' }, analyzeAny(p, 0)); },
 
     /** Step n replays the scene from its start, so a param change recomputes at the same step. */
-    step: function (s, n, p) { return Object.assign({ phase: 'hop' }, analyze(p, n)); },
+    step: function (s, n, p) { return Object.assign({ phase: 'hop' }, analyzeAny(p, n)); },
 
     nodes: NODES,
     net: NET,
@@ -282,8 +425,17 @@
     nextHop: nextHop,
     walk: walk,
     stepsFor: stepsFor,
-    analyze: analyze
+    analyze: analyze,
+    cnodes: CNODES,
+    cnet: CNET,
+    cport: CPORT,
+    walkContainer: walkContainer,
+    analyzeContainer: analyzeContainer
   };
+
+  function analyzeAny(p, n) {
+    return p.container ? analyzeContainer(p, n) : Object.assign({ host: 'router' }, analyze(p, n));
+  }
 
   if (typeof module === 'object' && module.exports) module.exports = logic;
   else root.SimLogic = logic;
