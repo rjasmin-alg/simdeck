@@ -1,0 +1,262 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   Every visible string of ssh-tunnels, in both languages (docs/sim-ui.md §9). Same keys in hr and en; the page looks
+   them up with t(key) from Simdeck.useStrings(window.SimStrings). {name} is a placeholder, an array is plural forms
+   (hr: 1 / 2–4 / 5+, en: 1 / other), [[term]] a glossary term (first mention; [[=term]] later ones).
+   Host names, addresses, ports and message names are data: the page puts them in placeholders with translate="no".
+   The title and subtitle come from sim.json (title, concept). */
+(function (root) {
+  'use strict';
+
+  var strings = {
+    hr: {
+      stage: 'SSH tunel: kanali, socketi koji osluškuju te šifrirane i nešifrirane dionice',
+
+      // controls
+      kind: 'Vrsta prosljeđivanja',
+      kindL: 'lokalno',
+      kindR: 'udaljeno',
+      kindD: 'dinamičko',
+      target: 'Odredište (kako je napisano)',
+      remoteBindAny: 'Poslužitelj udaljena prosljeđivanja veže na sve adrese',
+      remoteBindAnyHint: 'Postavka poslužitelja, zadano isključena: tada udaljeno prosljeđivanje sluša samo na 127.0.0.1.',
+      btnSend: 'Pošalji promet',
+      btnSendHint: 'Još jedna veza kroz isti tunel: novi kanal u istoj SSH vezi.',
+
+      // presets
+      presetLoop: 'Lokalno do povratne petlje',
+      presetLoopHint: 'Web poslužitelj koji sluša samo na 127.0.0.1:80 na demosrv1, dohvaćen s democli1.',
+      presetInternal: 'Lokalno do unutarnjeg stroja',
+      presetInternalHint: 'Baza na db1 do koje dolazi samo demosrv1; zadnja dionica nije šifrirana.',
+      presetRemote: 'Udaljeno',
+      presetRemoteHint: 'Stroj iza NAT-a: poslužitelj sluša na 2222 i vodi vezu natrag do klijenta.',
+      presetDynamic: 'Dinamičko',
+      presetDynamicHint: 'SOCKS na 1080: preglednik sam bira odredište za svaku vezu.',
+      presetMixup: 'Zabuna oko localhost',
+      presetMixupHint: 'Mislilo se na web poslužitelj na democli1, a promet stiže na demosrv1.',
+
+      // legend
+      legPipe: 'SSH veza: šifrirana (lokot)',
+      legPlain: 'običan TCP na mreži: nije šifriran',
+      legLoop: 'povratna petlja: unutar jednog stroja',
+      legPlug: 'socket koji osluškuje',
+      legArrow: 'strelica: tko otvara vezu',
+      legChanged: 'novo u ovom koraku',
+
+      // chart
+      laneBrowser: 'Preglednik',
+      laneProgram: 'Program',
+      laneTarget: 'Odredište',
+      laneClient: 'SSH klijent',
+      laneServer: 'SSH poslužitelj',
+      bodyConnects: 'spaja se na {addr}',
+      bodyReachedFrom: 'kako ga vidi {host}',
+      bodyListens: 'sluša na {addr}',
+      bodyOpensTarget: 'otvara vezu prema odredištu',
+      bodyIdle: 'još ništa',
+      chartEmpty: 'Još nema poruka. Korak 1 otvara SSH vezu.',
+      earlier: ['↑ još {n} ranija poruka', '↑ još {n} ranije poruke', '↑ još {n} ranijih poruka'],
+      rowSession: 'ključevi i prijava',
+      rowConnect: 'spajanje',
+      rowListen: 'sluša na {addr}',
+      rowListenSocks: 'SOCKS sluša na {addr}',
+      rowData: 'podaci',
+      rowNoRoute: 'nema puta',
+      rowClose: 'veza zatvorena',
+      chShort: 'kanal {n}',
+
+      // scene
+      hostClient: 'klijent',
+      hostServer: 'poslužitelj',
+      hostInternal: 'unutarnja mreža: do njega dolazi samo demosrv1',
+      hostSites: 'Internet',
+      hostSitesNote: 'web stranice',
+      svcSsh: 'SSH poslužitelj',
+      svcWeb: 'web poslužitelj',
+      svcDb: 'baza podataka',
+      svcFwdCli: 'prosljeđivanje: SSH klijent',
+      svcFwdSrv: 'prosljeđivanje: SSH poslužitelj',
+      svcSocks: 'SOCKS: SSH klijent',
+      reachLocal: 'samo procesi na ovom stroju',
+      reachAny: 'svatko tko dođe do stroja',
+      pipeTitle: 'SSH veza',
+      pipeNone: 'još nema SSH veze',
+      netTitle: 'mreža',
+      channel: 'kanal {n}',
+      tagPlain: 'nije šifrirano, na mreži',
+      tagLoop: 'povratna petlja',
+      tagFail: 'nema puta',
+      appBrowser: 'preglednik',
+      appProgram: 'program',
+      endSshCli: 'SSH klijent',
+      endSshSrv: 'SSH poslužitelj',
+      meant: 'na ovo se mislilo, a nije dohvaćeno',
+      markHit: ['odredište kanala {chs}', 'odredište kanala {chs}', 'odredište kanala {chs}'],
+
+      // captions
+      capStartLoop: 'Web poslužitelj na demosrv1 sluša samo na {web}: s democli1 do njega izravno ne dolazi nitko. Lokalno prosljeđivanje {spec} vodi do njega kroz SSH vezu.',
+      capStartInternal: 'Do baze na {db} dolazi samo demosrv1. Lokalno prosljeđivanje {spec} vodi s democli1 do nje preko demosrv1.',
+      capStartL: 'Lokalno prosljeđivanje {spec}: democli1 će slušati, a demosrv1 se spajati na odredište.',
+      capStartR: 'democli1 je iza NAT-a, pa demosrv1 ne može otvoriti vezu prema njemu. Zato democli1 otvara SSH vezu i traži od poslužitelja da sluša umjesto njega: udaljeno prosljeđivanje {spec}.',
+      capStartD: 'Dinamičko prosljeđivanje {spec}: democli1 će imati SOCKS posrednika, a odredište bira preglednik za svaku vezu posebno.',
+      capStartMixup: 'Korisnik želi web poslužitelj na svojem democli1, pa piše {spec}. Pogledaj gdje će to završiti.',
+      capSetupL: 'SSH veza do {host}. SSH klijent na democli1 sluša na {listen}, samo za procese na democli1; poslužitelju se još ništa ne šalje.',
+      capSetupD: 'SSH veza do {host}. SSH klijent na democli1 sluša na {listen} kao SOCKS posrednik; odredište stiže tek s pojedinom vezom.',
+      capSetupR: 'SSH veza do {host}, pa zahtjev {req}: poslužitelj sluša na {listen}.',
+      capReachLocal: 'Poslužitelj udaljena prosljeđivanja veže samo na povratnu petlju, pa se mogu spojiti samo programi na demosrv1.',
+      capReachAny: 'Poslužitelj udaljena prosljeđivanja veže na sve svoje adrese: na port {port} može se spojiti svatko tko dođe do 192.168.122.57.',
+      capConnectL: 'Program na democli1 spaja se na {listen}: običan TCP preko povratne petlje, unutar democli1.',
+      capConnectBrowser: 'Preglednik na democli1 otvara {url}: običan TCP preko povratne petlje, unutar democli1.',
+      capConnectD: 'Preglednik se spaja na {listen} i traži od SOCKS posrednika vezu do {dest}.',
+      capConnectR: 'Program na demosrv1 spaja se na {listen}: običan TCP preko povratne petlje, unutar demosrv1.',
+      capOpenL: 'SSH klijent otvara kanal {n} unutar SSH veze: {msg} traži od poslužitelja vezu do {req}, točno kako je napisano.',
+      capOpenR: 'SSH poslužitelj otvara kanal {n} natrag prema klijentu: {msg} javlja da je stigla veza na {listen}.',
+      capTargetLoop: '{host} razrješava localhost kao sebe i spaja se na svoj {dst}, pa potvrđuje kanal.',
+      capLoopWeb: 'Veza dolazi sa samog demosrv1, pa je prihvaća web poslužitelj koji sluša samo na povratnoj petlji.',
+      capTargetNet: 'demosrv1 se spaja na {dst} ({host}): običan TCP na unutarnjoj mreži, do koje dolazi samo on. Zatim potvrđuje kanal.',
+      capTargetSite: 'demosrv1 se spaja na {dst}: stranica vidi vezu s demosrv1, a ne s democli1. Zatim potvrđuje kanal.',
+      capTargetFail: 'democli1 ne dolazi do {dst}: do db1 dolazi samo demosrv1. Odredište se razrješava i dohvaća s udaljenog kraja, ovdje s klijenta, pa odgovor glasi {msg}.',
+      capTargetMixup: 'demosrv1 razrješava localhost kao sebe: spaja se na svoj {dst}, a ne na web poslužitelj na democli1. localhost u prosljeđivanju znači udaljeni kraj.',
+      capDataNet: 'Podaci teku. Šifriran je samo dio između democli1 i demosrv1, u kanalu {n}. Od demosrv1 do {dst} to je običan TCP na mreži. Odgovor se vraća istim putem.',
+      capDataLoop: 'Podaci teku. Šifriran je dio između democli1 i demosrv1, u kanalu {n}; oba kraja su na povratnoj petlji, svaki unutar svojeg stroja, pa ništa ne ide mrežom nešifrirano. Odgovor se vraća istim putem.',
+      capDataMixup: 'Stranica koja se vraća dolazi s web poslužitelja na demosrv1, a ne s democli1. Za vlastiti web poslužitelj tunel nije ni trebao: {own}.',
+      capDataFail: 'Nema kanala, nema podataka: demosrv1 zatvara vezu programa koji je čekao.',
+      capMore: 'Nova veza: kanal {n} u istoj SSH vezi, sa svojim {msg} i istim putem.',
+      capMoreD: 'Preglednik sad traži {dest}: kanal {n} u istoj SSH vezi, a i ta stranica vidi vezu s demosrv1.',
+      capMoreFail: 'Nova veza, kanal {n}: završava jednako, democli1 ne dolazi do {dst}.',
+      capPlainTail: 'Od demosrv1 dalje nije šifrirano.',
+      capSend: 'T šalje još jednu vezu.',
+      capFull: 'Demo je pun: najviše dvije dodatne veze.',
+
+      explain:
+        '<p>Jedna SSH veza nosi više logičkih kanala, a <i>port forwarding</i> (prosljeđivanje porta) jedan je od načina da se kanal otvori. Prosljeđivanje je <b><i>socket</i> koji osluškuje</b> na jednom kraju veze; svaka veza na njega postaje novi kanal, a <b>udaljeni kraj</b> otvara običnu TCP vezu prema odredištu.</p>' +
+        '<ul><li><b>Lokalno</b>: sluša klijent, a na odredište se spaja poslužitelj (<code>direct-tcpip</code>).</li>' +
+        '<li><b>Udaljeno</b>: sluša poslužitelj (zahtjev <code>tcpip-forward</code>), a na odredište se spaja klijent (<code>forwarded-tcpip</code>).</li>' +
+        '<li><b>Dinamičko</b>: klijent je SOCKS posrednik, a odredište bira program za svaku vezu.</li></ul>' +
+        '<p>Tri zablude: <b>„kroz tunel je sve šifrirano s kraja na kraj“</b> – šifriran je samo dio između klijenta i poslužitelja; <b>„localhost je moje računalo“</b> – to je [[loopback]] udaljenog kraja; <b>„udaljeno prosljeđivanje otvara port cijelom Internetu“</b> – samo ako ga poslužitelj veže na sve adrese, a zadano sluša samo na 127.0.0.1.</p>'
+    },
+
+    en: {
+      stage: 'SSH tunnel: channels, listening sockets, and the encrypted and plain segments',
+
+      kind: 'Kind of forwarding',
+      kindL: 'local',
+      kindR: 'remote',
+      kindD: 'dynamic',
+      target: 'Target (as written)',
+      remoteBindAny: 'Server binds remote forwards to all addresses',
+      remoteBindAnyHint: 'A server setting, off by default: then a remote forward listens on 127.0.0.1 only.',
+      btnSend: 'Send traffic',
+      btnSendHint: 'One more connection through the same tunnel: a new channel in the same SSH connection.',
+
+      presetLoop: 'Local to loopback',
+      presetLoopHint: 'A web server that listens on 127.0.0.1:80 only on demosrv1, reached from democli1.',
+      presetInternal: 'Local to an internal host',
+      presetInternalHint: 'A database on db1 that only demosrv1 reaches; the last segment is not encrypted.',
+      presetRemote: 'Remote',
+      presetRemoteHint: 'A machine behind NAT: the server listens on 2222 and carries the connection back to the client.',
+      presetDynamic: 'Dynamic',
+      presetDynamicHint: 'SOCKS on 1080: the browser picks the destination for each connection.',
+      presetMixup: 'The localhost mix-up',
+      presetMixupHint: 'Meant for the web server on democli1, but the traffic lands on demosrv1.',
+
+      legPipe: 'SSH connection: encrypted (lock)',
+      legPlain: 'plain TCP on the network: not encrypted',
+      legLoop: 'loopback: inside one host',
+      legPlug: 'listening socket',
+      legArrow: 'arrow: who opens the connection',
+      legChanged: 'new this step',
+
+      laneBrowser: 'Browser',
+      laneProgram: 'Program',
+      laneTarget: 'Target',
+      laneClient: 'SSH client',
+      laneServer: 'SSH server',
+      bodyConnects: 'connects to {addr}',
+      bodyReachedFrom: 'as {host} sees it',
+      bodyListens: 'listens on {addr}',
+      bodyOpensTarget: 'opens the connection to the target',
+      bodyIdle: 'nothing yet',
+      chartEmpty: 'No messages yet. Step 1 opens the SSH connection.',
+      earlier: ['↑ {n} earlier message', '↑ {n} earlier messages'],
+      rowSession: 'key exchange and login',
+      rowConnect: 'connect',
+      rowListen: 'listens on {addr}',
+      rowListenSocks: 'SOCKS listens on {addr}',
+      rowData: 'data',
+      rowNoRoute: 'no route',
+      rowClose: 'connection closed',
+      chShort: 'channel {n}',
+
+      hostClient: 'client',
+      hostServer: 'server',
+      hostInternal: 'internal network: only demosrv1 reaches it',
+      hostSites: 'Internet',
+      hostSitesNote: 'web sites',
+      svcSsh: 'SSH server',
+      svcWeb: 'web server',
+      svcDb: 'database',
+      svcFwdCli: 'forwarding: SSH client',
+      svcFwdSrv: 'forwarding: SSH server',
+      svcSocks: 'SOCKS: SSH client',
+      reachLocal: 'only processes on this host',
+      reachAny: 'anyone who reaches the host',
+      pipeTitle: 'SSH connection',
+      pipeNone: 'no SSH connection yet',
+      netTitle: 'network',
+      channel: 'channel {n}',
+      tagPlain: 'not encrypted, on the network',
+      tagLoop: 'loopback',
+      tagFail: 'no route',
+      appBrowser: 'browser',
+      appProgram: 'program',
+      endSshCli: 'SSH client',
+      endSshSrv: 'SSH server',
+      meant: 'meant: not reached',
+      markHit: ['target of channel {chs}', 'target of channels {chs}'],
+
+      capStartLoop: 'The web server on demosrv1 listens on {web} only: nobody on democli1 reaches it directly. A local forward {spec} leads to it through the SSH connection.',
+      capStartInternal: 'Only demosrv1 reaches the database on {db}. A local forward {spec} leads from democli1 to it by way of demosrv1.',
+      capStartL: 'Local forward {spec}: democli1 will listen, and demosrv1 will connect to the target.',
+      capStartR: 'democli1 is behind NAT, so demosrv1 cannot open a connection to it. So democli1 opens the SSH connection and asks the server to listen for it: remote forward {spec}.',
+      capStartD: 'Dynamic forward {spec}: democli1 will run a SOCKS proxy, and the browser picks the destination for each connection.',
+      capStartMixup: 'The user wants the web server on their own democli1, so they write {spec}. Watch where it ends up.',
+      capSetupL: 'SSH connection to {host}. The SSH client on democli1 listens on {listen}, for processes on democli1 only; nothing is sent to the server yet.',
+      capSetupD: 'SSH connection to {host}. The SSH client on democli1 listens on {listen} as a SOCKS proxy; the destination comes only with each connection.',
+      capSetupR: 'SSH connection to {host}, then the request {req}: the server listens on {listen}.',
+      capReachLocal: 'The server binds remote forwards to loopback only, so only programs on demosrv1 can connect.',
+      capReachAny: 'The server binds remote forwards to all its addresses: anyone who reaches 192.168.122.57 can connect to port {port}.',
+      capConnectL: 'A program on democli1 connects to {listen}: plain TCP over loopback, inside democli1.',
+      capConnectBrowser: 'The browser on democli1 opens {url}: plain TCP over loopback, inside democli1.',
+      capConnectD: 'The browser connects to {listen} and asks the SOCKS proxy for a connection to {dest}.',
+      capConnectR: 'A program on demosrv1 connects to {listen}: plain TCP over loopback, inside demosrv1.',
+      capOpenL: 'The SSH client opens channel {n} inside the SSH connection: {msg} asks the server for a connection to {req}, exactly as written.',
+      capOpenR: 'The SSH server opens channel {n} back to the client: {msg} says a connection arrived on {listen}.',
+      capTargetLoop: '{host} resolves localhost as itself and connects to its own {dst}, then confirms the channel.',
+      capLoopWeb: 'The connection comes from demosrv1 itself, so the web server bound to loopback accepts it.',
+      capTargetNet: 'demosrv1 connects to {dst} ({host}): plain TCP on the internal network, which only it reaches. Then it confirms the channel.',
+      capTargetSite: 'demosrv1 connects to {dst}: the site sees the connection coming from demosrv1, not from democli1. Then it confirms the channel.',
+      capTargetFail: 'democli1 does not reach {dst}: only demosrv1 reaches db1. The target is resolved and reached from the far end, here the client, so the answer is {msg}.',
+      capTargetMixup: 'demosrv1 resolves localhost as itself: it connects to its own {dst}, not to the web server on democli1. localhost in a forward means the far end.',
+      capDataNet: 'Data flows. Only the part between democli1 and demosrv1 is encrypted, in channel {n}. From demosrv1 to {dst} it is plain TCP on the network. The reply comes back the same way.',
+      capDataLoop: 'Data flows. The part between democli1 and demosrv1 is encrypted, in channel {n}; both ends are on loopback, inside one host each, so nothing crosses the network unencrypted. The reply comes back the same way.',
+      capDataMixup: 'The page that comes back is from the web server on demosrv1, not democli1. Their own web server needed no tunnel at all: {own}.',
+      capDataFail: 'No channel, no data: demosrv1 closes the connection of the program that was waiting.',
+      capMore: 'A new connection: channel {n} in the same SSH connection, with its own {msg} and the same path.',
+      capMoreD: 'The browser now asks for {dest}: channel {n} in the same SSH connection, and this site too sees the connection coming from demosrv1.',
+      capMoreFail: 'A new connection, channel {n}: it ends the same way, democli1 does not reach {dst}.',
+      capPlainTail: 'From demosrv1 on it is not encrypted.',
+      capSend: 'T sends one more connection.',
+      capFull: 'The demo is full: two extra connections at most.',
+
+      explain:
+        '<p>One SSH connection carries several logical channels, and port forwarding is one way to open one. A forwarding is a <b>listening socket</b> at one end of the connection; every connection to it becomes a new channel, and the <b>far end</b> opens a plain TCP connection to the target.</p>' +
+        '<ul><li><b>Local</b>: the client listens, and the server connects to the target (<code>direct-tcpip</code>).</li>' +
+        '<li><b>Remote</b>: the server listens (request <code>tcpip-forward</code>), and the client connects to the target (<code>forwarded-tcpip</code>).</li>' +
+        '<li><b>Dynamic</b>: the client is a SOCKS proxy, and the program picks the target for each connection.</li></ul>' +
+        '<p>Three misconceptions: <b>“everything through a tunnel is encrypted end to end”</b> – only the part between client and server is; <b>“localhost is my machine”</b> – it is the far end’s [[loopback]]; <b>“a remote forward opens my port to the whole Internet”</b> – only if the server binds it to all addresses; by default it listens on 127.0.0.1 only.</p>'
+    }
+  };
+
+  if (typeof module === 'object' && module.exports) module.exports = strings;
+  else root.SimStrings = strings;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

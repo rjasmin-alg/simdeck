@@ -1,0 +1,535 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ssh-tunnels: SSH port forwarding. A stepper: step 1 opens the SSH connection and the forwarding's listener, the
+     first connection takes four steps (connect, channel open, the far end connects to the target, data), every further
+     one a step. Top: the messages as kit view K1 (kit/sequence.js), lanes app/target, SSH client, SSH server,
+     target/app. Bottom: the scene, the hosts with their listening sockets, the SSH connection as a thick encrypted
+     pipe with one channel per connection, and each connection's segments (loopback, encrypted, plain on the network).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ssh-tunnels">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSH: prosljeđivanje porta · simdeck</title>
+<meta name="description" content="Lokalno, udaljeno i dinamičko prosljeđivanje porta kroz SSH: tko sluša, tko se spaja na odredište, što znači localhost i koja dionica nije šifrirana.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ssh-tunnels",
+  "title": {
+    "hr": "SSH: prosljeđivanje porta",
+    "en": "SSH port forwarding"
+  },
+  "concept": {
+    "hr": "lokalno, udaljeno i dinamičko prosljeđivanje",
+    "en": "local, remote and dynamic forwarding"
+  },
+  "summary": {
+    "hr": "Složi svaki tunel i pošalji promet: tko sluša, tko se spaja na odredište, što znači localhost i koja dionica nije šifrirana.",
+    "en": "Build each tunnel and send traffic: who listens, who connects to the target, what localhost means and which segment is not encrypted."
+  },
+  "tags": [
+    "ssh"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ssh-tunnels"]; colours only from kit tokens.
+   Layout: the K1 chart on top (it takes the free height and drops old rows), the scene under it. The scene is a grid
+   of five columns: democli1, the SSH pipe, demosrv1, the network, the host beyond (db1 or the web sites). Row 1 holds
+   the host cards, one row per connection under it. The pipe is one element over all rows of its column; each channel
+   is a bar inside it. Line style carries the kind of segment, not colour: loopback a thin solid line, the channel a
+   thick line with a lock in the double-walled pipe, plain on the network a dashed line. */
+[data-sim="ssh-tunnels"] .tn {
+  display: flex; flex-direction: column; gap: 0.8cqh; height: 100%; padding: 1cqh 1cqw; font-size: 0.9rem;
+}
+[data-sim="ssh-tunnels"] .tn > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="ssh-tunnels"] .tn-mono { font-family: var(--mono); }
+[data-sim="ssh-tunnels"] .tn-muted { color: var(--muted); }
+[data-sim="ssh-tunnels"] .tn-sm { font-size: var(--fs-sm); }
+[data-sim="ssh-tunnels"] .tn-card { margin: 0.1rem 0 0; font-size: var(--fs-sm); line-height: 1.3; color: var(--muted); }
+
+/* the scene grid */
+[data-sim="ssh-tunnels"] .tn-scene {
+  flex: none; position: relative; display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.45fr) minmax(0, 1.05fr) minmax(0, 0.28fr) minmax(0, 0.9fr);
+  column-gap: 0; row-gap: 0.25rem; align-items: stretch;
+}
+[data-sim="ssh-tunnels"] .tn-host {
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+  padding: 0.3rem 0.6rem 0.4rem; min-width: 0; z-index: 1;
+}
+[data-sim="ssh-tunnels"] .tn-host[data-h="cli"] { border-top: 0.35rem solid var(--c1); }
+[data-sim="ssh-tunnels"] .tn-host[data-h="srv"] { border-top: 0.35rem solid var(--c6); }
+[data-sim="ssh-tunnels"] .tn-host[data-h="far"] { border-top: 0.35rem solid var(--c4); }
+[data-sim="ssh-tunnels"] .tn-host h2 { margin: 0; font-size: 1rem; font-weight: 700; line-height: 1.3; }
+[data-sim="ssh-tunnels"] .tn-host h2 .tn-sm { font-weight: 400; color: var(--muted); }
+[data-sim="ssh-tunnels"] .tn-note { margin: 0.1rem 0 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="ssh-tunnels"] .tn-socks { list-style: none; margin: 0.2rem 0 0; padding: 0; display: grid; gap: 0.15rem; }
+[data-sim="ssh-tunnels"] .tn-sock { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 0.4rem; align-items: baseline; line-height: 1.3; padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="ssh-tunnels"] .tn-sock > .tn-reach, [data-sim="ssh-tunnels"] .tn-sock > .tn-mark { grid-column: 2 / -1; font-size: var(--fs-sm); color: var(--muted); line-height: 1.2; }
+[data-sim="ssh-tunnels"] .tn-sock[data-own="tun"] { font-weight: 700; outline: 0.15rem solid var(--ink); outline-offset: -0.05rem; }
+[data-sim="ssh-tunnels"] .tn-sock[data-own="tun"] > .tn-reach { font-weight: 400; color: var(--ink); }
+[data-sim="ssh-tunnels"] .tn-sock > .tn-mark { font-weight: 700; color: var(--ink); }
+[data-sim="ssh-tunnels"] .tn-sock[data-st="meant"] { outline: 0.15rem dashed var(--danger); outline-offset: -0.05rem; }
+[data-sim="ssh-tunnels"] .tn-sock[data-st="hit"] { outline: 0.18rem solid var(--ink); outline-offset: -0.05rem; }
+/* the plug: a socket body with two prongs */
+[data-sim="ssh-tunnels"] .tn-plug, [data-sim="ssh-tunnels"] .sd-swatch[data-shape="plug"] {
+  position: relative; display: inline-block; width: 0.75em; height: 0.6em; margin-top: 0.3em; flex: none;
+  border: 0.13em solid currentColor; border-radius: 0.1em 0.1em 0.3em 0.3em; background: transparent; box-sizing: border-box;
+}
+[data-sim="ssh-tunnels"] .tn-plug::before, [data-sim="ssh-tunnels"] .sd-swatch[data-shape="plug"]::before {
+  content: ''; position: absolute; bottom: 100%; left: 0.1em; width: 0.12em; height: 0.3em; background: currentColor;
+  box-shadow: 0.26em 0 0 currentColor;
+}
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="plug"] { width: 1em; height: 0.8em; color: var(--ink); margin-top: 0.35em; }
+[data-sim="ssh-tunnels"] .tn-sock[data-own="tun"] .tn-plug { background: var(--ink); }
+
+/* the pipe and the network headers */
+[data-sim="ssh-tunnels"] .tn-pipe {
+  grid-column: 2; margin: 1.6rem 0.35rem 0; border-radius: 1.2rem;
+  border: 0.45rem double var(--ink); background: var(--bg); z-index: 0;
+}
+[data-sim="ssh-tunnels"] .tn-pipe[data-off] { border-style: dashed; border-width: 0.18rem; border-color: var(--muted); }
+[data-sim="ssh-tunnels"] .tn-head { grid-row: 1; z-index: 1; align-self: center; text-align: center; padding: 0 0.6rem; line-height: 1.25; }
+[data-sim="ssh-tunnels"] .tn-head b { display: block; }
+[data-sim="ssh-tunnels"] .tn-head .tn-sm { color: var(--muted); }
+[data-sim="ssh-tunnels"] .tn-lock { display: inline-block; position: relative; width: 0.8em; height: 0.6em; margin: 0 0.2em 0 0.1em; border-radius: 0.1em; background: currentColor; vertical-align: -0.05em; }
+[data-sim="ssh-tunnels"] .tn-lock::before {
+  content: ''; position: absolute; left: 0.14em; bottom: 100%; width: 0.52em; height: 0.38em; box-sizing: border-box;
+  border: 0.12em solid currentColor; border-bottom: 0; border-radius: 0.25em 0.25em 0 0;
+}
+
+/* one connection: cells per column, lines between end chips */
+[data-sim="ssh-tunnels"] .tn-cell { display: flex; align-items: center; min-width: 0; z-index: 1; padding: 0.1rem 0; }
+[data-sim="ssh-tunnels"] .tn-cell[data-c="pipe"] { padding-inline: 0.75rem; }
+[data-sim="ssh-tunnels"] .tn-end {
+  flex: none; max-width: 70%; white-space: nowrap; padding: 0.05rem 0.3rem; font-size: var(--fs-sm); border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--panel); line-height: 1.25; overflow-wrap: anywhere;
+}
+[data-sim="ssh-tunnels"] .tn-end[data-fail] { border-style: dashed; border-color: var(--danger); }
+[data-sim="ssh-tunnels"] .tn-seg { position: relative; flex: 1 1 0; min-width: 1.5rem; align-self: stretch; display: flex; align-items: center; justify-content: center; min-height: 1.9rem; }
+/* the tag sits on the line, on the page background, so a row is one line high */
+[data-sim="ssh-tunnels"] .tn-tag {
+  position: relative; z-index: 1; max-width: calc(100% - 1.3rem); padding: 0 0.2rem; background: var(--bg); border-radius: var(--radius-sm);
+  font-size: var(--fs-sm); line-height: 1.2; text-align: center; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-sim="ssh-tunnels"] .tn-tag:empty { display: none; }
+[data-sim="ssh-tunnels"] .tn-line { position: absolute; left: 0.55rem; right: 0.55rem; top: 50%; height: 0; margin-top: -0.1rem; border-top: 0.2rem solid var(--ink); }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="net"] .tn-line { border-top-style: dashed; }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="fail"] .tn-line { border-top-style: dashed; border-top-color: var(--danger); }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="ssh"] .tn-line { border-top-width: 0.45rem; margin-top: -0.225rem; }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="ssh"] .tn-tag { color: var(--ink); font-weight: 700; }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="net"] .tn-tag { color: var(--ink); }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="fail"] .tn-tag { color: var(--danger); font-weight: 700; }
+/* arrow heads at the end the connection is opened towards; edge = the line runs on into the next column */
+[data-sim="ssh-tunnels"] .tn-line::after {
+  content: ''; position: absolute; top: calc(-0.5rem - 0.1rem); border: 0.5rem solid transparent;
+}
+[data-sim="ssh-tunnels"] .tn-seg[data-k="ssh"] .tn-line::after { top: calc(-0.5rem - 0.225rem); }
+[data-sim="ssh-tunnels"] .tn-line[data-dir="r"]::after { right: -0.6rem; border-left: 0.7rem solid var(--ink); border-right: 0; }
+[data-sim="ssh-tunnels"] .tn-line[data-dir="l"]::after { left: -0.6rem; border-right: 0.7rem solid var(--ink); border-left: 0; }
+[data-sim="ssh-tunnels"] .tn-line[data-noarrow]::after { display: none; }
+[data-sim="ssh-tunnels"] .tn-line[data-edge~="r"] { right: 0; }
+[data-sim="ssh-tunnels"] .tn-line[data-edge~="l"] { left: 0; }
+[data-sim="ssh-tunnels"] .tn-seg[data-k="fail"] .tn-line::after { content: '✕'; border: 0; top: -0.75rem; color: var(--danger); font-weight: 700; font-size: 1rem; line-height: 1; }
+/* data flowing: a moving dash pattern over the line (no motion under reduced motion: the kit stops animations) */
+[data-sim="ssh-tunnels"] .tn-line[data-flow]::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0.15rem; height: 0.4rem;
+  background: radial-gradient(circle, var(--ink) 0.13rem, transparent 0.15rem) 0 50% / 1rem 0.4rem repeat-x;
+  animation: tn-flow 1.2s linear infinite;
+}
+[data-sim="ssh-tunnels"] .tn-seg[data-k="ssh"] .tn-line[data-flow]::before { top: 0.2rem; }
+[data-sim="ssh-tunnels"] .tn-line[data-flow][data-dir="l"]::before { animation-direction: reverse; }
+@keyframes tn-flow { from { background-position: 0 50%; } to { background-position: 1rem 50%; } }
+[data-sim="ssh-tunnels"] .tn-cell .sd-changed { box-shadow: none; outline: none; }
+[data-sim="ssh-tunnels"] .tn-seg.sd-changed .tn-tag:not(:empty), [data-sim="ssh-tunnels"] .tn-end.sd-changed {
+  background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm);
+}
+[data-sim="ssh-tunnels"] .tn-sock.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; }
+[data-sim="ssh-tunnels"] .tn-sock.sd-changed > .tn-reach { color: var(--on-hl); }
+
+/* legend swatches */
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="pipe"] { width: 1.6em; height: 0.7em; margin-top: 0.25em; border: 0.25em double var(--ink); border-radius: 0.4em; background: var(--bg); }
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="plain"] { width: 1.6em; height: 0; margin-top: 0.6em; border: 0; border-top: 0.2rem dashed var(--ink); border-radius: 0; background: none; }
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="loop"] { width: 1.6em; height: 0; margin-top: 0.6em; border: 0; border-top: 0.2rem solid var(--ink); border-radius: 0; background: none; }
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="arrow"] { position: relative; width: 1.4em; height: 0; margin-top: 0.6em; border: 0; border-top: 0.2rem solid var(--ink); border-radius: 0; background: none; }
+[data-sim="ssh-tunnels"] .sd-swatch[data-shape="arrow"]::after { content: ''; position: absolute; right: -0.4em; top: calc(-0.35em - 0.1rem); border: 0.35em solid transparent; border-left: 0.5em solid var(--ink); border-right: 0; }
+
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as ssh-key-auth does). */
+[data-sim="ssh-tunnels"] .sd-panel [hidden] { display: none; }
+
+[data-sim="ssh-tunnels"] .tn-flowhead { display: none; }
+
+/* Phone and portrait: the stage grows with its content; the scene becomes one column, the pipe a border on each
+   channel. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ssh-tunnels"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ssh-tunnels"] .tn { height: auto; padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="ssh-tunnels"] .tn > .sd-seq { flex: none; }
+  [data-sim="ssh-tunnels"] .tn .sd-seq-list { padding-bottom: 1.5rem; }
+  [data-sim="ssh-tunnels"] .tn-scene { grid-template-columns: minmax(0, 1fr); row-gap: 0.3rem; }
+  [data-sim="ssh-tunnels"] .tn-scene > * { grid-column: 1 !important; grid-row: auto !important; }
+  [data-sim="ssh-tunnels"] .tn-pipe { display: none; }
+  [data-sim="ssh-tunnels"] .tn-head { text-align: left; padding: 0; }
+  [data-sim="ssh-tunnels"] .tn-cell:empty { display: none; }
+  [data-sim="ssh-tunnels"] .tn-cell[data-c="pipe"] { padding-inline: 0.3rem; border: 0.35rem double var(--ink); border-radius: 0.8rem; }
+  [data-sim="ssh-tunnels"] .tn-flowhead { display: block; font-weight: 700; margin-top: 0.4rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">SSH: prosljeđivanje porta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (host names, addresses, ports, message names) is not language. */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'tn-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function ap(a, port) { return a + ':' + port; }
+  var SVC = { ssh: 'svcSsh', web: 'svcWeb', db: 'svcDb' };
+
+  /** The forwarding as a spec, without any tool's syntax: "8080 → localhost:80", "1080" for dynamic. */
+  function specOf(s, p) {
+    var bind = L.listener(s.kind, s.target || {}, !!p.remoteBindAny);
+    return s.kind === 'D' ? String(bind.port) : bind.port + ' → ' + ap(s.target.host, s.target.port);
+  }
+  /** Where the target of this run lands (rule 7), before the far end tries it: for the lane card. */
+  function landing(s) {
+    if (s.kind === 'D') return null;
+    return L.resolve(L.ends(s.kind).far, s.target);
+  }
+  function dstText(d) { return d.addr ? ap(d.addr, d.port) : ap(d.host, d.port); }
+
+  // ── the chart (K1) ──
+
+  function lanes(c) {
+    var s = c.state, tun = s.tunnels[0], kind = s.kind, ln = L.lanesFor(kind);
+    var bind = tun ? tun.bind : null, land = landing(s);
+    var appName = kind === 'D' || (s.target && s.target.port === 80) ? 'laneBrowser' : 'laneProgram';
+    function card(x) { return h('div', { class: 'tn-card' }, x); }
+    var listenAt = bind ? card(t.parts('bodyListens', { addr: data(ap(bind.addr, bind.port), '') })) : card(t('bodyIdle'));
+    var opens = card(t('bodyOpensTarget'));
+    var landed = s.flows[0] && s.flows[0].dst;
+    var tgtTags = kind === 'D' ? h('span', { class: 'tn-sm' }, t('hostSitesNote'))
+      : s.mixup && !landed ? data(ap(s.target.host, s.target.port), 'tn-mono tn-sm')
+      : data(land.host + (land.addr ? ' ' + ap(land.addr, land.port) : ''), 'tn-mono tn-sm');
+    var tgtBody = card(t.parts('bodyReachedFrom', { host: data(L.ends(kind).far, '') }));
+    var appBody = bind ? card(t.parts('bodyConnects', { addr: data(ap(L.LOOP, bind.port), '') })) : card(t('bodyIdle'));
+    var out = {};
+    out[ln.near] = { id: ln.near, mark: ln.near, c: ln.near === 'C' ? 1 : 6, shape: 'square',
+      name: t(ln.near === 'C' ? 'laneClient' : 'laneServer'), tags: data(ln.near === 'C' ? L.CLIENT : L.SERVER + ' · ' + L.HOST, 'tn-mono tn-sm'), body: listenAt };
+    out[ln.far] = { id: ln.far, mark: ln.far, c: ln.far === 'C' ? 1 : 6, shape: 'square',
+      name: t(ln.far === 'C' ? 'laneClient' : 'laneServer'), tags: data(ln.far === 'C' ? L.CLIENT : L.SERVER + ' · ' + L.HOST, 'tn-mono tn-sm'), body: opens };
+    out[ln.app] = { id: ln.app, mark: ln.app, c: 2, name: t(kind === 'R' ? 'laneProgram' : appName),
+      tags: data(kind === 'R' ? L.SERVER : L.CLIENT, 'tn-mono tn-sm'), body: appBody };
+    out[ln.tgt] = { id: ln.tgt, mark: ln.tgt, c: 4, name: t('laneTarget'), tags: tgtTags, body: tgtBody };
+    return ['A', 'C', 'S', 'B'].map(function (id) { return out[id]; });
+  }
+
+  function rowOf(r, c) {
+    var changed = r.n === c.n;
+    var m = { from: r.from, to: r.to, changed: changed };
+    switch (r.k) {
+      case 'session': return Object.assign(m, { c: 1, label: 'SSH', fields: h('span', null, data(':22', ''), ' ', t('rowSession')) });
+      case 'fwdReq': return Object.assign(m, { c: 1, lock: true, label: 'tcpip-forward', fields: data(r.host + ' ' + r.port, '') });
+      case 'fwdOk': return Object.assign(m, { c: 6, lock: true, label: 'REQUEST_SUCCESS' });
+      case 'listen': return { kind: 'note', lane: r.lane, k: 'solid', changed: changed,
+        text: h('span', null, t.parts(r.socks ? 'rowListenSocks' : 'rowListen', { addr: data(ap(r.addr, r.port), '') })) };
+      case 'connect': return Object.assign(m, { c: 2, label: 'TCP', time: h('span', null, t('chShort', { n: r.ch })),
+        fields: h('span', null, t('rowConnect'), ' ', data(ap(r.addr, r.port), '')) });
+      case 'socks': return Object.assign(m, { c: 2, label: 'SOCKS CONNECT', fields: data(ap(r.host, r.port), '') });
+      case 'open': return Object.assign(m, { c: r.from === 'C' ? 1 : 6, lock: true, label: 'CHANNEL_OPEN', fields: data(r.type === 'direct-tcpip' ? r.type + ' ' + ap(r.host, r.port) : r.type, '') });
+      case 'tconnect': return r.fail
+        ? Object.assign(m, { c: 1, label: 'TCP', drop: true, line: 'dashed', re: (function () { var o = {}; o[r.to] = t('rowNoRoute'); return o; })() })
+        : Object.assign(m, { c: r.from === 'C' ? 1 : 6, label: 'TCP', fields: h('span', null, t('rowConnect'), ' ', data(ap(r.host, r.port), '')) });
+      case 'confirm': return Object.assign(m, { c: r.from === 'C' ? 1 : 6, lock: true, label: 'CHANNEL_OPEN_CONFIRMATION' });
+      case 'openFail': return Object.assign(m, { c: 1, lock: true, label: 'CHANNEL_OPEN_FAILURE' });
+      case 'close': return Object.assign(m, { c: 6, label: 'TCP', line: 'dashed', fields: h('span', null, t('rowClose')) });
+      case 'data': return Object.assign(m, { c: r.seg === 0 ? 2 : r.from === 'C' ? 1 : 6, label: h('span', null, t('rowData')) });
+      case 'chdata': return Object.assign(m, { c: r.from === 'C' ? 1 : 6, lock: true, label: 'CHANNEL_DATA' });
+    }
+    return null;
+  }
+
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '5.6rem',
+      lanes: lanes(c),
+      rows: c.state.rows.map(function (r) { return rowOf(r, c); }).filter(Boolean),
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── the scene ──
+
+  /** Channels whose connection landed on host:port (the target's socket in the host card). */
+  function hits(c, host, port) {
+    return c.state.flows.filter(function (f) { return f.dst && !f.fail && f.dst.host === host && f.dst.port === port; })
+      .map(function (f) { return f.ch; });
+  }
+  function svcLine(c, host, x, roleWord) {
+    var s = c.state, f0 = s.flows[0], chs = hits(c, host, x.port), st = '', mark = null;
+    if (chs.length) { st = 'hit'; mark = h('span', { class: 'tn-mark' }, '✓ ', t.n('markHit', chs.length, { chs: chs.join(', ') })); }
+    else if (s.mixup && f0 && f0.dst && host === L.CLIENT && x.role === 'web') { st = 'meant'; mark = h('span', { class: 'tn-mark' }, '✕ ', t('meant')); }
+    return h('li', { class: 'tn-sock', dataset: { own: 'svc', st: st } },
+      h('span', { class: 'tn-plug', 'aria-hidden': 'true' }), data(ap(x.addr, x.port)), roleWord,
+      x.addr === L.LOOP ? h('span', { class: 'tn-reach' }, t('reachLocal')) : null, mark);
+  }
+
+  function sockets(c, host) {
+    var s = c.state, tun = s.tunnels[0];
+    var list = (L.SERVICES[host] || []).map(function (x) { return svcLine(c, host, x, h('span', null, t(SVC[x.role]))); });
+    if (tun && tun.bind.host === host) {
+      var b = tun.bind;
+      list.push(h('li', { class: 'tn-sock' + (tun.n === c.n ? ' sd-changed' + anim(c) : ''), dataset: { own: 'tun' } },
+        h('span', { class: 'tn-plug', 'aria-hidden': 'true' }), data(ap(b.addr, b.port)), h('span'),
+        h('span', { class: 'tn-reach' }, t(s.kind === 'D' ? 'svcSocks' : s.kind === 'R' ? 'svcFwdSrv' : 'svcFwdCli'), ' · ',
+          t(L.reach(b.addr) === 'local' ? 'reachLocal' : 'reachAny'))));
+    }
+    return h('ul', { class: 'tn-socks' }, list);
+  }
+
+  function hostCards(c) {
+    var s = c.state;
+    var cli = h('section', { class: 'tn-host', dataset: { h: 'cli' }, style: { gridColumn: '1', gridRow: '1' } },
+      h('h2', null, data(L.CLIENT, ''), ' ', h('span', { class: 'tn-sm' }, t('hostClient'))), sockets(c, L.CLIENT));
+    var srv = h('section', { class: 'tn-host', dataset: { h: 'srv' }, style: { gridColumn: '3', gridRow: '1' } },
+      h('h2', null, data(L.SERVER, ''), ' ', h('span', { class: 'tn-sm' }, data(L.HOST, ''), ' · ', t('hostServer'))), sockets(c, L.SERVER));
+    var far = s.kind === 'D'
+      ? h('section', { class: 'tn-host', dataset: { h: 'far' }, style: { gridColumn: '5', gridRow: '1' } },
+        h('h2', null, t('hostSites')),
+        h('ul', { class: 'tn-socks' }, L.SITES.map(function (x) { return svcLine(c, x, { addr: x, port: 80 }, null); })))
+      : h('section', { class: 'tn-host', dataset: { h: 'far' }, style: { gridColumn: '5', gridRow: '1' } },
+        h('h2', null, data(L.DB, ''), ' ', h('span', { class: 'tn-sm' }, data(L.DB_ADDR, ''))),
+        sockets(c, L.DB), h('p', { class: 'tn-note' }, t('hostInternal')));
+    var pipeHead = h('div', { class: 'tn-head', style: { gridColumn: '2' } }, s.session
+      ? [h('b', null, h('span', { class: 'tn-lock', 'aria-hidden': 'true' }), t('pipeTitle')), h('span', { class: 'tn-sm' }, data(L.HOST + ':22', ''))]
+      : h('span', { class: 'tn-sm' }, t('pipeNone')));
+    var netHead = h('div', { class: 'tn-head', style: { gridColumn: '4' } }, h('span', { class: 'tn-sm' }, t('netTitle')));
+    return [cli, pipeHead, srv, netHead, far];
+  }
+
+  /** One segment drawn in a cell: a line with its tag; dir puts the arrow head; edge runs it into the next column. */
+  function seg(c, g, f, edge, noArrow, noTag) {
+    var tag = noTag ? '' : g.kind === 'ssh' ? h('span', null, h('span', { class: 'tn-lock', 'aria-hidden': 'true' }), t('channel', { n: f.ch }))
+      : g.kind === 'net' ? t('tagPlain') : g.kind === 'fail' ? '✕ ' + t('tagFail') : t('tagLoop');
+    var ds = { dir: g.dir, edge: edge || '' };
+    if (noArrow) ds.noarrow = '1';
+    if (f.phase === 'data') ds.flow = '1';
+    return h('div', { class: 'tn-seg' + (g.n === c.n ? ' sd-changed' + anim(c) : ''), dataset: { k: g.kind } },
+      h('span', { class: 'tn-tag' }, tag), h('span', { class: 'tn-line', dataset: ds }));
+  }
+  function end(c, n, text, fail) {
+    return h('span', { class: 'tn-end' + (n === c.n ? ' sd-changed' + anim(c) : ''), dataset: fail ? { fail: '1' } : {} }, text);
+  }
+
+  /** The cells of one connection, one per column. */
+  function flowCells(c, f, row) {
+    var s = c.state, kind = s.kind, cells = { cli: [], pipe: [], srv: [], net: [], far: [] };
+    var segs = {};
+    f.segs.forEach(function (g, i) { segs[i] = g; });
+    var g0 = segs[0], gs = segs[1], gt = segs[2];
+    var lst = data(ap(f.listener.addr === L.ANY ? L.ANY : f.listener.addr, f.listener.port));
+    var appWord = kind === 'R' ? t('appProgram') : (kind === 'D' || (s.target && s.target.port === 80) ? t('appBrowser') : t('appProgram'));
+    if (kind !== 'R') {
+      // client side: app → listener (loopback); server side: SSH server → target
+      cells.cli.push(end(c, g0.n, appWord), seg(c, g0, f), end(c, g0.n, lst));
+      if (gs) cells.pipe.push(seg(c, gs, f, 'l r'));
+      if (gt && gt.kind === 'loop') {
+        cells.srv.push(end(c, gt.n, t('endSshSrv')), seg(c, gt, f), end(c, gt.n, data(dstText(f.dst))));
+      } else if (gt) {
+        cells.srv.push(end(c, gt.n, t('endSshSrv')), seg(c, gt, f, 'r', true));
+        cells.net.push(seg(c, gt, f, 'l r', true, true));
+        cells.far.push(seg(c, gt, f, 'l', false, true), end(c, gt.n, data(dstText(f.dst))));
+      }
+    } else {
+      // server side: program → listener (loopback), drawn right to left; client side: SSH client → target
+      if (gt && gt.kind === 'fail') cells.cli.push(end(c, gt.n, data(ap(f.dst.host, f.dst.port)), true), seg(c, gt, f), end(c, gt.n, t('endSshCli')));
+      else if (gt) cells.cli.push(end(c, gt.n, data(dstText(f.dst))), seg(c, gt, f), end(c, gt.n, t('endSshCli')));
+      if (gs) cells.pipe.push(seg(c, gs, f, 'l r'));
+      cells.srv.push(end(c, g0.n, lst), seg(c, g0, f), end(c, g0.n, appWord));
+    }
+    var cols = ['cli', 'pipe', 'srv', 'net', 'far'];
+    return [h('div', { class: 'tn-flowhead', style: { gridRow: String(row) } }, t('chShort', { n: f.ch }))].concat(cols.map(function (k, i) {
+      return h('div', { class: 'tn-cell', dataset: { c: k }, style: { gridColumn: String(i + 1), gridRow: String(row) } }, cells[k]);
+    }));
+  }
+
+  function renderScene(c) {
+    var s = c.state, rows = Math.max(2, s.flows.length + 1);
+    var kids = hostCards(c);
+    kids.unshift(h('div', { class: 'tn-pipe', dataset: s.session ? {} : { off: '1' }, style: { gridRow: '1 / ' + (rows + 1) }, 'aria-hidden': 'true' }));
+    s.flows.forEach(function (f, i) { kids = kids.concat(flowCells(c, f, i + 2)); });
+    return h('div', { class: 'tn-scene' }, kids);
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, p = c.params, out = [];
+    var spec = B(specOf(s, p));
+    switch (ev.kind) {
+      case 'start':
+        if (s.mixup) out = t.parts('capStartMixup', { spec: spec });
+        else if (s.kind === 'D') out = t.parts('capStartD', { spec: spec });
+        else if (s.kind === 'R') out = t.parts('capStartR', { spec: spec });
+        else if (s.target.host === 'localhost' && s.target.port === 80) out = t.parts('capStartLoop', { web: B(ap(L.LOOP, 80)), spec: spec });
+        else if (s.target.host === L.DB_ADDR) out = t.parts('capStartInternal', { db: B(L.DB + ' ' + ap(L.DB_ADDR, 5432)), spec: spec });
+        else out = t.parts('capStartL', { spec: spec });
+        break;
+      case 'setup': {
+        var lst = B(ap(ev.listener.addr, ev.listener.port)), host = B(L.HOST + ':22');
+        if (s.kind === 'R') {
+          out = t.parts('capSetupR', { host: host, req: B('tcpip-forward localhost ' + ev.listener.port), listen: lst })
+            .concat(' ', ev.reach === 'local' ? t('capReachLocal') : t.parts('capReachAny', { port: B(ev.listener.port) }));
+        } else out = t.parts(s.kind === 'D' ? 'capSetupD' : 'capSetupL', { host: host, listen: lst });
+        break;
+      }
+      case 'connect': {
+        var l = B(ap(ev.listener.addr === L.ANY ? L.LOOP : ev.listener.addr, ev.listener.port));
+        if (s.kind === 'D') out = t.parts('capConnectD', { listen: l, dest: B(ap(ev.req.host, ev.req.port)) });
+        else if (s.kind === 'R') out = t.parts('capConnectR', { listen: l });
+        else if (s.target.port === 80) out = t.parts('capConnectBrowser', { url: B('http://localhost:' + ev.listener.port + '/') });
+        else out = t.parts('capConnectL', { listen: l });
+        break;
+      }
+      case 'open':
+        out = s.kind === 'R'
+          ? t.parts('capOpenR', { n: B(ev.ch), msg: B('CHANNEL_OPEN forwarded-tcpip'), listen: B(ap('localhost', ev.listener.port)) })
+          : t.parts('capOpenL', { n: B(ev.ch), msg: B('CHANNEL_OPEN direct-tcpip'), req: B(ap(ev.req.host, ev.req.port)) });
+        break;
+      case 'target': {
+        var d = ev.dst;
+        if (ev.fail) out = t.parts('capTargetFail', { dst: B(ap(d.addr, d.port)), msg: B('CHANNEL_OPEN_FAILURE') });
+        else if (ev.mixup) out = t.parts('capTargetMixup', { dst: B(dstText(d)) });
+        else if (d.seg === 'loop') out = t.parts('capTargetLoop', { host: B(d.host), dst: B(dstText(d)) });
+        else if (d.role === 'site') out = t.parts('capTargetSite', { dst: B(dstText(d)) });
+        else out = t.parts('capTargetNet', { dst: B(dstText(d)), host: B(d.host) });
+        if (!ev.fail && !ev.mixup && d.seg === 'loop' && d.host === L.SERVER && d.role === 'web') out = out.concat(' ', t('capLoopWeb'));
+        break;
+      }
+      case 'data':
+        if (ev.fail) out = [t('capDataFail')];
+        else if (ev.mixup) out = t.parts('capDataMixup', { own: B('http://localhost/') });
+        else if (ev.plainOnWire) out = t.parts('capDataNet', { n: B(ev.ch), dst: B(dstText(ev.dst)) });
+        else out = t.parts('capDataLoop', { n: B(ev.ch) });
+        break;
+      case 'more':
+        if (ev.fail) out = t.parts('capMoreFail', { n: B(ev.ch), dst: B(ap(ev.dst.addr, ev.dst.port)) });
+        else if (s.kind === 'D') out = t.parts('capMoreD', { n: B(ev.ch), dest: B(ap(ev.req.host, ev.req.port)) });
+        else out = t.parts('capMore', { n: B(ev.ch), msg: B('CHANNEL_OPEN') }).concat(ev.plainOnWire ? [' ', t('capPlainTail')] : []);
+        break;
+    }
+    if (c.last && c.n > 0) out = out.concat(' ', t(L.canSend(p) ? 'capSend' : 'capFull'));
+    return out;
+  }
+
+  // ── controls ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // `mixup` (set by the mix-up preset) and `extra` (T presses) are model params without a control: the kit keeps
+      // only controls in the URL (NOTES.md, Shared requests, as ssh-key-auth's `queue`).
+      { key: 'kind', type: 'choice', label: t('kind'), resets: true, options: [['L', t('kindL')], ['R', t('kindR')], ['D', t('kindD')]] },
+      { key: 'target', type: 'choice', label: t('target'), resets: true, visible: function (p) { return p.kind !== 'D'; },
+        options: [['localhost:80', data('localhost:80', '')], ['localhost:22', data('localhost:22', '')], ['db1:5432', data('db1:5432', '')]] },
+      { key: 'remoteBindAny', type: 'toggle', label: t('remoteBindAny'), hint: t('remoteBindAnyHint'), visible: function (p) { return p.kind === 'R'; } },
+      { type: 'button', label: t('btnSend'), hint: t('btnSendHint'), key: 't', run: function (sim) {
+        if (!L.canSend(sim.params)) { sim.render(); return; }
+        var atEnd = sim.n === sim.steps;
+        sim.set({ extra: L.sendMore(sim.params) });
+        if (atEnd) sim.go(sim.steps);
+      } }
+    ],
+
+    presets: [
+      { id: 'local-to-loopback', label: t('presetLoop'), hint: t('presetLoopHint'), params: L.PRESETS['local-to-loopback'] },
+      { id: 'local-to-internal', label: t('presetInternal'), hint: t('presetInternalHint'), params: L.PRESETS['local-to-internal'] },
+      { id: 'remote', label: t('presetRemote'), hint: t('presetRemoteHint'), params: L.PRESETS['remote'] },
+      { id: 'dynamic', label: t('presetDynamic'), hint: t('presetDynamicHint'), params: L.PRESETS['dynamic'] },
+      { id: 'localhost-mixup', label: t('presetMixup'), hint: t('presetMixupHint'), params: L.PRESETS['localhost-mixup'] }
+    ],
+
+    legend: [
+      { shape: 'pipe', label: t('legPipe') },
+      { shape: 'plain', label: t('legPlain') },
+      { shape: 'loop', label: t('legLoop') },
+      { shape: 'plug', label: t('legPlug') },
+      { shape: 'arrow', label: t('legArrow') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'tn' }, chart, renderScene(c)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+
+  // `mixup` belongs to the mix-up preset: once a param is changed by hand (the preset is no longer active), drop it.
+  window.simdeck.on(function (c) {
+    if (c.params.mixup && c.preset !== 'localhost-mixup') Promise.resolve().then(function () { window.simdeck.set({ mixup: false }); });
+  });
+})();
+</script>
+</body>
+</html>
