@@ -1,0 +1,642 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-container-volumes: what a container sees (its image under its writable layer, mounts over that) and where each
+     file lives on the host disk: the container's layer, a named or anonymous volume, a host directory. Each step is one
+     lifecycle command; rm deletes the layer, volumes and host directories stay, rm -v takes the anonymous volumes, an
+     image VOLUME gives every run a new one. Drawn on kit view K3 (block grid), one column per path, as in
+     lnx-overlayfs-layers. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-container-volumes">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gdje se gube podaci kontejnera · simdeck</title>
+<meta name="description" content="Zapiši podatke i ponovno stvori kontejner: sloj za pisanje nestaje s njim, svesci i direktoriji domaćina ostaju, a anonimni svesci ostaju bez vlasnika.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-container-volumes",
+  "title": {
+    "hr": "Gdje se gube podaci kontejnera",
+    "en": "Where container data is lost"
+  },
+  "concept": {
+    "hr": "Sloj kontejnera, svezak ili vezano montiranje: što rm čuva, a što briše",
+    "en": "Container layer, volume or bind mount: what rm keeps and what it deletes"
+  },
+  "summary": {
+    "hr": "Zapiši podatke i ponovno stvori kontejner: sloj za pisanje nestaje s njim, svesci i direktoriji domaćina ostaju, a anonimni svesci ostaju bez vlasnika.",
+    "en": "Write data, then recreate the container: its writable layer dies with it, volumes and host directories stay, and anonymous volumes are left orphaned."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-container-volumes"]; colours only from kit tokens.
+   Layout: the command line on top, one kit block grid (K3): what the container sees, then the host's places (host
+   directories, volumes, the container's writable layer) and the image; one column per path. The example's steps as a
+   strip under it. */
+[data-sim="lnx-container-volumes"] .cv {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.8cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-container-volumes"] .cv .sd-bg-grid { --bg-row-gap: 0.7rem; justify-content: center; }
+[data-sim="lnx-container-volumes"] .cv[data-rows="3"] .sd-bg-grid,
+[data-sim="lnx-container-volumes"] .cv[data-rows="4"] .sd-bg-grid { --bg-row-gap: 1.1rem; }
+[data-sim="lnx-container-volumes"] .cv .sd-bg-cell { font-size: 1.2rem; }
+
+/* the command line: prompt, command, and what it printed */
+[data-sim="lnx-container-volumes"] .cv-cmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 1.2rem;
+  min-height: 2.4rem;
+  padding: 0.25rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-container-volumes"] .cv-cmd code { font-size: 1.3rem; }
+[data-sim="lnx-container-volumes"] .cv-prompt { color: var(--muted); font-weight: 700; }
+[data-sim="lnx-container-volumes"] .cv-out { color: var(--muted); }
+[data-sim="lnx-container-volumes"] .cv-out code { font-size: 1.1rem; }
+
+/* cells: an empty slot is a faint dashed outline the lines show through */
+[data-sim="lnx-container-volumes"] .cv .sd-bg-cell:empty { background: transparent; border-style: dashed; border-color: var(--line); }
+/* the writable layer (and what the container sees from it): white, a dashed ink edge — it dies with the container */
+[data-sim="lnx-container-volumes"] .cv .sd-bg-cell:has(> .cv-layer) { border: 0.18rem dashed var(--ink); }
+/* a volume or a host directory (and what the container sees from it): white, a solid ink edge */
+[data-sim="lnx-container-volumes"] .cv .sd-bg-cell:has(> .cv-vol) { border: 0.18rem solid var(--ink); }
+/* a host directory (and what the container sees from it): the same, with a thick top edge like a folder's tab */
+[data-sim="lnx-container-volumes"] .cv .sd-bg-cell:has(> .cv-bind) { border: 0.18rem solid var(--ink); border-top-width: 0.45rem; }
+[data-sim="lnx-container-volumes"] .cv-sub { display: inline-flex; gap: 0.4rem; align-items: center; }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-container-volumes"] .sd-ctl[hidden] { display: none; }
+
+/* row labels with their icon */
+[data-sim="lnx-container-volumes"] .cv-ico { width: 1em; height: 1em; flex: none; fill: currentColor; }
+[data-sim="lnx-container-volumes"] .cv-lab { display: inline-flex; gap: 0.4rem; align-items: center; }
+[data-sim="lnx-container-volumes"] .cv-lab-none { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-container-volumes"] .cv-aside { display: inline-flex; flex-direction: column; gap: 0.1rem; font-size: 1rem; }
+[data-sim="lnx-container-volumes"] .cv-note { color: var(--muted); }
+
+/* the example's steps */
+[data-sim="lnx-container-volumes"] .cv-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+[data-sim="lnx-container-volumes"] .cv-steps li { display: inline-flex; align-items: center; gap: 0.3rem; }
+[data-sim="lnx-container-volumes"] .cv-steps li + li::before { content: '→'; color: var(--muted); }
+[data-sim="lnx-container-volumes"] .cv-chip {
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 1rem;
+}
+[data-sim="lnx-container-volumes"] .cv-chip[data-at="done"] { border-color: var(--ink); }
+[data-sim="lnx-container-volumes"] .cv-chip[data-at="todo"] { color: var(--muted); border-style: dashed; }
+[data-sim="lnx-container-volumes"] .cv-chip[data-at="now"] { background: var(--hl); color: var(--on-hl); border: 0.15rem solid var(--ink); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="lnx-container-volumes"] .sd-swatch[data-shape="cv-layer"] { background: var(--bg); border: 0.18rem dashed var(--ink); }
+[data-sim="lnx-container-volumes"] .sd-swatch[data-shape="cv-vol"] { background: var(--bg); border: 0.18rem solid var(--ink); }
+[data-sim="lnx-container-volumes"] .sd-swatch[data-shape="cv-bind"] {
+  background: var(--bg);
+  border: 0.18rem solid var(--ink);
+  border-top-width: 0.45rem;
+}
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-container-volumes"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-container-volumes"] .cv { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-container-volumes"] .cv-cmd code { font-size: 1rem; }
+  [data-sim="lnx-container-volumes"] .cv-cmd { min-width: 0; overflow-wrap: anywhere; }
+  [data-sim="lnx-container-volumes"] .cv .sd-bg-cell { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Gdje se gube podaci kontejnera</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var GREY = 8;                                       // the image: the series grey, solid (read-only)
+  var STORAGE = '<storage>';
+  var ROWS = '/data/rows.db';
+
+  // ── small pieces ──
+
+  /** Data (paths, file names, container ids, volume names) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  var NS = 'http://www.w3.org/2000/svg';
+  var ICON = {
+    lock: 'M7 10V7a5 5 0 0 1 10 0v3h1.5v11h-13V10zm2.3 0h5.4V7a2.7 2.7 0 0 0-5.4 0z',
+    pen: 'M3 21l1.2-5.2L15.6 4.4l4 4L8.2 19.8zM17 3l1.6-1.6 4 4L21 7z',
+    drum: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3zm2 0c0 .8 2.7 1.6 6 1.6s6-.8 6-1.6-2.7-1.6-6-1.6S6 5.2 6 6z',
+    folder: 'M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z',
+    eye: 'M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zm11 4a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'
+  };
+  function glyph(name) {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'cv-ico');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', ICON[name]);
+    p.setAttribute('fill-rule', 'evenodd');
+    s.append(p);
+    return s;
+  }
+  function has(list, row, path) { return (list || []).some(function (x) { return x.row === row && x.path === path; }); }
+  /** A volume's tag: its name, or the start of its hash for an anonymous one. */
+  function tag(name) { return L.HASHES.indexOf(name) >= 0 ? name + '…' : name; }
+  /** Where a store lives on the host disk. */
+  function hostPath(row) {
+    var k = row.split(':')[0], v = row.slice(k.length + 1);
+    if (k === 'layer') return STORAGE + '/overlay/' + v + '/diff';
+    if (k === 'vol') return STORAGE + '/volumes/' + tag(v) + '/_data';
+    return v;
+  }
+  /** File names as caption parts, each in code: "a", "a and b", "a, b and c". */
+  function names(paths) {
+    var n = paths.map(L.baseName).filter(function (x, i, a) { return a.indexOf(x) === i; });
+    var out = [];
+    n.forEach(function (x, i) { if (i) out.push(i === n.length - 1 ? t('and') : ', '); out.push(code(x)); });
+    return h('span', null, out);
+  }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands (a node can stand in one place only),
+      *English term* turned into <em lang="en"> (the Croatian term rule, for terms the glossary lacks) and `x` into code. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var out = [];
+    t.parts(key, flat).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── commands ──
+
+  function vflag(v) { return '-v ' + (v.source ? v.source + ':' : '') + v.target; }
+  function cmdText(cmd) {
+    switch (cmd.op) {
+      case 'run': return ['run', '--name', cmd.name, '-d'].concat(cmd.rm ? ['--rm'] : [], (cmd.volumes || []).map(vflag), [cmd.image]).join(' ');
+      case 'write': case 'host-write': return 'echo "' + cmd.text + '" ' + (cmd.append ? '>>' : '>') + ' ' + cmd.path;
+      case 'rm': return 'rm ' + (cmd.force || cmd.v ? '-' + (cmd.force ? 'f' : '') + (cmd.v ? 'v' : '') + ' ' : '') + cmd.c;
+      case 'volume-ls': return 'volume ls';
+      case 'prune': return 'volume prune';
+      case 'ls': case 'cat': return cmd.op + ' ' + cmd.path;
+      default: return cmd.op + ' ' + cmd.c;
+    }
+  }
+  /** The short name of a command, for the strip of steps. */
+  function chipText(cmd) {
+    if (cmd.op === 'write' || cmd.op === 'host-write') return (cmd.op === 'host-write' ? 'host: ' : '') + 'echo ' + (cmd.append ? '>>' : '>') + ' ' + L.baseName(cmd.path);
+    if (cmd.op === 'ls' || cmd.op === 'cat') return cmd.op + ' ' + (cmd.op === 'cat' ? L.baseName(cmd.path) : cmd.path);
+    if (cmd.op === 'run') return 'run' + ((cmd.volumes || []).length ? ' ' + cmd.volumes.map(vflag).join(' ') : '');
+    var full = cmdText(cmd);
+    return cmd.c ? full.slice(0, full.length - cmd.c.length - 1) : full;
+  }
+  /** Commands run inside the container show its prompt; the rest are the host's. */
+  function promptOf(cmd) { return cmd.op === 'write' || cmd.op === 'ls' || cmd.op === 'cat' ? cmd.c + ' #' : 'host #'; }
+
+  function cmdOut(s) {
+    var r = s.result;
+    if (!r) return null;
+    switch (r.what) {
+      case 'created': return code(r.id);
+      case 'refused': return h('span', null, t(s.cmd.op === 'run' ? 'outRefusedRun' : 'outRefusedRm'));
+      case 'list': return r.entries.length ? code(r.entries.map(L.baseName).join('  ')) : h('span', null, t('empty'));
+      case 'read': return code(r.text.replace(/\n/g, ' ⏎ '));
+      case 'missing': return code('cat: ' + s.cmd.path + ': No such file or directory');
+      case 'volumes': return code(r.list.map(function (v) { return tag(v.name); }).join('  '));
+      case 'pruned': return r.gone.length ? h('span', null, t.parts('outPruned', { list: data(r.gone.map(tag).join(', ')) })) : h('span', null, t('outNone'));
+    }
+    return null;
+  }
+
+  // ── stage ──
+
+  /** Volume names and host directories in the order they first appear in the run, so rows do not come and go. */
+  function volumeNames(fr) {
+    var out = [];
+    fr.forEach(function (s) { s.volumes.forEach(function (v) { if (out.indexOf(v.name) < 0) out.push(v.name); }); });
+    return out;
+  }
+  function firstFrame(fr, name) {
+    for (var i = 0; i < fr.length; i++) if (fr[i].volumes.some(function (v) { return v.name === name; })) return i;
+    return -1;
+  }
+  /** Where a host directory shows inside a container (its mount target in any frame). */
+  function bindTarget(fr, dir) {
+    for (var i = 0; i < fr.length; i++) {
+      for (var j = 0; j < fr[i].containers.length; j++) {
+        var m = fr[i].containers[j].mounts.filter(function (x) { return x.kind === 'bind' && x.source === dir; })[0];
+        if (m) return m.target;
+      }
+    }
+    return null;
+  }
+  function lostCell(s, row, q) {
+    var x = s.lost.filter(function (l) { return l.row === row && l.path === q; })[0];
+    return x ? { text: L.baseName(q), kind: 'dead', now: true } : null;
+  }
+
+  function seesRow(s, cur, cols) {
+    if (!cur) return { id: 'sees', label: h('span', { class: 'cv-lab cv-lab-none' }, glyph('eye'), t('rowNone')), brackets: [], cells: cols.map(function () { return null; }) };
+    var m = L.merged(s, cur);
+    var changed = s.changed.some(function (x) { return x.row === 'sees'; });
+    var brackets = cur.mounts.map(function (mt) {
+      var idx = cols.map(function (q, k) { return L.under(q, mt.target) ? k : -1; }).filter(function (k) { return k >= 0; });
+      return idx.length ? { from: idx[0], len: idx[idx.length - 1] - idx[0] + 1,
+        label: h('span', null, t.parts('mountsAt', { target: code(mt.target), src: data(tag(mt.source)) })) } : null;
+    }).filter(Boolean);
+    return {
+      id: 'sees', brackets: brackets,
+      label: h('span', { class: 'cv-lab' + (changed ? ' sd-hl' : '') }, glyph('eye'), t.parts('rowSees', { c: data(cur.name) })),
+      aside: h('span', { class: 'cv-aside' }, t(cur.running ? 'running' : 'stopped')),
+      cells: cols.map(function (q) {
+        var e = m[q], now = has(s.changed, 'sees', q);
+        // a name the mount hid this step: dimmed with "hidden", not struck (struck means lost)
+        if (!e) return s.gone.indexOf(q) >= 0 ? { text: L.baseName(q), sub: h('span', null, t('hidden')), dim: true, now: true } : {};
+        var k = e.from.split(':')[0];
+        if (k === 'image') return { text: L.baseName(q), sub: h('span', null, t('srcImage')), kind: 'soft', c: GREY, now: now };
+        if (k === 'layer') return { text: h('span', { class: 'cv-layer', translate: 'no' }, L.baseName(q)), sub: h('span', null, t('srcLayer')), now: now };
+        return { text: h('span', { class: k === 'vol' ? 'cv-vol' : 'cv-bind', translate: 'no' }, L.baseName(q)), sub: data(k === 'vol' ? tag(e.from.slice(4)) : e.from.slice(5)), now: now };
+      })
+    };
+  }
+
+  function bindRow(s, fr, dir, cols) {
+    var row = 'bind:' + dir, target = bindTarget(fr, dir);
+    var files = s.hostDirs[dir] || {};
+    return {
+      id: row,
+      label: h('span', { class: 'cv-lab' }, glyph('folder'), t('rowHost')),
+      aside: h('span', { class: 'cv-aside' }, data(dir)),
+      cells: cols.map(function (q) {
+        var rel = target && L.under(q, target) ? q.slice(target.length) : null;
+        if (!rel || !files[rel]) return {};
+        return { text: h('span', { class: 'cv-bind', translate: 'no' }, L.baseName(q)), now: has(s.changed, row, q) };
+      })
+    };
+  }
+
+  function volumeRow(s, fr, n, name, cols) {
+    var row = 'vol:' + name;
+    var v = L.volumeOf(s, name);
+    var anon = L.HASHES.indexOf(name) >= 0;
+    var label = h('span', { class: 'cv-lab' }, glyph('drum'), t.parts(anon ? 'rowAnon' : 'rowNamed', { name: data(tag(name)) }));
+    var lostHere = s.lost.some(function (x) { return x.row === row; });
+    var note = null;
+    if (!v) note = firstFrame(fr, name) > n ? t('notYet') : t('deleted');
+    else if (!v.usedBy.length) note = t('unused');
+    var aside = h('span', { class: 'cv-aside' }, data(hostPath(row)), note ? h('span', { class: 'cv-note' }, note) : null);
+    if (!v && !lostHere) return { id: row, label: label, aside: aside, cells: cols.map(function () { return null; }) };
+    return {
+      id: row, label: label, aside: aside,
+      cells: cols.map(function (q) {
+        var lc = lostCell(s, row, q);
+        if (lc) return lc;
+        var rel = v && L.under(q, v.at) ? q.slice(v.at.length) : null;
+        if (!rel || !v.files[rel]) return {};
+        return { text: h('span', { class: 'cv-vol', translate: 'no' }, L.baseName(q)), now: has(s.changed, row, q) };
+      })
+    };
+  }
+
+  function layerRow(s, cur, prev, cols) {
+    var gone = s.result && s.result.what === 'removed' ? s.containers.filter(function (x) { return x.id === s.result.id; })[0] : null;
+    var c = cur || gone;
+    if (!c) return { id: 'layer', label: h('span', { class: 'cv-lab cv-lab-none' }, glyph('pen'), t('rowNone')), cells: cols.map(function () { return null; }) };
+    var row = 'layer:' + c.id;
+    var fresh = !!(prev && !prev.containers.some(function (x) { return x.id === c.id; }));
+    return {
+      id: 'layer',
+      label: h('span', { class: 'cv-lab' + (fresh ? ' sd-hl' : '') }, glyph('pen'), t.parts('rowLayer', { id: data(c.id) })),
+      aside: h('span', { class: 'cv-aside' }, data(hostPath(row)), c.alive ? null : h('span', { class: 'cv-note' }, t('removed'))),
+      cells: cols.map(function (q) {
+        var lc = lostCell(s, row, q);
+        if (lc) return lc;
+        if (!c.upper[q]) return {};
+        return { text: h('span', { class: 'cv-layer', translate: 'no' }, L.baseName(q)), now: has(s.changed, row, q) };
+      })
+    };
+  }
+
+  function imageRow(s, cur, cols) {
+    var img = s.image;
+    return {
+      id: 'image',
+      label: h('span', { class: 'cv-lab' }, glyph('lock'), t.parts('rowImage', { img: data(img.name) })),
+      aside: img.declaredVolumes.length ? h('span', { class: 'cv-aside' }, code('VOLUME ' + img.declaredVolumes.join(' '))) : null,
+      cells: cols.map(function (q) {
+        if (!img.files[q]) return {};
+        var covered = cur && L.resolve(cur, q).mount;
+        return { text: L.baseName(q), sub: covered ? h('span', null, t('hidden')) : null, kind: 'fill', c: GREY };
+      })
+    };
+  }
+
+  /** The grid row a model store id is drawn in. */
+  function rowOf(store) { return store.indexOf('layer:') === 0 ? 'layer' : store; }
+
+  function render(c) {
+    var s = c.state, p = c.params, n = c.n;
+    var fr = L.frames(p);
+    var cols = L.columns(p);
+    var cur = L.current(s);
+    var rows = [seesRow(s, cur, cols)];
+    Object.keys(fr[fr.length - 1].hostDirs).forEach(function (d) { rows.push(bindRow(s, fr, d, cols)); });
+    volumeNames(fr).forEach(function (name) { rows.push(volumeRow(s, fr, n, name, cols)); });
+    rows.push(layerRow(s, cur, c.prev, cols));
+    rows.push(imageRow(s, cur, cols));
+
+    // this step's path: from what the container sees to the store a write or a read resolved to
+    var links = [];
+    var r = s.result, cmd = s.cmd;
+    if (cmd && r && (r.what === 'written' || r.what === 'read')) {
+      var col = cmd.op === 'host-write' ? cols.indexOf(bindTarget(fr, r.store.slice(5)) + r.rel) : cols.indexOf(cmd.path);
+      var store = rowOf(r.what === 'read' ? r.from : r.store);
+      if (col >= 0 && store !== 'image') {
+        links.push(cmd.op === 'host-write' ? { from: { row: store, cell: col }, to: { row: 'sees', cell: col }, now: true }
+          : { from: { row: 'sees', cell: col }, to: { row: store, cell: col }, now: true });
+      }
+    }
+
+    var grew = !!(c.prev && c.prev.volumes.length !== s.volumes.length);
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'), meta: [t('metaStorage')],
+      count: { text: t.n('cntVols', s.volumes.length), hl: grew },
+      colLabels: cols.map(L.dirName),
+      cellHeight: rows.length > 5 ? '2.8rem' : '3.2rem', cellWidth: 'minmax(0, 12rem)', cellWidthPhone: 'minmax(5.5rem, max-content)',
+      rows: rows, links: links
+    });
+
+    var cmdLine = h('div', { class: 'cv-cmd' },
+      cmd ? h('span', { class: 'cv-prompt', translate: 'no' }, promptOf(cmd)) : null,
+      cmd ? code(cmdText(cmd)) : null,
+      h('span', { class: 'cv-out' }, cmdOut(s)));
+
+    var setup = s.setup || [];
+    var script = L.script(p);
+    var chips = setup.map(function (x) { return { cmd: x, at: 'done' }; }).concat(script.map(function (x, i) {
+      return { cmd: x, at: i + 1 < n ? 'done' : i + 1 === n ? 'now' : 'todo' };
+    }));
+    var strip = h('ol', { class: 'cv-steps', 'aria-label': t('timeline') }, chips.map(function (x) {
+      return h('li', null, h('span', { class: 'cv-chip', translate: 'no', dataset: { at: x.at } }, chipText(x.cmd)));
+    }));
+
+    c.stage.replaceChildren(h('div', { class: 'cv', dataset: { rows: String(rows.length) } }, cmdLine, grid, strip));
+  }
+
+  // ── captions ──
+
+  var START = { 'named-survives': 'capStartNamed', 'anon-orphan': 'capStartAnon', 'bind-hides': 'capStartBind', 'rm-flags': 'capStartFlags' };
+
+  /** The places a container's data lives in, as caption parts: "volume a91c3e… and volume dblogs". */
+  function whereOf(c) {
+    var out = [];
+    c.mounts.slice().sort(byKind).forEach(function (m, i) {
+      if (i) out.push(t('and'));
+      out = out.concat(rich(m.kind === 'bind' ? 'whereBind' : 'whereVol', { x: m.kind === 'bind' ? code(m.source) : data(tag(m.source)) }));
+    });
+    return h('span', null, out);
+  }
+  /** Anonymous volumes first, then named ones, then host directories (the order the rm caption tells them). */
+  var ORDER = { anon: 0, volume: 1, bind: 2 };
+  function byKind(a, b) { return ORDER[a.kind] - ORDER[b.kind]; }
+  function dataMount(c) { return c ? c.mounts.filter(function (m) { return m.target === '/data' || m.target === '/var/www/html'; })[0] || null : null; }
+
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    var cur = L.current(s);
+    var img = data(s.image.name);
+    if (!s.cmd) {
+      if (s.scene === 'layer-lost') {
+        return rich('capStartLost_' + (L.KIND[p.kind] ? p.kind : 'layer'), { img: img, conf: code('/etc/db.conf'), schema: code('/data/schema.sql') });
+      }
+      var anon = cur && cur.mounts.filter(function (m) { return m.kind === 'anon'; })[0];
+      return rich(START[s.scene], { img: img, conf: code('/etc/db.conf'), schema: code('/data/schema.sql'),
+        index: code('/var/www/html/index.html'), dir: code('/srv/site'), id: data(cur ? cur.id : ''), anon: data(anon ? tag(anon.source) : '') });
+    }
+    var cmd = s.cmd, r = s.result;
+    var prev = c.prev;
+    var rows = code('rows.db');
+    // the volume or host directory the previous container had on /data (for "the old one")
+    var oldMount = null;
+    for (var i = n - 1; i >= 0 && !oldMount; i--) {
+      var f = L.frames(p)[i];
+      var oc = f.containers.filter(function (x) { return !cur || x.id !== cur.id; }).filter(function (x) { return x.mounts.length; })[0];
+      if (oc) oldMount = dataMount(oc);
+    }
+    if (r.what === 'refused') return rich('capRefused');
+
+    switch (cmd.op) {
+      case 'run': {
+        var m = dataMount(cur);
+        var again = r.id !== L.IDS[0];
+        var files = names(r.populated);
+        if (!m) return again ? rich('capRunLayerAgain', { id: data(r.id) }) : rich('capRunLayer', { id: data(r.id), path: code(hostPath('layer:' + r.id)) });
+        if (m.kind === 'volume') return r.made.length ? rich('capRunNamedNew', { vol: data(m.source), files: files }) : rich('capRunNamedOld', { vol: data(m.source), id: data(r.id), rows: rows });
+        if (m.kind === 'anon') {
+          var old = data(oldMount ? tag(oldMount.source) : '');
+          var v = { vol: data(tag(m.source)), id: data(r.id), files: files, old: old };
+          var kept = again && oldMount && L.volumeOf(s, oldMount.source) ? '' : 'Gone';
+          if (m.fromImage) return rich(again ? 'capRunAnonAgain' + kept : 'capRunAnonImage', v);
+          return rich(again ? 'capRunAnonFlagAgain' + kept : 'capRunAnonFlag', v);
+        }
+        var hiddenFile = code(L.baseName(Object.keys(s.image.files).filter(function (q) { return L.under(q, m.target); })[0] || ''));
+        return rich(again ? 'capRunBindAgain' : 'capRunBind', { dir: code(m.source), target: code(m.target), file: hiddenFile, rows: rows });
+      }
+      case 'write': {
+        var res = L.resolve(cur, cmd.path);
+        var vw = { name: code(L.baseName(cmd.path)), id: data(cur.id), path: code(hostPath(r.store) + r.rel), target: res.mount ? code(res.mount.target) : null };
+        if (!res.mount) return rich('capWriteLayer', vw);
+        if (res.mount.kind === 'bind') {
+          return r.isNew ? rich('capWriteBind', Object.assign(vw, { dir: code(res.mount.source) }))
+            : rich('capWriteBindBack', Object.assign(vw, { host: code(res.mount.source + r.rel) }));
+        }
+        return rich('capWriteVol', Object.assign(vw, { vol: data(tag(res.mount.source)) }));
+      }
+      case 'host-write': {
+        var tgt = cur ? cur.mounts.filter(function (x) { return x.kind === 'bind'; })[0].target : '';
+        return rich('capHostWrite', { host: code(cmd.path), inside: code(tgt + r.rel) });
+      }
+      case 'stop': {
+        var lc = L.containerOf(s, cmd.c);
+        if (Object.keys(lc.upper).length || !lc.mounts.length) return rich('capStopLayer', { id: data(lc.id), rows: rows, path: code(hostPath('layer:' + lc.id) + ROWS) });
+        return rich('capStopMount', { id: data(lc.id), where: whereOf(lc) });
+      }
+      case 'start':
+        return rich(cur.mounts.length ? 'capStarted' : 'capStartedLayer', { id: data(cur.id), rows: rows });
+      case 'rm': {
+        var gone = prev.containers.filter(function (x) { return x.id === r.id; })[0];
+        var layerLost = s.lost.filter(function (x) { return x.row === 'layer:' + r.id; }).map(function (x) { return x.path; });
+        var out = cmd.force && prev && gone.running ? rich('capRmForce').concat([' ']) : [];
+        out = out.concat(layerLost.length ? rich('capRmLost', { files: names(layerLost) }) : rich('capRmEmpty', { id: data(r.id) }));
+        gone.mounts.slice().sort(byKind).forEach(function (mt) {
+          if (mt.kind === 'bind') { out = out.concat(sp(rich('capRmKeepBind', { dir: code(mt.source) }))); return; }
+          var vv = { vol: data(tag(mt.source)) };
+          if (mt.kind === 'volume') out = out.concat(sp(rich(cmd.v ? 'capRmKeepNamedV' : 'capRmKeepNamed', vv)));
+          else if (r.gone.indexOf(mt.source) >= 0) {
+            var lostFiles = s.lost.filter(function (x) { return x.row === 'vol:' + mt.source; }).map(function (x) { return x.path; });
+            out = out.concat(sp(rich('capRmGoneAnon', Object.assign(vv, { files: names(lostFiles) }))));
+          } else out = out.concat(sp(rich('capRmKeepAnon', vv)));
+        });
+        return out;
+      }
+      case 'ls': {
+        if (!r.entries.length) {
+          var dmB = dataMount(cur);
+          return rich('capLsHidden', { dir: code(cmd.path), file: code('index.html'), host: code(dmB ? dmB.source : '') });
+        }
+        var oldV = oldMount && L.volumeOf(s, oldMount.source);
+        return rich(oldV ? 'capLsData' : 'capLsDataV', { dir: code(cmd.path), list: names(r.entries), rows: rows, old: data(oldMount ? tag(oldMount.source) : '') });
+      }
+      case 'cat': {
+        var nm = code(L.baseName(cmd.path));
+        if (r.what === 'read') {
+          var src = r.from.indexOf('vol:') === 0 ? data(tag(r.from.slice(4))) : code(r.from.slice(5));
+          return rich('capCatBack', { name: nm, where: src });
+        }
+        if (!oldMount) return rich('capCatGoneLayer', { name: nm });
+        return rich(L.volumeOf(s, oldMount.source) ? 'capCatGoneAnon' : 'capCatGoneAnonV', { name: nm, old: data(tag(oldMount.source)) });
+      }
+      case 'volume-ls': {
+        var unused = r.list.filter(function (x) { return !x.users.length; })[0];
+        var used = r.list.filter(function (x) { return x.users.length; })[0];
+        if (unused) return rich('capVolLsOrphan', { old: data(tag(unused.name)), now: data(tag(used.name)), rows: rows });
+        if (used && used.anon) return rich('capVolLsOne', { now: data(tag(used.name)) });
+        return rich('capVolLsNamed', { vol: data(tag(used.name)) });
+      }
+      case 'prune': {
+        var kept = s.volumes[0];
+        var who = { kept: data(kept ? tag(kept.name) : ''), id: data(cur ? cur.id : '') };
+        if (!r.gone.length) return rich('capPruneNone', who);
+        return rich('capPrune', Object.assign(who, { gone: data(r.gone.map(tag).join(', ')), rows: rows }));
+      }
+    }
+    return '';
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['layer-lost', t('pLost')], ['named-survives', t('pNamed')], ['anon-orphan', t('pAnon')], ['bind-hides', t('pBind')], ['rm-flags', t('pFlags')]],
+        visible: function () { return false; } },
+      { key: 'kind', type: 'choice', label: t('kind'), hint: t('kindHint'), resets: true,
+        options: [['layer', t('kLayer')], ['named', t('kNamed')], ['anon', t('kAnon')], ['bind', t('kBind')]],
+        visible: function (p) { return p.scene === 'layer-lost'; } },
+      { key: 'rmV', type: 'toggle', label: t('rmV'), resets: true }
+    ],
+
+    presets: [
+      { id: 'layer-lost', label: t('pLost'), params: { scene: 'layer-lost', kind: 'layer', rmV: false }, hint: t('pLostHint') },
+      { id: 'named-survives', label: t('pNamed'), params: { scene: 'named-survives', rmV: false }, hint: t('pNamedHint') },
+      { id: 'anon-orphan', label: t('pAnon'), params: { scene: 'anon-orphan', rmV: false }, hint: t('pAnonHint') },
+      { id: 'bind-hides', label: t('pBind'), params: { scene: 'bind-hides', rmV: false }, hint: t('pBindHint') },
+      { id: 'rm-flags', label: t('pFlags'), params: { scene: 'rm-flags', rmV: true }, hint: t('pFlagsHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: GREY, label: t('legImage') },
+      { shape: 'cv-layer', label: t('legLayer') },
+      { shape: 'cv-vol', label: t('legVol') },
+      { shape: 'cv-bind', label: t('legBind') },
+      { shape: 'bg-dead', label: t('legLost') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
