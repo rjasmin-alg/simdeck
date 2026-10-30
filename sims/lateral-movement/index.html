@@ -1,0 +1,459 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lateral-movement: an attacker with a foothold on WS1 follows stolen credentials from machine to machine across a
+     small AD estate drawn in admin tiers (Tier 0 DC1, Tier 1 APP1 and FS1, Tier 2 WS1 and WS2). Each machine card
+     shows what its memory holds; the attacker panel shows what was stolen and where each credential opens a door.
+     A stepper, one event per step (foothold, escalation, dump, move, refused try, outcome).
+     Drawn with kit view K2 (topology, kit/topology.js) over three tier bands of the page's own.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lateral-movement">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bočno kretanje i slojevi ovlasti · simdeck</title>
+<meta name="description" content="Korak po korak: napadač s WS1 kopira vjerodajnice iz memorije i prelazi dalje. LAPS siječe lokalni sažetak, slojevi ga zaustavljaju u sloju 2.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lateral-movement",
+  "title": {
+    "hr": "Bočno kretanje i slojevi ovlasti",
+    "en": "Lateral movement and tiering"
+  },
+  "concept": {
+    "hr": "Jedna administratorska prijava na radnoj stanici otvara cijelu domenu",
+    "en": "One admin logon on a workstation exposes the whole domain"
+  },
+  "summary": {
+    "hr": "Korak po korak: napadač s WS1 kopira vjerodajnice iz memorije i prelazi dalje. LAPS siječe lokalni sažetak, slojevi ga zaustavljaju u sloju 2.",
+    "en": "Step by step: from WS1 the attacker copies credentials from memory and moves on. LAPS cuts the local hash; tiering stops the attacker at Tier 2."
+  },
+  "tags": [
+    "attacks"
+  ],
+  "class": "stepper",
+  "steps": 5,
+  "entries": [
+    {
+      "preset": "laps"
+    },
+    {
+      "preset": "tiered"
+    },
+    {
+      "preset": "chain"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lateral-movement"]; colours only from kit tokens.
+   Layout: the graph (three tier bands with the K2 drawing over them) on the left, the attacker panel on the right. */
+[data-sim="lateral-movement"] .lm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 17rem);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+  --lm-gap: 0.8rem;
+}
+[data-sim="lateral-movement"] .lm-mono { font-family: var(--mono); }
+[data-sim="lateral-movement"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lateral-movement"] .lm-graph { position: relative; min-height: 0; }
+
+/* tier bands: the same three rows as the drawing, a tint and a thick left edge in the tier's colour, a label */
+[data-sim="lateral-movement"] .lm-bands {
+  position: absolute; inset: 0;
+  display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); row-gap: var(--lm-gap);
+}
+[data-sim="lateral-movement"] .lm-band {
+  border-left: 0.5rem solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--sw) 9%, var(--bg));
+  padding: 0.15rem 0.6rem;
+}
+[data-sim="lateral-movement"] .lm-band[data-tier="1"] { border-left-style: double; border-left-width: 0.6rem; }
+[data-sim="lateral-movement"] .lm-band[data-tier="2"] { border-left-style: dotted; }
+[data-sim="lateral-movement"] .lm-band b { font-size: var(--fs-sm); color: var(--ink); }
+
+/* the drawing over the bands */
+[data-sim="lateral-movement"] .lm-topo {
+  position: absolute; inset: 0;
+  grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+  row-gap: var(--lm-gap);
+  align-content: stretch;
+  padding: 0 0.6rem 0 1.4rem;
+}
+[data-sim="lateral-movement"] .lm-topo .sd-topo-card { align-self: center; margin-top: 1.2rem; font-size: 1rem; padding-top: 0.3rem; padding-bottom: 0.3rem; }
+[data-sim="lateral-movement"] .lm-topo .sd-topo-badges { min-height: 1.7rem; margin-top: 0.1rem; }
+[data-sim="lateral-movement"] .lm-la { font-size: var(--fs-sm); }
+[data-sim="lateral-movement"] .lm-la .lm-tag { margin-left: 0.4rem; padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+
+/* credentials in memory: a chip per account; shape and colour by tier */
+[data-sim="lateral-movement"] .lm-mem { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.45rem; margin-top: 0.2rem; }
+[data-sim="lateral-movement"] .lm-mem-label { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lateral-movement"] .lm-cred {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0 0.45rem; border: 0.16rem solid var(--sw); border-radius: 1rem;
+  background: color-mix(in srgb, var(--sw) 12%, var(--bg));
+  font-size: var(--fs-sm); line-height: 1.5; white-space: nowrap; color: var(--ink);
+}
+[data-sim="lateral-movement"] .lm-cred::before { color: var(--sw); font-size: 0.9em; line-height: 1; }
+[data-sim="lateral-movement"] .lm-cred[data-tier="0"] { --sw: var(--c5); }
+[data-sim="lateral-movement"] .lm-cred[data-tier="0"]::before { content: '◆'; }
+[data-sim="lateral-movement"] .lm-cred[data-tier="1"] { --sw: var(--c2); border-radius: var(--radius-sm); }
+[data-sim="lateral-movement"] .lm-cred[data-tier="1"]::before { content: '■'; }
+[data-sim="lateral-movement"] .lm-cred[data-tier="2"] { --sw: var(--c1); }
+[data-sim="lateral-movement"] .lm-cred[data-tier="2"]::before { content: '●'; }
+[data-sim="lateral-movement"] .lm-cred[data-tier="3"] { --sw: var(--c8); border-style: dotted; background: var(--bg); }
+[data-sim="lateral-movement"] .lm-cred[data-tier="3"]::before { content: '○'; }
+[data-sim="lateral-movement"] .lm-cred b { font-weight: 700; }
+[data-sim="lateral-movement"] .lm-cred .lm-small { color: var(--muted); }
+[data-sim="lateral-movement"] .lm-cred.lm-stolen { background-color: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--sw) 35%, transparent) 0.35em 0.55em); border-width: 0.2rem; }
+[data-sim="lateral-movement"] .lm-cred.lm-refused { border-style: dashed; border-color: var(--muted); background: transparent; color: var(--muted); }
+[data-sim="lateral-movement"] .lm-cred.lm-refused::before { color: var(--muted); }
+[data-sim="lateral-movement"] .lm-cred.lm-refused b { text-decoration: line-through; text-decoration-thickness: 0.15rem; }
+[data-sim="lateral-movement"] .lm-cred.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* attacker panel */
+[data-sim="lateral-movement"] .lm-side {
+  display: flex; flex-direction: column; gap: 0.45rem; min-height: 0; overflow: hidden;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.7rem;
+}
+[data-sim="lateral-movement"] .lm-side h2 { margin: 0; font-size: 1.15em; }
+[data-sim="lateral-movement"] .lm-side h3 { margin: 0.2rem 0 0; font-size: 1em; }
+[data-sim="lateral-movement"] .lm-where { line-height: 1.35; }
+[data-sim="lateral-movement"] .lm-path { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lateral-movement"] .lm-path span { color: var(--ink); font-weight: 700; }
+[data-sim="lateral-movement"] .lm-held { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="lateral-movement"] .lm-held li { display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="lateral-movement"] .lm-held .lm-head { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+[data-sim="lateral-movement"] .lm-kind { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lateral-movement"] .lm-opens { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.3rem; font-size: var(--fs-sm); padding-left: 1.2rem; }
+[data-sim="lateral-movement"] .lm-door { padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="lateral-movement"] .lm-door[data-ok="false"] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; text-decoration: line-through; }
+[data-sim="lateral-movement"] .lm-none { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lateral-movement"] .lm-outcome {
+  margin-top: auto; padding: 0.4rem 0.6rem; border: 0.25rem solid var(--ok); border-radius: var(--radius);
+  font-weight: 700; font-size: 1.1em; display: flex; gap: 0.5rem; align-items: center;
+}
+[data-sim="lateral-movement"] .lm-outcome::before { content: '✓'; color: var(--ok); }
+[data-sim="lateral-movement"] .lm-outcome[data-outcome="compromised"] { border-color: var(--danger); border-style: double; border-width: 0.4rem; }
+[data-sim="lateral-movement"] .lm-outcome[data-outcome="compromised"]::before { content: '✕'; color: var(--danger); }
+
+/* legend swatches the kit lacks: credential chips by tier, stolen, cut move, refused logon */
+[data-sim="lateral-movement"] .sd-swatch[data-shape^="lm-"] { position: relative; background: var(--bg); border-color: var(--sw, var(--ink)); }
+[data-sim="lateral-movement"] .sd-swatch[data-shape^="lm-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; line-height: 1; color: var(--sw, var(--ink)); }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-t0"] { border-radius: 50%; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-t0"]::after { content: '◆'; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-t1"]::after { content: '■'; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-t2"] { border-radius: 50%; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-t2"]::after { content: '●'; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-user"] { border-radius: 50%; border-style: dotted; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-user"]::after { content: '○'; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-stolen"] { border-width: 0.2rem; background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 45%, transparent) 0.2em 0.32em); }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-cut"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--muted) 0 0.3em, transparent 0.3em 0.48em); overflow: visible; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-cut"]::after { content: '✕'; color: var(--danger); font-size: 0.9em; font-weight: 700; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-refused"] { border-style: dashed; border-color: var(--muted); border-radius: 1em; }
+[data-sim="lateral-movement"] .sd-swatch[data-shape="lm-refused"]::after { content: '—'; color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content; K2 lists the machines, the bands go, the panel goes under. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lateral-movement"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lateral-movement"] .lm { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="lateral-movement"] .lm-bands { display: none; }
+  [data-sim="lateral-movement"] .lm-topo { position: relative; inset: auto; padding: 0; }
+  [data-sim="lateral-movement"] .lm-topo .sd-topo-card { margin-top: 0; }
+  [data-sim="lateral-movement"] .lm-cred { white-space: normal; }
+  [data-sim="lateral-movement"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Bočno kretanje i slojevi ovlasti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var TIER_C = { 0: 5, 1: 2, 2: 1, 3: 8 };
+  var POS = { DC1: [3, 0], FS1: [0, 1], APP1: [6, 1], WS1: [3, 2], WS2: [6, 2] };
+  var ROLE = { dc: 'roleDc', app: 'roleApp', fs: 'roleFs', ws: 'roleWs' };
+  var KIND = { dc: 'server', app: 'server', fs: 'server', ws: 'host' };
+  var ORDER = L.NODES.map(function (n) { return n.id; });   // DC1, APP1, FS1, WS1, WS2: by tier, then id
+
+  /** Data (machine and account names, hashes) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** t.parts, with a node that fills two placeholders cloned (a DOM node can stand in one place only). */
+  function P(key, vars, n) {
+    var seen = [];
+    var parts = n == null ? t.parts(key, vars) : t.parts(key, Object.assign({ n: n }, vars), n);
+    return parts.map(function (p) {
+      if (typeof p === 'string' || p.nodeType === 3) return p;
+      var dup = seen.indexOf(p) >= 0;
+      seen.push(p);
+      return dup ? p.cloneNode(true) : p;
+    });
+  }
+  /** Parts with *term* turned into <em lang="en">. */
+  function rich(key, vars) {
+    var out = [];
+    P(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function label(c) { return c.local ? 'Administrator #' + c.hash : c.who; }
+  /** A credential's name in a caption: the account, or "local Administrator (WS1)" in words. */
+  function nameOf(c) { return c.local ? h('b', null, P('localAdminName', { node: data(c.local) })) : q(c.who); }
+  function heldOf(s, key) { return s.attacker.held.filter(function (c) { return L.keyOf(c) === key; })[0]; }
+
+  /** A credential chip: shape and colour by tier; hatched when the attacker holds it. */
+  function chip(c, o) {
+    o = o || {};
+    var cls = 'lm-cred' + (o.stolen ? ' lm-stolen' : '') + (o.refused ? ' lm-refused' : '') + (o.changed ? ' sd-changed' : '');
+    var kids = [h('b', { translate: 'no' }, label(c))];
+    if (c.leaver) kids.push(h('span', { class: 'lm-small' }, '(' + t('leaverTag') + ')'));
+    return h('span', { class: cls, dataset: { tier: String(c.tier) }, 'aria-label': o.refused ? t('refusedLabel', { who: c.who }) : null }, kids);
+  }
+
+  // ── the machines ──
+  function cardOf(c, n) {
+    var s = c.state, a = s.attacker, e = c.n > 0 ? s.last : null;
+    var dumpedNow = e && (e.kind === 'dump' || e.kind === 'compromised') && e.node === n.id;
+    var line;
+    if (n.localAdminHash === null) line = { text: t('dcLine'), kind: 'role' };
+    else line = { text: h('span', { class: 'lm-la' }, t('laLabel'), ' ', data('#' + n.localAdminHash, 'lm-mono'),
+      n.role === 'ws' && s.lapsOnWorkstations ? h('span', { class: 'lm-tag' }, t('lapsTag')) : null), kind: 'role' };
+    var mem = n.cachedCreds.map(function (cr) {
+      var k = L.keyOf(cr);
+      return chip(cr, { changed: dumpedNow && e.gained && e.gained.indexOf(k) >= 0 });
+    }).concat(n.refused.map(function (cr) { return chip(cr, { refused: true }); }));
+    var badges = [];
+    if (a.at === n.id) badges.push({ text: P('badgeAttacker', { priv: a.priv === 'system' ? data('SYSTEM') : t('privUser') }), k: 'fill' });
+    else if (a.visited.indexOf(n.id) >= 0) badges.push({ text: t('badgeOwned'), k: 'solid' });
+    return {
+      id: n.id, kind: KIND[n.role], col: POS[n.id][0], span: 2, row: POS[n.id][1], c: TIER_C[n.tier],
+      name: t(ROLE[n.role]), lines: [line], badges: badges,
+      extra: h('div', { class: 'lm-mem' }, h('span', { class: 'lm-mem-label' }, t('memory')), mem.length ? mem : h('span', { class: 'lm-mem-label' }, t('memoryEmpty'))),
+      state: a.at === n.id ? 'active' : null,
+      changed: !!e && e.kind === 'move' && e.to === n.id
+    };
+  }
+
+  function linksOf(s) {
+    var a = s.attacker, out = [], seen = {};
+    function add(l) {
+      var k = [l.a, l.b].sort().join('|');
+      if (seen[k]) return;
+      seen[k] = true;
+      l.id = 'l-' + k;
+      out.push(l);
+    }
+    for (var i = 1; i < a.path.length; i++) add({ a: a.path[i - 1], b: a.path[i], active: true });
+    a.tried.forEach(function (x) { add({ a: x.from, b: x.to, state: 'down' }); });
+    if (a.priv === 'system' && !s.done) L.edges(s).forEach(function (x) { add({ a: a.at, b: x.to, state: x.ok ? 'up' : 'down' }); });
+    return out;
+  }
+
+  function packetsOf(s, e) {
+    if (!e || (e.kind !== 'move' && e.kind !== 'refused')) return [];
+    var c = heldOf(s, e.via);
+    return [{ from: e.from, to: e.to, label: c.local ? '#' + c.hash : c.who, c: TIER_C[c.tier], drop: e.kind === 'refused', at: 0.5 }];
+  }
+
+  function renderGraph(c) {
+    var s = c.state;
+    var bands = h('div', { class: 'lm-bands', 'aria-hidden': 'true' }, [0, 1, 2].map(function (k) {
+      return h('div', { class: 'lm-band', dataset: { tier: String(k), c: String(TIER_C[k]) } }, h('b', null, t('tier' + k)));
+    }));
+    var topo = Simdeck.topology({
+      className: 'lm-topo', cols: 8, gap: '0.9rem', rows: ['1fr', '1fr', '1fr'], dir: c.dir,
+      nodes: ORDER.map(function (id) { return cardOf(c, L.nodeOf(s, id)); }),
+      links: linksOf(s),
+      packets: packetsOf(s, c.n > 0 ? s.last : null)
+    });
+    return h('div', { class: 'lm-graph' }, bands, topo);
+  }
+
+  // ── the attacker panel ──
+  function opensOf(s, cr) {
+    if (cr.all) return h('span', { class: 'lm-none' }, t('everyAccount'));
+    var doors = s.nodes.filter(function (n) { return L.works(cr, n) || L.expects(cr, n); });
+    if (!doors.length) return h('span', { class: 'lm-none' }, t('opensNothing'));
+    return [h('span', { class: 'lm-none' }, t('opens'))].concat(doors.map(function (n) {
+      var ok = L.works(cr, n);
+      return h('span', { class: 'lm-door', translate: 'no', dataset: { ok: String(ok) } }, n.id);
+    }));
+  }
+  function renderSide(c) {
+    var s = c.state, a = s.attacker, e = c.n > 0 ? s.last : null;
+    var gained = e && e.gained ? e.gained : [];
+    var where = a.at === null ? t('notIn')
+      : P('atLine', { node: q(a.at), priv: a.priv === 'system' ? q('SYSTEM') : h('b', null, t('privUser')) });
+    var held = a.held.slice().sort(function (x, y) { return x.tier - y.tier || (x.local ? 1 : 0) - (y.local ? 1 : 0) || (L.keyOf(x) < L.keyOf(y) ? -1 : 1); });
+    var list = held.length ? h('ul', { class: 'lm-held' }, held.map(function (cr) {
+      return h('li', null,
+        h('div', { class: 'lm-head' }, chip(cr, { stolen: true, changed: gained.indexOf(L.keyOf(cr)) >= 0 }),
+          h('span', { class: 'lm-kind' }, t(cr.kind === 'password' ? 'kindPassword' : 'kindHash'))),
+        h('div', { class: 'lm-opens' }, opensOf(s, cr)));
+    })) : h('p', { class: 'lm-none' }, t('heldNone'));
+    var kids = [h('h2', null, t('sideTitle')), h('div', { class: 'lm-where' }, where)];
+    if (a.path.length > 1) kids.push(h('div', { class: 'lm-path' }, t('pathLabel'), ' ', h('span', { translate: 'no' }, a.path.join(' → '))));
+    kids.push(h('h3', null, t('heldTitle')), list);
+    if (s.done) {
+      var worst = e && e.kind === 'stalled' ? e.tier : 0;
+      kids.push(h('div', { class: 'lm-outcome', dataset: { outcome: s.outcome } },
+        s.outcome === 'compromised' ? t('outcomeCompromised') : t('outcomeContained', { tier: worst })));
+    }
+    return h('section', { class: 'lm-side' }, kids);
+  }
+
+  // ── captions ──
+  function listOf(s, keys) {
+    var out = [];
+    keys.forEach(function (k, i) {
+      if (i) out.push(', ');
+      var cr = heldOf(s, k);
+      out.push(nameOf(cr));
+    });
+    return out;
+  }
+  function eventCaption(c) {
+    var s = c.state, e = s.last, p = c.params;
+    switch (e.kind) {
+      case 'foothold': return P('capFoothold', { who: q(e.who), node: q(e.node) });
+      case 'escalate': return rich('capEscalate', { node: q(e.node) });
+      case 'dump': {
+        var out = e.gained.length ? P('capDump', { node: q(e.node), list: h('span', null, listOf(s, e.gained)) }, e.gained.length)
+          : P('capDumpNone', { node: q(e.node) });
+        var got = e.gained.map(function (k) { return heldOf(s, k); });
+        var node = L.nodeOf(s, e.node);
+        got.forEach(function (cr) {
+          if (cr.tier === 0 && cr.leaver) out = out.concat([' '], P('noteLeaver', { who: q(cr.who), node: q(e.node) }));
+          else if (cr.tier === 0) out = out.concat([' '], P('noteDaOnWs', { node: q(e.node) }));
+          else if (cr.tier === 1 && !cr.local && node.tier === 2) out = out.concat([' '], P('noteServerAdmin', {}));
+        });
+        var la = got.filter(function (cr) { return cr.local && cr.tier === 2; })[0];
+        if (la && !got.some(function (cr) { return cr.tier < 2; })) {
+          var shared = s.nodes.some(function (n) { return n.id !== e.node && n.localAdminHash === la.hash; });
+          out = out.concat([' '], shared ? P('noteImage', {}) : P(s.lapsOnWorkstations ? 'noteLaps' : 'noteUnique', { node: q(e.node) }));
+        }
+        return out;
+      }
+      case 'move': {
+        var cr = heldOf(s, e.via);
+        return cr.kind === 'password' ? P('capMovePassword', { to: q(e.to), who: nameOf(cr) })
+          : rich('capMoveHash', { to: q(e.to), who: nameOf(cr) });
+      }
+      case 'refused':
+        return P(s.lapsOnWorkstations ? 'capRefusedLaps' : 'capRefusedUnique', { from: q(e.from), to: q(e.to) });
+      case 'compromised': return P('capCompromised', {});
+      case 'stalled': {
+        var st = P('capStalled', { tier: e.tier });
+        // credit tiering only where it kept a Tier 0 credential off a workstation
+        var kept = s.nodes.some(function (n) { return n.tier === 2 && n.refused.some(function (cr) { return cr.tier === 0; }); });
+        if (kept) st = st.concat([' '], P('noteTiering', {}));
+        return st;
+      }
+    }
+    return [];
+  }
+  function caption(c) {
+    if (c.first) return P('capStart', {});
+    return P('capStep', { n: c.n }).concat([' '], eventCaption(c));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'tiering', type: 'toggle', label: t('tiering'), hint: t('tieringHint') },
+      { key: 'lapsOnWorkstations', type: 'toggle', label: t('laps'), hint: t('lapsHint') },
+      { key: 'daLogsOnWS', type: 'toggle', label: t('daLogsOnWS'), hint: t('daLogsOnWSHint'),
+        disabled: function (p) { return p.tiering ? t('daRefused') : false; } },
+      { key: 'sharedLocalAdmin', type: 'toggle', label: t('sharedLocalAdmin'), hint: t('sharedHint'),
+        disabled: function (p) { return p.lapsOnWorkstations ? t('sharedLaps') : false; } },
+      { key: 'leaverAdmin', type: 'toggle', label: t('leaverAdmin'), hint: t('leaverHint') }
+    ],
+
+    presets: [
+      { id: 'flat', label: t('presetFlat'), hint: t('presetFlatHint'), params: {} },
+      { id: 'laps', label: t('presetLaps'), hint: t('presetLapsHint'), params: { lapsOnWorkstations: true } },
+      { id: 'tiered', label: t('presetTiered'), hint: t('presetTieredHint'), params: { tiering: true } },
+      { id: 'both', label: t('presetBoth'), hint: t('presetBothHint'), params: { tiering: true, lapsOnWorkstations: true } },
+      { id: 'chain', label: t('presetChain'), hint: t('presetChainHint'), params: { daLogsOnWS: false } }
+    ],
+
+    legend: [
+      { c: 5, shape: 'lm-t0', label: t('legendT0') },
+      { c: 2, shape: 'lm-t1', label: t('legendT1') },
+      { c: 1, shape: 'lm-t2', label: t('legendT2') },
+      { c: 8, shape: 'lm-user', label: t('legendUser') },
+      { shape: 'lm-stolen', label: t('legendStolen') },
+      { shape: 'line', label: t('legendUsable') },
+      { shape: 'lm-cut', label: t('legendCut') },
+      { shape: 'lm-refused', label: t('legendRefused') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'lm' }, renderGraph(c), renderSide(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
