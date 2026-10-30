@@ -1,0 +1,507 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-cgroups: CPU weights and cpu.max, memory.high and memory.max, OOM inside one cgroup. On top, the host: its
+     cores split among the groups and its RAM. Below, three control groups A, B and C on the host (the container
+     diagram of lnx-namespaces, reduced to the boxes), each with its files, its processes, a CPU bar and a memory bar.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-cgroups">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ograničenja u cgroups · simdeck</title>
+<meta name="description" content="Postavi granice trima grupama i pusti pohlepne procese: tko dobiva procesor, tko je prigušen i koga OOM killer ubija iako domaćin ima memorije.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-cgroups",
+  "title": {
+    "hr": "Ograničenja u cgroups",
+    "en": "cgroup limits"
+  },
+  "concept": {
+    "hr": "Težine i granica procesora, granice memorije; OOM unutar kontrolne grupe",
+    "en": "CPU weights and caps, memory limits; OOM inside a cgroup"
+  },
+  "summary": {
+    "hr": "Postavi granice trima grupama i pusti pohlepne procese: tko dobiva procesor, tko je prigušen i koga OOM killer ubija iako domaćin ima memorije.",
+    "en": "Set limits on three groups and run greedy workloads: who gets the CPU, who is throttled, and whom the OOM killer kills while the host has RAM free."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "weights-idle"
+    },
+    {
+      "preset": "high-throttle"
+    },
+    {
+      "preset": "oom-inside"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-cgroups"]; colours only from kit tokens.
+   Layout: the host strip on top; the three group boxes side by side below it. */
+[data-sim="lnx-cgroups"] .cg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-cgroups"] code, [data-sim="lnx-cgroups"] .cg-mono { font-family: var(--mono); }
+
+/* the host: the outer frame, as in lnx-namespaces (ink border, a thick top) */
+[data-sim="lnx-cgroups"] .cg-host {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.3rem 1.2rem;
+  padding: 0.4rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-top-width: 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-cgroups"] .cg-host h3 { margin: 0; font-size: 1.15rem; }
+[data-sim="lnx-cgroups"] .cg-hm { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+[data-sim="lnx-cgroups"] .cg-hm-label { display: flex; justify-content: space-between; gap: 0.6rem; font-size: 1rem; }
+[data-sim="lnx-cgroups"] .cg-hm-label b { font-weight: 700; }
+[data-sim="lnx-cgroups"] .cg-stack {
+  position: relative;
+  display: flex;
+  height: 2rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+[data-sim="lnx-cgroups"] .cg-seg {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  font-size: 1rem;
+  white-space: nowrap;
+  border-right: 2px solid var(--bg);
+}
+[data-sim="lnx-cgroups"] .cg-seg.cg-own { background: var(--c8); color: var(--on-series); }
+[data-sim="lnx-cgroups"] .cg-seg.cg-idle { flex: 1 1 auto; color: var(--muted); font-weight: 400; border-right: 0; }
+[data-sim="lnx-cgroups"] .cg-core { position: absolute; top: 0; height: 0.45rem; border-left: 2px solid var(--ink); }
+[data-sim="lnx-cgroups"] .cg-stack.sd-changed { outline-offset: 0.1rem; box-shadow: none; }
+
+/* the groups */
+[data-sim="lnx-cgroups"] .cg-groups {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+[data-sim="lnx-cgroups"] .cg-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 0;
+  justify-content: space-between;
+  padding: 0.4rem 0.7rem 0.6rem;
+  border: 0.2rem solid var(--sw);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg);
+}
+[data-sim="lnx-cgroups"] .cg-box.cg-edit { border-width: 0.35rem; }
+[data-sim="lnx-cgroups"] .cg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+[data-sim="lnx-cgroups"] .cg-head h3 { margin: 0; font-size: 1.2rem; }
+[data-sim="lnx-cgroups"] .cg-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="lnx-cgroups"] .cg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.4rem;
+  border: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 1rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="lnx-cgroups"] .cg-chip[data-k="oom"] { border-color: var(--danger); color: var(--danger); }
+[data-sim="lnx-cgroups"] .cg-files {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 0.8rem;
+  margin: 0;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.35;
+}
+[data-sim="lnx-cgroups"] .cg-files dt { color: var(--muted); }
+[data-sim="lnx-cgroups"] .cg-files dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="lnx-cgroups"] .cg-sub { margin: 0; font-size: 1rem; color: var(--muted); font-weight: 700; }
+[data-sim="lnx-cgroups"] .cg-procs { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-cgroups"] .cg-proc {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 0.6rem;
+  padding: 0.05rem 0.5rem;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+}
+[data-sim="lnx-cgroups"] .cg-proc .cg-pid { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-cgroups"] .cg-proc .cg-name { font-family: var(--mono); }
+[data-sim="lnx-cgroups"] .cg-proc .cg-rss { font-family: var(--mono); text-align: right; white-space: nowrap; }
+[data-sim="lnx-cgroups"] .cg-proc.cg-killed { border: 2px dashed var(--danger); color: var(--muted); }
+[data-sim="lnx-cgroups"] .cg-proc.cg-killed .cg-name { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="lnx-cgroups"] .cg-x { color: var(--danger); font-weight: 700; white-space: nowrap; }
+[data-sim="lnx-cgroups"] .cg-quiet { color: var(--muted); font-style: italic; }
+
+/* a meter: the label line, the bar with its marks, the scale */
+[data-sim="lnx-cgroups"] .cg-meter { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.15rem 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-cgroups"] .cg-meter.sd-changed { outline-offset: 0; box-shadow: none; background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-cgroups"] .cg-meter.sd-changed .cg-scale { color: var(--on-hl); }
+[data-sim="lnx-cgroups"] .cg-mlabel { font-size: 1rem; }
+[data-sim="lnx-cgroups"] .cg-mlabel b { font-weight: 700; }
+[data-sim="lnx-cgroups"] .cg-bar {
+  position: relative;
+  height: 2.4rem;
+  margin: 0.45rem 0;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-cgroups"] .cg-used, [data-sim="lnx-cgroups"] .cg-want { position: absolute; top: 0; bottom: 0; }
+[data-sim="lnx-cgroups"] .cg-used { left: 0; background: var(--sw); }
+[data-sim="lnx-cgroups"] .cg-want {
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3rem, color-mix(in srgb, var(--sw) 70%, transparent) 0.3rem 0.5rem);
+  border: 2px dashed var(--sw);
+}
+[data-sim="lnx-cgroups"] .cg-mark { position: absolute; top: -0.45rem; bottom: -0.45rem; width: 0; transform: translateX(-50%); }
+[data-sim="lnx-cgroups"] .cg-mark[data-k="cap"] { border-left: 0.22rem dashed var(--ink); }
+[data-sim="lnx-cgroups"] .cg-mark[data-k="high"] { border-left: 0.3rem dotted var(--ink); }
+[data-sim="lnx-cgroups"] .cg-mark[data-k="max"] { border-left: 0.45rem solid var(--ink); }
+[data-sim="lnx-cgroups"] .cg-mark[data-k="host"] { border-left: 2px dotted var(--muted); top: 0; bottom: 0; }
+[data-sim="lnx-cgroups"] .cg-scale { position: relative; height: 1.2rem; font-family: var(--mono); font-size: 1rem; color: var(--muted); }
+[data-sim="lnx-cgroups"] .cg-scale span { position: absolute; top: 0; transform: translateX(-50%); line-height: 1.2; white-space: nowrap; }
+[data-sim="lnx-cgroups"] .cg-scale span:first-child { transform: none; }
+[data-sim="lnx-cgroups"] .cg-scale span:last-child { transform: translateX(-100%); }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-cgroups"] .sd-ctl[hidden] { display: none; }
+/* the panel holds 6 presets and 9 controls: presets in two columns, sliders and gaps tighter, so it fits 1920×1080 */
+[data-sim="lnx-cgroups"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-cgroups"] .sd-group { gap: 0.3rem; }
+[data-sim="lnx-cgroups"] .sd-ctl { gap: 0.1rem; }
+[data-sim="lnx-cgroups"] .sd-range { height: 1.5rem; }
+[data-sim="lnx-cgroups"] .sd-ctl-choice:not([hidden]) { display: grid; grid-template-columns: 8.2rem minmax(0, 1fr); align-items: center; column-gap: 0.4rem; }
+[data-sim="lnx-cgroups"] .sd-ctl-choice .sd-hint { grid-column: 1 / -1; }
+[data-sim="lnx-cgroups"] .sd-ctl-choice .sd-seg { flex-wrap: nowrap; }
+[data-sim="lnx-cgroups"] .sd-ctl-choice .sd-seg button { padding: 0 0.35rem; min-width: 0; }
+
+/* legend swatches */
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-used"] { background: linear-gradient(90deg, var(--c1) 0 33%, var(--c2) 33% 66%, var(--c3) 66%); }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-want"] {
+  border: 2px dashed var(--ink);
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.15rem, var(--ink) 0.15rem 0.25rem);
+}
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-cap"], [data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-high"],
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-max"] { width: 0.6em; border: 0; border-radius: 0; background: transparent; }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-cap"] { border-left: 0.22rem dashed var(--ink); }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-high"] { border-left: 0.3rem dotted var(--ink); }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-max"] { border-left: 0.45rem solid var(--ink); }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-oom"] { position: relative; border: 2px dashed var(--danger); background: var(--bg); }
+[data-sim="lnx-cgroups"] .sd-swatch[data-shape="cg-oom"]::after { content: '✗'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-cgroups"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-cgroups"] .cg { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-cgroups"] .cg-host { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-cgroups"] .cg-groups { display: flex; flex-direction: column; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Ograničenja u cgroups</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { A: '1', B: '2', C: '3' };
+  var MEM_SCALE = 2048;     // MB at the right end of every memory bar
+
+  // ── numbers in the page's language ──
+
+  function num(x) {
+    var s = String(Math.round(x * 100) / 100);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function cores(x) {
+    var r = Math.round(x * 100) / 100;
+    return r === Math.round(r) ? t.n('nCores', r, { n: num(r) }) : t('nCoresFrac', { n: num(r) });
+  }
+  function gb(mb) {
+    var s = (mb / 1024).toFixed(1);
+    return (Simdeck.lang === 'hr' ? s.replace('.', ',') : s) + ' GB';
+  }
+  function size(mb) { return mb >= 1024 ? num(mb / 1024) + ' GB' : mb + ' MB'; }
+  function pct(x, of) { return Math.max(0, Math.min(100, x / of * 100)) + '%'; }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+
+  /** Caption parts: t.parts with *word* as <em lang="en"> and `x` as code (as in lnx-namespaces). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) out.push(h('em', { lang: 'en' }, bit.slice(1, -1)));
+        else if (/^`[^`]+`$/.test(bit)) out.push(code(bit.slice(1, -1)));
+        else out.push(bit);
+      });
+    });
+    return out;
+  }
+
+  // ── the host strip ──
+
+  function host(s, chg) {
+    var anyCpu = chg.some(function (k) { return /:cpu$/.test(k); });
+    var anyMem = chg.some(function (k) { return /:mem$/.test(k); });
+    var cpuSegs = s.groups.filter(function (g) { return g.alloc > 0; }).map(function (g) {
+      return h('div', { class: 'cg-seg sd-fill', dataset: { c: COLOUR[g.id] }, style: { width: pct(g.alloc, s.cores) }, translate: 'no' },
+        g.alloc / s.cores >= 0.08 ? g.id : '');
+    });
+    cpuSegs.push(h('div', { class: 'cg-seg cg-idle sd-hatch' }, s.idle > 0 && s.idle / s.cores >= 0.2 ? t('idle') : ''));
+    var ticks = [];
+    for (var i = 1; i < s.cores; i++) ticks.push(h('span', { class: 'cg-core', style: { left: pct(i, s.cores) } }));
+    var ramSegs = [h('div', { class: 'cg-seg cg-own', style: { width: pct(s.hostOwn, s.hostRam) } })]
+      .concat(s.groups.filter(function (g) { return g.memUsed > 0; }).map(function (g) {
+        return h('div', { class: 'cg-seg sd-fill', dataset: { c: COLOUR[g.id] }, style: { width: pct(g.memUsed, s.hostRam) } });
+      }))
+      .concat([h('div', { class: 'cg-seg cg-idle' })]);
+    return h('div', { class: 'cg-host' },
+      h('h3', null, t('host')),
+      h('div', { class: 'cg-hm' },
+        h('div', { class: 'cg-hm-label' }, h('span', null, h('b', null, t('hostCpu')), ' ', cores(s.cores)),
+          h('span', null, t('idle'), ' ', cores(s.idle))),
+        h('div', { class: 'cg-stack' + (anyCpu ? ' sd-changed' : '') }, cpuSegs, ticks)),
+      h('div', { class: 'cg-hm' },
+        h('div', { class: 'cg-hm-label' }, h('span', null, h('b', null, t('hostRam')), ' ', data(gb(s.hostRam))),
+          h('span', null, t('free'), ' ', data(gb(s.hostFree)))),
+        h('div', { class: 'cg-stack' + (anyMem ? ' sd-changed' : '') }, ramSegs)));
+  }
+
+  // ── a group box ──
+
+  function scale(max, stepOf, label) {
+    var out = [];
+    for (var v = 0; v <= max + 1e-9; v += stepOf) out.push(h('span', { style: { left: pct(v, max) } }, label(v)));
+    return h('div', { class: 'cg-scale', translate: 'no' }, out);
+  }
+
+  function cpuMeter(g, s, top, on) {
+    var cap = g.quota > 0 ? g.quota : null;
+    var want = Math.min(g.demandCpu, cap != null ? cap : Infinity);
+    var marks = [];
+    if (s.cores < top) marks.push(h('span', { class: 'cg-mark', dataset: { k: 'host' }, style: { left: pct(s.cores, top) } }));
+    if (cap != null) marks.push(h('span', { class: 'cg-mark', dataset: { k: 'cap' }, style: { left: pct(Math.min(cap, top), top) } }));
+    return h('div', { class: 'cg-meter' + (on ? ' sd-changed' : '') },
+      h('div', { class: 'cg-mlabel' }, t.parts('cpuLine', { got: h('b', null, cores(g.alloc)), want: cores(g.demandCpu) }),
+        g.allKilled ? [' · ', h('span', { class: 'cg-x' }, t('allKilled'))] : null),
+      h('div', { class: 'cg-bar', dataset: { c: COLOUR[g.id] } },
+        h('div', { class: 'cg-used', style: { width: pct(g.alloc, top) } }),
+        g.demandCpu > g.alloc + 1e-9 ? h('div', { class: 'cg-want', style: { left: pct(g.alloc, top), width: pct(g.demandCpu - g.alloc, top) } }) : null,
+        marks),
+      scale(top, 1, function (v) { return String(v); }));
+  }
+
+  function memMeter(g, on) {
+    var marks = [];
+    if (g.memHigh != null && g.memHigh < (g.memMax != null ? g.memMax : Infinity)) marks.push(h('span', { class: 'cg-mark', dataset: { k: 'high' }, style: { left: pct(g.memHigh, MEM_SCALE) } }));
+    if (g.memMax != null) marks.push(h('span', { class: 'cg-mark', dataset: { k: 'max' }, style: { left: pct(g.memMax, MEM_SCALE) } }));
+    return h('div', { class: 'cg-meter' + (on ? ' sd-changed' : '') },
+      h('div', { class: 'cg-mlabel' }, t.parts('memLine', { used: h('b', null, String(g.memUsed)), want: String(g.demandMem) })),
+      h('div', { class: 'cg-bar', dataset: { c: COLOUR[g.id] } },
+        h('div', { class: 'cg-used', style: { width: pct(g.memUsed, MEM_SCALE) } }),
+        g.demandMem > g.memUsed ? h('div', { class: 'cg-want', style: { left: pct(g.memUsed, MEM_SCALE), width: pct(g.demandMem - g.memUsed, MEM_SCALE) } }) : null,
+        marks),
+      scale(MEM_SCALE, 1024, function (v) { return v ? size(v) : '0'; }));
+  }
+
+  function box(g, s, p, top, chg) {
+    var chips = [];
+    if (g.throttled) chips.push(h('span', { class: 'cg-chip', dataset: { k: 'thr' } }, '‖ ', t('statThrottled')));
+    if (g.overHigh) chips.push(h('span', { class: 'cg-chip', dataset: { k: 'high' } }, '↓ ', t('statHigh')));
+    if (g.oom) chips.push(h('span', { class: 'cg-chip', dataset: { k: 'oom' } }, '✗ ', t('statOom')));
+    var files = Object.keys(g.files).map(function (k) { return [h('dt', null, k), h('dd', null, g.files[k])]; });
+    var procs = g.procs.map(function (x) {
+      return h('li', { class: 'cg-proc' + (x.killed ? ' cg-killed' : '') },
+        h('span', { class: 'cg-pid', translate: 'no' }, String(x.pid)),
+        h('span', { class: 'cg-name', translate: 'no' }, x.name),
+        x.killed ? h('span', { class: 'cg-x' }, '✗ ', data('OOM'), ' ', h('span', { class: 'cg-rss', translate: 'no' }, x.rss + ' MB'))
+          : x.rss || g.demandCpu ? h('span', { class: 'cg-rss', translate: 'no' }, x.rss + ' MB') : h('span', { class: 'cg-quiet' }, t('sleeping')));
+    });
+    return h('section', { class: 'cg-box' + (p.group === g.id ? ' cg-edit' : ''), dataset: { c: COLOUR[g.id], g: g.id } },
+      h('div', { class: 'cg-head' }, h('span', { class: 'cg-badge sd-fill', translate: 'no' }, g.id), h('h3', null, t('group', { g: g.id })), chips),
+      h('dl', { class: 'cg-files', translate: 'no', 'aria-label': t('files') }, files),
+      h('ul', { class: 'cg-procs', 'aria-label': t('procs') }, procs),
+      cpuMeter(g, s, top, chg.indexOf(g.id + ':cpu') >= 0),
+      memMeter(g, chg.indexOf(g.id + ':mem') >= 0));
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state, p = c.params;
+    // the CPU bars share one scale: the host's cores, or more when a group wants or may use more
+    var top = Math.ceil(Math.max.apply(null, [s.cores].concat(s.groups.map(function (g) { return Math.max(g.demandCpu, g.quota); }))));
+    c.stage.replaceChildren(h('div', { class: 'cg' }, host(s, chg),
+      h('div', { class: 'cg-groups' }, s.groups.map(function (g) { return box(g, s, p, top, chg); }))));
+  }
+
+  // ── captions: the group and half whose param changed last speak (sim.js nextFocus, captionKey) ──
+
+  var focus = null, lastParams = null, lastPreset = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    var same = lastParams && JSON.stringify(lastParams) === key && lastPreset === c.preset;
+    if (!same) {
+      focus = L.nextFocus(focus, lastParams, c.params, c.preset, lastPreset);
+      chg = lastState ? L.changed(lastState, c.state) : [];
+      lastParams = Object.assign({}, c.params);
+      lastPreset = c.preset;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var k = L.captionKey(c.state, focus);
+    var v = {};
+    Object.keys(k).forEach(function (name) { v[name] = k[name]; });
+    ['want', 'quota', 'idle', 'got', 'share', 'a', 'b', 'c', 'ca', 'cb', 'ch'].forEach(function (name) {
+      if (typeof k[name] === 'number') v[name] = cores(k[name]);
+    });
+    if (k.key === 'cContention') { v.cl = num(k.cl); v.ratio = num(k.ratio); }
+    if (k.free != null) v.free = gb(k.free);
+    if (k.max != null) v.max = size(k.max);
+    if (k.high != null) v.high = size(k.high);
+    if (k.name) v.name = data(k.name);
+    if (k.pid) v.pid = data(k.pid);
+    var out = rich(k.key, v);
+    if (k.key === 'cOom' && k.n > 1) out = out.concat([' '], rich('cOomMore'));
+    return out;
+  }
+
+  var labels = {
+    'weights-contention': 'pContention', 'weights-idle': 'pIdle', 'quota-cap': 'pQuota',
+    'oom-inside': 'pOom', 'high-throttle': 'pHigh', 'oom-group': 'pOomGroup'
+  };
+
+  var params = [
+    { key: 'cores', type: 'range', label: t('cores'), min: 1, max: 8, step: 1 },
+    { key: 'group', type: 'choice', label: t('editGroup'), options: [['A', 'A'], ['B', 'B'], ['C', 'C']] }
+  ];
+  function opt(v) { return [v, t('opt_' + v)]; }
+  L.GROUPS.forEach(function (g) {
+    var only = function (p) { return p.group === g; };
+    params.push(
+      { key: 'weight' + g, type: 'range', label: t('weight'), min: 1, max: 1000, step: 1, visible: only },
+      { key: 'quota' + g, type: 'range', label: t('quota'), min: 0, max: 8, step: 0.1, visible: only,
+        format: function (v) { return v > 0 ? cores(v) : t('quotaMax'); } },
+      { key: 'cpu' + g, type: 'range', label: t('cpu'), min: 0, max: 8, step: 0.1, visible: only, format: cores },
+      { key: 'mem' + g, type: 'range', label: t('mem'), min: 0, max: 2000, step: 50, visible: only,
+        format: function (v) { return v + ' MB'; } },
+      { key: 'memHigh' + g, type: 'choice', label: t('memHigh'), visible: only,
+        options: ['off', '256M', '384M', '1G'].map(opt) },
+      { key: 'memMax' + g, type: 'choice', label: t('memMax'), visible: only,
+        options: ['256M', '512M', '1G', '2G', 'max'].map(opt) });
+  });
+  params.push({ key: 'oomGroup', type: 'toggle', label: t('oomGroup') });
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: params,
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cg-used', label: t('legUsed') },
+      { shape: 'cg-want', label: t('legWanted') },
+      { shape: 'cg-cap', label: t('legCap') },
+      { shape: 'cg-high', label: t('legHigh') },
+      { shape: 'cg-max', label: t('legMax') },
+      { shape: 'cg-oom', label: t('legOom') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
