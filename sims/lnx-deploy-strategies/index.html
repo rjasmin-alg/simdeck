@@ -1,0 +1,488 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-deploy-strategies: one v2 deployed three ways at once, one step per minute. Three lanes side by side, stepped in
+     lockstep (rolling update, blue-green, canary): each with its load balancer, its instances (v1 blue, v2 orange with
+     a "2", dashed when not ready), a pipe per instance whose width is its share of traffic, the split bar, the failed
+     requests this minute and in total, the lane's check and its phase. Under them one shared strip: failed requests
+     per minute per lane. Drawn by the page (no kit view compares lanes). Model: sim.js; rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="lnx-deploy-strategies">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plavo-zeleno, kanarinac, postupno uvođenje · simdeck</title>
+<meta name="description" content="Uvedi istu lošu inačicu na tri načina odjednom i broji neuspjele zahtjeve: strategije se razlikuju po tome koga pogode i kako brzo se vrate.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-deploy-strategies",
+  "title": {
+    "hr": "Plavo-zeleno, kanarinac, postupno uvođenje",
+    "en": "Blue-green, canary, rolling"
+  },
+  "concept": {
+    "hr": "Kako svaka strategija seli promet na novu inačicu i vraća lošu natrag",
+    "en": "How each strategy moves traffic to a new version and rolls a bad one back"
+  },
+  "summary": {
+    "hr": "Uvedi istu lošu inačicu na tri načina odjednom i broji neuspjele zahtjeve: strategije se razlikuju po tome koga pogode i kako brzo se vrate.",
+    "en": "Deploy the same bad version three ways at once and count failed requests: the strategies differ in whom they hit and how fast they get back."
+  },
+  "tags": [
+    "automation"
+  ],
+  "class": "stepper",
+  "steps": 3,
+  "entries": [
+    {
+      "preset": "subtle-bug"
+    },
+    {
+      "preset": "below-threshold"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-deploy-strategies"]; colours only from kit tokens.
+   Layout: three lane columns on top, the shared strip under them. A lane's fleet is a grid of slot columns (5 for
+   rolling, 8 for the others) of one width, so boxes are the same size in every lane. */
+[data-sim="lnx-deploy-strategies"] .ds {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.6cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw 1.6cqh;
+  font-size: 1rem;
+}
+[data-sim="lnx-deploy-strategies"] .ds-mono { font-family: var(--mono); }
+/* the lanes share their rows (subgrid), so a name that wraps in one lane keeps the fleets level */
+[data-sim="lnx-deploy-strategies"] .ds-lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto minmax(0, 1fr) auto auto auto; column-gap: 1.2cqw; min-height: 0; }
+[data-sim="lnx-deploy-strategies"] .ds-lane {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+  row-gap: 0.9cqh;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.5rem 0.7rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+/* lane head: the name (the term), its one-line rule, the phase badge */
+[data-sim="lnx-deploy-strategies"] .ds-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
+[data-sim="lnx-deploy-strategies"] .ds-name { font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
+[data-sim="lnx-deploy-strategies"] .ds-name small { display: block; font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="lnx-deploy-strategies"] .ds-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.2; }
+[data-sim="lnx-deploy-strategies"] .ds-phase {
+  flex: none;
+  padding: 0.1rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--bg);
+}
+[data-sim="lnx-deploy-strategies"] .ds-phase[data-p="deploying"] { border-color: var(--accent); color: var(--accent); }
+[data-sim="lnx-deploy-strategies"] .ds-phase[data-p="rollingBack"] { border: 0.2rem solid var(--danger); color: var(--danger); }
+[data-sim="lnx-deploy-strategies"] .ds-phase[data-p="rolledBack"] { border-style: dashed; border-color: var(--ink); }
+[data-sim="lnx-deploy-strategies"] .ds-phase[data-p="done"] { border-color: var(--ok); background: var(--ok); color: var(--on-series); }
+[data-sim="lnx-deploy-strategies"] .ds-phase[data-p="stalled"] { border: 0.2rem dashed var(--warn); color: var(--ink); }
+[data-sim="lnx-deploy-strategies"] .ds-phase.sd-changed { outline: 0.3rem solid var(--hl); outline-offset: 0.12rem; }
+
+/* load balancer */
+[data-sim="lnx-deploy-strategies"] .ds-lb {
+  justify-self: center;
+  padding: 0.15rem 0.9rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  text-align: center;
+  line-height: 1.2;
+}
+[data-sim="lnx-deploy-strategies"] .ds-lb small { display: block; font-size: var(--fs-sm); color: var(--muted); }
+
+/* fleet: group labels, pipes, boxes, requests; one column per slot */
+[data-sim="lnx-deploy-strategies"] .ds-fleet {
+  --gap: 0.3rem;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), calc((100% - 7 * var(--gap)) / 8));
+  grid-template-rows: auto minmax(2rem, 1fr) auto auto;
+  justify-content: center;
+  column-gap: var(--gap);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+[data-sim="lnx-deploy-strategies"] .ds-group {
+  grid-row: 1;
+  margin-bottom: 0.2rem;
+  padding-bottom: 0.1rem;
+  border-bottom: 0.15rem solid var(--line);
+  font-size: var(--fs-sm);
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-sim="lnx-deploy-strategies"] .ds-group[data-live] { border-bottom: 0.3rem solid var(--ink); font-weight: 700; }
+[data-sim="lnx-deploy-strategies"] .ds-pipe { grid-row: 2; display: flex; justify-content: center; min-height: 0; }
+[data-sim="lnx-deploy-strategies"] .ds-pipe > span { display: block; height: 100%; border-radius: 0.2rem 0.2rem 0 0; }
+[data-sim="lnx-deploy-strategies"] .ds-pipe > span[data-v="1"] { background: var(--c1); }
+[data-sim="lnx-deploy-strategies"] .ds-pipe > span[data-v="2"] { background: var(--c2); }
+[data-sim="lnx-deploy-strategies"] .ds-pipe > span[data-none] { width: 0 !important; border-left: 0.15rem dotted var(--muted); background: none; border-radius: 0; }
+[data-sim="lnx-deploy-strategies"] .ds-box {
+  grid-row: 3;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  max-height: 3.4rem;
+  width: 100%;
+  border: 0.2rem solid;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-weight: 700;
+  box-sizing: border-box;
+}
+[data-sim="lnx-deploy-strategies"] .ds-box[data-v="1"] { background: var(--c1); border-color: var(--c1); color: var(--on-series); }
+[data-sim="lnx-deploy-strategies"] .ds-box[data-v="2"] { background: var(--c2); border-color: var(--c2); color: var(--on-series); }
+[data-sim="lnx-deploy-strategies"] .ds-box[data-notready] { border-style: dashed; border-color: var(--c2); color: var(--ink); background: repeating-linear-gradient(45deg, var(--bg) 0 0.3rem, color-mix(in srgb, var(--c2) 25%, var(--bg)) 0.3rem 0.5rem); }
+[data-sim="lnx-deploy-strategies"] .ds-box[data-empty] { border: 0.12rem dotted var(--line); background: transparent; }
+[data-sim="lnx-deploy-strategies"] .ds-box.sd-changed { outline: 0.3rem solid var(--hl); outline-offset: 0.1rem; }
+[data-sim="lnx-deploy-strategies"] .ds-req { grid-row: 4; margin-top: 0.4rem; font-family: var(--mono); font-size: var(--fs-sm); text-align: center; color: var(--muted); }
+[data-sim="lnx-deploy-strategies"] .ds-req[data-on] { color: var(--ink); }
+
+/* split bar */
+[data-sim="lnx-deploy-strategies"] .ds-split {
+  position: relative;
+  display: flex;
+  height: 2rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--c1) 22%, var(--bg));
+}
+[data-sim="lnx-deploy-strategies"] .ds-split > i { display: block; margin-left: auto; height: 100%; background: repeating-linear-gradient(-45deg, var(--c2) 0 0.35rem, color-mix(in srgb, var(--c2) 60%, var(--bg)) 0.35rem 0.55rem); }
+[data-sim="lnx-deploy-strategies"] .ds-split > span {
+  position: absolute;
+  top: 50%;
+  left: 0.4rem;
+  transform: translateY(-50%);
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="lnx-deploy-strategies"] .ds-split.sd-changed { outline: 0.3rem solid var(--hl); outline-offset: 0.12rem; }
+
+/* this minute, total, check */
+[data-sim="lnx-deploy-strategies"] .ds-stats { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+[data-sim="lnx-deploy-strategies"] .ds-stat { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-deploy-strategies"] .ds-stat b { font-family: var(--mono); font-size: 1.5rem; color: var(--ink); }
+[data-sim="lnx-deploy-strategies"] .ds-stat b[data-bad] { color: var(--danger); }
+[data-sim="lnx-deploy-strategies"] .ds-check { font-size: var(--fs-sm); line-height: 1.25; min-height: 2.5em; }
+[data-sim="lnx-deploy-strategies"] .ds-check[data-none] { color: var(--muted); }
+[data-sim="lnx-deploy-strategies"] .ds-check b[data-trip] { color: var(--danger); }
+
+/* shared strip: failed requests per minute */
+[data-sim="lnx-deploy-strategies"] .ds-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 10rem) repeat(var(--n), minmax(0, 1fr)) minmax(0, 6rem);
+  gap: 0.25rem;
+  align-items: stretch;
+}
+[data-sim="lnx-deploy-strategies"] .ds-strip > * { display: flex; align-items: center; justify-content: center; min-width: 0; line-height: 1.2; }
+[data-sim="lnx-deploy-strategies"] .ds-strip .ds-sh { font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="lnx-deploy-strategies"] .ds-strip .ds-sh[data-now] { color: var(--accent); font-weight: 700; font-size: 1rem; }
+[data-sim="lnx-deploy-strategies"] .ds-strip .ds-sl { justify-content: flex-start; font-size: var(--fs-sm); }
+[data-sim="lnx-deploy-strategies"] .ds-strip .ds-sl b { font-size: 1rem; }
+[data-sim="lnx-deploy-strategies"] .ds-cell {
+  gap: 0.25rem;
+  min-height: 2.1rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  background: var(--bg);
+}
+[data-sim="lnx-deploy-strategies"] .ds-cell[data-bad] { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-deploy-strategies"] .ds-cell[data-future] { border-style: dotted; background: transparent; }
+[data-sim="lnx-deploy-strategies"] .ds-cell[data-trip] { border: 0.2rem solid var(--danger); }
+[data-sim="lnx-deploy-strategies"] .ds-cell[data-now] { box-shadow: inset 0 0 0 0.2rem var(--accent); }
+[data-sim="lnx-deploy-strategies"] .ds-cell small { font-size: var(--fs-sm); color: var(--ink); font-weight: 400; }
+[data-sim="lnx-deploy-strategies"] .ds-cell.ds-tot { font-weight: 700; border-color: var(--ink); }
+
+/* legend swatches the kit lacks */
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v1"],
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v2"],
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="fail"],
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="back"] { display: inline-grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 0.8em; line-height: 1; }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v1"] { background: var(--c1); border-color: var(--c1); color: var(--on-series); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v1"]::after { content: '1'; }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v2"] { background: var(--c2); border-color: var(--c2); color: var(--on-series); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="v2"]::after { content: '2'; }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="notready"] { border-style: dashed; border-color: var(--c2); background: repeating-linear-gradient(45deg, var(--bg) 0 0.12rem, color-mix(in srgb, var(--c2) 35%, var(--bg)) 0.12rem 0.24rem); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="pipe"] { border: 0; border-radius: 0; background: linear-gradient(90deg, transparent 0 15%, var(--c1) 15% 35%, transparent 35% 55%, var(--c2) 55% 95%, transparent 95%); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="fail"] { border-color: var(--danger); background: var(--bg); color: var(--danger); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="fail"]::after { content: '✗'; }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="back"] { border-color: var(--danger); background: var(--bg); color: var(--danger); }
+[data-sim="lnx-deploy-strategies"] .sd-swatch[data-shape="back"]::after { content: '↩'; }
+[data-sim="lnx-deploy-strategies"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the stage grows with its content; lanes stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-deploy-strategies"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-deploy-strategies"] .ds { height: auto; grid-template-rows: none; padding: 0.4rem; gap: 0.5rem; }
+  [data-sim="lnx-deploy-strategies"] .ds-lanes { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 0.5rem; }
+  [data-sim="lnx-deploy-strategies"] .ds-lane { grid-row: auto; grid-template-rows: none; }
+  [data-sim="lnx-deploy-strategies"] .ds-livetxt { display: none; }
+  [data-sim="lnx-deploy-strategies"] .ds-fleet { grid-template-rows: auto 2.5rem auto auto; }
+  [data-sim="lnx-deploy-strategies"] .ds-strip { grid-template-columns: minmax(0, 5.5rem) repeat(var(--n), minmax(0, 1fr)) minmax(0, 3.5rem); gap: 1px; }
+  [data-sim="lnx-deploy-strategies"] .ds-cell small { display: none; }
+  [data-sim="lnx-deploy-strategies"] .ds-strip .ds-sl small { display: none; }
+  [data-sim="lnx-deploy-strategies"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Plavo-zeleno, kanarinac, postupno uvođenje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HR = document.documentElement.lang === 'hr';
+  var PER_INSTANCE_MAX = L.REQUESTS / 4; // the widest pipe: a quarter of the traffic
+  var GLYPH = { idle: '', deploying: '→', rollingBack: '↩', rolledBack: '↩', done: '✓', stalled: '⏸' };
+  // caption headline: the lane whose event ranks highest; ties go to more failed requests, then lane order. So
+  // blue-green's deploy, the canary's advance and stall and a done lane serving never make the headline (no strings)
+  var RANK = { trip: 6, refused: 5, stalled: 5, rolledBack: 4, done: 3, back: 2, advance: 1, deploy: 1, serving: 0, waiting: -1, idle: -1, start: -1 };
+
+  /** Numbers in the page's language: hr 2,25 and 2000; en 2.25 and 2,000. */
+  function num(v) {
+    var r = Math.round(v * 100) / 100;
+    if (HR) return String(r).replace('.', ',');
+    return r >= 1000 ? r.toLocaleString('en') : String(r);
+  }
+  function pct(v) { return t('pct', { v: num(v) }); }
+  function data(text) { return h('span', { translate: 'no', class: 'ds-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** A lane or concept name: italic; on the Croatian page with the Croatian in parentheses (the term rule). */
+  function term(k) {
+    return HR ? h('span', null, h('i', null, t(k)), ' (' + t(k + 'Hr') + ')') : h('i', null, t(k));
+  }
+
+  // ── one lane ──
+  function slotsOf(k, x) {
+    var byId = {};
+    x.instances.forEach(function (i) { byId[i.id] = i; });
+    var ids = k === 'rolling' ? ['r1', 'r2', 'r3', 'r4', 'r5'] : k === 'blueGreen' ? ['b1', 'b2', 'b3', 'b4', 'g1', 'g2', 'g3', 'g4'] : ['c1', 'c2', 'c3', 'c4', 'k1', 'k2', 'k3', 'k4'];
+    return ids.map(function (id) { return { id: id, inst: byId[id] || null }; });
+  }
+  function groupsOf(k, x) {
+    if (k === 'rolling') return [{ label: t('groupRolling'), col: 1, span: 4, live: true }, { label: t('groupSurge'), col: 5, span: 1, live: false }];
+    if (k === 'blueGreen') return [{ label: t('groupBlue'), col: 1, span: 4, live: x.live === 'blue' }, { label: t('groupGreen'), col: 5, span: 4, live: x.live === 'green' }];
+    return [{ label: t('groupBase'), col: 1, span: 4, live: x.v2Share < 100 }, { label: t('groupCanary'), col: 5, span: 4, live: x.v2Share > 0 }];
+  }
+  function fleet(k, x, dir) {
+    var slots = slotsOf(k, x), req = L.traffic(x);
+    var g = h('div', { class: 'ds-fleet', style: { '--cols': String(slots.length) } });
+    groupsOf(k, x).forEach(function (gr) {
+      g.append(h('div', { class: 'ds-group', dataset: gr.live ? { live: '' } : {}, style: { gridColumn: gr.col + ' / span ' + gr.span } },
+        gr.label, gr.live ? h('span', { class: 'ds-livetxt' }, ' · ' + t('live')) : null));
+    });
+    slots.forEach(function (sl, i) {
+      var col = String(i + 1), x2 = sl.inst;
+      var r = x2 ? req[x2.id] : 0;
+      var pipe = h('span', { dataset: Object.assign({ v: x2 ? String(x2.ver) : '1' }, r ? {} : { none: '' }), style: { width: (r / PER_INSTANCE_MAX * 100) + '%' } });
+      g.append(h('div', { class: 'ds-pipe', style: { gridColumn: col } }, x2 ? pipe : null));
+      if (!x2) {
+        g.append(h('div', { class: 'ds-box', dataset: { empty: '' }, style: { gridColumn: col }, 'aria-hidden': 'true' }));
+        g.append(h('div', { class: 'ds-req', style: { gridColumn: col } }, ''));
+        return;
+      }
+      var changed = x.changed.indexOf(x2.id) >= 0;
+      var label = !x2.ready ? t('instNotReady', { id: x2.id }) : t(x2.ver === 1 ? 'instV1' : 'instV2', { id: x2.id, req: num(r) });
+      g.append(h('div', {
+        class: 'ds-box' + (changed ? ' sd-changed' : '') + (changed && dir === 'forward' ? ' sd-anim-in' : ''),
+        dataset: Object.assign({ v: String(x2.ver) }, x2.ready ? {} : { notready: '' }),
+        style: { gridColumn: col }, role: 'img', 'aria-label': label, translate: 'no'
+      }, 'v' + x2.ver));
+      g.append(h('div', { class: 'ds-req', translate: 'no', dataset: r ? { on: '' } : {}, style: { gridColumn: col } }, num(r)));
+    });
+    return g;
+  }
+  function check(k, x, p) {
+    var ran = ['advance', 'trip', 'done', 'deploy'].indexOf(x.event) >= 0;
+    if (!ran) return h('div', { class: 'ds-check', dataset: { none: '' } }, t('checkNone'));
+    var rate = x.rate; // exact, as the check reads it: the canary's own rate, the others the service-wide one
+    var trip = x.event === 'trip';
+    return h('div', { class: 'ds-check' },
+      t.parts(k === 'canary' ? 'checkOwn' : 'checkAll', { rate: b(pct(rate)) }), ' ',
+      h('b', { translate: 'no', dataset: trip ? { trip: '' } : {} }, (trip ? '> ' : '≤ ') + pct(p.threshold) + (trip ? ' ↩' : '')));
+  }
+  function lane(k, c) {
+    var x = c.state.lanes[k], pr = c.prev && c.prev.lanes[k], p = c.params;
+    var phaseChanged = pr && pr.phase !== x.phase;
+    var splitChanged = pr && pr.v2Share !== x.v2Share;
+    return h('section', { class: 'ds-lane', dataset: { lane: k } },
+      h('div', { class: 'ds-head' },
+        h('div', null, h('div', { class: 'ds-name' }, term(k)), h('div', { class: 'ds-sub' }, t(k + 'Sub'))),
+        h('span', { class: 'ds-phase' + (phaseChanged ? ' sd-changed' : ''), dataset: { p: x.phase } },
+          (GLYPH[x.phase] ? GLYPH[x.phase] + ' ' : '') + t('phase_' + x.phase))),
+      h('div', { class: 'ds-lb' }, t('lb'), h('small', null, t('lbReq'))),
+      fleet(k, x, c.dir),
+      h('div', { class: 'ds-split' + (splitChanged ? ' sd-changed' : ''), role: 'img', 'aria-label': t('splitLabel', { p: pct(x.v2Share) }) },
+        h('i', { style: { width: x.v2Share + '%' } }),
+        h('span', null, t('split'), ' ', b(pct(x.v2Share)))),
+      h('div', { class: 'ds-stats' },
+        h('span', { class: 'ds-stat' }, t('thisMinute'), ' ', h('b', { translate: 'no', dataset: x.failed ? { bad: '' } : {} }, '✗ ' + num(x.failed))),
+        h('span', { class: 'ds-stat' }, t('total'), ' ', h('b', { translate: 'no', dataset: x.total ? { bad: '' } : {} }, 'Σ ' + num(x.total)))),
+      check(k, x, p));
+  }
+
+  // ── the shared strip: failed requests per minute and lane ──
+  function strip(c, n) {
+    var p = c.params, hist = [], s = L.initial(p);
+    for (var i = 1; i <= n; i++) { s = L.step(s, i, p); hist.push(s); }
+    var g = h('div', { class: 'ds-strip', style: { '--n': String(n) } },
+      h('div', { class: 'ds-sl' }, h('b', null, t('strip'))));
+    for (i = 1; i <= n; i++) g.append(h('div', { class: 'ds-sh', translate: 'no', dataset: i === c.n ? { now: '' } : {} }, String(i)));
+    g.append(h('div', { class: 'ds-sh' }, t('stripTotal')));
+    L.LANES.forEach(function (k) {
+      g.append(h('div', { class: 'ds-sl' }, t('strip' + k.charAt(0).toUpperCase() + k.slice(1))));
+      for (var m = 1; m <= n; m++) {
+        if (m > c.n) { g.append(h('div', { class: 'ds-cell', dataset: { future: '' } })); continue; }
+        var x = hist[m - 1].lanes[k];
+        // a glyph only where the minute changed something: the trip and rollback (↩), done (✓), stalled (⏸)
+        var glyph = x.event === 'trip' || x.event === 'back' || x.event === 'rolledBack' ? '↩' : x.event === 'done' ? '✓' : x.event === 'stalled' || x.event === 'refused' ? '⏸' : '';
+        g.append(h('div', { class: 'ds-cell', translate: 'no',
+          dataset: Object.assign({}, x.failed ? { bad: '' } : {}, x.event === 'trip' ? { trip: '' } : {}, m === c.n ? { now: '' } : {}) },
+          glyph ? h('small', null, glyph) : null, num(x.failed)));
+      }
+      g.append(h('div', { class: 'ds-cell ds-tot', translate: 'no' }, 'Σ ' + num(c.state.lanes[k].total)));
+    });
+    return g;
+  }
+
+  // ── caption ──
+  function headline(s) {
+    var best = null;
+    L.LANES.forEach(function (k, i) {
+      var x = s.lanes[k], r = RANK[x.event];
+      if (best === null || r > best.r || (r === best.r && x.failed > best.failed)) best = { k: k, r: r, failed: x.failed, i: i };
+    });
+    return best;
+  }
+  var KEY = {
+    rolling: { advance: 'rAdvance', trip: 'rTrip', back: 'rBack', rolledBack: 'rRolledBack', done: 'rDone', stalled: 'rStalled' },
+    blueGreen: { done: 'bDone', trip: 'bTrip', rolledBack: 'bRolledBack', refused: 'bRefused' },
+    canary: { trip: 'cTrip', rolledBack: 'cRolledBack', done: 'cDone' }
+  };
+  function caption(c) {
+    var s = c.state, p = c.params;
+    if (c.first) return !p.v2Ready ? [t('capStartCrash')] : p.v2Error ? t.parts('capStart', { err: b(pct(p.v2Error)) }) : [t('capStartGood')];
+    var parts = [t('capMin', { n: c.n })];
+    var top = headline(s);
+    var k = top.k, x = s.lanes[k];
+    var vars = {
+      lane: term(k), health: term('health'), healthAcc: term('healthAcc'),
+      share: b(pct(x.v2Share)), failed: b(num(x.failed)), total: b(num(x.total)), thr: b(pct(p.threshold)),
+      nFailed: b(t.n('nFailed', x.failed, { c: num(x.failed) })), nTotal: b(t.n('nFailed', x.total, { c: num(x.total) })),
+      rate: b(pct(x.rate)), deadline: b(x.deadlineAt)
+    };
+    var key = KEY[k][x.event];
+    if (!key && L.LANES.every(function (j) { return s.lanes[j].phase === 'stalled'; })) key = 'capWaiting';
+    if (!key) key = 'capQuiet';
+    parts = parts.concat(t.parts(key, vars));
+    // the end of a run where every lane completed on a v2 that still fails (below-threshold)
+    if (c.last && L.LANES.every(function (j) { return s.lanes[j].phase === 'done' && s.lanes[j].failed > 0; })) parts.push(t('capUnseen'));
+    return parts;
+  }
+
+  var pctFormat = function (v) { return pct(v); };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'v2Error', type: 'range', label: t('v2Error'), min: 0, max: 100, step: 0.5, format: pctFormat, resets: true },
+      { key: 'v2Ready', type: 'toggle', label: t('v2Ready'), hint: t('v2ReadyHint'), resets: true },
+      { key: 'threshold', type: 'range', label: t('threshold'), hint: t('thresholdHint'), min: 1, max: 10, step: 0.5, format: pctFormat, resets: true }
+    ],
+
+    presets: [
+      { id: 'all-errors', label: t('presetAll'), hint: t('presetAllHint'), params: { v2Error: 100, v2Ready: true, threshold: 2 } },
+      { id: 'subtle-bug', label: t('presetSubtle'), hint: t('presetSubtleHint'), params: { v2Error: 3, v2Ready: true, threshold: 2 } },
+      { id: 'below-threshold', label: t('presetBelow'), hint: t('presetBelowHint'), params: { v2Error: 1.5, v2Ready: true, threshold: 2 } },
+      { id: 'crash', label: t('presetCrash'), hint: t('presetCrashHint'), params: { v2Error: 100, v2Ready: false, threshold: 2 } },
+      { id: 'good-release', label: t('presetGood'), hint: t('presetGoodHint'), params: { v2Error: 0, v2Ready: true, threshold: 2 } }
+    ],
+
+    legend: [
+      { shape: 'v1', label: t('legV1') },
+      { shape: 'v2', label: t('legV2') },
+      { shape: 'notready', label: t('legNotReady') },
+      { shape: 'pipe', label: t('legPipe') },
+      { shape: 'fail', label: t('legFailed') },
+      { shape: 'back', label: t('legBack') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var n = L.steps(c.params);
+      c.stage.replaceChildren(h('div', { class: 'ds' },
+        h('div', { class: 'ds-lanes' }, L.LANES.map(function (k) { return lane(k, c); })),
+        strip(c, n)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
