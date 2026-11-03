@@ -1,0 +1,728 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-netns-veth-bridge: how container networking is wired by hand. On top, the command of this step and what it
+     printed. Below, the host (root network namespace) as a large box: the bridge br0 as a bar the host-side veth ends
+     plug into, the two namespaces ns1 and ns2 inside it with their interfaces, routes and ARP tables, each joined to
+     the host by a veth cable; on the right the host's own lo, routes and tables, and enp1s0 with its cable to the
+     gateway outside. Under it, the last ping: where the packet stopped and why. Draws its own scene (no kit view fits
+     nested namespaces). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-netns-veth-bridge">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imenski prostori, veth i most · simdeck</title>
+<meta name="description" content="Spoji dva mrežna imenska prostora korak po korak: veth par, most, ruta, prosljeđivanje i prevođenje adresa; svaki ping pokaže gdje paket stane i zašto.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-netns-veth-bridge",
+  "title": {
+    "hr": "Imenski prostori, veth i most",
+    "en": "Namespaces, veth and a bridge"
+  },
+  "concept": {
+    "hr": "Kako se mreža kontejnera spaja ručno",
+    "en": "How container networking is wired by hand"
+  },
+  "summary": {
+    "hr": "Spoji dva mrežna imenska prostora korak po korak: veth par, most, ruta, prosljeđivanje i prevođenje adresa; svaki ping pokaže gdje paket stane i zašto.",
+    "en": "Connect two network namespaces step by step: veth pairs, a bridge, a route, forwarding and masquerade; each ping shows where the packet stops and why."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "stepper",
+  "steps": 19,
+  "entries": [
+    {
+      "preset": "to-the-world"
+    },
+    {
+      "preset": "forgot-forward"
+    },
+    {
+      "preset": "container-view"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-netns-veth-bridge"]; colours only from kit tokens.
+   Layout: the command strip on top; the host box with the gateway outside it; the ping line under both. */
+[data-sim="lnx-netns-veth-bridge"] .nv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv > * { flex-shrink: 0; }
+[data-sim="lnx-netns-veth-bridge"] code, [data-sim="lnx-netns-veth-bridge"] .nv-mono { font-family: var(--mono); }
+[data-sim="lnx-netns-veth-bridge"] .nv-muted { color: var(--muted); }
+
+/* the command strip */
+[data-sim="lnx-netns-veth-bridge"] .nv-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.8rem;
+  align-items: baseline;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-side { font-weight: 700; padding: 0.05rem 0.5rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap; }
+[data-sim="lnx-netns-veth-bridge"] .nv-side.nv-engine { border-style: dashed; }
+[data-sim="lnx-netns-veth-bridge"] .nv-cmd { display: flex; flex-direction: column; font-family: var(--mono); font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="lnx-netns-veth-bridge"] .nv-cmd .nv-words { font-family: var(--sans); }
+[data-sim="lnx-netns-veth-bridge"] .nv-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hint { color: var(--muted); font-family: var(--sans); font-weight: 400; }
+[data-sim="lnx-netns-veth-bridge"] .nv-out {
+  grid-column: 2;
+  margin: 0;
+  min-height: calc(var(--lines, 1) * 1.2em);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-out.nv-two { columns: 2; column-gap: 1.5rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-out .nv-line { display: block; break-inside: avoid; }
+[data-sim="lnx-netns-veth-bridge"] .nv-out .nv-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-netns-veth-bridge"] .nv-out .nv-none, [data-sim="lnx-netns-veth-bridge"] .nv-out .nv-same { color: var(--muted); font-family: var(--sans); font-style: italic; }
+
+/* the world: the host box and the gateway outside it */
+[data-sim="lnx-netns-veth-bridge"] .nv-world {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 11.5rem;
+  column-gap: 2.2rem;
+  align-items: start;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-height: 0;
+  height: 100%;
+  padding: 0.4rem 0.7rem 0.6rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-hhead { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; min-height: 2.4rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hhead h3 { margin: 0; font-size: 1.1rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hhead .nv-kind { color: var(--muted); font-size: 0.875rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hhead .nv-wan { margin-left: auto; position: relative; }
+/* enp1s0's cable, out through the host's frame to the gateway */
+[data-sim="lnx-netns-veth-bridge"] .nv-hhead .nv-wan::after {
+  content: '';
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  width: calc(0.7rem + 0.2rem + 2.2rem + 0.2rem);
+  border-top: 0.3rem solid var(--c3);
+  transform: translateY(-50%);
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-chip.nv-on { border: 2px solid var(--ink); font-weight: 700; }
+
+[data-sim="lnx-netns-veth-bridge"] .nv-gw {
+  position: relative;
+  margin-top: 0.6rem;
+  padding: 0.25rem 0.55rem 0.35rem;
+  border: 2px dashed var(--ink);
+  border-radius: 1.2rem;
+  background: var(--panel);
+  font-size: 0.875rem;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-gw b { display: block; font-size: 1rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-gw .nv-ip { font-family: var(--mono); font-weight: 700; font-size: 1rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-gw.nv-trail { border: 0.22rem solid var(--c1); }
+
+/* the host's inside: the bridge bar over two namespace columns, the host's own column on the right */
+[data-sim="lnx-netns-veth-bridge"] .nv-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)) minmax(0, 0.95fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0 1.1rem;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-bridge {
+  grid-column: 1 / span var(--cols, 2);
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.7rem;
+  min-height: 2.5rem;
+  padding: 0.15rem 0.7rem;
+  border: 0.32rem solid var(--c4);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--c4) 14%, var(--bg));
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-bridge.nv-none { border: 2px dashed var(--line); background: var(--bg); color: var(--muted); font-style: italic; }
+[data-sim="lnx-netns-veth-bridge"] .nv-bridge.nv-down { border-style: dashed; }
+[data-sim="lnx-netns-veth-bridge"] .nv-bridge .nv-fdb { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; align-items: center; font-size: 0.875rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-col { grid-row: 2; display: flex; flex-direction: column; align-items: stretch; min-width: 0; min-height: 0; }
+[data-sim="lnx-netns-veth-bridge"] .nv-col > * { flex-shrink: 0; }
+[data-sim="lnx-netns-veth-bridge"] .nv-stub, [data-sim="lnx-netns-veth-bridge"] .nv-cable { position: relative; align-self: center; width: 0.32rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-stub { height: 0.9rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-stub.nv-on { background: var(--c4); }
+[data-sim="lnx-netns-veth-bridge"] .nv-cable { flex: 1 1 1rem; min-height: 1rem; max-height: 3.5rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-cable.nv-on { background: var(--c3); }
+[data-sim="lnx-netns-veth-bridge"] .nv-cable.nv-trail, [data-sim="lnx-netns-veth-bridge"] .nv-stub.nv-trail { box-shadow: 0 0 0 0.15rem var(--c1); }
+[data-sim="lnx-netns-veth-bridge"] .nv-zone { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.2rem 0.5rem; min-height: 2rem; }
+/* both ends still on the host: a short cable between them */
+[data-sim="lnx-netns-veth-bridge"] .nv-zone.nv-both { flex-direction: column; flex-wrap: nowrap; }
+[data-sim="lnx-netns-veth-bridge"] .nv-zone .nv-wire { width: 0.32rem; height: 0.8rem; background: var(--c3); }
+[data-sim="lnx-netns-veth-bridge"] .nv-zone .nv-tag { font-size: 0.875rem; color: var(--muted); }
+
+/* an interface: a port dot (solid up, hollow down), its name, its addresses */
+[data-sim="lnx-netns-veth-bridge"] .nv-if {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.4rem;
+  max-width: 100%;
+  padding: 0.05rem 0.45rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  line-height: 1.3;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-if.nv-isdown { border-style: dashed; }
+[data-sim="lnx-netns-veth-bridge"] .nv-if .nv-name, [data-sim="lnx-netns-veth-bridge"] .nv-bridge .nv-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-netns-veth-bridge"] .nv-if .nv-addr, [data-sim="lnx-netns-veth-bridge"] .nv-bridge .nv-addr { font-family: var(--mono); font-size: 0.9rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-if .nv-state { font-size: 0.875rem; color: var(--muted); }
+[data-sim="lnx-netns-veth-bridge"] .nv-dot { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 50%; border: 0.16em solid var(--ink); background: var(--ink); flex: none; }
+[data-sim="lnx-netns-veth-bridge"] .nv-dot.nv-hollow { background: var(--bg); }
+[data-sim="lnx-netns-veth-bridge"] .nv-if.nv-trail, [data-sim="lnx-netns-veth-bridge"] .nv-bridge.nv-trail { box-shadow: 0 0 0 0.2rem var(--c1); }
+[data-sim="lnx-netns-veth-bridge"] .nv-if.nv-gone { border-style: dotted; color: var(--muted); }
+[data-sim="lnx-netns-veth-bridge"] .nv-if.nv-gone .nv-name { text-decoration: line-through; }
+/* changed: the kit's outline and glow would cover the neighbours, so inset, on a yellow fill */
+[data-sim="lnx-netns-veth-bridge"] .sd-changed.nv-if, [data-sim="lnx-netns-veth-bridge"] .sd-changed.nv-row,
+[data-sim="lnx-netns-veth-bridge"] .sd-changed.nv-chip, [data-sim="lnx-netns-veth-bridge"] .nv-nshead.sd-changed,
+[data-sim="lnx-netns-veth-bridge"] .nv-bridge.sd-changed {
+  outline: 0.18rem solid var(--ink);
+  outline-offset: -0.18rem;
+  box-shadow: none;
+  background-color: var(--hl);
+  color: var(--on-hl);
+}
+[data-sim="lnx-netns-veth-bridge"] .sd-changed .nv-state, [data-sim="lnx-netns-veth-bridge"] .sd-changed .nv-muted, [data-sim="lnx-netns-veth-bridge"] .sd-changed .nv-kind { color: var(--on-hl); }
+[data-sim="lnx-netns-veth-bridge"] .nv-trail.sd-changed { box-shadow: 0 0 0 0.2rem var(--c1); }
+/* where the packet stopped (✗, with the stage) or arrived (✓) */
+[data-sim="lnx-netns-veth-bridge"] .nv-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.4rem;
+  border: 2px solid var(--danger);
+  border-radius: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-stop .nv-sym { color: var(--danger); font-size: 1.1em; }
+[data-sim="lnx-netns-veth-bridge"] .nv-stop.nv-ok { border-color: var(--ok); }
+[data-sim="lnx-netns-veth-bridge"] .nv-stop.nv-ok .nv-sym { color: var(--ok); }
+
+/* a network namespace: a rounded frame */
+[data-sim="lnx-netns-veth-bridge"] .nv-ns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-height: 0;
+  padding: 0.2rem 0.55rem 0.4rem;
+  border: 0.22rem solid var(--c2);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--c2) 8%, var(--bg));
+  overflow: hidden;
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-ns.nv-missing { border: 2px dashed var(--line); background: var(--bg); color: var(--muted); }
+[data-sim="lnx-netns-veth-bridge"] .nv-ns > * { flex-shrink: 0; }
+[data-sim="lnx-netns-veth-bridge"] .nv-nshead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-netns-veth-bridge"] .nv-nshead b { font-family: var(--mono); font-size: 1.1rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-nshead .nv-kind { color: var(--muted); font-size: 0.875rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-ports { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25rem 0.4rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-sec { display: flex; flex-direction: column; gap: 0.05rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-sec h4 { margin: 0.1rem 0 0; font-size: 0.875rem; color: var(--muted); font-weight: 700; }
+[data-sim="lnx-netns-veth-bridge"] .nv-rows { display: flex; flex-direction: column; gap: 0.05rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-netns-veth-bridge"] .nv-row { padding: 0 0.35rem; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 0.875rem; line-height: 1.35; overflow-wrap: anywhere; }
+[data-sim="lnx-netns-veth-bridge"] .nv-row .nv-muted { font-size: 0.875rem; }
+[data-sim="lnx-netns-veth-bridge"] .nv-row.nv-empty { color: var(--muted); font-family: var(--sans); font-style: italic; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hside { grid-column: calc(var(--cols, 2) + 1); grid-row: 1 / span 2; display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; padding-left: 0.8rem; border-left: 1px solid var(--line); }
+[data-sim="lnx-netns-veth-bridge"] .nv-hside > * { flex-shrink: 0; }
+[data-sim="lnx-netns-veth-bridge"] .nv-hside .nv-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+/* the ping line */
+[data-sim="lnx-netns-veth-bridge"] .nv-ping {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.7rem;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-netns-veth-bridge"] .nv-ping.nv-old { border-style: dashed; border-color: var(--line); }
+[data-sim="lnx-netns-veth-bridge"] .nv-ping .nv-who { font-family: var(--mono); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-ns"] { border: 0.18rem solid var(--c2); border-radius: 0.45rem; background: var(--bg); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-up"] { border-radius: 50%; background: var(--ink); border: 2px solid var(--ink); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-down"] { border-radius: 50%; background: var(--bg); border: 2px solid var(--ink); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-cable"] { position: relative; background: var(--bg); border-color: transparent; }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-cable"]::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 0.3rem solid var(--c3); transform: translateY(-50%); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-bridge"] { background: color-mix(in srgb, var(--c4) 14%, var(--bg)); border: 0.22rem solid var(--c4); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-route"] { position: relative; background: var(--bg); border-color: transparent; }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-route"]::after { content: '→'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-path"] { position: relative; background: var(--bg); border: 0.2rem solid var(--c1); }
+[data-sim="lnx-netns-veth-bridge"] .sd-swatch[data-shape="nv-path"]::after { content: '✗'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); font-size: 0.8rem; }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-netns-veth-bridge"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-netns-veth-bridge"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-netns-veth-bridge"] .nv { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-shell { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-netns-veth-bridge"] .nv-out { grid-column: 1; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-world { display: flex; flex-direction: column; gap: 0.6rem; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-hhead .nv-wan::after { display: none; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-gw { margin-top: 0; align-self: stretch; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-grid { display: flex; flex-direction: column; gap: 0.4rem; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-hside { padding-left: 0; border-left: none; border-top: 1px solid var(--line); padding-top: 0.3rem; }
+  [data-sim="lnx-netns-veth-bridge"] .nv-ns { overflow: visible; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Imenski prostori, veth i most</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var ROOT = L.ROOT;
+  var STAGE_KEY = { 'link-down': 'st_linkDown', 'no-route': 'st_noRoute', 'no-arp': 'st_noArp', 'not-forwarded': 'st_notForwarded', 'no-return': 'st_noReturn' };
+
+  // ── small pieces ──
+
+  /** Data (names, addresses, MACs) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { class: 'nv-mono', translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function has(s, k) { return s.changed.indexOf(k) >= 0; }
+  function chg(on, c) { return on ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''; }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands, *word* as <em lang="en"> and `x` as code. */
+  var MARK = '\u0001';
+  function rich(k, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (n) {
+      var v = vars[n];
+      if (v && typeof v === 'object' && v.nodeType) { flat[n] = MARK + nodes.length + MARK; nodes.push(v); } else flat[n] = v;
+    });
+    var out = [];
+    t.parts(k, flat).forEach(function (p) {
+      var str = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (str === null) { out.push(p); return; }
+      str.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  // ── per-preset memo: the most lines the strip prints, the namespaces the preset makes ──
+
+  var memo = {};
+  function presetInfo(p) {
+    if (!memo[p.scene]) {
+      var n = 1, names = [];
+      for (var i = 0; i <= L.steps(p); i++) {
+        var s = Simdeck.stateAt(L, p, i);
+        // an engine step lists its commands and may be taller; the scene is smallest then (no pings, no tables yet)
+        var lines = !s.cmd ? 2 : s.cmd.op === 'engine' ? 1 : L.cmdLines(s.cmd).length + Math.max(1, s.out.length);
+        n = Math.max(n, lines);
+        s.order.forEach(function (id) { if (id !== ROOT && names.indexOf(id) < 0) names.push(id); });
+      }
+      memo[p.scene] = { lines: n, names: names };
+    }
+    return memo[p.scene];
+  }
+
+  // ── the command strip ──
+
+  function shell(s, p) {
+    var c = s.cmd;
+    var info = presetInfo(p);
+    var side = !c ? h('span') : c.op === 'engine' ? h('span', { class: 'nv-side nv-engine' }, t('sideEngine')) : h('span', { class: 'nv-side' }, t('sideHost'));
+    var cmd, out;
+    if (!c) {
+      cmd = h('span', { class: 'nv-hint' }, t('before'));
+      out = [];
+    } else if (c.op === 'engine') {
+      cmd = h('span', { class: 'nv-words' }, c.what === 'start' ? t('engineStart') : t.parts('engineRun', { ns: data(c.ns) }), ' · ',
+        h('span', { class: 'nv-hint' }, t('engineSame')));
+      out = L.cmdLines(c).map(function (l) { return h('span', { class: 'nv-line', translate: 'no' }, l); });
+    } else {
+      cmd = L.cmdLines(c).map(function (l) { return h('span', null, h('span', { class: 'nv-prompt', translate: 'no' }, '# '), h('span', { translate: 'no' }, l)); });
+      out = s.out.length ? s.out.map(function (l) { return h('span', { class: s.lastError ? 'nv-err' : null, translate: 'no' }, l + '\n'); })
+        : [h('span', { class: 'nv-none' }, t('noOutput'))];
+    }
+    var cmdLinesN = c && c.op !== 'engine' ? L.cmdLines(c).length : 1;
+    var engine = !!(c && c.op === 'engine');
+    return h('div', { class: 'nv-shell' }, side, h('div', { class: 'nv-cmd' }, cmd),
+      h('pre', { class: 'nv-out' + (engine ? ' nv-two' : ''), style: { '--lines': String(engine ? 1 : Math.max(1, info.lines - cmdLinesN)) } }, out));
+  }
+
+  // ── the scene ──
+
+  /** This step's ping: the keys on its path, and the stop point. */
+  function pingMarks(s) {
+    var pg = s.ping;
+    return { trail: pg ? pg.trail : [], at: pg ? pg.at : null, ping: pg };
+  }
+  function stopBadge(pg) {
+    if (pg.ok) return h('span', { class: 'nv-stop nv-ok' }, h('span', { class: 'nv-sym', 'aria-hidden': 'true' }, '✓'), t('pingOk'));
+    return h('span', { class: 'nv-stop' }, h('span', { class: 'nv-sym', 'aria-hidden': 'true' }, '✗'), t(STAGE_KEY[pg.stage]));
+  }
+
+  /** One interface: port dot (solid up / hollow down), name, addresses; marked changed, on the path, where it stopped. */
+  function iface(c, nsId, l, pm) {
+    var s = c.state, k = L.key(nsId, l.name);
+    var cls = 'nv-if' + (l.up ? '' : ' nv-isdown') + (pm.trail.indexOf(k) >= 0 ? ' nv-trail' : '') + chg(has(s, nsId + ':link:' + l.name), c);
+    return h('span', { class: cls },
+      h('span', { class: 'nv-dot' + (l.up ? '' : ' nv-hollow'), 'aria-hidden': 'true' }),
+      h('span', { class: 'nv-name', translate: 'no' }, l.name),
+      l.addrs.length ? h('span', { class: 'nv-addr', translate: 'no' }, l.addrs.join(' ')) : null,
+      l.up ? null : h('span', { class: 'nv-state' }, t('down')),
+      pm.at === k ? stopBadge(pm.ping) : null);
+  }
+  function ghost(g) {
+    return h('span', { class: 'nv-if nv-gone' }, h('span', { class: 'nv-name', translate: 'no' }, g.name), h('span', { class: 'nv-state' }, t.parts('goneTo', { ns: data(g.to) })));
+  }
+  function routeRows(c, nsId) {
+    var s = c.state, rs = L.routes(s, nsId, false);
+    if (!rs.length) return [h('li', { class: 'nv-row nv-empty' }, t('noRoutes'))];
+    return rs.map(function (r) {
+      return h('li', { class: 'nv-row' + chg(has(s, nsId + ':route:' + r.dst + ' ' + r.dev), c), translate: 'no' },
+        r.dst, r.via ? ' → ' + r.via : '', h('span', { class: 'nv-muted' }, ' dev ' + r.dev + (r.linkdown ? ' linkdown' : '')));
+    });
+  }
+  function arpRows(c, nsId) {
+    var s = c.state, a = L.ns(s, nsId).arp;
+    if (!a.length) return [h('li', { class: 'nv-row nv-empty' }, t('arpEmpty'))];
+    return a.map(function (e) {
+      return h('li', { class: 'nv-row' + chg(has(s, nsId + ':arp:' + e.ip), c) }, h('span', { translate: 'no' }, e.ip + ' '),
+        e.mac ? h('span', { translate: 'no' }, '→ ' + e.mac) : h('b', null, t('arpFailed')));
+    });
+  }
+  function section(title, rows) { return h('div', { class: 'nv-sec' }, h('h4', null, title), h('ul', { class: 'nv-rows' }, rows)); }
+
+  /** veth pairs in creation order (the a end, as named in ip link add, and its peer), wherever their ends are now. */
+  function pairs(s) {
+    var out = [];
+    s.order.forEach(function (id) {
+      s.netns[id].links.forEach(function (l) {
+        if (l.kind === 'veth' && l.end === 'a') out.push({ a: { ns: id, l: l }, b: { ns: l.peer.ns, l: L.peerOf(s, l) }, idx: Math.min(l.idx, L.peerOf(s, l).idx) });
+      });
+    });
+    return out.sort(function (x, y) { return x.idx - y.idx; });
+  }
+
+  function nsBox(c, nsId, name, pm) {
+    var s = c.state, p = c.params;
+    if (!nsId) return h('div', { class: 'nv-ns nv-missing' }, h('div', { class: 'nv-nshead' }, name ? h('b', { translate: 'no' }, name) : null, h('span', { class: 'nv-kind' }, t('nsMissing'))));
+    var links = L.ns(s, nsId).links;
+    var ports = links.filter(function (l) { return l.kind !== 'lo'; });
+    var lo = links.filter(function (l) { return l.kind === 'lo'; });
+    return h('div', { class: 'nv-ns' },
+      h('div', { class: 'nv-nshead' + chg(has(s, 'ns:' + nsId), c) }, h('b', { translate: 'no' }, nsId), h('span', { class: 'nv-kind' }, t('nsKind')),
+        pm.at === nsId + ':' ? stopBadge(pm.ping) : null),
+      ports.length ? h('div', { class: 'nv-ports' }, ports.map(function (l) { return iface(c, nsId, l, pm); })) : null,
+      h('div', { class: 'nv-ports' }, lo.map(function (l) { return iface(c, nsId, l, pm); })),
+      section(t('secRoutes'), routeRows(c, nsId)),
+      p.showArp ? section(t('secArp'), arpRows(c, nsId)) : null);
+  }
+
+  function bridgeBar(c, cols, pm) {
+    var s = c.state, p = c.params;
+    var br = L.ns(s, ROOT).links.filter(function (l) { return l.kind === 'bridge'; })[0];
+    if (!br) return h('div', { class: 'nv-bridge nv-none' }, t('noBridge'));
+    var k = L.key(ROOT, br.name);
+    return h('div', { class: 'nv-bridge' + (br.up ? '' : ' nv-down') + (pm.trail.indexOf(k) >= 0 ? ' nv-trail' : '') + chg(has(s, ROOT + ':link:' + br.name), c) },
+      h('span', { class: 'nv-dot' + (br.up ? '' : ' nv-hollow'), 'aria-hidden': 'true' }),
+      h('span', { class: 'nv-name', translate: 'no' }, br.name), h('span', null, t('bridgeKind')),
+      br.addrs.length ? h('span', { class: 'nv-addr', translate: 'no' }, br.addrs.join(' ')) : null,
+      h('span', { class: 'nv-muted' }, t(br.up ? 'up' : 'down')),
+      pm.at === k ? stopBadge(pm.ping) : null,
+      p.showArp ? h('span', { class: 'nv-fdb' }, h('b', null, t('fdbTitle')), br.fdb.length ? br.fdb.map(function (f) {
+        return h('span', { class: 'nv-row' + chg(has(s, ROOT + ':fdb:' + br.name + ':' + f.mac), c), translate: 'no' }, f.mac + ' → ' + f.port);
+      }) : h('span', { class: 'nv-muted' }, t('fdbEmpty'))) : null);
+  }
+
+  function column(c, i, nsId, pair, name, pm) {
+    var s = c.state;
+    var ends = [], inner = null;
+    if (pair) [pair.a, pair.b].forEach(function (e) { if (e.ns === ROOT) ends.push(e); else inner = e; });
+    // host ends first in a pair still wholly on the host, the a end (veth1) on the left
+    var hostEnd = ends.filter(function (e) { return e.l.peer.ns !== ROOT; })[0] || ends[0];
+    var gone = (s.gone[ROOT] || []).filter(function (g) { return pair && (g.name === pair.a.l.name || g.name === pair.b.l.name); });
+    var zone = [];
+    if (ends.length === 2) zone = [iface(c, ROOT, ends[0].l, pm), h('span', { class: 'nv-wire', 'aria-hidden': 'true' }), iface(c, ROOT, ends[1].l, pm)];
+    else if (ends.length === 1) zone = [iface(c, ROOT, ends[0].l, pm)];
+    gone.forEach(function (g) { zone.push(' ', ghost(g)); });
+    var master = hostEnd && ends.length === 1 ? hostEnd.l.master : null;
+    if (ends.length === 1) zone.push(h('span', { class: 'nv-tag' }, master ? t.parts('portTag', { br: data(master) }) : t('looseTag')));
+    var stubKey = master ? L.key(ROOT, hostEnd.l.name) : null;
+    var onPath = function (k) { return pm.trail.indexOf(k) >= 0; };
+    var cableOn = !!(inner && ends.length === 1 && inner.ns === nsId);
+    return h('div', { class: 'nv-col', style: { gridColumn: String(i + 1) } },
+      h('span', { class: 'nv-stub' + (master ? ' nv-on' : '') + (master && onPath(stubKey) && onPath(L.key(ROOT, master)) ? ' nv-trail' : ''), 'aria-hidden': 'true' }),
+      h('div', { class: 'nv-zone' + (ends.length === 2 ? ' nv-both' : '') }, zone),
+      h('span', { class: 'nv-cable' + (cableOn ? ' nv-on' : '') + (cableOn && onPath(L.key(inner.ns, inner.l.name)) && onPath(L.key(ROOT, ends[0].l.name)) ? ' nv-trail' : ''), 'aria-hidden': 'true' }),
+      nsBox(c, nsId, name, pm));
+  }
+
+  function hostSide(c, pm) {
+    var s = c.state, p = c.params;
+    var lo = L.link(s, ROOT, 'lo');
+    var nat = s.nat[0];
+    return h('div', { class: 'nv-hside' },
+      h('div', { class: 'nv-chips' }, iface(c, ROOT, lo, pm)),
+      h('div', { class: 'nv-chips' },
+        h('span', { class: 'nv-chip' + (s.ipForward ? ' nv-on' : '') + chg(has(s, 'sys:forward'), c), translate: 'no' }, 'ip_forward = ' + (s.ipForward ? 1 : 0)),
+        h('span', { class: 'nv-chip' + (nat ? ' nv-on' : '') + chg(has(s, 'sys:nat'), c) }, nat ? t.parts('natOn', { src: data(nat.src) }) : t('natNone'))),
+      section(t('secRoutes'), routeRows(c, ROOT)),
+      p.showArp ? section(t('secArp'), arpRows(c, ROOT)) : null,
+      pm.at === ROOT + ':' ? stopBadge(pm.ping) : null);
+  }
+
+  function world(c) {
+    var s = c.state, p = c.params, pm = pingMarks(s);
+    var info = presetInfo(p);
+    var others = s.order.filter(function (id) { return id !== ROOT; });
+    var ps = pairs(s);
+    var cols = Math.max(2, others.length, ps.length);
+    var wan = L.link(s, ROOT, 'enp1s0');
+    var columns = [];
+    for (var i = 0; i < cols; i++) columns.push(column(c, i, others[i] || null, ps[i] || null, info.names[i] || null, pm));
+    return h('div', { class: 'nv-world' },
+      h('div', { class: 'nv-host' },
+        h('div', { class: 'nv-hhead' }, h('h3', null, t('hostTitle')), h('span', { class: 'nv-kind' }, t('hostKind')),
+          h('span', { class: 'nv-wan' }, iface(c, ROOT, wan, pm))),
+        h('div', { class: 'nv-grid', style: { '--cols': String(cols) } }, bridgeBar(c, cols, pm), columns, hostSide(c, pm))),
+      h('div', { class: 'nv-gw' + (pm.trail.indexOf('gateway') >= 0 ? ' nv-trail' : '') },
+        h('b', null, t('gwTitle')), h('span', { class: 'nv-ip', translate: 'no' }, L.GATEWAY.ip), h('div', { class: 'nv-muted' }, t('gwNote')),
+        pm.at === 'gateway' ? stopBadge(pm.ping) : null));
+  }
+
+  function atLabel(at) {
+    if (at === 'gateway') return t('atGateway');
+    var i = at.indexOf(':'), n = at.slice(0, i), dev = at.slice(i + 1);
+    if (!dev) return t.parts('atNs', { ns: data(n) });
+    return [data(dev), ' (', data(n), ')'];
+  }
+  function pingLine(c) {
+    var s = c.state, pg = s.ping || s.lastPing;
+    if (!pg) return h('div', { class: 'nv-ping nv-old' }, h('span', { class: 'nv-muted' }, t('pingNone')));
+    var now = !!s.ping;
+    return h('div', { class: 'nv-ping' + (now ? '' : ' nv-old') },
+      now ? null : h('span', { class: 'nv-muted' }, t('pingEarlier')),
+      h('span', { class: 'nv-who', translate: 'no' }, 'ping ' + pg.from + ' → ' + pg.to),
+      stopBadge(pg), pg.ok ? null : h('span', null, t.parts('pingAt', { at: h('span', null, atLabel(pg.at)) })));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'nv' }, shell(c.state, c.params), world(c), pingLine(c)));
+  }
+
+  // ── captions ──
+
+  /** How many commands of this op the script ran before step n (first mention or a repeat). */
+  function earlier(s, n, op) { return L.SCENES[s.scene].script.slice(0, n - 1).filter(function (x) { return x.op === op; }).length; }
+
+  function pingCaption(c) {
+    var s = c.state, pg = s.ping;
+    var i = pg.at.indexOf(':'), atNs = pg.at.slice(0, i), atDev = pg.at.slice(i + 1);
+    if (pg.ok) {
+      if (pg.at === 'gateway') return rich('capPingOkOut');
+      var direct = L.lookup(s, pg.from, pg.to, false);
+      if (direct && !direct.via) return rich('capPingOkL2', { from: data(pg.from), to: data(atNs) });
+      return rich('capPingOk');
+    }
+    switch (pg.stage) {
+      case 'link-down':
+        if (atNs === pg.from) return rich('capPingLinkDownSelf', { dev: data(atDev), ns: data(atNs) });
+        return rich('capPingLinkDown', { dev: data(atDev), from: data(pg.from),
+          where: h('span', null, atNs === ROOT ? t('whereHost') : t.parts('whereNs', { ns: data(atNs) })) });
+      case 'no-route': {
+        var out = rich('capPingNoRoute', { ns: data(pg.from), dst: data(pg.to) });
+        if (s.scene === 'to-the-world' && c.n === 1) out = out.concat(sp(rich('capWorldNote')));
+        return out;
+      }
+      case 'no-arp':
+        if (atNs === ROOT && atDev !== 'br0') return rich('capPingNoArp', { from: data(pg.from), dst: data(pg.to), at: data(atDev) });
+        return rich('capPingNoArpOther', { dst: data(pg.to) });
+      case 'not-forwarded': return rich('capPingNotFwd');
+      case 'no-return': return rich('capPingNoReturn', { src: data(L.lookup(s, pg.from, pg.to, false).src) });
+    }
+    return rich('capErr');
+  }
+
+  function caption(c) {
+    var s = c.state, cmd = s.cmd, ev = s.event;
+    if (c.n === 0) return rich('capStart').concat(sp(rich('capGoal_' + s.scene)));
+    if (s.lastError) return rich('capErr');
+    switch (cmd.op) {
+      case 'netns-add': return rich(earlier(s, c.n, 'netns-add') ? 'capNetnsAdd2' : 'capNetnsAdd', { ns: data(cmd.ns) });
+      case 'veth-add': return rich(earlier(s, c.n, 'veth-add') ? 'capVethAdd2' : 'capVethAdd', { a: data(cmd.a), b: data(cmd.b) });
+      case 'link-netns': {
+        if (!earlier(s, c.n, 'link-netns')) return rich('capMove', { dev: data(cmd.dev), ns: data(cmd.to) });
+        var moved = L.link(s, cmd.to, cmd.dev);
+        return rich('capMove2', { dev: data(cmd.dev), ns: data(cmd.to), peer: data(moved.peer.name) });
+      }
+      case 'addr-add': {
+        var la = L.link(s, cmd.ns || ROOT, cmd.dev);
+        if (la.kind === 'bridge') return rich('capAddrBridge', { addr: data(cmd.addr) });
+        return rich('capAddr', { ns: data(cmd.ns || ROOT), addr: data(cmd.addr), dev: data(cmd.dev), net: data(L.prefixOf(cmd.addr)) });
+      }
+      case 'link-up': {
+        var l = L.link(s, cmd.ns || ROOT, cmd.dev);
+        if (l.kind === 'bridge') return rich('capUpBridge');
+        var peer = L.peerOf(s, l);
+        if (peer && !peer.up && l.addrs.length) return rich('capUpNoPeer', { dev: data(l.name), ns: data(cmd.ns || ROOT), peer: data(peer.name), net: data(L.prefixOf(l.addrs[0])) });
+        if (l.master) return rich('capUpPortFix', { dev: data(l.name) });
+        return rich('capUpBoth', { dev: data(l.name) });
+      }
+      case 'bridge-add': return rich('capBridgeAdd');
+      case 'link-master': {
+        var br = L.link(s, ROOT, cmd.master);
+        if (!br.up && L.portsOf(s, ROOT, cmd.master).length >= 2) return rich('capMasterDown', { dev: data(cmd.dev), br: data(cmd.master) });
+        return rich('capMaster', { dev: data(cmd.dev), br: data(cmd.master) });
+      }
+      case 'route-add': return rich('capRoute');
+      case 'sysctl': return cmd.value == null ? rich('capFwdRead', { v: data(s.ipForward ? 1 : 0) }) : rich('capFwdOn');
+      case 'nat': return cmd.oif ? rich('capNat', { src: data(cmd.src), oif: data(cmd.oif) }) : rich('capNatEngine', { src: data(cmd.src) });
+      case 'show-links': return rich('capShowLinks');
+      case 'show-routes': return rich('capShowRoutes');
+      case 'engine':
+        if (cmd.what === 'start') return rich('capEngineStart');
+        return rich('capEngineRun', { ns: data(cmd.ns), addr: data(cmd.cmds.filter(function (x) { return x.op === 'addr-add'; })[0].addr) });
+      case 'ping': return pingCaption(c);
+    }
+    return rich('capErr');
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['by-hand', t('pByHand')], ['to-the-world', t('pWorld')], ['forgot-up', t('pForgotUp')], ['forgot-forward', t('pForgotFwd')], ['container-view', t('pEngine')]],
+        visible: function () { return false; } },
+      { key: 'showArp', type: 'toggle', label: t('showArp'), hint: t('showArpHint') }
+    ],
+
+    presets: [
+      { id: 'by-hand', label: t('pByHand'), params: { scene: 'by-hand' }, hint: t('pByHandHint') },
+      { id: 'to-the-world', label: t('pWorld'), params: { scene: 'to-the-world' }, hint: t('pWorldHint') },
+      { id: 'forgot-up', label: t('pForgotUp'), params: { scene: 'forgot-up' }, hint: t('pForgotUpHint') },
+      { id: 'forgot-forward', label: t('pForgotFwd'), params: { scene: 'forgot-forward' }, hint: t('pForgotFwdHint') },
+      { id: 'container-view', label: t('pEngine'), params: { scene: 'container-view' }, hint: t('pEngineHint') }
+    ],
+
+    legend: [
+      { shape: 'nv-ns', label: t('legNs') },
+      { shape: 'nv-up', label: t('legUp') },
+      { shape: 'nv-down', label: t('legDown') },
+      { shape: 'nv-cable', label: t('legCable') },
+      { shape: 'nv-bridge', label: t('legBridge') },
+      { shape: 'nv-route', label: t('legRoute') },
+      { shape: 'nv-path', label: t('legPath') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
