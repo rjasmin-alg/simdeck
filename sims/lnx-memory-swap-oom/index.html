@@ -1,0 +1,485 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-memory-swap-oom: page cache vs used, swapping, and who the OOM killer picks. On top, the RAM bar (other
+     processes, one block per process, unreclaimable and reclaimable cache, free) and the swap bar at the same scale;
+     below, the free -m listing and the process table with each one's OOM score; at the bottom, what each started
+     process got and from where, and the kernel's log line when the OOM killer fired.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-memory-swap-oom">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memorija, odlagalište i ubojica OOM · simdeck</title>
+<meta name="description" content="Pokreni procese i gledaj predmemoriju stranica, odlagalište memorije i ubojicu OOM: slobodno nije raspoloživo, a žrtva nije uvijek onaj koji traži.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-memory-swap-oom",
+  "title": {
+    "hr": "Memorija, odlagalište i ubojica OOM",
+    "en": "Memory, swap and the OOM killer"
+  },
+  "concept": {
+    "hr": "Predmemorija se vraća, odlagalište daje mjesta, a OOM ubija najveći zbroj",
+    "en": "Page cache gives way, swap buys room, the OOM killer takes the top score"
+  },
+  "summary": {
+    "hr": "Pokreni backup, bazu i build na stroju iz knjige: slobodno pada, raspoloživo ne; s odlagalištem svi prežive, bez njega ubojica OOM bira žrtvu.",
+    "en": "Start a backup, a database and a build on the book's machine: free drops, available holds; with swap all survive, without it the OOM killer picks a victim."
+  },
+  "tags": [
+    "memory"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "cache-gives-way"
+    },
+    {
+      "preset": "oom-kills-db"
+    },
+    {
+      "preset": "swap-saves"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-memory-swap-oom"]; colours only from kit tokens.
+   Layout: the bars on top; free -m and the process table side by side; the trace and the kernel log below. */
+[data-sim="lnx-memory-swap-oom"] .mo {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-memory-swap-oom"] .mo-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-box h3 { margin: 0; font-size: 1.1rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+[data-sim="lnx-memory-swap-oom"] .mo-box h3 span { font-weight: 400; color: var(--muted); }
+
+/* bars */
+[data-sim="lnx-memory-swap-oom"] .mo-barrow { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 0.6rem; align-items: center; }
+[data-sim="lnx-memory-swap-oom"] .mo-barname { font-weight: 700; }
+[data-sim="lnx-memory-swap-oom"] .mo-barname small { display: block; font-size: 1rem; font-weight: 400; color: var(--muted); }
+[data-sim="lnx-memory-swap-oom"] .mo-bar {
+  display: flex;
+  height: 4.2rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-bar[data-k="swap"] { height: 3.2rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-nobar {
+  display: grid;
+  place-items: center start;
+  height: 3.2rem;
+  padding: 0 0.8rem;
+  border: var(--line-w) dashed var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  width: max-content;
+}
+[data-sim="lnx-memory-swap-oom"] .mo-seg {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 0.35rem;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.15;
+  border-right: 2px solid var(--ink);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-seg:last-child { border-right: 0; }
+[data-sim="lnx-memory-swap-oom"] .mo-seg b, [data-sim="lnx-memory-swap-oom"] .mo-seg span { overflow: hidden; text-overflow: clip; }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="other"] { background: color-mix(in srgb, var(--muted) 35%, var(--bg)); color: var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="db"] { background: var(--c1); color: var(--on-series); }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="build"] { background: var(--c2); color: var(--on-series); }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="fixed"] {
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 55%, transparent) 0.12rem, transparent 0.14rem);
+  background-size: 0.6rem 0.6rem;
+  color: var(--ink);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="cache"] {
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--ink) 28%, transparent) 0.4em 0.55em);
+  color: var(--ink);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="free"] { background: var(--bg); color: var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="swapused"] {
+  background-color: color-mix(in srgb, var(--c1) 30%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.45em, color-mix(in srgb, var(--ink) 35%, transparent) 0.45em 0.65em);
+  color: var(--ink);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-seg b, [data-sim="lnx-memory-swap-oom"] .mo-seg span { background: inherit; }
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="fixed"] b, [data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="cache"] b,
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="swapused"] b,
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="fixed"] span, [data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="cache"] span,
+[data-sim="lnx-memory-swap-oom"] .mo-seg[data-k="swapused"] span { background: var(--bg); align-self: flex-start; padding: 0 0.2rem; border-radius: 0.15rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-seg.sd-changed { box-shadow: inset 0 0 0 0.3rem var(--hl), inset 0 0 0 0.45rem var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .mo-avail { margin: 0; }
+
+/* middle: free -m and the process table */
+[data-sim="lnx-memory-swap-oom"] .mo-mid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.7rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-console {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: hidden;
+}
+[data-sim="lnx-memory-swap-oom"] .mo-console .mo-prompt { color: var(--muted); }
+[data-sim="lnx-memory-swap-oom"] .mo-console .sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.15rem; outline: 0.15rem solid var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .mo-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+[data-sim="lnx-memory-swap-oom"] .mo-table th, [data-sim="lnx-memory-swap-oom"] .mo-table td { padding: 0.15rem 0.4rem; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="lnx-memory-swap-oom"] .mo-table th { font-weight: 700; color: var(--muted); }
+[data-sim="lnx-memory-swap-oom"] .mo-table th:nth-child(2), [data-sim="lnx-memory-swap-oom"] .mo-table td:nth-child(2) { text-align: left; }
+[data-sim="lnx-memory-swap-oom"] .mo-table td.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); outline-offset: -0.15rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-name { display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-memory-swap-oom"] .mo-chip { display: inline-block; width: 1rem; height: 1rem; border: 2px solid var(--ink); border-radius: 0.2rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-chip[data-k="db"] { background: var(--c1); }
+[data-sim="lnx-memory-swap-oom"] .mo-chip[data-k="build"] { background: var(--c2); }
+[data-sim="lnx-memory-swap-oom"] .mo-chip[data-k="backup"] { background: var(--c3); }
+[data-sim="lnx-memory-swap-oom"] .mo-table tr[data-killed] td { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 0.14em; text-decoration-color: var(--danger); }
+[data-sim="lnx-memory-swap-oom"] .mo-table tr[data-killed] td.mo-killcell { text-decoration: none; color: var(--danger); font-weight: 700; }
+[data-sim="lnx-memory-swap-oom"] .mo-x { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-memory-swap-oom"] .mo-empty { margin: 0; color: var(--muted); }
+
+/* bottom: what happened, the kernel log */
+[data-sim="lnx-memory-swap-oom"] .mo-trace { min-height: 0; }
+[data-sim="lnx-memory-swap-oom"] .mo-events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-events li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.5rem; }
+[data-sim="lnx-memory-swap-oom"] .mo-step { padding: 0 0.4rem; border: 1px solid var(--line); border-radius: 0.2rem; background: var(--bg); }
+[data-sim="lnx-memory-swap-oom"] .mo-step[data-k="short"] { border: 2px dashed var(--danger); }
+[data-sim="lnx-memory-swap-oom"] .mo-step[data-k="kill"] { border: 2px solid var(--danger); font-weight: 700; }
+[data-sim="lnx-memory-swap-oom"] .mo-step[data-k="swap"] {
+  border: 2px solid var(--ink);
+  background-color: color-mix(in srgb, var(--c1) 30%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.45em, color-mix(in srgb, var(--ink) 20%, transparent) 0.45em 0.65em);
+}
+[data-sim="lnx-memory-swap-oom"] .mo-arrow { color: var(--muted); }
+[data-sim="lnx-memory-swap-oom"] .mo-log {
+  margin: 0.2rem 0 0;
+  padding: 0.35rem 0.6rem;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+[data-sim="lnx-memory-swap-oom"] .mo-log b { color: var(--danger); }
+
+/* panel: six presets in two columns, as amdahl and delay-components do, so presets and params fit at 1920×1080 */
+[data-sim="lnx-memory-swap-oom"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-memory-swap-oom"] .sd-preset { line-height: 1.15; }
+
+/* legend swatches */
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-proc"] { background: linear-gradient(90deg, var(--c1) 0 50%, var(--c2) 50%); border-color: var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-other"] { background: color-mix(in srgb, var(--muted) 35%, var(--bg)); border-color: var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-cache"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--ink) 40%, transparent) 0.25em 0.38em);
+}
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-fixed"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 60%, transparent) 0.1rem, transparent 0.12rem);
+  background-size: 0.45rem 0.45rem;
+}
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-free"] { background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-swap"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c1) 30%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 40%, transparent) 0.3em 0.45em);
+}
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-killed"] { position: relative; background: var(--bg); border-color: var(--danger); }
+[data-sim="lnx-memory-swap-oom"] .sd-swatch[data-shape="mo-killed"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; font-size: 0.8em; line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-memory-swap-oom"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-memory-swap-oom"] .mo { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-memory-swap-oom"] .mo-barrow { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-memory-swap-oom"] .mo-mid { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-memory-swap-oom"] .mo-console { overflow-x: auto; }
+  [data-sim="lnx-memory-swap-oom"] .mo-tablewrap { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Memorija, odlagalište i ubojica OOM</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var NAME = { db: 'nDb', build: 'nBuild', backup: 'nBackup' };
+  var GEN = { db: 'gDb', build: 'gBuild', backup: 'gBackup' };
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function mib(n) { return t('mib', { n: n }); }
+  /** a process size on its slider: 0 = not started */
+  function size(n) { return n > 0 ? mib(n) : t('notStarted'); }
+  function pad(v, w) { v = String(v); while (v.length < w) v = ' ' + v; return v; }
+  function on(list, k) { return list.indexOf(k) >= 0 ? 'sd-changed' : null; }
+  /** a signed number as the kernel prints it, with a real minus sign */
+  function signed(n) { return n < 0 ? '−' + Math.abs(n) : String(n); }
+  function score(v) { return v === null ? t('never') : String(Math.round(v)); }
+
+  // ── the bars: RAM, and swap at the same scale ──
+
+  function segLabel(seg) {
+    if (seg.key) return [h('b', { translate: 'no' }, seg.key), h('span', null, mib(seg.size))];
+    var name = { other: 'segOther', fixed: 'segFixed', cache: 'segCache', free: 'segFree' }[seg.id];
+    return [h('b', null, t(name)), h('span', null, mib(seg.size))];
+  }
+
+  function bars(st, chg) {
+    var ram = h('div', { class: 'mo-bar', role: 'img', 'aria-label': t('ram') + ' ' + mib(st.total) },
+      L.segments(st).map(function (seg) {
+        return h('div', {
+          class: 'mo-seg ' + (on(chg.seg, seg.id) || ''),
+          dataset: { k: seg.key || seg.id },
+          style: { flex: seg.size + ' 0 0' },
+          title: mib(seg.size)
+        }, segLabel(seg));
+      }));
+    var swap;
+    if (!st.swapTotal) swap = h('div', { class: 'mo-nobar' }, t('noSwap'));
+    else {
+      var parts = st.procs.filter(function (x) { return !x.killed && x.swap > 0; }).map(function (x) {
+        return h('div', { class: 'mo-seg ' + (on(chg.seg, 'swap') || ''), dataset: { k: 'swapused' }, style: { flex: x.swap + ' 0 0' } },
+          h('b', { translate: 'no' }, x.key), h('span', null, mib(x.swap)));
+      });
+      var left = st.swapTotal - st.swapUsed;
+      if (left > 0) parts.push(h('div', { class: 'mo-seg', dataset: { k: 'free' }, style: { flex: left + ' 0 0' } },
+        h('b', null, t('segFree')), h('span', null, mib(left))));
+      swap = h('div', { class: 'mo-bar', dataset: { k: 'swap' }, role: 'img', 'aria-label': t('swapBar') + ' ' + mib(st.swapTotal),
+        style: { width: (st.swapTotal / st.total * 100) + '%' } }, parts);
+    }
+    return h('section', { class: 'mo-box' },
+      h('div', { class: 'mo-barrow' }, h('div', { class: 'mo-barname' }, t('ram'), h('small', null, mib(st.total))), ram),
+      h('div', { class: 'mo-barrow' }, h('div', { class: 'mo-barname' }, t('swapBar'), h('small', null, mib(st.swapTotal))), h('div', null, swap)),
+      h('p', { class: 'mo-avail' }, t('availLine', { free: st.free, cache: st.cache - st.cacheFixed, avail: st.available })));
+  }
+
+  // ── free -m as it prints, and the process table ──
+
+  function freeM(st, chg) {
+    var cell = function (v, w, list, k) { return h('b', { class: on(list, k) }, pad(v, w)); };
+    return h('section', { class: 'mo-box' },
+      h('pre', { class: 'mo-console', translate: 'no' },
+        h('span', { class: 'mo-prompt' }, '$ '), 'free -m\n',
+        '       total  used  free shared buff/cache available\n',
+        'Mem:   ', pad(st.total, 5), ' ', cell(st.used, 5, chg.mem, 'used'), ' ', cell(st.free, 5, chg.mem, 'free'),
+        '      0 ', cell(st.cache, 10, chg.mem, 'cache'), ' ', cell(st.available, 9, chg.mem, 'available'), '\n',
+        'Swap:  ', cell(st.swapTotal, 5, chg.swap, 'total'), ' ', cell(st.swapUsed, 5, chg.swap, 'used'), ' ',
+        cell(st.swapTotal - st.swapUsed, 5, chg.swap, 'free')));
+  }
+
+  function procTable(st, chg) {
+    var head = h('h3', null, t('procs'), h('span', null, t('orderHint')));
+    if (!st.procs.length) return h('section', { class: 'mo-box' }, head, h('p', { class: 'mo-empty' }, t('noProcs')));
+    var rows = st.procs.map(function (x) {
+      var c = chg.procs[x.key] || [];
+      var mark = function (k) { return c.indexOf('row') >= 0 || c.indexOf(k) >= 0 ? 'sd-changed' : null; };
+      return h('tr', { dataset: x.killed ? { killed: '' } : {} },
+        h('td', { translate: 'no', class: mark('pid') }, String(x.pid)),
+        h('td', { class: mark('killed') }, h('span', { class: 'mo-name', translate: 'no' },
+          x.killed ? h('span', { class: 'mo-x', 'aria-hidden': 'true' }, '✕') : h('span', { class: 'mo-chip', dataset: { k: x.key } }), x.key)),
+        h('td', { class: mark('ask') }, x.key === 'backup' ? '—' : String(x.ask)),
+        h('td', { class: mark('rss') }, String(x.rss)),
+        h('td', { class: mark('swap') }, String(x.swap)),
+        h('td', { class: mark('adj') }, signed(x.adj)),
+        h('td', { class: mark('score') }, score(x.score)),
+        x.killed ? h('td', { class: 'mo-killcell' }, t('killed')) : h('td', null, ''));
+    });
+    return h('section', { class: 'mo-box' },
+      head,
+      h('div', { class: 'mo-tablewrap' }, h('table', { class: 'mo-table' },
+        h('thead', null, h('tr', null,
+          h('th', null, t('thPid')), h('th', null, t('thName')), h('th', null, t('thAsk')), h('th', null, t('thRss')),
+          h('th', null, t('thSwap')), h('th', { translate: 'no' }, t('thAdj')), h('th', null, t('thScore')), h('th', null, ''))),
+        h('tbody', null, rows))));
+  }
+
+  // ── what each started process got, and the kernel log ──
+
+  function step(k, text) { return h('span', { class: 'mo-step', dataset: { k: k } }, text); }
+  function arrow() { return h('span', { class: 'mo-arrow', 'aria-hidden': 'true' }, '→'); }
+
+  function trace(st) {
+    if (!st.events.length) return null;
+    var log = null;
+    var items = st.events.map(function (e) {
+      if (e.kind === 'read') return h('li', null, t('evRead', { free: e.fromFree, rest: e.replaced }));
+      var parts = [h('b', null, t.parts('evAsk', { name: data(e.key), ask: e.ask }))];
+      var add = function (k, text) { parts.push(arrow(), step(k, text)); };
+      if (e.fromFree) add('free', t('evFree', { n: e.fromFree }));
+      if (e.fromCache) add('cache', t('evCache', { n: e.fromCache }));
+      e.swapped.forEach(function (sw) { add('swap', t.parts('evSwap', { n: sw.n, who: data(sw.key) })); });
+      if (e.short) add('short', t('evShort', { n: e.short }));
+      e.oom.forEach(function (o) {
+        var list = o.scores.map(function (x) { return x.key + ' ' + Math.round(x.score); }).join(' · ');
+        add('scores', t.parts('evScores', { list: data(list) }));
+        add('kill', t.parts('evKill', { who: data(o.victim) }));
+        var pid = L.PROCS.filter(function (d) { return d.key === o.victim; })[0].pid;
+        log = h('pre', { class: 'mo-log', translate: 'no' }, h('b', null, 'Out of memory: '), 'Killed process ' + pid + ' (' + o.victim + ')');
+      });
+      var failed = e.oom.some(function (o) { return o.self; });
+      add(failed ? 'kill' : 'done', t(failed ? 'evFail' : 'evDone'));
+      return h('li', null, parts);
+    });
+    return h('section', { class: 'mo-box mo-trace' },
+      h('h3', null, t('trace')),
+      h('ul', { class: 'mo-events' }, items),
+      log ? h('h3', null, t('kernelLog')) : null,
+      log);
+  }
+
+  // ── render; "changed" compares with the state before the last param change ──
+
+  var lastKey = null, shown = null, chg = L.changed(null, null);
+  function track(c) {
+    var k = JSON.stringify(c.params);
+    if (k !== lastKey) {
+      chg = L.changed(shown, c.state);
+      lastKey = k;
+    }
+    shown = c.state;
+  }
+
+  function render(c) {
+    track(c);
+    var st = c.state;
+    c.stage.replaceChildren(h('div', { class: 'mo' },
+      bars(st, chg),
+      h('div', { class: 'mo-mid' }, freeM(st, chg), procTable(st, chg)),
+      trace(st) || h('div')));
+  }
+
+  function caption(c) {
+    var st = c.state;
+    var k = L.captionKey(st);
+    var b = function (x) { return h('b', null, String(x)); };
+    var allocs = st.events.filter(function (e) { return e.kind === 'alloc'; });
+    var vars = {
+      free: b(st.free), avail: b(st.available), used: b(st.used), bc: b(st.cache), cache: b(st.cache - st.cacheFixed)
+    };
+    if (k === 'cReclaim') vars.took = b(allocs.reduce(function (a, e) { return a + e.fromCache; }, 0));
+    if (k === 'cSwap') {
+      var sw = [];
+      allocs.forEach(function (e) { sw = sw.concat(e.swapped); });
+      vars.n = b(sw.reduce(function (a, x) { return a + x.n; }, 0));
+      vars.who = t(GEN[sw[0].key]);
+      vars.who2 = t(NAME[sw[0].key]);
+    }
+    if (k === 'cOomDb' || k === 'cOomProtected' || k === 'cOomSelf') {
+      var e = allocs.filter(function (x) { return x.oom.length; })[0];
+      var sc = {};
+      e.oom[0].scores.forEach(function (x) { sc[x.key] = Math.round(x.score); });
+      vars.short = b(e.short);
+      vars.why = t(st.swapTotal ? 'whySwapFull' : 'whyNoSwap');
+      vars.as = b(sc.build);
+      var db = st.procs.filter(function (x) { return x.key === 'db'; })[0];
+      // a −1000 database has no score: compare with its RSS + swap
+      vars.vs = b(sc.db != null ? sc.db : db.rss + db.swap);
+    }
+    return t.parts(k, vars);
+  }
+
+  var labels = {
+    'book-free': 'pBookFree', 'backup-reads': 'pBackupReads', 'cache-gives-way': 'pCacheGivesWay',
+    'oom-kills-db': 'pOomKillsDb', 'swap-saves': 'pSwapSaves', 'protect-db': 'pProtectDb'
+  };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'swap', type: 'choice', label: t('swap'), options: [[0, t('swapNone')], [512, mib(512)], [1024, mib(1024)]] },
+      { key: 'backup', type: 'toggle', label: t('backup') },
+      { key: 'dbSize', type: 'range', label: t('dbSize'), min: 0, max: 1200, step: 100, format: size },
+      { key: 'dbAdj', type: 'choice', label: t('dbAdj'), options: [[0, '0'], [L.ADJ_MIN, '−1000']] },
+      { key: 'buildSize', type: 'range', label: t('buildSize'), min: 0, max: 1200, step: 100, format: size }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'mo-proc', label: t('legProc') },
+      { shape: 'mo-other', label: t('legOther') },
+      { shape: 'mo-cache', label: t('legCache') },
+      { shape: 'mo-fixed', label: t('legFixed') },
+      { shape: 'mo-free', label: t('legFree') },
+      { shape: 'mo-swap', label: t('legSwap') },
+      { shape: 'mo-killed', label: t('legKilled') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
