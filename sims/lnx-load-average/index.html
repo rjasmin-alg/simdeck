@@ -1,0 +1,483 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-load-average: load counts runnable and D-state tasks, not CPU percent. On top, one machine: its cores (busy or
+     idle), the run queue of R tasks waiting for a core and the disk lane of D tasks; beside it the uptime and nproc
+     lines, the sample at the cursor and a %CPU bar. Below, the 1/5/15-minute averages over time with the cursor at t
+     and a capacity line at the number of cores.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-load-average">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opterećenje sustava · simdeck</title>
+<meta name="description" content="Dodaj poslove koji računaju i one koji čekaju disk na 1–8 jezgri: tri brojke opterećenja rastu i padaju, a %CPU priča drugu priču.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-load-average",
+  "title": {
+    "hr": "Opterećenje sustava",
+    "en": "Load average"
+  },
+  "concept": {
+    "hr": "Opterećenje broji poslove u stanju R i D, a ne postotak procesora",
+    "en": "Load counts runnable and D-state tasks, not CPU percent"
+  },
+  "summary": {
+    "hr": "Dodaj poslove koji računaju i one koji čekaju disk na 1–8 jezgri: tri brojke opterećenja rastu i padaju, a %CPU priča drugu priču.",
+    "en": "Add CPU-bound and disk-waiting tasks on 1–8 cores: the three load numbers rise and fall, while %CPU tells a different story."
+  },
+  "tags": [
+    "performance"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "one-core-queue"
+    },
+    {
+      "preset": "io-bound"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-load-average"]; colours only from kit tokens.
+   Layout: the machine (cores, run queue, disk) and the readout (uptime, nproc, %CPU) on top; the chart below. */
+[data-sim="lnx-load-average"] .la {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-load-average"] .la-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 27rem;
+  gap: 0.8rem;
+  align-items: stretch;
+}
+[data-sim="lnx-load-average"] .la-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-load-average"] .la-box h3 { margin: 0; font-size: 1.15rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+[data-sim="lnx-load-average"] .la-box h3 span { font-weight: 400; color: var(--muted); }
+
+/* cores */
+[data-sim="lnx-load-average"] .la-cores { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 0.4rem; }
+[data-sim="lnx-load-average"] .la-core { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; text-align: center; }
+[data-sim="lnx-load-average"] .la-core-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="lnx-load-average"] .la-core-box {
+  display: grid;
+  place-items: center;
+  min-height: 3.6rem;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="lnx-load-average"] .la-core-box[data-busy="yes"] { background: var(--c1); border: var(--line-w) solid var(--c1); color: var(--on-series); }
+[data-sim="lnx-load-average"] .la-core-box[data-busy="no"] { background: transparent; border: var(--line-w) dashed var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="lnx-load-average"] .la-core-box.sd-changed { outline: 0.25rem solid var(--ink); outline-offset: 0.15rem; box-shadow: 0 0 0 0.5rem var(--hl); }
+
+/* lanes: run queue and disk */
+[data-sim="lnx-load-average"] .la-lane {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.9rem;
+  padding: 0.25rem 0.4rem;
+  border-top: 1px solid var(--line);
+}
+[data-sim="lnx-load-average"] .la-lane-name { font-weight: 700; }
+[data-sim="lnx-load-average"] .la-lane-name small { display: block; font-size: 1rem; font-weight: 400; color: var(--muted); }
+[data-sim="lnx-load-average"] .la-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; min-width: 0; }
+[data-sim="lnx-load-average"] .la-empty { color: var(--muted); }
+[data-sim="lnx-load-average"] .la-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 3.6rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+[data-sim="lnx-load-average"] .la-chip[data-k="R"] { border: var(--line-w) solid var(--c1); background: var(--bg); color: var(--ink); }
+[data-sim="lnx-load-average"] .la-chip[data-k="D"] {
+  border: var(--line-w) solid var(--c2);
+  background-color: color-mix(in srgb, var(--c2) 16%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em);
+  color: var(--ink);
+}
+[data-sim="lnx-load-average"] .la-stopped { margin: 0; color: var(--muted); }
+
+/* readout: uptime, nproc, per core, sample, %CPU */
+[data-sim="lnx-load-average"] .la-console {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: hidden;
+}
+[data-sim="lnx-load-average"] .la-console .la-prompt { color: var(--muted); }
+[data-sim="lnx-load-average"] .la-console b { font-size: 1.2rem; }
+[data-sim="lnx-load-average"] .la-console .sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.15rem; outline: 0.15rem solid var(--ink); }
+[data-sim="lnx-load-average"] .la-line { margin: 0; }
+[data-sim="lnx-load-average"] .la-line b { font-family: var(--mono); }
+[data-sim="lnx-load-average"] .la-cpu { display: flex; height: 1.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg); }
+[data-sim="lnx-load-average"] .la-cpu span { height: 100%; }
+[data-sim="lnx-load-average"] .la-cpu .la-us { background: var(--c1); }
+[data-sim="lnx-load-average"] .la-cpu .la-wa {
+  background-color: color-mix(in srgb, var(--c2) 16%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 30%, transparent) 0.35em 0.5em);
+}
+[data-sim="lnx-load-average"] .la-cpu-keys { display: flex; flex-wrap: wrap; gap: 0 0.9rem; margin: 0; font-size: 1rem; }
+
+/* chart */
+[data-sim="lnx-load-average"] .la-chart {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 0.4rem 0.7rem 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+[data-sim="lnx-load-average"] .la-chead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.2rem 1rem; }
+[data-sim="lnx-load-average"] .la-chart h3 { margin: 0; font-size: 1.1rem; }
+[data-sim="lnx-load-average"] .la-keys { display: flex; flex-wrap: wrap; gap: 0.1rem 1.1rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-load-average"] .la-keys li { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="lnx-load-average"] .la-keys svg { width: 2.4em; height: 0.8em; overflow: visible; }
+[data-sim="lnx-load-average"] .la-plot { position: relative; flex: 1 1 auto; min-height: 9rem; }
+[data-sim="lnx-load-average"] .la-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="lnx-load-average"] .la-plot text { font-family: var(--sans); font-size: 1rem; fill: var(--muted); }
+[data-sim="lnx-load-average"] .la-grid { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
+[data-sim="lnx-load-average"] .la-axis { stroke: var(--ink); stroke-width: var(--line-w); }
+[data-sim="lnx-load-average"] .la-curve { fill: none; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+[data-sim="lnx-load-average"] .la-curve[data-k="0"] { stroke: var(--c1); }
+[data-sim="lnx-load-average"] .la-curve[data-k="1"] { stroke: var(--c2); stroke-dasharray: 12 6; }
+[data-sim="lnx-load-average"] .la-curve[data-k="2"] { stroke: var(--c3); stroke-dasharray: 2 7; stroke-width: 5; }
+[data-sim="lnx-load-average"] .la-curve[data-later] { opacity: 0.35; stroke-width: 3; }
+[data-sim="lnx-load-average"] .la-cap { stroke: var(--ink); stroke-width: 2.5; stroke-dasharray: 3 4 12 4; }
+[data-sim="lnx-load-average"] .la-plot .la-cap-label { fill: var(--ink); font-weight: 700; }
+[data-sim="lnx-load-average"] .la-cursor { stroke: var(--ink); stroke-width: 2.5; }
+[data-sim="lnx-load-average"] .la-plot .la-cursor-label { fill: var(--ink); font-weight: 700; }
+[data-sim="lnx-load-average"] .la-dot { stroke: var(--ink); stroke-width: 2; }
+[data-sim="lnx-load-average"] .la-dot[data-k="0"] { fill: var(--c1); }
+[data-sim="lnx-load-average"] .la-dot[data-k="1"] { fill: var(--c2); }
+[data-sim="lnx-load-average"] .la-dot[data-k="2"] { fill: var(--c3); }
+[data-sim="lnx-load-average"] .la-stop { fill: var(--ink); }
+[data-sim="lnx-load-average"] .la-plot .la-stop-label { fill: var(--ink); }
+
+/* legend swatches */
+[data-sim="lnx-load-average"] .sd-swatch[data-shape="la-busy"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="lnx-load-average"] .sd-swatch[data-shape="la-idle"] { background: transparent; border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-load-average"] .sd-swatch[data-shape="la-queued"] { background: var(--bg); border-color: var(--c1); }
+[data-sim="lnx-load-average"] .sd-swatch[data-shape="la-disk"] {
+  border-color: var(--c2);
+  background-color: color-mix(in srgb, var(--c2) 16%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--ink) 40%, transparent) 0.25em 0.38em);
+}
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-load-average"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-load-average"] .la { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-load-average"] .la-top { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-load-average"] .la-cores { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  [data-sim="lnx-load-average"] .la-lane { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-load-average"] .la-plot { height: 14rem; flex: none; }
+  [data-sim="lnx-load-average"] .la-console { white-space: pre-wrap; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Opterećenje sustava</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var sim = null;
+
+  // ── numbers and times in the page's language ──
+
+  /** Two decimals with the page's decimal mark (prose); the uptime line keeps the point (program output). */
+  function load2(x) { var v = L.round2(x).toFixed(2); return Simdeck.lang === 'hr' ? v.replace('.', ',') : v; }
+  function pct(x) { return String(Math.round(x)); }
+  /** Seconds under 2 min, then minutes and seconds. */
+  function dur(s) {
+    if (s < 120) return s + ' ' + t('uS');
+    var m = Math.floor(s / 60), r = s - m * 60;
+    return m + ' ' + t('uMin') + (r ? ' ' + r + ' ' + t('uS') : '');
+  }
+  function coresText(n) { return t.n('cores1', n); }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function s(tag, attrs) {
+    var el = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) el.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) el.append(arguments[i]);
+    return el;
+  }
+
+  // ── the machine: cores, run queue, disk ──
+
+  function machine(st, chg) {
+    var cores = st.coreTask.map(function (task, i) {
+      var busy = task != null;
+      return h('div', { class: 'la-core' },
+        h('div', { class: 'la-core-name' }, t('coreN', { i: i })),
+        h('div', { class: 'la-core-box' + (chg.cores.indexOf(i) >= 0 ? ' sd-changed' : ''), dataset: { busy: busy ? 'yes' : 'no' } },
+          busy ? data('#' + task + ' R') : t('idle')));
+    });
+    var chips = function (ids, k, empty) {
+      if (!ids.length) return h('span', { class: 'la-empty' }, empty);
+      return ids.map(function (id) { return h('span', { class: 'la-chip', translate: 'no', dataset: { k: k } }, '#' + id + ' ' + k); });
+    };
+    var foot = null;
+    if (!st.on && st.peak > 0) foot = h('p', { class: 'la-stopped' }, t.n('stoppedAt', st.peak, { stop: dur(st.runFor) }));
+    else if (st.peak === 0) foot = h('p', { class: 'la-stopped' }, t('notStarted'));
+    return h('section', { class: 'la-box' },
+      h('h3', null, t('machine'), h('span', null, t('nowTitle', { t: dur(st.t) }))),
+      h('div', { class: 'la-cores', style: { '--n': String(st.cores) } }, cores),
+      h('div', { class: 'la-lane' },
+        h('div', { class: 'la-lane-name' }, t('queue'), h('small', null, t('legQueued'))),
+        h('div', { class: 'la-chips' }, chips(st.queued, 'R', t('queueEmpty')))),
+      h('div', { class: 'la-lane' },
+        h('div', { class: 'la-lane-name' }, t('disk'), h('small', null, t('legDisk'))),
+        h('div', { class: 'la-chips' }, chips(st.dstate, 'D', t('diskEmpty')))),
+      foot);
+  }
+
+  // ── the readout: uptime and nproc as printed, per core, the sample, %CPU ──
+
+  function readout(st, chg) {
+    var nums = st.printed.map(function (v, k) {
+      return h('b', { class: chg.load.indexOf(k) >= 0 ? 'sd-changed' : null }, v.toFixed(2));
+    });
+    var r = st.on ? st.queued.length + st.running.length : 0;
+    var d = st.on ? st.dstate.length : 0;
+    return h('section', { class: 'la-box' },
+      h('pre', { class: 'la-console', translate: 'no' },
+        h('span', { class: 'la-prompt' }, '$ '), 'uptime\n',
+        '… load average: ', nums[0], ', ', nums[1], ', ', nums[2], '\n',
+        h('span', { class: 'la-prompt' }, '$ '), 'nproc\n',
+        h('b', null, String(st.cores))),
+      h('p', { class: 'la-line' }, t('perCore', { v: load2(st.perCore) })),
+      h('p', { class: 'la-line' }, h('b', null, t('sampleLine', { r: r, d: d, n: r + d }))),
+      h('div', { class: 'la-cpu', role: 'img', 'aria-label': t('cpuTitle') },
+        h('span', { class: 'la-us', style: { width: st.cpuPct + '%' } }),
+        h('span', { class: 'la-wa', style: { width: st.waPct + '%' } })),
+      h('p', { class: 'la-cpu-keys' },
+        h('span', null, t('cpuBusy', { v: pct(st.cpuPct) })),
+        h('span', null, t('cpuWa', { v: pct(st.waPct) })),
+        h('span', null, t('cpuIdle', { v: pct(st.idlePct) }))));
+  }
+
+  // ── the chart, drawn in pixels so that its text stays at 1:1 ──
+
+  function key(k, label, later) {
+    return h('li', null, s('svg', { 'aria-hidden': 'true', viewBox: '0 0 40 10' },
+      s('line', { class: k === 'cap' ? 'la-cap' : 'la-curve', 'data-k': k === 'cap' ? null : k, 'data-later': later ? '' : null, x1: 0, y1: 5, x2: 40, y2: 5 })), label);
+  }
+
+  function drawChart(box, st) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var pad = { l: 3.4 * rem, r: 1.2 * rem, t: 1.4 * rem, b: 2.5 * rem };
+    var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    var top = Math.max(1, st.cores, st.peak);
+    var yMax = Math.ceil(top * 1.15 + 0.01);
+    var yStep = yMax <= 6 ? 1 : 2;
+    var X = function (sec) { return pad.l + sec / st.span * cw; };
+    var Y = function (v) { return pad.t + ch * (1 - v / yMax); };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('chart') });
+    for (var v = 0; v <= yMax + 1e-9; v += yStep) {
+      svg.append(s('line', { class: 'la-grid', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) }));
+      svg.append(s('text', { x: pad.l - 0.5 * rem, y: Y(v) + 0.35 * rem, 'text-anchor': 'end' }, String(v)));
+    }
+    var xStep = st.span <= 300 ? 60 : 300;
+    for (var x = 0; x <= st.span; x += xStep) {
+      svg.append(s('line', { class: 'la-grid', x1: X(x), x2: X(x), y1: pad.t, y2: pad.t + ch }));
+      svg.append(s('text', { x: X(x), y: pad.t + ch + 1.2 * rem, 'text-anchor': 'middle' }, String(x / 60)));
+    }
+    svg.append(s('line', { class: 'la-axis', x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ch }));
+    svg.append(s('line', { class: 'la-axis', x1: pad.l, x2: pad.l + cw, y1: pad.t + ch, y2: pad.t + ch }));
+    svg.append(s('text', { x: pad.l + cw / 2, y: H - 0.15 * rem, 'text-anchor': 'middle' }, t('axisMin')));
+    svg.append(s('text', { x: 0.9 * rem, y: pad.t + ch / 2, 'text-anchor': 'middle', transform: 'rotate(-90 ' + (0.9 * rem) + ' ' + (pad.t + ch / 2) + ')' }, t('axisLoad')));
+
+    // the capacity line at nproc
+    svg.append(s('line', { class: 'la-cap', x1: pad.l, x2: pad.l + cw, y1: Y(st.cores), y2: Y(st.cores) }));
+    svg.append(s('text', { class: 'la-cap-label', x: pad.l + cw - 0.3 * rem, y: Y(st.cores) - 0.35 * rem, 'text-anchor': 'end' },
+      t('capacity', { n: st.cores })));
+
+    // the stop of the workload, a triangle on the time axis
+    if (st.peak > 0 && st.runFor <= st.span) {
+      var sx = X(st.runFor), sy = pad.t + ch;
+      svg.append(s('path', { class: 'la-stop', d: 'M' + sx + ' ' + (sy - 0.1 * rem) + ' l' + (-0.45 * rem) + ' ' + (-0.75 * rem) + ' h' + (0.9 * rem) + ' z' }));
+    }
+
+    // the three averages: solid up to the cursor, faint after it
+    var cut = Math.round(L.lastSample(st.t) / L.LOAD_FREQ);
+    [2, 1, 0].forEach(function (k) {
+      var pts = st.series.map(function (row) { return X(row[0]).toFixed(1) + ',' + Y(row[k + 1]).toFixed(1); });
+      if (cut < pts.length - 1) svg.append(s('polyline', { class: 'la-curve', 'data-k': k, 'data-later': '', points: pts.slice(cut).join(' ') }));
+      svg.append(s('polyline', { class: 'la-curve', 'data-k': k, points: pts.slice(0, cut + 1).join(' ') }));
+    });
+
+    // the cursor and the three values on it
+    var cx = X(st.t);
+    svg.append(s('line', { class: 'la-cursor', x1: cx, x2: cx, y1: pad.t - 0.3 * rem, y2: pad.t + ch }));
+    var right = cx > pad.l + cw * 0.75;
+    svg.append(s('text', { class: 'la-cursor-label', translate: 'no', x: cx + (right ? -0.4 : 0.4) * rem, y: pad.t + 0.1 * rem, 'text-anchor': right ? 'end' : 'start' },
+      't = ' + dur(st.t)));
+    st.load.forEach(function (l, k) { svg.append(s('circle', { class: 'la-dot', 'data-k': k, cx: cx, cy: Y(l), r: 0.4 * rem })); });
+    box.replaceChildren(svg);
+  }
+
+  function chart(st) {
+    var plot = h('div', { class: 'la-plot' });
+    var el = h('section', { class: 'la-chart' },
+      h('div', { class: 'la-chead' }, h('h3', null, t('chart')),
+        h('ul', { class: 'la-keys' },
+          key(0, t('k1')), key(1, t('k5')), key(2, t('k15')), key(0, t('kLater'), true),
+          key('cap', t('capacity', { n: st.cores })),
+          h('li', null, h('span', { 'aria-hidden': 'true' }, '▼'), t('stopMark')))),
+      plot);
+    return { el: el, plot: plot };
+  }
+
+  // ── render; "changed" compares with the state before the last param change ──
+
+  var lastKey = null, shown = null, chg = { load: [], cores: [] };
+  function track(c) {
+    var k = JSON.stringify(c.params);
+    if (k !== lastKey) {
+      chg = L.changed(shown, c.state);
+      lastKey = k;
+    }
+    shown = c.state;
+  }
+
+  function render(c) {
+    track(c);
+    var st = c.state;
+    var ch = chart(st);
+    c.stage.replaceChildren(h('div', { class: 'la' },
+      h('div', { class: 'la-top' }, machine(st, chg), readout(st, chg)),
+      ch.el));
+    drawChart(ch.plot, st);
+  }
+
+  function caption(c) {
+    var st = c.state;
+    var k = L.captionKey(st);
+    var b = function (x) { return h('b', null, x); };
+    var vars = { l1: load2(st.load[0]), l5: load2(st.load[1]), l15: load2(st.load[2]) };
+    var ago = dur(st.t - st.runFor);
+    var out = t.parts(k.a, { l1: b(vars.l1), cores: b(coresText(st.cores)), who: t.n('whoWants', st.n), ago: ago });
+    if (!k.b) return out;
+    var more;
+    if (k.b === 'bQueue') more = t.n('bQueue', st.queued.length);
+    else if (k.b === 'bDisk') more = t.n('bDisk', st.dstate.length);
+    else if (k.b === 'bSteady') more = t.n('bSteady', st.n, { dur: dur(st.t) });
+    else if (k.b === 'bStopped' || k.b === 'bRising') more = t(k.b, Object.assign({ ago: ago }, vars));
+    else more = t(k.b, vars);
+    return out.concat(' ', more);
+  }
+
+  var labels = {
+    'book-yes': 'pBookYes', 'book-top-later': 'pBookTopLater', 'one-core-queue': 'pOneCoreQueue',
+    'io-bound': 'pIoBound', 'easing': 'pEasing'
+  };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'cores', type: 'range', label: t('cores'), min: 1, max: L.MAX_CORES, step: 1 },
+      { key: 'cpuTasks', type: 'range', label: t('cpuTasks'), min: 0, max: 8, step: 1 },
+      { key: 'ioTasks', type: 'range', label: t('ioTasks'), min: 0, max: 8, step: 1 },
+      { key: 'runFor', type: 'range', label: t('runFor'), min: 5, max: L.MAX_T, step: 5, format: dur },
+      { key: 't', type: 'range', label: t('t'), min: 0, max: L.MAX_T, step: 5, format: dur }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'la-busy', label: t('legBusy') },
+      { shape: 'la-idle', label: t('legIdle') },
+      { shape: 'la-queued', label: t('legQueued') },
+      { shape: 'la-disk', label: t('legDisk') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+
+  // The chart is drawn in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var last = '';
+    new ResizeObserver(function (es) {
+      var r = es[0].contentRect, k = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (k !== last) { last = k; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
+</body>
+</html>
