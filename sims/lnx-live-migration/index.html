@@ -1,0 +1,489 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-live-migration: pre-copy rounds converge only if dirtying is slower than copying. On top, the source host with
+     the guest's memory as a page grid (K3 block grid), the migration link with its bandwidth, and the destination.
+     Below, the pre-copy rounds as bars (data sent per round, the pause last, the downtime limit as a dashed line in
+     MiB) and the result card. The round slider picks the round the grid shows.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-live-migration">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seoba uživo · simdeck</title>
+<meta name="description" content="Pomakni brzinu prljanja i propusnost veze: krugovi pretkopiranja se smanjuju ili ne, a gost na kraju stoji 41 ms ili 9 s.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-live-migration",
+  "title": {
+    "hr": "Seoba uživo",
+    "en": "Live migration"
+  },
+  "concept": {
+    "hr": "Pretkopiranje konvergira samo ako gost prlja sporije nego što veza kopira",
+    "en": "Pre-copy rounds converge only if dirtying is slower than copying"
+  },
+  "summary": {
+    "hr": "Pomakni brzinu prljanja i propusnost veze: krugovi pretkopiranja se smanjuju ili ne, a gost na kraju stoji 41 ms ili 9 s.",
+    "en": "Slide the dirty rate and the link bandwidth: the pre-copy rounds shrink or they do not, and the guest is paused for 41 ms or 9 s."
+  },
+  "tags": [
+    "virtualization"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dirty-faster"
+    },
+    {
+      "preset": "auto-converge"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-live-migration"]; colours only from kit tokens.
+   Layout: source host (grid), link, destination on top; the round chart and the result card below. */
+[data-sim="lnx-live-migration"] .lm {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-live-migration"] .lm-mono { font-family: var(--mono); }
+
+/* the top row: source (the block grid's box), link, destination */
+[data-sim="lnx-live-migration"] .lm-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem 13.5rem;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+[data-sim="lnx-live-migration"] .lm-top .sd-bg { min-width: 0; margin: 0; }
+[data-sim="lnx-live-migration"] .sd-bg-grid { --bg-row-gap: 0.1rem; }
+[data-sim="lnx-live-migration"] .lm-roundline { margin: 0.3rem 0 0; font-size: 1rem; }
+[data-sim="lnx-live-migration"] .lm-roundline b { font-weight: 700; }
+[data-sim="lnx-live-migration"] .lm-link {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.2rem;
+  text-align: center;
+}
+[data-sim="lnx-live-migration"] .lm-link-bw { font-family: var(--mono); font-weight: 700; font-size: 1.15rem; }
+[data-sim="lnx-live-migration"] .lm-link-line { display: flex; align-items: center; color: var(--ink); }
+[data-sim="lnx-live-migration"] .lm-link-line span:first-child { flex: 1 1 auto; border-top: 0.3rem solid var(--ink); }
+[data-sim="lnx-live-migration"] .lm-link-line span:last-child { font-size: 1.5rem; line-height: 1; margin-left: -0.2rem; }
+[data-sim="lnx-live-migration"] .lm-link-label { color: var(--muted); }
+[data-sim="lnx-live-migration"] .lm-dst {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-top-width: 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-live-migration"] .lm-dst h3 { margin: 0; font-size: 1.15rem; }
+[data-sim="lnx-live-migration"] .lm-dst p { margin: 0; }
+[data-sim="lnx-live-migration"] .lm-vm {
+  display: grid;
+  place-items: center;
+  min-height: 3rem;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="lnx-live-migration"] .lm-vm[data-on="no"] { border: var(--line-w) dashed var(--muted); color: var(--muted); }
+[data-sim="lnx-live-migration"] .lm-vm[data-on="yes"] { background: var(--c3); color: var(--on-series); }
+[data-sim="lnx-live-migration"] .lm-recv { color: var(--muted); font-family: var(--mono); }
+
+/* the bottom row: chart and result card */
+[data-sim="lnx-live-migration"] .lm-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 0.7rem;
+  min-height: 0;
+}
+[data-sim="lnx-live-migration"] .lm-chart {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 0.4rem 0.7rem 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+[data-sim="lnx-live-migration"] .lm-chead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 1rem; }
+[data-sim="lnx-live-migration"] .lm-chart h3 { margin: 0; font-size: 1.1rem; }
+[data-sim="lnx-live-migration"] .lm-limit-key { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--danger); font-weight: 700; }
+[data-sim="lnx-live-migration"] .lm-plot {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 7rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.15rem;
+  margin-top: 1.4rem;
+  border-bottom: 2px solid var(--ink);
+}
+[data-sim="lnx-live-migration"] .lm-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+[data-sim="lnx-live-migration"] .lm-bar { width: 100%; background: var(--c1); border-radius: 0.15rem 0.15rem 0 0; }
+[data-sim="lnx-live-migration"] .lm-bar[data-k="pause"] {
+  background: var(--c8);
+  outline: 0.15rem solid var(--ink);
+  outline-offset: -0.15rem;
+}
+[data-sim="lnx-live-migration"] .lm-bar[data-cut] {
+  background-image: linear-gradient(to bottom, transparent 0 0.6rem, var(--bg) 0.6rem 0.9rem, transparent 0.9rem);
+}
+[data-sim="lnx-live-migration"] .lm-col[data-sel] .lm-bar { box-shadow: 0 0 0 0.2rem var(--bg), 0 0 0 0.4rem var(--ink); }
+[data-sim="lnx-live-migration"] .lm-val {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
+  padding: 0 0.2rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  z-index: 2;
+}
+[data-sim="lnx-live-migration"] .lm-col[data-end="l"] .lm-val { left: 0; transform: none; }
+[data-sim="lnx-live-migration"] .lm-col[data-end="r"] .lm-val { left: auto; right: 0; transform: none; }
+[data-sim="lnx-live-migration"] .lm-limit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 0.2rem dashed var(--danger);
+  z-index: 1;
+  pointer-events: none;
+}
+[data-sim="lnx-live-migration"] .lm-axis { display: flex; gap: 0.15rem; margin-top: 0.15rem; }
+[data-sim="lnx-live-migration"] .lm-axis span { position: relative; flex: 1 1 0; min-width: 0; text-align: center; font-family: var(--mono); font-size: 1rem; color: var(--muted); white-space: nowrap; overflow: visible; }
+[data-sim="lnx-live-migration"] .lm-axis span[data-sel] { color: var(--ink); font-weight: 700; }
+[data-sim="lnx-live-migration"] .lm-axis-name { margin-top: 0.05rem; font-size: 1rem; color: var(--muted); }
+
+[data-sim="lnx-live-migration"] .lm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-live-migration"] .lm-card h3 { margin: 0; font-size: 1.15rem; }
+[data-sim="lnx-live-migration"] .lm-out {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+[data-sim="lnx-live-migration"] .lm-out[data-k="converged"] { border: 2px solid var(--ok); color: var(--ok); }
+[data-sim="lnx-live-migration"] .lm-out[data-k="forced"] { border: 2px dashed var(--danger); color: var(--danger); }
+[data-sim="lnx-live-migration"] .lm-card dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.1rem 0.6rem; margin: 0; }
+[data-sim="lnx-live-migration"] .lm-card dt { color: var(--muted); }
+[data-sim="lnx-live-migration"] .lm-card dd { margin: 0; text-align: right; font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-live-migration"] .lm-card dt small { font-size: 1rem; }
+[data-sim="lnx-live-migration"] .lm-card .lm-sub { grid-column: 1 / -1; text-align: right; color: var(--muted); font-family: var(--sans); font-weight: 400; font-size: 1rem; }
+[data-sim="lnx-live-migration"] .lm-card .sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.15rem; padding: 0 0.2rem; }
+[data-sim="lnx-live-migration"] .lm-out.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* the panel holds 5 presets and 8 controls: presets in two columns, sliders and gaps tighter, so it fits 1920×1080 */
+[data-sim="lnx-live-migration"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-live-migration"] .sd-group { gap: 0.3rem; }
+[data-sim="lnx-live-migration"] .sd-ctl { gap: 0.1rem; }
+[data-sim="lnx-live-migration"] .sd-range { height: 1.5rem; }
+
+/* legend swatches */
+[data-sim="lnx-live-migration"] .sd-swatch[data-shape="lm-paused"] { position: relative; background: var(--c8); border-color: var(--c8); }
+[data-sim="lnx-live-migration"] .sd-swatch[data-shape="lm-paused"]::after { content: '‖'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--on-series); font-weight: 700; line-height: 1; }
+[data-sim="lnx-live-migration"] .sd-swatch[data-shape="lm-bar"] { background: var(--c1); border-color: var(--c1); height: 1.1em; width: 0.6em; border-radius: 0.1rem 0.1rem 0 0; }
+[data-sim="lnx-live-migration"] .sd-swatch[data-shape="lm-limit"], [data-sim="lnx-live-migration"] .lm-limit-key .sd-swatch { width: 1.2em; height: 0; border: 0; border-radius: 0; border-top: 0.2rem dashed var(--danger); background: transparent; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-live-migration"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-live-migration"] .lm { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-live-migration"] .lm-top, [data-sim="lnx-live-migration"] .lm-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-live-migration"] .lm-link { flex-direction: row; align-items: center; }
+  [data-sim="lnx-live-migration"] .lm-link-line { flex: 1 1 auto; transform: rotate(0deg); }
+  [data-sim="lnx-live-migration"] .lm-plot { height: 12rem; flex: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Seoba uživo</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    if (d > 0) s = s.replace(/\.?0+$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** MiB: GiB from 1024 up (two decimals), one decimal below. */
+  function mib(x) {
+    if (x >= 1024 - 1e-9) return dec(x / 1024, 2) + ' ' + t('uGiB');
+    return dec(x, 1) + ' ' + t('uMiB');
+  }
+  function fixed2(x) { var v = x.toFixed(2); return Simdeck.lang === 'hr' ? v.replace('.', ',') : v; }
+  function rate(x) { return dec(x, 0) + ' ' + t('uMiBs'); }
+  /** dataset without the empty keys (Simdeck.h would write "null") */
+  function ds(o) {
+    var out = {};
+    Object.keys(o).forEach(function (k) { if (o[k] != null && o[k] !== false) out[k] = String(o[k]); });
+    return out;
+  }
+  /** Seconds: ms under 1 s, then two decimals under 10 s (one with coarse), one decimal above. */
+  function secs(s, coarse) {
+    if (s < 1 - 5e-4) return dec(s * 1000, 0) + ' ' + t('uMs');
+    return dec(s, s < 10 && !coarse ? 2 : 1) + ' ' + t('uS');
+  }
+  function ms(x) { return secs(x / 1000, true); }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+
+  // ── the source grid (K3), the link and the destination ──
+
+  var KIND = {
+    todo: { kind: 'ghost' },
+    clean: { kind: 'fill', c: 3 },
+    dirty: { kind: 'soft', c: 2 },
+    paused: { kind: 'fill', c: 8, text: '‖' }
+  };
+
+  function source(s, p, dir) {
+    var g = s.grid;
+    var n = s.rounds.length;
+    var cells = g.cells.map(function (k) { return Object.assign({}, KIND[k]); });
+    var rows = Simdeck.blockGrid.split({ id: 'mem', cells: cells, brackets: [{ from: 0, len: g.wsCells, label: t('wsBracket') }] }, g.cols);
+    rows.forEach(function (r, i) {
+      r.label = i ? mib(i * g.cols * g.cellMiB) : '0';
+      if (r.brackets && !r.brackets.length) delete r.brackets;   // split gives every piece a list; only the bracket's rows need a band
+    });
+    var count;
+    if (s.view === 0) count = t('gridAll', { mib: mib(s.memMiB) });
+    else if (!s.paused) count = t('gridDirty', { mib: mib(s.rounds[s.view - 1].dirtiedMiB), k: s.view });
+    else count = t('gridPaused', { mib: mib(s.remainingMiB) });
+    var line;
+    if (!s.paused) {
+      var r = s.rounds[s.view];
+      line = [t.parts('roundLine', { k: h('b', null, String(r.i)), sent: data(mib(r.sentMiB)), sec: data(secs(r.seconds)), dirty: data(mib(r.dirtiedMiB)) })];
+      if (r.throttlePct > 0) line.push(' ', t('roundThrottle', { thr: r.throttlePct }));
+    } else {
+      line = [t.parts('pauseLine', { rem: data(mib(s.remainingMiB)), dt: h('b', null, ms(s.downtimeMs)) })];
+    }
+    return Simdeck.blockGrid({
+      dir: dir,
+      title: t('src'),
+      meta: [t('srcMeta', { m: mib(s.memMiB), w: mib(s.wssMiB) }), t('cellSize', { c: mib(g.cellMiB) })],
+      count: { text: count, hl: s.paused },
+      rows: rows,
+      cellHeight: '1.6rem',
+      foot: [h('p', { class: 'lm-roundline' }, line)]
+    });
+  }
+
+  function link(p) {
+    return h('div', { class: 'lm-link' },
+      h('div', { class: 'lm-link-bw' }, rate(p.bwMiBs)),
+      h('div', { class: 'lm-link-line', 'aria-hidden': 'true' }, h('span'), h('span', null, '▶')),
+      h('div', { class: 'lm-link-label' }, t('link')));
+  }
+
+  function destination(s) {
+    var sent = 0;
+    for (var i = 0; i < s.view; i++) sent += s.rounds[i].sentMiB;
+    if (s.paused) sent += s.remainingMiB;
+    return h('section', { class: 'lm-dst' },
+      h('h3', null, t('dst')),
+      h('div', { class: 'lm-vm', dataset: { on: s.paused ? 'yes' : 'no' } }, s.paused ? '▶ ' + t('vm') : t('vm')),
+      s.paused ? [h('p', null, t('pausedFor', { dt: ms(s.downtimeMs) })), h('p', null, t('runsOnDst'))] : h('p', null, t('runsOnSrc')),
+      h('p', { class: 'lm-recv' }, t('received', { mib: mib(sent) })));
+  }
+
+  // ── the round chart ──
+
+  function chart(s) {
+    var n = s.rounds.length;
+    var bars = s.rounds.map(function (r) { return { mib: r.sentMiB, k: 'round', i: r.i }; });
+    bars.push({ mib: s.remainingMiB, k: 'pause', i: n });
+    // the scale: the largest round after round 0, the pause and the limit, so round 0 (often far larger) is cut off
+    var top = Math.max(s.limitMiB, s.remainingMiB, 1);
+    for (var j = 1; j < n; j++) top = Math.max(top, s.rounds[j].sentMiB);
+    top *= 1.12;
+    var every = bars.length <= 16 ? 1 : 5;
+    var cols = bars.map(function (b, k) {
+      var cut = b.mib > top;
+      var hgt = Math.min(1, b.mib / top) * 100;
+      var sel = k === s.view;
+      // the pause's label gives way to the selected round's when they stand side by side (the card has the downtime)
+      var showVal = sel || cut || (b.k === 'pause' && s.view !== n - 1);
+      // the value, and for the selected round and the pause its duration
+      var val = b.k === 'pause' ? mib(b.mib) + ' · ' + ms(s.downtimeMs) : sel ? mib(b.mib) + ' · ' + secs(s.rounds[k].seconds) : mib(b.mib);
+      return h('div', { class: 'lm-col', dataset: ds({ sel: sel, end: k === bars.length - 1 ? 'r' : k === 0 ? 'l' : null }) },
+        h('div', { class: 'lm-bar', dataset: ds({ k: b.k, cut: cut }), style: { height: hgt + '%' } }),
+        showVal ? h('span', { class: 'lm-val', translate: 'no', style: { bottom: 'calc(' + hgt + '% + 0.25rem)' } }, val) : null);
+    });
+    var axis = bars.map(function (b, k) {
+      var label = b.k === 'pause' ? '‖' : k % every === 0 || k === s.view ? String(b.i) : '';
+      return h('span', { translate: 'no', dataset: ds({ sel: k === s.view }) }, label);
+    });
+    var limitAt = s.limitMiB / top * 100;
+    return h('section', { class: 'lm-chart' },
+      h('div', { class: 'lm-chead' }, h('h3', null, t('chart')),
+        h('span', { class: 'lm-limit-key' }, h('span', { class: 'sd-swatch', dataset: { shape: 'lm-limit' } }),
+          t('limitLine', { mib: mib(s.limitMiB), ms: ms(params().downtimeMs), b: rate(params().bwMiBs) }))),
+      h('div', { class: 'lm-plot' }, cols, h('div', { class: 'lm-limit', style: { bottom: limitAt + '%' } })),
+      h('div', { class: 'lm-axis' }, axis),
+      h('div', { class: 'lm-axis-name' }, t('axisRound'), ' · ‖ ', t('pauseMark')));
+  }
+
+  // ── the result card ──
+
+  function card(s, chg) {
+    var on = function (k) { return chg.indexOf(k) >= 0 ? 'sd-changed' : null; };
+    var conv = s.outcome === 'converged';
+    return h('section', { class: 'lm-card' },
+      h('h3', null, t('result')),
+      h('div', { class: 'lm-out ' + (on('outcome') || ''), dataset: { k: s.outcome } }, conv ? '✓ ' : '✗ ', t(conv ? 'outConverged' : 'outForced')),
+      h('dl', null,
+        h('dt', null, t('rRounds')), h('dd', { class: on('rounds'), translate: 'no' }, String(s.rounds.length)),
+        h('dt', null, t('rTotal')), h('dd', { class: on('total') }, secs(s.totalS)),
+        h('dt', null, t('rDowntime')), h('dd', { class: on('downtime') }, ms(s.downtimeMs)),
+        h('dd', { class: 'lm-sub' }, t('rLimit', { lim: ms(params().downtimeMs) })),
+        h('dt', null, t('rRatio')), h('dd', { class: on('ratio'), translate: 'no' }, fixed2(s.ratio)),
+        h('dd', { class: 'lm-sub' }, s.ratio < 1 ? '↓ ' : '= ', t(s.ratio < 1 ? 'rRatioShrinks' : s.throttlePct > 0 && s.outcome === 'converged' ? 'rRatioUnthrottled' : 'rRatioGrows')),
+        h('dt', null, t('rThrottle')), h('dd', { class: on('throttle'), translate: 'no' }, s.throttlePct + '\u00a0%')));
+  }
+
+  // ── render; the changed marks follow param changes, not the round slider ──
+
+  var cur = null, lastKey = null, lastState = null, chg = [], views = 1;
+  function params() { return cur; }
+  function track(c) {
+    var p = Object.assign({}, c.params);
+    delete p.round;
+    var key = JSON.stringify(p);   // not the preset: moving the round slider deselects it but changes no result
+    if (key !== lastKey) {
+      chg = lastState ? L.changed(lastState, c.state) : [];
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    cur = c.params;
+    views = c.state.rounds.length;
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'lm' },
+      h('div', { class: 'lm-top' }, source(s, c.params, c.dir), link(c.params), destination(s)),
+      h('div', { class: 'lm-bottom' }, chart(s), card(s, chg))));
+  }
+
+  function caption(c) {
+    var k = L.captionKey(c.state);
+    var p = c.params;
+    var out = [t(k.key, {
+      d: dec(p.dirtyMiBs, 0), b: dec(p.bwMiBs, 0), ratio: fixed2(k.ratio), rounds: t.n('nRounds', k.n),
+      rem: mib(k.rem), lim: ms(p.downtimeMs), dt: ms(k.dt), w: mib(k.w), thr: k.thr
+    })];
+    if (k.thr > 0 && k.key !== 'cThrottled') out.push(' ', t('cThrottleNote', { thr: k.thr }));
+    return out;
+  }
+
+  var labels = {
+    '10gbe-converges': 'p10gbe', '1gbe-busy': 'p1gbeBusy', 'dirty-faster': 'pDirtyFaster',
+    'auto-converge': 'pAutoConverge', '1gbe-quiet': 'p1gbeQuiet'
+  };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'dirtyMiBs', type: 'range', label: t('dirtyMiBs'), min: 0, max: 1500, step: 10, format: rate },
+      { key: 'bwMiBs', type: 'range', label: t('bwMiBs'), min: 10, max: 2000, step: 10, format: rate },
+      { key: 'memGiB', type: 'range', label: t('memGiB'), min: 1, max: 64, step: 1, format: function (v) { return v + ' ' + t('uGiB'); } },
+      { key: 'wssMiB', type: 'range', label: t('wssMiB'), min: 64, max: 8192, step: 64, format: function (v) { return mib(v); } },
+      { key: 'downtimeMs', type: 'range', label: t('downtimeMs'), min: 50, max: 2000, step: 10, format: function (v) { return ms(v); } },
+      { key: 'maxRounds', type: 'range', label: t('maxRounds'), min: 5, max: 50, step: 1 },
+      { key: 'autoConverge', type: 'toggle', label: t('autoConverge') },
+      { key: 'round', type: 'range', label: t('round'), min: 0, max: function (p) { return L.lastView(p); }, step: 1,
+        format: function (v) { return v >= views ? t('roundPause') : t('roundN', { k: v }); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'bg-ghost', label: t('legTodo') },
+      { shape: 'bg-fill', c: 3, label: t('legClean') },
+      { shape: 'bg-soft', c: 2, label: t('legDirty') },
+      { shape: 'lm-paused', label: t('legPaused') },
+      { shape: 'lm-bar', label: t('legRound') },
+      { shape: 'lm-limit', label: t('legLimit') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
