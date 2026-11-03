@@ -1,0 +1,542 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-page-cache: the page cache is not lost memory; dirty pages and writeback. On top, the RAM bar (processes, cache
+     that stays, clean cache of earlier files, a.dat and b.dat, b.dat under writeback and dirty, free) and the gauge of
+     Dirty + Writeback with its two marks; below, the disk with its counters beside the free -m and /proc/meminfo
+     listings; at the bottom, what happened, one line per event.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-page-cache">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Predmemorija stranica i prljave stranice · simdeck</title>
+<meta name="description" content="Čitaj i piši datoteke i gledaj brojače: predmemorija stranica nije izgubljena memorija, a zapisano nije na disku dok ga disk ne dobije.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-page-cache",
+  "title": {
+    "hr": "Predmemorija stranica i prljave stranice",
+    "en": "Page cache and dirty pages"
+  },
+  "concept": {
+    "hr": "Predmemorija je posuđena, ne izgubljena; zapisano čeka na disk",
+    "en": "Page cache is lent, not lost; what you write waits for the disk"
+  },
+  "summary": {
+    "hr": "Čitaj i piši datoteke i gledaj free i /proc/meminfo: slobodno pada, raspoloživo ne; prljave stranice idu na disk nakon 30 s, a nestanak struje ih briše.",
+    "en": "Read and write files and watch free and /proc/meminfo: free falls, available does not; dirty pages reach the disk after 30 s, and a power loss wipes them."
+  },
+  "tags": [
+    "memory"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "drop-caches"
+    },
+    {
+      "preset": "power-loss"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-page-cache"]; colours only from kit tokens.
+   Layout: the RAM bar and the dirty gauge on top; the disk, free -m and /proc/meminfo side by side; the trace below. */
+[data-sim="lnx-page-cache"] .pc {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.6rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-page-cache"] .pc-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-page-cache"] .pc-box h3 { margin: 0; font-size: 1.1rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+[data-sim="lnx-page-cache"] .pc-box h3 span { font-weight: 400; color: var(--muted); }
+
+/* RAM bar */
+[data-sim="lnx-page-cache"] .pc-barrow { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.6rem; align-items: center; }
+[data-sim="lnx-page-cache"] .pc-barname { font-weight: 700; }
+[data-sim="lnx-page-cache"] .pc-barname small { display: block; font-size: 1rem; font-weight: 400; color: var(--muted); }
+[data-sim="lnx-page-cache"] .pc-bar {
+  display: flex;
+  height: 4.1rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg);
+}
+[data-sim="lnx-page-cache"] .pc-seg {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 0.35rem;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1.15;
+  border-right: 2px solid var(--ink);
+  color: var(--ink);
+}
+[data-sim="lnx-page-cache"] .pc-seg:last-child { border-right: 0; }
+/* b.dat's dirty and writeback parts keep room for their three lines (the MiB are written in them; the scale bends) */
+[data-sim="lnx-page-cache"] .pc-seg[data-k="dirty"], [data-sim="lnx-page-cache"] .pc-seg[data-k="wb"] { line-height: 1.05; min-width: 6.6rem; }
+[data-sim="lnx-page-cache"] .pc-seg > * { align-self: flex-start; max-width: 100%; overflow: hidden; background: var(--bg); padding: 0 0.2rem; border-radius: 0.15rem; }
+[data-sim="lnx-page-cache"] .pc-seg[data-k="proc"] { background: color-mix(in srgb, var(--muted) 45%, var(--bg)); }
+[data-sim="lnx-page-cache"] .pc-seg[data-k="fixed"] {
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 55%, transparent) 0.12rem, transparent 0.14rem);
+  background-size: 0.6rem 0.6rem;
+}
+[data-sim="lnx-page-cache"] .pc-seg[data-k="old"], [data-sim="lnx-page-cache"] .pc-seg[data-k="read"], [data-sim="lnx-page-cache"] .pc-seg[data-k="written"] {
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--ink) 28%, transparent) 0.4em 0.55em);
+}
+[data-sim="lnx-page-cache"] .pc-seg[data-k="read"] { background-color: color-mix(in srgb, var(--c1) 30%, var(--bg)); }
+[data-sim="lnx-page-cache"] .pc-seg[data-k="written"] { background-color: color-mix(in srgb, var(--c2) 30%, var(--bg)); }
+[data-sim="lnx-page-cache"] .pc-seg[data-k="dirty"] {
+  background-color: color-mix(in srgb, var(--c2) 55%, var(--bg));
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 45%, transparent) 0.35em 0.5em),
+    repeating-linear-gradient(-45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 45%, transparent) 0.35em 0.5em);
+}
+[data-sim="lnx-page-cache"] .pc-seg[data-k="wb"] {
+  background-color: color-mix(in srgb, var(--c2) 40%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.45em, color-mix(in srgb, var(--ink) 40%, transparent) 0.45em 0.65em);
+}
+[data-sim="lnx-page-cache"] .pc-seg[data-k="free"] { background: var(--bg); }
+[data-sim="lnx-page-cache"] .pc-seg.sd-changed { box-shadow: inset 0 0 0 0.3rem var(--hl), inset 0 0 0 0.45rem var(--ink); }
+[data-sim="lnx-page-cache"] .pc-seg[data-lost] { outline: 0.2rem solid var(--danger); outline-offset: -0.2rem; }
+[data-sim="lnx-page-cache"] .pc-x {
+  display: inline-grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: 2px solid var(--danger);
+  border-radius: 50%;
+  color: var(--danger);
+  font-weight: 700;
+  line-height: 1;
+  background: var(--bg);
+}
+/* the age clock: a circle with two hands */
+[data-sim="lnx-page-cache"] .pc-age { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 700; }
+[data-sim="lnx-page-cache"] .pc-clock {
+  position: relative;
+  display: inline-block;
+  width: 1.05rem;
+  height: 1.05rem;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  flex: none;
+}
+[data-sim="lnx-page-cache"] .pc-clock::before, [data-sim="lnx-page-cache"] .pc-clock::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 1px);
+  bottom: 50%;
+  width: 2px;
+  background: var(--ink);
+  transform-origin: 50% 100%;
+}
+[data-sim="lnx-page-cache"] .pc-clock::before { height: 40%; }
+[data-sim="lnx-page-cache"] .pc-clock::after { height: 30%; transform: rotate(90deg); }
+[data-sim="lnx-page-cache"] .pc-power {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  border: 2px dashed var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 700;
+}
+[data-sim="lnx-page-cache"] .pc-avail { margin: 0; }
+
+/* the dirty gauge: Dirty + Writeback on 0–400 MiB, two marks */
+[data-sim="lnx-page-cache"] .pc-gauge {
+  position: relative;
+  display: flex;
+  height: 2rem;
+  margin-top: 1.6rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-page-cache"] .pc-gfill { height: 100%; border-right: 2px solid var(--ink); }
+[data-sim="lnx-page-cache"] .pc-gfill[data-k="dirty"] {
+  background-color: color-mix(in srgb, var(--c2) 55%, var(--bg));
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 45%, transparent) 0.35em 0.5em),
+    repeating-linear-gradient(-45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 45%, transparent) 0.35em 0.5em);
+}
+[data-sim="lnx-page-cache"] .pc-gfill[data-k="wb"] {
+  background-color: color-mix(in srgb, var(--c2) 40%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.45em, color-mix(in srgb, var(--ink) 40%, transparent) 0.45em 0.65em);
+}
+[data-sim="lnx-page-cache"] .pc-mark {
+  position: absolute;
+  top: -1.75rem;
+  bottom: -0.2rem;
+  border-left: 0.2rem dashed var(--ink);
+}
+[data-sim="lnx-page-cache"] .pc-mark span { position: absolute; top: 0; left: 0.35rem; white-space: nowrap; font-weight: 700; line-height: 1.3; }
+[data-sim="lnx-page-cache"] .pc-gnum { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); font-weight: 700; background: var(--bg); padding: 0 0.3rem; border-radius: 0.15rem; }
+[data-sim="lnx-page-cache"] .pc-thr { color: var(--danger); }
+
+/* middle: disk, free -m, /proc/meminfo */
+[data-sim="lnx-page-cache"] .pc-mid { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 0.6rem; }
+[data-sim="lnx-page-cache"] .pc-disk dl { margin: 0; display: grid; grid-template-columns: max-content max-content; gap: 0.1rem 1rem; }
+[data-sim="lnx-page-cache"] .pc-disk dt { color: var(--muted); }
+[data-sim="lnx-page-cache"] .pc-disk dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+[data-sim="lnx-page-cache"] .pc-disk dd.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); border-radius: 0.15rem; padding: 0 0.2rem; }
+[data-sim="lnx-page-cache"] .pc-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="lnx-page-cache"] .pc-files li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.5rem; }
+[data-sim="lnx-page-cache"] .pc-fname { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-page-cache"] .pc-lost { color: var(--danger); font-weight: 700; display: inline-flex; align-items: center; gap: 0.3rem; }
+[data-sim="lnx-page-cache"] .pc-box h3 .pc-busy[data-k="busy"] { font-weight: 700; color: var(--ink); }
+[data-sim="lnx-page-cache"] .pc-console {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: hidden;
+}
+[data-sim="lnx-page-cache"] .pc-console .pc-prompt { color: var(--muted); }
+[data-sim="lnx-page-cache"] .pc-console .sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.15rem; outline: 0.15rem solid var(--ink); }
+
+/* bottom: what happened */
+[data-sim="lnx-page-cache"] .pc-trace { min-height: 0; overflow: hidden; }
+[data-sim="lnx-page-cache"] .pc-events { margin: 0; padding: 0 0 0 1.6rem; columns: 2; column-gap: 2.6rem; }
+[data-sim="lnx-page-cache"] .pc-events li { break-inside: avoid; line-height: 1.25; margin-bottom: 0.1rem; }
+[data-sim="lnx-page-cache"] .pc-events li[data-k="lost"], [data-sim="lnx-page-cache"] .pc-events li[data-k="throttle"] { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-page-cache"] .pc-empty { margin: 0; color: var(--muted); }
+[data-sim="lnx-page-cache"] .pc small { font-size: 1rem; }
+
+/* panel: six presets in two columns and tighter rows, so presets and eight params fit at 1920×1080 */
+[data-sim="lnx-page-cache"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-page-cache"] .sd-preset { line-height: 1.15; }
+[data-sim="lnx-page-cache"] .sd-panel { gap: 0.5rem; }
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem 0.9rem; align-items: end; }
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-switch { min-height: 2rem; }
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-group > .sd-ctl-choice { flex-direction: row; align-items: center; gap: 0.8rem; }
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-group > .sd-ctl-choice > :last-child { flex: 1; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="lnx-page-cache"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-proc"] { background: color-mix(in srgb, var(--muted) 45%, var(--bg)); border-color: var(--ink); }
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-clean"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--ink) 40%, transparent) 0.25em 0.38em);
+}
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-dirty"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c2) 55%, var(--bg));
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.22em, color-mix(in srgb, var(--ink) 55%, transparent) 0.22em 0.34em),
+    repeating-linear-gradient(-45deg, transparent 0 0.22em, color-mix(in srgb, var(--ink) 55%, transparent) 0.22em 0.34em);
+}
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-wb"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c2) 40%, var(--bg));
+  background-image: repeating-linear-gradient(90deg, transparent 0 0.3em, color-mix(in srgb, var(--ink) 45%, transparent) 0.3em 0.45em);
+}
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-fixed"] {
+  border-color: var(--ink);
+  background-color: color-mix(in srgb, var(--c4) 22%, var(--bg));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 60%, transparent) 0.1rem, transparent 0.12rem);
+  background-size: 0.45rem 0.45rem;
+}
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-free"] { background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-lost"] { position: relative; background: var(--bg); border-color: var(--danger); border-radius: 50%; }
+[data-sim="lnx-page-cache"] .sd-swatch[data-shape="pc-lost"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; font-size: 0.8em; line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-page-cache"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-page-cache"] .pc { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-page-cache"] .pc-barrow { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-page-cache"] .pc-mid { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-page-cache"] .pc-trace { overflow: visible; }
+  [data-sim="lnx-page-cache"] .pc-events { columns: 1; }
+  [data-sim="lnx-page-cache"] .pc-console { overflow-x: auto; }
+  /* the two mark labels on two rows: the background one right of its line, the limit one left of it */
+  [data-sim="lnx-page-cache"] .pc-gauge { margin-top: 3.4rem; }
+  [data-sim="lnx-page-cache"] .pc-mark { top: -3.35rem; }
+  [data-sim="lnx-page-cache"] .pc-mark[data-k="limit"] span { top: 1.6rem; left: auto; right: 0.35rem; }
+  [data-sim="lnx-page-cache"] .pc-mark span small { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Predmemorija stranica i prljave stranice</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var GAUGE_MAX = 400;   // MiB at the right end of the dirty gauge
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function mib(n) { return t('mib', { n: n }); }
+  /** seconds with one decimal, in the page's language (9.4 / 9,4) */
+  function sec(x) { return String(Math.round(x * 10) / 10).replace('.', t('decSep')); }
+  function pad(v, w) { v = String(v); while (v.length < w) v = ' ' + v; return v; }
+  function on(list, k) { return list.indexOf(k) >= 0 ? 'sd-changed' : null; }
+  function clock(age) { return h('span', { class: 'pc-age' }, h('span', { class: 'pc-clock', 'aria-hidden': 'true' }), t('sec', { n: age })); }
+  function lostBadge() { return h('span', { class: 'pc-x', 'aria-hidden': 'true' }, '✕'); }
+
+  // ── the RAM bar and the dirty gauge ──
+
+  function segLabel(seg, st) {
+    var lost = st.power && st.lost > 0 && (seg.id === 'dirty' || seg.id === 'wb');
+    switch (seg.id) {
+      case 'read': return [h('b', { translate: 'no' }, 'a.dat'), h('span', null, mib(seg.size))];
+      case 'written': return [h('b', { translate: 'no' }, 'b.dat'), h('span', null, mib(seg.size))];
+      case 'wb': return [h('b', null, '→ ', t('segWb')), h('span', null, mib(seg.size), lost ? [' ', lostBadge()] : null)];
+      case 'dirty': return [h('b', null, t('segDirty')), h('span', null, mib(seg.size), lost ? [' ', lostBadge()] : null), clock(st.age)];
+      default:
+        var name = { proc: 'segProc', fixed: 'segFixed', old: 'segOld', free: 'segFree' }[seg.id];
+        return [h('b', null, t(name)), h('span', null, mib(seg.size))];
+    }
+  }
+
+  function ram(st, chg) {
+    var bar = h('div', { class: 'pc-bar', role: 'img', 'aria-label': t('ram') + ' ' + mib(st.total) },
+      L.segments(st).map(function (seg) {
+        var lost = st.power && st.lost > 0 && (seg.id === 'dirty' || seg.id === 'wb');
+        return h('div', {
+          class: 'pc-seg ' + (on(chg.seg, seg.id) || ''),
+          dataset: lost ? { k: seg.id, lost: '' } : { k: seg.id },
+          style: { flex: seg.size + ' 0 0' },
+          title: mib(seg.size)
+        }, segLabel(seg, st));
+      }));
+    var total = st.dirty + st.writeback;
+    var pctOf = function (n) { return Math.min(100, n / GAUGE_MAX * 100) + '%'; };
+    var mark = function (n, ratio, key) {
+      return h('div', { class: 'pc-mark', dataset: { k: key === 'markBg' ? 'bg' : 'limit' }, style: { left: pctOf(n) } },
+        h('span', null, t('pct', { n: ratio }), ' · ', mib(n), h('small', null, ' ', t(key))));
+    };
+    var gauge = h('div', { class: 'pc-gauge', role: 'img', 'aria-label': t('gauge') + ' ' + mib(total) },
+      st.dirty ? h('div', { class: 'pc-gfill', dataset: { k: 'dirty' }, style: { width: pctOf(st.dirty) } }) : null,
+      st.writeback ? h('div', { class: 'pc-gfill', dataset: { k: 'wb' }, style: { width: pctOf(st.writeback) } }) : null,
+      mark(st.th.bg, st.th.bgRatio, 'markBg'),
+      mark(st.th.limit, st.th.ratio, 'markLimit'),
+      h('span', { class: 'pc-gnum' }, mib(total), st.throttled ? h('span', { class: 'pc-thr' }, ' · ', t('throttled')) : null));
+    return h('section', { class: 'pc-box' },
+      h('div', { class: 'pc-barrow' }, h('div', { class: 'pc-barname' }, t('ram'), h('small', null, mib(st.total))), bar),
+      st.power ? h('p', { class: 'pc-power' }, t('powerBanner', { t: sec(st.powerAt) }))
+        : h('p', { class: 'pc-avail' }, t('availLine', { free: st.free, cache: st.clean + st.dirty + st.writeback, avail: st.available })),
+      h('div', { class: 'pc-barrow' }, h('div', { class: 'pc-barname' }, t('gauge')),
+        gauge));
+  }
+
+  // ── the disk, free -m and /proc/meminfo ──
+
+  function disk(st, chg) {
+    var files = [];
+    if (st.readSize) files.push(h('li', null, h('span', { class: 'pc-fname', translate: 'no' }, 'a.dat'),
+      h('span', null, mib(st.readSize) + ' · ' + t('onDisk'))));
+    if (st.writeSize) files.push(h('li', null, h('span', { class: 'pc-fname', translate: 'no' }, 'b.dat'),
+      h('span', null, t('partOnDisk', { n: st.diskWritten, m: st.writeSize })),
+      st.lost ? h('span', { class: 'pc-lost' }, lostBadge(), t('lostPart', { n: st.lost })) : null));
+    var busy = st.writeback > 0 && !st.power;
+    return h('section', { class: 'pc-box pc-disk' },
+      h('h3', null, t('disk'), h('span', { class: 'pc-busy', dataset: { k: busy ? 'busy' : 'idle' } }, t(busy ? 'diskBusy' : 'diskIdle'))),
+      h('dl', null,
+        h('dt', null, t('diskRead')), h('dd', { class: on(chg.disk, 'diskRead') }, mib(st.diskRead)),
+        h('dt', null, t('diskWritten')), h('dd', { class: on(chg.disk, 'diskWritten') }, mib(st.diskWritten))),
+      files.length ? h('ul', { class: 'pc-files' }, files) : null);
+  }
+
+  function freeM(st, chg) {
+    var cell = function (v, w, k) { return h('b', { class: on(chg.mem, k) }, pad(v, w)); };
+    return h('section', { class: 'pc-box' },
+      h('pre', { class: 'pc-console', translate: 'no' },
+        h('span', { class: 'pc-prompt' }, '$ '), 'free -m\n',
+        '      total  used  free shared buff/cache available\n',
+        'Mem:  ', pad(st.total, 5), ' ', cell(st.used, 5, 'used'), ' ', cell(st.free, 5, 'free'),
+        '      0 ', cell(st.cache, 10, 'cache'), ' ', cell(st.available, 9, 'available')));
+  }
+
+  function meminfo(st, chg) {
+    var line = function (name, v) {
+      var text = (name + ':').padEnd(14) + pad(v * 1024, 9) + ' kB';
+      return [h('b', { class: on(chg.info, name) }, text), '\n'];
+    };
+    return h('section', { class: 'pc-box' },
+      h('pre', { class: 'pc-console', translate: 'no' },
+        h('span', { class: 'pc-prompt' }, '$ '), 'cat /proc/meminfo  ', h('span', { class: 'pc-prompt' }, '# …'), '\n',
+        line('MemFree', st.free), line('MemAvailable', st.available), line('Cached', st.cache),
+        line('Dirty', st.dirty), line('Writeback', st.writeback).slice(0, 1)));
+  }
+
+  // ── what happened ──
+
+  function eventText(e) {
+    switch (e.kind) {
+      case 'read': return [data('a.dat'), ': ', t('evRead', { size: e.size }), e.evicted ? ', ' + t('evEvicted', { n: e.evicted }) : '',
+        e.again ? '; ' + t('evReread') : ''];
+      case 'write': return [data('b.dat'), ': ', t('evWrite', { size: e.size }), e.evicted ? ', ' + t('evEvicted', { n: e.evicted }) : '', '; ',
+        e.returnedAt > 0 ? t('evReturnedAt', { s: sec(e.returnedAt) }) : t('evReturnedNow')];
+      case 'background': return t('evBackground', { mark: e.mark });
+      case 'throttle': return t('evThrottle', { limit: e.limit, until: sec(e.until) });
+      case 'expire': return t('evExpire', { tick: e.tick, size: e.size });
+      case 'sync': return t('evSync', { size: e.size, took: sec(e.took) });
+      case 'drop': return t('evDrop', { size: e.size }) + (e.kept ? ', ' + t('evDropKept', { kept: e.kept }) : '');
+      case 'power': return t('evPower', { lost: e.lost });
+    }
+    return '';
+  }
+
+  /** the model's events, with a re-read folded into its read's line */
+  function events(st) {
+    var again = st.events.some(function (e) { return e.kind === 'reread'; });
+    return st.events.filter(function (e) { return e.kind !== 'reread'; })
+      .map(function (e) { return e.kind === 'read' ? Object.assign({ again: again }, e) : e; });
+  }
+
+  function trace(st) {
+    return h('section', { class: 'pc-box pc-trace' },
+      h('h3', null, t('trace')),
+      st.events.length
+        ? h('ol', { class: 'pc-events' }, events(st).map(function (e) { return h('li', { dataset: { k: e.kind === 'power' && e.lost ? 'lost' : e.kind } }, eventText(e)); }))
+        : h('p', { class: 'pc-empty' }, t('noEvents')));
+  }
+
+  // ── render; "changed" compares with the state before the last param change ──
+
+  var lastKey = null, shown = null, chg = L.changed(null, null);
+  function track(c) {
+    var k = JSON.stringify(c.params);
+    if (k !== lastKey) {
+      chg = L.changed(shown, c.state);
+      lastKey = k;
+    }
+    shown = c.state;
+  }
+
+  function render(c) {
+    track(c);
+    var st = c.state;
+    c.stage.replaceChildren(h('div', { class: 'pc' },
+      ram(st, chg),
+      h('div', { class: 'pc-mid' }, freeM(st, chg), meminfo(st, chg), disk(st, chg)),
+      trace(st)));
+  }
+
+  function caption(c) {
+    var st = c.state;
+    var k = L.captionKey(st);
+    var b = function (x) { return h('b', null, String(x)); };
+    var vars = {
+      free: b(st.free), avail: b(st.available), bc: b(st.cache), cache: b(st.clean + st.dirty + st.writeback),
+      size: b(k === 'cRead' || k === 'cReread' ? st.readSize : st.writeSize), disk: b(st.diskRead), twice: b(st.readSize * 2),
+      dirty: b(st.dirty), wb: b(st.writeback), written: b(st.diskWritten), age: b(st.seconds), bg: b(st.th.bg),
+      limit: b(st.th.limit), ret: b(sec(st.returnedAt)), tick: b(st.expiredAt), t: b(sec(st.powerAt)), lost: b(st.lost),
+      n: b(k === 'cDrop' ? st.dropped : (st.events.filter(function (e) { return e.kind === 'sync'; })[0] || { size: 0 }).size),
+      took: b(sec(st.syncTook || 0)), kept: b(st.dirty + st.writeback)
+    };
+    var out = t.parts(k, vars);
+    if (k === 'cDrop' && st.dirty + st.writeback > 0) out = out.concat([' '], t.parts('cDropKept', vars));
+    return out;
+  }
+
+  var labels = {
+    'book-free': 'pBookFree', 'read-twice': 'pReadTwice', 'small-write': 'pSmallWrite',
+    'big-write': 'pBigWrite', 'drop-caches': 'pDropCaches', 'power-loss': 'pPowerLoss'
+  };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'readMiB', type: 'range', label: t('readMiB'), min: 0, max: 800, step: 50, format: function (v) { return v ? mib(v) : t('none'); } },
+      { key: 'writeMiB', type: 'range', label: t('writeMiB'), min: 0, max: 500, step: 25, format: function (v) { return v ? mib(v) : t('none'); } },
+      { key: 'seconds', type: 'range', label: t('seconds'), min: 0, max: 60, step: 5, format: function (v) { return t('sec', { n: v }); } },
+      { key: 'ratios', type: 'choice', label: t('ratios'), options: [['10/20', '10 / 20 %'], ['5/10', '5 / 10 %']] },
+      { key: 'reread', type: 'toggle', label: t('reread') },
+      { key: 'sync', type: 'toggle', label: t('sync') },
+      { key: 'dropCaches', type: 'toggle', label: t('dropCaches') },
+      { key: 'powerLoss', type: 'toggle', label: t('powerLoss') }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'pc-proc', label: t('legProc') },
+      { shape: 'pc-fixed', label: t('legFixed') },
+      { shape: 'pc-clean', label: t('legClean') },
+      { shape: 'pc-dirty', label: t('legDirty') },
+      { shape: 'pc-wb', label: t('legWb') },
+      { shape: 'pc-free', label: t('legFree') },
+      { shape: 'dash', label: t('legMark') },
+      { shape: 'pc-lost', label: t('legLost') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
