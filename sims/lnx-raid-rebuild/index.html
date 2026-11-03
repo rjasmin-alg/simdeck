@@ -1,0 +1,424 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-raid-rebuild: a RAID 5 or RAID 6 array loses a disk and rebuilds onto its spare, one band (10 % of the disk) per
+     step. Top: the md0 lines of /proc/mdstat. Below: one K3 block grid (kit/blockgrid.js), columns = disks and the
+     spare, rows = a state row and the ten bands. Right: the clock, the window of vulnerability and the read-error
+     odds. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-raid-rebuild">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obnova pod opterećenjem i drugi kvar · simdeck</title>
+<meta name="description" content="Otkaži disk u RAID 5 ili 6 i prati obnovu pojas po pojas: sati bez zalihosti, pročitani bitovi i nečitljiv sektor koji polje sruši ili ne.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-raid-rebuild",
+  "title": {
+    "hr": "Obnova pod opterećenjem i drugi kvar",
+    "en": "Rebuild under load and the second failure"
+  },
+  "concept": {
+    "hr": "Duga obnova, nečitljiv sektor, izgubljeno polje",
+    "en": "A long rebuild, an unreadable sector, a lost array"
+  },
+  "summary": {
+    "hr": "Otkaži disk u RAID 5 ili 6 i prati obnovu pojas po pojas: sati bez zalihosti, pročitani bitovi i nečitljiv sektor koji polje sruši ili ne.",
+    "en": "Fail a disk in RAID 5 or 6 and follow the rebuild band by band: hours without redundancy, bits read, and the unreadable sector that sinks the array or not."
+  },
+  "tags": [
+    "raid"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-raid-rebuild"]; colours only from kit tokens.
+   Layout: left, /proc/mdstat above the block grid; right, a card with the clock, the window and the read errors. */
+[data-sim="lnx-raid-rebuild"] .rr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 17rem);
+  gap: 1.2rem;
+  align-items: center;
+  height: 100%;
+  padding: 1cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-raid-rebuild"] .rr-main { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; }
+[data-sim="lnx-raid-rebuild"] .rr-md {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.35rem 0.8rem;
+  min-width: 0;
+}
+[data-sim="lnx-raid-rebuild"] .rr-md h3 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 400; }
+[data-sim="lnx-raid-rebuild"] .rr-md pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-raid-rebuild"] .rr-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); }
+
+[data-sim="lnx-raid-rebuild"] .rr .sd-bg-grid { --bg-row-gap: 0.25rem; row-gap: 0; }
+[data-sim="lnx-raid-rebuild"] .rr .sd-bg-aside { min-width: 10rem; font-size: var(--fs-sm); }
+[data-sim="lnx-raid-rebuild"] .rr .sd-bg-label { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="lnx-raid-rebuild"] .rr .sd-bg-colhead { font-size: var(--fs-sm); line-height: 1.1; text-align: center; padding-bottom: 0.35rem; }
+[data-sim="lnx-raid-rebuild"] .rr-dead .sd-bg-grid { opacity: 0.45; }
+[data-sim="lnx-raid-rebuild"] .rr-banner { color: var(--danger); font-weight: 700; font-size: var(--fs-md); }
+[data-sim="lnx-raid-rebuild"] .rr-st { font-weight: 700; }
+[data-sim="lnx-raid-rebuild"] .rr-st-bad { color: var(--danger); }
+[data-sim="lnx-raid-rebuild"] .rr-st-warn { color: var(--warn); }
+[data-sim="lnx-raid-rebuild"] .rr-st-ok { color: var(--ok); }
+[data-sim="lnx-raid-rebuild"] .rr-ev-bad { color: var(--danger); font-weight: 700; }
+
+/* the card */
+[data-sim="lnx-raid-rebuild"] .rr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.6rem 0.9rem;
+}
+[data-sim="lnx-raid-rebuild"] .rr-card h3 { margin: 0; font-size: var(--fs-md); }
+[data-sim="lnx-raid-rebuild"] .rr-sec { display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="lnx-raid-rebuild"] .rr-sec + .rr-sec { border-top: 1px solid var(--line); padding-top: 0.45rem; }
+[data-sim="lnx-raid-rebuild"] .rr-big { font-family: var(--mono); font-size: var(--fs-xl); font-weight: 700; line-height: 1.1; }
+[data-sim="lnx-raid-rebuild"] .rr-big.rr-bad { color: var(--danger); }
+[data-sim="lnx-raid-rebuild"] .rr-muted { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="lnx-raid-rebuild"] .rr-note { color: var(--muted); font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="lnx-raid-rebuild"] .rr-row { display: flex; justify-content: space-between; gap: 0.6rem; align-items: baseline; font-size: var(--fs-sm); }
+[data-sim="lnx-raid-rebuild"] .rr-row b { font-family: var(--mono); font-size: var(--fs-md); }
+[data-sim="lnx-raid-rebuild"] .rr .sd-bg-meter { font-size: var(--fs-sm); }
+
+/* the controls in two columns, the group title and the reset button across both */
+[data-sim="lnx-raid-rebuild"] [data-sd-controls] > .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 0.8rem; align-items: end; }
+[data-sim="lnx-raid-rebuild"] [data-sd-controls] > .sd-group > :not(.sd-ctl) { grid-column: 1 / -1; }
+
+/* legend: the URE mark */
+[data-sim="lnx-raid-rebuild"] .sd-swatch[data-shape="ure"] { position: relative; background: var(--bg); }
+[data-sim="lnx-raid-rebuild"] .sd-swatch[data-shape="ure"]::after { content: '\26A1\FE0E'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; color: var(--ink); }
+
+/* Phone and portrait: one column; the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-raid-rebuild"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-raid-rebuild"] .rr { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="lnx-raid-rebuild"] .rr .sd-bg-aside { min-width: 0; }
+  [data-sim="lnx-raid-rebuild"] [data-sd-controls] > .sd-group { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Obnova pod opterećenjem i drugi kvar</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C_DISK = 1, C_SPARE = 2, C_WIN = 3;          // series colours: data on the disks, the spare, the window bar
+  var URE = '⚡︎';                         // the lightning mark, text presentation
+
+  /** Data (disk names, numbers, mdstat) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+
+  /** Numbers: one decimal, a trailing ",0" dropped; percentages; 9,6 × 10¹³. */
+  function num(x) { var r = Math.round(x * 10) / 10; return String(r).replace('.', t('dec')); }
+  function hrs(x) { return t('hours', { h: num(x) }); }
+  function pct(p) {
+    var v = p * 100;
+    if (v >= 99.95 && v < 100) return t('pct', { p: '> ' + num(99.9) });
+    return t('pct', { p: (v > 0 && v < 1) || (v >= 99.5 && v < 100) ? num(v) : String(Math.round(v)) });
+  }
+  var SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  function sci(x) {
+    if (!x) return '0';
+    var e = Math.floor(Math.log10(x) + 1e-9), m = Math.round(x / Math.pow(10, e) * 100) / 100;
+    if (m >= 10) { m = m / 10; e += 1; }
+    var sup = String(e).split('').map(function (d) { return SUP[Number(d)]; }).join('');
+    return String(m).replace('.', t('dec')) + ' ' + t('times') + ' 10' + sup;
+  }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary
+      lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+
+  function box(s) { return '[' + s.mdstat.n + '/' + s.mdstat.active + '] [' + s.mdstat.map + ']'; }
+  function bandLabel(b) { return t('band', { a: (b - 1) * 10, b: b * 10 }); }
+  function failedDisk(s, name) { return s.disks.filter(function (d) { return d.name === name; })[0]; }
+  function statusChanged(s, prev, i) { return !!prev && prev.disks[i].status !== s.disks[i].status; }
+
+  // ── stage ──
+
+  function mdstatPre(s, prev) {
+    var key = function (line) { return /recovery =/.test(line) ? 'rec' : line.trim().split(/\s+/)[0] === 'md0' ? 'md0' : 'blocks'; };
+    var now = L.mdstatLines(s.mdstat).slice(1, -1), was = prev ? L.mdstatLines(prev.mdstat).slice(1, -1) : null;
+    var kids = [];
+    now.forEach(function (line, i) {
+      if (i) kids.push('\n');
+      if (!was) { kids.push(line); return; }
+      var old = was.filter(function (x) { return key(x) === key(line); })[0];
+      if (old === undefined) { kids.push(h('span', { class: 'rr-now' }, line)); return; }
+      if (old === line) { kids.push(line); return; }
+      var a = line.split(/( +)/), b = old.split(/( +)/);
+      a.forEach(function (tok, j) { kids.push(tok.trim() && tok !== b[j] ? h('span', { class: 'rr-now' }, tok) : tok); });
+    });
+    return h('div', { class: 'rr-md' }, h('h3', null, data('$ cat /proc/mdstat')), h('pre', { translate: 'no' }, kids));
+  }
+
+  function stateWord(s) {
+    var k = { optimal: 'stOptimal', rebuilding: 'stRebuilding', degraded: 'stDegraded', failed: 'stFailed' }[s.array];
+    var cls = s.array === 'failed' ? 'rr-st-bad' : s.array === 'optimal' ? 'rr-st-ok' : 'rr-st-warn';
+    return h('span', { class: 'rr-st ' + cls }, (s.array === 'failed' ? '✕ ' : '') + t(k));
+  }
+
+  function grid(c) {
+    var s = c.state, ev = s.ev, prev = c.prev, n = s.n;
+    var thisBand = ev && ev.kind === 'band' ? ev.band : 0;
+    var ureAt = {};
+    s.ures.forEach(function (u) { ureAt[u.disk + ':' + u.band] = u.result; });
+
+    var status = s.disks.map(function (d, i) {
+      return { text: d.status === 'failed' ? 'F' : 'U', now: statusChanged(s, prev, i) };
+    });
+    var sp0 = s.spare.status;
+    var spText = sp0 === 'spare' ? 'S' : sp0 === 'rebuilding' ? '↻' : sp0 === 'in' ? 'U' : '✕';
+    status.push(null, { text: spText, now: !!prev && (prev.spare.status !== sp0 || sp0 === 'rebuilding') });
+    var rows = [{ id: 'st', label: h('span', null, t('rowStatus')), cells: status,
+      aside: h('span', null, h('span', { class: prev && prev.array !== s.array ? 'rr-now' : null }, stateWord(s)),
+        sp0 === 'rebuilding' ? h('span', { translate: 'no' }, ' · ' + pct(s.progress)) : null) }];
+
+    for (var b = 1; b <= L.BANDS; b++) {
+      var cells = s.disks.map(function (d) {
+        var u = ureAt[d.name + ':' + b];
+        if (u) return { text: URE, kind: 'fill', c: C_DISK, now: !!(ev && ev.ures.some(function (x) { return x.disk === d.name; }) && b === thisBand) };
+        if (d.status === 'failed') return { kind: 'dead' };
+        return { kind: 'fill', c: C_DISK };
+      });
+      var sb = s.spare.bands[b - 1], here = b === thisBand && s.band === b;
+      var spCell = !sb ? { kind: 'ghost' } : sb === 'lost' ? { kind: 'bad', now: here } : here ? { kind: 'soft', c: C_SPARE, now: true } : { kind: 'fill', c: C_SPARE };
+      cells.push(null, spCell);
+
+      var asides = [];
+      if (b === thisBand) ev.fails.forEach(function (f) { asides.push(h('span', { class: 'rr-ev-bad' }, t('asFail', { d: f.disk }))); });
+      s.ures.filter(function (u) { return u.band === b; }).forEach(function (u) {
+        var k = { fixed: 'asFixed', lost: 'asLost', abort: 'asAbort' }[u.result];
+        asides.push(h('span', { class: u.result === 'fixed' ? null : 'rr-ev-bad' }, t(k, { d: u.disk })));
+      });
+      var parts = [];
+      asides.forEach(function (a, i) { if (i) parts.push(' · '); parts.push(a); });
+      rows.push({ id: 'b' + b, label: h('span', null, bandLabel(b)), cells: cells,
+        aside: parts.length ? h('span', null, parts) : '',
+        spans: b === thisBand ? [{ from: 0, len: n }] : [] });
+    }
+
+    var cols = s.disks.map(function (d) { return d.name; });
+    cols.push('', s.spare.name);
+    var failed = s.array === 'failed';
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: failed ? 'rr-dead' : null,
+      title: h('span', null, t('gridTitle'), ' ', data('· raid' + s.level)),
+      meta: [failed ? h('span', { class: 'rr-banner' }, '✕ ' + t('failedTitle')) : t('gridMeta')],
+      count: { text: data(box(s)), hl: !!prev && box(prev) !== box(s) },
+      cols: n + 2,
+      cellHeight: '1.6rem',
+      colLabels: cols,
+      rows: rows
+    });
+  }
+
+  function card(c) {
+    var s = c.state, o = L.norm(c.params);
+    var failedName = s.disks[L.FIRST].name;
+    var clock = h('div', { class: 'rr-sec' },
+      h('h3', null, t('clockTitle')),
+      h('div', { class: 'rr-big' + (s.array === 'failed' ? ' rr-bad' : '') }, data(hrs(s.hours))),
+      h('div', { class: 'rr-muted' }, c.n ? rich('clockSince', { d: data(failedName) }) : t('clockBefore')));
+    var win = h('div', { class: 'rr-sec' },
+      h('h3', null, t('windowTitle')),
+      Simdeck.blockGrid.meter({ total: o.totalHours, parts: [{ n: Math.min(s.hours, o.totalHours), kind: s.array === 'failed' ? 'bad' : 'fill', c: C_WIN }],
+        text: t('windowText', { h: hrs(s.hours), t: hrs(o.totalHours) }) }),
+      h('div', { class: 'rr-muted' }, rich('atSpeed', { speed: data(o.speed + ' MB/s'), load: t(o.speed === 200 ? 'loadIdle' : 'loadBusy') })),
+      h('div', { class: 'rr-muted' }, t('parityLeft', { k: s.parityLeft, of: o.parity })));
+    var rate = o.ureRate === '1e14' ? '10¹⁴' : '10¹⁵';
+    var budget = h('div', { class: 'rr-sec' },
+      h('h3', null, t('budgetTitle')),
+      Simdeck.blockGrid.meter({ total: o.plannedBits, parts: [{ n: s.bitsRead, kind: 'fill', c: C_DISK }] }),
+      h('div', { class: 'rr-muted' }, rich('readText', { a: data(sci(s.bitsRead)), b: data(sci(o.plannedBits)) })),
+      h('div', { class: 'rr-row' }, h('span', null, t('pAll')), h('b', { translate: 'no' }, pct(o.pUre))),
+      h('div', { class: 'rr-row' }, h('span', null, t('pNow')), h('b', { translate: 'no' }, pct(s.pSoFar))),
+      h('div', { class: 'rr-muted' }, rich('ureCount', {}, s.ures.length)),
+      h('div', { class: 'rr-note' }, rich('specNote', { r: data(rate), kind: t(o.ureRate === '1e14' ? 'disk14' : 'disk15') })));
+    return h('div', { class: 'rr-card' }, clock, win, budget);
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'rr' },
+      h('div', { class: 'rr-main' }, mdstatPre(c.state, c.prev), grid(c)),
+      card(c)));
+  }
+
+  // ── captions ──
+
+  /** Whether the same run at 200 MB/s ends with the array alive (no URE or failure stops it first). */
+  function idleSurvives(params) {
+    var p = Object.assign({}, params, { speed: 200 });
+    return Simdeck.stateAt(L, p, L.steps(p)).array !== 'failed';
+  }
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, o = L.norm(c.params);
+    var BOX = code(box(s)), SPARE = data(s.spare.name), LVL = t(s.level === 5 ? 'lvl5' : 'lvl6');
+    var WHY = t(s.level === 5 ? 'why5' : 'why6');
+    if (!ev) return rich('capStart', { lvl: LVL, disks: t.n('disksN', s.n), size: t('tb', { n: o.sizeTB }), spare: SPARE, box: BOX })
+      .concat(sp(rich('capOdds', { bits: data(sci(o.plannedBits)), p: data(pct(o.pUre)) })));
+    if (ev.kind === 'fail') {
+      return rich('capFail', { d: data(ev.disk), box: BOX, spare: SPARE, bits: data(sci(o.plannedBits)),
+        h: hrs(o.totalHours), speed: data(o.speed + ' MB/s') })
+        .concat(sp(rich(s.level === 5 ? 'capFail5' : 'capFail6')));
+    }
+    var out = [];
+    var add = function (parts) { out = out.concat(out.length ? sp(parts) : parts); };
+    ev.fails.forEach(function (f) {
+      var k = f.nth >= 3 ? 'capFail3' : s.level === 5 ? 'capFail2r5' : o.onUre === 'abort' ? 'capFail2r6abort' : 'capFail2r6';
+      add(rich(k, { h: hrs(f.hours), d: data(f.disk) }));
+      var idle = o.devBytes / 200e6 / 3600;
+      if (ev.failed && ev.cause === 'fail' && o.speed !== 200 && f.hours > idle && idleSurvives(c.params)) add(rich('capFailIdle', { t: hrs(idle) }));
+    });
+    if (ev.failed && ev.cause === 'fail') return out;
+    // the parity left is the same for every URE of one band (failures come first), so they share one outcome
+    var on = function (u) { return u.disk; };
+    var disks = function (list) { return data(list.map(on).filter(function (d, i, a) { return a.indexOf(d) === i; }).join(', ')); };
+    var abort = ev.ures.filter(function (u) { return u.result === 'abort'; })[0];
+    if (abort) { add(rich('capAbort', { pct: data(pct(s.progress)), d: data(abort.disk), why: WHY })); return out; }
+    var alive = s.disks.filter(function (d) { return d.status !== 'failed'; }).length;
+    if (ev.done) add(rich('capDone', { h: hrs(s.hours), spare: SPARE, box: BOX }));
+    else add(rich('capBand', { band: bandLabel(ev.band), from: t.n('readFrom', alive), spare: SPARE, h: hrs(s.hours) }));
+    var fixed = ev.ures.filter(function (u) { return u.result === 'fixed'; }), lost = ev.ures.filter(function (u) { return u.result === 'lost'; });
+    if (fixed.length) add(rich('capFixed', { d: disks(fixed), lvl: LVL }, fixed.length));
+    if (lost.length) add(rich('capLost', { d: disks(lost), why: WHY }, lost.length));
+    if (ev.done) {
+      if (s.lostStripes) add(rich('capDoneLost', {}, s.lostStripes));
+      var still = s.disks.filter(function (d, i) { return d.status === 'failed' && i !== L.FIRST; });
+      if (s.array === 'degraded' && still.length) add(rich('capDoneDegraded', { d: data(still.map(function (d) { return d.name; }).join(', ')) }));
+      if (ev.after.length > 1 && s.level === 5) add(rich('capAfter2', { h: hrs(ev.after[0]), h2: hrs(ev.after[1]) }));
+      else if (ev.after.length) add(rich('capAfter', { h: hrs(ev.after[0]) }));
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // in pairs: the page lays the controls out in two columns (CSS above)
+      { key: 'level', type: 'choice', label: t('level'), options: [[5, t('raid5')], [6, t('raid6')]], resets: true },
+      { key: 'sizeTB', type: 'select', label: t('sizeTB'), options: L.SIZES.map(function (x) { return [x, t('tb', { n: x })]; }), resets: true },
+      { key: 'n', type: 'range', label: t('n'), min: 4, max: 16, resets: true },
+      { key: 'seed', type: 'range', label: t('seed'), min: 1, max: 99, resets: true },
+      { key: 'speed', type: 'select', label: t('speed'), options: [[200, t('speedIdle')], [50, t('speedLoad')]], resets: true },
+      { key: 'ureRate', type: 'select', label: t('ureRate'), options: [['1e14', t('rate14')], ['1e15', t('rate15')]], resets: true },
+      { key: 'onUre', type: 'select', label: t('onUre'), options: [['abort', t('onAbort')], ['badblock', t('onBadblock')]], resets: true },
+      { key: 'later', type: 'select', label: t('later'), options: [['none', t('laterNone')], ['h15', t('laterH15')], ['h18-32', t('laterH1832')]], resets: true }
+    ],
+
+    presets: [
+      { id: 'raid5-ure', label: t('presetUre'), params: {}, hint: t('presetUreHint') },
+      { id: 'raid5-enterprise', label: t('presetEnt'), params: { ureRate: '1e15' }, hint: t('presetEntHint') },
+      { id: 'raid6-ure', label: t('presetR6'), params: { level: 6 }, hint: t('presetR6Hint') },
+      { id: 'under-load', label: t('presetLoad'), params: { speed: 50, later: 'h15', seed: 4 }, hint: t('presetLoadHint') },
+      { id: 'pfx-fs1', label: t('presetPfx'), params: { level: 6, n: 16, sizeTB: 6, ureRate: '1e15', speed: 50, later: 'h18-32', seed: 7 }, hint: t('presetPfxHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: C_DISK, label: t('legHealthy') },
+      { shape: 'bg-dead', label: t('legFailed') },
+      { shape: 'bg-span', label: t('legRead') },
+      { shape: 'bg-soft', c: C_SPARE, label: t('legNow') },
+      { shape: 'bg-fill', c: C_SPARE, label: t('legRebuilt') },
+      { shape: 'bg-ghost', label: t('legSpare') },
+      { shape: 'ure', label: t('legUre') },
+      { shape: 'bg-bad', label: t('legLost') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
