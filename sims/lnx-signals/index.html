@@ -1,0 +1,525 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-signals: SIGTERM vs SIGKILL, handlers, SIGHUP and nohup. Top: the signals of this step, each an envelope with
+     its four phases (permission, disposition, action, result). Below, left: the terminal, as bash prints it; right: the
+     process cards (PID, PPID, owner, STAT, a disposition per signal) and the files beside them.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-signals">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signali: SIGTERM, SIGKILL, SIGHUP i nohup · simdeck</title>
+<meta name="description" content="Pošalji signale procesima sa i bez funkcije za hvatanje: kill šalje SIGTERM, SIGKILL se ne da uhvatiti, a nohup štiti samo od SIGHUP-a.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-signals",
+  "title": {
+    "hr": "Signali: SIGTERM, SIGKILL, SIGHUP i nohup",
+    "en": "Signals: SIGTERM, SIGKILL, SIGHUP and nohup"
+  },
+  "concept": {
+    "hr": "Postupanje sa signalom odlučuje: zadana radnja, zanemari ili uhvati",
+    "en": "The disposition decides: default action, ignore, or catch"
+  },
+  "summary": {
+    "hr": "Pošalji signale procesima sa i bez funkcije za hvatanje: kill šalje SIGTERM, SIGKILL se ne da uhvatiti, a nohup štiti samo od SIGHUP-a.",
+    "en": "Send signals to processes with and without handlers: kill sends SIGTERM, SIGKILL cannot be caught, and nohup guards only against SIGHUP."
+  },
+  "tags": [
+    "processes"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-signals"]; colours only from kit tokens.
+   Layout: the signals of the step across the top; below them terminal | process cards. */
+[data-sim="lnx-signals"] .sg {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  height: 100%;
+  padding: 1cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-signals"] .sg-mono { font-family: var(--mono); }
+[data-sim="lnx-signals"] .sg-muted { color: var(--muted); }
+[data-sim="lnx-signals"] h3 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+
+/* the signals of this step */
+[data-sim="lnx-signals"] .sg-sigs { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+[data-sim="lnx-signals"] .sg-none { color: var(--muted); border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); padding: 0.35rem 0.8rem; }
+[data-sim="lnx-signals"] .sg-del {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.2rem 0.6rem;
+  min-width: 0;
+}
+[data-sim="lnx-signals"] .sg-env {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-weight: 700;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0 0.45rem;
+}
+[data-sim="lnx-signals"] .sg-env-icon { font-size: 1.3em; line-height: 1; }
+[data-sim="lnx-signals"] .sg-env-sig { font-family: var(--mono); font-size: 1.15rem; }
+[data-sim="lnx-signals"] .sg-route { font-size: 1.1rem; }
+[data-sim="lnx-signals"] .sg-route b { font-family: var(--mono); }
+[data-sim="lnx-signals"] .sg-phases { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-left: auto; }
+[data-sim="lnx-signals"] .sg-ph {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 0.4rem;
+  font-size: var(--fs-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-signals"] .sg-ph i { font-style: normal; color: var(--muted); }
+[data-sim="lnx-signals"] .sg-ph b { font-weight: 700; }
+[data-sim="lnx-signals"] .sg-ph-no { border-color: var(--danger); color: var(--danger); border-width: 0.15rem; }
+[data-sim="lnx-signals"] .sg-ph-no i { color: var(--danger); }
+[data-sim="lnx-signals"] .sg-ph-skip { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-signals"] .sg-ph-end { border-color: var(--ink); border-width: 0.15rem; }
+
+/* body */
+[data-sim="lnx-signals"] .sg-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
+  gap: 0.8rem;
+  min-height: 0;
+  align-items: start;
+}
+
+/* the terminal, and the files under it */
+[data-sim="lnx-signals"] .sg-left { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="lnx-signals"] .sg-term {
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  min-width: 0;
+  overflow: hidden;
+}
+[data-sim="lnx-signals"] .sg-term-bar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  border-bottom: var(--line-w) solid var(--line);
+  padding: 0.15rem 0.6rem;
+  font-weight: 700;
+}
+[data-sim="lnx-signals"] .sg-term-bar span { font-weight: 400; font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="lnx-signals"] .sg-term-closed { border-style: dashed; }
+[data-sim="lnx-signals"] .sg-lines { display: flex; flex-direction: column; padding: 0.3rem 0.4rem; }
+[data-sim="lnx-signals"] .sg-ln {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0 0.25rem;
+  border-left: 0.3rem solid transparent;
+}
+[data-sim="lnx-signals"] .sg-ln-cmd { font-weight: 700; }
+[data-sim="lnx-signals"] .sg-ln-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-signals"] .sg-ln-now { background: var(--hl); color: var(--on-hl); border-left-color: var(--ink); }
+[data-sim="lnx-signals"] .sg-ln-now.sg-ln-err { color: var(--on-hl); }
+[data-sim="lnx-signals"] .sg-prompt { font-weight: 400; }
+[data-sim="lnx-signals"] .sg-sep { text-align: center; color: var(--muted); font-size: var(--fs-sm); border-top: var(--line-w) dashed var(--line); margin: 0.25rem 0; padding-top: 0.1rem; }
+[data-sim="lnx-signals"] .sg-sep.sg-ln-now { color: var(--on-hl); }
+
+/* process cards */
+[data-sim="lnx-signals"] .sg-procs { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+[data-sim="lnx-signals"] .sg-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.1rem 0.8rem;
+  align-items: start;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.35rem 0.6rem;
+  min-width: 0;
+}
+[data-sim="lnx-signals"] .sg-card.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-signals"] .sg-card.sd-changed .sg-muted, [data-sim="lnx-signals"] .sg-card.sd-changed .sg-dcell i { color: var(--on-hl); }
+[data-sim="lnx-signals"] .sg-ended { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-signals"] .sg-ended .sg-cmd { text-decoration: line-through; text-decoration-thickness: 0.14em; }
+[data-sim="lnx-signals"] .sg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.5rem; min-width: 0; }
+[data-sim="lnx-signals"] .sg-cmd { font-family: var(--mono); font-weight: 700; font-size: 1.15rem; }
+[data-sim="lnx-signals"] .sg-tag { font-size: var(--fs-sm); border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); padding: 0 0.3rem; }
+[data-sim="lnx-signals"] .sg-meta { font-family: var(--mono); font-size: var(--fs-sm); grid-column: 1; }
+[data-sim="lnx-signals"] .sg-state { grid-column: 1; font-size: var(--fs-sm); display: flex; flex-wrap: wrap; gap: 0 0.6rem; line-height: 1.25; }
+[data-sim="lnx-signals"] .sg-state b { font-weight: 700; }
+[data-sim="lnx-signals"] .sg-dot { font-weight: 700; }
+
+/* the disposition table */
+[data-sim="lnx-signals"] .sg-disp { grid-column: 2; grid-row: 1 / span 3; display: grid; grid-template-columns: repeat(2, auto); gap: 0.15rem; align-self: center; }
+[data-sim="lnx-signals"] .sg-dcell {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  min-width: 9rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0 0.25rem;
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+}
+[data-sim="lnx-signals"] .sg-dcell b { font-family: var(--mono); }
+[data-sim="lnx-signals"] .sg-dcell i { font-style: normal; color: var(--muted); }
+[data-sim="lnx-signals"] .sg-dcell[data-d='ignore'] { border-style: dashed; border-color: var(--ink); }
+[data-sim="lnx-signals"] .sg-dcell[data-d='catch'] { border-color: var(--ink); border-width: 0.15rem; }
+[data-sim="lnx-signals"] .sg-dcell.sg-looked { outline: 0.22rem solid var(--ink); outline-offset: 0.05rem; }
+[data-sim="lnx-signals"] .sg-dico { font-weight: 700; }
+
+/* files */
+[data-sim="lnx-signals"] .sg-files { border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); padding: 0.3rem 0.6rem; }
+[data-sim="lnx-signals"] .sg-file { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; padding: 0 0.3rem; border: 0.12rem solid transparent; border-radius: var(--radius-sm); }
+[data-sim="lnx-signals"] .sg-file.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-signals"] .sg-fname { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-signals"] .sg-file-gone .sg-fname { text-decoration: line-through; }
+[data-sim="lnx-signals"] .sg-warn { font-weight: 700; color: var(--danger); }
+[data-sim="lnx-signals"] .sd-changed .sg-warn { color: var(--on-hl); }
+[data-sim="lnx-signals"] .sg-file-left { border-color: var(--danger); }
+
+/* kit 0.6.0: .sd-ctl's display: flex beats the hidden attribute that a param's visible() sets (see lnx-rsync-delete) */
+[data-sim="lnx-signals"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-signals"] .sd-swatch[data-shape^='sg-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape^='sg-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-alive'] { border-width: 0.18rem; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-ended'] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-ended']::after { content: '—'; color: var(--muted); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-default']::after { content: '·'; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-ign'] { border-style: dashed; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-ign']::after { content: '⊘'; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-catch'] { border-width: 0.18rem; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-catch']::after { content: '↪'; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-env']::after { content: '✉'; }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-refused'] { border-color: var(--danger); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-refused']::after { content: '✕'; color: var(--danger); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-left'] { border-color: var(--danger); }
+[data-sim="lnx-signals"] .sd-swatch[data-shape='sg-left']::after { content: '⚠'; color: var(--danger); }
+
+/* Phone and portrait: one column; the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-signals"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-signals"] .sg { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-signals"] .sg-body { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-signals"] .sg-card { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-signals"] .sg-disp { grid-column: 1; grid-row: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-sim="lnx-signals"] .sg-dcell { min-width: 0; }
+  [data-sim="lnx-signals"] .sg-phases { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Signali: SIGTERM, SIGKILL, SIGHUP i nohup</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (PIDs, signal names, commands, what bash prints) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+
+  /** Caption parts: t.parts (vars may be nodes; [[terms]] in the kit's style), then *English term* in <em lang="en">
+      for terms the glossary lacks. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var text = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (text === null) { out.push(p); return; }
+      text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  function prompt(user) { return '[' + user + '@' + L.HOST + ' ~]' + (user === 'root' ? '# ' : '$ '); }
+  function sigName(sig) { return 'SIG' + sig; }
+
+  // ── stage: the signals of this step ──
+
+  var ACT = { terminated: 'actTerminated', ignored: 'actIgnored', handler: 'actHandler', handlerAgain: 'actHandlerAgain',
+    resend: 'actResend', shellCatch: 'actShellCatch', refused: 'actRefused', nosuch: 'actNosuch', nojob: 'actNojob' };
+  var DISP = { default: 'dispDefault', ignore: 'dispIgnore', catch: 'dispCatch' };
+  var DICON = { default: '·', ignore: '⊘', catch: '↪' };
+
+  function fromLabel(d, s) {
+    if (d.from === 'terminal') return t('fromTerminal');
+    if (d.from === 'shell') {
+      var tgt = L.find(s, d.target);
+      return t('fromShell', { pid: tgt ? tgt.ppid === 1 ? s.shell : tgt.ppid : s.shell });
+    }
+    return d.from;
+  }
+
+  /** A phase chip: "(a) permission: yes". The letter is a mark, not a word. */
+  function phase(label, value, cls) {
+    var m = /^(\([a-d]\) )(.*)$/.exec(label);
+    return h('span', { class: 'sg-ph' + (cls ? ' ' + cls : '') }, h('i', null, data(m[1]), m[2]), h('b', null, value));
+  }
+
+  function delivery(d, s) {
+    var p = L.find(s, d.target);
+    var reached = d.act !== 'nosuch' && d.act !== 'nojob';
+    var ph = [
+      reached ? phase('(a) ' + t('phA'), d.perm ? '✓ ' + t('permOk') : '✕ ' + t('permNo'), d.perm ? null : 'sg-ph-no')
+        : phase('(a) ' + t('phA'), '—', 'sg-ph-skip'),
+      d.disp ? phase('(b) ' + t('phB'), DICON[d.disp] + ' ' + t(DISP[d.disp])) : phase('(b) ' + t('phB'), '—', 'sg-ph-skip'),
+      phase('(c) ' + t('phC'), t(ACT[d.act]), d.act === 'refused' || !reached ? 'sg-ph-no' : null)
+    ];
+    var res;
+    if (!reached || d.act === 'refused' || d.act === 'ignored' || d.act === 'handlerAgain' || d.act === 'shellCatch') res = t('resNothing');
+    else if (p && !p.alive && p.sig === d.sig) res = t('resGone', { n: p.exit });
+    else res = t('resAlive');
+    ph.push(phase('(d) ' + t('phD'), res, 'sg-ph-end'));
+    return h('div', { class: 'sg-del' + (d.act === 'refused' ? ' sg-del-no' : '') },
+      h('span', { class: 'sg-env' }, h('span', { class: 'sg-env-icon', 'aria-hidden': 'true' }, d.act === 'refused' ? '✕' : '✉'),
+        data(sigName(d.sig) + ' ' + d.num, 'sg-env-sig')),
+      h('span', { class: 'sg-route' }, h('b', null, fromLabel(d, s)), h('span', { 'aria-hidden': 'true' }, ' → '),
+        h('b', { translate: 'no' }, String(d.target))),
+      h('span', { class: 'sg-phases' }, ph));
+  }
+
+  function signals(s) {
+    if (!s.deliveries.length) return h('div', { class: 'sg-sigs' }, h('p', { class: 'sg-none' }, t('sigNone')));
+    return h('div', { class: 'sg-sigs' }, s.deliveries.map(function (d) { return delivery(d, s); }));
+  }
+
+  // ── stage: the terminal ──
+
+  var MAX_LINES = 17;
+
+  function terminal(s) {
+    var now = {};
+    s.out.forEach(function (i) { now[i] = true; });
+    var first = Math.max(0, s.term.length - MAX_LINES);
+    var lines = s.term.slice(first).map(function (l, k) {
+      var i = first + k, cls = 'sg-ln' + (now[i] ? ' sg-ln-now' : '');
+      if (l.kind === 'sep') return h('div', { class: cls + ' sg-sep' }, '— ' + t(l.text === 'closed' ? 'termClosed' : 'newTerm') + ' —');
+      if (l.kind === 'cmd') return h('div', { class: cls + ' sg-ln-cmd', translate: 'no' }, h('span', { class: 'sg-prompt' }, prompt(l.user)), l.text);
+      return h('div', { class: cls + (l.kind === 'err' ? ' sg-ln-err' : ''), translate: 'no' }, l.text || ' ');
+    });
+    var closed = s.terminal === 'closed' && !s.newTerm;
+    return h('div', { class: 'sg-term' + (closed ? ' sg-term-closed' : '') },
+      h('div', { class: 'sg-term-bar' }, t('termTitle'), data('student@' + L.HOST)),
+      h('div', { class: 'sg-lines' }, lines));
+  }
+
+  // ── stage: the process cards ──
+
+  function looked(s, pid) {
+    var out = {};
+    s.deliveries.forEach(function (d) { if (d.target === pid && d.disp) out[d.sig] = true; });
+    return out;
+  }
+
+  function card(s, p) {
+    var changed = s.changed.indexOf(p.pid) >= 0, look = looked(s, p.pid);
+    var head = [data(p.cmd, 'sg-cmd')];
+    if (p.cmd === 'bash') head.push(h('span', { class: 'sg-tag' }, t('shellTag')));
+    if (p.job) head.push(data('%' + p.job, 'sg-tag'));
+    if (p.nohup) head.push(data('nohup', 'sg-tag'));
+    var meta = data('PID ' + p.pid + ' · PPID ' + p.ppid + ' · ' + p.user + (p.alive ? ' · ' + p.stat : ''), 'sg-meta');
+    var cells = L.SIGS.map(function (sig) {
+      var d = p.disp[sig];
+      return h('span', { class: 'sg-dcell' + (look[sig] ? ' sg-looked' : ''), dataset: { d: d } },
+        h('b', { translate: 'no' }, sig + ' ' + L.NUM[sig]),
+        h('span', null, h('span', { class: 'sg-dico', 'aria-hidden': 'true' }, DICON[d] + ' '), h('i', null, t(DISP[d]))));
+    });
+    var st = [];
+    if (p.alive) {
+      st.push(h('b', null, h('span', { class: 'sg-dot', 'aria-hidden': 'true' }, '● '),
+        p.inHandler ? t(p.handler === 'hang' && s.ev.some(function (e) { return e.kind === 'hanging'; }) ? 'stateHanging' : 'stateHandler') : t('stateRun')));
+    } else {
+      st.push(h('b', null, '— ', p.sig ? t.parts('stateSig', { sig: data(sigName(p.sig)) }) : t.parts('stateExit', { code: data(p.exit) })));
+      st.push(h('span', null, t('status', { n: p.exit })));
+      st.push(h('span', { class: 'sg-muted' }, p.reporter ? t('reportBy', { pid: p.reporter }) : t('reportNone')));
+    }
+    return h('div', { class: 'sg-card' + (p.alive ? '' : ' sg-ended') + (changed ? ' sd-changed' : '') },
+      h('div', { class: 'sg-head' }, head), meta, h('div', { class: 'sg-disp' }, cells), h('div', { class: 'sg-state' }, st));
+  }
+
+  function fileRow(s, key, name, state, opts) {
+    return h('div', { class: 'sg-file' + (s.changed.indexOf(key) >= 0 ? ' sd-changed' : '') + (opts.gone ? ' sg-file-gone' : '') +
+      (opts.left ? ' sg-file-left' : '') },
+      data(name, 'sg-fname'), h('span', null, state), opts.left ? h('span', { class: 'sg-warn' }, '⚠ ' + t('legLeft')) : null);
+  }
+
+  function files(s) {
+    var f = s.files, rows = [];
+    var prog = s.procs.filter(function (p) { return p.prog; })[0];
+    var dead = prog && !prog.alive;
+    if (f.lock !== null) {
+      rows.push(fileRow(s, 'lock', 'zapis.lock', t(f.lock ? (dead ? 'lockLeft' : 'lockHeld') : 'lockGone'), { gone: !f.lock, left: f.lock && dead }));
+      rows.push(fileRow(s, 'data', 'zapis.dat', t(f.data === 'open' ? 'dataOpen' : f.data === 'closed' ? 'dataClosed' : 'dataHalf'), { left: f.data === 'half' }));
+    }
+    if (f.nohupOut) rows.push(fileRow(s, 'nohupOut', 'nohup.out', t('nohupHas'), {}));
+    if (!rows.length) return null;
+    return h('div', { class: 'sg-files' }, h('h3', null, t('filesTitle')), rows);
+  }
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'sg' },
+      signals(s),
+      h('div', { class: 'sg-body' },
+        h('div', { class: 'sg-left' }, terminal(s), files(s)),
+        h('div', { class: 'sg-procs' }, h('h3', null, t('procsTitle')), s.procs.map(function (p) { return card(s, p); })))));
+  }
+
+  // ── captions ──
+
+  var START = { 'book-primjer1': 'capStartBook', 'handler-cleans': 'capStartCleans', stubborn: 'capStartStubborn',
+    'nohup-and-hangup': 'capStartNohup', 'not-yours': 'capStartNotYours' };
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, o = L.norm(c.params);
+    var find = function (kind) { for (var i = 0; i < ev.length; i++) if (ev[i].kind === kind) return ev[i]; return null; };
+    if (c.n === 0) return rich(START[o.script]);
+    var e;
+    if ((e = find('close'))) {
+      var survived = s.procs.some(function (p) { return p.alive && p.ppid === 1; });
+      return rich(survived ? 'capClose' : 'capCloseNoNohup');
+    }
+    if ((e = find('kill'))) {
+      var p = L.find(s, e.target);
+      if (e.act === 'refused') return rich('capRefused');
+      if (e.act === 'nosuch' || e.act === 'nojob') return rich('capNoSuch', { pid: data(e.target) });
+      if (e.act === 'handler' || e.act === 'handlerAgain') return rich('capHandler', { cmd: code(p.cmd) });
+      if (e.act === 'terminated') {
+        if (e.sig === 'KILL') return p.prog ? rich('capKillLeft', { n: data(p.exit) }) : rich('capKillPlain', { pid: data(p.pid) });
+        if (e.from === 'root' && p.user !== 'root' && p.user !== 'student') return rich('capTermRoot', { n: data(p.exit) });
+        return rich('capTerm', { cmd: code(p.cmd) });
+      }
+      return rich('capOther');
+    }
+    if ((e = find('cleaned'))) return rich('capCleaned');
+    if ((e = find('hanging'))) return rich('capHanging', { pid: data(e.pid) });
+    if ((e = find('start'))) {
+      if (e.nohup) return rich('capJobNohup');
+      var j = L.find(s, e.pid);
+      return rich(find('ps') ? 'capJob' : 'capJobPlain', { cmd: code(j.cmd + ' &'), job: data('%' + e.job), pid: data(e.pid) });
+    }
+    if ((e = find('ps'))) {
+      var q = L.find(s, e.pids[0]);
+      if (q && !q.alive && q.sig) return rich('capGone', { n: data(q.exit), num: data(L.NUM[q.sig]) });
+    }
+    return rich('capOther');
+  }
+
+  // ── mount ──
+
+  function unused(key, reason) {
+    return function (p) { return L.uses(L.norm(p).script, key) ? false : t(reason); };
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // the scenario is chosen with the presets; the select stays hidden so the panel fits
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; }, options: [
+        ['book-primjer1', t('presetBook')], ['nohup-and-hangup', t('presetNohup')], ['handler-cleans', t('presetCleans')],
+        ['stubborn', t('presetStubborn')], ['not-yours', t('presetNotYours')]] },
+      { key: 'handler', type: 'choice', label: t('handler'), disabled: unused('handler', 'notUsedHandler'),
+        options: [['finish', t('handlerFinish')], ['hang', t('handlerHang')]] },
+      { key: 'sender', type: 'choice', label: t('sender'), disabled: unused('sender', 'notUsedSender'),
+        options: [['student', t('senderStudent')], ['root', t('senderRoot')]] }
+    ],
+
+    presets: [
+      { id: 'book-primjer1', label: t('presetBook'), params: { script: 'book-primjer1' }, hint: t('presetBookHint') },
+      { id: 'nohup-and-hangup', label: t('presetNohup'), params: { script: 'nohup-and-hangup' }, hint: t('presetNohupHint') },
+      { id: 'handler-cleans', label: t('presetCleans'), params: { script: 'handler-cleans', handler: 'finish' }, hint: t('presetCleansHint') },
+      { id: 'stubborn', label: t('presetStubborn'), params: { script: 'stubborn', handler: 'hang' }, hint: t('presetStubbornHint') },
+      { id: 'not-yours', label: t('presetNotYours'), params: { script: 'not-yours' }, hint: t('presetNotYoursHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'sg-alive', label: t('legAlive') },
+      { shape: 'sg-ended', label: t('legEnded') },
+      { shape: 'sg-default', label: t('legDefault') },
+      { shape: 'sg-ign', label: t('legIgnore') },
+      { shape: 'sg-catch', label: t('legCatch') },
+      { shape: 'sg-env', label: t('legSignal') },
+      { shape: 'sg-refused', label: t('legRefused') },
+      { shape: 'sg-left', label: t('legLeft') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
