@@ -1,24 +1,21 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
    Every visible string of lnx-deploy-strategies, in both languages (docs/sim-ui.md §9). Same keys in hr and en; the
    page looks them up with t(key). {name} is a placeholder, an array is plural forms (hr: 1 / 2–4 / 5+, en: 1 / other).
-   The glossary has none of this sim's terms (NOTES.md, Term pairs): the lane names are written out, and on the
-   Croatian page the English name is in italics with the Croatian in parentheses (the page's term() helper; keys
-   ending in Hr, unused on the English page, keep the tables equal). Numbers, shares and instance labels are data:
-   the page puts them in translate="no" elements. The title and subtitle come from sim.json. */
+   Terms are [[glossary]] markers (kit/glossary.js, NOTES.md, Term pairs): the kit writes the Croatian page's first
+   mention as the English term in italics with the Croatian in parentheses. Lane names and {health} are rendered
+   with t.html wherever they appear, so each caption names its lane in the first-mention style. Numbers, shares and
+   instance labels are data: the page puts them in translate="no" elements. The title and subtitle come from sim.json. */
 (function (root) {
   'use strict';
 
   var strings = {
     hr: {
       stage: 'Tri strategije uvođenja jedna uz drugu, minutu po minutu',
-      rolling: 'rolling update',
-      rollingHr: 'postupno uvođenje',
+      rolling: '[[rolling update]]',
       rollingSub: 'jedna instanca u minuti',
-      blueGreen: 'blue-green',
-      blueGreenHr: 'plavo-zeleno',
+      blueGreen: '[[blue-green deployment]]',
       blueGreenSub: 'cijeli novi skup, pa prebacivanje',
-      canary: 'canary',
-      canaryHr: 'kanarinac',
+      canary: '[[canary]]',
       canarySub: '10, 10, 25, 50, 100 % prometa',
       lb: 'uravnotežitelj opterećenja',
       lbReq: '2000 zahtjeva u minuti',
@@ -87,25 +84,23 @@
       bDone: '{lane} prebacuje sav promet na zelene odjednom, bez uzbune: gotovo. Plave i dalje rade, za brzi povratak. U ovoj minuti {nFailed}.',
       bTrip: '{lane} prebacuje sav promet na zelene odjednom: {failed} od 2000 zahtjeva ne uspije ({rate} > {thr}) i uzbuna se aktivira. Pogođeni su svi korisnici, ali plave još rade.',
       bRolledBack: '{lane} vraća sav promet na plave u jednoj minuti, jer plave nisu ni stale. Ukupno {nTotal}.',
-      bRefused: '{lane} odbija prebacivanje: zelene ne prolaze {healthAcc}, plave zadržavaju 100 % prometa. 0 neuspjelih.',
+      bRefused: '{lane} odbija prebacivanje: {health} javlja da zelene nisu spremne, pa plave zadržavaju 100 % prometa. 0 neuspjelih.',
       cTrip: '{lane} prima {share} prometa i griješi u {rate} zahtjeva; usporedba s osnovnom inačicom to odmah vidi i promet vraća na v1. Ukupno {nTotal}.',
       cRolledBack: '{lane} je isključen iz prometa: v2 dobiva 0 %, sav promet opet ide na v1. Ukupno {nTotal}.',
       cDone: '{lane} stiže do 100 %: njegova stopa pogrešaka ({rate}) nikad nije prešla prag od {thr}. U ovoj minuti {nFailed}.',
       capWaiting: 'sve tri trake stoje, a v1 poslužuje sve: 0 neuspjelih zahtjeva. Pad uhvati {health}, ali pogrešne odgovore ne.',
       capQuiet: 'ništa se ne mijenja; svaka traka zadržava svoje stanje.',
       capUnseen: ' Sve su tri trake na 100 % s v2 koji i dalje griješi: nijedna provjera ne hvata ono što ne vidi.',
-      health: 'health check',
-      healthHr: 'provjera ispravnosti',
-      healthAcc: 'health check',
-      healthAccHr: 'provjeru ispravnosti',
+      health: '[[health check]]',
       nFailed: ['{c} neuspio zahtjev', '{c} neuspjela zahtjeva', '{c} neuspjelih zahtjeva'],
       explain:
-        '<p>Isti v2 uvodi se na tri načina odjednom; svaka traka svake minute dobiva 2000 zahtjeva. ' +
-        '<i>Rolling update</i> (postupno uvođenje) mijenja jednu instancu u minuti: nova prima promet tek kad je spremna, ' +
-        'pa v2 dobiva 25, 50, 75 i 100 %. <i>Blue-green deployment</i> (plavo-zeleno uvođenje) pokrene cijeli novi skup ' +
-        'uz stari, provjeri ga i prebaci sav promet odjednom. <i>Canary</i> (kanarinac) pusti malen dio prometa na v2 ' +
-        '(10 %, pa 25, 50 i 100 %) i uspoređuje njegovu stopu pogrešaka s osnovnom inačicom.</p>' +
-        '<p><b>Povratak.</b> <i>Rollback</i> (povratak unatrag) plavo-zelenog traje jednu minutu jer stari skup još radi. ' +
+        '<p>Isti v2 uvodi se na tri načina odjednom: u svakoj traci [[load balancer]] svake minute dijeli 2000 ' +
+        'zahtjeva, a pri dnu kartice je [[traffic split]], udio koji ide na v2. ' +
+        'Traka [[rolling update]] mijenja jednu instancu u minuti: nova prima promet tek kad je spremna, ' +
+        'pa v2 dobiva 25, 50, 75 i 100 %. Traka [[blue-green deployment]] pokrene cijeli novi skup ' +
+        'uz stari, provjeri ga i prebaci sav promet odjednom. Traka [[canary]] pusti malen dio prometa na v2 ' +
+        '(10 %, pa 25, 50 i 100 %) i uspoređuje [[error rate]] na v2 i na osnovnoj inačici.</p>' +
+        '<p><b>Povratak.</b> Kod plavo-zelenog uvođenja [[rollback]] traje jednu minutu jer stari skup još radi. ' +
         'Postupno uvođenje vraća se jednako polako kako je i išlo, instancu po instancu, i to tek kad uzbuna za cijelu ' +
         'uslugu okine. Samo se ne vraća: ovdje uzbuna stoji za operatera ili cjevovod koji ga sljedeće minute počne vraćati. U Kubernetesu (<code>maxSurge 1</code>, <code>maxUnavailable 0</code>) ' +
         'uvođenje s v2 koji nikad ne postane spreman stoji, javlja da nema napretka nakon ' +
@@ -113,7 +108,7 @@
         'Kanarinac vraća 10 % prometa u jednoj minuti.</p>' +
         '<p><b>Što provjera vidi.</b> Uzbuna za cijelu uslugu gleda sve zahtjeve, pa se mala greška na malom udjelu u ' +
         'njima razvodni. Provjera kanarinca gleda samo njegove zahtjeve i zato vidi 3 % već na 10 % prometa. ' +
-        '<i>Health check</i> (provjera ispravnosti) hvata v2 koji se ruši, ali ne i v2 koji odgovara pogrešno.</p>' +
+        'Pad v2 uhvati [[health check]], ali pogrešan odgovor ne.</p>' +
         '<p><b>Zablude.</b> „Plavo-zeleno je najsigurnije”: povratak jest najbrži, ali prebacivanje pogodi sve korisnike ' +
         'odjednom. „Prošao je provjeru ispravnosti, dakle izdanje je dobro”: primjeri 2–4. „Postupno uvođenje samo se ' +
         'vraća”: ne vraća se; bez uzbune i nekoga tko na nju reagira, stoji.</p>' +
@@ -123,14 +118,11 @@
     },
     en: {
       stage: 'Three deployment strategies side by side, minute by minute',
-      rolling: 'rolling update',
-      rollingHr: 'rolling update',
+      rolling: '[[rolling update]]',
       rollingSub: 'one instance a minute',
-      blueGreen: 'blue-green',
-      blueGreenHr: 'blue-green',
+      blueGreen: '[[blue-green deployment]]',
       blueGreenSub: 'a whole new set, then a switch',
-      canary: 'canary',
-      canaryHr: 'canary',
+      canary: '[[canary]]',
       canarySub: '10, 10, 25, 50, 100 % of traffic',
       lb: 'load balancer',
       lbReq: '2,000 requests a minute',
@@ -199,25 +191,23 @@
       bDone: '{lane} switches all traffic to green at once, with no alert: done. Blue keeps running for a quick way back. {nFailed} this minute.',
       bTrip: '{lane} switches all traffic to green at once: {failed} of 2,000 requests fail ({rate} > {thr}) and the alert fires. Every user was hit, but blue is still running.',
       bRolledBack: '{lane} switches back to blue in one minute, because blue never stopped. {nTotal} in total.',
-      bRefused: '{lane} refuses the switch: green fails its {healthAcc}, blue keeps 100 % of traffic. 0 failed.',
+      bRefused: '{lane} refuses the switch: green fails its {health}, blue keeps 100 % of traffic. 0 failed.',
       cTrip: 'the {lane} takes {share} of traffic and fails {rate} of its requests; comparing it with the baseline catches this at once and traffic goes back to v1. {nTotal} in total.',
       cRolledBack: 'the {lane} is pulled: v2 gets 0 %, all traffic is back on v1. {nTotal} in total.',
       cDone: 'the {lane} reaches 100 %: its own error rate ({rate}) never went over {thr}. {nFailed} this minute.',
       capWaiting: 'all three lanes stand still and v1 serves everything: 0 failed. A {health} catches a crash, not wrong answers.',
       capQuiet: 'nothing changes; every lane keeps its state.',
       capUnseen: ' All three lanes are at 100 % on a v2 that still fails: no check catches what it cannot see.',
-      health: 'health check',
-      healthHr: 'health check',
-      healthAcc: 'health check',
-      healthAccHr: 'health check',
+      health: '[[health check]]',
       nFailed: ['{c} failed request', '{c} failed requests'],
       explain:
-        '<p>The same v2 is deployed three ways at once; every lane gets 2,000 requests each minute. A ' +
-        '<i>rolling update</i> replaces one instance a minute: a new one takes traffic only once it is ready, so v2 gets ' +
-        '25, 50, 75 and 100 %. A <i>blue-green deployment</i> starts a whole new set beside the old one, checks it and ' +
-        'switches all traffic at once. A <i>canary</i> sends a small share to v2 (10 %, then 25, 50 and 100 %) and ' +
-        'compares its error rate with the baseline.</p>' +
-        '<p><b>Getting back.</b> A blue-green <i>rollback</i> takes one minute, because the old set is still running. ' +
+        '<p>The same v2 is deployed three ways at once: in every lane a [[load balancer]] spreads 2,000 requests each ' +
+        'minute, and the bar at the bottom of the card is the [[traffic split]], the share that goes to v2. A ' +
+        '[[rolling update]] replaces one instance a minute: a new one takes traffic only once it is ready, so v2 gets ' +
+        '25, 50, 75 and 100 %. A [[blue-green deployment]] starts a whole new set beside the old one, checks it and ' +
+        'switches all traffic at once. A [[canary]] sends a small share to v2 (10 %, then 25, 50 and 100 %) and ' +
+        'compares its [[error rate]] with the baseline.</p>' +
+        '<p><b>Getting back.</b> A blue-green [[rollback]] takes one minute, because the old set is still running. ' +
         'A rolling update goes back as slowly as it went out, one instance at a time, and only once the service-wide ' +
         'alert fires. It does not roll back by itself: here the alert stands for the operator or pipeline that starts ' +
         'undoing it the next minute. In Kubernetes (<code>maxSurge 1</code>, ' +
@@ -226,7 +216,7 @@
         'A canary takes its 10 % back in one minute.</p>' +
         '<p><b>What the check sees.</b> The service-wide alert looks at all requests, so a small error on a small ' +
         'share is diluted in them. The canary check looks at the canary’s own requests only, which is why it sees ' +
-        '3 % at 10 % of traffic. A <i>health check</i> catches a v2 that crashes, not a v2 that answers wrongly.</p>' +
+        '3 % at 10 % of traffic. A [[health check]] catches a v2 that crashes, not a v2 that answers wrongly.</p>' +
         '<p><b>Misconceptions.</b> “Blue-green is the safest”: its rollback is the fastest, but the switch hits every ' +
         'user at once. “It passed its health check, so the release is good”: presets 2–4. “A rolling update rolls ' +
         'back on its own”: it does not; without an alert and someone acting on it, it stands still.</p>' +

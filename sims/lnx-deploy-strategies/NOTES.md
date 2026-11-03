@@ -89,7 +89,7 @@ ignoring `ready` or `live`, the canary trip skipped at 100 %, MAX_STEPS 8.
 
 ## Term pairs
 
-All eight are in `kit/glossary.js` (`"src": "simdeck"`, added on the owner's request, 2026-11-03); the string tables still write them out:
+All eight are in `kit/glossary.js` (`"src": "simdeck"`, added on the owner's request, 2026-11-03); the string tables use them as `[[term]]` markers, and the page links `kit/glossary.js`:
 
 | English | Croatian | Source |
 |---|---|---|
