@@ -1,0 +1,529 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-disk-full-mysteries: "No space left on device" with free space. Two gauges side by side, blocks (what df -h
+     reports) and inodes (what df -i reports); under them the tree of names with what du adds up, and the process that
+     holds files open; at the bottom the command of this step and what it printed, beside the order of checks
+     (df -h → df -i → du → lsof +L1) and the cause found so far. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-disk-full-mysteries">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>„Disk je pun”, a mjesta ima · simdeck</title>
+<meta name="description" content="Napuni disk na dva načina: sitnim datotekama do zadnjeg inodea i zapisnikom koji je obrisan, a još otvoren. Pa df, df -i, du i lsof nađu uzrok.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-disk-full-mysteries",
+  "title": {
+    "hr": "„Disk je pun”, a mjesta ima",
+    "en": "\"Disk full\" with free space"
+  },
+  "concept": {
+    "hr": "Ponestalo inodea; obrisana datoteka koju proces drži otvorenom",
+    "en": "Running out of inodes; a deleted file a process holds open"
+  },
+  "summary": {
+    "hr": "Napuni disk na dva načina: sitnim datotekama do zadnjeg inodea i zapisnikom koji je obrisan, a još otvoren. Pa df, df -i, du i lsof nađu uzrok.",
+    "en": "Fill a disk two ways: with tiny files up to the last inode, and with a log that is deleted but still open. Then df, df -i, du and lsof find the cause."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 6,
+  "entries": [
+    {
+      "preset": "inodi"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-disk-full-mysteries"]; colours only from kit tokens.
+   Layout: the two gauges on top; the tree of names | the processes; the command of this step | the order of checks. */
+[data-sim="lnx-disk-full-mysteries"] .df {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.8rem 1.2rem;
+  height: 100%;
+  padding: 0.8cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-disk-full-mysteries"] .df h3 { margin: 0; font-size: 1rem; color: var(--muted); font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df h3 code { color: var(--ink); }
+[data-sim="lnx-disk-full-mysteries"] .df code { font-family: var(--mono); }
+
+/* gauges: blocks solid, inodes striped (each its own pattern), the part with no name hollow and hatched */
+[data-sim="lnx-disk-full-mysteries"] .df-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.6rem 0.9rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-g-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+[data-sim="lnx-disk-full-mysteries"] .df-g-head b { font-size: 1.3rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-g-head code { color: var(--muted); }
+[data-sim="lnx-disk-full-mysteries"] .df-g-pct { margin-left: auto; font-family: var(--mono); font-size: 2.2rem; font-weight: 700; line-height: 1; }
+[data-sim="lnx-disk-full-mysteries"] .df-bar {
+  display: flex;
+  height: 2.4rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+[data-sim="lnx-disk-full-mysteries"] .df-seg { flex: none; height: 100%; }
+[data-sim="lnx-disk-full-mysteries"] .df-seg-named { background: var(--c1); }
+[data-sim="lnx-disk-full-mysteries"] .df-seg-own { background: radial-gradient(circle, var(--c8) 0 0.14em, transparent 0.16em) 0 0 / 0.38em 0.38em, var(--bg); }
+[data-sim="lnx-disk-full-mysteries"] .df-seg-held {
+  box-sizing: border-box;
+  border: 0.2rem dashed var(--c1);
+  background: repeating-linear-gradient(45deg, transparent 0 0.35em, var(--c1) 0.35em 0.55em);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-seg-inodes {
+  background: repeating-linear-gradient(90deg, var(--c2) 0 0.55em, var(--bg) 0.55em 0.75em);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-g-nums { display: flex; flex-wrap: wrap; gap: 0.2rem 1.1rem; font-size: 1.15rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-g-nums code { white-space: nowrap; }
+[data-sim="lnx-disk-full-mysteries"] .df-g-nums code i { color: var(--muted); font-style: normal; }
+[data-sim="lnx-disk-full-mysteries"] .df-g-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 1rem; min-height: 1.9rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-disk-full-mysteries"] .df-part { display: inline-flex; align-items: center; gap: 0.35rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-part .df-sw { width: 1.1rem; height: 1.1rem; border: 2px solid var(--ink); }
+[data-sim="lnx-disk-full-mysteries"] .df-part code { color: var(--ink); }
+[data-sim="lnx-disk-full-mysteries"] .df-wall {
+  margin-left: auto;
+  padding: 0 0.5rem;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* the tree of names (du) and the processes */
+[data-sim="lnx-disk-full-mysteries"] .df-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-sim="lnx-disk-full-mysteries"] .df-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-disk-full-mysteries"] .df-ent {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-left: 0.55rem solid var(--c1);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 1.25rem;
+}
+[data-sim="lnx-disk-full-mysteries"] .df-ent.df-dir { border-left-color: var(--c8); }
+[data-sim="lnx-disk-full-mysteries"] .df-ent .df-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-ent .df-sub { color: var(--muted); font-size: 1rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-ent .df-size { margin-left: auto; font-family: var(--mono); }
+[data-sim="lnx-disk-full-mysteries"] .df-ent.df-gone { border-color: var(--line); border-left-color: var(--line); color: var(--muted); border-style: dashed; }
+[data-sim="lnx-disk-full-mysteries"] .df-ent.df-gone .df-name { text-decoration: line-through; }
+[data-sim="lnx-disk-full-mysteries"] .df-total { display: flex; gap: 0.6rem; padding: 0.1rem 0.8rem; font-size: 1.1rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-total code { margin-left: auto; font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-none { color: var(--muted); }
+
+[data-sim="lnx-disk-full-mysteries"] .df-proc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-proc-head { display: flex; align-items: baseline; gap: 0.7rem; font-size: 1.25rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-proc-head code { font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-proc-head span { color: var(--muted); font-size: 1rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-fd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.7rem;
+  padding: 0.3rem 0.7rem;
+  border: 2px solid var(--ink);
+  border-left: 0.55rem solid var(--c1);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 1.2rem;
+}
+[data-sim="lnx-disk-full-mysteries"] .df-fd .df-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-fd .df-size { margin-left: auto; font-family: var(--mono); }
+[data-sim="lnx-disk-full-mysteries"] .df-fd .df-sub { color: var(--muted); font-size: 1rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-fd.df-orphan {
+  border: 0.2rem dashed var(--c1);
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.5em, var(--panel) 0.5em 0.75em);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-fd.df-orphan .df-del { color: var(--danger); font-family: var(--mono); font-weight: 700; }
+
+/* the command of this step, and the order of checks */
+[data-sim="lnx-disk-full-mysteries"] .df-foot { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 1.2rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-term {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-app { font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-out {
+  margin: 0;
+  min-height: calc(6 * 1.3em);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1.3;
+  white-space: pre;
+  tab-size: 8;
+  overflow-x: auto;
+}
+[data-sim="lnx-disk-full-mysteries"] .df-out .df-cmd { font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-out .df-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-out .df-quiet { color: var(--muted); font-family: var(--sans); }
+
+[data-sim="lnx-disk-full-mysteries"] .df-trail { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+[data-sim="lnx-disk-full-mysteries"] .df-chk {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.15rem 0.6rem;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-disk-full-mysteries"] .df-chk code { font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-chk .df-read { margin-left: auto; font-family: var(--mono); }
+[data-sim="lnx-disk-full-mysteries"] .df-chk.df-ran { border-color: var(--ink); }
+[data-sim="lnx-disk-full-mysteries"] .df-chk.df-next { border: 2px dashed var(--accent); }
+[data-sim="lnx-disk-full-mysteries"] .df-chk.df-next .df-read { color: var(--accent); font-family: var(--sans); font-weight: 700; }
+[data-sim="lnx-disk-full-mysteries"] .df-chk.df-skip { color: var(--muted); border-style: dotted; }
+[data-sim="lnx-disk-full-mysteries"] .df-chk.df-skip .df-read { font-family: var(--sans); }
+[data-sim="lnx-disk-full-mysteries"] .df-cause { padding: 0.15rem 0.1rem; }
+[data-sim="lnx-disk-full-mysteries"] .df-cause b { color: var(--danger); }
+
+/* legend swatches of this page */
+[data-sim="lnx-disk-full-mysteries"] .sd-swatch[data-shape='df-blocks'] { background: var(--c1); }
+[data-sim="lnx-disk-full-mysteries"] .sd-swatch[data-shape='df-inodes'] { background: repeating-linear-gradient(90deg, var(--c2) 0 0.3em, var(--bg) 0.3em 0.42em); }
+[data-sim="lnx-disk-full-mysteries"] .sd-swatch[data-shape='df-held'] {
+  border: 0.15rem dashed var(--c1);
+  background: repeating-linear-gradient(45deg, transparent 0 0.2em, var(--c1) 0.2em 0.32em);
+}
+[data-sim="lnx-disk-full-mysteries"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-disk-full-mysteries"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-disk-full-mysteries"] .df { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
+  [data-sim="lnx-disk-full-mysteries"] .df-foot { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-disk-full-mysteries"] .df-g-pct { font-size: 1.6rem; }
+  [data-sim="lnx-disk-full-mysteries"] .df-ent, [data-sim="lnx-disk-full-mysteries"] .df-fd { font-size: 1rem; flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">„Disk je pun”, a mjesta ima</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SEP = Simdeck.lang === 'hr' ? ' ' : ',';
+
+  /** 65536 → "65 536" (hr) or "65,536" (en). */
+  function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, SEP); }
+  function size(blocks) { return L.human(blocks * L.BLOCK); }
+  function fileSizeText(b) { return b === 0 ? t('size0') : b === 1 ? t('size1') : b === 4096 ? t('size4k') : t('size16k'); }
+  function fsName(s) { return s.fs.type === 'xfs' ? 'XFS' : 'ext4'; }
+  function data(text, cls) { return h('span', { class: cls || null, translate: 'no' }, text); }
+  function code(text) { return h('code', { translate: 'no' }, text); }
+  function scene(p) { return L.SCENES[p.scene] ? p.scene : 'obrisana'; }
+
+  // ── gauges ──
+
+  function blocksGauge(s, ev) {
+    var df = L.dfh(s), base = df.used + df.avail;
+    var held = L.heldBlocks(s), named = L.duBlocks(s, L.MNT), own = Math.max(0, df.used - named - held);
+    var w = function (n) { return base ? (n * 100 / base) + '%' : '0%'; };
+    var wall = ev.err && ev.cause === 'blocks';
+    var parts = [[named, 'named', 'partNamed'], [held, 'held', 'partHeld'], [own, 'own', s.fs.type === 'xfs' ? 'partOwnXfs' : 'partOwn']].filter(function (x) { return x[0] > 0; });
+    return h('section', { class: 'df-gauge' + (ev.changed.blocks ? ' sd-changed' : '') },
+      h('div', { class: 'df-g-head' }, h('b', null, t('gaugeBlocks')), code('df -h'),
+        h('span', { class: 'df-g-pct', translate: 'no' }, df.pct + '%')),
+      h('div', { class: 'df-bar' },
+        named ? h('div', { class: 'df-seg df-seg-named', style: { width: w(named) } }) : null,
+        held ? h('div', { class: 'df-seg df-seg-held', style: { width: w(held) } }) : null,
+        own ? h('div', { class: 'df-seg df-seg-own', style: { width: w(own) } }) : null),
+      h('div', { class: 'df-g-nums' },
+        code([h('i', null, 'Size '), size(df.size)]), code([h('i', null, 'Used '), size(df.used)]),
+        code([h('i', null, 'Avail '), size(df.avail)])),
+      h('div', { class: 'df-g-foot' }, parts.map(function (x) {
+        return h('span', { class: 'df-part' }, h('span', { class: 'df-sw df-seg-' + x[1] }), t(x[2]), code(size(x[0])));
+      }), wall ? h('span', { class: 'df-wall' }, '✕ ', data('ENOSPC'), ' · ', t('enospc')) : null));
+  }
+
+  function inodesGauge(s, ev) {
+    var di = L.dfi(s);
+    var wall = ev.err && ev.cause === 'inodes';
+    return h('section', { class: 'df-gauge' + (ev.changed.inodes ? ' sd-changed' : '') },
+      h('div', { class: 'df-g-head' }, h('b', null, t('gaugeInodes')), code('df -i'),
+        h('span', { class: 'df-g-pct', translate: 'no' }, di.pct + '%')),
+      h('div', { class: 'df-bar' },
+        h('div', { class: 'df-seg df-seg-inodes', style: { width: (di.inodes ? di.used * 100 / di.inodes : 0) + '%' } })),
+      h('div', { class: 'df-g-nums' },
+        code([h('i', null, 'Inodes '), fmt(di.inodes)]), code([h('i', null, 'IUsed '), fmt(di.used)]),
+        code([h('i', null, 'IFree '), fmt(di.free)])),
+      h('div', { class: 'df-g-foot' },
+        h('span', null, s.fs.type === 'xfs' ? t('onDemand', { max: fmt(s.fs.maxicount) }) : t('fixed')),
+        wall ? h('span', { class: 'df-wall' }, '✕ ', data('ENOSPC'), ' · ', t('enospc')) : null));
+  }
+
+  // ── names (du) and processes ──
+
+  function tree(s) {
+    var rows = [];
+    (s.dirs[L.MNT] || []).slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }).forEach(function (e) {
+      var sub = L.MNT + '/' + e.name, isDir = !!s.dirs[sub];
+      var blocks = isDir ? L.duBlocks(s, sub) : L.inodeOf(s, e.ino).blocks;
+      var inside = isDir ? (s.dirs[sub] || []) : [];
+      var n = inside.reduce(function (k, x) { return k + (x.n || 1); }, 0);
+      rows.push(h('li', { class: 'df-ent' + (isDir ? ' df-dir' : '') },
+        data(e.name + (isDir ? '/' : ''), 'df-name'),
+        isDir && n ? h('span', { class: 'df-sub' }, t.n('files', n, { n: fmt(n) }), ' ', data(inside[0].name)) : null,
+        data(size(blocks), 'df-size')));
+    });
+    s.gone.filter(function (g) { return g.dir === L.MNT; }).forEach(function (g) {
+      rows.push(h('li', { class: 'df-ent df-gone' }, data(g.name, 'df-name'), h('span', { class: 'df-sub' }, t('removed'))));
+    });
+    return h('section', { class: 'df-box' },
+      h('h3', null, t('treeTitle'), ' · ', code(L.MNT), ' · ', t('treeDu')),
+      rows.length ? h('ul', { class: 'df-list' }, rows) : h('p', { class: 'df-none' }, t('treeEmpty')),
+      h('div', { class: 'df-total' }, h('span', null, t('duTotal'), ' (', code('du -sh'), ')'), code(size(L.duBlocks(s, L.MNT)))));
+  }
+
+  function procs(s) {
+    return h('section', { class: 'df-box' }, h('h3', null, t('procTitle')), s.procs.map(function (pr) {
+      return h('div', { class: 'df-proc' },
+        h('div', { class: 'df-proc-head' }, code(pr.cmd), data('PID ' + pr.pid), pr.pid !== L.PID ? h('span', null, t('procRestarted')) : null),
+        pr.fds.length ? pr.fds.map(function (f) {
+          var node = L.inodeOf(s, f.ino), orphan = L.orphan(s, f.ino);
+          return h('div', { class: 'df-fd' + (orphan ? ' df-orphan' : '') },
+            h('span', { class: 'df-sub' }, t.parts('fdLabel', { fd: data(f.fd + f.mode) })), data('→ ' + f.path.replace(/.*\//, ''), 'df-name'),
+            orphan ? h('span', { class: 'df-del' }, t('deletedTag')) : null,
+            orphan ? h('span', { class: 'df-sub' }, t('countZero')) : null,
+            data(size(node.blocks), 'df-size'));
+        }) : h('p', { class: 'df-none' }, t('procNone')));
+    }));
+  }
+
+  // ── the command and the order of checks ──
+
+  function term(s, p) {
+    var ev = s.lastEvent, pid = s.procs.length ? s.procs[0].pid : L.PID;
+    var head = null;
+    if (s.tool.who === 'app' && s.action) {
+      head = s.action.op === 'write' ? t('appWrite', { pid: pid, mib: fmt(s.action.bytes / L.MIB) })
+        : t('appFill', { pid: pid, size: fileSizeText(p.fileSize) });
+    } else if (!s.action) head = t('appStart', { pid: pid });
+    var lines = s.tool.lines.map(function (l) {
+      return h('div', { class: l.k === 'cmd' ? 'df-cmd' : l.k === 'err' ? 'df-err' : null, translate: 'no' }, l.text);
+    });
+    if (s.tool.who === 'shell' && s.action && s.tool.lines.every(function (l) { return l.k === 'cmd'; })) {
+      lines.push(h('div', { class: 'df-quiet' }, t('toolNone')));
+    }
+    return h('section', { class: 'df-term' },
+      h('h3', null, t('toolTitle')),
+      head ? h('div', { class: 'df-app' }, head) : null,
+      h('pre', { class: 'df-out' }, lines));
+  }
+
+  var CHECKS = [['dfh', 'df -h'], ['dfi', 'df -i'], ['du', 'du -sh'], ['lsof', 'lsof +L1']];
+  function trail(s) {
+    var c = s.checks, next = L.nextCheck(s), ran = s.lastEvent.ran || [];
+    var skip = {};
+    if (s.failed && c.dfh) {
+      if (c.dfh.avail > 0) { skip.du = 1; skip.lsof = 1; } else skip.dfi = 1;
+      if (c.du && !(c.dfh.used - c.du.blocks > L.DISAGREE * c.dfh.size)) skip.lsof = 1;
+    }
+    var items = CHECKS.map(function (k, i) {
+      var r = c[k[0]], read = null, cls = 'df-chk';
+      if (r) {
+        cls += ' df-ran';
+        read = k[0] === 'dfh' || k[0] === 'dfi' ? data(r.pct + '%', 'df-read') : k[0] === 'du' ? data(size(r.blocks), 'df-read')
+          : h('span', { class: 'df-read' }, t.n('trailFiles', r.count, { n: fmt(r.count) }));
+      } else if (next === k[0]) { cls += ' df-next'; read = h('span', { class: 'df-read' }, t('trailNext')); }
+      else if (skip[k[0]]) { cls += ' df-skip'; read = h('span', { class: 'df-read' }, t('trailSkip')); }
+      if (ran.indexOf(k[0]) >= 0) cls += ' sd-changed';
+      return h('li', { class: cls }, data((i + 1) + '.'), code(k[1]), read);
+    });
+    var cause = L.cause(s);
+    var word = !s.failed ? t('causeNone') : cause === 'inodes' ? t('causeInodes') : cause === 'blocks' ? t('causeBlocks')
+      : cause === 'deleted-open' ? t('causeDeleted') : t('causeOpen');
+    return h('section', { class: 'df-trail' },
+      h('h3', null, t('trailTitle')),
+      h('ol', { class: 'df-list' }, items),
+      h('div', { class: 'df-cause' }, t('causeTitle'), ': ', cause ? h('b', null, word) : h('span', null, word)));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    // every number and size goes in as data (translate="no"), so 24K or 989M are not read as words
+    var tt = function (key, vars) {
+      var v = {};
+      Object.keys(vars || {}).forEach(function (k) { v[k] = typeof vars[k] === 'string' && /\d/.test(vars[k]) || typeof vars[k] === 'number' ? data(String(vars[k])) : vars[k]; });
+      return t.parts(key, v);
+    };
+    var s = c.state, p = c.params, ev = s.lastEvent;
+    var df = L.dfh(s), di = L.dfi(s), pid = s.procs.length ? s.procs[0].pid : L.PID;
+    var common = { fs: fsName(s), size: size(df.size), used: size(df.used), pct: df.pct, avail: size(df.avail), pid: pid,
+      ipct: di.pct, ifree: fmt(di.free), inodes: fmt(di.inodes), iused: fmt(di.used), max: fmt(s.fs.maxicount || 0) };
+    var a = s.action;
+    if (!a) {
+      if (scene(p) === 'obrisana') return tt(p.holdOpen ? 'capStartObrisana' : 'capStartObrisanaClosed', common);
+      return tt(s.fs.type === 'xfs' ? 'capStartInodiXfs' : 'capStartInodi', Object.assign({}, common, { size: fileSizeText(p.fileSize) }));
+    }
+    switch (a.op) {
+      case 'write':
+        return ev.err ? tt('capWriteFull', Object.assign({}, common, { got: size(ev.wrote) }))
+          : tt(s.fs.type === 'xfs' ? 'capWriteXfs' : 'capWrite', Object.assign({}, common, { mib: fmt(a.bytes / L.MIB) }));
+      case 'fill': {
+        var v = Object.assign({}, common, { files: t.n('files', ev.made || 0, { n: fmt(ev.made || 0) }), size: fileSizeText(p.fileSize),
+          per: t.n('perBlocks', Math.ceil(p.fileSize / L.BLOCK), { n: Math.ceil(p.fileSize / L.BLOCK) }) });
+        if (s.fs.type === 'xfs' && ev.cause === 'inodes') return tt('capFillXfsCap', v);
+        if (s.fs.type === 'xfs' && ev.made > 65524) return tt('capFillXfs', v);
+        return tt(ev.cause === 'inodes' ? 'capFillInodes' : 'capFillBlocks', v);
+      }
+      case 'touch':
+        if (!ev.err) return tt('capTouchOk', common);
+        return tt(ev.cause === 'inodes' && df.avail > 0 ? 'capTouchFail' : 'capTouchFailBlocks', common);
+      case 'rm':
+        return ev.free && ev.free.what === 'postponed' ? tt('capRmHeld', common)
+          : tt('capRmFreed', Object.assign({}, common, { size: size(ev.free ? ev.free.blocks : 0) }));
+      case 'dfdu':
+        return L.heldBlocks(s) > 0 ? tt('capDfDuHeld', Object.assign({}, common, { du: size(s.checks.du.blocks) }))
+          : tt('capDfDuAgree', Object.assign({}, common, { du: size(s.checks.du.blocks) }));
+      case 'dfh':
+        if (!s.failed) return tt('capDfhOk', common);
+        return tt(df.avail > 0 ? 'capDfhFree' : 'capDfhFull', common);
+      case 'dfi': {
+        if (di.free === 0) {
+          var prior = s.checks.dfh ? s.checks.dfh.pct : df.pct;
+          return tt('capDfiInodes', Object.assign({}, common, { pct: prior }));
+        }
+        if (s.fs.type === 'xfs' && df.avail === 0) return tt('capDfiXfs', common);
+        return tt('capDfiOther', common);
+      }
+      case 'lsof': {
+        var held = L.heldBlocks(s);
+        return held ? tt('capLsofHeld', Object.assign({}, common, { size: size(held) })) : tt('capLsofNone', common);
+      }
+      case 'restart':
+        return ev.free.blocks ? tt('capRestartFreed', Object.assign({}, common, { size: size(ev.free.blocks) }))
+          : tt('capRestartNone', common);
+      case 'rmr':
+        return tt('capRmr', Object.assign({}, common, { inodes: fmt(ev.free.inodes), size: size(ev.free.blocks) }));
+    }
+    return '';
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['obrisana', t('sceneObrisana')], ['inodi', t('sceneInodi')], ['inodi-kratko', t('sceneKratko')]],
+        visible: function () { return false; } },
+      { key: 'fstype', type: 'choice', label: t('fstype'), options: [['ext4', t('optExt4')], ['xfs', t('optXfs')]] },
+      { key: 'fileSize', type: 'choice', label: t('fileSize'),
+        options: [[0, t('size0')], [1, t('size1')], [4096, t('size4k')], [16384, t('size16k')]],
+        disabled: function (p) { return scene(p) === 'obrisana' ? t('fileSizeOff') : false; } },
+      { key: 'holdOpen', type: 'toggle', label: t('holdOpen'), hint: t('holdOpenHint'),
+        disabled: function (p) { return scene(p) !== 'obrisana' ? t('holdOpenOff') : false; } }
+    ],
+
+    presets: [
+      { id: 'obrisana-otvorena', label: t('presetObrisana'), params: { scene: 'obrisana', fstype: 'ext4', holdOpen: true }, hint: t('presetObrisanaHint') },
+      { id: 'inodi', label: t('presetInodi'), params: { scene: 'inodi', fstype: 'ext4', fileSize: 1 }, hint: t('presetInodiHint') },
+      { id: 'inodi-prazne', label: t('presetPrazne'), params: { scene: 'inodi-kratko', fstype: 'ext4', fileSize: 0 }, hint: t('presetPrazneHint') },
+      { id: 'xfs', label: t('presetXfs'), params: { scene: 'inodi-kratko', fstype: 'xfs', fileSize: 1 }, hint: t('presetXfsHint') }
+    ],
+
+    legend: [
+      { shape: 'df-blocks', label: t('legendBlocks') },
+      { shape: 'df-inodes', label: t('legendInodes') },
+      { shape: 'df-held', label: t('legendDeleted') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, ev = s.lastEvent;
+      var root = h('div', { class: 'df' },
+        blocksGauge(s, ev), inodesGauge(s, ev),
+        tree(s), procs(s),
+        h('div', { class: 'df-foot' }, term(s, c.params), trail(s)));
+      if (c.dir === 'forward') root.querySelectorAll('.sd-changed').forEach(function (n) { n.classList.add('sd-anim-in'); });
+      c.stage.replaceChildren(root);
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
