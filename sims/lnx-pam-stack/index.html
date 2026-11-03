@@ -1,0 +1,471 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-pam-stack: the PAM stack. A stepper drawn in HTML: the login attempt on top, the auth lines in the middle (kit
+     view K4 with the page's own marks: control flags are not one of the view's modes, docs/sim-ui.md §12), the outcome
+     under them. Lines are reordered by dragging a row (or the panel's buttons) and their result forced in the panel;
+     both are params. Rules: SPEC.md; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="lnx-pam-stack">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAM: kontrolne oznake odlučuju o prijavi · simdeck</title>
+<meta name="description" content="Presloži stog auth, prisili module da padnu i prati prijavu redak po redak: ne odlučuje prvi pogodak, oznake se slažu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json (the build replaces it). -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-pam-stack",
+  "title": {
+    "hr": "PAM: kontrolne oznake odlučuju o prijavi",
+    "en": "PAM: control flags decide a login"
+  },
+  "concept": {
+    "hr": "required, requisite, sufficient i optional zajedno odlučuju o prijavi",
+    "en": "required, requisite, sufficient and optional together decide a login"
+  },
+  "summary": {
+    "hr": "Presloži stog auth, prisili module da padnu i prati prijavu redak po redak: ne odlučuje prvi pogodak, oznake se slažu.",
+    "en": "Reorder the auth stack, make modules fail and step a login line by line: not first match, the flags add up."
+  },
+  "tags": [
+    "authentication"
+  ],
+  "class": "stepper",
+  "steps": 3,
+  "entries": [
+    {
+      "preset": "required-then-sufficient"
+    },
+    {
+      "preset": "permit-first"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-pam-stack"]; colours only from kit tokens.
+   A module's result is a symbol and a word (✓ uspjeh, ✕ neuspjeh, – ignore); what its flag did is the K4 mark
+   (– ignored, ▷ counts, ▶ decides, ▽ success ignored with the result struck, hatched: not run); the line where the stack
+   returns has a thick bar under it and a ■ note; the outcome is ✓ (solid --ok) or ✕ (double --danger). */
+[data-sim="lnx-pam-stack"] .ps {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.6cqh;
+  height: 100%;
+  padding: 1.6cqh 1.4cqw;
+  font-size: 1.3rem;
+  line-height: 1.3;
+}
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (same in lnx-access-decision and amdahl). */
+[data-sim="lnx-pam-stack"] .sd-ctl[hidden] { display: none; }
+[data-sim="lnx-pam-stack"] [translate="no"] { font-family: var(--mono); }
+[data-sim="lnx-pam-stack"] h3 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; }
+[data-sim="lnx-pam-stack"] .ps-box {
+  min-width: 0;
+  padding: 0.5rem 0.8rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-pam-stack"] .ps-muted { color: var(--muted); }
+[data-sim="lnx-pam-stack"] .ps-small { font-size: var(--fs-sm); }
+
+/* the attempt */
+[data-sim="lnx-pam-stack"] .ps-attempt { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; }
+[data-sim="lnx-pam-stack"] .ps-attempt h3 { margin: 0; }
+[data-sim="lnx-pam-stack"] .ps-user { font-family: var(--mono); font-weight: 700; font-size: 1.35em; }
+[data-sim="lnx-pam-stack"] .ps-chip {
+  display: inline-flex; align-items: baseline; gap: 0.3rem;
+  padding: 0.1rem 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="lnx-pam-stack"] .ps-chip[data-v='bad'] { border: 0.2rem dashed var(--ink); font-weight: 700; }
+
+/* the table */
+[data-sim="lnx-pam-stack"] .ps-table { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+[data-sim="lnx-pam-stack"] .ps-table .sd-rt { flex: 0 1 auto; min-height: 0; }
+[data-sim="lnx-pam-stack"] .ps-table .sd-rt-table { font-size: 1em; }
+[data-sim="lnx-pam-stack"] .ps-table .sd-rt-table td { padding-top: 0.12rem; padding-bottom: 0.12rem; }
+[data-sim="lnx-pam-stack"] .ps-table tbody tr[data-line] { cursor: grab; touch-action: none; user-select: none; }
+[data-sim="lnx-pam-stack"] .ps-grip { color: var(--muted); margin-right: 0.35rem; font-weight: 400; }
+/* the editable cells: a dashed box that turns solid on hover; keyboard focus keeps the kit's ring */
+[data-sim="lnx-pam-stack"] .ps-edit {
+  font: inherit; color: inherit; cursor: pointer;
+  min-height: 2.2rem; padding: 0 0.45rem; line-height: 1.15;
+  border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); background: transparent;
+}
+[data-sim="lnx-pam-stack"] .ps-edit:hover { border-style: solid; border-color: var(--ink); }
+[data-sim="lnx-pam-stack"] .ps-res[data-r='wait'], [data-sim="lnx-pam-stack"] .ps-res[data-wait][data-r] { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-pam-stack"] .ps-table tr[data-drop='before'] td:not(.sd-rt-ptr) { box-shadow: inset 0 0.3rem 0 var(--accent); }
+[data-sim="lnx-pam-stack"] .ps-table tr[data-drop='after'] td:not(.sd-rt-ptr) { box-shadow: inset 0 -0.3rem 0 var(--accent); }
+[data-sim="lnx-pam-stack"] .ps-table tr[data-dragging] td:not(.sd-rt-ptr) { opacity: 0.55; }
+/* the line where the stack returns: a thick bar under it */
+[data-sim="lnx-pam-stack"] .ps-table tr[data-stop] td:not(.sd-rt-ptr) { border-bottom: 0.45rem solid var(--ink); }
+/* after a return the implicit end row is never reached: hatched like a line that did not run */
+[data-sim="lnx-pam-stack"] .ps-returned tr.sd-rt-implicit td:not(.sd-rt-ptr) {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 18%, transparent) 0.35em 0.5em);
+}
+[data-sim="lnx-pam-stack"] .ps-res { white-space: nowrap; }
+[data-sim="lnx-pam-stack"] .ps-res[data-r='success'] { color: var(--ok); }
+[data-sim="lnx-pam-stack"] .ps-res[data-r='fail'] { color: var(--danger); }
+[data-sim="lnx-pam-stack"] .ps-res[data-r='ignore'] { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-pam-stack"] .sd-changed .ps-res { color: var(--on-hl); }
+[data-sim="lnx-pam-stack"] .ps-sofar { display: inline-block; padding: 0 0.3rem; border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="lnx-pam-stack"] .ps-sofar[data-v='fail'] { font-weight: 700; color: var(--danger); }
+[data-sim="lnx-pam-stack"] .ps-sofar[data-v='ok'] { font-weight: 700; color: var(--ok); }
+[data-sim="lnx-pam-stack"] .ps-sofar[data-v='none'] { color: var(--muted); }
+[data-sim="lnx-pam-stack"] .ps-sofar.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* the outcome and the contrast */
+[data-sim="lnx-pam-stack"] .ps-low { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 1.4cqw; }
+[data-sim="lnx-pam-stack"] .ps-out { border-width: 0.22rem; border-style: dashed; }
+[data-sim="lnx-pam-stack"] .ps-out[data-v='ok'] { border-style: solid; border-color: var(--ok); }
+[data-sim="lnx-pam-stack"] .ps-out[data-v='fail'] { border-style: double; border-width: 0.45rem; border-color: var(--danger); }
+[data-sim="lnx-pam-stack"] .ps-out.sd-changed { outline: 0.3rem solid var(--hl); outline-offset: 0.1rem; }
+[data-sim="lnx-pam-stack"] .ps-out-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1rem; }
+[data-sim="lnx-pam-stack"] .ps-out-row h3 { margin: 0; }
+[data-sim="lnx-pam-stack"] .ps-big { font-size: 1.4em; font-weight: 700; }
+[data-sim="lnx-pam-stack"] .ps-out[data-v='ok'] .ps-big { color: var(--ok); }
+[data-sim="lnx-pam-stack"] .ps-out[data-v='fail'] .ps-big { color: var(--danger); }
+[data-sim="lnx-pam-stack"] .ps-out[data-v='wait'] .ps-big { color: var(--muted); }
+[data-sim="lnx-pam-stack"] .ps-notes { display: flex; flex-direction: column; justify-content: center; gap: 0.5rem; }
+[data-sim="lnx-pam-stack"] .ps-note { margin: 0; color: var(--muted); font-size: var(--fs-sm); font-style: italic; }
+[data-sim="lnx-pam-stack"] .ps-howto { font-style: normal; color: var(--ink); }
+
+/* legend swatches: a module's result, the stop bar */
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape^='ps-'] { position: relative; background: var(--bg); }
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape^='ps-']::after {
+  position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1;
+}
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape='ps-ok']::after { content: '✓'; color: var(--ok); }
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape='ps-fail']::after { content: '✕'; color: var(--danger); }
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape='ps-stop'] { border-bottom: 0.4rem solid var(--ink); }
+[data-sim="lnx-pam-stack"] .sd-swatch[data-shape='ps-stop']::after { content: '■'; color: var(--ink); font-size: 0.6em; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-pam-stack"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-pam-stack"] .ps { height: auto; padding: 0.5rem; gap: 0.6rem; font-size: 1rem; }
+  [data-sim="lnx-pam-stack"] .ps-low { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">PAM: kontrolne oznake odlučuju o prijavi</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var ctl = null;   // the controller, once mounted (row drag and click set params through it)
+
+  var PRESET_LABEL = {
+    'unix-then-sss': 'pUnixSss', 'required-runs-on': 'pRunsOn', 'requisite-stops': 'pRequisite',
+    'deny-too-early': 'pDenyEarly', 'permit-first': 'pPermitFirst', 'required-then-sufficient': 'pReqSuff'
+  };
+  var RES_SYM = { success: '✓', fail: '✕', ignore: '–' };
+
+  /** Data (modules, flags, users) is not language: the word check skips translate="no". */
+  function code(s) { return h('code', { translate: 'no' }, String(s)); }
+  function data(s, cls) { return h('span', Object.assign({ translate: 'no' }, cls ? { class: cls } : {}), String(s)); }
+
+  var FORCE_NEXT = { auto: 'fail', fail: 'success', success: 'auto' };
+  var focusAfter = null;   // a stage button to focus again after the re-render (keyboard use)
+
+  /** A button on the stage: it never takes focus on a click (so the clicker's → still steps), Enter works, and
+      Alt + ↑/↓ moves its line. */
+  function stageBtn(key, line, label, body, run) {
+    return h('button', { type: 'button', class: 'ps-edit', dataset: { focus: key }, 'aria-label': label,
+      onmousedown: function (e) { e.preventDefault(); },
+      onclick: function (e) { if (e.detail === 0) focusAfter = key; run(); },
+      onkeydown: function (e) {
+        if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !ctl) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var to = line + (e.key === 'ArrowUp' ? -1 : 1);
+        if (to < 0 || to >= L.slotsOf(ctl.params).length) return;
+        focusAfter = key.split(':')[0] + ':' + to;
+        ctl.set(L.movePatch(ctl.params, line, to));
+      } }, body);
+  }
+  function slotOfLine(i) { return L.slotsOf(ctl.params)[i]; }
+  function cycleFlag(i) {
+    var k = slotOfLine(i), f = ctl.params['f' + k];
+    ctl.set(kv('f' + k, L.FLAGS[(L.FLAGS.indexOf(f) + 1) % L.FLAGS.length]));
+  }
+  function cycleForce(i) { var k = slotOfLine(i); ctl.set(kv('x' + k, FORCE_NEXT[ctl.params['x' + k]] || 'auto')); }
+  function kv(k, v) { var o = {}; o[k] = v; return o; }
+
+  // ── the attempt ──
+  function attemptBox(s) {
+    var a = s.attempt;
+    var kind = a.root ? t('kindRoot') : a.kind === 'sss' ? t('kindSss') : t('kindLocal');
+    return h('section', { class: 'ps-box ps-attempt' },
+      h('h3', null, t('attemptTitle')),
+      h('span', { class: 'ps-user', translate: 'no' }, a.user),
+      h('span', { class: 'ps-muted' }, kind),
+      h('span', { class: 'ps-chip', dataset: { v: a.passwordOk ? 'ok' : 'bad' } }, a.passwordOk ? '✓ ' + t('pwOk') : '✕ ' + t('pwBad')),
+      h('span', { class: 'ps-chip', dataset: { v: a.nologin ? 'bad' : 'ok' } }, t(a.nologin ? 'nologinOn' : 'nologinOff')));
+  }
+
+  // ── the table (K4 with the page's own marks) ──
+  function markOf(s, i) {
+    var l = s.lines[i];
+    if (!l.ran) return l.skipped ? 'skip' : 'pending';
+    if (s.final && s.final.by === i) return 'win';
+    // while stepping: the line that returned decides (a requisite that keeps an earlier failure only counts)
+    if (!s.final && s.returnedAt === i && (l.effect === 'returns-ok' || l.effect === 'sets-fail')) return 'win';
+    if (l.effect === 'ignored' || l.effect === 'fail-ignored') return 'no';
+    if (l.effect === 'ok-ignored') return 'beaten';
+    // at the verdict, a success that a later failure overruled is set aside too
+    if (s.final && !s.final.ok && (l.effect === 'sets-ok' || l.effect === 'adds-ok')) return 'beaten';
+    return 'hit';
+  }
+
+  function resultNode(l, i) {
+    var r = l.result != null ? l.result : l.force !== 'auto' ? l.force : null;
+    var body = r == null ? h('span', { class: 'ps-res', dataset: { r: 'wait' }, 'aria-hidden': 'true' }, '…')
+      : h('span', { class: 'ps-res', dataset: l.result == null ? { r: r, wait: '' } : { r: r } }, RES_SYM[r] + ' ', t('res_' + r));
+    var label = t('resBtn', { n: i + 1, v: t(l.force === 'auto' ? 'forceAuto' : l.force === 'fail' ? 'forceFail' : 'forceOk') });
+    return stageBtn('res:' + i, i, label, body, function () { cycleForce(i); });
+  }
+
+  function soFarNode(s, c, i) {
+    var l = s.lines[i];
+    if (!l.ran) return '';
+    var prevV = i > 0 ? s.lines[i - 1] : null;
+    var changed = i === s.i && (!prevV ? l.verdict !== 'none' : prevV.verdict !== l.verdict || prevV.by !== l.by);
+    var txt = l.verdict === 'none' ? t('soFarNone') : (l.verdict === 'ok' ? '✓ ' : '✕ ') + t(l.verdict === 'ok' ? 'soFarOk' : 'soFarFail', { n: l.by + 1 });
+    return h('span', { class: 'ps-sofar' + (changed ? ' sd-changed' : ''), dataset: { v: l.verdict } }, txt);
+  }
+
+  function stackTable(s, c) {
+    var n = s.lines.length;
+    var at = s.phase === 'line' ? s.i : s.phase === 'verdict' && s.final.how === 'end-none' ? n : -1;
+    var table = RT({
+      dir: c.dir,
+      mode: 'first',
+      title: t('tableTitle'),
+      noLabel: t('colNo'),
+      columns: [{ key: 'flag', label: t('colFlag') }, { key: 'module', label: t('colModule') }],
+      actionLabel: t('colResult'),
+      extra: [{ key: 'sofar', label: t('colSoFar') }],
+      markLabel: t('colMark'),
+      rows: s.lines.map(function (l, i) {
+        var tags = [];
+        if (l.force !== 'auto') tags.push({ k: 'dashed', text: t('forcedTag') });
+        return {
+          no: h('span', null, h('span', { class: 'ps-grip', 'aria-hidden': 'true' }, '⠿'), data(i + 1)),
+          tags: tags,
+          cells: {
+            flag: stageBtn('flag:' + i, i, t('flagBtn', { n: i + 1, f: l.flag }), h('span', { translate: 'no' }, l.flag), function () { cycleFlag(i); }),
+            module: l.module, sofar: soFarNode(s, c, i) },
+          action: resultNode(l, i),
+          hit: null,
+          mark: markOf(s, i),
+          note: s.returnedAt === i ? [{ k: 'dashed', text: t('stopNote') }] : null
+        };
+      }),
+      implicit: { text: t('implicitText'), action: RT.verdict(false, t('implicitAction')), effect: 'deny' },
+      at: at,
+      subject: { mark: s.attempt.user, c: 1 },
+      done: s.phase === 'verdict',
+      outcome: function () { return RT.verdict(s.final.ok, t(s.final.ok ? 'outOk' : 'outFail')); },
+      words: { hit: t('markHit'), win: t('markWin'), beaten: t('markBeaten'), skip: t('markSkip') },
+      changed: at >= 0,
+      stickyMark: true,
+      className: s.returnedAt != null ? 'ps-returned' : null
+    });
+    var rows = table.querySelectorAll('tbody tr:not(.sd-rt-implicit)');
+    Array.prototype.forEach.call(rows, function (tr, i) {
+      tr.dataset.line = String(i);
+      if (s.returnedAt === i) tr.dataset.stop = '';
+      wireRow(tr, i, rows);
+    });
+    return h('div', { class: 'ps-table' }, table);
+  }
+
+  // ── reorder by drag (a page action recorded into params) ──
+  function wireRow(tr, i, rows) {
+    tr.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || !ctl || e.target.closest('button')) return;
+      var startY = e.clientY, dragging = false, target = i;
+      try { tr.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
+      function clear() { Array.prototype.forEach.call(rows, function (r) { delete r.dataset.drop; delete r.dataset.dragging; }); }
+      function move(ev) {
+        if (!dragging && Math.abs(ev.clientY - startY) < 8) return;
+        dragging = true;
+        // ins: where the row would be inserted (0…n, by row midpoints); target: its index once moved
+        var ins = 0;
+        Array.prototype.forEach.call(rows, function (r) { var b = r.getBoundingClientRect(); if (ev.clientY > b.top + b.height / 2) ins++; });
+        target = ins > i ? ins - 1 : ins;
+        clear();
+        tr.dataset.dragging = '';
+        if (target < i) rows[ins].dataset.drop = 'before';
+        else if (target > i) rows[ins - 1].dataset.drop = 'after';
+      }
+      function up() {
+        tr.removeEventListener('pointermove', move);
+        tr.removeEventListener('pointerup', up);
+        tr.removeEventListener('pointercancel', cancel);
+        clear();
+        if (dragging && target !== i) ctl.set(L.movePatch(ctl.params, i, target));
+      }
+      function cancel() { dragging = false; target = i; up(); }
+      tr.addEventListener('pointermove', move);
+      tr.addEventListener('pointerup', up);
+      tr.addEventListener('pointercancel', cancel);
+    });
+  }
+
+  // ── the outcome ──
+  function outcomeBox(s, c) {
+    var f = s.final;
+    var v = f ? (f.ok ? 'ok' : 'fail') : 'wait';
+    var ran = s.lines.filter(function (l) { return l.ran; }).length;
+    var body = [h('div', { class: 'ps-out-row' },
+      h('h3', null, t('outTitle')),
+      h('span', { class: 'ps-big' }, f ? (f.ok ? '✓ ' : '✕ ') : '… ', t(f ? (f.ok ? 'outOk' : 'outFail') : 'outWait')))];
+    var facts = [h('span', { class: 'ps-muted' }, t.n('outRan', ran, { m: s.lines.length }))];
+    if (f) {
+      var d = f.by != null ? s.lines[f.by] : null;
+      facts.unshift(d ? h('span', null, t('outBy', { n: f.by + 1 }), ' ', code(d.flag + ' ' + d.module)) : h('span', null, t('outByNone')));
+      facts.push(h('span', { class: 'ps-muted' }, f.at != null ? t('outReturned', { n: f.at + 1 }) : t('outEnd')));
+    }
+    body.push(h('div', { class: 'ps-out-row' }, facts));
+    return h('section', { class: 'ps-box ps-out' + (s.changed.indexOf('final') >= 0 ? ' sd-changed' : ''), dataset: { v: v } }, body);
+  }
+
+  // ── captions: the sentence and its data come from the model (captionOf) ──
+  var PLAIN = { line: 1, first: 1, rline: 1, n: 1 };
+  /** Backticks in a string mark code; they may wrap placeholders (already code nodes), so the state carries over. */
+  function rich(parts) {
+    var out = [], inCode = false;
+    (Array.isArray(parts) ? parts : [parts]).forEach(function (q) {
+      var txt = typeof q === 'string' ? q : q.nodeType === 3 ? q.textContent : null;
+      if (txt == null) { out.push(q); return; }
+      txt.split('`').forEach(function (bit, i) {
+        if (i > 0) inCode = !inCode;
+        if (bit) out.push(inCode ? code(bit) : bit);
+      });
+    });
+    return out;
+  }
+  function said(key, raw) {
+    var vars = {};
+    Object.keys(raw).forEach(function (k) {
+      var v = raw[k];
+      vars[k] = typeof v === 'number' ? v : typeof v === 'string' ? (PLAIN[k] ? v : code(v)) : t(v.t);
+    });
+    return rich(t.parts(key, vars));
+  }
+  function caption(c) {
+    var cap = L.captionOf(c.state);
+    var out = said(cap.key, cap.vars);
+    if (cap.effect) out = out.concat(' ', said(cap.effect.key, cap.effect.vars));
+    cap.extra.forEach(function (x) {
+      out.push(' ');
+      out = out.concat(x.vars.n != null ? rich(t.n(x.key, x.vars.n)) : rich(t(x.key)));
+    });
+    return out;
+  }
+
+  // ── the stage ──
+  function render(c) {
+    var s = c.state;
+    var low = h('div', { class: 'ps-low' }, outcomeBox(s, c),
+      h('div', { class: 'ps-notes' }, h('p', { class: 'ps-note ps-howto' }, t('hintEdit')), h('p', { class: 'ps-note' }, t('outNotFirst'))));
+    c.stage.replaceChildren(h('div', { class: 'ps' }, attemptBox(s), stackTable(s, c), low));
+    if (focusAfter) {
+      var el = c.stage.querySelector('[data-focus="' + focusAfter + '"]');
+      focusAfter = null;
+      if (el) el.focus();
+    }
+  }
+
+  // ── params: the attempt in the panel; the stack (modules, flags, forced results in slots 1…5) is edited on the stage
+  //    and kept as hidden params, so presets, reset and the URL carry it ──
+  var params = [
+    { key: 'user', type: 'choice', label: t('user'), resets: true,
+      options: [['ana', t('uAna')], ['ivan', t('uIvan')], ['root', t('uRoot')]] },
+    { key: 'password', type: 'toggle', label: t('password'), resets: true },
+    { key: 'nologin', type: 'toggle', label: t('nologin'), resets: true }
+  ];
+  for (var k = 1; k <= L.SLOTS; k++) {
+    (function (k) {
+      var hidden = function () { return false; };
+      params.push({ key: 'm' + k, type: 'select', label: t('module'), resets: true, visible: hidden,
+        options: [['-', '–']].concat(L.MODULES.map(function (m) { return [m, m]; })) });
+      params.push({ key: 'f' + k, type: 'choice', label: t('flag'), resets: true, visible: hidden,
+        options: L.FLAGS.map(function (f) { return [f, t('fl_' + f)]; }) });
+      params.push({ key: 'x' + k, type: 'choice', label: t('force'), resets: true, visible: hidden,
+        options: [['auto', t('forceAuto')], ['success', t('forceOk')], ['fail', t('forceFail')]] });
+    })(k);
+  }
+
+  ctl = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: params,
+    presets: L.PRESETS.map(function (pr) { return { id: pr.id, label: t(PRESET_LABEL[pr.id]), params: L.presetParams(pr.id) }; }),
+    legend: [
+      { shape: 'ps-ok', label: t('legOk') },
+      { shape: 'ps-fail', label: t('legFail') },
+      { shape: 'rt-no', label: t('legIgnored') },
+      { shape: 'rt-hit', label: t('legCounts') },
+      { shape: 'rt-win', label: t('legDecides') },
+      { shape: 'rt-beaten', label: t('legBeaten') },
+      { shape: 'ps-stop', label: t('legStop') },
+      { shape: 'rt-skip', label: t('legSkip') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
