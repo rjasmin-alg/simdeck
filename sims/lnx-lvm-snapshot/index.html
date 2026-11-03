@@ -1,0 +1,360 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-lvm-snapshot: a classic LVM snapshot of lv_data. Rows of one K3 block grid (kit/blockgrid.js): the origin's 16
+     chunks, the snapshot's copy-on-write area (cap slots), the snapshot as a reader sees it, and the VG's free space.
+     Each step is one write (to the origin or the snapshot) or one read of the snapshot. Model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="lnx-lvm-snapshot">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LVM snimka se puni · simdeck</title>
+<meta name="description" content="Piši u izvorni volumen i gledaj kako se područje snimke puni: prvo pisanje u komad troši mjesto, ponovno ne. Kad ponestane mjesta, snimka je izgubljena.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-lvm-snapshot",
+  "title": {
+    "hr": "LVM snimka se puni",
+    "en": "An LVM snapshot filling up"
+  },
+  "concept": {
+    "hr": "Područje kopiranja pri pisanju i nevaljana snimka kad se napuni",
+    "en": "Copy-on-write snapshot space, and invalidation when full"
+  },
+  "summary": {
+    "hr": "Piši u izvorni volumen i gledaj kako se područje snimke puni: prvo pisanje u komad troši mjesto, ponovno ne. Kad ponestane mjesta, snimka je izgubljena.",
+    "en": "Write to the origin and watch the snapshot area fill: a chunk's first write takes a slot, later ones don't. When it runs out, the snapshot is lost."
+  },
+  "tags": [
+    "lvm",
+    "snapshots"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-lvm-snapshot"]; colours only from kit tokens.
+   Layout: one kit block grid (K3): origin, CoW area, reader view, VG free; under it the lvs lines, the Data% meter
+   and the next I/O of the script. */
+[data-sim="lnx-lvm-snapshot"] .ls {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-lvm-snapshot"] .ls .sd-bg-grid { --bg-row-gap: 1.3rem; }
+[data-sim="lnx-lvm-snapshot"] .sd-bg-label > * { position: relative; padding: 0.1rem 0.2rem; background: var(--panel); }
+/* the asides keep one width, so the cells do not shift when "invalid" replaces "2 of 4" */
+[data-sim="lnx-lvm-snapshot"] .ls .sd-bg-aside { min-width: 14.5rem; }
+[data-sim="lnx-lvm-snapshot"] .ls-role { color: var(--muted); white-space: nowrap; }
+[data-sim="lnx-lvm-snapshot"] .ls-bad { color: var(--danger); font-weight: 700; white-space: nowrap; }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-lvm-snapshot"] .sd-ctl[hidden] { display: none; }
+/* legend: a free slot (no kind: the page colour, a hairline edge) */
+[data-sim="lnx-lvm-snapshot"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
+
+/* foot: the lvs lines, the meter, the next I/O */
+[data-sim="lnx-lvm-snapshot"] .ls-foot { display: flex; flex-wrap: wrap; gap: 0.6rem 2.4rem; align-items: center; }
+[data-sim="lnx-lvm-snapshot"] .ls-lvs { margin: 0; font-family: var(--mono); font-size: var(--fs-md); line-height: 1.35; }
+[data-sim="lnx-lvm-snapshot"] .ls-lvs .ls-head { color: var(--muted); }
+[data-sim="lnx-lvm-snapshot"] .ls-lvs .ls-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
+[data-sim="lnx-lvm-snapshot"] .ls-lvs .ls-inv { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-lvm-snapshot"] .ls-side { display: flex; flex-direction: column; gap: 0.5rem; min-width: 18rem; flex: 1 1 18rem; }
+[data-sim="lnx-lvm-snapshot"] .ls-next { font-size: var(--fs-md); }
+[data-sim="lnx-lvm-snapshot"] .ls-next b { margin-right: 0.4rem; }
+[data-sim="lnx-lvm-snapshot"] .ls-note { color: var(--muted); font-size: var(--fs-sm); }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-lvm-snapshot"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-lvm-snapshot"] .ls { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-lvm-snapshot"] .ls .sd-bg-grid { --bg-row-gap: 1rem; }
+  [data-sim="lnx-lvm-snapshot"] .ls-foot { gap: 0.6rem 1rem; }
+  [data-sim="lnx-lvm-snapshot"] .ls-lvs { font-size: var(--fs-sm); overflow-x: auto; max-width: 100%; }
+  [data-sim="lnx-lvm-snapshot"] .ls-side { min-width: 0; }
+  [data-sim="lnx-lvm-snapshot"] .ls .sd-bg-aside { min-width: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">LVM snimka se puni</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C_ORIGIN = 1;     // series colour of the origin's chunks
+  var C_SNAP = 2;       // series colour of what the snapshot holds (saved: hatched; its own: solid)
+
+  /** Data (LV names, chunk labels, lvs output) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+  function label(chunk, ver) { return chunk + ver; }
+  /** A percentage for a caption: whole numbers bare, else two decimals with the language's decimal mark. */
+  function pct(v) {
+    var r = Math.round(v * 100) / 100;
+    var s = r === Math.round(r) ? String(Math.round(r)) : r.toFixed(2).replace('.', t('dec'));
+    return t('pct', { p: s });
+  }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary
+      lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+  function term(key) { return h('span', null, rich(key)); }
+  function idx(chunk) { return L.CHUNKS.indexOf(chunk); }
+
+  // ── stage ──
+
+  function render(c) {
+    var s = c.state, p = c.params, o = L.norm(p), ev = s.ev, prev = c.prev;
+    var writeOrigin = ev && ev.op === 'write' && ev.target === 'origin';
+    var newSlots = prev && s.cap > prev.cap ? { from: prev.cap, to: s.cap } : null;
+
+    var origin = s.origin.map(function (x) {
+      return { text: label(x.id, x.ver), kind: 'fill', c: C_ORIGIN, now: !!(writeOrigin && ev.chunk === x.id) };
+    });
+
+    var cow = [];
+    for (var k = 0; k < s.cap; k++) {
+      var slot = s.cow[k];
+      var now = !!(ev && ev.slot === k) || !!(newSlots && k >= newSlots.from);
+      if (!s.valid) cow.push(slot ? { text: label(slot.chunk, slot.ver), kind: 'dead', now: !!(ev && ev.invalidated) } : { kind: 'dead', now: !!(ev && ev.invalidated) });
+      else if (slot) cow.push({ text: label(slot.chunk, slot.ver), kind: slot.src === 'origin' ? 'soft' : 'fill', c: C_SNAP, now: now });
+      else cow.push({ now: now });
+    }
+
+    var reader = L.CHUNKS.split('').map(function (id) {
+      var r = L.readSnap(s, id);
+      var isRead = !!(ev && ev.op === 'read' && ev.chunk === id);
+      if (r.from === 'lost') return { kind: 'bad', now: isRead || !!(ev && ev.invalidated) };
+      if (r.from === 'cow') return { text: label(id, r.ver), kind: r.src === 'origin' ? 'soft' : 'fill', c: C_SNAP, sub: '#' + (r.slot + 1), now: isRead || !!(ev && ev.slot === r.slot) };
+      return { text: label(id, r.ver), kind: 'ghost', sub: '↑', now: isRead };
+    });
+
+    var vg = [];
+    for (var v = 0; v < s.vgFree; v++) vg.push({});
+    if (!vg.length) vg.push(null);
+
+    var used = s.cow.length;
+    var rows = [
+      { id: 'origin', label: L.ORIGIN, aside: h('span', { class: 'ls-role' }, t('roleOrigin')), cells: origin },
+      { id: 'cow', label: L.SNAP, cells: cow,
+        aside: s.valid ? h('span', { class: 'ls-role' }, t('roleCow', { used: used, cap: s.cap })) : h('span', { class: 'ls-bad' }, '✕ ' + t('roleCowLost')) },
+      { id: 'reader', label: h('span', null, t('rowReader')), cells: reader,
+        aside: s.valid ? h('span', { class: 'ls-role' }, t('roleReader')) : h('span', { class: 'ls-bad' }, '✕ ' + t('roleReaderLost')) },
+      { id: 'vg', label: h('span', null, t('rowVg')), cells: vg,
+        aside: h('span', { class: 'ls-role' }, s.vgFree ? t.n('roleVg', s.vgFree) : t('roleVgNone')) }
+    ];
+
+    var links = [];
+    if (ev && writeOrigin && ev.saved !== null) links.push({ from: { row: 'origin', cell: idx(ev.chunk) }, to: { row: 'cow', cell: ev.slot }, now: true });
+    if (ev && ev.op === 'read' && ev.read.from === 'cow') links.push({ from: { row: 'cow', cell: ev.read.slot }, to: { row: 'reader', cell: idx(ev.chunk) }, now: true });
+    if (ev && ev.op === 'read' && ev.read.from === 'origin') links.push({ from: { row: 'origin', cell: idx(ev.chunk) }, to: { row: 'reader', cell: idx(ev.chunk) }, now: true });
+    if (ev && ev.op === 'read' && ev.read.from === 'lost') links.push({ from: { row: 'cow' }, to: { row: 'reader', cell: idx(ev.chunk) }, broken: true });
+
+    var changedPct = !prev || L.pctText(L.dataPct(prev)) !== L.pctText(L.dataPct(s)) || prev.valid !== s.valid;
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: h('span', null, t('gridTitle'), ' ', data(L.VG)),
+      meta: [t.n('chunksOf', L.CHUNKS.length), t('slotNote')],
+      count: { text: h('span', { translate: 'no' }, 'Data% ' + L.pctText(L.dataPct(s))), hl: !!(prev && changedPct) },
+      cols: L.CHUNKS.length,
+      cellHeight: '3rem',
+      rows: rows, links: links,
+      foot: [foot(c, changedPct)]
+    });
+    c.stage.replaceChildren(h('div', { class: 'ls' }, grid));
+  }
+
+  function foot(c, changedPct) {
+    var s = c.state, p = c.params, o = L.norm(p), prev = c.prev;
+    var col = function (x, n) { x = String(x); while (x.length < n) x += ' '; return x; };
+    var attr = L.snapAttr(s), dp = L.pctText(L.dataPct(s));
+    var attrNow = prev && L.snapAttr(prev) !== attr;
+    var lvs = h('pre', { class: 'ls-lvs', translate: 'no' },
+      h('span', { class: 'ls-head' }, '  ' + col('LV', 8) + col('VG', 7) + col('Attr', 11) + col('Origin', 8) + 'Data%'), '\n',
+      '  ' + col(L.ORIGIN, 8) + col(L.VG, 7) + col(L.originAttr(), 11), '\n',
+      '  ' + col(L.SNAP, 8) + col(L.VG, 7),
+      h('span', { class: (s.valid ? '' : 'ls-inv ') + (attrNow ? 'ls-now' : '') }, attr), ' ' + col(L.ORIGIN, 8),
+      h('span', { class: prev && changedPct ? 'ls-now' : null }, dp));
+    var parts = [];
+    if (s.valid) {
+      var own = s.cow.filter(function (x) { return x.src === 'snap'; }).length;
+      parts = [{ n: s.cow.length - own, kind: 'soft', c: C_SNAP }, { n: own, kind: 'fill', c: C_SNAP }];
+    } else parts = [{ n: s.cap, kind: 'dead' }];
+    var meter = Simdeck.blockGrid.meter({
+      total: s.cap, parts: parts, label: t('meterLabel'),
+      mark: o.autoextend ? { at: s.cap * o.threshold / 100, label: t('meterTick', { p: pct(o.threshold) }) } : undefined,
+      text: h('span', { translate: 'no' }, dp)
+    });
+    var sc = L.script(p), nx = sc[c.n];
+    var next = h('div', { class: 'ls-next' }, h('b', null, t('next')),
+      nx ? (nx.op === 'read' ? rich('ioRead', { c: data(nx.chunk), lv: data(L.SNAP) })
+        : rich('ioWrite', { c: data(nx.chunk), lv: data(nx.target === 'snap' ? L.SNAP : L.ORIGIN) })) : t('nextNone'));
+    var side = h('div', { class: 'ls-side' }, meter, next,
+      o.autoextend ? h('div', { class: 'ls-note' }, t('ioAuto', { th: o.threshold, pc: o.percent })) : null);
+    return h('div', { class: 'ls-foot' }, h('div', null, lvs, h('div', { class: 'ls-note' }, t('lvsNote'))), side);
+  }
+
+  // ── captions ──
+
+  function capWrite(c) {
+    var s = c.state, prev = c.prev, ev = s.ev, o = L.norm(c.params);
+    var C = data(ev.chunk);
+    var nowOrigin = data(label(ev.chunk, L.originOf(s, ev.chunk).ver));
+    var used = s.cow.length;
+    var base = { c: C, used: used, cap: prev.cap, pct: pct(ev.after) };
+    var out;
+    if (ev.failed) return rich('capAfterSnap', { c: C });
+    if (!prev.valid) return rich('capAfterOrigin', { c: C, now: nowOrigin });
+    if (ev.invalidated) {
+      out = rich('capInvalid', { c: C, k: prev.cap + 1, cap: prev.cap, invalid: t('termInvalid'), attr: data(L.snapAttr(s)) });
+      return out.concat(sp(ev.target === 'origin' ? rich('capInvalidOrigin', { now: nowOrigin }) : rich('capInvalidSnap')));
+    }
+    var slot = s.cow[L.slotOf(s, ev.chunk)];
+    if (ev.target === 'origin') {
+      if (!ev.had) out = rich('capFirst', Object.assign({ old: data(label(ev.chunk, ev.saved)) }, base));
+      else if (slot.src === 'origin') out = rich('capAgain', Object.assign({ now: nowOrigin, old: data(label(ev.chunk, slot.ver)) }, base));
+      else out = rich('capOwnAgain', Object.assign({ now: nowOrigin, old: data(label(ev.chunk, slot.ver)) }, base));
+    } else {
+      if (!ev.had) out = rich('capSnapNew', Object.assign({ new: data(label(ev.chunk, slot.ver)), orig: nowOrigin }, base));
+      else out = rich('capSnapAgain', base);
+    }
+    if (ev.grew) out = out.concat(sp(rich('capGrew', { was: pct(ev.after), th: o.threshold, g: t.n('capSlots', ev.grew), cap: t.n('capSlots', s.cap), pct: pct(ev.final), vg: t.n('capSlots', s.vgFree) })));
+    else if (ev.short) out = out.concat(sp(rich('capShort', { was: pct(ev.after), th: o.threshold, vg: t.n('capSlots', s.vgFree), want: t.n('capSlots', ev.want) })));
+    if (s.valid && used === s.cap) out = out.concat(sp(rich('capFull')));
+    return out;
+  }
+
+  function capRead(c) {
+    var s = c.state, ev = s.ev, r = ev.read, C = data(ev.chunk);
+    if (r.from === 'lost') return rich('capReadLost', { c: C });
+    if (r.from === 'origin') return rich('capReadOrigin', { c: C, ver: data(label(ev.chunk, r.ver)) });
+    if (r.src === 'snap') return rich('capReadOwn', { c: C, ver: data(label(ev.chunk, r.ver)) });
+    return rich('capReadCow', { c: C, ver: data(label(ev.chunk, r.ver)), now: data(label(ev.chunk, L.originOf(s, ev.chunk).ver)) });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['fill-up', t('presetFill')], ['same-chunks', t('presetSame')], ['autoextend', t('presetAuto')],
+          ['snapshot-write', t('presetSnapWrite')], ['backup-window', t('presetBackup')]],
+        visible: function () { return false; } },
+      { key: 'cap', type: 'range', label: t('cap'), min: 2, max: 8, resets: true },
+      { key: 'vgFree', type: 'range', label: t('vgFree'), min: 0, max: 8, resets: true },
+      { key: 'autoextend', type: 'toggle', label: t('autoextend'), resets: true },
+      { key: 'threshold', type: 'range', label: t('threshold'), min: 50, max: 95, step: 5, resets: true,
+        visible: function (p) { return p.autoextend === true; } },
+      { key: 'percent', type: 'range', label: t('percent'), min: 10, max: 100, step: 10, resets: true,
+        visible: function (p) { return p.autoextend === true; } }
+    ],
+
+    presets: [
+      { id: 'fill-up', label: t('presetFill'), params: { scene: 'fill-up', cap: 4, vgFree: 4, autoextend: false }, hint: t('presetFillHint') },
+      { id: 'same-chunks', label: t('presetSame'), params: { scene: 'same-chunks', cap: 4, vgFree: 4, autoextend: false }, hint: t('presetSameHint') },
+      { id: 'autoextend', label: t('presetAuto'), params: { scene: 'autoextend', cap: 4, vgFree: 6, autoextend: true, threshold: 70, percent: 50 }, hint: t('presetAutoHint') },
+      { id: 'snapshot-write', label: t('presetSnapWrite'), params: { scene: 'snapshot-write', cap: 4, vgFree: 4, autoextend: false }, hint: t('presetSnapWriteHint') },
+      { id: 'backup-window', label: t('presetBackup'), params: { scene: 'backup-window', cap: 3, vgFree: 4, autoextend: false }, hint: t('presetBackupHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: C_ORIGIN, label: t('legOrigin') },
+      { shape: 'bg-soft', c: C_SNAP, label: t('legSaved') },
+      { shape: 'bg-fill', c: C_SNAP, label: t('legOwn') },
+      { shape: 'slot', label: t('legFree') },
+      { shape: 'bg-ghost', label: t('legThrough') },
+      { shape: 'bg-dead', label: t('legDead') },
+      { shape: 'bg-link', label: t('legLink') }
+    ],
+
+    render: render,
+
+    caption: function (c) {
+      var s = c.state;
+      if (!s.ev) return rich('capStart', { snap: term('termSnap'), snap0: data(L.SNAP), lv: data(L.ORIGIN),
+        cow: term('termCow'), n: t.n('capSlots', s.cap), pct: pct(0) });
+      return s.ev.op === 'read' ? capRead(c) : capWrite(c);
+    }
+  });
+
+  // A slider at its end changes nothing on a click: the kit blurs a slider only on 'change', and the clicker's → would
+  // then move the slider instead of stepping. Release it after any pointer click (as lnx-cow-filesystem).
+  document.querySelector('[data-sd-controls]').addEventListener('click', function (e) {
+    var el = e.target;
+    if (el.matches && el.matches('input[type="range"]') && e.detail > 0) el.blur();
+  });
+})();
+</script>
+</body>
+</html>
