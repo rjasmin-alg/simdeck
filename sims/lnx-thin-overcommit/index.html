@@ -1,0 +1,395 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-thin-overcommit: promised vs real space; the thin pool fills under everyone. On top, the thin pool as a K3 block
+     grid of 1-GiB cells coloured by the thin volume that owns each (autoextensions as added rows), with the pool's
+     Data% meter (threshold tick), the promised-vs-real meter and banner, and the VG's free space. Below, one bar per
+     thin volume over its virtual size: what its filesystem uses, what it deleted but the pool still holds, refused
+     writes, and the promised but unbacked rest. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-thin-overcommit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tanki bazen i prekomjerno dodjeljivanje · simdeck</title>
+<meta name="description" content="Napravi tanke volumene, piši u njih i ostani bez mjesta: kad se bazen napuni, pisanje pada svima, i onima čiji datotečni sustav pokazuje slobodno.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-thin-overcommit",
+  "title": {
+    "hr": "Tanki bazen i prekomjerno dodjeljivanje",
+    "en": "Thin provisioning and overcommit"
+  },
+  "concept": {
+    "hr": "Obećani i stvarni prostor: tanki bazen se puni pod svima",
+    "en": "Promised vs real space: the thin pool fills under everyone"
+  },
+  "summary": {
+    "hr": "Napravi tanke volumene, piši u njih i ostani bez mjesta: kad se bazen napuni, pisanje pada svima, i onima čiji datotečni sustav pokazuje slobodno.",
+    "en": "Create thin volumes, write, and run out: when the pool is full, writes fail for everyone, even where the filesystem shows free space."
+  },
+  "tags": [
+    "lvm"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "one-tenant-fills"
+    },
+    {
+      "preset": "deleted-not-returned"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-thin-overcommit"]; colours only from kit tokens.
+   Layout: the pool's block grid (with its meters in the foot) on top, the thin volumes' bars below. */
+[data-sim="lnx-thin-overcommit"] .to {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.45rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-thin-overcommit"] { --panel-w: minmax(17rem, 26rem); }
+[data-sim="lnx-thin-overcommit"] .to .sd-bg { margin: 0; flex: none; }
+[data-sim="lnx-thin-overcommit"] .to .sd-bg-grid { --bg-row-gap: 0.1rem; }
+[data-sim="lnx-thin-overcommit"] .to .sd-bg-label { font-weight: 400; color: var(--muted); }
+/* the autoextend threshold is a dashed line (task legend) */
+[data-sim="lnx-thin-overcommit"] .sd-bg-tick { border-left-style: dashed; }
+/* a changed cell a volume holds keeps its colour (which volume took it) under the changed outline and halo */
+[data-sim="lnx-thin-overcommit"] .to .sd-bg-cell.sd-changed { box-shadow: 0 0 0 0.16rem var(--hl); outline-offset: 0.05rem; }
+[data-sim="lnx-thin-overcommit"] .to .sd-bg-cell.sd-changed.sd-fill { background: var(--sw); color: var(--on-series); }
+
+/* the grid's foot: two meters, the banner, the VG line, the warning */
+[data-sim="lnx-thin-overcommit"] .to-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.3rem 2rem;
+  align-items: start;
+  margin-top: 0.2rem;
+}
+[data-sim="lnx-thin-overcommit"] .to-foot .sd-bg-meter { font-size: var(--fs-md); }
+[data-sim="lnx-thin-overcommit"] .to-foot .sd-bg-meter-label { min-width: 5.5rem; }
+[data-sim="lnx-thin-overcommit"] .to-note { margin: 0; font-size: var(--fs-md); }
+[data-sim="lnx-thin-overcommit"] .to-banner { font-weight: 700; }
+[data-sim="lnx-thin-overcommit"] .to-banner[data-over] { color: var(--danger); }
+[data-sim="lnx-thin-overcommit"] .to-muted { color: var(--muted); }
+[data-sim="lnx-thin-overcommit"] .to-hl { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); padding: 0 0.25rem; }
+
+/* the thin volumes */
+[data-sim="lnx-thin-overcommit"] .to-vols {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: none;
+  padding: 0.4rem 0.8rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-thin-overcommit"] .to-vols h2 { margin: 0; font-size: 1.1em; }
+[data-sim="lnx-thin-overcommit"] .to-vols h2 span { margin-left: 0.8rem; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="lnx-thin-overcommit"] .to-vol {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(8rem, 1fr) 25rem;
+  align-items: center;
+  gap: 0 0.8rem;
+}
+[data-sim="lnx-thin-overcommit"] .to-vol-name { display: flex; align-items: center; gap: 0.4rem; font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-thin-overcommit"] .to-vol-name i { display: inline-block; width: 0.9rem; height: 0.9rem; border-radius: 0.15rem; background: var(--sw); }
+[data-sim="lnx-thin-overcommit"] .to-vol .sd-bg-bar { height: 1.7rem; }
+[data-sim="lnx-thin-overcommit"] .to-vol-info { display: flex; flex-direction: column; line-height: 1.2; }
+[data-sim="lnx-thin-overcommit"] .to-vol-head { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; }
+[data-sim="lnx-thin-overcommit"] .to-badge { font-weight: 700; color: var(--danger); white-space: nowrap; }
+[data-sim="lnx-thin-overcommit"] .to-badge[data-k="queue"] { color: var(--ink); }
+[data-sim="lnx-thin-overcommit"] .to-badge[data-k="queue"] > span { outline: 0.15rem dashed var(--danger); outline-offset: 0.05rem; border-radius: var(--radius-sm); padding: 0 0.2rem; }
+[data-sim="lnx-thin-overcommit"] .to-badge[data-k="error"] > span { outline: 0.15rem solid var(--danger); outline-offset: 0.05rem; border-radius: var(--radius-sm); padding: 0 0.2rem; }
+
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-thin-overcommit"] .sd-ctl[hidden] { display: none; }
+/* the panel holds 5 presets and up to 14 controls: presets in two columns, tighter gaps, so it fits 1920×1080 */
+[data-sim="lnx-thin-overcommit"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-thin-overcommit"] .sd-group { gap: 0.15rem; }
+[data-sim="lnx-thin-overcommit"] .sd-ctl { gap: 0; }
+[data-sim="lnx-thin-overcommit"] .sd-range { height: 1.15rem; }
+/* the controls in two columns: the volumes' writes and the autoextend pair side by side, the rest full width */
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.8rem; }
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="w1"], [data-key="w2"], [data-key="w3"], [data-key="w4"], [data-key="threshold"], [data-key="percent"], [data-key="deleted1"], [data-key="discard"], [data-key="autoextend"], [data-key="errorWhenFull"]) { grid-column: auto; }
+/* thin1's deletion starts a row (beside its discard switch); alone, it takes the whole row */
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-group > .sd-ctl.sd-ctl-range[data-key="deleted1"] { grid-column: 1 / span 1; }
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-group:has(> [data-key="discard"][hidden]) > .sd-ctl[data-key="deleted1"] { grid-column: 1 / -1; }
+/* half-width switches: the label may take two lines; the switch's position shows on or off, so its word is left out */
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-ctl-toggle .sd-switch-state { display: none; }
+[data-sim="lnx-thin-overcommit"] [data-sd-controls] .sd-ctl-toggle .sd-switch { line-height: 1.2; }
+
+/* legend swatches of the page's own marks */
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-free"] { background: var(--bg); border: 1px solid var(--line); }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-tick"] { width: 0; height: 1.1em; border: 0; border-radius: 0; border-left: 0.2rem dashed var(--ink); background: transparent; }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-refused"],
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-queued"] { position: relative; background: var(--bg); border: 0.15rem solid var(--danger); }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-queued"] { border-style: dashed; }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-refused"]::after,
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-queued"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--danger); }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-refused"]::after { content: '✕'; }
+[data-sim="lnx-thin-overcommit"] .sd-swatch[data-shape="to-queued"]::after { content: '⏱'; color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-thin-overcommit"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-thin-overcommit"] .to { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-thin-overcommit"] .to-foot { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-thin-overcommit"] .to-vol { grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.2rem 0.5rem; }
+  [data-sim="lnx-thin-overcommit"] .to-vol-info { grid-column: 1 / -1; }
+  [data-sim="lnx-thin-overcommit"] .to-foot .sd-bg-meter { flex-wrap: wrap; }
+  [data-sim="lnx-thin-overcommit"] .to-foot .sd-bg-meter-text { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tanki bazen i prekomjerno dodjeljivanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour of each thin volume (thin1 … thin4). */
+  function colour(k) { return k + 1; }
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    if (d > 0) s = s.replace(/\.?0+$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function gib(x) { return t('gib', { n: dec(x, 1) }); }
+  function pct(x) { return t('pct', { p: dec(x, 1) }); }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function list(names) {
+    if (names.length < 2) return names.join('');
+    return names.slice(0, -1).join(', ') + t('and') + names[names.length - 1];
+  }
+
+  // ── the pool grid (K3) ──
+
+  /** The pool's cells as rows: the pool as created, then the autoextensions as added rows (each a span). */
+  function poolRows(s, chg) {
+    var cells = s.pool.cells.map(function (o, i) {
+      var c = o === L.FREE ? {} : { kind: s.pool.kept.indexOf(i) >= 0 ? 'soft' : 'fill', c: colour(o), text: String(o + 1) };
+      if (chg.indexOf(i) >= 0) c.now = true;
+      return c;
+    });
+    // the narrowest grid that keeps the pool, then its autoextensions, within 6 rows (300 GiB at most: 6 × 50); with
+    // four volume bars below, within 4 rows where it can
+    var extTotal = s.pool.size - s.pool.size0;
+    var maxRows = s.lvs.length > 3 ? 4 : 6;
+    var cols = [20, 25, 40, 50].filter(function (n) {
+      return Math.ceil(s.pool.size0 / n) + Math.ceil(extTotal / n) <= maxRows;
+    })[0] || 50;
+    var base = Simdeck.blockGrid.split({ id: 'pool', label: h('span', null, t('poolRow')), cells: cells.slice(0, s.pool.size0) }, cols);
+    if (!s.extended.length) return { rows: base, cols: cols, n: base.length };
+    var spans = s.extended.map(function (e) {
+      return { from: e.from - s.pool.size0, len: e.by, style: 'dashed' };
+    });
+    var ext = Simdeck.blockGrid.split({ id: 'ext', label: h('span', null, t('extRow', { p: s.extPercent })),
+      cells: cells.slice(s.pool.size0), spans: spans }, cols);
+    return { rows: base.concat(ext), cols: cols, n: base.length + ext.length };
+  }
+
+  function poolGrid(s, chg, dir) {
+    var pr = poolRows(s, chg);
+    var parts = s.lvs.map(function (lv, k) { return { n: lv.allocated, kind: 'fill', c: colour(k) }; });
+    var dataMeter = Simdeck.blockGrid.meter({
+      total: s.pool.size, parts: parts, label: t('mData'), text: pct(s.pool.pct),
+      mark: s.autoextend ? { at: s.threshold * s.pool.size / 100, label: t('mTick', { p: s.threshold }) } : null
+    });
+    var promMeter = Simdeck.blockGrid.meter({
+      total: s.pool.size, label: t('mPromised'),
+      parts: s.lvs.map(function (lv, k) { return { n: lv.virt, kind: 'ghost', c: colour(k) }; }),
+      text: h('span', { class: 'to-banner', dataset: s.promised > s.pool.size ? { over: 'true' } : {} },
+        t('banner', { promised: gib(s.promised), real: gib(s.pool.size) }))
+    });
+    // the pool's sizes after each autoextension; past three, the first and the last only
+    var sizes = [s.pool.size0].concat(s.extended.map(function (e) { return e.to; }));
+    if (sizes.length > 4) sizes = [sizes[0], sizes[1], '…', sizes[sizes.length - 1]];
+    var chain = sizes.join(' → ') + ' GiB';
+    var foot = h('div', { class: 'to-foot' },
+      dataMeter, promMeter,
+      h('p', { class: 'to-note' }, t('vgLine', { vg: gib(s.vgFree) }), s.extended.length ? [' · ', data(chain)] : null),
+      h('p', { class: 'to-note ' + (s.warned ? '' : 'to-muted') }, s.warned ? '⚠ ' + t('warn') : t('noWarn')));
+    return Simdeck.blockGrid({
+      dir: dir,
+      title: t('poolTitle'),
+      meta: [t('cellNote')],
+      count: { text: t('poolCount', { p: pct(s.pool.pct), used: dec(s.pool.used, 0), size: dec(s.pool.size, 0) }), hl: s.full },
+      cols: pr.cols,
+      rows: pr.rows,
+      cellHeight: pr.n > 5 ? '1.2rem' : s.lvs.length > 3 ? '1.55rem' : '2rem',   // taller cells while there is room
+      foot: [foot]
+    });
+  }
+
+  // ── the thin volumes ──
+
+  function volumes(s, mode) {
+    var rows = s.lvs.map(function (lv, k) {
+      var rest = lv.virt - lv.fsUsed - lv.kept - lv.refused;
+      var bar = Simdeck.blockGrid.meter({
+        total: lv.virt,
+        parts: [
+          { n: lv.fsUsed, kind: 'fill', c: colour(k) },
+          { n: lv.kept, kind: 'soft', c: colour(k) },
+          { n: lv.refused, kind: 'bad' },
+          { n: rest, kind: 'ghost' }
+        ]
+      });
+      var info = [
+        h('span', null, t('volFs', { used: gib(lv.fsUsed), free: gib(lv.fsFree) })),
+        h('span', null, t('volPool', { a: gib(lv.allocated), p: pct(lv.dataPct) })),
+        lv.kept > 0 ? h('span', null, t('volKept', { k: gib(lv.kept) })) : null
+      ];
+      var badge = lv.refused > 0 ? h('span', { class: 'to-badge', dataset: { k: mode } },
+        h('span', null, t(mode === 'error' ? 'volRefused' : 'volQueued', { r: gib(lv.refused) }))) : null;
+      return h('div', { class: 'to-vol' },
+        h('div', { class: 'to-vol-head' },
+          h('span', { class: 'to-vol-name' }, h('i', { dataset: { c: String(colour(k)) } }), data(lv.name)), badge),
+        bar,
+        h('div', { class: 'to-vol-info' }, info));
+    });
+    return h('section', { class: 'to-vols' },
+      h('h2', null, t('volTitle'), h('span', null, t('volSize', { v: gib(s.lvs[0].virt) }))),
+      rows);
+  }
+
+  // ── render; the changed marks follow param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = lastState ? L.changedCells(lastState, c.state) : [];
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'to' }, poolGrid(s, chg, c.dir), volumes(s, s.mode)));
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var k = L.captionKey(s);
+    var lv = s.firstRefused ? s.lvs[s.firstRefused.lv] : null;
+    var out = [t(k.key, {
+      promised: gib(s.promised), real: gib(s.pool.size), used: gib(s.pool.used), p: pct(s.pool.pct),
+      lv: lv ? lv.name : '', free: lv ? gib(s.firstRefused.free) : ''
+    })];
+    k.notes.forEach(function (nt) {
+      var txt;
+      if (nt.key === 'nAlsoRefused') txt = t.n('nAlsoRefused', nt.lvs.length, { lvs: list(nt.lvs) });
+      else if (nt.key === 'nKept' || nt.key === 'nDiscarded' || nt.key === 'nDiscardedOnly') txt = t(nt.key, { d: gib(nt.d) });
+      else if (nt.key === 'nGrew') txt = t.n('nGrew', nt.n, { size: gib(s.pool.size) });
+      else if (nt.key === 'nShort') txt = t('nShort', { at: gib(s.short.at), want: gib(s.short.want), vg: gib(s.short.vgFree) });
+      else if (nt.key === 'nGrewShort') txt = t.n('nGrewShort', nt.n, { size: gib(s.pool.size), want: gib(s.short.want), vg: gib(s.short.vgFree) });
+      else txt = t(nt.key);
+      out.push(' ', txt);
+    });
+    return out;
+  }
+
+  var labels = {
+    'overcommit-ok': 'pOk', 'one-tenant-fills': 'pFills', 'autoextend': 'pAuto',
+    'deleted-not-returned': 'pDeleted', 'error-at-once': 'pError'
+  };
+  function gibFmt(v) { return gib(v); }
+  function pctFmt(v) { return t('pct', { p: v }); }
+  function shown(k) { return function (p) { return p.n >= k; }; }
+  function auto(p) { return p.autoextend === true; }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'pool', type: 'range', value: L.defaults.pool, label: t('pool'), min: 50, max: 200, step: 10, format: gibFmt },
+      { key: 'n', type: 'range', value: L.defaults.n, label: t('n'), min: 1, max: 4, step: 1 },
+      { key: 'virt', type: 'range', value: L.defaults.virt, label: t('virt'), min: 10, max: 100, step: 10, format: gibFmt },
+      { key: 'w1', type: 'range', value: L.defaults.w1, label: t('w1'), min: 0, max: function (p) { return p.virt; }, step: 1, format: gibFmt },
+      { key: 'w2', type: 'range', value: L.defaults.w2, label: t('w2'), min: 0, max: function (p) { return p.virt; }, step: 1, format: gibFmt, visible: shown(2) },
+      { key: 'w3', type: 'range', value: L.defaults.w3, label: t('w3'), min: 0, max: function (p) { return p.virt; }, step: 1, format: gibFmt, visible: shown(3) },
+      { key: 'w4', type: 'range', value: L.defaults.w4, label: t('w4'), min: 0, max: function (p) { return p.virt; }, step: 1, format: gibFmt, visible: shown(4) },
+      { key: 'deleted1', type: 'range', value: L.defaults.deleted1, label: t('deleted1'), min: 0, max: function (p) { return Math.min(50, p.w1); }, step: 1, format: gibFmt },
+      { key: 'discard', type: 'toggle', label: t('discard'), visible: function (p) { return p.deleted1 > 0; } },
+      { key: 'autoextend', type: 'toggle', label: t('autoextend') },
+      { key: 'errorWhenFull', type: 'toggle', label: t('errorWhenFull') },
+      { key: 'threshold', type: 'range', value: L.defaults.threshold, label: t('threshold'), min: 50, max: 95, step: 5, format: pctFmt, visible: auto },
+      { key: 'percent', type: 'range', value: L.defaults.percent, label: t('percent'), min: 10, max: 50, step: 10, format: pctFmt, visible: auto },
+      { key: 'vgFree', type: 'range', value: L.defaults.vgFree, label: t('vgFree'), min: 0, max: 100, step: 10, format: gibFmt, visible: auto }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'bg-fill', c: 1, label: t('legOwned') },
+      { shape: 'to-free', label: t('legFree') },
+      { shape: 'bg-soft', c: 1, label: t('legKept') },
+      { shape: 'bg-ghost', label: t('legPromised') },
+      { shape: 'to-refused', label: t('legRefused') },
+      { shape: 'to-queued', label: t('legQueued') },
+      { shape: 'to-tick', label: t('legThreshold') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
