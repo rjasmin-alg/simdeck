@@ -131,6 +131,73 @@
       capHealKeepF: 'Na kraju: grozd {m} ima {v} od {total}, a {r} i nakon ispada radi na {node}.',
       capHealStartF: 'Na kraju: grozd {m} ima {v} od {total} i pokreće {ra} na {node}.',
       capHealOffF: 'Na kraju: grozd {m} ima samo {v} od {total}. Bez kvoruma {r} ne radi dok se čvor ne vrati.',
+      // Windows failover sequence (task win-failover-cluster)
+      wk_disk: 'diskovni svjedok',
+      wk_fileshare: 'svjedok (dijeljena mapa)',
+      wk_cloud: 'svjedok u oblaku',
+      wkShort_none: 'nema',
+      wkShort_disk: 'disk',
+      wkShort_fileshare: 'mapa',
+      wkShort_cloud: 'oblak',
+      pEvents: 'Događaji',
+      'ev:!B': 'B pada',
+      'ev:A|B': 'A | B',
+      'ev:W,!B': 'pada svjedok, pa B',
+      'ev:!A': 'A pada',
+      'ev:!C': 'C pada',
+      'ev:AB|C': 'AB | C',
+      'ev:!C,!B': 'pada C, pa B',
+      'ev:W,!C,!B': 'pada svjedok, C, pa B',
+      'ev:AB|CD': 'AB | CD',
+      'ev:W,AB|CD': 'pada svjedok, pa AB | CD',
+      'ev:!D,!C': 'pada D, pa C',
+      'ev:!D,!C,!B': 'padaju D, C, pa B',
+      'ev:AB|CDE': 'AB | CDE',
+      'ev:AB|CD|E': 'AB | CD | E',
+      'ev:!E,!D': 'pada E, pa D',
+      'ev:!E,!D,!C': 'padaju E, D, pa C',
+      pVotes: 'Glasovi',
+      votes_static: 'statični',
+      votes_dynamic: 'dinamički kvorum i svjedok',
+      votes_dynamicA: 'dinamički, A prvi gubi glas',
+      prW2Fsw: 'Win: 2 + mapa',
+      prW2None: 'Win: 2 čvora',
+      prW2NoneHint: 'Dva čvora bez svjedoka ne preživljavaju ni prekid jedne veze.',
+      prW4Split: 'Win: 4 + disk',
+      prW4SplitHint: 'Isključi svjedoka: 2 i 2 od 4, staju obje strane.',
+      prWDynamic: 'Win: dinamički',
+      prWDynamicHint: 'Glasovi statični: A + svjedok ima 2 od 4 i staje.',
+      prWWitLost: 'Win: pad svjedoka',
+      prWWitLostHint: 'Glasovi dinamični: B unaprijed gubi glas i A ostaje raditi.',
+      votesN: ['{n} glas', '{n} glasa', '{n} glasova'],
+      ofVotesN: ['{v} od {n} glasa', '{v} od {n} glasa', '{v} od {n} glasova'],
+      totalStatic: 'Glasova u grozdu: {v} · kvorum {k} · statični',
+      totalDyn: 'Glasova u grozdu: {v} · kvorum {k} · dinamički',
+      capSeqStart: 'Windows grozd od {nodes}{w}; uloge grozda rade na {a}. Kvorum je više od pola glasova: {needed} od {total}.',
+      dynNothing: 'Dinamički kvorum zasad nema što mijenjati: ukupan broj glasova je neparan.',
+      dynRemoved: 'Dinamički kvorum uklanja glasove koje više nitko ne daje: {list}.',
+      dynWitOn: 'Dinamički svjedok: glasova čvorova ima {k}, paran broj, pa svjedok glasa.',
+      dynWitOff: 'Dinamički svjedok: glasova čvorova ima {k}, neparan broj, pa svjedok ne glasa.',
+      dynWitGone: 'Svjedok je nedostupan: dinamički svjedok mu oduzima glas.',
+      dynTie: 'Paran broj glasova ({k}) mogao bi se podijeliti napola, pa {node} unaprijed gubi svoj glas.',
+      dynNow: 'Sada je ukupno {total}, a kvorum traži {needed}.',
+      evLostRoles: 'Uloge grozda bile su na njemu i padaju s njim.',
+      evWit_disk: 'Disk svjedoka na dijeljenoj pohrani više nije dostupan.',
+      evWit_fileshare: 'Dijeljena mapa svjedoka na trećem poslužitelju više nije dostupna.',
+      evWit_cloud: 'Svjedok u oblaku više nije dostupan.',
+      evWitStatic: 'Njegov glas i dalje se broji u ukupan zbroj, ali ga više nitko ne dobiva.',
+      evWitNoVote: 'Svjedok ionako nije glasao.',
+      reachDisk: 'Disk svjedoka drži strana čvora {node}.',
+      reachFile: 'Datoteku svjedoka zaključava strana čvora {node}.',
+      rcKeep: 'Strana {m} ima {ov}: većina, uloge ostaju na {node}.',
+      rcMove: 'Strana {m} ima {ov}: većina, uloge prelaze na {node}.',
+      rcWKeep: 'Strana {m} + svjedok ima {ov}: većina, uloge ostaju na {node}.',
+      rcWMove: 'Strana {m} + svjedok ima {ov}: većina, uloge prelaze na {node}.',
+      rcTie: 'Podjela {a} : {b}{w}: nitko nema više od pola, grozd staje na obje strane.',
+      noWit: ' bez svjedoka',
+      rcNone: 'Glasovi: {list}. Kvorum traži {needed} od {total} i nitko ga nema: uloge grozda staju.',
+      rcStill: 'I dalje nitko nema kvoruma: grozd stoji.',
+      rcStatic: 'Glasovi su statični: pali članovi i dalje se broje u {total}.',
       explain: '<p><i lang="en">Cluster</i> (grozd) mora odlučiti tko smije pokrenuti uslugu kad se mreža razdvoji. Svaki čvor ' +
         'ima jedan glas; <i lang="en">quorum</i> (kvorum) je više od pola <b>konfiguriranih</b> glasova, ⌊n/2⌋ + 1. Strana s ' +
         'kvorumom zadržava ili preuzima uslugu, ostale je zaustavljaju. Dvije strane nikad ne mogu obje imati više od pola.</p>' +
@@ -139,7 +206,13 @@
         'dobiva ga strana koja ga doseže.</p>' +
         '<p>Bez kvoruma svaka strana pokreće uslugu: <i lang="en">split-brain</i> (rascjep mozga). Svaka prihvaća svoja pisanja ' +
         'i kopije se razilaze. Kvorum kaže tko <em>smije</em> raditi, ali ne zaustavlja čvor koji odluku ne čuje. To radi ' +
-        '<i lang="en">fencing</i> (ograđivanje): izgubljeni čvor se isključi prije nego što ga drugi zamijene.</p>'
+        '<i lang="en">fencing</i> (ograđivanje): izgubljeni čvor se isključi prije nego što ga drugi zamijene.</p>' +
+        '<p>U Windows grozdu svjedok je disk na dijeljenoj pohrani, dijeljena mapa na trećem poslužitelju ili svjedok u ' +
+        'oblaku. Glas dobiva strana koja drži disk ili zaključa datoteku svjedoka; svjedok ne čuva podatke grozda. ' +
+        '<i lang="en">Dynamic quorum</i> (dinamički kvorum) uklanja glas čvora koji padne dok grozd ima kvorum, pa grozd koji ' +
+        'gubi čvor po čvor radi sve do zadnjega. <i lang="en">Dynamic witness</i> (dinamički svjedok) glasa samo kad čvorovi ' +
+        'imaju paran broj glasova; ostane li ukupan broj paran, jedan čvor unaprijed gubi glas, pa podjela napola uvijek ima ' +
+        'pobjednika.</p>'
     },
     en: {
       stage: 'A cluster of nodes in a ring of links, a witness, the sides after a partition and what each does with the service',
@@ -259,6 +332,73 @@
       capHealKeepF: 'In the end: cluster {m} has {v} of {total}, and the {r} still runs on {node} after the failure.',
       capHealStartF: 'In the end: cluster {m} has {v} of {total} and starts the {ra} on {node}.',
       capHealOffF: 'In the end: cluster {m} has only {v} of {total}. Without quorum the {r} stays off until the node returns.',
+      // Windows failover sequence (task win-failover-cluster)
+      wk_disk: 'disk witness',
+      wk_fileshare: 'file share witness',
+      wk_cloud: 'cloud witness',
+      wkShort_none: 'none',
+      wkShort_disk: 'disk',
+      wkShort_fileshare: 'file share',
+      wkShort_cloud: 'cloud',
+      pEvents: 'Events',
+      'ev:!B': 'B fails',
+      'ev:A|B': 'A | B',
+      'ev:W,!B': 'witness fails, then B',
+      'ev:!A': 'A fails',
+      'ev:!C': 'C fails',
+      'ev:AB|C': 'AB | C',
+      'ev:!C,!B': 'C fails, then B',
+      'ev:W,!C,!B': 'witness, C, then B fail',
+      'ev:AB|CD': 'AB | CD',
+      'ev:W,AB|CD': 'witness fails, then AB | CD',
+      'ev:!D,!C': 'D fails, then C',
+      'ev:!D,!C,!B': 'D, C, then B fail',
+      'ev:AB|CDE': 'AB | CDE',
+      'ev:AB|CD|E': 'AB | CD | E',
+      'ev:!E,!D': 'E fails, then D',
+      'ev:!E,!D,!C': 'E, D, then C fail',
+      pVotes: 'Votes',
+      votes_static: 'static',
+      votes_dynamic: 'dynamic quorum and witness',
+      votes_dynamicA: 'dynamic, A drops its vote first',
+      prW2Fsw: 'Win: 2 + share',
+      prW2None: 'Win: 2 nodes',
+      prW2NoneHint: 'Two nodes without a witness do not survive even one cut link.',
+      prW4Split: 'Win: 4 + disk',
+      prW4SplitHint: 'Switch the witness off: 2 and 2 of 4, both sides stop.',
+      prWDynamic: 'Win: dynamic',
+      prWDynamicHint: 'Static votes: A + witness has 2 of 4 and stops.',
+      prWWitLost: 'Win: witness lost',
+      prWWitLostHint: 'Dynamic votes: B gives up its vote in advance and A keeps running.',
+      votesN: ['{n} vote', '{n} votes'],
+      ofVotesN: ['{v} of {n} vote', '{v} of {n} votes'],
+      totalStatic: 'Votes in the cluster: {v} · quorum {k} · static',
+      totalDyn: 'Votes in the cluster: {v} · quorum {k} · dynamic',
+      capSeqStart: 'A Windows failover cluster of {nodes}{w}; the clustered roles run on {a}. Quorum is more than half of the votes: {needed} of {total}.',
+      dynNothing: 'Dynamic quorum has nothing to change yet: the total number of votes is odd.',
+      dynRemoved: 'Dynamic quorum removes the votes nobody casts any more: {list}.',
+      dynWitOn: 'Dynamic witness: the node votes are {k}, an even number, so the witness votes.',
+      dynWitOff: 'Dynamic witness: the node votes are {k}, an odd number, so the witness does not vote.',
+      dynWitGone: 'The witness is unreachable: dynamic witness takes its vote away.',
+      dynTie: 'An even number of votes ({k}) could split in half, so {node} gives up its vote in advance.',
+      dynNow: 'Now the total is {total}, and quorum needs {needed}.',
+      evLostRoles: 'The clustered roles were on it and go down with it.',
+      evWit_disk: 'The witness disk on the shared storage is gone.',
+      evWit_fileshare: 'The witness file share on the third server is gone.',
+      evWit_cloud: 'The cloud witness can no longer be reached.',
+      evWitStatic: 'Its vote still counts in the total, but nobody gets it any more.',
+      evWitNoVote: 'The witness had no vote anyway.',
+      reachDisk: 'The side of node {node} owns the witness disk.',
+      reachFile: 'The side of node {node} locks the witness file.',
+      rcKeep: 'Side {m} has {ov}: a majority, the roles stay on {node}.',
+      rcMove: 'Side {m} has {ov}: a majority, the roles move to {node}.',
+      rcWKeep: 'Side {m} + witness has {ov}: a majority, the roles stay on {node}.',
+      rcWMove: 'Side {m} + witness has {ov}: a majority, the roles move to {node}.',
+      rcTie: 'A {a} : {b} split{w}: nobody has more than half, the cluster stops on both sides.',
+      noWit: ' with no witness',
+      rcNone: 'Votes: {list}. Quorum needs {needed} of {total} and nobody has it: the clustered roles stop.',
+      rcStill: 'Still nobody has quorum: the cluster stays down.',
+      rcStatic: 'The votes are static: the failed members still count in the {total}.',
       explain: '<p>A <i>cluster</i> must decide who may run the service when the network splits. Every node has one vote; ' +
         '<i>quorum</i> is more than half of the <b>configured</b> votes, ⌊n/2⌋ + 1. The side with quorum keeps or takes over ' +
         'the service, the others stop it. Two sides can never both have more than half.</p>' +
@@ -267,7 +407,13 @@
         'place: the side that reaches it gets it.</p>' +
         '<p>Without quorum every side starts the service: <i>split-brain</i>. Each accepts its own writes and the copies ' +
         'drift apart. Quorum says who <em>may</em> run; it does not stop a node that cannot hear the decision. That is ' +
-        '<i>fencing</i>: the lost node is switched off before another takes its place.</p>'
+        '<i>fencing</i>: the lost node is switched off before another takes its place.</p>' +
+        '<p>In a Windows failover cluster the witness is a disk on shared storage, a file share on a third server or a ' +
+        'cloud witness. Its vote goes to the side that owns the disk or locks the witness file; the witness holds no ' +
+        'cluster data. <i>Dynamic quorum</i> removes the vote of a node that fails while the cluster has quorum, so a ' +
+        'cluster losing one node at a time runs down to the last one. <i>Dynamic witness</i> votes only when the node ' +
+        'votes are even; if the total is still even, one node gives up its vote in advance, so a split in half always ' +
+        'has a winner.</p>'
     }
   };
 

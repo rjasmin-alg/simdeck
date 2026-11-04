@@ -125,3 +125,109 @@ None of these is in `kit/glossary.js`; the Croatian explanation writes the term 
 ## Time
 
 Start 2026-10-15 12:07, done 12:50 (CEST): about 45 minutes, one session, including the fresh review.
+
+## Preset task `win-failover-cluster` (Windows failover cluster quorum)
+
+Task `docs/tasks/w3/win-failover-cluster.md`, thread t-0257. Five presets (`win-2node-fsw`, `win-2node-none`,
+`win-4node-split`, `win-dynamic`, `win-witness-lost`), rules and numbers in `SPEC.md` "Windows failover sequence".
+
+### Decisions
+
+- **The host model could not express it, so it was extended additively** (as the `win-boot` and `win-update-rings`
+  preset tasks did with their hosts). The task says "write the change under Shared requests and stop"; running
+  unattended, with the host's author long done and the change contained, I made it instead. What was missing: a
+  sequence of events (two of the five presets fail two members one after the other), a witness that can go away, and
+  per-member votes that change (dynamic quorum, dynamic witness, the tie-breaker). The new flow is opt-in (`failover`,
+  off by default): `initial`, `step` and `steps` hand over to it only when it is set, and every classic result is
+  unchanged (test `W-off`; the 35 tests include all the host's).
+- **Steps**: per event an event step, a recount step, and an adjust step only when dynamic votes change something. The
+  task's "2–5 steps per preset" holds for four presets; `win-dynamic` has 6 (two failures, each with its recount and
+  its adjustment). Folding the adjustment into the recount would show "3 of 4, quorum" next to badges already at the new
+  votes.
+- **Comparisons are one control away**, not separate presets: `win-4node-split` has the disk witness on (3 of 5); the
+  witness switched off gives the task's 2 : 2 caption. `win-dynamic` starts dynamic (A runs to the end); static stops at
+  2 of 4. `win-witness-lost` starts static (stops at 1 of 3); dynamic keeps A running; "dynamic, A drops its vote first"
+  stops it again. Each hint (tooltip) says which switch.
+- **One `votes` select** (static / dynamic / dynamic with A dropping its vote first) instead of a dynamic toggle plus a
+  tie-break choice: the panel had no room for both at 1920×1080 (it overflowed by 50–67 px).
+- **No "witness sits with" control in this flow**: with it the panel overflowed again (52 px). The witness is reached by
+  A's side (where the roles start); the param still works (URL, tests) and the classic flow keeps its control.
+- **Node names stay A–E** (the host's), not N1…N4 as the task writes: the same page, the same letters in both flows.
+- **Witness kinds** change labels and the witness-lost sentence; the model treats all three alike (rule W2: whoever
+  reaches it). "Owns the disk" / "locks the witness file" is said in the caption at a cut.
+- **Captions** follow the task's two examples ("Side A + witness has 2 of 3 votes: a majority, the roles stay on A";
+  "A 2 : 2 split with no witness: nobody has more than half, the cluster stops on both sides"). With static votes and a
+  lost majority the caption adds that failed members still count in the total (the "static" misconception).
+- **Misconceptions** shown: two nodes without a witness do not survive one cut link (`win-2node-none`); the witness holds
+  no data (explanation); more nodes are not safer when even (the 2 : 2 split).
+- **Explanation**: one paragraph added for Windows (witness kinds, dynamic quorum, dynamic witness, tie-breaker).
+- **Entries**: `win-2node-fsw` and `win-dynamic` (the two a WIN2 course would name).
+- **Concepts, not tools**: no PowerShell, no property names on the page; `LowerQuorumPriorityNodeID` is only in
+  `SPEC.md`. "Windows failover cluster" is named because the WIN2 course teaches it.
+
+### Deviations from the task
+
+- Host model changed (additive, see Decisions) instead of stopping with a shared request.
+- Node ids A–E instead of N1–N4; `win-dynamic` has 6 steps; no witness-side control in this flow.
+- The task's state sketch (`partitions`, `rolesOn`, `reachableFrom`) is carried as the host's `sides`,
+  `resource.runningOn` and `witness.reach`, plus `groups`, `ev`, `adjust`, `lost`, `stopped`.
+- Dynamic quorum also removes the votes of nodes cut off in a minority side (they are gone from the quorum side's view);
+  the task only speaks of failed nodes. *(check)*
+
+### Sources and unchecked items
+
+No local course material on Windows clustering (NLA T52–T53 are the Linux counterpart, chapters not written). From
+memory of Microsoft Learn, not readable offline; all *(check)*:
+
+- *Understanding cluster and pool quorum* / *Configure and manage quorum*: majority of votes, one vote per node and one
+  for the witness; witness types disk, file share, cloud *(check titles and wording)*.
+- Dynamic quorum from Windows Server 2012; dynamic witness from 2012 R2 (the witness votes only when node votes are
+  even) *(check)*.
+- The tie-breaker for a 50 % split (2012 R2), property `LowerQuorumPriorityNodeID`; which node loses its vote when unset
+  (the model: the highest id, as the task decides) *(check)*.
+- A disk witness belongs to the side that owns (reserves) the disk; a file share or cloud witness to the side that
+  locks the witness file *(check)*.
+- After the witness is lost in a two-node cluster with dynamic quorum, one node's vote is removed (`win-witness-lost`
+  dynamic) *(check)*.
+- Minority-side nodes losing their votes after a split (Deviations) *(check)*.
+
+### Checks
+
+- Numbers printed by a Python script (independent of `sim.js`) before coding; asserted in `sim.test.js` (`W-*` tests).
+- **Mutations** of the new code, one at a time (19): tie picks the lowest node, tie ignores the A choice (twice: in the
+  adjustment and in reading `votes`), no removal of
+  outside votes, dynamic witness inverted, no tie-breaker, static total counting only live nodes, a lost witness still
+  reached, reach ignoring `witnessAt`, `>` for `≥`, roles starting on the highest node, an adjust step every time, the
+  witness vote to every side, dynamic always on, no adjustment at the start, roles not lost with their node, a
+  no-quorum side keeping the roles: **17 caught**. Two are equivalent within the offered events: adjusting when stopped
+  (`stopped` is exactly "no side has quorum") and dynamic witness ignoring reach (no offered sequence leaves an up
+  witness unreachable from a quorum side with even node votes).
+- `npm run gate -- quorum-split-brain`: pass. Every Windows preset at every step, both languages, plus the
+  static/dynamic and witness-off variants, shot at 1920×1080 with a local Playwright script: panel, stage and page fit,
+  console clean; dark and 375×812 (no sideways scroll) reviewed. Fixed from them: preset labels wrapping beside their key badges
+  (shortened), the panel overflowing (one `votes` select, no witness-side control), failed-node cards marked "changed"
+  when only the total changed, and a lost witness drawn with cut links (now dead links).
+
+### Term pairs (failover flow)
+
+Written out by hand in the explanation; for the coordinator to add with `"src": "simdeck"`:
+
+| en | hr | source |
+|---|---|---|
+| dynamic quorum | dinamički kvorum | this task *(check)* |
+| dynamic witness | dinamički svjedok | this task *(check)* |
+| disk witness | diskovni svjedok | this task *(check)* |
+| file share witness | svjedok (dijeljena mapa) | host page *(check)* |
+| cloud witness | svjedok u oblaku | this task *(check)* |
+| failover cluster | grozd s prebacivanjem | task *(check)*; the page says "Windows grozd" |
+| clustered role | uloga grozda | host page |
+
+### Shared requests (failover flow)
+
+- K2 (`topology.js`): a vote badge kind (or a per-node `votes` field) would save every quorum page its own badge text.
+- None blocking.
+
+### Time
+
+Start 2026-11-04 20:27, done 20:50 (CET): about 25 minutes, one session (no separate fresh review: a preset task; the
+mutations and the script check stand in for it).

@@ -3,8 +3,9 @@
 <!-- quorum-split-brain: a cluster of 2–5 nodes in a ring (and an optional witness) is partitioned. A stepper: cut the
      links (or fail a node), each side counts its votes, each side keeps, starts or stops the service, then the network
      heals. With quorum ignored every side runs the service and takes its own write, and the copies differ. Kit view K2
-     draws the nodes and links; the side column holds one card per side. Model: sim.js; rules: SPEC.md; words:
-     strings.js. -->
+     draws the nodes and links; the side column holds one card per side. The Windows presets (failover: true) play a
+     sequence of events instead (a node fails, the network splits, the witness goes away), recount after each and,
+     with dynamic quorum on, adjust the votes. Model: sim.js; rules: SPEC.md; words: strings.js. -->
 <html lang="hr" data-sim="quorum-split-brain">
 <head>
 <meta charset="utf-8">
@@ -60,6 +61,8 @@
 [data-sim="quorum-split-brain"] .qs-scene { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
 [data-sim="quorum-split-brain"] .qs-sides { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; min-height: 0; }
 [data-sim="quorum-split-brain"] .qs-sides h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="quorum-split-brain"] .qs-total { margin: 0; font-size: var(--fs-sm); }
+[data-sim="quorum-split-brain"] .qs-total b { font-family: var(--mono); font-size: var(--fs-md); }
 
 /* one card per side: solid frame with quorum, hatched and dashed without, a coloured left bar for the side */
 [data-sim="quorum-split-brain"] .qs-side { padding: 0.45rem 0.8rem 0.55rem;
@@ -192,7 +195,10 @@
     return s;
   }
 
-  function sceneOf(p) { return p.scene === 'win' || p.scene === 'ceph' ? p.scene : 'ha'; }
+  function sceneOf(p) { return p.failover ? 'win' : p.scene === 'win' || p.scene === 'ceph' ? p.scene : 'ha'; }
+  /** The Windows failover sequence (presets win-*): events, recounts and vote adjustments (SPEC.md). */
+  function seqMode(s) { return s.mode === 'failover'; }
+  function votesOf(s, id) { return s.nodes.filter(function (x) { return x.id === id; })[0].votes; }
   function res(p) { return t('res_' + sceneOf(p)); }
   function resA(p) { return t('resA_' + sceneOf(p)); }
   function membersText(sd) { return sd.members.join(''); }
@@ -206,6 +212,7 @@
     var s = c.state, p = c.params, prev = c.prev;
     var pos = POS[s.n];
     var single = s.phase === 'start' || s.phase === 'heal';
+    var seq = seqMode(s);
     var colourOf = function (id) {
       var i = L.sideOfNode(s.sides, id);
       return String(single ? 1 : i + 1);
@@ -220,7 +227,9 @@
       if (!nd.up) badges.push({ text: t('bDown'), k: 'muted' });
       if (runs) badges.push({ text: [keyIcon(), res(p)], k: 'fill' });
       if (runs && s.writes.length) badges.push({ text: mono('x = ' + (sd.copies ? sd.copies.filter(function (cp) { return cp.node === nd.id; })[0].value : sd.value)), k: 'solid' });
-      var changed = c.n > 0 && ((runs !== (wasRunning.indexOf(nd.id) >= 0)) || (lastWrite && lastWrite.node === nd.id));
+      if (seq) badges.push({ text: t.n('votesN', nd.votes), k: nd.votes ? 'solid' : 'muted' });
+      var changed = c.n > 0 && ((runs !== (wasRunning.indexOf(nd.id) >= 0)) || (lastWrite && lastWrite.node === nd.id) ||
+        (seq && prev && (votesOf(prev, nd.id) !== nd.votes || upNode(prev, nd.id) !== nd.up)));
       return { id: nd.id, kind: 'host', col: pos[nd.id][0], row: pos[nd.id][1], span: 2, c: colourOf(nd.id),
         name: t('node_' + sceneOf(p)), lines: [!single && nd.up ? { text: t('sideN', { k: i + 1 }), kind: 'role' } : null],
         badges: badges, state: nd.up ? null : 'down', changed: changed, align: 'center' };
@@ -234,12 +243,18 @@
     if (s.witness) {
       var w = s.witness;
       var wSide = w.reach ? L.sideOfNode(s.sides, w.reach) : -1;
+      var wBadges = [w.reach ? { text: t('bVote', { k: wSide + 1 }), k: 'solid' } : { text: t('bNoVote'), k: 'muted' }];
+      // failover sequence: the witness can go away, and dynamic witness can take its vote
+      if (seq) wBadges = !w.up ? [{ text: t('bDown'), k: 'muted' }] : w.votes ? wBadges : [{ text: t.n('votesN', 0), k: 'muted' }];
       nodes.push({ id: 'W', kind: 'host', mark: t('wMark'), col: pos.W[0], row: pos.W[1], span: 4, align: 'center',
-        c: wSide >= 0 ? String(single ? 1 : wSide + 1) : null, name: t('wit_' + sceneOf(p)), lines: [],
-        badges: [w.reach ? { text: t('bVote', { k: wSide + 1 }), k: 'solid' } : { text: t('bNoVote'), k: 'muted' }] });
+        c: wSide >= 0 ? String(single ? 1 : wSide + 1) : null, name: seq ? t('wk_' + w.kind) : t('wit_' + sceneOf(p)), lines: [],
+        state: seq && !w.up ? 'down' : null,
+        changed: seq && c.n > 0 && !!prev && !!prev.witness && (prev.witness.votes !== w.votes || prev.witness.up !== w.up),
+        badges: wBadges });
       s.nodes.forEach(function (nd) {
         var reach = nd.up && wSide >= 0 && L.sideOfNode(s.sides, nd.id) === wSide;
-        links.push({ id: 'W' + nd.id, a: 'W', b: nd.id, state: reach ? 'up' : nd.up ? 'down' : 'off', style: 'dashed' });
+        // a witness that is gone has dead links, not cut ones
+        links.push({ id: 'W' + nd.id, a: 'W', b: nd.id, state: reach ? 'up' : nd.up && w.up !== false ? 'down' : 'off', style: 'dashed' });
         if (reach && s.phase === 'count') packets.push({ from: 'W', to: nd.id, chip: false, c: String(wSide + 1) });
       });
     }
@@ -253,7 +268,7 @@
     var r = res(p), ra = resA(p), node = sd.node ? mono(sd.node) : null;
     var line = function (text, attrs, icon) { return h('div', Object.assign({ class: 'qs-res' }, attrs || {}), icon ? [keyIcon()] : null, text); };
     if (sd.down) return sd.node ? line(t.parts('actLost', { node: node }), { dataset: { bad: '1' } }) : line(t('actOff'), { dataset: { off: '1' } });
-    var act = s.phase === 'act' || s.phase === 'write' || (s.phase === 'heal') ? sd.act : null;
+    var act = s.phase === 'act' || s.phase === 'write' || s.phase === 'heal' || s.phase === 'recount' ? sd.act : null;
     if (act === 'conflict') {
       var nodes = sd.copies.map(function (cp) { return cp.node; }).join(', ');
       return h('div', { class: 'qs-res', dataset: { bad: '1' } }, sd.copies.map(function () { return keyIcon(); }), h('span', { class: 'qs-bang', 'aria-hidden': 'true' }, '!'),
@@ -279,6 +294,7 @@
     var s = c.state, p = c.params;
     var single = s.phase === 'start' || s.phase === 'heal';
     var out = [h('h2', null, t('sidesTitle'))];
+    if (seqMode(s)) out.push(h('p', { class: 'qs-total' }, t.parts(s.dynamic ? 'totalDyn' : 'totalStatic', { v: data(s.total), k: data(L.neededOf(s.total)) })));
     s.sides.forEach(function (sd, i) {
       var q = qOf(sd);
       var cls = 'qs-side' + (counted(sd) && !sd.quorum ? ' sd-hatch' : '') + (s.changed.indexOf(i) >= 0 && c.n > 0 ? ' sd-changed' : '');
@@ -292,7 +308,7 @@
         counted(sd) ? h('div', { class: 'qs-votes' }, t.parts('votes', { v: data(sd.votes), n: data(sd.total) }), ' · ',
           t.parts('needs', { k: data(sd.needed) }), sd.witness ? [' · ', t('plusW')] : null) : null,
         resLine(s, sd, p),
-        sceneOf(p) === 'ceph' ? null : dataLine(sd))));
+        sceneOf(p) === 'ceph' || seqMode(s) ? null : dataLine(sd))));
     });
     return out;
   }
@@ -375,10 +391,78 @@
     return t.parts('capHealOff' + F, vars);
   }
 
+  // ── captions of the failover sequence ──
+
+  function ofVotes(v, total) { return t.n('ofVotesN', total, { v: v }); }
+
+  /** What dynamic quorum and dynamic witness just changed (step 0 or an adjust step). */
+  function capAdjust(s) {
+    var a = s.adjust, out = [];
+    if (!a) return out;
+    if (a.removed.length) out.push(t.parts('dynRemoved', { list: data(a.removed.join(', ')) }));
+    if (a.witness) {
+      if (!s.witness.up || a.witness[1] === 0 && s.witness.reach === null) out.push(t('dynWitGone'));
+      else out.push(t.parts(a.witness[1] ? 'dynWitOn' : 'dynWitOff', { k: data(a.nodeVotes) }));
+    }
+    if (a.tie) out.push(t.parts('dynTie', { k: data(a.tie.before), node: data(a.tie.node) }));
+    return out;
+  }
+
+  function capSeqStart(s) {
+    var out = [t.parts('capSeqStart', { nodes: t.n('nodesN', s.n), w: s.witness ? t('andW') : '', a: data('A'),
+      total: data(s.total), needed: data(L.neededOf(s.total)) })];
+    if (s.adjust) out = out.concat(capAdjust(s));
+    else if (s.dynamic) out.push(t('dynNothing'));
+    return join(out);
+  }
+
+  function capEvent(s) {
+    var ev = s.ev, out = [];
+    if (ev.type === 'fail') {
+      out.push(t.parts('capFail', { node: data(ev.node) }));
+      if (s.lost.indexOf(ev.node) >= 0) out.push(t('evLostRoles'));
+    }
+    if (ev.type === 'cut') out.push(t.parts('capSplit', { sides: t.n('sidesN', s.groups.length), list: data(s.groups.map(function (g) { return g.join(''); }).join(' | ')) }));
+    if (ev.type === 'witness') out.push(t('evWit_' + s.witness.kind));
+    if (s.witness && ev.type === 'cut' && s.witness.reach) out.push(t.parts(s.witness.kind === 'disk' ? 'reachDisk' : 'reachFile', { node: data(s.witness.reach) }));
+    if (ev.type === 'witness') out.push(t(s.witness.votes ? 'evWitStatic' : 'evWitNoVote'));
+    return join(out);
+  }
+
+  function capRecount(s) {
+    var live = s.sides.filter(function (sd) { return !sd.down; });
+    var q = live.filter(function (sd) { return sd.quorum; })[0];
+    var list = live.map(function (sd) { return membersText(sd) + (sd.witness ? '+' + t('wMark') : '') + ' ' + sd.votes; }).join(', ');
+    if (q) {
+      var vars = { m: sideName(q), ov: ofVotes(q.votes, s.total), node: data(q.node) };
+      return t.parts((q.witness ? 'rcW' : 'rc') + (q.act === 'keep' ? 'Keep' : 'Move'), vars);
+    }
+    if (s.wasStopped) return t('rcStill');
+    var out = [];
+    if (live.length === 2 && live[0].votes === live[1].votes) {
+      out.push(t.parts('rcTie', { a: data(live[0].votes), b: data(live[1].votes), w: s.witness ? '' : t('noWit') }));
+    } else {
+      out.push(t.parts('rcNone', { list: data(list), needed: data(L.neededOf(s.total)), total: data(s.total) }));
+    }
+    var stale = s.nodes.some(function (x) { return !x.up && x.votes; }) || (s.witness && !s.witness.up && s.witness.votes);
+    if (stale && !s.dynamic) out.push(t.parts('rcStatic', { total: data(s.total) }));
+    return join(out);
+  }
+
+  function capAdjustStep(s) {
+    return join(capAdjust(s).concat([t.parts('dynNow', { total: data(s.total), needed: data(L.neededOf(s.total)) })]));
+  }
+
+  var EV_PARAMS = [2, 3, 4, 5].map(function (n) {
+    return { key: 'ev' + n, type: 'select', label: t('pEvents'), resets: true,
+      options: L.EVENTS[n].map(function (ev) { return [ev, t('ev:' + ev)]; }),
+      visible: function (p) { return !!p.failover && Number(p.nodes) === n; } };
+  });
+
   var SPLIT_PARAMS = [2, 3, 4, 5].map(function (n) {
     return { key: 'split' + n, type: 'choice', label: t('pSplit'), hint: t('pSplitHint'), resets: true,
       options: L.SPLITS[n].map(function (sp) { return [sp, t('sp:' + sp)]; }),
-      visible: function (p) { return Number(p.nodes) === n; } };
+      visible: function (p) { return !p.failover && Number(p.nodes) === n; } };
   });
 
   Simdeck.mount({
@@ -387,12 +471,17 @@
     initial: L.initial,
     step: L.step,
 
-    params: [{ key: 'nodes', type: 'range', label: t('pNodes'), min: 2, max: 5, step: 1, resets: true }].concat(SPLIT_PARAMS, [
-      { key: 'witness', type: 'toggle', label: t('pWitness'), resets: true, visible: function (p) { return p.scene !== 'ceph'; } },
+    params: [{ key: 'nodes', type: 'range', label: t('pNodes'), min: 2, max: 5, step: 1, resets: true }].concat(SPLIT_PARAMS, EV_PARAMS, [
+      { key: 'witness', type: 'toggle', label: t('pWitness'), resets: true, visible: function (p) { return p.scene !== 'ceph' && !p.failover; } },
+      { key: 'wkind', type: 'choice', label: t('pWitness'), resets: true,
+        options: L.KINDS.map(function (k) { return [k, t('wkShort_' + k)]; }), visible: function (p) { return !!p.failover; } },
       { key: 'witnessAt', type: 'choice', label: t('pWitnessAt'), resets: true, options: [['first', t('wFirst')], ['last', t('wLast')]],
-        visible: function (p) { return p.scene !== 'ceph' && p.witness; } },
+        // the failover flow keeps the witness with A's side (the panel has no room for a seventh row; SPEC.md)
+        visible: function (p) { return !p.failover && p.scene !== 'ceph' && p.witness; } },
       { key: 'policy', type: 'choice', label: t('pPolicy'), resets: true, options: [['stop', t('polStop')], ['ignore', t('polIgnore')]],
-        visible: function (p) { return p.scene !== 'ceph'; } }
+        visible: function (p) { return p.scene !== 'ceph' && !p.failover; } },
+      { key: 'votes', type: 'select', label: t('pVotes'), resets: true, options: L.VOTES.map(function (v) { return [v, t('votes_' + v)]; }),
+        visible: function (p) { return !!p.failover; } }
     ]),
 
     presets: [
@@ -401,7 +490,13 @@
       { id: 'two-plus-witness', label: t('prWitness'), params: { scene: 'win', nodes: 2, split2: 'A|B', witness: true, witnessAt: 'first', policy: 'stop' } },
       { id: 'five-three-way', label: t('prFive'), params: { scene: 'ha', nodes: 5, split5: 'AB|CD|E', witness: false, witnessAt: 'first', policy: 'stop' } },
       { id: 'split-brain', label: t('prSplitBrain'), params: { scene: 'ha', nodes: 2, split2: 'A|B', witness: false, witnessAt: 'first', policy: 'ignore' } },
-      { id: 'ceph-mons', label: t('prCeph'), hint: t('prCephHint'), params: { scene: 'ceph', nodes: 3, split3: 'A|B|C', witness: false, witnessAt: 'first', policy: 'stop' } }
+      { id: 'ceph-mons', label: t('prCeph'), hint: t('prCephHint'), params: { scene: 'ceph', nodes: 3, split3: 'A|B|C', witness: false, witnessAt: 'first', policy: 'stop' } },
+      // Windows failover cluster (task win-failover-cluster): a sequence of events, static or dynamic votes
+      { id: 'win-2node-fsw', label: t('prW2Fsw'), params: { scene: 'win', failover: true, nodes: 2, ev2: '!B', wkind: 'fileshare', witnessAt: 'first', votes: 'static' } },
+      { id: 'win-2node-none', label: t('prW2None'), hint: t('prW2NoneHint'), params: { scene: 'win', failover: true, nodes: 2, ev2: 'A|B', wkind: 'none', witnessAt: 'first', votes: 'static' } },
+      { id: 'win-4node-split', label: t('prW4Split'), hint: t('prW4SplitHint'), params: { scene: 'win', failover: true, nodes: 4, ev4: 'AB|CD', wkind: 'disk', witnessAt: 'first', votes: 'static' } },
+      { id: 'win-dynamic', label: t('prWDynamic'), hint: t('prWDynamicHint'), params: { scene: 'win', failover: true, nodes: 3, ev3: '!C,!B', wkind: 'fileshare', witnessAt: 'first', votes: 'dynamic' } },
+      { id: 'win-witness-lost', label: t('prWWitLost'), hint: t('prWWitLostHint'), params: { scene: 'win', failover: true, nodes: 2, ev2: 'W,!B', wkind: 'fileshare', witnessAt: 'first', votes: 'static' } }
     ],
 
     legend: [
@@ -423,7 +518,10 @@
     caption: function (c) {
       var s = c.state, p = c.params;
       switch (s.phase) {
-        case 'start': return capStart(s, p);
+        case 'start': return seqMode(s) ? capSeqStart(s) : capStart(s, p);
+        case 'event': return capEvent(s);
+        case 'recount': return capRecount(s);
+        case 'adjust': return capAdjustStep(s);
         case 'partition': return capPartition(s);
         case 'count': return capCount(s);
         case 'act': return capAct(s, p);

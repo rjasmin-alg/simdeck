@@ -225,12 +225,166 @@ test('an unknown split or node count falls back to a valid one', () => {
   assert.equal(logic.ringOf(5).length, 5);
 });
 
+
+// ── Windows failover sequence (task win-failover-cluster; SPEC.md "Windows failover sequence") ──
+
+const W = (nodes, ev, over) => P(Object.assign({ scene: 'win', failover: true, nodes, ['ev' + nodes]: ev }, over));
+/** Every step as "phase total: side votes/total Q|- act@node; …" (live sides only). */
+const trace = (p) => {
+  const out = [];
+  for (let n = 0; n <= steps(p); n++) {
+    const s = at(p, n);
+    out.push(`${s.phase} ${s.total}: ` + s.sides.filter((x) => !x.down).map((x) => `${x.members.join('')} ${x.counted ? x.votes + '/' + x.total + (x.quorum ? ' Q' : ' -') : '?'}${x.running ? '@' + x.node : ''}`).join('; '));
+  }
+  return out;
+};
+const votes = (s) => s.nodes.map((x) => x.id + x.votes).join(' ') + (s.witness ? ' W' + s.witness.votes : '');
+const last = (p) => end(p).sides.filter((x) => !x.down).map((x) => `${x.members.join('')} ${x.votes}/${x.total} ${x.quorum ? 'Q' : '-'}${x.running ? '@' + x.node : ''}`);
+
+test('W-T6: in a tie dynamic quorum drops the vote of the last voting node, or of A when chosen', () => {
+  // four nodes, no witness: an even total, so one node gives up its vote at the start
+  assert.equal(votes(at(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamic' }), 0)), 'A1 B1 C1 D0');
+  assert.equal(votes(at(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamicA' }), 0)), 'A0 B1 C1 D1');
+  assert.deepEqual(at(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamic' }), 0).adjust.tie, { node: 'D', before: 4 });
+  // the 2 : 2 split then has a winner, and the choice decides which side
+  assert.deepEqual(last(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamic' })), ['AB 1/1 Q@A', 'CD 0/1 -']);
+  assert.deepEqual(trace(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamic' }))[2], 'recount 3: AB 2/3 Q@A; CD 1/3 -');
+  assert.deepEqual(trace(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamicA' }))[2], 'recount 3: AB 1/3 -; CD 2/3 Q@C');
+  // the witness gone, two nodes left: B (the last) gives up its vote, so A survives B; with A chosen it does not
+  assert.deepEqual(last(W(2, 'W,!B', { votes: 'dynamic' })), ['A 1/1 Q@A']);
+  assert.deepEqual(last(W(2, 'W,!B', { votes: 'dynamicA' })), ['A 0/1 -']);
+  // the tie never drops a vote outside the side with quorum
+  assert.equal(votes(end(W(4, 'AB|CD', { wkind: 'none', votes: 'dynamicA' }))), 'A0 B0 C1 D0');
+});
+
+test('W-T1, W-T3: roles move to the lowest up node of the quorum side; a failed witness node hands the witness on', () => {
+  // A (with the roles) fails; the witness sat with A, so it answers B's side: B + witness 2 of 3
+  assert.deepEqual(trace(W(2, '!A', { wkind: 'fileshare' })), ['start 3: AB 3/3 Q@A', 'event 3: B ?', 'recount 3: B 2/3 Q@B']);
+  assert.equal(end(W(2, '!A', { wkind: 'fileshare' })).sides[0].act, 'start');
+  assert.deepEqual(end(W(2, '!A', { wkind: 'fileshare' })).lost, ['A']);
+  // the roles go down with A at once, before the recount
+  assert.deepEqual(at(W(2, '!A', { wkind: 'fileshare' }), 1).resource.runningOn, []);
+  assert.deepEqual(at(W(2, '!A', { wkind: 'fileshare' }), 1).sides.map((x) => [x.members.join(''), x.down, x.node]), [['B', false, null], ['A', true, 'A']]);
+  assert.deepEqual(trace(W(4, 'AB|CD', { wkind: 'disk', witnessAt: 'last' }))[2], 'recount 5: AB 2/5 -; CD 3/5 Q@C');
+});
+
+test('W1: quorum is more than half of all assigned votes; static votes keep failed members in the total', () => {
+  assert.deepEqual(trace(W(3, '!C,!B', { wkind: 'fileshare' })), [
+    'start 4: ABC 4/4 Q@A', 'event 4: AB ?@A', 'recount 4: AB 3/4 Q@A', 'event 4: A ?@A', 'recount 4: A 2/4 -']);
+  assert.deepEqual(last(W(2, 'W,!B', { wkind: 'cloud' })), ['A 1/3 -']);
+  assert.equal(end(W(2, 'W,!B')).total, 3);
+  // without quorum the roles stop everywhere
+  assert.deepEqual(end(W(3, '!C,!B', { wkind: 'fileshare' })).resource.runningOn, []);
+  assert.equal(end(W(3, '!C,!B', { wkind: 'fileshare' })).sides[0].act, 'stop');
+});
+
+test('W2: the witness vote goes to the side that owns the disk or locks the file, whatever its kind', () => {
+  for (const wkind of ['disk', 'fileshare', 'cloud']) {
+    assert.deepEqual(trace(W(4, 'AB|CD', { wkind }))[2], 'recount 5: AB 3/5 Q@A; CD 2/5 -');
+    assert.deepEqual(trace(W(4, 'AB|CD', { wkind, witnessAt: 'last' }))[2], 'recount 5: AB 2/5 -; CD 3/5 Q@C');
+    assert.equal(at(W(4, 'AB|CD', { wkind }), 2).sides[0].witness, true);
+    assert.equal(at(W(4, 'AB|CD', { wkind }), 2).sides[1].witness, false);
+  }
+  // a witness that is gone gives its vote to nobody
+  assert.equal(at(W(4, 'W,AB|CD', { wkind: 'disk' }), 3).witness.reach, null);
+  assert.deepEqual(trace(W(4, 'W,AB|CD', { wkind: 'disk' }))[4], 'recount 5: AB 2/5 -; CD 2/5 -');
+});
+
+test('W3: an even node count without a witness splits 50/50 and both halves stop', () => {
+  assert.deepEqual(trace(W(2, 'A|B', { wkind: 'none' })), ['start 2: AB 2/2 Q@A', 'event 2: A ?@A; B ?', 'recount 2: A 1/2 -; B 1/2 -']);
+  assert.deepEqual(trace(W(4, 'AB|CD', { wkind: 'none' }))[2], 'recount 4: AB 2/4 -; CD 2/4 -');
+  // a three-way split leaves nobody, dynamic or not, and nothing is adjusted without quorum
+  const p = W(5, 'AB|CD|E', { wkind: 'none', votes: 'dynamic' });
+  assert.deepEqual(trace(p), ['start 5: ABCDE 5/5 Q@A', 'event 5: AB ?@A; CD ?; E ?', 'recount 5: AB 2/5 -; CD 2/5 -; E 1/5 -']);
+  assert.equal(votes(end(p)), 'A1 B1 C1 D1 E1');
+});
+
+test('W4: dynamic quorum removes a failed node\'s vote while the cluster has quorum: last man standing', () => {
+  const p = W(4, '!D,!C,!B', { wkind: 'none', votes: 'dynamic' });
+  // start: D gives up its vote (tie); D fails (nothing to adjust); C fails: its vote goes and B gives up its own
+  assert.deepEqual(trace(p), ['start 3: ABCD 3/3 Q@A', 'event 3: ABC ?@A', 'recount 3: ABC 3/3 Q@A', 'event 3: AB ?@A',
+    'recount 3: AB 2/3 Q@A', 'adjust 1: AB 1/1 Q@A', 'event 1: A ?@A', 'recount 1: A 1/1 Q@A']);
+  assert.deepEqual(at(p, 5).adjust.removed, ['C']);
+  // the adjust marks the live side (its votes and total changed), not the failed nodes
+  assert.deepEqual(at(p, 5).changed, [0]);
+  // static: the same sequence stops at C
+  assert.deepEqual(trace(W(4, '!D,!C,!B', { wkind: 'none' })).slice(-1), ['recount 4: A 1/4 -']);
+  // a node cut off in the minority side also loses its vote; two node votes left, so the witness keeps its own
+  assert.equal(votes(end(W(4, 'AB|CD', { wkind: 'disk', votes: 'dynamic' }))), 'A1 B1 C0 D0 W1');
+});
+
+test('W5: dynamic witness: the witness votes only when the node votes are even', () => {
+  assert.equal(votes(at(W(3, '!C', { votes: 'dynamic' }), 0)), 'A1 B1 C1 W0');
+  assert.equal(at(W(3, '!C', { votes: 'dynamic' }), 0).total, 3);
+  assert.equal(votes(at(W(2, '!B', { votes: 'dynamic' }), 0)), 'A1 B1 W1');
+  assert.equal(at(W(2, '!B', { votes: 'dynamic' }), 0).adjust, null);
+  // C fails: two node votes left, even, so the witness gets its vote back
+  assert.deepEqual(at(W(3, '!C', { votes: 'dynamic' }), 3).adjust.witness, [0, 1]);
+  assert.equal(votes(at(W(3, '!C', { votes: 'dynamic' }), 3)), 'A1 B1 C0 W1');
+  // a witness that is gone loses its vote
+  assert.deepEqual(at(W(2, 'W,!B', { votes: 'dynamic' }), 3).adjust.witness, [1, 0]);
+  // static votes: the witness always votes
+  assert.equal(votes(at(W(3, '!C'), 0)), 'A1 B1 C1 W1');
+});
+
+test('W-events: a witness event without a witness is skipped; never two quorums; at most 13 steps', () => {
+  assert.equal(steps(W(2, 'W,!B', { wkind: 'none' })), 2);
+  assert.equal(at(W(2, 'W,!B', { wkind: 'none' }), 1).ev.type, 'fail');
+  let max = 0;
+  for (const nodes of [2, 3, 4, 5]) for (const ev of logic.EVENTS[nodes]) for (const wkind of logic.KINDS)
+    for (const witnessAt of ['first', 'last']) for (const votes of logic.VOTES) {
+      const p = W(nodes, ev, { wkind, witnessAt, votes });
+      max = Math.max(max, steps(p));
+      for (let n = 0; n <= steps(p); n++) {
+        const s = at(p, n);
+        assert.ok(s.sides.filter((x) => x.quorum).length <= 1, `${nodes} ${ev} ${wkind} ${n}`);
+        assert.ok(s.resource.runningOn.length <= 1);
+        assert.ok(s.total >= 1);
+      }
+    }
+  assert.ok(max <= 20);
+  assert.equal(max, 9);
+});
+
+test('W-presets: the numbers in SPEC.md', () => {
+  const pr = {
+    'win-2node-fsw': W(2, '!B', { wkind: 'fileshare' }),
+    'win-2node-none': W(2, 'A|B', { wkind: 'none' }),
+    'win-4node-split': W(4, 'AB|CD', { wkind: 'disk' }),
+    'win-dynamic': W(3, '!C,!B', { wkind: 'fileshare', votes: 'dynamic' }),
+    'win-witness-lost': W(2, 'W,!B', { wkind: 'fileshare' })
+  };
+  assert.deepEqual(trace(pr['win-2node-fsw']), ['start 3: AB 3/3 Q@A', 'event 3: A ?@A', 'recount 3: A 2/3 Q@A']);
+  assert.equal(end(pr['win-2node-fsw']).sides[0].witness, true);
+  assert.deepEqual(trace(pr['win-2node-none']).slice(-1), ['recount 2: A 1/2 -; B 1/2 -']);
+  assert.deepEqual(trace(pr['win-4node-split']).slice(-1), ['recount 5: AB 3/5 Q@A; CD 2/5 -']);
+  assert.deepEqual(trace(W(4, 'AB|CD', { wkind: 'none' })).slice(-1), ['recount 4: AB 2/4 -; CD 2/4 -']);
+  assert.deepEqual(trace(pr['win-dynamic']), ['start 3: ABC 3/3 Q@A', 'event 3: AB ?@A', 'recount 3: AB 2/3 Q@A',
+    'adjust 3: AB 3/3 Q@A', 'event 3: A ?@A', 'recount 3: A 2/3 Q@A', 'adjust 1: A 1/1 Q@A']);
+  assert.deepEqual(trace(W(3, '!C,!B', { wkind: 'fileshare' })).slice(-1), ['recount 4: A 2/4 -']);
+  assert.deepEqual(trace(pr['win-witness-lost']), ['start 3: AB 3/3 Q@A', 'event 3: AB ?@A', 'recount 3: AB 2/3 Q@A',
+    'event 3: A ?@A', 'recount 3: A 1/3 -']);
+  assert.deepEqual(trace(W(2, 'W,!B', { wkind: 'fileshare', votes: 'dynamic' })), ['start 3: AB 3/3 Q@A', 'event 3: AB ?@A',
+    'recount 3: AB 2/3 Q@A', 'adjust 1: AB 1/1 Q@A', 'event 1: A ?@A', 'recount 1: A 1/1 Q@A']);
+  const want = { 'win-2node-fsw': 2, 'win-2node-none': 2, 'win-4node-split': 2, 'win-dynamic': 6, 'win-witness-lost': 4 };
+  for (const id of Object.keys(want)) assert.equal(steps(pr[id]), want[id], id);
+});
+
+test('W-off: the failover flow is off by default and the classic flow ignores its params', () => {
+  assert.equal(logic.defaults.failover, false);
+  const a = cfg(4, 'AB|CD', { witness: true });
+  const b = cfg(4, 'AB|CD', { witness: true, wkind: 'none', votes: 'dynamicA', ev4: 'W,AB|CD' });
+  for (let n = 0; n <= steps(a); n++) assert.deepEqual(at(b, n), at(a, n));
+  assert.equal(at(a, 0).mode, undefined);
+});
+
 // ── presets (SPEC.md table) ──
 
 test('presets: the numbers in SPEC.md', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  const ids = [...html.matchAll(/\{ id: '([a-z-]+)',/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ['three-nodes', 'four-nodes', 'two-plus-witness', 'five-three-way', 'split-brain', 'ceph-mons']);
+  const ids = [...html.matchAll(/\{ id: '([a-z0-9-]+)',/g)].map((m) => m[1]);
+  assert.deepEqual(ids, ['three-nodes', 'four-nodes', 'two-plus-witness', 'five-three-way', 'split-brain', 'ceph-mons',
+    'win-2node-fsw', 'win-2node-none', 'win-4node-split', 'win-dynamic', 'win-witness-lost']);
   const pr = {
     'three-nodes': P({ nodes: 3, split3: 'AB|C' }),
     'four-nodes': P({ nodes: 4, split4: 'AB|CD' }),
@@ -265,7 +419,8 @@ test('no combination of params exceeds 20 steps; the most is 7', () => {
 
 // ── generic checks every sim keeps ──
 
-const SAMPLES = [P({}), cfg(2, 'A|B', { policy: 'ignore' }), cfg(5, 'AB|CD|E', { policy: 'ignore', witness: true }), cfg(2, '!A|B', { witness: true })];
+const SAMPLES = [P({}), cfg(2, 'A|B', { policy: 'ignore' }), cfg(5, 'AB|CD|E', { policy: 'ignore', witness: true }), cfg(2, '!A|B', { witness: true }),
+  W(3, '!C,!B', { wkind: 'fileshare', votes: 'dynamic' }), W(4, 'W,AB|CD', { wkind: 'disk', votes: 'dynamicA' })];
 
 test('state is JSON-safe at every step', () => {
   for (const p of SAMPLES) for (let n = 0; n <= steps(p); n++) {
