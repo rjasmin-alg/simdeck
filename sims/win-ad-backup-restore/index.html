@@ -1,0 +1,459 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ad-backup-restore: qm-dc01 is backed up (or snapshotted), changed, restored non-authoritatively (then
+     optionally authoritatively) or reverted, and the two DCs pull from each other. Kit view K2 draws the two DC cards
+     with the pull on the link, the shelf under qm-dc01 and the health lamp with the actual state under qm-dc02; kit
+     view K3 draws qm-dc01's originating USNs, 100 per cell, before and after the restore, with qm-dc02's UTD as a
+     bracket. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ad-backup-restore">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obnova DC-a i USN rollback · simdeck</title>
+<meta name="description" content="Obnovi DC iz sigurnosne kopije nemjerodavno i mjerodavno, pa vrati snimku virtualnog stroja: novi invocationID, gornje oznake, vektor ažurnosti i promjene koje nikad ne stignu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ad-backup-restore",
+  "title": {
+    "hr": "Obnova DC-a i USN rollback",
+    "en": "Restoring a DC, and USN rollback"
+  },
+  "concept": {
+    "hr": "Nemjerodavna i mjerodavna obnova; vraćanje snimke DC-a tiho kvari replikaciju",
+    "en": "Non-authoritative vs authoritative restore; snapshot reverts break replication"
+  },
+  "summary": {
+    "hr": "Obnovi DC iz kopije na oba načina i vrati snimku VM-a: novi invocationID, gornja oznaka, vektor ažurnosti i promjene koje nikad ne stignu.",
+    "en": "Restore a DC both ways and revert a VM snapshot: a new invocationID, the watermark, the up-to-dateness vector, and changes that never arrive."
+  },
+  "tags": [
+    "active-directory",
+    "backup"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ad-backup-restore"]; colours only from kit tokens.
+   Layout: K2 on top (qm-dc01 left, qm-dc02 right, the boxes under them), the K3 strip under it. */
+[data-sim="win-ad-backup-restore"] .br { height: 100%; display: flex; flex-direction: column; gap: 0.8rem; padding: 1cqh 1.2cqw; font-size: var(--fs-sm); }
+[data-sim="win-ad-backup-restore"] .br > .sd-topo { flex: none; }
+[data-sim="win-ad-backup-restore"] .br > .sd-bg { flex: none; }
+[data-sim="win-ad-backup-restore"] .sd-topo-card { min-width: 0; align-content: start; }
+[data-sim="win-ad-backup-restore"] [translate="no"].br-d { font-family: var(--mono); white-space: nowrap; }
+/* changed in this step: the kit's highlight plus an ink underline, so it survives grayscale */
+[data-sim="win-ad-backup-restore"] .br-ch { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* the card */
+[data-sim="win-ad-backup-restore"] .br-host { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; font-weight: 700; min-height: 1.9rem; font-size: var(--fs-md); }
+[data-sim="win-ad-backup-restore"] .br-tab { border-collapse: collapse; width: 100%; }
+[data-sim="win-ad-backup-restore"] .br-tab th, [data-sim="win-ad-backup-restore"] .br-tab td { padding: 0.05rem 0.35rem; text-align: left; vertical-align: top; }
+[data-sim="win-ad-backup-restore"] .br-tab th { color: var(--muted); font-weight: 400; white-space: nowrap; padding-left: 0; }
+[data-sim="win-ad-backup-restore"] .br-tab td { font-family: var(--mono); }
+[data-sim="win-ad-backup-restore"] .br-tab td.br-word { font-family: var(--sans); }
+[data-sim="win-ad-backup-restore"] .br-utd { display: flex; flex-wrap: wrap; gap: 0.1rem 1rem; }
+[data-sim="win-ad-backup-restore"] .br-utd > span { white-space: nowrap; }
+[data-sim="win-ad-backup-restore"] .br-note { font-family: var(--sans); color: var(--muted); }
+[data-sim="win-ad-backup-restore"] .br-usn { font-size: var(--fs-md); font-weight: 700; }
+
+/* the boxes under the cards */
+[data-sim="win-ad-backup-restore"] .br-box { padding: 0.35rem 0.7rem 0.45rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); min-width: 0; align-self: start; }
+[data-sim="win-ad-backup-restore"] .br-box > b { display: block; margin-bottom: 0.1rem; }
+[data-sim="win-ad-backup-restore"] .br-box p { margin: 0.1rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+[data-sim="win-ad-backup-restore"] .br-muted { color: var(--muted); }
+[data-sim="win-ad-backup-restore"] .br-icon { width: 1.5rem; height: 1.5rem; flex: none; }
+[data-sim="win-ad-backup-restore"] .br-tag { padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+/* the lamp: a filled disc when well, a hollow ring with a cross when not (grayscale) */
+[data-sim="win-ad-backup-restore"] .br-lamp { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; flex: none; font-weight: 700; line-height: 1; }
+[data-sim="win-ad-backup-restore"] .br-lamp[data-k="ok"] { background: var(--ok); border: 0.2rem solid var(--ok); }
+[data-sim="win-ad-backup-restore"] .br-lamp[data-k="error"] { background: var(--bg); border: 0.2rem solid var(--danger); color: var(--danger); }
+[data-sim="win-ad-backup-restore"] .br-lamp[data-k="error"]::after { content: '✕'; font-size: 0.8rem; }
+[data-sim="win-ad-backup-restore"] .br-real li { margin: 0; }
+[data-sim="win-ad-backup-restore"] .br-real { margin: 0.1rem 0 0; padding-left: 1.1rem; }
+[data-sim="win-ad-backup-restore"] .br-bad { color: var(--danger); font-weight: 700; }
+
+/* legend swatch the kit lacks: filled with a tick (on both DCs) */
+[data-sim="win-ad-backup-restore"] .sd-swatch[data-shape="br-both"] { position: relative; background: var(--c1); border-color: var(--c1); }
+[data-sim="win-ad-backup-restore"] .sd-swatch[data-shape="br-both"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--on-series); }
+
+[data-sim="win-ad-backup-restore"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the kit's card list, the strip after it; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ad-backup-restore"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ad-backup-restore"] .br { height: auto; padding: 0.5rem; }
+  [data-sim="win-ad-backup-restore"] .br-tab th, [data-sim="win-ad-backup-restore"] .br-tab td { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Obnova DC-a i USN rollback</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var HOST = { DC01: 'qm-dc01', DC02: 'qm-dc02' };
+  /** Series colour per invocationID: qm-dc01's first and its new one, qm-dc02's. */
+  var INV_C = { a1f3: 1, b82e: 3, e52b: 2 };
+  var INV_DC = { a1f3: 'DC01', b82e: 'DC01', e52b: 'DC02' };
+  var SVG = 'http://www.w3.org/2000/svg';
+
+  /** Data (host names, USNs, invocationIDs) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'br-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function inv(i) { return data(i + '…'); }
+  /** A version with thousands grouped as the strings write 100,000 / 100 000. */
+  function group(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ','); }
+  function host(id) { return data(HOST[id]); }
+  /** Parts of a string with *English term* turned into <em lang="en">. Nodes are cloned, so one vars object may serve
+      several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (!x) return; if (out.length) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Highlight what differs from the step before. */
+  function ch(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    try { return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev)); } catch (e) { return false; }
+  }
+
+  function icon(kind) {
+    var svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'br-icon');
+    svg.setAttribute('aria-hidden', 'true');
+    var parts = kind === 'vm-snapshot'
+      ? [['rect', { x: 2, y: 7, width: 20, height: 14, rx: 2 }], ['circle', { cx: 12, cy: 14, r: 4 }], ['path', { d: 'M8 7l2-3h4l2 3' }]]
+      : [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['rect', { x: 7, y: 3, width: 10, height: 6 }], ['rect', { x: 6, y: 13, width: 12, height: 6 }]];
+    parts.forEach(function (p) {
+      var el = document.createElementNS(SVG, p[0]);
+      Object.keys(p[1]).forEach(function (k) { el.setAttribute(k, p[1][k]); });
+      el.setAttribute('fill', 'none');
+      el.setAttribute('stroke', 'currentColor');
+      el.setAttribute('stroke-width', '2');
+      el.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(el);
+    });
+    return svg;
+  }
+
+  // ── the cards (kit view K2) ──
+
+  function badges(c, id) {
+    var s = c.state, e = s.last, dc = s.dcs[id], out = [];
+    if (e) {
+      if ((e.kind === 'write' || e.kind === 'auth') && id === 'DC01') out.push({ text: t('bWrites'), k: 'fill' });
+      if (e.kind === 'pull' && e.dest === id) out.push({ text: t('bPulls'), k: 'fill' });
+      if (e.kind === 'pull' && e.src === id) out.push({ text: t('bSends'), k: 'solid' });
+      if (e.kind === 'revert' && id === 'DC01') out.push({ text: t('bBack'), k: 'fill' });
+    }
+    if (dc.dsrm) out.push({ text: t('bDsrm'), k: 'dashed' });
+    if (!dc.writable) out.push({ text: t('bQuarantine'), k: 'dashed' });
+    return out;
+  }
+
+  function cardHead(c, id) {
+    return h('div', { class: 'br-host' }, host(id), badges(c, id).map(function (b) {
+      return h('span', { class: 'sd-topo-badge', dataset: { k: b.k } }, b.text);
+    }));
+  }
+
+  function cell(c, get, content, word) {
+    return h('td', { class: [word ? 'br-word' : '', ch(c, get) ? 'br-ch' : ''].join(' ').trim() || null, translate: word ? null : 'no' }, content);
+  }
+
+  function cardTable(c, id) {
+    var s = c.state, dc = s.dcs[id], other = id === 'DC01' ? 'DC02' : 'DC01';
+    var utd = Object.keys(dc.utd).sort().map(function (i) {
+      var note = INV_DC[i] === id ? t('old') : null;
+      return h('span', { class: ch(c, function (x) { return x.dcs[id].utd[i]; }) ? 'br-ch' : null },
+        data(i + '… ' + HOST[INV_DC[i]] + ' ' + dc.utd[i]), note ? h('span', { class: 'br-note' }, ' (' + note + ')') : null);
+    });
+    var known = dc.knows[other];
+    var stale = known !== s.dcs[other].inv;
+    return h('table', { class: 'br-tab' }, h('tbody', null,
+      h('tr', null, h('th', null, data('USN')), cell(c, function (x) { return x.dcs[id].usn; }, h('span', { class: 'br-usn' }, String(dc.usn)))),
+      h('tr', null, h('th', null, t('rowInv')), cell(c, function (x) { return x.dcs[id].inv; }, dc.inv + '…')),
+      h('tr', null, h('th', null, t('rowUtd')), h('td', { translate: 'no' }, h('div', { class: 'br-utd' }, utd))),
+      h('tr', null, h('th', null, t.parts('rowHwm', { dc: host(other) })),
+        cell(c, function (x) { return [x.dcs[id].hwm[other], x.dcs[id].knows[other]]; },
+          [String(dc.hwm[other]) + ' (' + known + '…)', stale ? h('span', { class: 'br-bad' }, ' ≠ ' + s.dcs[other].inv + '…') : null])),
+      h('tr', null, h('th', null, t('rowNetlogon')),
+        cell(c, function (x) { return x.dcs[id].netlogon; }, dc.netlogon === 'paused' ? h('span', { class: 'br-bad' }, t('paused')) : t('running'), true)),
+      h('tr', null, h('th', null, t('rowOu')),
+        cell(c, function (x) { return x.dcs[id].ou; }, [data('Brackenridge'), ' ', dc.ou.exists ? t('ouExists') : h('span', { class: 'br-bad' }, t('ouDeleted')),
+          ' ', data('v' + group(dc.ou.ver))], true))));
+  }
+
+  function shelfBox(c) {
+    var s = c.state;
+    var items = s.shelf.map(function (it) {
+      var used = c.n >= 4;
+      return h('p', null, icon(it.kind), t(it.kind === 'vm-snapshot' ? 'shelfSnapshot' : 'shelfBackup'),
+        h('span', { class: 'br-muted' }, t('shelfDay', { d: it.day })),
+        data('USN ' + it.usn + ' · ' + it.inv + '…'), used ? h('span', { class: 'br-tag' }, t('shelfUsed')) : null);
+    });
+    return h('div', { class: 'br-box' }, h('b', null, t('shelfTitle'), ' ', host('DC01')),
+      items.length ? items : h('p', { class: 'br-muted' }, t('shelfEmpty')));
+  }
+
+  function healthBox(c) {
+    var s = c.state, r = L.reality(s);
+    var real = [];
+    if (r.inStep) real.push(h('li', null, t('realSame')));
+    [['DC01', r.only1, r.never1], ['DC02', r.only2, r.never2]].forEach(function (x) {
+      if (!x[1]) return;
+      real.push(h('li', null, t.parts('realOnly', { n: x[1], dc: host(x[0]) }),
+        x[2] ? [' · ', h('span', { class: 'br-bad' }, x[2] === x[1] ? t('realNever') : t('realNeverN', { n: x[2] }))] : null));
+    });
+    if (!r.ouSame) real.push(h('li', null, h('span', { class: 'br-bad' }, t('realOu'))));
+    return h('div', { class: 'br-box' },
+      h('b', null, t('healthTitle')),
+      h('p', null, h('span', { class: 'br-lamp', dataset: { k: s.health } }), s.health === 'ok' ? t('healthOk') : h('span', { class: 'br-bad' }, t('healthError'))),
+      s.events.length ? h('p', null, h('span', { class: 'br-bad' }, t('event2095'))) : null,
+      h('b', null, t('realTitle')),
+      h('ul', { class: 'br-real' }, real));
+  }
+
+  function renderTopo(c) {
+    var s = c.state, e = s.last;
+    var acting = !e ? [] : e.kind === 'pull' ? [e.dest] : ['DC01'];
+    var nodes = [
+      { id: 'DC01', kind: 'server', col: 0, row: 0, span: 4, c: INV_C[s.dcs.DC01.inv], mark: '01', name: cardHead(c, 'DC01'),
+        extra: cardTable(c, 'DC01'), state: acting.indexOf('DC01') >= 0 ? 'active' : null, table: shelfBox(c), tableRow: 1 },
+      { id: 'DC02', kind: 'server', col: 6, row: 0, span: 4, c: INV_C.e52b, mark: '02', name: cardHead(c, 'DC02'),
+        extra: cardTable(c, 'DC02'), state: acting.indexOf('DC02') >= 0 ? 'active' : null, table: healthBox(c), tableRow: 1 }
+    ];
+    var pulling = e && e.kind === 'pull';
+    var links = [{ id: 'l', a: 'DC01', b: 'DC02', state: s.health === 'ok' ? 'up' : 'off', active: !!pulling }];
+    var packets = [];
+    if (pulling) {
+      var n = sentChanges(e);
+      // a refused pull is the request dropped at the DC that refuses it; otherwise the reply with the changes
+      if (e.refused) packets.push({ from: e.refused === e.src ? e.dest : e.src, to: e.refused, at: 0.5, drop: true, label: t('chipRefused') });
+      else packets.push({ from: e.src, to: e.dest, c: INV_C[s.dcs[e.src].inv], at: 0.5, label: n ? t.n('chipN', n) : t('chipNone') });
+    }
+    return Simdeck.topology({ cols: 10, rows: ['auto', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  function sentChanges(e) {
+    return e.sent.filter(function (x) { return x.outcome === 'applied'; }).length * L.BLOCK;
+  }
+
+  // ── the strip (kit view K3) ──
+
+  /** The cell of qm-dc01's block in row gen, column col. */
+  function cellOf(s, gen, col) {
+    var b = s.blocks.filter(function (x) { return x.gen === gen && x.col === col; })[0];
+    if (!b) return {};
+    var w = L.where(s, b.id);
+    var out = { c: INV_C[b.inv], sub: b.ou ? 'OU' : null };
+    if (w.dead) out.kind = 'dead';
+    else if (w.on1 && w.on2) { out.kind = 'fill'; out.text = '✓'; }
+    else if (w.on1) out.kind = L.never(s, b.id) ? 'soft' : 'fill';
+    else { out.kind = 'ghost'; out.text = '✓'; }
+    return out;
+  }
+
+  /** The invocationID of a row: the first row is a1f3; the second the DC's after the restore or revert. */
+  function rowInv(s, n, gen) {
+    if (gen === 1) return 'a1f3';
+    return n >= 4 ? s.dcs.DC01.inv : null;
+  }
+
+  function renderGrid(c) {
+    var s = c.state;
+    var rows = [1, 2].map(function (gen) {
+      var ri = rowInv(s, c.n, gen);
+      var cells = [];
+      for (var col = 0; col < L.COLS; col++) {
+        var x = cellOf(s, gen, col);
+        var y = c.prev && c.n > 0 ? cellOf(c.prev, gen, col) : x;
+        if (JSON.stringify(x) !== JSON.stringify(y)) x.now = true;
+        cells.push(x);
+      }
+      var u = ri ? (s.dcs.DC02.utd[ri] || 0) : 0;
+      var len = Math.min(L.COLS, Math.max(0, (u - L.BASE) / L.BLOCK));
+      return { id: 'g' + gen, label: h('span', null, t(gen === 1 ? 'row1' : 'row2'), ri ? [' ', inv(ri)] : null), cells: cells,
+        brackets: len > 0 ? [{ from: 0, len: len, label: len >= 3 ? t('brUtd', { u: u }) : String(u) }] : [] };
+    });
+    var cols = [];
+    for (var k = 1; k <= L.COLS; k++) cols.push(String(L.BASE + k * L.BLOCK));
+    return Simdeck.blockGrid({ dir: c.dir, title: t('gridTitle'), meta: [t('gridMeta')], colLabels: cols, rows: rows, cellHeight: '3rem' });
+  }
+
+  // ── captions ──
+
+  function capStart(c) {
+    var s = c.state, m = L.eff(c.params).mode;
+    return join([rich('capStart', { u1: data(s.dcs.DC01.usn), i1: inv(s.dcs.DC01.inv), u2: data(s.dcs.DC02.usn) }),
+      rich(m === 'auth' ? 'planAuth' : m === 'revert' ? 'planRevert' : 'planNonauth')]);
+  }
+
+  function capWrite(c) {
+    var s = c.state, e = s.last;
+    if (e.gen === 1) return rich('capWrite1', { n: data(e.n), from: data(e.from + 1), to: data(e.to) });
+    if (!e.n) return rich('capWrite2None');
+    var i = s.dcs.DC01.inv, utd = s.dcs.DC02.utd[i] || 0;
+    var out = [rich('capWrite2', { n: data(e.n), from: data(e.from + 1), to: data(e.to), inv: inv(i) })];
+    if (utd > e.from) {
+      out.push(rich('capWriteSame', { a: data(e.from + 1), b: data(Math.min(e.to, utd)), utd: data(utd) }));
+      if (e.to > utd) out.push(rich('capWriteAbove', { utd: data(utd) }));
+    }
+    else if (!utd) out.push(rich('capWriteFresh'));
+    return join(out);
+  }
+
+  function capPull(c) {
+    var s = c.state, e = s.last, src = s.dcs[e.src], dest = s.dcs[e.dest], pd = c.prev.dcs[e.dest];
+    var v = { dest: host(e.dest), src: host(e.src) };
+    if (e.detected) return rich('capDetect', Object.assign({ inv: inv(src.inv), utd: data(e.utdSeen), usn: data(src.usn) }, v));
+    if (e.refused) return join([rich('capRefused', { src: host(e.refused) })]);
+    var out = [];
+    out.push(e.reset
+      ? rich('capReset', Object.assign({ hwm: data(e.hwm), old: inv(c.prev.dcs[e.dest].knows[e.src]), 'new': inv(src.inv) }, v))
+      : rich('capFrom', Object.assign({ from: data(e.from) }, v)));
+    var n = sentChanges(e);
+    out.push(n ? t.parts('capSent', { n: n }) : t('capSentNone'));
+    var own = e.left.filter(function (x) { return x.why === 'own'; }).length * L.BLOCK;
+    var utd = e.left.filter(function (x) { return x.why === 'utd'; }).length * L.BLOCK;
+    if (own) out.push(t.parts('capLeftOwn', Object.assign({ n: own }, v)));
+    if (utd) out.push(t.parts('capLeftUtd', Object.assign({ n: utd }, v)));
+    e.sent.forEach(function (x) {
+      var b = s.blocks[x.id - 1];
+      if (!b.ou) return;
+      if (x.outcome === 'applied') out.push(rich('capOuWin', Object.assign({ v: data(group(b.ver)), vh: data(group(pd.ou.ver)), state: t(dest.ou.exists ? 'stExists' : 'stDeleted') }, v)));
+      else out.push(rich('capOuLost', { v: data(group(b.ver)), vh: data(group(pd.ou.ver)) }));
+    });
+    // the reverted DC's changes below the partner's watermark: never offered
+    if (e.dest === 'DC02' && !e.reset) {
+      var below = s.blocks.filter(function (b) { return b.gen === 2 && b.inv === src.inv && b.usn <= e.from && src.held[b.id]; });
+      if (below.length) out.push(rich('capBelow', { a: data(below[0].usn - L.BLOCK + 1), b: data(below[below.length - 1].usn) }));
+    }
+    if (e.dest === 'DC02') out.push(rich('capUtdNow', { dest: host('DC02'), inv: inv(src.inv), u: data(dest.utd[src.inv]), h: data(dest.hwm.DC01) }));
+    if (c.last && s.health === 'ok') {
+      var r = L.reality(s);
+      out.push(r.inStep
+        ? join([t('capEndSame'), rich('capEndOu', { state: t(dest.ou.exists ? 'stExists' : 'stDeleted') })])
+        : rich('capEndDiff', { n1: data(r.only1), n2: data(r.only2) }));
+    }
+    return join(out);
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.last;
+    if (!e) return capStart(c);
+    var d1 = s.dcs.DC01;
+    if (e.kind === 'backup' || e.kind === 'snapshot') {
+      var key = e.kind === 'backup' ? 'capBackup' : L.eff(c.params).vmGenId ? 'capSnapshotGen' : 'capSnapshot';
+      return rich(key, { usn: data(d1.usn), inv: inv(d1.inv) });
+    }
+    if (e.kind === 'write') return capWrite(c);
+    if (e.kind === 'pull') return capPull(c);
+    if (e.kind === 'auth') return rich('capAuth', { was: data(e.was), days: data(e.days), ver: data(group(e.ver)), usn: data(e.usn), inv: inv(d1.inv) });
+    if (e.kind === 'restore') return rich('capRestore', { usn: data(e.usn), inv: inv(e.inv), old: inv(e.oldInv) });
+    if (e.genId) return rich('capRevertGen', { inv: inv(e.inv) });
+    var n = s.blocks.filter(function (b) { return b.gen === 1; }).length * L.BLOCK;
+    return rich('capRevert', { usn: data(e.usn), inv: inv(e.inv), n: data(n), utd: data(s.dcs.DC02.utd[e.inv]) });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('pMode'), options: [['nonauth', t('mNonauth')], ['auth', t('mAuth')], ['revert', t('mRevert')]] },
+      { key: 'vmGenId', type: 'toggle', label: t('pGenId'), hint: t('pGenIdHint'), visible: function (p) { return p.mode === 'revert'; } },
+      { key: 'writesAfter', type: 'range', label: t('pAfter'), min: 100, max: 1000, step: 100 },
+      { key: 'writesAfterRevert', type: 'range', label: t('pAfterRevert'), min: 0, max: 1000, step: 100, visible: function (p) { return p.mode !== 'auth'; } }
+    ],
+
+    presets: [
+      { id: 'non-authoritative', label: t('prNonauth'), params: { mode: 'nonauth', vmGenId: false, writesAfter: 600, writesAfterRevert: 400 } },
+      { id: 'authoritative', label: t('prAuth'), params: { mode: 'auth', vmGenId: false, writesAfter: 600, writesAfterRevert: 400 } },
+      { id: 'usn-rollback', label: t('prRollback'), params: { mode: 'revert', vmGenId: false, writesAfter: 600, writesAfterRevert: 400 } },
+      { id: 'vm-genid', label: t('prGenId'), params: { mode: 'revert', vmGenId: true, writesAfter: 600, writesAfterRevert: 400 } },
+      { id: 'silent-rollback', label: t('prSilent'), params: { mode: 'revert', vmGenId: false, writesAfter: 600, writesAfterRevert: 1000 } }
+    ],
+
+    legend: [
+      { shape: 'bg-fill', c: 1, label: t('lgPending') },
+      { shape: 'br-both', label: t('lgBoth') },
+      { shape: 'bg-soft', c: 1, label: t('lgNever') },
+      { shape: 'bg-ghost', label: t('lgGhost') },
+      { shape: 'bg-dead', label: t('lgDead') },
+      { shape: 'bg-bracket', label: t('lgUtd') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'br' }, renderTopo(c), renderGrid(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
