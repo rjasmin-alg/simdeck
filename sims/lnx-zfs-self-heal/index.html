@@ -1,0 +1,509 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-zfs-self-heal: checksums in block pointers and a scrub that repairs from the mirror. The pointer row carries
+     each block's checksum; the disk rows hold the copies; a read or a scrub checks a copy against its pointer and
+     rewrites a bad copy from a good one. Right: the pool status (or md's, for the contrast). Drawn on kit view K3
+     (block grid). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-zfs-self-heal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrolni zbrojevi i samoizlječenje · simdeck</title>
+<meta name="description" content="Tiho ošteti blok i pokreni provjeru: zbroj u pokazivaču otkrije lošu kopiju, a zrcalo je popravi. Jedan disk samo otkrije, md RAID 1 ni to.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-zfs-self-heal",
+  "title": {
+    "hr": "Kontrolni zbrojevi i samoizlječenje",
+    "en": "Checksums and self-healing"
+  },
+  "concept": {
+    "hr": "Provjera integriteta nađe loš blok i popravi ga iz zrcala",
+    "en": "A scrub finds a bad block and repairs it from the mirror"
+  },
+  "summary": {
+    "hr": "Tiho ošteti blok i pokreni provjeru: zbroj u pokazivaču otkrije lošu kopiju, a zrcalo je popravi. Jedan disk samo otkrije, md RAID 1 ni to.",
+    "en": "Silently damage a block and scrub: the checksum in the pointer catches the bad copy and the mirror repairs it. One disk only detects; md RAID 1 cannot tell."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-zfs-self-heal"]; colours only from kit tokens.
+   Layout: the kit block grid (K3) on the left (root, the pointer row with the files under it, a row per copy), the
+   status output on the right. */
+[data-sim="lnx-zfs-self-heal"] .zh {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-zfs-self-heal"] .zh > .sd-bg { flex: 1 1 0; min-width: 0; }
+[data-sim="lnx-zfs-self-heal"] .zh .sd-bg-grid { --bg-row-gap: 1.4rem; }
+[data-sim="lnx-zfs-self-heal"] .zh-aside { color: var(--muted); }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="lnx-zfs-self-heal"] .sd-ctl[hidden] { display: none; }
+/* legend swatches the kit does not have */
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="under"] { background: var(--bg); box-shadow: inset 0 -0.3rem 0 var(--ink); }
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="heal"],
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="tag"] { position: relative; }
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="heal"] { background: var(--sw, var(--c1)); border-color: var(--sw, var(--c1)); }
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="tag"] { background: var(--bg); border: 1px solid var(--line); }
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="heal"]::after,
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="tag"]::after {
+  position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1;
+}
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="heal"]::after { content: '↺'; color: var(--on-series); }
+[data-sim="lnx-zfs-self-heal"] .sd-swatch[data-shape="tag"]::after { content: '✓'; color: var(--ink); }
+
+/* the status output: zpool status -v, or md's /proc/mdstat and mismatch_cnt */
+[data-sim="lnx-zfs-self-heal"] .zs {
+  flex: 0 0 22rem;
+  min-width: 0;
+  padding: 0.5rem 0.8rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-zfs-self-heal"] .zs h3 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+[data-sim="lnx-zfs-self-heal"] .zs-cmd { display: block; margin-bottom: 0.4rem; color: var(--muted); font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="lnx-zfs-self-heal"] .zs-out { font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="lnx-zfs-self-heal"] .zs-line { white-space: pre-wrap; }
+[data-sim="lnx-zfs-self-heal"] .zs-key { color: var(--muted); }
+[data-sim="lnx-zfs-self-heal"] .zs-table { border-collapse: collapse; margin: 0.3rem 0; }
+[data-sim="lnx-zfs-self-heal"] .zs-table th,
+[data-sim="lnx-zfs-self-heal"] .zs-table td { padding: 0 0.45rem; text-align: right; white-space: nowrap; }
+[data-sim="lnx-zfs-self-heal"] .zs-table th { color: var(--muted); font-weight: 700; }
+[data-sim="lnx-zfs-self-heal"] .zs-table td:first-child,
+[data-sim="lnx-zfs-self-heal"] .zs-table th:first-child { text-align: left; padding-left: 0; }
+[data-sim="lnx-zfs-self-heal"] .zs-table td[data-depth="1"] { padding-left: 1rem; }
+[data-sim="lnx-zfs-self-heal"] .zs-table td[data-depth="2"] { padding-left: 2rem; }
+[data-sim="lnx-zfs-self-heal"] .zs-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
+[data-sim="lnx-zfs-self-heal"] .zs-bad { color: var(--danger); font-weight: 700; }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box; the status goes under it. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-zfs-self-heal"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-zfs-self-heal"] .zh { flex-direction: column; align-items: stretch; height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="lnx-zfs-self-heal"] .zh > .sd-bg { flex: 0 0 auto; }
+  [data-sim="lnx-zfs-self-heal"] .zh .sd-bg-grid { --bg-row-gap: 0.8rem; }
+  [data-sim="lnx-zfs-self-heal"] .zs { flex: 0 0 auto; overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kontrolni zbrojevi i samoizlječenje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var FREE = '8, 9';                                    // the free blocks, as data
+
+  /** Data (pool, device and file names, block numbers, sums, status output) is not language: translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+
+  /** Caption parts from t(key) or t.n(key, n): node placeholders are put back where they land (cloned, so a node may
+      appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+
+  function isMd(s) { return s.redundancy === 'md-mirror'; }
+  function twoOnOne(s) { return s.disks.length === 2 && s.disks[0].name === s.disks[1].name; }
+  /** A copy's name: the disk, and with copies=2 on one disk which copy it is. */
+  function devL(s, k) {
+    var d = s.disks[k];
+    return twoOnOne(s) ? h('span', null, data(d.name), ' ', t('copyN', { n: d.copy })) : data(d.name);
+  }
+  function cksumOf(s, k) { return s.counters[s.disks[k].name].cksum; }
+  function sumMark(v) { return v.sum + (v.ok ? ' ✓' : ' ✗'); }
+
+  /** What this step read and wrote: reads['k:b'] = the check of copy k of block b; wrote['k:b']; repair links. */
+  function touched(s) {
+    var l = s.last, reads = {}, wrote = {}, links = [], focus = [];
+    function add(r) {
+      focus.push(r.block);
+      (r.read || []).forEach(function (v) { reads[v.copy + ':' + r.block] = v; });
+      (r.wrote || []).forEach(function (k) {
+        wrote[k + ':' + r.block] = true;
+        if (r.from !== null && r.from !== undefined) links.push({ from: r.from, to: k, b: r.block });
+      });
+      (r.extra || []).forEach(function (b) { reads['0:' + b] = { cmp: true }; reads['1:' + b] = { cmp: true }; });
+    }
+    if (l.op === 'corrupt') { if (!l.again) wrote[l.copy + ':' + l.block] = true; focus.push(l.block); }
+    else if (l.op === 'read' || l.op === 'scrub') add(l);
+    else if (l.results) l.results.forEach(add);                        // a whole ZFS scrub in one step
+    else if (l.op === 'check' || l.op === 'repair') {                  // md: every block of both disks, free ones too
+      for (var b = 0; b < L.BLOCKS; b++) { reads['0:' + b] = { cmp: true }; reads['1:' + b] = { cmp: true }; }
+      if (l.op === 'repair') l.blocks.forEach(function (x) { wrote['1:' + x] = true; links.push({ from: 0, to: 1, b: x }); });
+    }
+    return { reads: reads, wrote: wrote, links: links, focus: focus };
+  }
+
+  // ── stage ──
+
+  function render(c) {
+    var s = c.state, md = isMd(s), tc = touched(s), l = s.last;
+    var cols = [];
+    for (var i = 0; i < L.BLOCKS; i++) cols.push(String(i));
+
+    var rootSum = md ? '—' : L.checksum(s.ptrs.map(function (p) { return p.sum; }).join(''));
+    var rows = [{ id: 'root', label: h('span', null, t('rowRoot')), cells: [{ text: rootSum }] }];
+
+    var ptrCells = [];
+    for (var b = 0; b < L.BLOCKS; b++) {
+      var p = s.ptrs.filter(function (x) { return x.block === b; })[0];
+      ptrCells.push(p ? { text: md ? '—' : p.sum, now: l.op !== 'corrupt' && tc.focus.indexOf(b) >= 0 && (l.op === 'read' || l.op === 'scrub') } : null);
+    }
+    var bad = L.permanentFiles(s);
+    var spans = L.FILES.map(function (f) {
+      var lost = bad.indexOf(f.name) >= 0;
+      return { from: f.blocks[0], len: f.blocks.length, label: (lost ? '✕ ' : '') + f.name, style: lost ? 'dashed' : 'solid' };
+    });
+    var brackets = [];
+    if (l.op === 'scrub') brackets.push({ from: l.block, len: 1, label: t(md ? 'cursorCheck' : 'cursorScrub') });
+    else if (l.op === 'check' || l.op === 'repair') {
+      brackets.push(md ? { from: 0, len: L.BLOCKS, label: t('cursorCheck') } : { from: 0, len: L.ALLOCATED.length, label: t('cursorScrub') });
+    }
+    rows.push({ id: 'ptr', label: h('span', null, t('rowPtr')), cells: ptrCells, spans: spans, brackets: brackets });
+
+    s.disks.forEach(function (d, k) {
+      var cells = d.blocks.map(function (cell, b) {
+        var key = k + ':' + b, v = tc.reads[key], now = !!tc.wrote[key];
+        var out;
+        if (b >= L.ALLOCATED.length) out = {};
+        else if (cell.rotten && s.permanent.indexOf(b) >= 0) out = { text: cell.data + '⚡', kind: 'bad' };
+        else if (cell.rotten) out = { text: (cell.healed ? '↺' : '') + cell.data + '⚡', kind: 'soft', c: k + 1 };
+        else out = { text: (cell.healed ? '↺' : '') + cell.data, kind: 'fill', c: k + 1 };
+        if (v) {
+          if (v.cmp) {                                   // md compared the two copies (a repaired block differed)
+            var diff = s.disks[0].blocks[b].data !== s.disks[1].blocks[b].data || (l.op === 'repair' && l.blocks.indexOf(b) >= 0);
+            out.sub = diff ? '≠' : '=';
+          } else if (v.sum) out.sub = sumMark(v);
+          else out.sub = '—';                           // md read: no checksum to compare with
+          if (!now) out.mark = 'under';
+        }
+        if (now) out.now = true;
+        return out;
+      });
+      rows.push({ id: 'd' + k, label: devL(s, k), cells: cells });
+    });
+
+    var links = tc.links.map(function (x) { return { from: { row: 'd' + x.from, cell: x.b }, to: { row: 'd' + x.to, cell: x.b }, now: true }; });
+
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [t('metaBlock'), md ? t('metaNoSum') : t('metaSum')],
+      cols: L.BLOCKS,
+      colLabels: cols,
+      cellHeight: '3.6rem',
+      rows: rows,
+      links: links
+    });
+    c.stage.replaceChildren(h('div', { class: 'zh' }, grid, md ? mdStatus(c) : zfsStatus(c)));
+  }
+
+  function line(key, value, hl, cls) {
+    return h('div', { class: 'zs-line' }, h('span', { class: 'zs-key' }, key + ' '),
+      h('span', { class: [hl ? 'zs-now' : '', cls || ''].join(' ').trim() || null }, value));
+  }
+  function kb(n) { return n ? (n * 4) + 'K' : '0B'; }
+  function scanText(s) {
+    var x = s.scrub;
+    if (!x) return ['none requested'];
+    if (!x.done) {
+      var k = L.ALLOCATED.indexOf(x.at) + 1;
+      return ['scrub in progress', (k * 4) + 'K scanned, ' + kb(x.repaired) + ' repaired, ' + (k / L.ALLOCATED.length * 100).toFixed(2) + '% done'];
+    }
+    return ['scrub repaired ' + kb(x.repaired) + ' with ' + x.errors + ' errors'];
+  }
+  function errorsText(s) {
+    var f = L.permanentFiles(s);
+    if (!f.length) return ['No known data errors'];
+    return ['Permanent errors have been detected in the following files:'].concat(f.map(function (x) { return '/tank/' + x; }));
+  }
+
+  function zfsStatus(c) {
+    var s = c.state, prev = c.prev;
+    var same = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+    var scan = scanText(s), errs = errorsText(s);
+    var scanHl = !!prev && !same(scan, scanText(prev)), errHl = !!prev && !same(errs, errorsText(prev));
+    var num = function (v, was) { return h('td', { class: prev && v !== was ? 'zs-now' : null }, String(v)); };
+    var rowsT = [];
+    var top = s.counters.top.cksum, wasTop = prev ? prev.counters.top.cksum : top;
+    function trow(name, depth, ck, was) {
+      return h('tr', null, h('td', { dataset: { depth: String(depth) } }, name), h('td', null, 'ONLINE'),
+        h('td', null, '0'), h('td', null, '0'), num(ck, was));
+    }
+    rowsT.push(trow('tank', 0, top, wasTop));
+    var depth = 1;
+    if (s.redundancy === 'mirror') { rowsT.push(trow('mirror-0', 1, top, wasTop)); depth = 2; }
+    L.devices({ redundancy: s.redundancy, copies2: s.disks.length === 2 }).forEach(function (d) {
+      rowsT.push(trow(d, depth, s.counters[d].cksum, prev ? prev.counters[d].cksum : s.counters[d].cksum));
+    });
+    var table = h('table', { class: 'zs-table' },
+      h('thead', null, h('tr', null, ['NAME', 'STATE', 'READ', 'WRITE', 'CKSUM'].map(function (x) { return h('th', null, x); }))),
+      h('tbody', null, rowsT));
+    var out = h('div', { class: 'zs-out', translate: 'no' },
+      line('pool:', 'tank'), line('state:', 'ONLINE'),
+      line('scan:', scan.join('\n'), scanHl),
+      table,
+      line('errors:', errs.join('\n'), errHl, errs.length > 1 ? 'zs-bad' : ''));
+    return h('div', { class: 'zs' }, h('h3', null, t('statusPool')), h('span', { class: 'zs-cmd', translate: 'no' }, 'zpool status -v'), out);
+  }
+
+  function mdStatus(c) {
+    var s = c.state, prev = c.prev;
+    var running = s.scrub && !s.scrub.done;
+    var action = running ? 'check' : 'idle';
+    var lastAction = s.scrub && s.scrub.done ? s.scrub.kind : 'none';
+    var out = h('div', { class: 'zs-out', translate: 'no' },
+      line('md0 :', 'active raid1 sdb[1] sda[0]'),
+      line('', '[2/2] [UU]'),
+      line('sync_action:', action, !!prev && prev.sync !== s.sync),
+      line('last_sync_action:', lastAction, !!prev && s.scrub && s.scrub.done && !(prev.scrub && prev.scrub.done && prev.scrub.kind === s.scrub.kind)),
+      line('mismatch_cnt:', String(s.mismatch), !!prev && prev.mismatch !== s.mismatch));
+    return h('div', { class: 'zs' }, h('h3', null, t('statusMd')), h('span', { class: 'zs-cmd', translate: 'no' }, '/proc/mdstat, /sys/block/md0/md/'), out);
+  }
+
+  // ── captions ──
+
+  /** The English terms a step's caption uses (for the term rule: first mention with the Croatian, later alone). */
+  function termsOf(s) {
+    var l = s.last;
+    if (l.op === 'corrupt') return l.again ? [] : ['Rot'];
+    if (isMd(s)) return [];
+    if (l.op === 'start') return ['Sum'];
+    if (l.op === 'read') return l.result === 'healed' ? ['Sum', 'Heal'] : l.result === 'permanent' && s.disks.length > 1 ? [] : ['Sum'];
+    if (l.op === 'scrub') {
+      var out = ['Scrub'];
+      if (l.result === 'healed') out.push('Sum', 'Heal');
+      if (l.result === 'permanent' && s.disks.length === 1) out.push('Sum');
+      return out;
+    }
+    return ['Scrub'];
+  }
+  function seen(c) {
+    var p = c.params, s = L.initial(p), out = {};
+    termsOf(s).forEach(function (x) { out[x] = true; });
+    for (var n = 1; n < c.n; n++) { s = L.step(s, n, p); termsOf(s).forEach(function (x) { out[x] = true; }); }
+    if (c.n === 0) return {};
+    return out;
+  }
+
+  function caption(c) {
+    var s = c.state, l = s.last, md = isMd(s), prev = c.prev;
+    var used = seen(c);
+    /** A term node: first mention with the Croatian, later ones alone (also later in the same caption). */
+    function T(name, cap) {
+      var key = 'term' + name + (cap ? 'Cap' : '');
+      var later = used[name];
+      used[name] = true;
+      return h('span', null, rich(later ? key + 'Later' : key));
+    }
+    var V = { pool: data('tank'), vdev: data('mirror-0'), sda: data('sda'), sdb: data('sdb'), md: data('md0') };
+    function v(extra) { return Object.assign({}, V, extra); }
+    var b = l.block, file = b !== undefined ? data(L.fileOf(b) || '') : null;
+
+    if (l.op === 'start') {
+      var key = md ? 'capStartMd' : s.redundancy === 'mirror' ? 'capStartMirror' : twoOnOne(s) ? 'capStartCopies' : 'capStartSingle';
+      return rich(key, v({ sum: md ? '' : T('Sum'), copies: data('copies=2') })).concat(sp(rich('capPress')));
+    }
+    if (l.op === 'corrupt') {
+      if (l.again) return rich('capCorruptAgain', v({ b: data(b), dev: devL(s, l.copy) }));
+      return rich('capCorrupt', v({ rot: T('Rot'), b: data(b), dev: devL(s, l.copy), from: data(L.good(b)), to: data(L.rot(L.good(b))) }));
+    }
+
+    if (md) {
+      if (l.op === 'read') {
+        var k = l.read[0].copy, cell = s.disks[k].blocks[b], other = s.disks[1 - k].blocks[b];
+        var out = rich('capMdRead', v({ b: data(b), dev: devL(s, k) }));
+        if (cell.rotten) {
+          out = out.concat(sp(rich('capMdReadBad', { from: data(L.good(b)), to: data(cell.data) })));
+          if (other.rotten && other.data === cell.data) out = out.concat(sp(rich('capMdBothBad')));
+        } else {
+          out = out.concat(sp(rich('capMdReadOk')));
+          if (other.rotten) out = out.concat(sp(rich('capMdReadOther')));
+        }
+        return out;
+      }
+      var mm = data('mismatch_cnt');
+      if (l.op === 'scrub') {
+        var o = l.result === 'mismatch' ? rich('capMdBlockDiff', { b: data(b), mm: mm, n: s.mismatch }) : rich('capMdBlockSame', { b: data(b) });
+        return l.done ? o.concat(sp(rich('capMdEnd', { free: data(FREE) }))) : o;
+      }
+      if (l.op === 'check') {
+        return rich('capMdCheck', { check: data('check') }).concat(sp(l.blocks.length
+          ? rich('capMdCheckDiff', { list: data(l.blocks.join(', ')), mm: mm, n: s.mismatch }) : rich('capMdCheckSame', { mm: mm })));
+      }
+      var rep = rich('capMdRepair', v({ repair: data('repair') }));
+      if (!l.blocks.length) return rep.concat(sp(rich('capMdRepairNone')));
+      var sdaBad = l.blocks.some(function (x) { return prev.disks[0].blocks[x].rotten; });
+      return rep.concat(sp(rich(sdaBad ? 'capMdRepairBad' : 'capMdRepairLucky', V)));
+    }
+
+    // ZFS: one block, read or scrubbed
+    function badCopies(r) {
+      var out = [];
+      r.read.filter(function (x) { return !x.ok; }).forEach(function (x) {
+        out = out.concat(sp(rich('capBadCopy', { sumCap: T('Sum', true), b: data(r.block), bad: devL(s, x.copy), hash: data(sumMark(x)) })));
+      });
+      return out;
+    }
+    if (l.op === 'read' || l.op === 'scrub') {
+      var one = s.disks.length === 1, outR = [];
+      var badK = l.read.filter(function (x) { return !x.ok; }).map(function (x) { return x.copy; });
+      if (l.op === 'scrub') {
+        if (l.result === 'ok') outR = rich(one ? 'capScrubOkOne' : 'capScrubOk', { scrub: T('Scrub', true), b: data(b), file: file });
+        else outR = rich(one ? 'capScrubReadOne' : 'capScrubRead', { scrub: T('Scrub', true), b: data(b), file: file });
+      }
+      if (l.result === 'ok' && l.op === 'read') {
+        var served = l.read[0];
+        outR = rich('capReadOk', { b: data(b), file: file, dev: devL(s, served.copy), hash: data(sumMark(served)), sum: T('Sum') });
+        if (!one) outR = outR.concat(sp(rich(s.disks[1 - served.copy].blocks[b].rotten ? 'capReadOtherBad' : 'capReadOther')));
+        if (s.disks[served.copy].blocks[b].healed && cksumOf(s, served.copy) > 0) {
+          outR = outR.concat(sp(rich('capReadWasHealed', { n: cksumOf(s, served.copy) })));
+        }
+      } else if (l.result === 'healed') {
+        outR = outR.concat(l.op === 'read' ? badCopies(l).slice(1) : badCopies(l));
+        var bad1 = badK[0];
+        outR = outR.concat(sp(rich(l.op === 'read' ? 'capHealRead' : 'capHealScrub', { good: devL(s, l.from), bad: devL(s, bad1), heal: T('Heal') })));
+        outR = outR.concat(sp(rich(l.op === 'read' ? 'capNoError' : 'capCksum', { dev: data(s.disks[bad1].name), n: cksumOf(s, bad1) })));
+      } else if (l.result === 'permanent') {
+        if (one) {
+          outR = outR.concat(l.op === 'read' ? badCopies(l).slice(1) : badCopies(l));
+          outR = outR.concat(sp(rich('capPermOne', { dev: data(s.disks[0].name), n: cksumOf(s, 0) })));
+        } else outR = outR.concat(sp(rich('capPermAll', { b: data(b) })));
+        // the file goes on the list once; a re-read or a second bad block of it finds it there
+        outR = outR.concat(sp(rich(L.permanentFiles(prev).indexOf(L.fileOf(b)) >= 0 ? 'capListStays' : 'capListAdd', { file: file })));
+        if (l.op === 'read') {
+          outR = outR.concat(sp(rich('capEio', { eio: data('EIO') })));
+          if (prev.permanent.indexOf(b) >= 0) outR = outR.concat(sp(rich('capStill')));
+        }
+      }
+      if (l.op === 'scrub' && l.done) {
+        outR = outR.concat(sp(rich('capScrubEnd', { rep: t.n('repBlocks', s.scrub.repaired), err: t.n('errBlocks', s.scrub.errors), free: data(FREE) })));
+      }
+      return outR[0] === ' ' ? outR.slice(1) : outR;
+    }
+
+    // ZFS: a whole scrub in one step (the md scene's check and repair)
+    var healedB = l.results.filter(function (r) { return r.result === 'healed'; }).map(function (r) { return r.block; });
+    var permB = l.results.filter(function (r) { return r.result === 'permanent'; }).map(function (r) { return r.block; });
+    var outP = rich('capPass', { scrub: T('Scrub') });
+    if (healedB.length) outP = outP.concat(sp(rich('capPassHealed', { list: data(healedB.join(', ')), scrub: T('Scrub') })));
+    if (permB.length) outP = outP.concat(sp(rich('capPassPerm', { list: data(permB.join(', ')) })));
+    if (!healedB.length && !permB.length) outP = outP.concat(sp(rich('capPassClean')));
+    return outP;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scene', type: 'select', label: t('scene'), resets: true,
+        options: [['scrub-repairs', t('presetScrub')], ['read-heals', t('presetRead')], ['both-bad', t('presetBoth')],
+          ['single-disk', t('presetSingle')], ['md-contrast', t('presetMd')]],
+        visible: function () { return false; } },
+      { key: 'redundancy', type: 'select', label: t('redundancy'), resets: true,
+        options: [['mirror', t('optMirror')], ['single', t('optSingle')], ['md-mirror', t('optMd')]] },
+      { key: 'copies2', type: 'toggle', label: t('copies2'), resets: true,
+        visible: function (p) { return p.redundancy === 'single'; } }
+    ],
+
+    presets: [
+      { id: 'scrub-repairs', label: t('presetScrub'), params: { scene: 'scrub-repairs', redundancy: 'mirror', copies2: false }, hint: t('presetScrubHint') },
+      { id: 'read-heals', label: t('presetRead'), params: { scene: 'read-heals', redundancy: 'mirror', copies2: false }, hint: t('presetReadHint') },
+      { id: 'both-bad', label: t('presetBoth'), params: { scene: 'both-bad', redundancy: 'mirror', copies2: false }, hint: t('presetBothHint') },
+      { id: 'single-disk', label: t('presetSingle'), params: { scene: 'single-disk', redundancy: 'single', copies2: false }, hint: t('presetSingleHint') },
+      { id: 'md-contrast', label: t('presetMd'), params: { scene: 'md-contrast', redundancy: 'md-mirror', copies2: false }, hint: t('presetMdHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'under', label: t('legRead') },
+      { shape: 'tag', label: t('legSum') },
+      { shape: 'bg-fill', c: 1, label: t('legGood') },
+      { shape: 'bg-soft', c: 1, label: t('legRotten') },
+      { shape: 'heal', c: 1, label: t('legHealed') },
+      { shape: 'bg-bad', label: t('legBad') },
+      { shape: 'bg-link', label: t('legLink') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
