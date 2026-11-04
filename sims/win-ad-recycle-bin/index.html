@@ -1,0 +1,445 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ad-recycle-bin: two OUs and their 65 users are deleted, then recovered. On top the lifecycle lane (time axis in
+     days, the states the deleted objects pass through, today, the backup and the day the Recycle Bin went on) and the
+     forest's settings; below one stack per OU (the OU card and a card for its users with the six fields and what
+     survives of each) and the restore panel (reanimate, Recycle Bin, authoritative restore: possible or not, and what
+     each brings back). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ad-recycle-bin">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obrisani objekti: tombstone i koš za smeće AD-a · simdeck</title>
+<meta name="description" content="Obriši dva OU-a sa 65 korisnika i vrati ih oživljavanjem, iz koša ili iz kopije: što od SID-a, atributa, grupa i lozinke preživi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ad-recycle-bin",
+  "title": {
+    "hr": "Obrisani objekti: tombstone i koš za smeće AD-a",
+    "en": "Deleted objects: tombstone and Recycle Bin"
+  },
+  "concept": {
+    "hr": "Životni vijek nadgrobnog zapisa, koš za smeće AD-a i mjerodavna obnova",
+    "en": "Tombstone lifetime, the Recycle Bin and authoritative restore"
+  },
+  "summary": {
+    "hr": "Obriši dva OU-a sa 65 korisnika i vrati ih oživljavanjem, iz koša ili iz kopije: što od SID-a, atributa, grupa i lozinke preživi.",
+    "en": "Delete two OUs with 65 users and bring them back: reanimation, Recycle Bin or a backup. What survives: SID, attributes, groups, password."
+  },
+  "tags": [
+    "active-directory",
+    "backup",
+    "disaster-recovery"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ad-recycle-bin"]; colours only from kit tokens.
+   Layout: the lane over two columns and the forest box on top; the two stacks and the restore panel below. */
+[data-sim="win-ad-recycle-bin"] .rb { height: 100%; display: grid; grid-template-columns: 1fr 1fr 1.15fr; grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.8rem 1rem; padding: 1cqh 1.2cqw; font-size: var(--fs-md); }
+[data-sim="win-ad-recycle-bin"] .rb-lane { grid-column: 1 / 3; min-width: 0; }
+[data-sim="win-ad-recycle-bin"] .rb-box { padding: 0.4rem 0.7rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); min-width: 0; }
+[data-sim="win-ad-recycle-bin"] .rb-box > b, [data-sim="win-ad-recycle-bin"] .rb-head { display: block; font-weight: 700; margin-bottom: 0.2rem; }
+[data-sim="win-ad-recycle-bin"] [translate="no"].rb-d { font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-ad-recycle-bin"] .rb-muted { color: var(--muted); }
+[data-sim="win-ad-recycle-bin"] .rb-ch { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* the lane */
+[data-sim="win-ad-recycle-bin"] .rb-flags, [data-sim="win-ad-recycle-bin"] .rb-scale, [data-sim="win-ad-recycle-bin"] .rb-marks { position: relative; height: 1.6rem; }
+[data-sim="win-ad-recycle-bin"] .rb-flag { position: absolute; top: 0; white-space: nowrap; font-weight: 700; transform: translateX(-0.45em); }
+[data-sim="win-ad-recycle-bin"] .rb-flag[data-end] { transform: translateX(calc(-100% + 0.45em)); }
+[data-sim="win-ad-recycle-bin"] .rb-tick { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--mono); color: var(--muted); }
+[data-sim="win-ad-recycle-bin"] .rb-mark { position: absolute; top: 0; white-space: nowrap; transform: translateX(-0.45em); }
+[data-sim="win-ad-recycle-bin"] .rb-track { position: relative; height: 2.8rem; border-bottom: var(--line-w) solid var(--line); }
+[data-sim="win-ad-recycle-bin"] .rb-seg { position: absolute; top: 0.2rem; bottom: 0.3rem; display: grid; place-items: center; overflow: hidden; white-space: nowrap;
+  border: 0.16rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="win-ad-recycle-bin"] .rb-pin { position: absolute; top: -0.2rem; bottom: -0.3rem; width: 0; border-left: 0.22rem solid var(--ink); }
+[data-sim="win-ad-recycle-bin"] .rb-pin[data-k="event"] { border-left-style: dashed; border-left-width: 0.16rem; }
+[data-sim="win-ad-recycle-bin"] .rb-future { position: absolute; top: 0; bottom: 0; right: 0; background: color-mix(in srgb, var(--bg) 45%, transparent); pointer-events: none; }
+[data-sim="win-ad-recycle-bin"] .rb-before { position: absolute; top: 0; bottom: 0; display: grid; place-items: center start; padding-left: 1rem; color: var(--muted); }
+
+/* states, shared by lane segments, cards and legend swatches */
+[data-sim="win-ad-recycle-bin"] [data-st="live"] { background: var(--c1); border-color: var(--c1); color: var(--on-series); }
+[data-sim="win-ad-recycle-bin"] [data-st="deleted"] { background: color-mix(in srgb, var(--c1) 18%, var(--bg)); border-color: var(--c1); border-style: solid; color: var(--ink); }
+[data-sim="win-ad-recycle-bin"] [data-st="tombstone"] { background: var(--bg); border-style: dashed; border-color: var(--ink); color: var(--ink); }
+[data-sim="win-ad-recycle-bin"] [data-st="recycled"] { border-style: dashed; border-color: var(--ink); color: var(--ink);
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.45rem, color-mix(in srgb, var(--muted) 35%, var(--bg)) 0.45rem 0.65rem); }
+[data-sim="win-ad-recycle-bin"] [data-st="gone"] { background: transparent; border-style: dotted; border-color: var(--muted); color: var(--muted); }
+
+/* the stacks */
+[data-sim="win-ad-recycle-bin"] .rb-stack { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; min-height: 0; }
+[data-sim="win-ad-recycle-bin"] .rb-ou, [data-sim="win-ad-recycle-bin"] .rb-card { border-width: 0.18rem; border-radius: var(--radius-sm); padding: 0.3rem 0.6rem; }
+[data-sim="win-ad-recycle-bin"] .rb-ou { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="win-ad-recycle-bin"] .rb-card { position: relative; box-shadow: 0.35rem 0.35rem 0 -0.1rem var(--bg), 0.35rem 0.35rem 0 0 var(--line), 0.7rem 0.7rem 0 -0.1rem var(--bg), 0.7rem 0.7rem 0 0 var(--line); margin-right: 0.7rem; }
+[data-sim="win-ad-recycle-bin"] .rb-card[data-st="live"], [data-sim="win-ad-recycle-bin"] .rb-ou[data-st="live"] { background: color-mix(in srgb, var(--c1) 12%, var(--bg)); color: var(--ink); }
+[data-sim="win-ad-recycle-bin"] .rb-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="win-ad-recycle-bin"] .rb-badge { padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 400; font-size: var(--fs-sm); background: var(--bg); color: var(--ink); }
+[data-sim="win-ad-recycle-bin"] .rb-icon { width: 1.4rem; height: 1.4rem; flex: none; }
+[data-sim="win-ad-recycle-bin"] .rb-tab { border-collapse: collapse; width: 100%; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-recycle-bin"] .rb-tab th, [data-sim="win-ad-recycle-bin"] .rb-tab td { padding: 0.05rem 0.3rem; text-align: left; vertical-align: top; }
+[data-sim="win-ad-recycle-bin"] .rb-tab th { color: var(--muted); font-weight: 400; padding-left: 0; white-space: nowrap; }
+[data-sim="win-ad-recycle-bin"] .rb-tab td.rb-v { overflow-wrap: anywhere; }
+[data-sim="win-ad-recycle-bin"] .rb-tab td.rb-v .rb-d { white-space: normal; }
+[data-sim="win-ad-recycle-bin"] .rb-tab td.rb-m { width: 1.4rem; text-align: center; font-weight: 700; }
+[data-sim="win-ad-recycle-bin"] .rb-lost .rb-v { text-decoration: line-through; text-decoration-thickness: 0.14rem; color: var(--muted); }
+[data-sim="win-ad-recycle-bin"] .rb-lost .rb-m { color: var(--danger); }
+[data-sim="win-ad-recycle-bin"] .rb-kept .rb-m { color: var(--ok); }
+[data-sim="win-ad-recycle-bin"] .rb-slot { min-height: 8rem; display: grid; place-items: center; text-align: center; padding: 1rem; }
+[data-sim="win-ad-recycle-bin"] .rb-verdict { margin: 0; padding: 0.3rem 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="win-ad-recycle-bin"] .rb-verdict p { margin: 0.05rem 0; display: flex; justify-content: space-between; gap: 0.6rem; }
+[data-sim="win-ad-recycle-bin"] .rb-yes { font-weight: 700; }
+[data-sim="win-ad-recycle-bin"] .rb-no { font-weight: 700; color: var(--danger); }
+
+/* the restore panel */
+[data-sim="win-ad-recycle-bin"] .rb-panel { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+[data-sim="win-ad-recycle-bin"] .rb-op { padding: 0.3rem 0.6rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-ad-recycle-bin"] .rb-op[data-now] { border: 0.22rem solid var(--ink); }
+[data-sim="win-ad-recycle-bin"] .rb-op > b { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+[data-sim="win-ad-recycle-bin"] .rb-op p { margin: 0.05rem 0; }
+[data-sim="win-ad-recycle-bin"] .rb-ok { font-weight: 700; }
+[data-sim="win-ad-recycle-bin"] .rb-bad { color: var(--danger); font-weight: 700; }
+[data-sim="win-ad-recycle-bin"] .rb-chips { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-recycle-bin"] .rb-forest { font-size: var(--fs-sm); }
+[data-sim="win-ad-recycle-bin"] .rb-chips .rb-off { text-decoration: line-through; color: var(--muted); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape^="rb-"] { border-width: 0.16rem; }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-live"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-deleted"] { background: color-mix(in srgb, var(--c1) 18%, var(--bg)); border-color: var(--c1); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-tomb"] { background: var(--bg); border-style: dashed; border-color: var(--ink); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-recycled"] { border-style: dashed; border-color: var(--ink);
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.2rem, color-mix(in srgb, var(--muted) 45%, var(--bg)) 0.2rem 0.32rem); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-gone"] { background: transparent; border-style: dotted; border-color: var(--muted); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-lost"] { position: relative; border-color: var(--muted); background: var(--bg); }
+[data-sim="win-ad-recycle-bin"] .sd-swatch[data-shape="rb-lost"]::after { content: ''; position: absolute; left: 10%; right: 10%; top: 50%; border-top: 0.16rem solid var(--muted); }
+
+[data-sim="win-ad-recycle-bin"] .rb-lane-head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; align-items: baseline; }
+
+/* Phone and portrait: one column; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ad-recycle-bin"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ad-recycle-bin"] .rb { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.5rem; }
+  [data-sim="win-ad-recycle-bin"] .rb-lane { grid-column: auto; }
+  [data-sim="win-ad-recycle-bin"] .rb-seg { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Obrisani objekti: tombstone i koš za smeće AD-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var AX0 = -100, AX1 = 400;   // the lane's time axis in days
+  var SVG = 'http://www.w3.org/2000/svg';
+  /** One example user per OU (made up), shown on the stack card. */
+  var EX = {
+    HQ: { name: 'j.ashby', sid: 'S-1-5-21-…-1107', guid: '7c1e…', groups: 'HQ-Staff, Finance-RW' },
+    Brackenridge: { name: 't.mercer', sid: 'S-1-5-21-…-1342', guid: '2b90…', groups: 'BRK-Staff, Site-Leads' }
+  };
+  var OU_DN = { HQ: 'OU=HQ', Brackenridge: 'OU=Brackenridge' };
+
+  /** Data (names, SIDs, numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'rb-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function num(d) { return String(d).replace('-', '−'); }
+  function days(n) { return t.n('days', n); }
+  function ousNode() { return data(OU_DN.HQ + ', ' + OU_DN.Brackenridge); }
+  /** Parts of a string with *English term* turned into <em lang="en">. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x) { if (!x) return; if (out.length) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  function pct(d) { return ((Math.max(AX0, Math.min(AX1, d)) - AX0) / (AX1 - AX0) * 100) + '%'; }
+  function firstOf(s, ou, kind) { return s.objects.filter(function (o) { return o.ou === ou && o.kind === kind; })[0]; }
+  function look(o) { return o ? { state: o.state, keeps: o.keeps, by: o.by } : null; }
+  function changed(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev));
+  }
+  function stateWord(o) {
+    if (o.state === 'live') return o.by === 'reanimate' ? t('byReanimate') : o.by === 'bin' ? t('byBin') : o.by === 'auth' ? t('byAuth') : t('stLive');
+    return t({ deleted: 'stDeleted', tombstone: 'stTombstone', recycled: 'stRecycled', gone: 'stGone' }[o.state]);
+  }
+
+  function binIcon() {
+    var svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'rb-icon');
+    svg.setAttribute('aria-hidden', 'true');
+    [['path', 'M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v8M14 10v8']].forEach(function (p) {
+      var el = document.createElementNS(SVG, p[0]);
+      el.setAttribute('d', p[1]);
+      el.setAttribute('fill', 'none');
+      el.setAttribute('stroke', 'currentColor');
+      el.setAttribute('stroke-width', '2');
+      el.setAttribute('stroke-linejoin', 'round');
+      el.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(el);
+    });
+    return svg;
+  }
+
+  // ── the lane ──
+
+  function laneView(c) {
+    var s = c.state, o = firstOf(s, 'HQ', 'user');
+    var segs = [{ from: AX0, to: 0, state: 'live' }].concat(L.lane(s, o, AX1));
+    var track = segs.map(function (g) {
+      var w = (g.to - g.from) / (AX1 - AX0) * 100;
+      var word = g.state === 'live' ? (g.by ? stateWord({ state: 'live', by: g.by }) : t('stLive'))
+        : t({ deleted: 'stDeleted', tombstone: 'stTombstone', recycled: 'stRecycled', gone: 'stGone' }[g.state]);
+      return h('div', { class: 'rb-seg', dataset: { st: g.state }, style: { left: pct(g.from), width: w + '%' } }, w >= 14 ? word : '');
+    });
+    if (o.deletedOn === null) track.push(h('div', { class: 'rb-before', style: { left: pct(0) } }, t('laneBefore')));
+    else track.push(h('div', { class: 'rb-future', style: { left: pct(s.day) } }));
+    var marks = [];
+    if (s.backup) {
+      track.push(h('div', { class: 'rb-pin', dataset: { k: 'event' }, style: { left: pct(s.backup.day) } }));
+      marks.push(h('span', { class: 'rb-mark', style: { left: pct(s.backup.day) } }, '◆ ', t('mkBackup'), ' ', data(num(s.backup.day))));
+    }
+    if (s.enabledOn !== null) {
+      track.push(h('div', { class: 'rb-pin', dataset: { k: 'event' }, style: { left: pct(s.enabledOn) } }));
+      marks.push(h('span', { class: 'rb-mark', style: { left: pct(s.enabledOn) } }, '● ', t('mkEnable')));
+    }
+    track.push(h('div', { class: 'rb-pin', style: { left: pct(s.day) } }));
+    var ticks = [0, 180, 360].map(function (d) { return h('span', { class: 'rb-tick', translate: 'no', style: { left: pct(d) } }, String(d)); });
+    var flag = { class: 'rb-flag' + (changed(c, function (x) { return x.day; }) ? ' rb-ch' : ''), style: { left: pct(s.day) } };
+    if (s.day > 300) flag.dataset = { end: '1' };
+    return h('div', { class: 'rb-lane' },
+      h('div', { class: 'rb-lane-head' }, h('b', null, t('laneTitle')), h('span', { class: 'rb-muted' }, t('laneAxis'))),
+      h('div', { class: 'rb-flags' }, h('span', flag, '▼ ', t('mkNow', { d: num(s.day) }))),
+      h('div', { class: 'rb-track', role: 'img', 'aria-label': t('laneTitle') }, track),
+      h('div', { class: 'rb-scale' }, ticks),
+      marks.length ? h('div', { class: 'rb-marks' }, marks) : null);
+  }
+
+  function forestBox(c) {
+    var s = c.state;
+    var bin = s.recycleBin
+      ? [h('b', null, t('fOn')), s.enabledOn !== null ? [' (', t('fSince', { d: num(s.enabledOn) }), ')'] : null, ' · ', t('fOneWay')]
+      : [t('fOff'), ' · ', t('fOneWay')];
+    return h('div', { class: 'rb-box rb-forest' },
+      h('b', null, t('fTitle'), ' ', data('quillmoor.example')),
+      h('div', { class: changed(c, function (x) { return x.recycleBin; }) ? 'rb-ch' : null }, t('fBin'), ': ', bin),
+      h('div', null, data('tombstoneLifetime'), ': ', days(s.tsl)),
+      h('div', null, data('msDS-deletedObjectLifetime'), ': ', t('fNotSet'), ' ', days(s.dol)),
+      h('div', null, t('fBackup'), ': ', s.backup ? t('fBackupDay', { d: num(s.backup.day) }) : t('fBackupNone')));
+  }
+
+  // ── the stacks ──
+
+  function fieldRow(o, f, ou) {
+    var ex = EX[ou];
+    var val = { sid: data(ex.sid), guid: data(ex.guid), name: data(ex.name), attrs: t('vAttrs'), groups: data(ex.groups), password: t('vPassword') }[f];
+    var label = { sid: t('fdSid'), guid: t('fdGuid'), name: t('fdName'), attrs: t('fdAttrs'), groups: t('fdGroups'), password: t('fdPassword') }[f];
+    var kept = o.keeps[f];
+    return h('tr', { class: kept ? 'rb-kept' : 'rb-lost' },
+      h('th', null, label),
+      h('td', { class: 'rb-v' }, val),
+      h('td', { class: 'rb-m', 'aria-label': kept ? null : t('vLost') }, kept ? '✓' : '✗'));
+  }
+
+  function verdictBox(o) {
+    var v = L.verdict(o);
+    function yn(ok, word) { return h('span', { class: ok ? 'rb-yes' : 'rb-no' }, word); }
+    return h('div', { class: 'rb-verdict' },
+      h('p', null, t('vdLogon'), yn(v.logon === 'yes', t(v.logon === 'yes' ? 'vdYes' : v.logon === 'reset' ? 'vdReset' : 'vdNo'))),
+      h('p', null, t('vdFiles'), yn(v.files, t(v.files ? 'vdYes' : 'vdNo'))),
+      h('p', null, t('vdGroups'), yn(v.groups, t(v.groups ? 'vdYes' : 'vdNo'))));
+  }
+
+  function stackView(c, ou) {
+    var s = c.state;
+    var unit = firstOf(s, ou, 'ou'), user = firstOf(s, ou, 'user');
+    var n = L.count(s, 'user', function (x) { return x.ou === ou; });
+    var ouCh = changed(c, function (x) { return look(firstOf(x, ou, 'ou')); });
+    var usCh = changed(c, function (x) { return look(firstOf(x, ou, 'user')); });
+    var ouCard = h('div', { class: 'rb-ou' + (ouCh ? ' sd-changed' : ''), dataset: { st: unit.state } },
+      data(OU_DN[ou]), h('span', { class: 'rb-badge' }, stateWord(unit)));
+    var head = h('div', { class: 'rb-card-head' }, unit.state === 'deleted' || user.state === 'deleted' ? binIcon() : null, t.n('nUsers', n),
+      h('span', { class: 'rb-badge' }, stateWord(user)),
+      user.asOf !== null && user.state === 'live' ? h('span', { class: 'rb-badge' }, t('asOf', { d: num(user.asOf) })) : null);
+    var body = user.state === 'gone'
+      ? h('div', { class: 'rb-slot' }, t('goneSlot'))
+      : h('table', { class: 'rb-tab' }, h('tbody', null, L.FIELDS.map(function (f) { return fieldRow(user, f, ou); })));
+    var card = h('div', { class: 'rb-card' + (usCh ? ' sd-changed' : '') + (usCh && c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { st: user.state } }, head, body);
+    return h('div', { class: 'rb-stack' }, ouCard, card, s.last && s.last.kind === 'outcome' ? verdictBox(user) : null);
+  }
+
+  // ── the restore panel ──
+
+  function usedNow(s) {
+    var e = s.last;
+    if (!e) return null;
+    if (e.kind === 'restore' || e.kind === 'attempt') return e.method;
+    if (e.kind === 'auth') return 'auth';
+    return null;
+  }
+
+  function opBox(c, key, label, brings) {
+    var s = c.state, o = L.options(s)[key], e = s.last;
+    var now = usedNow(s) === key;
+    var status;
+    if (o.ok) status = h('span', { class: 'rb-ok' }, '✓ ', o.n ? t.n('okN', o.n) : t('okAge', { age: days(o.age) }));
+    else {
+      var why = { live: 'whyLive', recycled: 'whyRecycled', gone: 'whyGone', off: 'whyOff', 'bin-on': 'whyBinOn', none: 'whyNone', 'too-old': 'whyTooOld' }[o.why];
+      status = h('span', { class: o.why === 'live' || o.why === 'bin-on' ? 'rb-muted' : 'rb-bad' },
+        o.why === 'live' || o.why === 'bin-on' ? '' : '✕ ', t(why, { age: o.age !== undefined ? days(o.age) : '' }));
+    }
+    var chips = L.FIELDS.map(function (f) {
+      var label2 = { sid: t('fdSid'), guid: t('fdGuid'), name: t('fdName'), attrs: t('fdAttrs'), groups: t('fdGroups'), password: t('fdPassword') }[f];
+      return h('span', { class: brings[f] ? null : 'rb-off' }, (brings[f] ? '✓ ' : '✗ ') + label2);
+    });
+    return h('div', { class: 'rb-op', dataset: now ? { now: '1' } : {} },
+      h('b', null, label, now ? h('span', { class: 'rb-badge' }, '▶ ', t('thisStep')) : null,
+        now && e && e.ok === 0 ? h('span', { class: 'rb-badge rb-bad' }, '✕ ', t('failed')) : null),
+      h('p', null, status),
+      h('p', { class: 'rb-chips' }, h('span', { class: 'rb-muted' }, t('brings')), chips));
+  }
+
+  function panel(c) {
+    var all = { sid: true, guid: true, name: true, attrs: true, groups: true, password: true };
+    var part = { sid: true, guid: true, name: true, attrs: false, groups: false, password: false };
+    return h('div', { class: 'rb-panel' },
+      h('span', { class: 'rb-head' }, t('rpTitle')),
+      opBox(c, 'reanimate', t('opReanimate'), part),
+      opBox(c, 'bin', t('opBin'), all),
+      opBox(c, 'auth', t('opAuth'), all));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, e = s.last;
+    var nUsers = L.count(s, 'user'), nAll = s.objects.length;
+    if (!e) return rich('capStart', { bin: t(s.recycleBin ? 'capBinOn' : 'capBinOff'), tsl: days(s.tsl), ous: ousNode(), n: nUsers });
+    if (e.kind === 'delete') return e.state === 'deleted' ? rich('capDeleteBin', { n: nAll, dol: days(s.dol) }) : rich('capDelete', { n: nAll - 1 });
+    if (e.kind === 'wait') {
+      var out = [rich('capWait', { d: days(e.to - e.from), gc: e.gc })];
+      if (e.recycled) out.push(rich('capWaitRecycled', { n: e.recycled }));
+      if (e.gone) out.push(rich(e.recycled ? 'capWaitGone' : 'capWaitGoneTomb', { n: e.gone }));
+      if (!e.recycled && !e.gone) out.push(rich('capWaitSame'));
+      return join(out);
+    }
+    if (e.kind === 'enable') return join([rich('capEnable', { n: nUsers }), e.recycled ? rich('capEnableWorse', { n: e.recycled }) : rich('capEnableNone')]);
+    if (e.kind === 'restore') {
+      if (e.why === 'parent') return rich('capParent', { n: e.failed, ous: ousNode() });
+      if (e.what === 'ous') return rich(e.method === 'bin' ? 'capOusBin' : 'capOusRe', { ous: ousNode() });
+      return rich(e.method === 'bin' ? 'capUsersBin' : 'capUsersRe', { n: e.ok });
+    }
+    if (e.kind === 'attempt') {
+      var a = [e.why === 'gone' ? rich('capAttemptGone') : rich('capAttemptRecycled', { n: e.recycled })];
+      if (!s.backup) a.push(rich('capNoBackup'));
+      return join(a);
+    }
+    if (e.kind === 'auth') return e.ok ? rich('capAuth', { age: days(e.age), d: num(s.backup.day) }) : rich('capAuthOld', { age: days(e.age), life: days(e.life) });
+    var u = s.objects.filter(function (o) { return o.kind === 'user'; });
+    var live = u.every(function (o) { return o.state === 'live'; });
+    if (!live) return rich('capOutNone', { n: nUsers });
+    var by = u[0].by;
+    if (by === 'bin') return rich('capOutBin', { n: nUsers });
+    if (by === 'auth') return rich('capOutAuth', { n: nUsers, d: num(u[0].asOf) });
+    return rich('capOutRe', { n: nUsers });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'recycleBin', type: 'choice', label: t('pBin'), options: [['off', t('rbOff')], ['before', t('rbBefore')], ['after', t('rbAfter')]] },
+      { key: 'daysSince', type: 'range', label: t('pDays'), min: 0, max: 400, step: 10 },
+      { key: 'backupAgeDays', type: 'choice', label: t('pBackup'), options: [[0, t('bkNone')], [80, t('bk80')]] },
+      { key: 'usersFirst', type: 'toggle', label: t('pUsersFirst') }
+    ],
+
+    presets: [
+      { id: 'no-recycle-bin', label: t('prNoBin'), params: { recycleBin: 'off', daysSince: 0, backupAgeDays: 0, usersFirst: false } },
+      { id: 'with-recycle-bin', label: t('prBin'), params: { recycleBin: 'before', daysSince: 0, backupAgeDays: 0, usersFirst: false } },
+      { id: 'enable-after', label: t('prEnableAfter'), params: { recycleBin: 'after', daysSince: 0, backupAgeDays: 0, usersFirst: false } },
+      { id: 'too-late', label: t('prTooLate'), params: { recycleBin: 'off', daysSince: 200, backupAgeDays: 0, usersFirst: false } },
+      { id: 'wrong-order', label: t('prWrongOrder'), params: { recycleBin: 'before', daysSince: 0, backupAgeDays: 0, usersFirst: true } }
+    ],
+
+    legend: [
+      { shape: 'rb-live', label: t('lgLive') },
+      { shape: 'rb-deleted', label: t('lgDeleted') },
+      { shape: 'rb-tomb', label: t('lgTomb') },
+      { shape: 'rb-recycled', label: t('lgRecycled') },
+      { shape: 'rb-gone', label: t('lgGone') },
+      { shape: 'rb-lost', label: t('lgLost') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'rb' }, laneView(c), forestBox(c), stackView(c, 'HQ'), stackView(c, 'Brackenridge'), panel(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
