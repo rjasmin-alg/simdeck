@@ -1,0 +1,420 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ntlm-vs-kerberos: ana on PC07 opens \\fs01\projects by name (Kerberos: a ticket FS01 opens with its own key,
+     the DC is not asked at access time) or \\10.10.0.20\projects by address (no SPN, Negotiate falls back to NTLM:
+     an 8-byte challenge, an NTLMv2 response from the NT hash, FS01 passes both to DC01). An observer on the client's network gains
+     challenge and response (offline guessing only); an admin on PC07 copies ana's NT hash and answers a new challenge
+     from the attacker's own host (pass-the-hash). A stepper, one message per step. Drawn with kit view K1 (message sequence
+     chart, kit/sequence.js) with its eavesdropper column as the "attacker sees" overlay; under it two panels,
+     Kerberos and NTLM. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ntlm-vs-kerberos">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NTLM i Kerberos · simdeck</title>
+<meta name="description" content="Po imenu Kerberos, po IP adresi NTLM. Promatrač dobiva izazov i odgovor; admin na PC07 uzima anin NT sažetak i prijavljuje se kao ana.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ntlm-vs-kerberos",
+  "title": {
+    "hr": "NTLM i Kerberos",
+    "en": "NTLM vs Kerberos"
+  },
+  "concept": {
+    "hr": "Izazov-odgovor ili karta; prelazak na NTLM; zašto pass-the-hash radi",
+    "en": "Challenge-response vs tickets; NTLM fallback; why pass-the-hash works"
+  },
+  "summary": {
+    "hr": "Po imenu Kerberos, po IP adresi NTLM. Promatrač dobiva izazov i odgovor; admin na PC07 uzima anin NT sažetak i prijavljuje se kao ana.",
+    "en": "By name Kerberos, by IP address NTLM. An observer gets challenge and response; an admin on PC07 takes ana's NT hash and logs on as ana."
+  },
+  "tags": [
+    "kerberos",
+    "authentication"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ntlm-vs-kerberos"]; colours only from kit tokens.
+   Layout: the K1 chart on top (with the attacker column when there is an attacker), the Kerberos and NTLM panels
+   side by side under it. */
+[data-sim="win-ntlm-vs-kerberos"] .nk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-ntlm-vs-kerberos"] .nk > .sd-seq { grid-column: 1 / 3; grid-row: 1; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-mono { font-family: var(--mono); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="win-ntlm-vs-kerberos"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* lane cards */
+[data-sim="win-ntlm-vs-kerberos"] .nk-line { display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; align-items: center; font-size: var(--fs-sm); line-height: 1.3; margin-top: 0.15rem; }
+/* a key or a hash held: a pill with a ring on its left (drawn in CSS), as in win-kerberos */
+[data-sim="win-ntlm-vs-kerberos"] .nk-key {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0 0.35rem 0 0.25rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+[data-sim="win-ntlm-vs-kerberos"] .nk-key::before { content: ''; width: 0.5em; height: 0.5em; border: 0.14em solid currentColor; border-radius: 50%; flex: none; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-key[data-hash]::before { border-radius: 0; transform: rotate(45deg) scale(0.85); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-key.sd-changed { background: var(--hl); color: var(--on-hl); font-weight: 700; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-same { padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+/* a padlock with the name of the key that locks it (K1's CSS lock) */
+[data-sim="win-ntlm-vs-kerberos"] .nk-lock { display: inline-flex; align-items: baseline; gap: 0.1rem; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-lock .sd-seq-lock { margin-top: 0; }
+
+/* the attacker column: what it gained carries an eye */
+[data-sim="win-ntlm-vs-kerberos"] .nk-eye {
+  position: relative; display: inline-block; flex: none;
+  width: 1.15em; height: 0.7em; margin-right: 0.3em; vertical-align: -0.05em;
+  border: 0.13em solid currentColor; border-radius: 50% / 50%;
+  box-sizing: border-box;
+}
+[data-sim="win-ntlm-vs-kerberos"] .nk-eye::after { content: ''; position: absolute; left: 50%; top: 50%; width: 0.3em; height: 0.3em; margin: -0.15em 0 0 -0.15em; border-radius: 50%; background: currentColor; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-got { font-weight: 700; padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-got.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-seen { color: var(--muted); }
+
+/* panels */
+[data-sim="win-ntlm-vs-kerberos"] .nk-panel {
+  grid-row: 2;
+  border: var(--line-w) dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-ntlm-vs-kerberos"] .nk-panel[data-active] { border: 0.2rem solid var(--ink); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-panel h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: center; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-tag { font-size: var(--fs-sm); font-weight: 400; padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); color: var(--muted); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-panel[data-active] .nk-tag { border-style: solid; border-color: var(--ink); color: var(--ink); font-weight: 700; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-swatch { display: inline-block; width: 2.2rem; height: 0; border-top: 0.22rem solid var(--ink); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-swatch[data-line="dashed"] { border-top-style: dashed; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.3rem 0.6rem; margin: 0; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv dt { color: var(--muted); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv dd { margin: 0; padding: 0 0.2rem; overflow-wrap: anywhere; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv dd[data-got] { font-weight: 700; }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv dd.sd-changed { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-kv dd.sd-changed .nk-sub { color: var(--on-hl); }
+[data-sim="win-ntlm-vs-kerberos"] .nk-count { font-family: var(--mono); font-weight: 700; }
+
+/* legend swatches the kit lacks: dotted line, eye */
+[data-sim="win-ntlm-vs-kerberos"] .sd-swatch[data-shape="dotted"] { height: 0.3rem; border: 0; border-radius: 0; background: radial-gradient(circle, var(--ink) 0.12rem, transparent 0.13rem) 0 50% / 0.42rem 0.3rem repeat-x; }
+[data-sim="win-ntlm-vs-kerberos"] .sd-swatch[data-shape="eye"] { width: 1.15em; height: 0.7em; border: 0.13em solid var(--ink); border-radius: 50% / 50%; background: radial-gradient(circle, var(--ink) 0.15em, transparent 0.16em); }
+
+/* Phone and portrait: the stage grows with its content; the panels stack under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ntlm-vs-kerberos"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ntlm-vs-kerberos"] .nk { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-ntlm-vs-kerberos"] .nk > .sd-seq, [data-sim="win-ntlm-vs-kerberos"] .nk-panel { grid-column: 1; grid-row: auto; }
+  [data-sim="win-ntlm-vs-kerberos"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="win-ntlm-vs-kerberos"] .nk-kv { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-ntlm-vs-kerberos"] .nk-kv dd { margin-bottom: 0.3rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">NTLM i Kerberos</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { pc: '1', x: '4', fs: '3', dc: '2' };
+  var MARK = { pc: 'P', x: 'X', fs: 'F', dc: 'D' };
+  var LINE = { kerberos: null, ntlm: 'dashed', netlogon: 'dotted' };
+  var TAG = { kerberos: 'Kerberos', ntlm: 'NTLM', netlogon: 'Netlogon' };
+
+  /** Data (names, hashes, challenges) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'nk-mono' : cls || null }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function q(text) { return h('b', { translate: 'no' }, text); }
+  /** A hash or challenge, shortened to its first 8 hex digits. */
+  function short(hexStr) { return hexStr.slice(0, 8) + '…'; }
+  function lock(k) {
+    var name = k === 'skTgs' || k === 'skFs' ? t('seenKey') : data(k, '');
+    return h('span', { class: 'nk-lock' }, h('span', { class: 'sd-seq-lock', 'aria-hidden': 'true' }), name);
+  }
+  function eye() { return h('span', { class: 'nk-eye', 'aria-hidden': 'true' }); }
+  function last(c) { return c.n > 0 ? c.state.log[c.state.log.length - 1] : null; }
+  /** Run the model to its end for other params (the other panel shows the other path's outcome). */
+  function runEnd(p) {
+    var s = L.initial(p), n = 0;
+    while (s.phase !== 'done' && n < 20) { n++; s = L.step(s, n, p); }
+    return s;
+  }
+
+  // ── lanes ──
+  function key(label, opts) {
+    opts = opts || {};
+    return h('span', { class: 'nk-key' + (opts.changed ? ' sd-changed' + (opts.anim ? ' sd-anim-in' : '') : ''), dataset: opts.hash ? { hash: '' } : {} }, label);
+  }
+  function lanes(c) {
+    var s = c.state, e = last(c), anim = c.dir === 'forward';
+    var theft = e && e.name === 'THEFT';
+    var body = {
+      pc: [h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('rolePc'))),
+        h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('inMemory')),
+          key([t('ntHash'), ' ', data(short(s.memory.pc.hash), '')], { hash: true, changed: theft }), key(t('tgt')))],
+      x: [h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('roleX'))),
+        h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('holds')),
+          s.memory.x.hash ? key([data('ana', ''), ' ', data(short(s.memory.x.hash), '')], { hash: true, changed: theft, anim: anim }) : h('span', { class: 'nk-sub' }, t('nothing')))],
+      fs: [h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('roleFs'))),
+        h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('keys')), key(data('FS01$', '')), h('span', { class: 'nk-sub' }, t('fsNoHash')))],
+      dc: [h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('roleDc'))),
+        h('div', { class: 'nk-line' }, h('span', { class: 'nk-sub' }, t('dcHashes')),
+          key([data('ana', ''), ' ', data(short(s.store.ana), '')], { hash: true }),
+          key([data('ivan', ''), ' ', data(short(s.store.ivan), '')], { hash: true }),
+          s.store.ana === s.store.ivan ? h('span', { class: 'nk-same' }, t('sameHash')) : null)]
+    };
+    var name = { pc: 'lanePc', x: 'laneX', fs: 'laneFs', dc: 'laneDc' };
+    return L.lanes(c.params).map(function (id) {
+      var active = e && (e.kind === 'note' ? e.at === id || e.to === id : e.from === id || e.to === id);
+      return { id: id, mark: MARK[id], c: COLOUR[id], shape: id === 'pc' || id === 'x' ? 'square' : null, name: t(name[id]),
+        state: active ? 'active' : null, body: body[id] };
+    });
+  }
+
+  // ── chart rows ──
+  function fieldsOf(e) {
+    switch (e.name) {
+      case 'TGS-REQ': return h('span', null, lock('krbtgt'), ' ', data('+ SPN', ''));
+      case 'TGS-REP': case 'AP-REQ': return lock('FS01$');
+      case 'AP-REP': return h('span', null, t('fAccess'));
+      case 'CHALLENGE': return data(short(e.challenge), '');
+      case 'AUTHENTICATE': return data(short(e.proof), '');
+      case 'PASS-THROUGH': return h('span', null, t('fPass'));
+      case 'DC-REPLY': return h('span', null, e.ok ? t('fOk') : t('fDenied'));
+      case 'ACCESS': return h('span', null, e.access ? t('fAsAna') : t('fDenied'));
+      default: return null;
+    }
+  }
+  function labelOf(e) {
+    if (e.name === 'PASS-THROUGH' || e.name === 'DC-REPLY') return 'Netlogon';
+    if (e.name === 'ACCESS') return h('span', null, t('chipAccess'));
+    return e.name;
+  }
+  /** What the attacker sees of a row (null: no attacker column). */
+  function seenOf(c, e) {
+    var who = c.params.attacker, s = c.state;
+    if (who === 'none') return null;
+    var gained = e.gained || [];
+    function got(content) {
+      return h('span', { class: 'nk-got' + (e.n === c.n ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') }, eye(), content);
+    }
+    function plain(content) { return h('span', { class: 'nk-seen' }, content); }
+    if (gained.indexOf('hash') >= 0) return got([t('ntHash'), ' ', data(short(s.memory.x.hash), '')]);
+    if (gained.indexOf('challenge') >= 0) return got(data(e.challenge, ''));
+    if (gained.indexOf('response') >= 0) return got([t('seenResponse'), ' ', data(short(e.proof), '')]);
+    if (e.name === 'PASS-THROUGH' || e.name === 'DC-REPLY') return plain(t('seenOffPath'));
+    if (who === 'admin') {
+      if (e.name === 'CHALLENGE') return plain(data(e.challenge, ''));
+      if (e.name === 'AUTHENTICATE') return plain(t('seenFromHash'));
+      if (e.name === 'ACCESS') return plain(t('seenIn'));
+      return null;
+    }
+    switch (e.name) {
+      case 'TGS-REQ': return plain([data('TGT', ''), ' ', lock('krbtgt')]);
+      case 'TGS-REP': return plain([t('seenTicket'), ' ', lock('FS01$')]);
+      case 'AP-REQ': return plain([t('seenTicket'), ' ', lock('FS01$'), ', ', t('seenAuth')]);
+      case 'AP-REP': return plain(t('seenNothing'));
+      case 'NEGOTIATE': return plain(t('seenFlags'));
+      case 'ACCESS': return plain(t('seenGranted'));
+      default: return null;
+    }
+  }
+  function rows(c) {
+    var s = c.state, out = [];
+    s.log.forEach(function (e) {
+      var changed = e.n === c.n;
+      if (e.kind === 'note') {
+        out.push({ kind: 'note', lane: e.to, text: t('noteTheft'), k: 'fill', time: h('span', null, t('timeMemory')), changed: changed, seen: seenOf(c, e) });
+        return;
+      }
+      out.push({ from: e.from, to: e.to, label: labelOf(e), c: COLOUR[e.from], fields: fieldsOf(e), line: LINE[e.proto],
+        place: e.proto === 'netlogon' ? 'mid' : null, time: TAG[e.proto], changed: changed, seen: seenOf(c, e) });
+    });
+    return out;
+  }
+  function renderChart(c) {
+    var who = c.params.attacker;
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      eve: who === 'none' ? null : { title: t(who === 'admin' ? 'eveAdmin' : 'eveObserver'), width: '12.5rem' },
+      timeWidth: '5.6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── the two panels: what FS01 needed from DC01, and what an attacker could reuse ──
+  function panel(c, proto) {
+    var s0 = c.state, p = c.params, e = last(c);
+    var active = s0.protocol === proto;
+    var s = active ? s0 : runEnd({ target: L.runTarget(p) === 'ip' ? 'name' : 'ip', attacker: p.attacker === 'admin' ? 'none' : p.attacker });
+    var k = proto === 'kerberos';
+    function row(label, content, opts) {
+      opts = opts || {};
+      var ds = opts.got ? { got: '' } : {};
+      return [h('dt', null, t(label)),
+        h('dd', { class: opts.now ? 'sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : null, dataset: ds }, opts.got ? eye() : null, [].concat(content).reduce(function (a, x, i) { return i ? a.concat(' ', x) : [x]; }, []))];
+    }
+    function count(v, text) { return [h('span', { class: 'nk-count', translate: 'no' }, t('times', { v: v })), h('span', null, t(text))]; }
+    var gotWire = !k && s.attacker.capture, gotMem = !k && s.attacker.hash;
+    var items = [
+      row('fsAsks', count(s.contacts.fsToDc, k ? 'kFs' : 'nFs'), { now: active && e && e.name === 'PASS-THROUGH' }),
+      row('pcAsks', count(s.contacts.pcToDc, k ? 'kPc' : 'nPc'), { now: active && e && e.name === 'TGS-REQ' }),
+      row('wire', h('span', null, t(k ? 'kWire' : 'nWire')), { got: gotWire, now: active && gotWire && e && (e.gained || []).indexOf('response') >= 0 }),
+      row('memory', h('span', null, t(k ? 'kMem' : 'nMem')), { got: gotMem, now: active && gotMem && e && e.name === 'THEFT' })
+    ];
+    if (!k) {
+      items.push(row('formula', s.response
+        ? [data(s.challenge + ' → ' + short(s.response.proof)), h('span', { class: 'nk-sub' }, t('formulaText'))]
+        : [h('span', null, t('formulaText')), h('span', { class: 'nk-sub' }, t('formulaNone'))],
+        { now: active && e && e.name === 'AUTHENTICATE' }));
+    }
+    return h('section', { class: 'nk-panel', dataset: active ? { active: '' } : {} },
+      h('h2', null, h('span', { class: 'nk-swatch', dataset: k ? {} : { line: 'dashed' }, 'aria-hidden': 'true' }), data(TAG[proto], ''),
+        h('span', { class: 'nk-tag' }, t(active ? 'panelActive' : 'panelOther'))),
+      h('dl', { class: 'nk-kv' }, items));
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n, x = s.client === 'x', obs = p.attacker === 'observer';
+    if (c.first) {
+      if (p.attacker === 'admin') return rich('capStartAdmin');
+      if (s.protocol === 'kerberos') return rich('capStartKerb', { unc: q(s.unc), spn: q(s.spn) });
+      return t.parts('capStartNtlm', { unc: q(s.unc) });
+    }
+    var e = last(c), out;
+    switch (e.name) {
+      case 'THEFT': return t.parts('capTheft', { n: n, hash: q(short(s.memory.x.hash)) });
+      case 'TGS-REQ': return t.parts('capTgsReq', { n: n, spn: q(s.spn) });
+      case 'TGS-REP': return rich('capTgsRep', { n: n });
+      case 'AP-REQ': return t.parts('capApReq', { n: n });
+      case 'AP-REP': out = t.parts('capApRep', { n: n }); if (obs) out.push(t('capApRepObs')); return out;
+      case 'NEGOTIATE': return t.parts('capNegotiate', { n: n, who: t(x ? 'whoX' : 'whoPc') });
+      case 'CHALLENGE':
+        if (x) return t.parts('capChallengeX', { n: n, ch: q(e.challenge) });
+        out = rich('capChallenge', { n: n, ch: q(e.challenge) }); if (obs) out.push(t('capChallengeObs')); return out;
+      case 'AUTHENTICATE':
+        if (x) return rich('capAuthX', { n: n });
+        out = t.parts('capAuth', { n: n, proof: q(short(e.proof)) }); if (obs) out.push(t('capAuthObs')); return out;
+      case 'PASS-THROUGH': return rich('capPass', { n: n });
+      case 'DC-REPLY': return t.parts(!e.ok ? 'capReplyBad' : x ? 'capReplyOkX' : 'capReplyOk', { n: n });
+      case 'ACCESS':
+        if (!e.access) return t.parts('capDenied', { n: n });
+        if (x) return rich('capAccessX', { n: n, unc: q(s.unc) });
+        if (obs) return t.parts('capAccessObs', { n: n });
+        return t.parts('capAccess', { n: n, unc: q(s.unc) });
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'target', type: 'choice', label: t('target'), options: [['name', t('optName')], ['ip', t('optIp')]],
+        disabled: function (p) { return p.attacker === 'admin' ? t('targetFixed') : false; } },
+      { key: 'attacker', type: 'choice', label: t('attacker'), options: [['none', t('attNone')], ['observer', t('attObserver')], ['admin', t('attAdmin')]] }
+    ],
+
+    presets: [
+      { id: 'by-name', label: t('presetByName'), hint: t('presetByNameHint'), params: {} },
+      { id: 'by-ip', label: t('presetByIp'), hint: t('presetByIpHint'), params: { target: 'ip' } },
+      { id: 'capture', label: t('presetCapture'), hint: t('presetCaptureHint'), params: { target: 'ip', attacker: 'observer' } },
+      { id: 'pass-the-hash', label: t('presetPth'), hint: t('presetPthHint'), params: { attacker: 'admin' } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legendKerberos') },
+      { shape: 'dash', label: t('legendNtlm') },
+      { shape: 'dotted', label: t('legendPass') },
+      { shape: 'eye', label: t('legendEye') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'nk' }, chart, panel(c, 'kerberos'), panel(c, 'ntlm')));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
