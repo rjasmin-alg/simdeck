@@ -3,7 +3,9 @@
    {name} is a placeholder, an array is plural forms (hr: 1 / 2–4 / 5+, en: 1 / other). *term* marks an English term
    the page sets in italics; none of this sim's terms is in kit/glossary.js yet, so the Croatian pairs are written out
    here (NOTES.md, "Term pairs"). Computer, group and update names (PC-P1, Pilot, All Computers, KB-B) are data,
-   filled in by the page: they are what the console shows. The title and subtitle come from sim.json. */
+   filled in by the page: they are what the console shows. The title and subtitle come from sim.json.
+   Keys starting with r / tl / sched / ring and the preset keys after presetDecline belong to the rings scene (preset task
+   win-update-rings). */
 (function (root) {
   'use strict';
 
@@ -116,6 +118,74 @@
       capStillUnassigned: '{pc} je i dalje u Unassigned Computers i ne vidi odobrenje Pilota.',
       and: ' i ',
 
+      // rings scene (preset task win-update-rings): params, presets, stage, captions
+      rings: 'Prstenovi uvođenja',
+      rollout: 'Odobrenje',
+      roRings: 'po prstenovima',
+      roAll: 'All Computers, dan 0',
+      ring2Day: 'Ring 2 Broad dobiva odobrenje',
+      r2d7: 'dan 7',
+      r2d3: 'dan 3',
+      r2d2: 'dan 2',
+      ring2Disabled: 'Bez prstenova: svi dobivaju odobrenje dana 0.',
+      patch: 'Zakrpa',
+      patchBad: 'KB-X (loša)',
+      patchGood: 'KB-Y (dobra)',
+      presetRings: 'Zaustavljena u prstenu 1',
+      presetRingsHint: 'Prstenovi: dan 0, 2 i 7. KB-X ruši poslovnu aplikaciju; prsten 1 to javlja i administrator ga odbija.',
+      presetNoRings: 'Bez prstenova',
+      presetNoRingsHint: 'KB-X za All Computers dana 0: svi ga instaliraju prije nego što itko išta javi.',
+      presetShort: 'Prekratka odgoda',
+      presetShortHint: 'Ring 2 Broad već dana 2, isti dan kad i prsten 1: javljanje stiže prekasno.',
+      presetGood: 'Dobra zakrpa',
+      presetGoodHint: 'KB-Y ništa ne kvari: prstenovi ga samo usporavaju.',
+      rModeRings: 'prstenovi uvođenja',
+      rModeAll: 'bez prstenova',
+      rCount: '{kb} instaliran: {n} od {m}',
+      rBrokenCount: 'aplikacija ne radi: {n}',
+      rProtected: 'zaštićeno: {n}',
+      colSched: 'Odobrenje zakazano',
+      schedDay: 'dan {d}',
+      schedSkipped: 'otpalo',
+      schedNone: '—',
+      rCellNa: 'nema zakrpe',
+      rCellInst: 'instalirano, radi',
+      rCellLob: 'koristi poslovnu aplikaciju (kvadrat)',
+      rCellBroken: 'instalirano, aplikacija ne radi',
+      rTlTitle: '{kb} po prstenovima i danima',
+      colRing: 'Prsten',
+      rowAdmin: 'Administrator',
+      ringSize: '{n} računala, LOB: {k}',
+      tlApprove: 'odobreno',
+      tlSkipped: 'odobrenje otpalo',
+      tlReport: 'javljen problem',
+      tlDecline: 'odbijeno',
+      tlInstalled: 'instalirano i radi',
+      tlBroken: 'aplikacija ne radi',
+      rStart: '{kb} je upravo izdan. 34 računala koriste *line-of-business application* (poslovnu aplikaciju, LOB): 4 u prstenu Ring 1 Pilot i 30 u prstenu Ring 2 Broad. {plan} Pritisni → za dan 0.',
+      rPlanRings: 'Odobrenja su zakazana po *deployment rings* (prstenovima uvođenja): Ring 0 IT dan 0, Ring 1 Pilot dan 2, Ring 2 Broad dan {r2}. Računala u prstenovima instaliraju zakrpu čim je otkriju.',
+      rPlanAll: 'Bez prstenova: administrator ga odobrava za All Computers već dana 0. Svako računalo instalira zakrpu čim je otkrije.',
+      rApprove: 'Došao je zakazani dan za {ring}: odobrenje „instalirati”.',
+      rApproveAll: '{kb} je odobren za All Computers: dobivaju ga sva računala odjednom.',
+      rInstalled: ['{ring}: {n} računalo ga instalira.', '{ring}: {n} računala ga instaliraju.', '{ring}: {n} računala ga instalira.'],
+      rBroken: ['Na {n} od njih poslovna aplikacija prestaje raditi.', 'Na {n} od njih poslovna aplikacija prestaje raditi.', 'Na {n} od njih poslovna aplikacija prestaje raditi.'],
+      rNoLobRing0: 'Ring 0 IT ne javlja nikakav problem — ali nijedno njegovo računalo ne koristi poslovnu aplikaciju.',
+      rReport: ['Dan {d}: {rings} javlja da {kb} ruši poslovnu aplikaciju (na {k} računala).', 'Dan {d}: {rings} javljaju da {kb} ruši poslovnu aplikaciju (na {k} računala).', 'Dan {d}: {rings} javljaju da {kb} ruši poslovnu aplikaciju (na {k} računala).'],
+      rStop: 'Administrator ga odbija — {left}, {m} računala, zakrpu nikad ne dobiva.',
+      rStopLate: 'Administrator ga odbija, ali zaustaviti nema što: svih {m} računala ga već ima.',
+      rStopAgain: '{kb} je već odbijen.',
+      rSkipped: 'Zakazano odobrenje za {ring} otpada: {kb} je odbijen.',
+      rWaiting: 'Danas se ništa ne mijenja. {ring} čeka svoje odobrenje (dan {d}).',
+      rQuiet: 'Danas se ništa ne mijenja.',
+      rStillBroken: 'Na {n} računala aplikacija i dalje ne radi: odbijanje ništa ne deinstalira.',
+      rEnd: 'Kraj 10 dana: {kb} je na {n} od {m} računala; poslovna aplikacija ne radi na {b}.',
+      rEndOk: 'Kraj 10 dana: {kb} je na {n} od {m} računala, i sve radi.',
+      rLessonStopped: ['Prstenovi su zaustavili lošu zakrpu: {n} računalo s poslovnom aplikacijom nikad je nije dobilo.', 'Prstenovi su zaustavili lošu zakrpu: {n} računala s poslovnom aplikacijom nikad je nisu dobila.', 'Prstenovi su zaustavili lošu zakrpu: {n} računala s poslovnom aplikacijom nikad je nije dobilo.'],
+      rLessonNoRings: 'Bez prstenova zakrpu su svi instalirali već dana 0. Kad je problem prijavljen, nije bilo što zaustaviti.',
+      rLessonShort: 'Ring 2 Broad odobren je dana {r2}, prije nego što je problem stigao biti javljen. *Deferral* (odgoda) mora biti barem koliko traju instalacija i javljanje (ovdje 1 dan): dan 3 bio bi dovoljan.',
+      rLessonCost: 'Zakrpa je bila dobra, a prstenovi su je samo usporili: Ring 2 Broad dobio ju je tek dana {r2}, a bez prstenova bi dana 0.',
+      rLessonLucky: 'Ovaj put zakrpa je bila dobra. Da nije, nije bilo prstena u kojem bi se zaustavila.',
+
       explain:
         '<p>WSUS ne odobrava ažuriranja računalima nego <em lang="en">computer groups</em> (grupama računala). ' +
         'Uobičajeni put je <em lang="en">staged rollout</em> (postupno uvođenje): najprije mala testna grupa (Pilot), ' +
@@ -132,7 +202,14 @@
         '<p><b>Kako računalo dolazi u grupu.</b> Uz dodjelu na poslužitelju novo računalo završava u Unassigned ' +
         'Computers dok ga administrator ne premjesti; grupna pravila se zanemaruju. Uz dodjelu na klijentu grupu ' +
         'imenuju grupna pravila računala, a konzola ga ne može premjestiti. Grupa mora postojati na poslužitelju: ' +
-        'odabir na klijentu je ne stvara, pa tipfeler ostavlja računalo u Unassigned Computers — samo s odobrenjima koja ta grupa nasljeđuje od All Computers.</p>'
+        'odabir na klijentu je ne stvara, pa tipfeler ostavlja računalo u Unassigned Computers — samo s odobrenjima koja ta grupa nasljeđuje od All Computers.</p>' +
+        '<p><b>Prstenovi.</b> <em lang="en">Deployment ring</em> (prsten uvođenja) je grupa računala čije se odobrenje daje ' +
+        'zadani broj dana nakon izdavanja zakrpe — <em lang="en">deferral</em> (odgoda): IT odmah, pilotni korisnici nakon 2 dana, ' +
+        'svi ostali nakon 7. Ako zakrpa nešto pokvari, rani prsten to javi i administrator je odbije prije nego što stigne do ' +
+        'kasnijih. Windows Update for Business radi isto odgodom po prstenu (0–30 dana) ili <em lang="en">pause</em> (pauziranjem, ' +
+        'do 35 dana). Odgoda mora biti barem koliko traju instalacija i javljanje. Što je već instalirano, ostaje pokvareno dok se zakrpa ' +
+        'ne ukloni. Prsten IT-a ne hvata sve: IT ne koristi svaku poslovnu aplikaciju. A prstenovi nisu besplatni — i dobra ' +
+        'zakrpa stiže kasnije.</p>'
     },
 
     en: {
@@ -238,6 +315,73 @@
       capStillUnassigned: '{pc} is still in Unassigned Computers and does not see Pilot\'s approval.',
       and: ' and ',
 
+      rings: 'Deployment rings',
+      rollout: 'Approval',
+      roRings: 'by ring',
+      roAll: 'All Computers, day 0',
+      ring2Day: 'Ring 2 Broad is approved on',
+      r2d7: 'day 7',
+      r2d3: 'day 3',
+      r2d2: 'day 2',
+      ring2Disabled: 'No rings: everyone is approved on day 0.',
+      patch: 'Patch',
+      patchBad: 'KB-X (bad)',
+      patchGood: 'KB-Y (good)',
+      presetRings: 'Stopped at ring 1',
+      presetRingsHint: 'Rings on days 0, 2 and 7. KB-X breaks the business app; ring 1 reports it and the admin declines it.',
+      presetNoRings: 'No rings',
+      presetNoRingsHint: 'KB-X for All Computers on day 0: everyone installs it before anyone reports anything.',
+      presetShort: 'Deferral too short',
+      presetShortHint: 'Ring 2 Broad on day 2, the same day as ring 1: the report comes too late.',
+      presetGood: 'Good patch',
+      presetGoodHint: 'KB-Y breaks nothing: the rings only slow it down.',
+      rModeRings: 'deployment rings',
+      rModeAll: 'no rings',
+      rCount: '{kb} installed: {n} of {m}',
+      rBrokenCount: 'app broken: {n}',
+      rProtected: 'protected: {n}',
+      colSched: 'Approval scheduled',
+      schedDay: 'day {d}',
+      schedSkipped: 'skipped',
+      schedNone: '—',
+      rCellNa: 'no patch',
+      rCellInst: 'installed, works',
+      rCellLob: 'runs the business app (square)',
+      rCellBroken: 'installed, app broken',
+      rTlTitle: '{kb} by ring and day',
+      colRing: 'Ring',
+      rowAdmin: 'Admin',
+      ringSize: '{n} computers, LOB: {k}',
+      tlApprove: 'approved',
+      tlSkipped: 'approval skipped',
+      tlReport: 'problem reported',
+      tlDecline: 'declined',
+      tlInstalled: 'installed and working',
+      tlBroken: 'app broken',
+      rStart: '{kb} has just been released. 34 computers run the line-of-business application (LOB): 4 in Ring 1 Pilot and 30 in Ring 2 Broad. {plan} Press → for day 0.',
+      rPlanRings: 'The approvals are scheduled by deployment ring: Ring 0 IT on day 0, Ring 1 Pilot on day 2, Ring 2 Broad on day {r2}. Computers in the rings install the patch as soon as they detect it.',
+      rPlanAll: 'No rings: the admin approves it for All Computers on day 0. Every computer installs the patch as soon as it detects it.',
+      rApprove: 'The scheduled day for {ring} has come: approval "Install".',
+      rApproveAll: '{kb} is approved for All Computers: every computer gets it at once.',
+      rInstalled: ['{ring}: {n} computer installs it.', '{ring}: {n} computers install it.'],
+      rBroken: ['On {n} of them the business app stops working.', 'On {n} of them the business app stops working.'],
+      rNoLobRing0: 'Ring 0 IT reports no problem — but none of its computers runs the business app.',
+      rReport: ['Day {d}: {rings} reports that {kb} breaks the business app (on {k} computers).', 'Day {d}: {rings} report that {kb} breaks the business app (on {k} computers).'],
+      rStop: 'The admin declines it, and {left}, {m} computers, never gets the patch.',
+      rStopLate: 'The admin declines it, but there is nothing left to stop: all {m} computers already have it.',
+      rStopAgain: '{kb} is already declined.',
+      rSkipped: 'The scheduled approval for {ring} is not made: {kb} is declined.',
+      rWaiting: 'Nothing changes today. {ring} waits for its approval (day {d}).',
+      rQuiet: 'Nothing changes today.',
+      rStillBroken: 'The app is still broken on {n} computers: declining uninstalls nothing.',
+      rEnd: 'End of the 10 days: {kb} is on {n} of {m} computers; the business app is broken on {b}.',
+      rEndOk: 'End of the 10 days: {kb} is on {n} of {m} computers, and everything works.',
+      rLessonStopped: ['The rings stopped a bad patch: {n} computer with the business app never got it.', 'The rings stopped a bad patch: {n} computers with the business app never got it.'],
+      rLessonNoRings: 'Without rings everyone installed the patch on day 0. When the problem was reported, there was nothing left to stop.',
+      rLessonShort: 'Ring 2 Broad was approved on day {r2}, before the problem could be reported. The deferral must be at least install plus report (here 1 day): day 3 would have been enough.',
+      rLessonCost: 'The patch was good, and the rings only slowed it down: Ring 2 Broad got it on day {r2}; without rings, on day 0.',
+      rLessonLucky: 'This time the patch was good. Had it not been, there was no ring to stop it in.',
+
       explain:
         '<p>WSUS approves updates not for computers but for computer groups. The usual path is a staged rollout: first ' +
         'a small test group (Pilot), a few days of watching, and only then Production. Approving for All Computers skips ' +
@@ -253,7 +397,13 @@
         '<p><b>How a computer gets into a group.</b> With server-side targeting a new computer sits in Unassigned ' +
         'Computers until the admin moves it; Group Policy is ignored. With client-side targeting the computer\'s Group ' +
         'Policy names the group and the console cannot move it. The group must exist on the server: client-side ' +
-        'targeting does not create it, so a typo leaves the computer in Unassigned Computers, with only the approvals that group inherits from All Computers.</p>'
+        'targeting does not create it, so a typo leaves the computer in Unassigned Computers, with only the approvals that group inherits from All Computers.</p>' +
+        '<p><b>Rings.</b> A deployment ring is a group of computers approved a fixed number of days after a patch is released ' +
+        '(a deferral): IT at once, pilot users after 2 days, everyone else after 7. If the patch breaks something, an early ring ' +
+        'reports it and the admin declines it before it reaches the later rings. Windows Update for Business does the same with a ' +
+        'deferral per ring (0–30 days) or a pause (up to 35 days). The deferral must be at least install plus report. ' +
+        'Whatever was installed stays broken until the patch is removed. The IT ring does not catch everything: IT does not run ' +
+        'every business app. And rings are not free: a good patch arrives later too.</p>'
     }
   };
 

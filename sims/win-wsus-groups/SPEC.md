@@ -126,3 +126,68 @@ PC-P3 in Unassigned still gets KB-B (inherits All Computers): det 0, ● 1. `pro
 approval (approve-all) does nothing.
 
 Steps: every run is 10; `sim.json` `steps` is 10.
+
+## Rings (preset task `win-update-rings`, `docs/tasks/w3/win-update-rings.md`)
+
+One concept: **approval rings and deferrals; a bad patch stopped at ring 1.** The same staged rollout as above,
+arranged as rings whose approvals come a fixed number of days after the release. The toggle `rings` switches the
+page to this scene (a different fleet and plan; the rules above all still apply).
+
+### Scene
+
+- **Groups:** All Computers → Unassigned Computers, `Ring 0 IT`, `Ring 1 Pilot`, `Ring 2 Broad`.
+- **Fleet (93):** Ring 0: IT-01 … IT-03 (none runs LOB); Ring 1: PL-01 … PL-10, PL-01 … PL-04 tagged `LOB` (they run the
+  line-of-business application); Ring 2: BR-01 … BR-80, BR-01 … BR-30 tagged `LOB`. 34 LOB computers in all.
+  Server-side targeting, every computer registered and in its ring at step 0. No KB-A.
+- **One update:** `KB-X` (param `patch: bad`: `health: 'bad', affects: 'LOB'`) or `KB-Y` (`patch: good`).
+- **Ring computers install at the scan** (`auto: true`): detected and installed on the same day, nobody asks a user
+  (rule R0). The host's computers keep the user model of rule 6.
+- **Stage:** the console as above with one update column and, per ring, a cell with its scheduled day; members drawn
+  as one mark per computer (circle, or square for LOB; hollow = not installed, filled = installed, ✕ = broken). Below,
+  the timeline per ring (not per computer): per day the count installed and the count broken, and an admin row with
+  the approvals (✓), the report (⚑) and the decline (⊘).
+
+### Rules (host rules plus)
+
+- **R0 (model choice).** A ring computer installs an approved update at the scan that detects it (automatic install;
+  no user is asked, no postponement).
+- **R1.** A ring is a computer group whose approval is made a fixed number of days after the release: Ring 0 day 0,
+  Ring 1 day 2, Ring 2 day `ring2Day` (7, 3 or 2). WSUS: an approval per group made on the day; Windows Update for
+  Business: a quality-update deferral per ring, 0–30 days *(check)* (Microsoft, "Build deployment rings for Windows
+  client updates" *(check)*). `rollout: all` approves All Computers on day 0 instead (no rings).
+- **R2 (toy delay, derived).** An install of a bad update on a computer with the tag it affects breaks it on that day
+  (`broken` = the day); the break is reported `REPORT_DELAY` = 1 day later.
+- **R3.** On the day a break is reported the admin stops the rollout: declines the update (host rule 5), before the
+  plan of the day and before the scans (host tie-break 1). Windows Update for Business would pause quality updates
+  for the later rings instead (up to 35 days *(check)*); not modelled, the explanation names it. An approval of the
+  declined update planned for that day or later is skipped (host). A report while it is already declined changes
+  nothing more.
+- **R4.** A broken computer stays broken while the update is installed; declining uninstalls nothing (host rule 5),
+  so stopping protects only rings not yet approved. A Remove approval uninstalls it and clears `broken` (no preset;
+  a test from a hand-made state).
+
+### Tie-breaks
+
+1. **Report before plan before scans:** on day d the report (of breaks from day d − 1) and the decline come first,
+   then the day's planned approvals (skipped when declined), then the scans. So a ring approved on the report day
+   never gets the update (`deferral-too-short` with `ring2Day: 3`).
+2. **Rings approved on the same day** install on the same day; a report the next day stops neither.
+3. **Several breaks on one day** are one report, one decline.
+
+### Params
+
+`rings` (off; resets to step 0), `rollout` rings / all (rings), `ring2Day` 7 / 3 / 2 (7; disabled with `rollout: all`),
+`patch` bad / good (bad). In the rings scene the host's params and the decline button are hidden.
+
+### Presets and expected numbers (derived by hand before coding, checked by `sim.test.js`)
+
+| Preset | Params | Day 0 | Day 2 | Day 3 | Ring 2 | End (day 9) |
+|---|---|---|---|---|---|---|
+| `rings-stop-at-1` | `rings` | Ring 0 approved, 3 install, 0 broken | Ring 1 approved, 10 install, 4 broken | reported, KB-X declined | approval day 7 skipped | 13 of 93 installed, 4 broken, 30 LOB protected |
+| `no-rings` | `rings`, `rollout: all` | All Computers approved, 93 install, 34 broken | – | – | installed day 0 | 93 of 93, 34 broken (reported and declined day 1: nothing left to stop), 0 protected |
+| `deferral-too-short` | `rings`, `ring2Day: 2` | as above | Ring 1 and Ring 2 approved, 90 install, 34 broken | reported, declined: nothing left | installed day 2 | 93 of 93, 34 broken, 0 protected |
+| `good-patch` | `rings`, `patch: good` | Ring 0, 3 install (KB-Y) | Ring 1, 10 install | – | approved and installed day 7 | 93 of 93 by day 7, 0 broken; without rings all on day 0 |
+
+Also checked: `ring2Day: 3` (bad): reported and declined day 3 before Ring 2's approval on day 3, which is skipped:
+as `rings-stop-at-1`, 4 broken, 30 protected. `rollout: all` with `patch: good`: 93 install day 0, nothing reported.
+Steps: 10 per preset, as the host.

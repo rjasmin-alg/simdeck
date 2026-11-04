@@ -138,3 +138,102 @@ Not in `kit/glossary.js`; written out in the strings (*English* (Croatian) at th
 ## Time
 
 Start 19:24, done 19:47 (one session, 2026-11-04): about 23 min.
+
+## Rings presets (task `docs/tasks/w3/win-update-rings.md`, thread t-0255)
+
+Four presets, keys 7–9 and a button: `rings-stop-at-1`, `no-rings`, `deferral-too-short`, `good-patch`; one entry in
+`sim.json` (`rings-stop-at-1`, "Update rings"). Rules and numbers: SPEC.md, "Rings".
+
+### Decisions
+
+- **The host is extended, not stopped.** The task says to stop if the host cannot express the presets. Of its list, the
+  host had approvals per group by day and a decline; it lacked computer tags, a bad update that breaks, a report delay,
+  the scripted decline on the report day, and a fleet of 93. As `lnx-container-ports` did on `port-forwarding` and
+  `broadcast-storm` on `stp`, the additions are additive: a `rings` param builds another fleet and plan
+  (`initialRings`), `contact` gains `auto` (install at the scan) and `broken`, `step` gains `report` and an admin `log`.
+  The groups scene's numbers are unchanged: all its old tests pass, apart from the page-presets test that now lists ten.
+  `s.subject` (KB-B or KB-X/KB-Y) replaces the constant inside the model.
+- **Install at the scan (rule R0).** The task's own numbers disagree on the install day: `rings-stop-at-1` and
+  `deferral-too-short` need Ring 1 to install on its approval day (day 2, reported day 3, declined day 3 before Ring 2's
+  approval on day 3), while `no-rings` ("install by day 1, reported day 2") and `good-patch` ("day 7–8") read as the
+  host's user model (install the day after). Install at the scan keeps the headline preset and its captions exactly and
+  makes "gap ≥ report delay" the rule; `no-rings` then installs and breaks on day 0 and is reported on day 1, and
+  `good-patch` patches Ring 2 on day 7 (see Deviations).
+- **A toggle "Prstenovi uvođenja / Deployment rings"** switches scene (resets to step 0). The groups scene's five settings
+  are hidden while it is on, and the rings' three (`rollout`, `ring2Day`, `patch`) while it is off (`visible`; page CSS
+  for `[hidden]`, as port-forwarding). The decline button (labelled KB-B) is hidden by CSS in the rings scene and does
+  nothing there: the report declines.
+- **Examples follow the toggle:** `data-wg-scene` on `.sd-page` (set in `render`) hides the other scene's presets. The
+  tenth preset (`good-patch`) has no number key (the kit gives keys 1–9). The settings gap is 0.4rem (kit 0.55rem): with
+  the toggle, the groups scene's panel was 16 px too tall in Croatian.
+- **Stage for 93 computers:** the console keeps its rows (groups, members, approval cell) with one mark per computer
+  instead of name chips (circle; square for LOB; hollow, filled, ✕), and a column "Approval scheduled" with the ring's
+  day (struck and "skipped" once the approval is skipped). The timeline is per ring, not per computer: per day the
+  count installed (●) and broken (✕), plus an admin row (✓ R0/R1/R2/All, ⚑ report, ⊘ decline) from `s.log`. Its key
+  sits in the timeline's head; the header legend stays the host's.
+- **`deferral-too-short` uses `ring2Day: 2`** (the failing case, "30 more broken"); `ring2Day: 3` (protected, just in
+  time thanks to admin-first) is the param's middle option and a test, and the end caption names it.
+- **Misconceptions in captions:** day 1 "Ring 0 IT reports no problem — but none of its computers runs the business
+  app" (the IT ring does not catch everything); `good-patch`'s end "the rings only slowed it down" (rings are not free).
+- **WUfB pause** is named in the explanation only (0–30 days deferral, up to 35 days pause); the model declines.
+- **Ring and computer names are data** (`Ring 0 IT`, `PL-01`, …), as the console shows them.
+- **Phone:** the rings timeline scrolls inside its box (the page does not scroll sideways); ring sub-lines are hidden
+  there and the ● mark is dropped (✕ stays).
+
+### Deviations from the task
+
+- `no-rings`: all 93 install (and 34 break) on day 0, reported on day 1, not "by day 1, reported day 2". Its end caption
+  says "on day 0" instead of the task's "by day 1".
+- `good-patch`: Ring 2 patched on day 7 (task: 7–8), and without rings on day 0 (task: 0–1).
+- Report caption: "Dan 3: Ring 1 Pilot javlja da KB-X ruši poslovnu aplikaciju (na 4 računala). Administrator ga
+  odbija — Ring 2 Broad, 80 računala, zakrpu nikad ne dobiva." (ring names as data, "poslovnu aplikaciju" for "app").
+- "The gap must exceed install + report": with admin-first, a gap equal to it is enough (Ring 2 on day 3); the strings
+  say "at least".
+- Sizes and LOB placement: the first 4 of Ring 1 and the first 30 of Ring 2 run LOB (the task gives only the counts).
+
+### Sources
+
+- Task file. Microsoft (from the task, not opened, no network): "Build deployment rings for Windows client updates";
+  "Configure Windows Update for Business" (quality-update deferral 0–30 days, pause up to 35 days); "Approve and deploy
+  WSUS updates" (declining, approvals per group).
+
+### Not checked *(check)*
+
+- Every Microsoft title above; the 0–30-day quality-update deferral and the 35-day pause.
+- The report delay (1 day), the install at the scan, the ring days 0/2/7 and the fleet: model choices from the task
+  ("derived, unchecked").
+
+### Checks
+
+- Numbers: SPEC.md's rings table was written before the model; a script printed every preset (and `ring2Day: 3`,
+  all + good) per ring and day, and they agree. 14 new tests: 3 tie-breaks first, fleet, R0–R4 (R4's Remove from a
+  hand-made state), each preset, every combination of the rings params with `declineAt` −1…10, generic (JSON-safe,
+  replay, no mutation).
+- Mutations (18): report delay 2, report after the plan, install the day after, tag ignored, health ignored, no decline,
+  Remove keeping the break, no `broken` code, `ring2Day` ignored, `rollout` ignored, reported twice, 29 LOB, protected
+  miscounted, a second decline, `patch` ignored, Ring 1 on day 3: all fail a test. Health ignored survived at first (a
+  good update had no `affects`); a hand-made test closes it. Two are equivalent: `REPORT_DELAY = 0` (reports run before
+  the scans, so a break is reported the next day at the earliest), and a `broken === undefined` guard (installed
+  computers return earlier; the guard was removed).
+- Screenshots of every rings preset at its key steps in both languages (1920×1080 light, dark, grayscale; 375×812),
+  and the captions of every step read in both languages. No fresh reviewer (a preset task; the host had one).
+
+### Term pairs
+
+Not in `kit/glossary.js`; written out in the strings:
+
+- deployment ring — prsten uvođenja
+- deferral — odgoda
+- pause — pauziranje
+- line-of-business application — poslovna aplikacija
+- (pilot group — pilotna grupa; staged rollout — postupno uvođenje: aliases only)
+
+### Shared requests
+
+- **Kit: a key for presets past the ninth**, or keys that follow the visible presets: `good-patch` has none.
+- **Kit: `visible` on buttons** (the decline button is hidden by page CSS on `aria-keyshortcuts='d'`).
+- **Glossary:** the pairs above, `"src": "simdeck"`.
+
+### Time
+
+Start 19:51, done 20:08 (one session, 2026-11-04): about 17 min.

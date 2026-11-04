@@ -5,6 +5,8 @@
    Builds on sims/win-wsus-flow (a client scans, finds an approved update, installs it); nothing is copied from it:
    that model has no groups, and models/ has no WSUS model. New here: groups, targeting, approval resolution, deadlines.
    Host for win-update-rings (task): approvals are a plan with a `day` per entry, updates carry a `health` flag.
+   Rings scene (param `rings`, preset task win-update-rings): 93 computers in three rings approved days apart; a bad
+   update breaks the computers tagged with what it affects, the break is reported a day later and the admin declines.
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON. The page loads this as a classic script
    (window.SimLogic); node tests require() it. */
 (function (root) {
@@ -41,6 +43,20 @@
   var PROD_DAY = 4;                       // the admin approves KB-B for Production on day 4
   var MOVE_DAY = 1;                       // the admin moves PC-P3 out of Unassigned Computers on day 1
   var RANK = { install: 2, remove: 1, notApproved: 0 };
+
+  // ── rings scene (SPEC.md, "Rings") ──
+  var LOB = 'LOB';                        // the tag of computers that run the line-of-business application
+  var REPORT_DELAY = 1;                   // rule R2: a break is reported the day after it happens (toy delay)
+  /** day: the day of the ring's approval (null: param ring2Day). lob: how many of its computers (the first ones) run LOB. */
+  var RINGS = [
+    { name: 'Ring 0 IT', prefix: 'IT-', size: 3, lob: 0, day: 0 },
+    { name: 'Ring 1 Pilot', prefix: 'PL-', size: 10, lob: 4, day: 2 },
+    { name: 'Ring 2 Broad', prefix: 'BR-', size: 80, lob: 30, day: null }
+  ];
+  var RING_UPDATE = { bad: { id: 'KB-X', health: 'bad', affects: LOB }, good: { id: 'KB-Y', health: 'good' } };
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+  function ringUpdate(p) { return RING_UPDATE[p.patch === 'good' ? 'good' : 'bad']; }
+  function ringDay(r, p) { return r.day !== null ? r.day : Number(p.ring2Day); }
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function groupOf(s, name) { return s.groups.filter(function (g) { return g.name === name; })[0] || null; }
@@ -97,6 +113,13 @@
   /** The admin's plan for KB-B (SPEC.md, "One step"). Each entry has the day it is made. */
   function plan(p) {
     var out = [];
+    if (p.rings) {                                                            // rule R1
+      var u = ringUpdate(p).id;
+      if (p.rollout === 'all') return [{ kind: 'approve', update: u, group: ALL, action: 'install', deadline: null, day: 0 }];
+      return RINGS.map(function (r) {
+        return { kind: 'approve', update: u, group: r.name, action: 'install', deadline: null, day: ringDay(r, p) };
+      });
+    }
     var all = p.firstApproval === 'all';
     out.push({ kind: 'approve', update: SUBJECT, group: all ? ALL : 'Pilot', action: 'install', deadline: null, day: 0 });
     if (p.kioskRemove) out.push({ kind: 'approve', update: SUBJECT, group: 'Kiosks', action: 'remove', deadline: null, day: 0 });
@@ -145,7 +168,7 @@
       function note(what) { ev.pcs.push({ pc: c.name, update: u.id, what: what }); }
       st.forced = false;
       if (st.st === 'installed') {
-        if (e.action === 'remove') { st.st = 'none'; st.due = null; st.det = null; note('removed'); }
+        if (e.action === 'remove') { st.st = 'none'; st.due = null; st.det = null; delete st.broken; delete st.reported; note('removed'); }   // R4
         return;
       }
       if (e.action !== 'install') {
@@ -153,34 +176,87 @@
         return;
       }
       if (st.st === 'none') {
-        st.st = 'detected'; st.det = d; st.due = d + 1 + c.postpone;
+        st.st = 'detected'; st.det = d; st.due = c.auto ? d : d + 1 + c.postpone;   // rule R0: a ring computer installs at the scan
         note('detected');
       }
       if (d >= st.due) { st.st = 'installed'; note('installed'); }            // tie-break 3: the user's day first
       else if (e.deadline !== null && d >= e.deadline) { st.st = 'installed'; st.forced = true; note('forced'); }
       else if (d === st.det + 1 && c.postpone > 0) note('postponed');
+      if (st.st === 'installed' && u.health === 'bad' && (c.tags || []).indexOf(u.affects) >= 0) {
+        st.broken = d;                                                        // rule R2: broken on the day it installs
+        note('broken');
+      }
     });
   }
 
   function code(st) {
+    if (st.st === 'installed' && st.broken !== undefined) return 'broken';
     if (st.st === 'installed') return st.forced ? 'forced' : 'inst';
     return st.st === 'detected' ? 'det' : 'na';
   }
 
+  /** Rings scene, step 0: every computer registered in its ring, nothing approved, the update just released. */
+  function initialRings(p) {
+    var u = ringUpdate(p);
+    var s = {
+      rings: true, subject: u.id, targeting: 'server', day: -1,
+      groups: [{ name: ALL, parent: null, members: [] }, { name: UNASSIGNED, parent: ALL, members: [] }].concat(
+        RINGS.map(function (r) { return { name: r.name, parent: ALL, members: [] }; })),
+      computers: [], updates: [clone(u)], approvals: [], declined: [], pc: {}, effective: {}, hist: {},
+      plan: plan(p), declineAt: typeof p.declineAt === 'number' ? p.declineAt : -1, log: [], ev: null
+    };
+    RINGS.forEach(function (r) {
+      for (var i = 1; i <= r.size; i++) {
+        var name = r.prefix + pad2(i);
+        s.computers.push({ name: name, gpoGroup: r.name, postpone: 0, registered: true, auto: true, tags: i <= r.lob ? [LOB] : [] });
+        groupOf(s, r.name).members.push(name);
+        s.pc[name] = {};
+        s.pc[name][u.id] = { st: 'none', det: null, due: null, forced: false };
+        s.hist[name] = [];
+      }
+    });
+    s.effective = deriveEffective(s);
+    return s;
+  }
+
+  /** Rules R2–R3: breaks from REPORT_DELAY days ago or earlier are reported today, all at once (tie-break 3); the admin
+      declines the update unless it is declined already. Runs before the day's plan and the scans (tie-break 1). */
+  function report(s, ev) {
+    var d = s.day;
+    s.updates.forEach(function (u) {
+      var pcs = [];
+      s.computers.forEach(function (c) {
+        var st = s.pc[c.name][u.id];
+        if (st.broken !== undefined && st.reported === undefined && d - st.broken >= REPORT_DELAY) { st.reported = d; pcs.push(c.name); }
+      });
+      if (!pcs.length) return;
+      var stop = s.declined.indexOf(u.id) < 0;
+      ev.admin.push({ kind: 'report', update: u.id, pcs: pcs });
+      if (stop) {
+        s.declined.push(u.id);
+        ev.admin.push({ kind: 'decline', update: u.id, reason: 'report' });
+      }
+    });
+  }
+
   var logic = {
-    DAYS: DAYS, ALL: ALL, UNASSIGNED: UNASSIGNED, SUBJECT: SUBJECT, NEW_PC: NEW_PC, PROD_DAY: PROD_DAY, MOVE_DAY: MOVE_DAY,
+    DAYS: DAYS, ALL: ALL, LOB: LOB, REPORT_DELAY: REPORT_DELAY, RINGS: RINGS, UNASSIGNED: UNASSIGNED, SUBJECT: SUBJECT, NEW_PC: NEW_PC, PROD_DAY: PROD_DAY, MOVE_DAY: MOVE_DAY,
 
     /** Parameter defaults. prodDeadline: day of the Production deadline (−1: none). firstApproval: KB-B's day-0
         approval goes to Pilot or to All Computers. declineAt: KB-B is declined on day declineAt (−1: never); the
         page's button sets it to the current step, so the decline is the next step. */
-    defaults: { targeting: 'server', gpoName: 'Pilot', prodDeadline: -1, kioskRemove: false, firstApproval: 'pilot', declineAt: -1 },
+    defaults: { targeting: 'server', gpoName: 'Pilot', prodDeadline: -1, kioskRemove: false, firstApproval: 'pilot', declineAt: -1,
+      rings: false, rollout: 'rings', ring2Day: 7, patch: 'bad' },
 
     /** Every run is the 10 days of the timeline. */
     steps: DAYS,
 
     /** State at step 0: before day 0. KB-A was rolled out on day −7 to Pilot, Production and Kiosks; KB-B is new. */
     initial: function (p) {
+      if (p.rings) return initialRings(p);
       var s = {
+        rings: false,
+        subject: SUBJECT,
         targeting: p.targeting === 'client' ? 'client' : 'server',
         day: -1,
         groups: GROUPS.map(function (g) { return { name: g.name, parent: g.parent, members: [] }; }),
@@ -196,6 +272,7 @@
         hist: {},
         plan: plan(p),
         declineAt: typeof p.declineAt === 'number' ? p.declineAt : -1,
+        log: [],
         ev: null
       };
       COMPUTERS.forEach(function (c) {
@@ -222,10 +299,11 @@
       var d = s.day;
       var ev = { day: d, admin: [], reg: [], member: [], pcs: [] };
       // 1. admin actions: the button's decline first, then the plan (an approval of a declined update is skipped)
-      if (s.declineAt === d && s.declined.indexOf(SUBJECT) < 0) {
-        s.declined.push(SUBJECT);
-        ev.admin.push({ kind: 'decline', update: SUBJECT });
+      if (s.declineAt === d && s.declined.indexOf(s.subject) < 0) {
+        s.declined.push(s.subject);
+        ev.admin.push({ kind: 'decline', update: s.subject });
       }
+      report(s, ev);                                                          // rules R2–R3, tie-break R1
       s.plan.filter(function (a) { return a.day === d; }).forEach(function (a) {
         if (a.kind === 'approve') {
           if (s.declined.indexOf(a.update) >= 0) { ev.admin.push({ kind: 'skipped', update: a.update, group: a.group }); return; }
@@ -239,10 +317,11 @@
           ev.admin.push({ kind: 'move', pc: a.pc, to: a.to });
         }
       });
+      ev.admin.forEach(function (a) { s.log.push({ day: d, kind: a.kind, group: a.group || null }); });   // the admin row of the rings timeline
       // 2–3. every computer contacts the server, in the fleet's order
       s.computers.forEach(function (c) { contact(s, c, ev); });
       s.effective = deriveEffective(s);
-      s.computers.forEach(function (c) { s.hist[c.name][d] = code(s.pc[c.name][SUBJECT]); });
+      s.computers.forEach(function (c) { s.hist[c.name][d] = code(s.pc[c.name][s.subject]); });
       s.ev = ev;
       return s;
     },
@@ -259,13 +338,42 @@
       s.computers.forEach(function (c) {
         if (!c.registered) return;
         out.computers++;
-        var st = s.pc[c.name][SUBJECT];
+        var st = s.pc[c.name][s.subject];
         if (st.st === 'installed') out.installed++;
         else if (st.st === 'detected') out.detected++;
         else out.none++;
       });
       return out;
     },
+
+    /** Rings scene: per ring its size, LOB count, installed and broken today, and its approval day from the plan; and
+        the totals (protected: LOB computers without the update). */
+    ringCount: function (s) {
+      var rings = RINGS.map(function (r) {
+        var a = s.plan.filter(function (x) { return x.group === r.name; })[0];
+        var out = { name: r.name, size: 0, lob: 0, installed: 0, broken: 0, day: a ? a.day : null };
+        s.computers.forEach(function (c) {
+          if (groupsOf(s, c.name).indexOf(r.name) < 0) return;
+          var st = s.pc[c.name][s.subject];
+          out.size++;
+          if ((c.tags || []).indexOf(LOB) >= 0) out.lob++;
+          if (st.st === 'installed') out.installed++;
+          if (st.st === 'installed' && st.broken !== undefined) out.broken++;
+        });
+        return out;
+      });
+      var tot = { installed: 0, broken: 0, lob: 0, protected: 0, computers: s.computers.length };
+      s.computers.forEach(function (c) {
+        var st = s.pc[c.name][s.subject];
+        var lob = (c.tags || []).indexOf(LOB) >= 0;
+        if (st.st === 'installed') tot.installed++;
+        if (st.st === 'installed' && st.broken !== undefined) tot.broken++;
+        if (lob) tot.lob++;
+        if (lob && st.st !== 'installed') tot.protected++;
+      });
+      return { rings: rings, total: tot };
+    },
+    isLob: function (c) { return (c.tags || []).indexOf(LOB) >= 0; },
 
     groupsOf: groupsOf,
     effectiveOf: effectiveOf,

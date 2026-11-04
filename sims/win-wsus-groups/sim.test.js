@@ -365,10 +365,13 @@ test('every preset in the page is valid for the model; meta.steps is 10', () => 
   const meta = JSON.parse(html.match(/<script type="application\/json" id="simdeck-meta">([\s\S]*?)<\/script>/)[1]);
   assert.equal(meta.steps, logic.steps);
   const presets = [...html.matchAll(/\{ id: '([\w-]+)',[^\n]*params: \{([^}]*)\}/g)];
-  assert.deepEqual(presets.map((m) => m[1]), ['pilot-first', 'production-deadline', 'typo-unassigned', 'two-groups', 'approve-all', 'decline']);
+  assert.deepEqual(presets.map((m) => m[1]), ['pilot-first', 'production-deadline', 'typo-unassigned', 'two-groups', 'approve-all', 'decline',
+    'rings-stop-at-1', 'no-rings', 'deferral-too-short', 'good-patch']);
   const want = {
     'pilot-first': {}, 'production-deadline': { prodDeadline: 7 }, 'typo-unassigned': { targeting: 'client', gpoName: 'Pliot' },
-    'two-groups': { kioskRemove: true }, 'approve-all': { firstApproval: 'all' }, decline: { declineAt: 2 }
+    'two-groups': { kioskRemove: true }, 'approve-all': { firstApproval: 'all' }, decline: { declineAt: 2 },
+    'rings-stop-at-1': { rings: true }, 'no-rings': { rings: true, rollout: 'all' }, 'deferral-too-short': { rings: true, ring2Day: 2 },
+    'good-patch': { rings: true, patch: 'good' }
   };
   for (const m of presets) {
     const over = {};
@@ -377,5 +380,180 @@ test('every preset in the page is valid for the model; meta.steps is 10', () => 
       over[kv[1]] = JSON.parse(kv[2].replace(/'/g, '"'));
     }
     assert.deepEqual(over, want[m[1]], m[1]);
+  }
+});
+
+// ── rings scene (preset task win-update-rings; SPEC.md "Rings") ──
+
+const R = (over) => Object.assign({ rings: true }, over);
+const RING = { 'Ring 0 IT': 'IT-', 'Ring 1 Pilot': 'PL-', 'Ring 2 Broad': 'BR-' };
+const R_LINE = { na: 'o', det: 'd', inst: 'I', forced: 'F', broken: 'X' };
+/** One computer's timeline in the rings scene: o none, d detected, I installed, X installed and broken. */
+const rline = (s, pc) => s.hist[pc].map((x) => R_LINE[x]).join('');
+/** Per ring: [installed, broken] at the state's day. */
+const perRing = (s) => logic.ringCount(s).rings.map((r) => [r.installed, r.broken]);
+const kinds = (s) => s.ev.admin.map((a) => a.kind + (a.group ? ':' + a.group : ''));
+
+test('rings tie-break 1: on the report day the report and the decline come before the plan, so a ring approved that day never gets it', () => {
+  const s3 = at(R({ ring2Day: 3 }), 4);
+  assert.deepEqual(kinds(s3), ['report', 'decline', 'skipped:Ring 2 Broad']);
+  const s = end(R({ ring2Day: 3 }));
+  assert.equal(rline(s, 'BR-01'), 'oooooooooo');
+  assert.deepEqual(perRing(s), [[3, 0], [10, 4], [0, 0]]);
+  assert.equal(logic.ringCount(s).total.protected, 30);
+});
+
+test('rings tie-break 2: rings approved on the same day install together; the next day\'s report stops neither', () => {
+  const s2 = at(R({ ring2Day: 2 }), 3);
+  assert.deepEqual(kinds(s2), ['approve:Ring 1 Pilot', 'approve:Ring 2 Broad']);
+  assert.deepEqual(perRing(s2), [[3, 0], [10, 4], [80, 30]]);
+  const s = end(R({ ring2Day: 2 }));
+  assert.equal(rline(s, 'BR-01'), 'ooXXXXXXXX');
+  assert.equal(rline(s, 'BR-31'), 'ooIIIIIIII');
+  assert.deepEqual(perRing(s), [[3, 0], [10, 4], [80, 30]]);
+});
+
+test('rings tie-break 3: breaks on one day are one report and one decline', () => {
+  const s1 = at(R({ rollout: 'all' }), 2);
+  assert.deepEqual(kinds(s1), ['report', 'decline']);
+  assert.equal(s1.ev.admin[0].pcs.length, 34);
+  assert.deepEqual(s1.ev.admin[1], { kind: 'decline', update: 'KB-X', reason: 'report' });
+  for (let n = 3; n <= 10; n++) assert.deepEqual(at(R({ rollout: 'all' }), n).ev.admin, []);
+});
+
+test('rings fleet: 93 computers in three rings (3, 10, 80), 34 run LOB (0, 4, 30), all registered at step 0, one update', () => {
+  const s = at(R(), 0);
+  assert.equal(s.computers.length, 93);
+  assert.deepEqual(logic.ringCount(s).rings.map((r) => [r.name, r.size, r.lob]),
+    [['Ring 0 IT', 3, 0], ['Ring 1 Pilot', 10, 4], ['Ring 2 Broad', 80, 30]]);
+  assert.ok(s.computers.every((c) => c.registered));
+  for (const [g, pre] of Object.entries(RING)) assert.ok(logic.groupsOf(s, pre + '01').join() === g);
+  assert.deepEqual(s.computers.filter(logic.isLob).map((c) => c.name).slice(0, 5), ['PL-01', 'PL-02', 'PL-03', 'PL-04', 'BR-01']);
+  assert.deepEqual(s.updates, [{ id: 'KB-X', health: 'bad', affects: 'LOB' }]);
+  assert.equal(s.subject, 'KB-X');
+  assert.deepEqual(at(R({ patch: 'good' }), 0).updates, [{ id: 'KB-Y', health: 'good' }]);
+  assert.deepEqual(logic.ringCount(s).total, { installed: 0, broken: 0, lob: 34, protected: 34, computers: 93 });
+});
+
+test('rings rule R0: a ring computer installs at the scan that detects it; the host\'s computers still wait for the user', () => {
+  const s = at(R(), 1);
+  assert.deepEqual(s.pc['IT-01']['KB-X'], { st: 'installed', det: 0, due: 0, forced: false });
+  assert.deepEqual(s.ev.pcs.filter((x) => x.pc === 'IT-01').map((x) => x.what), ['detected', 'installed']);
+  assert.equal(line(end({}), 'PC-P1'), 'dIIIIIIIII');
+});
+
+test('rings rule R1: approvals Ring 0 day 0, Ring 1 day 2, Ring 2 day ring2Day; rollout all approves All Computers on day 0', () => {
+  const days = (o) => logic.plan(P(R(o))).map((a) => [a.group, a.day]);
+  assert.deepEqual(days({}), [['Ring 0 IT', 0], ['Ring 1 Pilot', 2], ['Ring 2 Broad', 7]]);
+  assert.deepEqual(days({ ring2Day: 3 }), [['Ring 0 IT', 0], ['Ring 1 Pilot', 2], ['Ring 2 Broad', 3]]);
+  assert.deepEqual(days({ rollout: 'all', ring2Day: 3 }), [['All Computers', 0]]);
+  assert.ok(logic.plan(P(R())).every((a) => a.kind === 'approve' && a.action === 'install' && a.deadline === null && a.update === 'KB-X'));
+  const s = end(R({ patch: 'good' }));
+  assert.equal(rline(s, 'IT-01'), 'IIIIIIIIII');
+  assert.equal(rline(s, 'PL-01'), 'ooIIIIIIII');
+  assert.equal(rline(s, 'BR-80'), 'oooooooIII');
+});
+
+test('rings rule R2: a bad update breaks only computers with the tag it affects, on the install day; reported the next day', () => {
+  const s2 = at(R(), 3);
+  assert.deepEqual(s2.pc['PL-01']['KB-X'], { st: 'installed', det: 2, due: 2, forced: false, broken: 2 });
+  assert.deepEqual(s2.pc['PL-05']['KB-X'], { st: 'installed', det: 2, due: 2, forced: false });
+  assert.deepEqual(s2.ev.pcs.filter((x) => x.what === 'broken').map((x) => x.pc), ['PL-01', 'PL-02', 'PL-03', 'PL-04']);
+  assert.ok(!s2.ev.admin.some((a) => a.kind === 'report'));                 // not on the day it breaks
+  const s3 = at(R(), 4);
+  assert.deepEqual(s3.ev.admin[0], { kind: 'report', update: 'KB-X', pcs: ['PL-01', 'PL-02', 'PL-03', 'PL-04'] });
+  assert.equal(s3.pc['PL-01']['KB-X'].reported, 3);
+  // a good update breaks nothing and nothing is reported
+  const g = end(R({ patch: 'good' }));
+  assert.deepEqual(logic.ringCount(g).total, { installed: 93, broken: 0, lob: 34, protected: 0, computers: 93 });
+  for (let n = 1; n <= 10; n++) assert.ok(!at(R({ patch: 'good' }), n).ev.admin.some((a) => a.kind === 'report' || a.kind === 'decline'));
+  // health decides, not the tag alone: a good update that names LOB breaks nothing (hand-made)
+  let h = structuredClone(at(R(), 0));
+  h.updates = [{ id: 'KB-X', health: 'good', affects: 'LOB' }];
+  h = runFrom(h, 1, 10);
+  assert.equal(logic.ringCount(h).total.broken, 0);
+  // a break is reported REPORT_DELAY days later (the report runs before the scans, so never on the day itself)
+  assert.equal(logic.REPORT_DELAY, 1);
+});
+
+test('rings rule R3: the report declines the update; a report while it is already declined declines nothing more', () => {
+  const s = at(R(), 4);
+  assert.deepEqual(s.declined, ['KB-X']);
+  assert.equal(s.effective['BR-01']['KB-X'].action, 'declined');
+  // declined by hand on day 2 (before Ring 1's approval): nothing breaks, nothing is reported
+  const early = end(R({ declineAt: 2 }));
+  assert.deepEqual(perRing(early), [[3, 0], [0, 0], [0, 0]]);
+  // declined by hand on day 3, the report's day: the report is recorded, no second decline
+  const same = at(R({ declineAt: 3 }), 4);
+  assert.deepEqual(kinds(same), ['decline', 'report']);
+  assert.deepEqual(same.declined, ['KB-X']);
+});
+
+test('rings rule R4: a broken computer stays broken after the decline; a Remove approval uninstalls it and clears the break', () => {
+  const s = end(R());
+  assert.equal(rline(s, 'PL-01'), 'ooXXXXXXXX');
+  assert.equal(rline(s, 'PL-05'), 'ooIIIIIIII');
+  // hand-made: on day 4 the admin un-declines and approves Remove for Ring 1
+  let h = at(R(), 4);
+  h = structuredClone(h);
+  h.declined = [];
+  h.plan = [{ kind: 'approve', update: 'KB-X', group: 'Ring 1 Pilot', action: 'remove', deadline: null, day: 4 }];
+  h = logic.step(h, 5);
+  assert.deepEqual(h.pc['PL-01']['KB-X'], { st: 'none', det: null, due: null, forced: false });
+  assert.equal(h.hist['PL-01'][4], 'na');
+  assert.equal(logic.ringCount(h).total.broken, 0);
+  assert.ok(!h.ev.admin.some((a) => a.kind === 'report'));
+});
+
+test('rings-stop-at-1: Ring 0 day 0 without a break, Ring 1 day 2 breaks 4, reported and declined day 3, Ring 2 skipped day 7', () => {
+  const s = end(R());
+  assert.equal(rline(s, 'IT-01'), 'IIIIIIIIII');
+  assert.equal(rline(s, 'BR-01'), 'oooooooooo');
+  assert.deepEqual(kinds(at(R(), 1)), ['approve:Ring 0 IT']);
+  assert.deepEqual(kinds(at(R(), 8)), ['skipped:Ring 2 Broad']);
+  assert.deepEqual(perRing(s), [[3, 0], [10, 4], [0, 0]]);
+  assert.deepEqual(logic.ringCount(s).total, { installed: 13, broken: 4, lob: 34, protected: 30, computers: 93 });
+});
+
+test('no-rings: All Computers on day 0, all 93 install, 34 broken; the report on day 1 has nothing left to stop', () => {
+  const s = end(R({ rollout: 'all' }));
+  assert.equal(rline(s, 'BR-01'), 'XXXXXXXXXX');
+  assert.equal(rline(s, 'IT-01'), 'IIIIIIIIII');
+  assert.deepEqual(logic.ringCount(s).total, { installed: 93, broken: 34, lob: 34, protected: 0, computers: 93 });
+});
+
+test('deferral-too-short (Ring 2 on day 2): 30 more broken; good-patch: Ring 2 gets KB-Y on day 7, 7 days after Ring 0', () => {
+  assert.deepEqual(logic.ringCount(end(R({ ring2Day: 2 }))).total, { installed: 93, broken: 34, lob: 34, protected: 0, computers: 93 });
+  const g = R({ patch: 'good' });
+  assert.equal(logic.ringCount(at(g, 7)).total.installed, 13);
+  assert.equal(logic.ringCount(at(g, 8)).total.installed, 93);
+  assert.deepEqual(kinds(at(g, 8)), ['approve:Ring 2 Broad']);
+});
+
+test('rings, every combination: histories have 10 days, installed never goes back, broken only on LOB and only with KB-X', () => {
+  for (const rollout of ['rings', 'all']) for (const ring2Day of [7, 3, 2]) for (const patch of ['bad', 'good']) for (let declineAt = -1; declineAt <= 10; declineAt++) {
+    const p = R({ rollout, ring2Day, patch, declineAt });
+    const s = end(p);
+    for (const c of s.computers) {
+      assert.equal(s.hist[c.name].length, 10);
+      const l = rline(s, c.name);
+      assert.ok(!/[IX]o|[IX]d|XI/.test(l), JSON.stringify(p) + ' ' + c.name + ' ' + l);
+      if (l.includes('X')) assert.ok(logic.isLob(c) && patch === 'bad', c.name);
+    }
+    const rc = logic.ringCount(s).total;
+    assert.equal(rc.broken, s.computers.filter((c) => /X/.test(rline(s, c.name))).length);
+  }
+});
+
+test('rings: state is JSON-safe, replay is deterministic, step does not mutate its input', () => {
+  const p = P(R({ ring2Day: 3, declineAt: 5 }));
+  let s = logic.initial(p);
+  for (let n = 1; n <= 10; n++) {
+    assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+    const copy = structuredClone(s);
+    const next = logic.step(s, n, p);
+    assert.deepEqual(s, copy);
+    assert.deepEqual(kit.stateAt(logic, p, n), next);
+    s = next;
   }
 });
