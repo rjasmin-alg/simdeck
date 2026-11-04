@@ -1,0 +1,437 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-gpo-security-filtering: a stepper. Top left, the GPO "Sales Drive Maps" (linked to OU=Staff), the computer PC07
+     and the WMI filter card; top right, the GPO's delegation list as a rule table (kit view K4, kit/ruletable.js,
+     docs/sim-ui.md §12, with the page's own marks: which rows match the computer's and the user's token, a deny row
+     decides); below, the decision path per user on PC07 (link → computer reads → Read and Apply → no deny → WMI) and
+     the result with the reason the client's report gives. One step is the admin's change or one user.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-gpo-security-filtering">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPO: sigurnosno i WMI filtriranje · simdeck</title>
+<meta name="description" content="Jedan GPO, njegova delegacija i WMI filtar; za tri korisnika na PC07 put odluke: veza, računalo čita, čitanje i primjena, zabrana, WMI.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-gpo-security-filtering",
+  "title": {
+    "hr": "GPO: sigurnosno i WMI filtriranje",
+    "en": "GPO security and WMI filtering"
+  },
+  "concept": {
+    "hr": "Na koga se GPO primjenjuje; i račun računala treba čitanje",
+    "en": "Who a GPO applies to; the computer account needs Read too"
+  },
+  "summary": {
+    "hr": "Jedan GPO, njegova delegacija i WMI filtar; za tri korisnika na PC07 put odluke: veza, računalo čita, čitanje i primjena, zabrana, WMI.",
+    "en": "One GPO, its delegation and a WMI filter; for three users on PC07 the decision path: link, computer reads, Read and Apply, deny, WMI."
+  },
+  "tags": [
+    "group-policy"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-gpo-security-filtering"]; colours only from kit tokens.
+   Layout: the GPO, computer and WMI cards on the left, the delegation table (kit view K4) on the right; the decision
+   path of the three users below, across the stage. */
+[data-sim="win-gpo-security-filtering"] .sf {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 2.6fr);
+  grid-template-rows: auto auto;
+  align-content: start;
+  gap: 1rem 1.4cqw;
+  height: 100%;
+  padding: 1.5cqh 1.4cqw;
+  font-size: 1.1rem;
+}
+[data-sim="win-gpo-security-filtering"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-gpo-security-filtering"] .sf h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sf-side { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="win-gpo-security-filtering"] .sf-card {
+  padding: 0.35rem 0.7rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+[data-sim="win-gpo-security-filtering"] .sf-card.sf-off { border-style: dashed; background: var(--bg); color: var(--muted); }
+[data-sim="win-gpo-security-filtering"] .sf-card.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-security-filtering"] .sf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sf-kind {
+  display: inline-grid; place-items: center; height: 1.5rem; padding: 0 0.35rem;
+  border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="win-gpo-security-filtering"] .sf-line { font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="win-gpo-security-filtering"] .sf-query { display: block; margin-top: 0.15rem; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-gpo-security-filtering"] .sf-wmival { font-weight: 700; }
+
+/* delegation table: deny rows carry a no-entry sign */
+[data-sim="win-gpo-security-filtering"] .sf-deny { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sf-noentry,
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-noentry"] {
+  position: relative; display: inline-block; width: 1em; height: 1em; flex: none;
+  border: 0; border-radius: 50%; background: var(--danger); vertical-align: -0.12em;
+}
+[data-sim="win-gpo-security-filtering"] .sf-noentry::after,
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-noentry"]::after {
+  content: ''; position: absolute; left: 0.18em; right: 0.18em; top: 0.42em; height: 0.16em; background: var(--bg);
+}
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-row"] { border-radius: 0; background: var(--bg); border-color: var(--line); }
+
+/* decision path: one row per user, five diamonds and the result */
+[data-sim="win-gpo-security-filtering"] .sf-path { grid-column: 1 / -1; min-width: 0; }
+[data-sim="win-gpo-security-filtering"] .sf-grid {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1.1fr) repeat(5, minmax(0, 1fr)) minmax(10rem, 1.5fr);
+  align-items: stretch;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="win-gpo-security-filtering"] .sf-grid > * { padding: 0.4rem 0.5rem; min-width: 0; }
+[data-sim="win-gpo-security-filtering"] .sf-th { align-self: stretch; font-size: var(--fs-sm); font-weight: 700; text-align: center; border-bottom: var(--line-w) solid var(--line); background: var(--bg); }
+[data-sim="win-gpo-security-filtering"] .sf-th:first-child, [data-sim="win-gpo-security-filtering"] .sf-th:last-child { text-align: left; }
+[data-sim="win-gpo-security-filtering"] .sf-num { display: block; font-family: var(--mono); }
+[data-sim="win-gpo-security-filtering"] .sf-user { font-weight: 700; display: flex; flex-direction: column; justify-content: center; }
+[data-sim="win-gpo-security-filtering"] .sf-user small { display: block; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="win-gpo-security-filtering"] .sf-row-now { align-self: stretch; background: var(--bg); }
+[data-sim="win-gpo-security-filtering"] .sf-user.sf-row-now { box-shadow: inset 0.35rem 0 0 var(--ink); }
+[data-sim="win-gpo-security-filtering"] .sf-chk { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; text-align: center; }
+/* the arrow from the previous check into this one */
+[data-sim="win-gpo-security-filtering"] .sf-chk::before {
+  content: ''; position: absolute; top: calc(0.4rem + 1.05rem); right: calc(50% + 1.65rem); width: calc(100% - 3.3rem);
+  height: 0.16rem; background: var(--line);
+}
+[data-sim="win-gpo-security-filtering"] .sf-chk[data-from="pass"]::before { background: var(--ink); }
+[data-sim="win-gpo-security-filtering"] .sf-chk[data-from="none"]::before { display: none; }
+[data-sim="win-gpo-security-filtering"] .sf-dia,
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape^="sf-dia"] {
+  display: grid; place-items: center; width: 2.1rem; height: 2.1rem; flex: none;
+  transform: rotate(45deg); border: var(--line-w) dashed var(--line); border-radius: 0.2rem; background: var(--bg);
+}
+[data-sim="win-gpo-security-filtering"] .sf-dia > span { transform: rotate(-45deg); font-weight: 700; line-height: 1; }
+[data-sim="win-gpo-security-filtering"] .sf-dia[data-st="pass"],
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-dia-pass"] { border: 0.2rem solid var(--ink); color: var(--ok); }
+[data-sim="win-gpo-security-filtering"] .sf-dia[data-st="stop"],
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-dia-stop"] { border: 0.3rem solid var(--danger); color: var(--danger); background: var(--panel); }
+[data-sim="win-gpo-security-filtering"] .sf-dia[data-st="unreached"] {
+  border-color: var(--muted);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--ink) 22%, transparent) 0.25em 0.38em);
+}
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape^="sf-dia"] { width: 0.85em; height: 0.85em; position: relative; }
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-dia-pass"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; transform: rotate(-45deg); font-size: 0.7em; font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sd-swatch[data-shape="sf-dia-stop"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; transform: rotate(-45deg); font-size: 0.7em; font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sf-via { font-size: var(--fs-sm); line-height: 1.2; color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="win-gpo-security-filtering"] .sf-chk[data-st="stop"] .sf-via { color: var(--ink); font-weight: 700; }
+[data-sim="win-gpo-security-filtering"] .sf-res { font-weight: 700; display: flex; align-items: center; }
+[data-sim="win-gpo-security-filtering"] .sf-res .sf-wait { font-weight: 400; color: var(--muted); font-style: italic; }
+[data-sim="win-gpo-security-filtering"] .sf-res.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-security-filtering"] .sf-res.sd-changed .sd-rt-verdict { color: var(--on-hl); }
+
+/* Phone and portrait: the stage grows with its content; cards, table and path stacked; the path grid scrolls in its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-gpo-security-filtering"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-gpo-security-filtering"] .sf { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+  [data-sim="win-gpo-security-filtering"] .sf-path { overflow-x: auto; }
+  [data-sim="win-gpo-security-filtering"] .sf-grid { min-width: 46rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">GPO: sigurnosno i WMI filtriranje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PC = 'PC07', GPO = 'Sales Drive Maps', OU = 'OU=Staff';
+  var PRESET_WORDS = {
+    'default': 'presetDefault', 'sales-only-broken': 'presetSalesBroken', 'sales-fixed': 'presetSalesFixed',
+    'deny-managers': 'presetDenyManagers', 'wmi-laptops': 'presetWmi'
+  };
+  var CHECK_WORDS = { scope: 'chkScope', pcRead: 'chkPcRead', allow: 'chkAllow', deny: 'chkDeny', wmi: 'chkWmi' };
+  var RESULT_WORDS = { inaccessible: 'resInaccessible', security: 'resSecurity', wmi: 'resWmi', scope: 'resScope' };
+
+  /** Data (GPO, group, user, computer names, the query) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(key, vars) { return [' '].concat(rich(key, vars)); }
+  /** "a, b and c" over strings, as one data node. */
+  function names(items) {
+    if (!items.length) return h('span', null, t('nobody'));
+    items = items.slice();
+    if (items.length === 1) return data(items[0]);
+    var last = items.pop();
+    var head = items.reduce(function (acc, it) { return acc === null ? it : t('listMore', { a: acc, b: it }); }, null);
+    return h('span', null, t.parts('list2', { a: data(head), b: data(last) }));
+  }
+  function userOf(name) { return L.USERS.filter(function (u) { return u.name === name; })[0]; }
+  function verdictOf(d) {
+    return Simdeck.ruleTable.verdict(d.applied, t(d.applied ? 'resApplied' : RESULT_WORDS[d.reason]));
+  }
+
+  // ── left: GPO, computer, WMI filter ──
+
+  function renderSide(c) {
+    var s = c.state, pc = s.pc;
+    var admin = s.event === 'admin';
+    var gpo = h('section', { class: 'sf-card' },
+      h('div', { class: 'sf-head' }, h('span', { class: 'sf-kind' }, t('gpoKind')), data(GPO)),
+      h('div', { class: 'sf-line' }, t('gpoUser'), ' ', data('S: → \\\\FS01\\Sales')),
+      h('div', { class: 'sf-line' }, t.parts('linkedTo', { ou: data(OU) })));
+    var comp = h('section', { class: 'sf-card' },
+      h('div', { class: 'sf-head' }, h('span', { class: 'sf-kind' }, t('pcKind')), data(pc.name)),
+      h('div', { class: 'sf-line' }, t(pc.chassis === 3 ? 'pcDesktop' : 'pcLaptop')),
+      h('div', { class: 'sf-line' }, t('pcToken'), ' ', data(L.pcToken(pc).join(', '))));
+    var wmi;
+    if (!s.wmi) wmi = h('section', { class: 'sf-card sf-off' }, h('div', { class: 'sf-head' }, t('wmiTitle')), h('div', { class: 'sf-line' }, t('wmiNone')));
+    else {
+      var ok = s.wmi.chassis.indexOf(pc.chassis) >= 0;
+      wmi = h('section', { class: 'sf-card' + (admin ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') },
+        h('div', { class: 'sf-head' }, t('wmiTitle'), data(s.wmi.name)),
+        data(s.wmi.query, 'sf-query'),
+        h('div', { class: 'sf-line' }, t.parts('wmiOn', { pc: data(pc.name) }), ' ',
+          h('span', { class: 'sf-wmival' }, Simdeck.ruleTable.verdict(ok, t(ok ? 'wmiTrue' : 'wmiFalse')))));
+    }
+    return h('div', { class: 'sf-side' }, gpo, comp, wmi);
+  }
+
+  // ── right: the delegation list as a rule table ──
+
+  /** A note under a row's mark: who the row matches and for which right (the name is data). */
+  function noteTag(key, who) { return h('span', { class: 'sd-rt-tag', dataset: { k: 'muted' } }, t.parts(key, { who: data(who) })); }
+
+  function renderTable(c) {
+    var s = c.state, admin = s.event === 'admin';
+    var name = s.cursor >= 0 ? s.targets[s.cursor] : null;
+    var d = name ? s.results[name] : null;
+    var u = name ? userOf(name) : null;
+    var pt = L.pcToken(s.pc), ut = u ? L.userToken(u) : [];
+    var denied = d && d.reason === 'security' && d.path[3].pass === false;
+    function yes(v) { return v ? '✓' : '–'; }
+    return Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'deny',
+      title: h('span', null, t('tableTitle'), ' · ', data(GPO)),
+      columns: [{ key: 'who', label: t('colPrincipal') }, { key: 'read', label: t('colRead') }, { key: 'apply', label: t('colApply') }],
+      actionLabel: t('colType'),
+      markLabel: name ? t.parts('colMark', { user: data(name), pc: data(PC) }) : t('colMarkNone'),
+      rows: s.rows.map(function (r, i) {
+        var removed = r.status === 'removed';
+        var tags = null;
+        if (admin && r.status !== 'kept') tags = [{ k: 'hl', text: t(removed ? 'tagRemoved' : 'tagAdded') }];
+        var mark = removed && !admin ? 'skip' : null, note = null;
+        if (d && !removed) {
+          var forPc = pt.indexOf(r.principal) >= 0 && r.read, forUser = ut.indexOf(r.principal) >= 0 && (r.read || r.apply);
+          var who = [];
+          if (forPc) who.push(noteTag(r.deny ? 'noteDeny' : 'noteRead', PC));
+          if (forUser) who.push(noteTag(r.deny ? 'noteDeny' : r.read && r.apply ? 'noteBoth' : r.read ? 'noteRead' : 'noteApply', name));
+          if (r.deny && forUser && denied) mark = 'win';
+          else if (forUser && denied) mark = 'beaten';
+          else if (forPc || forUser) mark = 'hit';
+          else mark = 'no';
+          note = who.length ? who : null;
+        }
+        return {
+          no: i + 1,
+          cells: { who: r.principal, read: yes(r.read), apply: yes(r.apply) },
+          action: r.deny ? h('span', { class: 'sf-deny' }, h('span', { class: 'sf-noentry', 'aria-hidden': 'true' }), t('typeDeny')) : h('span', null, t('typeAllow')),
+          effect: r.deny ? 'deny' : 'allow',
+          hit: null,
+          mark: mark,
+          tags: tags,
+          note: note
+        };
+      }),
+      at: d ? 'all' : -1,
+      done: !!denied,
+      changed: false,
+      outcome: function () { return Simdeck.ruleTable.verdict(false, t('resSecurity')); },
+      words: { hit: t('markHit'), win: t('markWin'), beaten: t('markBeaten'), skip: t('markSkip') }
+    });
+  }
+
+  // ── below: the decision path per user ──
+
+  function renderPath(c) {
+    var s = c.state;
+    var cells = [h('div', { class: 'sf-th' }, t('colUser'))];
+    L.CHECKS.forEach(function (id, i) {
+      cells.push(h('div', { class: 'sf-th' }, h('span', { class: 'sf-num', translate: 'no' }, String(i + 1)),
+        id === 'pcRead' ? t.parts('chkPcRead', { pc: data(PC) }) : t(CHECK_WORDS[id])));
+    });
+    cells.push(h('div', { class: 'sf-th' }, t('colResult')));
+    s.targets.forEach(function (name, k) {
+      var u = userOf(name), d = s.results[name], now = k === s.cursor && s.event === 'target';
+      var rowCls = now ? ' sf-row-now' : '';
+      cells.push(h('div', { class: 'sf-user' + rowCls }, data(name),
+        h('small', null, u.groups.length ? data(u.groups.join(', ')) : t('noGroups'))));
+      var prev = null;
+      L.CHECKS.forEach(function (id, i) {
+        var chk = d ? d.path[i] : null;
+        var st = !chk ? 'pending' : chk.pass === true ? 'pass' : chk.pass === false ? 'stop' : 'unreached';
+        var via = null;
+        if (chk && chk.pass !== null) {
+          if (id === 'wmi' && !chk.via.length) via = t('noFilter');
+          else if (id === 'scope') via = data(chk.via.join(', '));
+          else if (id === 'wmi') via = h('span', null, t(chk.pass ? 'wmiTrue' : 'wmiFalse'));
+          else if (chk.via.length) via = data(chk.via.join(', '));
+          else if (!chk.pass) via = t('nobody');
+        } else if (st === 'unreached') via = t('notReached');
+        cells.push(h('div', { class: 'sf-chk' + rowCls, dataset: { st: st, from: prev || 'none' } },
+          h('span', { class: 'sf-dia', dataset: { st: st }, 'aria-hidden': 'true' }, h('span', null, st === 'pass' ? '✓' : st === 'stop' ? '✕' : '')),
+          via != null ? h('span', { class: 'sf-via' }, via) : null));
+        prev = st;
+      });
+      cells.push(h('div', { class: 'sf-res' + rowCls + (now ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') },
+        d ? verdictOf(d) : h('span', { class: 'sf-wait' }, t('resWaiting'))));
+    });
+    return h('section', { class: 'sf-path' }, h('h2', null, t.parts('pathTitle', { pc: data(PC) })), h('div', { class: 'sf-grid' }, cells));
+  }
+
+  // ── captions ──
+
+  function captionAdmin(p) {
+    var out = rich('capAdmin');
+    if (p.aclMode === 'sales') out = out.concat(sentence('capAdminSales'));
+    if (p.aclMode === 'sales-dc') out = out.concat(sentence('capAdminSalesDc'));
+    if (p.denyManagers) out = out.concat(sentence('capAdminDeny'));
+    if (p.wmi === 'laptops') out = out.concat(sentence('capAdminWmi', { wmi: data(L.LAPTOPS.name) }));
+    return out;
+  }
+
+  function captionTarget(c) {
+    var s = c.state, n = c.n, name = s.targets[s.cursor], d = s.results[name];
+    var who = data(name), pc = data(PC);
+    var last = s.cursor === s.targets.length - 1;
+    var out;
+    if (d.applied) {
+      out = rich('capApplied', { n: n, user: who, pc: pc, pcVia: names(d.path[1].via), via: names(d.path[2].via) });
+      if (s.wmi) out = out.concat(sentence('capWmiTrue', { pc: data(PC) }));
+      return out;
+    }
+    if (d.reason === 'scope') return rich('capScope', { n: n, user: who, ou: data(OU) });
+    if (d.reason === 'inaccessible') {
+      var firstInacc = !s.targets.slice(0, s.cursor).some(function (x) { return s.results[x].reason === 'inaccessible'; });
+      out = firstInacc && d.userOk && userOf(name).groups.indexOf('Sales') >= 0
+        ? rich('capInaccSales', { n: n, user: who })
+        : rich('capInacc', { n: n, user: who, pc: pc });
+      if (last) out = out.concat(sentence('capInaccFix'));
+    } else if (d.reason === 'security') {
+      out = d.path[3].pass === false
+        ? rich('capDeny', { n: n, user: who, via: names(d.path[2].via), deny: names(d.path[3].via) })
+        : rich('capNoApply', { n: n, user: who });
+    } else {
+      var firstWmi = !s.targets.slice(0, s.cursor).some(function (x) { return s.results[x].reason === 'wmi'; });
+      return firstWmi ? rich('capWmiFirst', { n: n, pc: pc }) : rich('capWmiAgain', { n: n, user: who, pc: pc });
+    }
+    if (d.alsoWmi) out = out.concat(sentence('capAlsoWmi'));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'aclMode', type: 'select', label: t('aclMode'), resets: true,
+        options: [['default', t('aclDefault')], ['sales', t('aclSales')], ['sales-dc', t('aclSalesDc')]] },
+      { key: 'denyManagers', type: 'toggle', label: t('denyManagers'), resets: true },
+      { key: 'wmi', type: 'select', label: t('wmi'), resets: true, options: [['none', t('wmiOptNone')], ['laptops', t('wmiOptLaptops')]] },
+      { key: 'pc07Laptop', type: 'toggle', label: t('pc07Laptop'), resets: true }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { shape: 'sf-dia', label: t('legDiamond') },
+      { shape: 'sf-dia-pass', label: t('legPass') },
+      { shape: 'sf-dia-stop', label: t('legStop') },
+      { shape: 'sf-row', label: t('legRow') },
+      { shape: 'sf-noentry', label: t('legDeny') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'sf' }, renderSide(c), renderTable(c), renderPath(c)));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (!s.event) {
+        var out = rich('capStart', { gpo: data(GPO), ou: data(OU), pc: data(PC) });
+        return L.hasChange(c.params) ? out.concat(sentence('capStartChange')) : out;
+      }
+      if (s.event === 'admin') return captionAdmin(c.params);
+      return captionTarget(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
