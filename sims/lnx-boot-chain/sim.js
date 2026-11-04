@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
    Model for lnx-boot-chain: booting is a chain of hand-overs. A chain is data (stages with what each needs, what it
-   does and what the console shows), so a second chain (the Windows preset task) needs no new model code. One step:
+   does and what the console shows), so a second chain (Windows, task w3/win-boot) needs no new model code. One step:
    power on, or the current stage checks its needs and either hands control to the next stage or stops the chain.
    Rules and numbers: SPEC.md. Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. */
@@ -14,7 +14,9 @@
 
   /* Stage fields: label, sub, lives, hands are string keys; needs are need ids (the page shows need_<id>); screen and
      failText are console lines ({var} filled from the chain's vars) or { t: key } for a described screen. does: what
-     the stage leaves behind when it finishes (root, pid1, time, target); onFail: what a failure leaves (target). */
+     the stage leaves behind when it finishes (root, pid1, time, target, facts); onFail: what a failure leaves (target,
+     facts). facts: { row: [part] } for the card rows a chain lists in factRows; a part is data (a string) or { t: key },
+     both {var}-filled; facts set by onFail are the bad ones (factsBad). A chain reads its break from p[breakKey]. */
   var CHAINS = {
     linux: {
       capPrefix: '',                                          // caption keys: <capPrefix>capDone_<stage id>, …capFail_<break>
@@ -78,10 +80,58 @@
       },
       // systemd-analyze on the book machine (UL ch10), multi-user.target; graphical was not measured (SPEC.md).
       timing: { kernel: 1.363, initrd: 3.996, userspace: { 'multi-user': 26.504 }, targetAt: { 'multi-user': 8.13 } }
+    },
+
+    /* Windows (task w3/win-boot): UEFI → Boot Manager → winload → kernel → smss → winlogon (Microsoft "Advanced
+       troubleshooting for Windows boot problems": PreBoot, Boot Manager, OS Loader, Kernel; Windows Internals 7th ed.
+       Part 2 ch. 12 "Startup and shutdown"). Its own break param (winBreak), no targets, no timing. SPEC.md "Windows". */
+    windows: {
+      capPrefix: 'win_',
+      breakKey: 'winBreak',
+      breaks: ['bcd', 'bootDriver', 'criticalProcess'],
+      targets: [],
+      factRows: ['from', 'bcd', 'driver', 'first', 's0', 's1'],
+      vars: function (p) {
+        return { drvState: p.winBreak === 'bootDriver' ? 'wDrvNotLoaded' : 'wDrvLoaded' };
+      },
+      stages: [
+        { id: 'uefi', label: 'wStUefi', sub: 'NVRAM: Windows Boot Manager', lives: 'livesRom', hands: 'wHandsUefi',
+          needs: ['bootEntry'], screen: [{ t: 'wScrUefi' }],
+          does: { facts: { from: [{ t: 'wFromEsp' }] } } },
+        { id: 'bootmgr', label: 'wStBootmgr', sub: 'bootmgfw.efi', lives: 'wLivesEsp', hands: 'wHandsBootmgr',
+          needs: ['bcd'], screen: [{ t: 'wScrBootmgr' }],
+          failText: ['Recovery', '', 'Your PC/Device needs to be repaired', '',
+            'The Boot Configuration Data for your PC is missing or contains errors.', '',
+            'File: \\EFI\\Microsoft\\Boot\\BCD', 'Error code: 0xc000000f', '',
+            'You\'ll need to use recovery tools.'], failState: 'bcdRecovery',
+          does: { facts: { from: [{ t: 'wFromC' }], bcd: ['device partition=C:', 'path \\Windows\\system32\\winload.efi'] } },
+          onFail: { facts: { bcd: [{ t: 'wBcdMissing' }] } } },
+        { id: 'winload', label: 'wStWinload', sub: 'winload.efi', lives: 'wLivesC', hands: 'wHandsWinload', needs: [],
+          screen: [{ t: 'wScrWinload' }],
+          does: { facts: { driver: ['storahci.sys', { t: '{drvState}' }] } } },
+        { id: 'kernel', label: 'stKernel', sub: 'ntoskrnl.exe', lives: 'livesKernel', hands: 'wHandsKernel',
+          needs: ['bootDriver'], screen: [{ t: 'wScrKernel' }],
+          failText: [':(', '', 'Your PC ran into a problem and needs to restart. We\'re just collecting some error info, and then we\'ll restart for you.', '', 'If you call a support person, give them this info:',
+            'Stop code: INACCESSIBLE_BOOT_DEVICE'], failState: 'bugcheck7b',
+          does: { facts: { first: ['smss.exe'] } },
+          onFail: { facts: { driver: ['storahci.sys', { t: '{drvState}' }] } } },
+        { id: 'smss', label: 'wStSmss', sub: ['smss.exe', { t: 'wSubS0' }, { t: 'wSubS1' }], lives: 'wLivesC',
+          hands: 'wHandsSmss', needs: ['criticalProcess'], screen: [{ t: 'wScrSmss' }],
+          failText: [':(', '', 'Your PC ran into a problem and needs to restart. We\'re just collecting some error info, and then we\'ll restart for you.', '', 'If you call a support person, give them this info:',
+            'Stop code: CRITICAL_PROCESS_DIED'], failState: 'bugcheckEf',
+          does: { facts: { s0: ['csrss.exe, wininit.exe → services.exe, lsass.exe'], s1: ['csrss.exe, winlogon.exe'] } },
+          onFail: { facts: { s0: ['csrss.exe', { t: 'wWininitDied' }] } } },
+        { id: 'winlogon', label: 'wStWinlogon', sub: 'winlogon.exe → LogonUI', lives: 'wLivesSession1',
+          hands: 'wHandsWinlogon', needs: [], screen: [{ t: 'wScrWinlogon' }] }
+      ],
+      end: { any: [{ t: 'wScrLogon' }] }
     }
   };
 
   function chainOf(p) { return CHAINS[p.chain] || CHAINS.linux; }
+
+  /** The break the chain reads: p[breakKey] ('break' for Linux, 'winBreak' for Windows). */
+  function breakOf(p) { return p[chainOf(p).breakKey || 'break']; }
 
   /** Index of the first stage that needs the broken thing (rule 7, T1), or -1 (none broken, or a break no stage has: T2). */
   function failIndex(chain, brk) {
@@ -91,13 +141,24 @@
   }
 
   function fill(line, vars) {
-    if (typeof line !== 'string') return { t: line.t };
+    if (typeof line !== 'string') return { t: fill(line.t, vars) };
     return line.replace(/\{(\w+)\}/g, function (m, k) { return k in vars ? vars[k] : m; });
   }
   function screenOf(lines, vars) { return lines.map(function (l) { return fill(l, vars); }); }
 
-  /** A stage's sub-label with its {vars} filled ('default.target → multi-user.target'), or null. */
-  function subOf(stage, p) { return stage.sub ? fill(stage.sub, chainOf(p).vars(p)) : null; }
+  /** A stage's sub-label with its {vars} filled ('default.target → multi-user.target'), or null. A list (a stage that
+      fans out, Windows smss) gives one line per item: data strings and { t: key }. */
+  function subOf(stage, p) {
+    if (!stage.sub) return null;
+    var vars = chainOf(p).vars(p);
+    return Array.isArray(stage.sub) ? screenOf(stage.sub, vars) : fill(stage.sub, vars);
+  }
+  function setFacts(o, facts, vars, bad) {
+    Object.keys(facts || {}).forEach(function (k) {
+      o.facts[k] = screenOf(facts[k], vars);
+      if (bad && o.factsBad.indexOf(k) < 0) o.factsBad.push(k);
+    });
+  }
 
   function targetName(p) { return chainOf(p).vars(p).target || null; }
 
@@ -106,13 +167,14 @@
     KVER: KVER, ROOT_UUID: ROOT_UUID, WRONG_UUID: WRONG_UUID, VJEZBA_UUID: VJEZBA_UUID,
     failIndex: failIndex,
     chainOf: chainOf,
+    breakOf: breakOf,
     subOf: subOf,
 
-    defaults: { chain: 'linux', 'break': 'none', target: 'multi-user' },
+    defaults: { chain: 'linux', 'break': 'none', winBreak: 'none', target: 'multi-user' },
 
     /** Power on + one step per stage; a failing stage is the last step (SPEC.md "Steps per demo"). */
     steps: function (p) {
-      var c = chainOf(p), f = failIndex(c, p['break']);
+      var c = chainOf(p), f = failIndex(c, breakOf(p));
       return 1 + (f < 0 ? c.stages.length : f + 1);
     },
 
@@ -122,13 +184,13 @@
         chain: p.chain in CHAINS ? p.chain : 'linux',
         stages: c.stages.map(function (s) { return s.id; }),
         power: false, at: -1, changed: null, done: [], failedAt: null, halt: null, screen: [],
-        root: { initramfs: false, real: false }, pid1: null, target: null,
+        root: { initramfs: false, real: false }, pid1: null, target: null, facts: {}, factsBad: [],
         t: { kernel: null, initrd: null, userspace: null, targetAt: null }
       };
     },
 
     step: function (s, n, p) {
-      var c = chainOf(p), vars = c.vars(p);
+      var c = chainOf(p), vars = c.vars(p), brk = breakOf(p);
       var o = JSON.parse(JSON.stringify(s));
       if (o.failedAt || o.at >= c.stages.length) return o;               // T4: nothing runs after a stop or the end
       if (!o.power) {                                                     // step 1: power on, stage 0 takes control
@@ -137,10 +199,11 @@
         return o;
       }
       var st = c.stages[o.at];
-      if (p['break'] !== 'none' && st.needs.indexOf(p['break']) >= 0) {  // rule 7: the chain stops here
+      if (brk && brk !== 'none' && st.needs.indexOf(brk) >= 0) {         // rule 7: the chain stops here
         o.failedAt = st.id; o.halt = st.failState || 'halt'; o.changed = null;
         o.screen = screenOf(st.failText || [], vars);
         if (st.onFail && st.onFail.target) o.target = st.onFail.target;
+        if (st.onFail) setFacts(o, st.onFail.facts, vars, true);
         return o;
       }
       o.done.push(st.id);
@@ -149,6 +212,7 @@
       if (d.root === 'real') { o.root.initramfs = false; o.root.real = true; }        // rule 5: switch root
       if (d.pid1) o.pid1 = d.pid1;
       if (d.target) o.target = vars.target;                                            // rule 6
+      setFacts(o, d.facts, vars, false);
       if (d.time && c.timing) {
         var tm = c.timing[d.time];
         o.t[d.time] = typeof tm === 'object' && tm !== null ? (tm[p.target] !== undefined ? tm[p.target] : null) : tm;

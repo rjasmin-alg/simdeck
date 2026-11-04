@@ -123,6 +123,69 @@
       capFail_diskDriver: 'Jezgra radi i PID 1 postoji, ali initramfs nema upravljački program diska: korijenski uređaj se ne pojavljuje, pa se nakon isteka vremena otvara hitna ljuska.',
       capFail_rootUuid: 'Disk je vidljiv, ali `root=` navodi UUID koji nema nijedna particija. Isti zastoj i ista ljuska kao bez upravljačkog programa: dva uzroka, jedan simptom.',
       capFail_targetUnit: 'PID 1 radi na pravom korijenu, ali disk iz retka za /mnt/vjezba u /etc/fstab ne postoji: `local-fs.target` pada i systemd prelazi u `emergency.target`. `rescue.target` ne pomaže jer uvlači upravo ta montiranja.',
+      // ── Windows chain (task w3/win-boot) ──
+      chainWindows: 'Windows',
+      wStUefi: 'UEFI firmware',
+      wStBootmgr: 'pokretač sustava',
+      wStWinload: 'učitavač sustava',
+      wStSmss: 'upravitelj sesija',
+      wStWinlogon: 'prijava',
+      wSubS0: 'sesija 0: csrss, wininit',
+      wSubS1: 'sesija 1: csrss, winlogon',
+      wLivesEsp: 'na ESP-u (FAT32)',
+      wLivesC: 'na C: (NTFS)',
+      wLivesSession1: 'u sesiji 1',
+      wHandsUefi: 'upravljanje datoteci bootmgfw.efi',
+      wHandsBootmgr: 'winload.efi s C:, kako kaže BCD',
+      wHandsWinload: 'jezgru, HAL, košnicu SYSTEM i upravljačke programe za pokretanje',
+      wHandsKernel: 'prvi korisnički proces: smss.exe',
+      wHandsSmss: 'sesiju 0 (usluge) i sesiju 1 (prijava)',
+      wHandsWinlogon: 'zaslon za prijavu; nakon prijave userinit.exe → explorer.exe',
+      need_bcd: 'spremište BCD',
+      need_bootDriver: 'upravljački program diska učitan pri pokretanju',
+      need_criticalProcess: 'da kritični procesi rade',
+      wScrUefi: '(logo proizvođača: firmware provjerava uređaje i u NVRAM-u čita stavke za podizanje)',
+      wScrBootmgr: '(i dalje logo: s jednom stavkom u BCD-u pokretač ne prikazuje izbornik)',
+      wScrWinload: '(logo: učitavač učitava jezgru i upravljačke programe u memoriju)',
+      wScrKernel: '(logo i točkice koje se vrte: jezgra se pokreće)',
+      wScrSmss: '(logo i točkice: smss pokreće sesije 0 i 1)',
+      wScrWinlogon: '(winlogon pokreće LogonUI)',
+      wScrLogon: '(zaslon za prijavu: korisnik i lozinka)',
+      wFact_from: 'Datoteke s',
+      wFact_bcd: 'BCD, zadana stavka',
+      wFact_driver: 'Program diska',
+      wFact_first: 'Prvi proces',
+      wFact_s0: 'Sesija 0',
+      wFact_s1: 'Sesija 1',
+      wFromEsp: 'ESP (FAT32), ne s C:',
+      wFromC: 'C: (NTFS)',
+      wBcdMissing: 'nedostaje ili je oštećena',
+      wDrvLoaded: 'Start=0 (pri pokretanju): učitan',
+      wDrvNotLoaded: 'Start=3 (na zahtjev): nije učitan',
+      wWininitDied: 'wininit.exe ✗ pao',
+      halt_bcdRecovery: 'zaslon za oporavak, kod 0xc000000f',
+      halt_bugcheck7b: 'zaustavna pogreška 0x7B',
+      halt_bugcheckEf: 'zaustavna pogreška 0xEF',
+      break_bcd: 'BCD nedostaje ili je oštećen',
+      break_bootDriver: 'upravljački program diska nije za pokretanje',
+      break_criticalProcess: 'kritični proces sesije 0 pada',
+      pWinNormal: 'Windows: cijeli lanac',
+      pWinNormalHint: '7 koraka do zaslona za prijavu',
+      pWinNoBcd: 'Windows: nema BCD-a',
+      pWinNoBcdHint: 'Lanac staje na pokretaču sustava',
+      pWinNoDriver: 'Windows: disk se ne vidi',
+      pWinNoDriverHint: 'INACCESSIBLE_BOOT_DEVICE: jezgra radi, disk ne vidi',
+      pWinCritical: 'Windows: kritični proces',
+      pWinCriticalHint: 'Jezgra radi, sesija 0 ne',
+      win_capDone_uefi: 'Firmware je u NVRAM-u pronašao stavku „Windows Boot Manager” i pokrenuo datoteku koju ona imenuje: `bootmgfw.efi` na particiji ESP (*EFI System Partition*), maloj particiji FAT32. Windows se ne pokreće izravno s C:.',
+      win_capDone_bootmgr: 'Boot Manager čita BCD i u njemu pronalazi koji `winload.efi` treba pokrenuti. Zadana stavka BCD-a (*Boot Configuration Data*, podaci o konfiguraciji pokretanja) kaže: particija C:, `\\Windows\\system32\\winload.efi`.',
+      win_capDone_winload: 'Učitavač je u memoriju stavio jezgru (`ntoskrnl.exe`), HAL, košnicu SYSTEM i upravljačke programe označene za pokretanje (`Start=0`), samo njih. Upravljanje preuzima jezgra.',
+      win_capDone_kernel: 'Jezgra se pokrenula, preko upravljačkog programa diska pristupila sistemskom disku i pokrenula prvi proces u korisničkom načinu, `smss.exe`. I Windows ima svoj [[init process]].',
+      win_capDone_smss: 'smss je stvorio dvije sesije: sesiju 0 s `csrss.exe` i `wininit.exe` (koji pokreće `services.exe` i `lsass.exe`) te sesiju 1 s `csrss.exe` i `winlogon.exe`.',
+      win_capDone_winlogon: 'winlogon prikazuje zaslon za prijavu (LogonUI). Nakon prijave pokreće `userinit.exe`, a on `explorer.exe`: tu lanac završava.',
+      win_capFail_bcd: 'Pokretač sustava radi, ali BCD nedostaje ili je oštećen: ne zna koji `winload.efi` treba pokrenuti, pa prikazuje zaslon za oporavak. Jezgra nije ni krenula: pokvaren je BCD, a ne jezgra.',
+      win_capFail_bootDriver: 'Upravljač diska prebačen je u način AHCI, a `storahci.sys` nije označen za pokretanje (`Start=3`). Upravljački program diska nije učitan pri pokretanju: jezgra ne vidi sistemski disk — INACCESSIBLE_BOOT_DEVICE, isto mjesto kao `initramfs` bez upravljačkog programa.',
+      win_capFail_criticalProcess: 'smss je pokrenuo sesije, ali `wininit.exe`, kritični proces sesije 0, je pao. Bez njega Windows ne može dalje i staje sa zaustavnom pogreškom CRITICAL_PROCESS_DIED. Zaslona za prijavu nema, a jezgra je ispravna.',
       explain: '<p>Podizanje sustava nije jedan događaj nego lanac predaja. Svaka karika radi jedan posao i predaje upravljanje ' +
         'sljedećoj. <em lang="en">Firmware</em> je u samom stroju (u ROM-u). Zatim [[boot loader]] s diska bira koja će ' +
         '[[kernel]] krenuti, učitava je zajedno s <code>initramfs</code>-om u memoriju i pokreće je.</p>' +
@@ -134,7 +197,12 @@
         'opisana datotekom. Ako ne uspije neka koju cilj zahtijeva (a ne samo želi), [[target]] nije dosegnut: <code>rescue.target</code> podiže osnovni sustav s montiranjima, ' +
         '<code>emergency.target</code> gotovo ništa. Kad karika stane, sljedeće se ne pokušavaju, pa o njima nema ni zapisa.</p>' +
         '<p>Vremena iz <code>systemd-analyze</code> su po fazama. Jedinice se izvode usporedno, pa ona koja je najdulje ' +
-        'trajala nije nužno ona koja je zadržala podizanje.</p>'
+        'trajala nije nužno ona koja je zadržala podizanje.</p>' +
+        '<p>Windows ima isti lanac s drugim imenima. UEFI <em lang="en">firmware</em> pokreće <code>bootmgfw.efi</code> s particije ESP, ' +
+        'a ne sa C:. Pokretač sustava (Boot Manager) čita BCD (podaci o konfiguraciji pokretanja) i pokreće <code>winload.efi</code>, ' +
+        'koji učitava jezgru i upravljačke programe označene za pokretanje. Jezgra pokreće <code>smss.exe</code>, prvi proces u ' +
+        'korisničkom načinu, a on sesiju 0 (usluge) i sesiju 1 (<code>winlogon.exe</code>, prijava). Plavi zaslon pri podizanju ' +
+        'obično znači upravljački program koji nedostaje ili oštećen BCD, a ne pokvarenu jezgru.</p>'
     },
     en: {
       stage: 'The boot chain',
@@ -245,6 +313,69 @@
       capFail_diskDriver: 'The kernel runs and PID 1 exists, but the initramfs lacks the disk driver: the root device never appears, so after the timeout it drops to an emergency shell.',
       capFail_rootUuid: 'The disk is visible, but `root=` names a UUID that no partition has. The same stop and the same shell as without the driver: two causes, one symptom.',
       capFail_targetUnit: 'PID 1 runs on the real root, but the disk of the /mnt/vjezba line in /etc/fstab is not there: `local-fs.target` fails and systemd goes to `emergency.target`. `rescue.target` does not help, because it pulls in exactly those mounts.',
+      // ── Windows chain (task w3/win-boot) ──
+      chainWindows: 'Windows',
+      wStUefi: 'UEFI firmware',
+      wStBootmgr: 'Boot Manager',
+      wStWinload: 'OS loader',
+      wStSmss: 'Session Manager',
+      wStWinlogon: 'logon',
+      wSubS0: 'session 0: csrss, wininit',
+      wSubS1: 'session 1: csrss, winlogon',
+      wLivesEsp: 'on the ESP (FAT32)',
+      wLivesC: 'on C: (NTFS)',
+      wLivesSession1: 'in session 1',
+      wHandsUefi: 'control to bootmgfw.efi',
+      wHandsBootmgr: 'winload.efi on C:, as the BCD says',
+      wHandsWinload: 'the kernel, HAL, the SYSTEM hive and the boot-start drivers',
+      wHandsKernel: 'the first user-mode process: smss.exe',
+      wHandsSmss: 'session 0 (services) and session 1 (logon)',
+      wHandsWinlogon: 'the logon screen; after logon userinit.exe → explorer.exe',
+      need_bcd: 'the BCD store',
+      need_bootDriver: 'a disk driver loaded at boot',
+      need_criticalProcess: 'its critical processes running',
+      wScrUefi: '(the maker\'s logo: the firmware checks the devices and reads the boot entries in NVRAM)',
+      wScrBootmgr: '(still the logo: with one entry in the BCD, Boot Manager shows no menu)',
+      wScrWinload: '(the logo: the loader loads the kernel and the drivers into memory)',
+      wScrKernel: '(the logo and spinning dots: the kernel starts)',
+      wScrSmss: '(the logo and dots: smss starts sessions 0 and 1)',
+      wScrWinlogon: '(winlogon starts LogonUI)',
+      wScrLogon: '(the logon screen: user name and password)',
+      wFact_from: 'Files from',
+      wFact_bcd: 'BCD, default entry',
+      wFact_driver: 'Disk driver',
+      wFact_first: 'First process',
+      wFact_s0: 'Session 0',
+      wFact_s1: 'Session 1',
+      wFromEsp: 'the ESP (FAT32), not C:',
+      wFromC: 'C: (NTFS)',
+      wBcdMissing: 'missing or damaged',
+      wDrvLoaded: 'Start=0 (boot): loaded',
+      wDrvNotLoaded: 'Start=3 (demand): not loaded',
+      wWininitDied: 'wininit.exe ✗ died',
+      halt_bcdRecovery: 'recovery screen, code 0xc000000f',
+      halt_bugcheck7b: 'stop error 0x7B',
+      halt_bugcheckEf: 'stop error 0xEF',
+      break_bcd: 'BCD missing or damaged',
+      break_bootDriver: 'disk driver not boot-start',
+      break_criticalProcess: 'a critical session-0 process dies',
+      pWinNormal: 'Windows: the whole chain',
+      pWinNormalHint: '7 steps to the logon screen',
+      pWinNoBcd: 'Windows: no BCD',
+      pWinNoBcdHint: 'The chain stops at Boot Manager',
+      pWinNoDriver: 'Windows: no disk driver',
+      pWinNoDriverHint: 'INACCESSIBLE_BOOT_DEVICE: the kernel runs, it cannot see the disk',
+      pWinCritical: 'Windows: a critical process',
+      pWinCriticalHint: 'The kernel runs, session 0 does not',
+      win_capDone_uefi: 'The firmware found the NVRAM entry "Windows Boot Manager" and started the file it names: `bootmgfw.efi` on the ESP (*EFI System Partition*), a small FAT32 partition. Windows does not start from C: directly.',
+      win_capDone_bootmgr: 'Boot Manager reads the BCD and finds in it which `winload.efi` to start. The default entry of the BCD (*Boot Configuration Data*) says: partition C:, `\\Windows\\system32\\winload.efi`.',
+      win_capDone_winload: 'The loader put the kernel (`ntoskrnl.exe`), the HAL, the SYSTEM hive and the drivers marked boot-start (`Start=0`) into memory, and only those. The kernel takes control.',
+      win_capDone_kernel: 'The kernel started, reached the system disk through the disk driver and started the first user-mode process, `smss.exe`. Windows has its own [[init process]] too.',
+      win_capDone_smss: 'smss created two sessions: session 0 with `csrss.exe` and `wininit.exe` (which starts `services.exe` and `lsass.exe`), and session 1 with `csrss.exe` and `winlogon.exe`.',
+      win_capDone_winlogon: 'winlogon shows the logon screen (LogonUI). After a logon it starts `userinit.exe`, which starts `explorer.exe`: the chain ends here.',
+      win_capFail_bcd: 'Boot Manager runs, but the BCD is missing or damaged: it does not know which `winload.efi` to start, so it shows the recovery screen. The kernel never started: the BCD is broken, not the kernel.',
+      win_capFail_bootDriver: 'The disk controller was switched to AHCI mode, and `storahci.sys` is not marked boot-start (`Start=3`). The disk driver was not loaded at boot: the kernel cannot see the system disk — INACCESSIBLE_BOOT_DEVICE, the same place as an initramfs without the driver.',
+      win_capFail_criticalProcess: 'smss started the sessions, but `wininit.exe`, a critical process of session 0, died. Windows cannot go on without it and stops with the stop error CRITICAL_PROCESS_DIED. There is no logon screen, and the kernel itself is fine.',
       explain: '<p>Booting is not one event but a chain of hand-overs. Each link does one job and hands control to the next. ' +
         'The <em lang="en">firmware</em> is in the machine itself (in ROM). Then the [[boot loader]] on the disk chooses which ' +
         '[[kernel]] starts, loads it together with the <code>initramfs</code> into memory and starts it.</p>' +
@@ -258,7 +389,12 @@
         '<code>emergency.target</code> almost nothing. When a link stops, the ones after it are never tried, so there are ' +
         'no logs from them.</p>' +
         '<p>The <code>systemd-analyze</code> times are per phase. Units run side by side, so the one that took longest is ' +
-        'not necessarily the one that held up the boot.</p>'
+        'not necessarily the one that held up the boot.</p>' +
+        '<p>Windows has the same chain under other names. The UEFI <em lang="en">firmware</em> starts <code>bootmgfw.efi</code> from the ESP ' +
+        'partition, not from C:. Boot Manager reads the BCD (Boot Configuration Data) and starts <code>winload.efi</code>, which ' +
+        'loads the kernel and the drivers marked boot-start. The kernel starts <code>smss.exe</code>, the first user-mode ' +
+        'process, and it starts session 0 (services) and session 1 (<code>winlogon.exe</code>, the logon). A blue screen at boot ' +
+        'usually means a missing driver or a damaged BCD, not a broken kernel.</p>'
     }
   };
 

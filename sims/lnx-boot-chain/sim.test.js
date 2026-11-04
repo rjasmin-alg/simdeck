@@ -262,6 +262,165 @@ test('rule 7: steps before the failing one are the same as in a whole boot', () 
   }
 });
 
+// ── the Windows chain (task w3/win-boot; SPEC.md "Windows") ──
+
+const W = (over) => P(Object.assign({ chain: 'windows' }, over));
+const wat = (over, n) => kit.stateAt(logic, W(over), n);
+const wend = (over) => wat(over, logic.steps(W(over)));
+const WIDS = ['uefi', 'bootmgr', 'winload', 'kernel', 'smss', 'winlogon'];
+
+test('W-T1: the Windows chain reads its own break; a Linux break leaves it whole, and the other way round', () => {
+  assert.equal(logic.breakOf(W({ winBreak: 'bcd' })), 'bcd');
+  assert.equal(logic.breakOf(P({ winBreak: 'bcd' })), 'none');
+  assert.equal(logic.steps(W({ break: 'diskDriver' })), 7, 'a Linux break does nothing to Windows');
+  assert.equal(wend({ break: 'diskDriver' }).failedAt, null);
+  assert.equal(logic.steps(P({ winBreak: 'bootDriver' })), 7, 'a Windows break does nothing to Linux');
+  assert.equal(end({ winBreak: 'bootDriver' }).failedAt, null);
+});
+
+test('W-T2: the default (none) and a break no Windows stage needs change nothing', () => {
+  assert.deepEqual(wend({ winBreak: 'kernelFile' }), wend({}));
+  assert.equal(logic.failIndex(logic.CHAINS.windows, 'none'), -1);
+});
+
+test('W-T3: winload does not fail without the disk driver; the kernel does (the first stage that needs it)', () => {
+  const p = W({ winBreak: 'bootDriver' });
+  assert.equal(logic.failIndex(logic.CHAINS.windows, 'bootDriver'), 3);
+  assert.deepEqual(wat({ winBreak: 'bootDriver' }, 4).done, ['uefi', 'bootmgr', 'winload']);
+  assert.equal(kit.stateAt(logic, p, 4).changed, 'kernel');
+});
+
+test('W1: the chain is UEFI, Boot Manager, winload, kernel, smss, winlogon; one hand-over per step; 7 steps', () => {
+  assert.deepEqual(wat({}, 0).stages, WIDS);
+  assert.equal(logic.steps(W()), 7);
+  for (let n = 1; n <= 6; n++) assert.equal(wat({}, n).changed, WIDS[n - 1], `step ${n}`);
+  for (let n = 2; n <= 7; n++) assert.deepEqual(wat({}, n).done, WIDS.slice(0, n - 1), `step ${n}`);
+  const e = wend({});
+  assert.equal(e.changed, null);
+  assert.equal(e.failedAt, null);
+  assert.deepEqual(e.screen, [{ t: 'wScrLogon' }]);
+});
+
+test('W2: the firmware starts bootmgfw.efi from the ESP, not from C:; Boot Manager starts winload.efi from C:', () => {
+  const c = logic.CHAINS.windows;
+  assert.equal(c.stages[0].lives, 'livesRom');
+  assert.equal(c.stages[1].lives, 'wLivesEsp');
+  assert.equal(c.stages[2].lives, 'wLivesC');
+  assert.equal(logic.subOf(c.stages[0], W()), 'NVRAM: Windows Boot Manager');
+  assert.equal(logic.subOf(c.stages[1], W()), 'bootmgfw.efi');
+  assert.equal(logic.subOf(c.stages[2], W()), 'winload.efi');
+  assert.deepEqual(wat({}, 1).facts, {}, 'nothing read yet while the firmware runs');
+  assert.deepEqual(wat({}, 2).facts.from, [{ t: 'wFromEsp' }]);
+  assert.deepEqual(wat({}, 3).facts.from, [{ t: 'wFromC' }]);
+  assert.deepEqual(wat({}, 3).facts.bcd, ['device partition=C:', 'path \\Windows\\system32\\winload.efi']);
+});
+
+test('W3: no BCD stops Boot Manager in 3 steps with the recovery screen, 0xc000000f; winload and the kernel never run', () => {
+  const p = W({ winBreak: 'bcd' });
+  assert.equal(logic.steps(p), 3);
+  const s = wend({ winBreak: 'bcd' });
+  assert.equal(s.failedAt, 'bootmgr');
+  assert.equal(s.halt, 'bcdRecovery');
+  assert.deepEqual(s.done, ['uefi']);
+  assert.ok(text(s).includes('Your PC/Device needs to be repaired'));
+  assert.ok(text(s).includes('File: \\EFI\\Microsoft\\Boot\\BCD'));
+  assert.ok(text(s).includes('Error code: 0xc000000f'));
+  assert.ok(!text(s).includes('Stop code'), 'not a blue screen: the kernel never started');
+  assert.deepEqual(s.facts.bcd, [{ t: 'wBcdMissing' }]);
+  assert.deepEqual(s.factsBad, ['bcd']);
+  assert.deepEqual(s.facts.from, [{ t: 'wFromEsp' }], 'still on the ESP');
+  assert.equal(s.facts.first, undefined);
+});
+
+test('W4: a disk driver that is not boot-start: winload leaves it out, the kernel stops with 0x7B in 5 steps', () => {
+  assert.deepEqual(wat({}, 4).facts.driver, ['storahci.sys', { t: 'wDrvLoaded' }]);
+  assert.deepEqual(wat({ winBreak: 'bootDriver' }, 4).facts.driver, ['storahci.sys', { t: 'wDrvNotLoaded' }]);
+  assert.deepEqual(wat({ winBreak: 'bootDriver' }, 4).factsBad, [], 'not red before the kernel has looked');
+  assert.equal(logic.steps(W({ winBreak: 'bootDriver' })), 5);
+  const s = wend({ winBreak: 'bootDriver' });
+  assert.equal(s.failedAt, 'kernel');
+  assert.equal(s.halt, 'bugcheck7b');
+  assert.ok(text(s).includes('Stop code: INACCESSIBLE_BOOT_DEVICE'));
+  assert.deepEqual(s.factsBad, ['driver']);
+  assert.equal(s.facts.first, undefined, 'smss never started');
+});
+
+test('W4: the Windows twin of the Linux no-driver: the same number of steps, the stage after the loader', () => {
+  const lin = P({ break: 'diskDriver' }), win = W({ winBreak: 'bootDriver' });
+  assert.equal(logic.steps(win), logic.steps(lin));
+  assert.equal(kit.stateAt(logic, win, 5).done.length, kit.stateAt(logic, lin, 5).done.length);
+});
+
+test('W5: the kernel starts smss.exe, the first user-mode process', () => {
+  assert.equal(wat({}, 4).facts.first, undefined);
+  assert.deepEqual(wat({}, 5).facts.first, ['smss.exe']);
+  assert.equal(logic.CHAINS.windows.stages[3].hands, 'wHandsKernel');
+});
+
+test('W6: smss fans out into two sessions: one box with two lines, session 0 and session 1', () => {
+  const smss = logic.CHAINS.windows.stages[4];
+  assert.deepEqual(logic.subOf(smss, W()), ['smss.exe', { t: 'wSubS0' }, { t: 'wSubS1' }]);
+  assert.equal(wat({}, 5).facts.s0, undefined);
+  const s = wat({}, 6);
+  assert.deepEqual(s.facts.s0, ['csrss.exe, wininit.exe → services.exe, lsass.exe']);
+  assert.deepEqual(s.facts.s1, ['csrss.exe, winlogon.exe']);
+  assert.equal(s.changed, 'winlogon');
+});
+
+test('W7: a critical session-0 process dies: CRITICAL_PROCESS_DIED after the kernel, 6 steps, no logon screen', () => {
+  assert.equal(logic.steps(W({ winBreak: 'criticalProcess' })), 6);
+  const s = wend({ winBreak: 'criticalProcess' });
+  assert.equal(s.failedAt, 'smss');
+  assert.equal(s.halt, 'bugcheckEf');
+  assert.ok(s.done.includes('kernel'), 'the kernel itself is fine');
+  assert.ok(text(s).includes('Stop code: CRITICAL_PROCESS_DIED'));
+  assert.deepEqual(s.facts.s0, ['csrss.exe', { t: 'wWininitDied' }]);
+  assert.deepEqual(s.factsBad, ['s0']);
+  assert.equal(s.facts.s1, undefined);
+  assert.ok(!s.screen.some((l) => l.t === 'wScrLogon'));
+});
+
+test('W8: Windows has no time bar data, no targets, no PID 1 or root rows; Linux has no fact rows', () => {
+  const c = logic.CHAINS.windows;
+  assert.equal(c.timing, undefined);
+  assert.deepEqual(c.targets, []);
+  assert.ok(c.stages.every((s) => !s.does || (!s.does.root && !s.does.pid1 && !s.does.target && !s.does.time)));
+  const e = wend({});
+  assert.deepEqual(e.t, { kernel: null, initrd: null, userspace: null, targetAt: null });
+  assert.equal(e.pid1, null);
+  assert.equal(logic.CHAINS.linux.factRows, undefined);
+  assert.deepEqual(end({}).facts, {});
+  assert.equal(logic.targetName(W()), null);
+});
+
+test('W9: the Windows steps before a failure are the same as in a whole Windows boot', () => {
+  for (const b of ['bcd', 'bootDriver', 'criticalProcess']) {
+    const p = W({ winBreak: b });
+    for (let n = 0; n < logic.steps(p); n++) {
+      // Only the driver row differs: winload left a driver that is not boot-start out (W4).
+      const a = kit.stateAt(logic, p, n), w = wat({}, n);
+      if (b === 'bootDriver' && n === 4) { assert.deepEqual(a.facts.driver, ['storahci.sys', { t: 'wDrvNotLoaded' }]); delete a.facts.driver; delete w.facts.driver; }
+      assert.deepEqual(a, w, `${b} step ${n}`);
+    }
+  }
+});
+
+test('W10: Windows states are JSON-safe, deterministic, and step does not mutate its input', () => {
+  for (const b of ['none', 'bcd', 'bootDriver', 'criticalProcess']) {
+    const p = W({ winBreak: b });
+    let s = logic.initial(p);
+    for (let n = 1; n <= logic.steps(p); n++) {
+      const copy = structuredClone(s);
+      const next = logic.step(s, n, p);
+      assert.deepEqual(s, copy);
+      assert.deepEqual(JSON.parse(JSON.stringify(next)), next);
+      assert.deepEqual(kit.stateAt(logic, p, n), next);
+      s = next;
+    }
+    assert.deepEqual(logic.step(s, 99, p), s, 'T4 holds for Windows');
+  }
+});
+
 // ── the presets' numbers (SPEC.md) ──
 
 test('normal: systemd-analyze 1.363 + 3.996 + 26.504 s, target after 8.130 s; times fill as stages finish', () => {
@@ -277,7 +436,8 @@ test('normal: systemd-analyze 1.363 + 3.996 + 26.504 s, target after 8.130 s; ti
 
 test('every preset in the page: its steps and where it ends', () => {
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, 'index.html'), 'utf8');
-  const want = { normal: [7, null], 'no-kernel': [3, 'loader'], 'no-driver': [5, 'initramfs'], 'wrong-uuid': [5, 'initramfs'], rescue: [7, 'target'] };
+  const want = { normal: [7, null], 'no-kernel': [3, 'loader'], 'no-driver': [5, 'initramfs'], 'wrong-uuid': [5, 'initramfs'], rescue: [7, 'target'],
+    'win-normal': [7, null], 'win-no-bcd': [3, 'bootmgr'], 'win-no-driver': [5, 'kernel'], 'win-critical-service': [6, 'smss'] };
   const found = [...html.matchAll(/\{ id: '([\w-]+)', label: t\('\w+'\), params: (\{[^}]*\})/g)];
   assert.deepEqual(found.map((m) => m[1]), Object.keys(want));
   for (const m of found) {
@@ -332,8 +492,13 @@ test('every string key the chain names exists in both tables', () => {
       keys.push(s.label, s.lives, s.hands);
       if (s.failState) keys.push('halt_' + s.failState);
       for (const n of s.needs) keys.push('need_' + n);
-      for (const l of [].concat(s.screen || [], s.failText || [])) if (typeof l !== 'string') keys.push(l.t);
+      for (const l of [].concat(s.screen || [], s.failText || [], Array.isArray(s.sub) ? s.sub : [])) if (typeof l !== 'string') keys.push(l.t);
+      for (const f of [(s.does || {}).facts, (s.onFail || {}).facts]) {
+        for (const parts of Object.values(f || {})) for (const x of parts) if (typeof x !== 'string' && !x.t.includes('{')) keys.push(x.t);
+      }
     }
+    for (const r of c.factRows || []) keys.push('wFact_' + r);
+    for (const v of ['wDrvLoaded', 'wDrvNotLoaded']) if (c.breakKey === 'winBreak') keys.push(v);
     const pre = c.capPrefix || '';
     for (const b of c.breaks) keys.push('break_' + b, pre + 'capFail_' + b);
     for (const s of c.stages) keys.push(pre + 'capDone_' + s.id);

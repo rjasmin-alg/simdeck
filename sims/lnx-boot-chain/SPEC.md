@@ -26,7 +26,7 @@ real }, pid1, target, t: { kernel, initrd, userspace, targetAt } }`.
   that id), screen = the next stage's `screen`; after the last stage, `at = stages.length` and screen = `end[target]`.
 - Steps per demo: `1 + stages.length` for a whole chain; `1 + (index of the failing stage) + 1` when a stage fails.
 
-Params: `chain` (hidden; `linux`), `break` (none / `bootEntry` / `kernelFile` / `diskDriver` / `rootUuid` /
+Params: `chain` (hidden; `linux`, or `windows` from the Windows presets, see "Windows"), `break` (none / `bootEntry` / `kernelFile` / `diskDriver` / `rootUuid` /
 `targetUnit`, default none, resets), `target` (`multi-user` / `graphical`, default `multi-user`).
 
 ## Rules
@@ -102,7 +102,68 @@ On a failure the bar keeps what finished; "Startup finished" is never printed.
 
 Deviation: the task gives failure presets 3–6 steps; `rescue` fails at the last link, so it has 7 like `normal`.
 
+## Windows (preset task `w3/win-boot`)
+
+A second chain, `CHAINS.windows`, on the same stage and the same model: **UEFI → Boot Manager → winload → kernel →
+smss → winlogon** (UEFI, Windows 10/11, Server 2019+). Sources: Microsoft Learn "Advanced troubleshooting for Windows
+boot problems" (the phases PreBoot, Windows Boot Manager, Windows OS Loader, Windows NT OS Kernel; `bootmgfw.efi`,
+`winload.efi`, `ntoskrnl.exe`, the kernel starts `smss.exe`), "Advanced troubleshooting for Stop error 7B or
+Inaccessible_Boot_Device", M. Russinovich et al., *Windows Internals* 7th ed. Part 2, ch. 12 "Startup and shutdown"
+(smss, csrss, wininit, services, lsass, winlogon, userinit). Titles and the chapter number checked on the web
+(2026-11-04); the books' text was not read here.
+
+Model additions (additive; every Linux result unchanged, the Linux tests pass untouched apart from the preset list):
+
+- A chain may name its break param (`breakKey`); Windows reads `winBreak` (none / `bcd` / `bootDriver` /
+  `criticalProcess`), Linux keeps `break`. So a Linux break never reaches the Windows chain and the other way round
+  (W-T1), and the page shows one break control per chain.
+- `does.facts` / `onFail.facts` fill the card rows a chain lists in `factRows`; a row set by `onFail` is a bad one
+  (`factsBad`, red on the page). State gains `facts: {}` and `factsBad: []` (empty for Linux).
+- A stage's `sub` may be a list (one line each): the smss box shows `smss.exe`, session 0 and session 1, one box with
+  two session lines rather than a branch (the task's fan-out).
+- `{ t: key }` lines are `{var}`-filled like console lines (the driver row picks `wDrvLoaded` / `wDrvNotLoaded`).
+- No `targets`, no `timing`: the page hides the target choice and the time bar.
+
+Rules:
+
+- **W1, order:** UEFI firmware (ROM, NVRAM entry "Windows Boot Manager"; needs the boot entry) → Boot Manager
+  (`\EFI\Microsoft\Boot\bootmgfw.efi` on the ESP, FAT32; needs the BCD `\EFI\Microsoft\Boot\BCD`) → winload
+  (`\Windows\system32\winload.efi` on C:) → kernel (`ntoskrnl.exe`; needs the disk driver loaded at boot) → smss
+  (needs its critical processes running) → winlogon (LogonUI; after logon `userinit.exe` → `explorer.exe`, not
+  stepped). One hand-over per step; 7 steps.
+- **W2, not from C::** "Files from" is the ESP after the firmware, C: after Boot Manager; the BCD's default entry
+  (`device partition=C:`, `path \Windows\system32\winload.efi`) shows once Boot Manager has read it.
+- **W3, no BCD:** Boot Manager stops (3 steps); recovery screen `Your PC/Device needs to be repaired` / `The Boot
+  Configuration Data for your PC is missing or contains errors.` / `File: \EFI\Microsoft\Boot\BCD` / `Error code:
+  0xc000000f` (the message and code as reported for Windows 10; *(check)* on a real machine); no stop error, the kernel
+  never ran.
+- **W4, driver not boot-start:** the controller was switched to AHCI and `storahci.sys` has `Start=3` (demand), so
+  winload, which loads only boot-start drivers (`Start=0`), leaves it out; the card shows it at step 4. The kernel
+  cannot see the system disk and stops with `INACCESSIBLE_BOOT_DEVICE` (0x7B), 5 steps: the twin of Linux `no-driver`,
+  the stage after the loader at the same step. `storahci`/`Start` as the example *(check)*.
+- **W5, smss is the first user-mode process**, started by the kernel (the misconception "Windows has no init process").
+- **W6, smss fans out:** session 0 `csrss.exe, wininit.exe → services.exe, lsass.exe`; session 1 `csrss.exe,
+  winlogon.exe`.
+- **W7, a critical process dies:** `wininit.exe` in session 0 dies; stop code `CRITICAL_PROCESS_DIED` (0xEF), 6 steps;
+  no logon screen; the kernel stage is done (fine) *(check: a missing csrss/winlogon at start can also give
+  0xC000021A)*.
+- **W8:** no time bar, no target, no PID 1 or root rows.
+
+Tie-breaks: **W-T1** each chain reads only its own break; **W-T2** `none` and a break no stage needs change nothing;
+**W-T3** the first stage that needs the driver is the kernel, not winload (winload does not check, it leaves the driver
+out). Steps before a stop equal the whole boot's (W9; only the driver row differs at step 4 under `bootDriver`).
+
+| Preset | Params | Steps | Ends |
+|---|---|---|---|
+| `win-normal` | `chain: windows` | 7 | all six done; logon screen |
+| `win-no-bcd` | `winBreak: bcd` | 3 | Boot Manager ✗; `halt = bcdRecovery`; BCD row red |
+| `win-no-driver` | `winBreak: bootDriver` | 5 | kernel ✗; `halt = bugcheck7b`; driver row red |
+| `win-critical-service` | `winBreak: criticalProcess` | 6 | smss ✗; `halt = bugcheckEf`; session 0 row red |
+
+Screens other than the recovery screen and the stop screens are described in words (logo, spinning dots, logon
+screen): Windows shows graphics there, not text.
+
 ## Out of scope
 
-Unit ordering (`lnx-systemd-ordering`), Secure Boot, BIOS vs UEFI details, GRUB configuration. Console text is the
+Unit ordering (`lnx-systemd-ordering`), Secure Boot and Measured Boot (`win-bitlocker-tpm`), BIOS/MBR Windows boot (`bootmgr`), Fast Startup, WinRE, Windows service order (`win-services`), BIOS vs UEFI details, GRUB configuration. Console text is the
 console without `quiet` (the book machine's real console shows a splash); its wording is from memory *(check)*.

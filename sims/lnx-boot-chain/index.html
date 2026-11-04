@@ -44,6 +44,12 @@
     },
     {
       "preset": "rescue"
+    },
+    {
+      "preset": "win-normal"
+    },
+    {
+      "preset": "win-no-bcd"
     }
   ]
 }
@@ -127,6 +133,9 @@
 [data-sim="lnx-boot-chain"] .bc-val code { font-size: var(--fs-sm); }
 [data-sim="lnx-boot-chain"] .bc-val[data-bad] { color: var(--danger); font-weight: 700; }
 [data-sim="lnx-boot-chain"] .bc-val .sd-changed { padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-boot-chain"] .bc-val .bc-fact.sd-changed { display: inline-block; }
+/* Windows: no time bar, more card rows; the card gets more of the width */
+[data-sim="lnx-boot-chain"] .bc[data-chain="windows"] .bc-mid { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
 [data-sim="lnx-boot-chain"] .bc-cmp { display: grid; gap: 0.25rem; margin-top: 0.1rem; font-size: var(--fs-sm); }
 [data-sim="lnx-boot-chain"] .bc-cmp div { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: 0.3rem; }
 
@@ -170,7 +179,7 @@
   [data-sim="lnx-boot-chain"] .bc { height: auto; padding: 0.6rem; gap: 0.9rem; }
   [data-sim="lnx-boot-chain"] .bc-chain { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
   [data-sim="lnx-boot-chain"] .bc-arrow { display: none; }
-  [data-sim="lnx-boot-chain"] .bc-mid { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+  [data-sim="lnx-boot-chain"] .bc-mid, [data-sim="lnx-boot-chain"] .bc[data-chain="windows"] .bc-mid { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
   [data-sim="lnx-boot-chain"] .bc-name { font-size: 1.05rem; }
 }
 </style>
@@ -265,7 +274,7 @@
     var sub = L.subOf(st, p);
     var needs = st.needs.length ? h('div', { class: 'bc-need' }, h('b', null, t('needs') + ': '),
       st.needs.map(function (n, j) {
-        var m = k === 'done' ? 'ok' : k === 'failed' && n === p['break'] ? 'bad' : null;
+        var m = k === 'done' ? 'ok' : k === 'failed' && n === L.breakOf(p) ? 'bad' : null;
         return [j ? ', ' : '', t('need_' + n),
           m ? h('span', { class: 'bc-mark', dataset: { m: m } }, m === 'ok' ? ' ✓' : ' ✗') : null];
       })) : null;
@@ -277,7 +286,11 @@
       h('div', { class: 'bc-head' }, h('span', { class: 'bc-num' }, String(i + 1)),
         h('span', { class: 'bc-status' }, MARKS[k] + ' ' + t(STATUS[k]))),
       h('div', { class: 'bc-name' }, t(st.label)),
-      sub ? h('div', { class: 'bc-sub', translate: 'no' }, sub) : null,
+      typeof sub === 'string' ? h('div', { class: 'bc-sub', translate: 'no' }, sub) : null,
+      // A stage that fans out (Windows smss: two sessions) has one line per item: data, or words from the table.
+      Array.isArray(sub) ? sub.map(function (x) {
+        return typeof x === 'string' ? h('div', { class: 'bc-sub', translate: 'no' }, x) : h('div', { class: 'bc-sub' }, t(x.t));
+      }) : null,
       h('span', { class: 'bc-lives' }, t(st.lives)),
       needs,
       h('div', { class: 'bc-hands' }, h('b', null, t('hands') + ': '), t(st.hands)));
@@ -332,6 +345,14 @@
         : hidden ? h('span', null, t('diskHidden')) : code('vda4 UUID=' + L.ROOT_UUID),
         looked && hidden ? { dataset: { bad: '' } } : null));
     }
+    // The chain's own card rows (Windows): data parts as code, { t } parts as words; the ones a failure set are red.
+    (chain.factRows || []).forEach(function (k) {
+      var v = s.facts[k], was = prev && prev.facts[k];
+      var val = v ? v.map(function (x, i) { return [i ? ' ' : '', typeof x === 'string' ? code(x) : t(x.t)]; }) : t('rootNone');
+      var changedNow = !!v && JSON.stringify(v) !== JSON.stringify(was);
+      rows.push(row('wFact_' + k, h('span', { class: 'bc-fact' + (changedNow ? ' sd-changed' : '') }, val),
+        s.factsBad.indexOf(k) >= 0 ? { dataset: { bad: '' } } : null));
+    });
     if (s.halt) rows.push(row('haltLabel', t('halt_' + s.halt), { dataset: { bad: '' } }));
     if (s.halt === 'emergency') {
       rows.push(h('div', { class: 'bc-cmp' },
@@ -382,7 +403,7 @@
   }
 
   function render(c) {
-    c.stage.replaceChildren(h('div', { class: 'bc' },
+    c.stage.replaceChildren(h('div', { class: 'bc', dataset: { chain: c.state.chain } },
       chainRow(c),
       h('div', { class: 'bc-mid' }, screenPanel(c.state), card(c)),
       timeBar(c)));
@@ -398,7 +419,7 @@
     if (!s.power) return rich('capOff');
     if (s.failedAt) {
       var i = s.stages.indexOf(s.failedAt);
-      var out = rich(pre + 'capFail_' + p['break'], vars);
+      var out = rich(pre + 'capFail_' + L.breakOf(p), vars);
       // The last link has nothing after it to not try.
       return i < s.stages.length - 1 ? out.concat(' ', rich('capStopped', { ord: t('ord' + (i + 1)) })) : out;
     }
@@ -408,9 +429,12 @@
     return rich(pre + 'capDone_' + last, vars);
   }
 
-  var breaks = [['none', t('break_none')]];
-  Object.keys(L.CHAINS).forEach(function (k) {
-    L.CHAINS[k].breaks.forEach(function (b) { if (!breaks.some(function (o) { return o[0] === b; })) breaks.push([b, t('break_' + b)]); });
+  // One break control per chain, under the chain's own param key ('break', 'winBreak'); only the chosen chain's shows.
+  var breakParams = Object.keys(L.CHAINS).map(function (k) {
+    var c = L.CHAINS[k];
+    return { key: c.breakKey || 'break', type: 'select', label: t('breakLabel'), hint: t('breakHint'), resets: true,
+      options: [['none', t('break_none')]].concat(c.breaks.map(function (b) { return [b, t('break_' + b)]; })),
+      visible: function (p) { return L.chainOf(p) === c; } };
   });
 
   Simdeck.mount({
@@ -420,20 +444,25 @@
     step: L.step,
 
     params: [
-      { key: 'chain', type: 'select', label: t('chain'), resets: true, options: [['linux', t('chainLinux')]],
-        visible: function () { return false; } },
-      { key: 'break', type: 'select', label: t('breakLabel'), hint: t('breakHint'), resets: true, options: breaks },
+      // The chain is chosen by the presets (the Windows ones set it); hidden, so the panel fits one screen.
+      { key: 'chain', type: 'select', label: t('chain'), resets: true,
+        options: [['linux', t('chainLinux')], ['windows', t('chainWindows')]], visible: function () { return false; } }
+    ].concat(breakParams, [
       { key: 'target', type: 'choice', label: t('targetParam'),
         options: [['multi-user', t('targetMulti')], ['graphical', t('targetGraphical')]],
         visible: function (p) { return L.chainOf(p).targets.length > 0; } }
-    ],
+    ]),
 
     presets: [
       { id: 'normal', label: t('pNormal'), params: {}, hint: t('pNormalHint') },
       { id: 'no-kernel', label: t('pNoKernel'), params: { break: 'kernelFile' }, hint: t('pNoKernelHint') },
       { id: 'no-driver', label: t('pNoDriver'), params: { break: 'diskDriver' }, hint: t('pNoDriverHint') },
       { id: 'wrong-uuid', label: t('pWrongUuid'), params: { break: 'rootUuid' }, hint: t('pWrongUuidHint') },
-      { id: 'rescue', label: t('pRescue'), params: { break: 'targetUnit' }, hint: t('pRescueHint') }
+      { id: 'rescue', label: t('pRescue'), params: { break: 'targetUnit' }, hint: t('pRescueHint') },
+      { id: 'win-normal', label: t('pWinNormal'), params: { chain: 'windows' }, hint: t('pWinNormalHint') },
+      { id: 'win-no-bcd', label: t('pWinNoBcd'), params: { chain: 'windows', winBreak: 'bcd' }, hint: t('pWinNoBcdHint') },
+      { id: 'win-no-driver', label: t('pWinNoDriver'), params: { chain: 'windows', winBreak: 'bootDriver' }, hint: t('pWinNoDriverHint') },
+      { id: 'win-critical-service', label: t('pWinCritical'), params: { chain: 'windows', winBreak: 'criticalProcess' }, hint: t('pWinCriticalHint') }
     ],
 
     legend: [

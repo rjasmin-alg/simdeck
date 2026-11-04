@@ -107,19 +107,62 @@ From the glossary: *boot loader* (pokretač sustava), *kernel* (jezgra), *init p
 
 - **Kit:** `.sd-ctl[hidden]` is still overridden by `.sd-ctl { display: flex }` (same as `lnx-overlayfs-layers`,
   `lnx-links-inodes`); worked around in the page CSS.
-- **For `w3/win-boot` (the preset task on this folder),** after the fresh review: add `CHAINS.windows` in `sim.js` with its stages, breaks,
-  `vars`, `end: { any: [...] }` and no `timing` (the page then draws no time bar); add the `chain` option to the hidden
-  param and the presets with `chain: 'windows'`; strings `st*`, `lives*`, `hands*`, `need_*`, `break_*`, `capFail_*`,
-  `capDone_<stage id>`, `halt_*`. Two Linux-specific bits it must not trip on: the card's "Traži se / Na disku" rows
-  show only when the chain's `vars` has `uuid`, and `does: { root, pid1, target }` are optional. A stage that fans out
-  into two sessions fits `sub` (one line) or `hands`; if two lines are needed, `sub` would need to allow a list
-  (the page renders one line today).
-  Ready for it: caption keys go through the chain's `capPrefix` (`win_capDone_kernel` will not collide with Linux's
-  `capDone_kernel`); the `target` choice hides for a chain without `targets`; the card hides rows no stage fills; no
-  time bar without `timing`. Still to do in that task: the `break` select lists every chain's breaks (a break of the
-  other chain is a no-op, T2) — filter them, e.g. one hidden select per chain or a `disabled` reason; the caption
-  passes `kver` from the Linux chain; `ord1`…`ord6` cover six stages; the preset test in `sim.test.js` lists the Linux
-  presets by name; `sim.json` needs a Windows `entries` item.
+- **Done in `w3/win-boot`:** the Windows chain is in (see "Windows preset" below); the earlier request for it is closed.
+- **Title and subtitle are Linux-only (owner/coordinator, from `w3/win-boot`):** `sim.json` `concept` is "Firmware →
+  boot loader → kernel → initramfs → systemd", and the kit shows it on the Windows presets too. A neutral concept such
+  as "Firmware → boot loader → kernel → first process: a chain of hand-overs" / "Firmware → pokretač sustava → jezgra →
+  prvi proces: lanac predaja" would fit both. Left unchanged: the host's title is not the preset task's to change.
+- **Entries carry no topic (site, from `w3/win-boot`):** the task gives `win-boot` the topic `windows-admin`, but an
+  `entries` item has no `topic`, so the Windows chips sit on the `linux-admin` tile. The WIN1 course file can name
+  `lnx-boot-chain#win-normal` meanwhile.
+
+## Windows preset (task `w3/win-boot`)
+
+Rules, numbers and sources: `SPEC.md` "Windows". Decisions:
+
+- **Its own break param, `winBreak`.** One `break` select with every chain's options would offer Linux breaks on a
+  Windows boot (no-ops, T2), and two controls on one key break the URL (the kit coerces a query value with every spec
+  of that key, the last wins). So a chain names its key (`breakKey`); the page builds one select per chain and shows
+  the chosen chain's. The model reads the break through `breakOf(p)`; the page's caption and the ✗ on a need too (the
+  caption read `p['break']` before and printed a missing key on Windows: found in the browser run, fixed).
+- **The chain stays a hidden param, set by the four Windows presets.** A visible Linux/Windows switch was tried: with
+  nine presets it pushed the panel 65 px past one screen at 1920×1080 (the gate failed). Each Windows preset label
+  starts "Windows:".
+- **The card's Windows rows** come from the chain (`factRows`, `does.facts`, `onFail.facts`): files from (ESP, then C:),
+  the BCD's default entry, the disk driver (`storahci.sys`, `Start=0` loaded / `Start=3` not loaded), the first
+  process (`smss.exe`), session 0 and session 1, then the halt state. The row a failure set is red. These answer the
+  three misconceptions: not from C:, a blue screen is a missing driver or a broken BCD and not the kernel, `smss.exe`
+  is the first user-mode process. On Windows the card takes a bit more width (`.bc[data-chain="windows"]`; no time bar).
+- **The fan-out (stage 5)** is one box with three sub-lines: `smss.exe`, "session 0: csrss, wininit", "session 1: csrss,
+  winlogon" (`sub` may now be a list).
+- **Screens:** the recovery screen and the two stop screens as text (English, as on an English install; console text is
+  data, `translate="no"`); the rest described in words, since Windows shows a logo there, not text.
+- **Stage labels:** en "UEFI firmware, Boot Manager, OS loader, kernel, Session Manager, logon"; hr "UEFI firmware,
+  pokretač sustava, učitavač sustava, jezgra, upravitelj sesija, prijava". The box sub-label carries the file name.
+- **`win-no-driver` stops at the kernel, not at winload:** winload does not check for the storage driver, it loads only
+  boot-start drivers and leaves the rest out; the kernel is the first that needs it (W-T3). Same step (5) and same
+  place after the loader as Linux `no-driver`.
+- **`win-critical-service`:** `wininit.exe` dies (the task's "e.g. wininit/csrss"); `CRITICAL_PROCESS_DIED` 0xEF.
+- **Entries:** `win-normal` ("The Windows boot chain") and `win-no-bcd` (the task's "break the BCD"). Aliases gain the
+  Windows terms (BCD, winload, smss, …).
+
+Unchecked *(check)*: the recovery screen's exact text on Windows 10/11 (taken from reports of 0xc000000f, UEFI path);
+the stop screens' wording (`Your PC ran into a problem…`, `Stop code: …` with underscores; versions differ);
+`storahci` `Start=3` as the example of a driver that is not boot-start (the Microsoft 7B article names a changed
+controller mode; the storahci detail is from memory); 0xEF vs 0xC000021A for a session-0 process (a missing csrss or
+winlogon at start-up is often reported as 0xC000021A); the hr terms below.
+
+Term pairs (Windows, not in `kit/glossary.js`; written out in the tables): *boot configuration data* — podaci o
+konfiguraciji pokretanja (BCD) *(check)*; *OS loader* — učitavač sustava *(check)*; *Session Manager* — upravitelj
+sesija *(check)*; *session* — sesija; *driver* — upravljački program; *stop error* — zaustavna pogreška *(check)*;
+*boot-start driver* — upravljački program za pokretanje *(check)*; *hive* — košnica (registry hive) *(check)*.
+
+Tests: W-T1…W-T3 first, W1…W10 per rule (`sim.test.js`, "the Windows chain"). Each rule was broken once (14 mutations of
+`sim.js`: break key, bad facts, facts dropped, `{var}` in `t` keys, the sub list, each need moved, the driver state, the
+ESP row, the sessions, the first process, the error code): every one fails a test. Every Windows preset rendered at its
+key steps in hr and en at 1920×1080 and 375×812: one screen, no sideways scroll, no console errors.
+
+Time: 2026-11-04 20:11 to 20:35, about 25 minutes.
 
 ## Checks
 
