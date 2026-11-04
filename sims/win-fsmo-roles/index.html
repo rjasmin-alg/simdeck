@@ -1,0 +1,464 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-fsmo-roles: three DCs of one domain with power and network, the five operations master roles as badges on the
+     DC that believes it holds them, each DC's RID pool, and an operations panel evaluated live against the step's
+     state. One action per step: power, network, transfer, seize or an operation. No kit view: the cards and the
+     panel are HTML. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-fsmo-roles">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSMO uloge: prijenos ili preuzimanje · simdeck</title>
+<meta name="description" content="Ugasi nositelje uloga i pokušaj operacije: prijava radi, shema ne, RID-ovi traju dok ima skupa. Prenesi PDC, preuzmi RID i vrati starog nositelja.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-fsmo-roles",
+  "title": {
+    "hr": "FSMO uloge: prijenos ili preuzimanje",
+    "en": "FSMO roles: transfer or seize"
+  },
+  "concept": {
+    "hr": "Poslovi samo jednog DC-a, što pada bez nositelja; prijenos ili preuzimanje",
+    "en": "The single-master jobs, what breaks without the holder; transfer vs seize"
+  },
+  "summary": {
+    "hr": "Ugasi nositelje uloga i pokušaj operacije: prijava radi, shema ne, RID-ovi traju dok ima skupa. Prenesi PDC, preuzmi RID i vrati starog nositelja.",
+    "en": "Turn role holders off and try operations: logons work, the schema does not, RIDs last while the pool does. Transfer the PDC, seize RID, bring the holder back."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-fsmo-roles"]; colours only from kit tokens.
+   Layout: three DC cards on top, the warnings under them, the operations table at the bottom. */
+[data-sim="win-fsmo-roles"] .fs { font-size: var(--fs-md); height: 100%; display: flex; flex-direction: column; gap: 0.6rem; padding: 1cqh 1.2cqw; }
+[data-sim="win-fsmo-roles"] .fs-d { font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-fsmo-roles"] .fs-ch { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* DC cards */
+[data-sim="win-fsmo-roles"] .fs-dcs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; flex: none; }
+[data-sim="win-fsmo-roles"] .fs-dc { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.8rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+[data-sim="win-fsmo-roles"] .fs-dc[data-on="false"] { border-style: dashed; background-color: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 18%, transparent) 0.35em 0.5em); }
+[data-sim="win-fsmo-roles"] .fs-dc[data-desk="true"] { border-width: 0.22rem; border-color: var(--ink); }
+[data-sim="win-fsmo-roles"] .fs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+[data-sim="win-fsmo-roles"] .fs-name { font-weight: 700; font-size: var(--fs-lg); margin-right: auto; }
+[data-sim="win-fsmo-roles"] .fs-tag { font-size: var(--fs-sm); padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: 999px; background: var(--bg); white-space: nowrap; }
+[data-sim="win-fsmo-roles"] .fs-tag[data-k="off"] { border-style: dashed; font-weight: 700; }
+[data-sim="win-fsmo-roles"] .fs-tag[data-k="cut"], [data-sim="win-fsmo-roles"] .fs-tag[data-k="wait"] { border-style: dashed; color: var(--danger); border-color: var(--danger); font-weight: 700; }
+[data-sim="win-fsmo-roles"] .fs-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; min-height: 1.6rem; font-size: var(--fs-sm); color: var(--muted); align-items: center; }
+[data-sim="win-fsmo-roles"] .fs-roles { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; min-height: 3.1rem; }
+[data-sim="win-fsmo-roles"] .fs-none { color: var(--muted); font-size: var(--fs-sm); }
+
+/* role badges: five shapes, each with its letter; hollow when the holder does not act; a clamp when seized */
+[data-sim="win-fsmo-roles"] .fs-badge { --clip: none; --round: 0; --fs-c: var(--ink); position: relative; display: inline-grid; place-items: center; width: 2.7rem; height: 2.7rem; flex: none; border-radius: 0.2rem; }
+[data-sim="win-fsmo-roles"] .fs-badge.fs-sm { width: 1.9rem; height: 1.9rem; }
+[data-sim="win-fsmo-roles"] .fs-badge::before, [data-sim="win-fsmo-roles"] .fs-badge::after { content: ''; position: absolute; inset: 0; clip-path: var(--clip); border-radius: var(--round, 0); }
+[data-sim="win-fsmo-roles"] .fs-badge::before { background: var(--fs-c); }
+[data-sim="win-fsmo-roles"] .fs-badge::after { display: none; inset: 0.26rem; background: var(--bg); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-hollow="true"]::after { display: block; }
+[data-sim="win-fsmo-roles"] .fs-badge > b { position: relative; z-index: 1; color: var(--on-series); font-weight: 700; font-size: 1.1rem; line-height: 1; }
+[data-sim="win-fsmo-roles"] .fs-badge[data-hollow="true"] > b { color: var(--ink); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="circle"] { --round: 50%; }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="square"] { --clip: inset(6% round 0.25rem); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="diamond"] { --clip: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="hex"] { --clip: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="tri"] { --clip: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="tri"] > b { margin-top: 0.7rem; }
+[data-sim="win-fsmo-roles"] .fs-badge[data-shape="tri"]::after { inset: 0.5rem 0.36rem 0.2rem; }
+[data-sim="win-fsmo-roles"] .fs-badge[data-c="1"] { --fs-c: var(--c1); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-c="2"] { --fs-c: var(--c2); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-c="3"] { --fs-c: var(--c3); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-c="4"] { --fs-c: var(--c4); }
+[data-sim="win-fsmo-roles"] .fs-badge[data-c="5"] { --fs-c: var(--c5); }
+[data-sim="win-fsmo-roles"] .fs-slot { position: relative; display: inline-flex; flex-direction: column; align-items: center; padding: 0.2rem; border-radius: 0.3rem; }
+[data-sim="win-fsmo-roles"] .fs-slot.fs-ch { box-shadow: 0 0 0 0.2rem var(--ink); }
+[data-sim="win-fsmo-roles"] .fs-clamp { position: absolute; top: -0.1rem; left: -0.15rem; right: -0.15rem; height: 1.6rem; border: 0.24rem solid var(--ink); border-bottom: 0; border-radius: 0.2rem 0.2rem 0 0; pointer-events: none; }
+[data-sim="win-fsmo-roles"] .fs-two { font-size: var(--fs-sm); font-weight: 700; color: var(--danger); line-height: 1.1; }
+
+/* RID pool gauge */
+[data-sim="win-fsmo-roles"] .fs-pool { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="win-fsmo-roles"] .fs-pool > .fs-lab { color: var(--muted); }
+[data-sim="win-fsmo-roles"] .fs-gauge { height: 1.1rem; border: var(--line-w) solid var(--ink); border-radius: 0.2rem; background: var(--bg); overflow: hidden; }
+[data-sim="win-fsmo-roles"] .fs-gauge > span { display: block; height: 100%; background: var(--c6); }
+[data-sim="win-fsmo-roles"] .fs-gauge[data-low="true"] > span { background: var(--danger); }
+[data-sim="win-fsmo-roles"] .fs-poolnum { display: flex; flex-wrap: wrap; gap: 0 0.6rem; }
+
+/* warnings */
+[data-sim="win-fsmo-roles"] .fs-warns { flex: none; display: flex; flex-direction: column; gap: 0.2rem; min-height: 0; }
+[data-sim="win-fsmo-roles"] .fs-warn { margin: 0; padding: 0.2rem 0.6rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); color: var(--ink); background: var(--bg); }
+[data-sim="win-fsmo-roles"] .fs-warn::before { content: '⚠ '; color: var(--danger); font-weight: 700; }
+
+/* the operations table */
+[data-sim="win-fsmo-roles"] .fs-ops { flex: 1 1 auto; min-height: 0; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.3rem 0.8rem 0.4rem; }
+[data-sim="win-fsmo-roles"] .fs-ops > h2 { margin: 0 0 0.15rem; font-size: var(--fs-md); }
+[data-sim="win-fsmo-roles"] .fs-tab { width: 100%; border-collapse: collapse; }
+[data-sim="win-fsmo-roles"] .fs-tab th { text-align: left; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); padding: 0 0.4rem; }
+[data-sim="win-fsmo-roles"] .fs-tab td { padding: 0.12rem 0.4rem; vertical-align: middle; border-top: 1px solid var(--line); }
+[data-sim="win-fsmo-roles"] .fs-tab tr[data-ran="true"] td { border-top: 0.2rem solid var(--ink); border-bottom: 0.2rem solid var(--ink); font-weight: 700; }
+[data-sim="win-fsmo-roles"] .fs-needs { display: flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+[data-sim="win-fsmo-roles"] .fs-scope { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-fsmo-roles"] .fs-res { display: flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
+[data-sim="win-fsmo-roles"] .fs-detail { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-fsmo-roles"] .fs-ran { font-size: var(--fs-sm); padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+
+/* status marks: ✓ in a filled disc, ! in a triangle, ✕ in a hollow square */
+[data-sim="win-fsmo-roles"] .fs-st { position: relative; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; flex: none; font-weight: 700; line-height: 1; }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="ok"] { border-radius: 50%; background: var(--ok); color: var(--bg); }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="ok"]::after { content: '✓'; }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="degraded"]::before { content: ''; position: absolute; inset: 0; background: var(--warn); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="degraded"]::after { content: '!'; position: relative; color: var(--bg); margin-top: 0.35rem; font-size: 0.95rem; }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="fail"] { border: 0.2rem solid var(--danger); border-radius: 0.15rem; color: var(--danger); background: var(--bg); }
+[data-sim="win-fsmo-roles"] .fs-st[data-k="fail"]::after { content: '✕'; font-size: 0.9rem; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape^="fs-"] { position: relative; background: var(--bg); }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-hollow"] { border: 0.22rem solid var(--ink); transform: rotate(45deg) scale(0.8); }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-clamp"] { border: 0.2rem solid var(--ink); border-bottom-color: transparent; border-radius: 0.2rem 0.2rem 0 0; }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-ok"] { border-radius: 50%; background: var(--ok); border-color: var(--ok); }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-ok"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--bg); font-size: 0.8em; font-weight: 700; line-height: 1; }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-deg"] { border: 0; background: var(--warn); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-fail"] { border-color: var(--danger); }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-fail"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="win-fsmo-roles"] .sd-swatch[data-shape="fs-off"] { border-style: dashed; background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+
+[data-sim="win-fsmo-roles"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: cards stacked, the table after them; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-fsmo-roles"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-fsmo-roles"] .fs { height: auto; padding: 0.5rem; }
+  [data-sim="win-fsmo-roles"] .fs-dcs { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-fsmo-roles"] .fs-needs, [data-sim="win-fsmo-roles"] .fs-res { white-space: normal; flex-wrap: wrap; }
+  [data-sim="win-fsmo-roles"] .fs-tab th:nth-child(4), [data-sim="win-fsmo-roles"] .fs-tab td:nth-child(4) { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">FSMO uloge: prijenos ili preuzimanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var HOST = { DC01: 'qm-dc01', DC02: 'qm-dc02', DC03: 'brk-dc03' };
+  /** Role badge: string key, letter, series colour, shape (SPEC.md "Scene"). */
+  var ROLE = {
+    schema: { k: 'rSchema', l: 'S', c: 1, shape: 'circle' },
+    naming: { k: 'rNaming', l: 'N', c: 2, shape: 'square' },
+    rid: { k: 'rRid', l: 'R', c: 3, shape: 'diamond' },
+    pdc: { k: 'rPdc', l: 'P', c: 4, shape: 'hex' },
+    infra: { k: 'rInfra', l: 'I', c: 5, shape: 'tri' }
+  };
+  var OP_KEY = { logon: 'opLogon', create: 'opCreate', password: 'opPassword', time: 'opTime', schema: 'opSchema', domain: 'opDomain', xref: 'opXref' };
+  var ST_KEY = { ok: 'stOk', degraded: 'stDegraded', fail: 'stFail' };
+  var WHY_KEY = { off: 'whyOff', cut: 'whyCut', waiting: 'whyWaiting' };
+
+  /** Data (host names, RIDs, letters) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { class: 'fs-d', translate: 'no' }, String(text)); }
+  function host(id) { return data(HOST[id]); }
+  function num(n) { return data(String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '.' : ',')); }
+  function why(w) { return t(WHY_KEY[w] || 'whyOff'); }
+  function roleName(r) { return t(ROLE[r].k); }
+  /** Parts of a string with *English term* turned into <em lang="en">; nodes are cloned so vars can be reused. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x) { if (!x || !x.length) return; if (out.length) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  function changed(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev));
+  }
+
+  function badge(role, opts) {
+    opts = opts || {};
+    var R = ROLE[role];
+    return h('span', { class: 'fs-badge' + (opts.small ? ' fs-sm' : ''), dataset: { shape: R.shape, c: String(R.c), hollow: opts.hollow ? 'true' : 'false' },
+      role: 'img', 'aria-label': roleName(role) }, h('b', { translate: 'no' }, R.l));
+  }
+
+  // ── DC cards ──
+
+  function dcCard(c, id) {
+    var s = c.state, dc = s.dcs[id];
+    var roles = L.rolesOf(s, id);
+    var prevRoles = c.prev ? L.rolesOf(c.prev, id) : roles;
+    var two = L.conflicts(s).map(function (x) { return x.role; });
+    var acts = dc.on && dc.synced;
+    var head = h('div', { class: 'fs-head' },
+      h('span', { class: 'fs-name' + (changed(c, function (x) { return x.desk === id; }) ? ' fs-ch' : '') }, host(id)),
+      h('span', { class: 'fs-tag' + (changed(c, function (x) { return x.dcs[id].on; }) ? ' fs-ch' : ''), dataset: { k: dc.on ? 'on' : 'off' } }, '⏻ ', t(dc.on ? 'on' : 'off')),
+      h('span', { class: 'fs-tag' + (changed(c, function (x) { return x.cut === id; }) ? ' fs-ch' : ''), dataset: { k: s.cut === id ? 'cut' : 'net' } },
+        t('net'), ': ', t(s.cut === id ? 'cutOff' : 'connected')));
+    var tags = [];
+    if (dc.restored) tags.push(h('span', { class: 'fs-tag' }, t('restored')));
+    if (dc.on && !dc.synced) tags.push(h('span', { class: 'fs-tag', dataset: { k: 'wait' } }, t('waiting')));
+    var slots = roles.map(function (r) {
+      var seized = s.seized[r] && s.seized[r] !== id;
+      var isNew = c.n > 0 && prevRoles.indexOf(r) < 0;
+      return h('span', { class: 'fs-slot' + (isNew ? ' fs-ch' : '') },
+        seized ? h('span', { class: 'fs-clamp', 'aria-hidden': 'true' }) : null,
+        badge(r, { hollow: !acts }),
+        two.indexOf(r) >= 0 ? h('span', { class: 'fs-two' }, t('two')) : null,
+        seized ? h('span', { class: 'fs-scope' }, t.parts('seizedFrom', { dc: host(s.seized[r]) })) : null);
+    });
+    var p = dc.ridPool;
+    var poolCh = changed(c, function (x) { return x.dcs[id].ridPool; });
+    var pool = h('div', { class: 'fs-pool' },
+      h('span', { class: 'fs-lab' }, t('pool')),
+      h('div', { class: 'fs-gauge', dataset: { low: p.left <= L.THRESHOLD && !p.next ? 'true' : 'false' }, role: 'img', 'aria-label': t('poolLeft', { n: p.left }) },
+        h('span', { style: { width: (p.left / L.POOL * 100) + '%' } })),
+      h('span'),
+      h('span', { class: 'fs-poolnum' + (poolCh ? ' fs-ch' : '') },
+        h('span', null, t.parts('poolLeft', { n: data(p.left) })), data(p.from + '–' + p.to),
+        p.next ? h('span', null, t('next'), ' ', data(p.next.from + '–' + p.next.to)) : h('span', { class: 'fs-none' }, t('noNext'))));
+    return h('div', { class: 'fs-dc', dataset: { on: String(dc.on), desk: String(s.desk === id) } },
+      head,
+      h('div', { class: 'fs-roles' }, slots.length ? slots : h('span', { class: 'fs-none' }, t('noRoles'))),
+      tags.length ? h('div', { class: 'fs-tags' }, tags) : null,
+      pool);
+  }
+
+  // ── warnings ──
+
+  function warnings(c) {
+    var s = c.state, out = [];
+    L.conflicts(s).forEach(function (x) {
+      out.push(t.parts(x.conflict ? 'wTwo' : 'wTwoMinor', { role: roleName(x.role), a: host(x.dcs[0]), b: host(x.dcs[1]) }));
+      if (x.role === 'rid') out.push(t.parts('wGap', { a: host(x.dcs[0]), x: num(s.dcs[x.dcs[0]].copy.avail), b: host(x.dcs[1]), y: num(s.dcs[x.dcs[1]].copy.avail) }));
+    });
+    L.duplicatePools(s).forEach(function (pr) {
+      out.push(t.parts('wDup', { a: host(s.pools[pr[0]].dc), b: host(s.pools[pr[1]].dc) }));
+    });
+    return out.map(function (x) { return h('p', { class: 'fs-warn' }, x); });
+  }
+
+  // ── the operations panel ──
+
+  function detail(r) {
+    if (r.why === 'atOff') return t.parts('dAtOff', { dc: host(r.at) });
+    switch (r.op) {
+      case 'logon': return [t('dAnyDc')];
+      case 'create':
+        var out = t.parts('dCreated', { c: data(r.created), n: data(r.n) });
+        if (r.request === 'failed') out = out.concat(' · ', t('dNoPool'));
+        return out;
+      case 'password': return r.status === 'ok' ? t.parts('dPdcOk', { dc: host(r.holder) }) : [t('dNoPdc')];
+      case 'time': return [t(r.why === 'external' ? 'dExternal' : r.why === 'ownClock' ? 'dOwnClock' : 'dDrift')];
+      case 'xref': return [t('dOneDomain')];
+      default: return r.status === 'ok' ? t.parts('dHolder', { dc: host(r.holder) }) : t.parts('dGone', { dc: host(r.holder), why: why(r.holderWhy) });
+    }
+  }
+
+  function opsPanel(c) {
+    var s = c.state, rows = L.panel(s, c.params);
+    var prevRows = c.prev && c.n > 0 ? L.panel(c.prev, c.params) : rows;
+    var e = s.last, ranOp = e && e.kind === 'op' ? e.op : null;
+    var body = rows.map(function (r, i) {
+      var ran = r.op === ranOp;
+      var shown = ran ? e : r;    // the row the step ran shows its result; the others their live evaluation
+      var stCh = ran || prevRows[i].status !== r.status;
+      return h('tr', { dataset: { ran: String(ran) } },
+        h('td', null, h('span', { class: 'fs-res' + (stCh ? ' fs-ch' : '') }, h('span', { class: 'fs-st', dataset: { k: shown.status }, 'aria-hidden': 'true' }), t(ST_KEY[shown.status]))),
+        h('td', null, t(OP_KEY[r.op]), ran ? [' ', h('span', { class: 'fs-ran' }, t('ran'))] : null),
+        h('td', null, r.role ? h('span', { class: 'fs-needs' }, badge(r.role, { small: true }), roleName(r.role),
+          h('span', { class: 'fs-scope' }, '· ', t(L.FOREST_WIDE[r.role] ? 'scForest' : 'scDomain'))) : h('span', { class: 'fs-none' }, t('noRole'))),
+        h('td', { class: 'fs-detail' }, detail(shown)));
+    });
+    return h('div', { class: 'fs-ops' },
+      h('h2', null, t.parts('opsTitle', { dc: host(s.desk) })),
+      h('table', { class: 'fs-tab' },
+        h('thead', null, h('tr', null, h('th', null, t('thResult')), h('th', null, t('thOp')), h('th', null, t('thNeeds')), h('th'))),
+        h('tbody', null, body)));
+  }
+
+  // ── captions ──
+
+  function roleList(list) {
+    var out = [];
+    list.forEach(function (r, i) { if (i) out.push(', '); out.push(roleName(r)); });
+    return h('span', null, out);
+  }
+
+  function capStart(c) {
+    var s = c.state;
+    var out = [rich('capStart')];
+    var others = L.DCS.filter(function (d) { return d !== 'DC01' && L.rolesOf(s, d).length; });
+    if (others.length) {
+      var list = [];
+      L.DCS.forEach(function (d) {
+        var rs = L.rolesOf(s, d);
+        if (!rs.length) return;
+        if (list.length) list.push('; ');
+        list.push(host(d), ': ', roleList(rs));
+      });
+      out.push(t.parts('capStartPlace', { list: h('span', null, list) }));
+    }
+    return join(out);
+  }
+
+  function capOp(c) {
+    var s = c.state, e = s.last;
+    var v = { at: host(e.at), holder: e.holder ? host(e.holder) : '', why: why(e.holderWhy) };
+    if (e.why === 'atOff') return rich('capAtOff', v);
+    switch (e.op) {
+      case 'logon': return rich('capLogon', v);
+      case 'password': return rich(e.status === 'ok' ? 'capPwOk' : 'capPwNo', v);
+      case 'time': return rich(e.why === 'external' ? 'capTimeOk' : e.why === 'ownClock' ? 'capTimeOwn' : 'capTimeDrift', v);
+      case 'schema': return rich(e.status === 'ok' ? 'capSchemaOk' : 'capSchemaNo', v);
+      case 'domain': return rich(e.status === 'ok' ? 'capDomainOk' : 'capDomainNo', v);
+      case 'xref': return rich('capXref', Object.assign(v, { state: s.dcs[e.holder].on ? t('on') : t('off') }));
+    }
+    // create
+    var left = s.dcs[e.at].ridPool.left;
+    var cv = Object.assign({}, v, { c: e.created, f: e.failed, left: left });
+    if (e.failed) {
+      var before = c.prev.dcs[e.at].ridPool;
+      return join([rich('capCreateLeft', Object.assign({}, cv, { left: data(before.left + (before.next ? L.POOL : 0)), c: data(e.created), f: data(e.failed) })),
+        e.request === 'failed' ? rich('capCreateLeftWhy', v) : null]);
+    }
+    if (e.request === 'failed') return join([t.parts('capCreateFailed', { c: e.created, at: host(e.at) }), rich('capCreateFailedWhy', Object.assign({}, v, { left: data(left) }))]);
+    if (e.request === 'granted') return join([t.parts('capCreateGrant', { c: e.created, at: host(e.at) }),
+      rich('capCreateGrantWhy', { by: host(e.granted.by), from: data(e.granted.from), to: data(e.granted.to) })]);
+    return t.parts('capCreatePool', { c: e.created, at: host(e.at), left: left });
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.last;
+    if (!e) return capStart(c);
+    if (e.kind === 'op') return capOp(c);
+    if (e.kind === 'off') {
+      if (e.roles.length === L.ROLES.length) return rich('capOffAll');
+      if (e.roles.length) return rich('capOffSome', { dc: host(e.dc), roles: roleList(e.roles) });
+      return rich('capOffNone', { dc: host(e.dc) });
+    }
+    if (e.kind === 'cut') return rich('capCut', { dc: host(e.dc) });
+    if (e.kind === 'on') {
+      var dc = s.dcs[e.dc];
+      if (!dc.synced) return rich('capOnWait', { dc: host(e.dc) });
+      if (L.conflicts(s).length) {
+        var partner = L.islands(s).filter(function (g) { return g.indexOf(e.dc) >= 0; })[0].filter(function (d) { return d !== e.dc; })[0];
+        return rich('capOnTwo', { dc: host(e.dc), partner: host(partner) });
+      }
+      return rich('capOnOk', { dc: host(e.dc) });
+    }
+    if (e.kind === 'join') {
+      var out = [rich('capJoin', { v2: data(s.dcs.DC01.copy.ver.rid), v1: data(c.prev.dcs.DC01.copy.ver.rid) })];
+      var two = L.conflicts(c.prev).filter(function (x) { return x.role === 'rid'; })[0];
+      if (two) out.push(rich('capJoinPools', { gap: num(Math.abs(c.prev.dcs[two.dcs[0]].copy.avail - c.prev.dcs[two.dcs[1]].copy.avail)) }));
+      return join(out);
+    }
+    // transfer or seize
+    var rv = { role: roleName(e.role), to: host(e.to), from: host(e.from) };
+    if (e.refused) return rich('capTransferNo', Object.assign(rv, { why: why(e.refused) }));
+    if (e.kind === 'transfer') return join([rich('capTransfer', rv), e.role === 'pdc' ? rich('capTransferPdc') : null]);
+    if (e.asTransfer) return join([rich('capSeize', rv), rich('capSeizeAs', rv)]);
+    var parts = [rich('capSeize', rv)];
+    if (e.role === 'rid') parts.push(rich('capSeizeRid', Object.assign({ a: num(e.availFrom), b: num(e.availTo) }, rv)));
+    var unaware = L.DCS.filter(function (d) { return d !== e.to && s.dcs[d].on && s.dcs[d].copy.owner[e.role] === e.from; });
+    if (unaware.length) parts.push(rich('capSeizeCut', Object.assign({ other: host(unaware[0]) }, rv)));
+    return join(parts);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('hidden'), options: L.SCENARIOS.map(function (x) { return [x, x]; }), visible: function () { return false; } },
+      { key: 'ridLeft', type: 'range', label: t('pRidLeft'), min: 0, max: 500, step: 10 },
+      { key: 'usersToCreate', type: 'range', label: t('pUsers'), min: 0, max: 600, step: 10 }
+    ],
+
+    presets: [
+      { id: 'quillmoor', label: t('prQuillmoor'), params: { scenario: 'quillmoor', ridLeft: 250, usersToCreate: 300 } },
+      { id: 'rid-only', label: t('prRidOnly'), params: { scenario: 'rid-only', ridLeft: 250, usersToCreate: 150 } },
+      { id: 'transfer', label: t('prTransfer'), params: { scenario: 'transfer', ridLeft: 250, usersToCreate: 300 } },
+      { id: 'seize-and-return', label: t('prSeize'), params: { scenario: 'seize-and-return', ridLeft: 250, usersToCreate: 300 } },
+      { id: 'infra-single-domain', label: t('prInfra'), params: { scenario: 'infra-single-domain', ridLeft: 250, usersToCreate: 300 } }
+    ],
+
+    legend: [
+      { shape: 'fs-hollow', label: t('lgHollow') },
+      { shape: 'fs-clamp', label: t('lgClamp') },
+      { shape: 'fs-ok', label: t('lgOk') },
+      { shape: 'fs-deg', label: t('lgDeg') },
+      { shape: 'fs-fail', label: t('lgFail') },
+      { shape: 'fs-off', label: t('lgOff') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'fs' },
+        h('div', { class: 'fs-dcs' }, L.DCS.map(function (id) { return dcCard(c, id); })),
+        h('div', { class: 'fs-warns', 'aria-live': 'off' }, warnings(c)),
+        opsPanel(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
