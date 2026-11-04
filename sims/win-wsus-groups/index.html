@@ -1,0 +1,442 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-wsus-groups: WSUS approves updates per computer group (inherited from the parent, several groups resolved
+     Install > Remove > Not approved, the earliest deadline), and targeting decides the groups: server-side the admin
+     moves computers, client-side their Group Policy names the group. One step = one day of a 10-day rollout of KB-B.
+     Stage: top the server, its targeting mode and the day; then the console (group tree with members and an approval
+     cell per update); below, KB-B's timeline per computer. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-wsus-groups">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grupe računala i odobrenja · simdeck</title>
+<meta name="description" content="KB-B najprije za Pilot, pa za Production s rokom. Nasljeđivanje, računalo u dvije grupe, odbijanje i tipfeler u grupnim pravilima.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-wsus-groups",
+  "title": {
+    "hr": "Grupe računala i odobrenja",
+    "en": "Computer groups and approvals"
+  },
+  "concept": {
+    "hr": "Odobrenje po grupi, rokovi; dodjela grupe na poslužitelju ili na klijentu (GPO)",
+    "en": "Approve per group, deadlines; server-side vs client-side targeting by GPO"
+  },
+  "summary": {
+    "hr": "KB-B najprije za Pilot, pa za Production s rokom. Nasljeđivanje, računalo u dvije grupe, odbijanje i tipfeler u grupnim pravilima.",
+    "en": "KB-B for Pilot first, then for Production with a deadline. Inheritance, a computer in two groups, declining, and a typo in Group Policy."
+  },
+  "tags": [
+    "updates"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-wsus-groups"]; colours only from kit tokens.
+   Layout: a top line (server, mode, day, count); the console table (groups × members × approvals); the timeline. */
+[data-sim="win-wsus-groups"] .wg {
+  display: flex;
+  flex-direction: column;
+  gap: 1cqh;
+  height: 100%;
+  padding: 1.2cqh 1.4cqw;
+  font-size: max(1rem, min(1.25rem, 2.6cqh));
+  line-height: 1.25;
+}
+[data-sim="win-wsus-groups"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-wsus-groups"] .wg-sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 400; }
+
+/* top line */
+[data-sim="win-wsus-groups"] .wg-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.2rem; }
+[data-sim="win-wsus-groups"] .wg-top b.wg-srv { font-family: var(--mono); font-size: 1.1em; }
+[data-sim="win-wsus-groups"] .wg-mode {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0.6rem;
+  border: var(--line-w) solid var(--ink); border-radius: 999px; background: var(--panel); font-weight: 700;
+}
+[data-sim="win-wsus-groups"] .wg-mode[data-mode='client'] { border-style: dashed; }
+[data-sim="win-wsus-groups"] .wg-day { margin-left: auto; font-family: var(--mono); font-size: var(--fs-xl); font-weight: 700; }
+[data-sim="win-wsus-groups"] .wg-count { font-weight: 700; }
+
+/* tables */
+[data-sim="win-wsus-groups"] .wg-table { width: 100%; border-collapse: collapse; }
+[data-sim="win-wsus-groups"] .wg-table th { text-align: left; font-size: var(--fs-sm); color: var(--muted); font-weight: 400; padding: 0.1rem 0.4rem; white-space: nowrap; }
+[data-sim="win-wsus-groups"] .wg-table td { padding: 0.2rem 0.4rem; border-top: var(--line-w) solid var(--line); vertical-align: middle; }
+[data-sim="win-wsus-groups"] .wg-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.3rem 0.6rem; }
+
+/* console: group tree */
+[data-sim="win-wsus-groups"] .wg-gname { white-space: nowrap; font-weight: 700; }
+[data-sim="win-wsus-groups"] .wg-gname[data-child] { padding-left: 1.6rem; }
+[data-sim="win-wsus-groups"] .wg-gname[data-child]::before { content: '└ '; color: var(--muted); font-weight: 400; }
+[data-sim="win-wsus-groups"] .wg-n { display: inline-block; min-width: 1.6em; margin-left: 0.4rem; padding: 0 0.3rem; border: 0.1rem solid var(--line); border-radius: var(--radius-sm); text-align: center; font-family: var(--mono); font-weight: 400; }
+[data-sim="win-wsus-groups"] .wg-n.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="win-wsus-groups"] .wg-members { display: flex; flex-wrap: wrap; gap: 0.25rem 0.35rem; }
+[data-sim="win-wsus-groups"] .wg-pc {
+  display: inline-flex; align-items: center; gap: 0.2rem; padding: 0 0.35rem; border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm); background: var(--bg); font-family: var(--mono); white-space: nowrap;
+}
+[data-sim="win-wsus-groups"] .wg-pc.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="win-wsus-groups"] .wg-pc[data-rejected] { border: 0.15rem solid var(--danger); }
+[data-sim="win-wsus-groups"] .wg-rej { color: var(--danger); font-family: var(--sans); font-weight: 700; }
+[data-sim="win-wsus-groups"] .wg-pc.sd-changed .wg-rej { color: var(--on-hl); }
+[data-sim="win-wsus-groups"] .wg-none { color: var(--muted); font-style: italic; }
+
+/* approval cells: icon + word, deadline; inherited dashed and muted */
+[data-sim="win-wsus-groups"] .wg-ap {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 0.4rem; padding: 0.05rem 0.45rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap;
+}
+[data-sim="win-wsus-groups"] .wg-ap b { font-size: 1.1em; }
+[data-sim="win-wsus-groups"] .wg-aw { white-space: nowrap; }
+[data-sim="win-wsus-groups"] .wg-con td:nth-child(n+3), [data-sim="win-wsus-groups"] .wg-con th:nth-child(n+3) { width: 1%; white-space: nowrap; }
+[data-sim="win-wsus-groups"] .wg-ap[data-a='install'] b { color: var(--ok); }
+[data-sim="win-wsus-groups"] .wg-ap[data-a='remove'] b { color: var(--warn); }
+[data-sim="win-wsus-groups"] .wg-ap[data-a='notApproved'] { border-color: var(--line); color: var(--muted); }
+[data-sim="win-wsus-groups"] .wg-ap[data-a='declined'] { border-color: var(--danger); }
+[data-sim="win-wsus-groups"] .wg-ap[data-a='declined'] b { color: var(--danger); }
+[data-sim="win-wsus-groups"] .wg-ap[data-inh] { border-style: dashed; background: transparent; font-style: italic; }
+[data-sim="win-wsus-groups"] .wg-ap .wg-dl { font-style: normal; font-weight: 700; }
+[data-sim="win-wsus-groups"] .wg-ap.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); outline: max(3px, 0.18rem) solid var(--ink); }
+[data-sim="win-wsus-groups"] .wg-ap.sd-changed b { color: var(--on-hl); }
+
+/* timeline */
+[data-sim="win-wsus-groups"] .wg-tl { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="win-wsus-groups"] .wg-tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1rem; }
+[data-sim="win-wsus-groups"] .wg-tl-head h2 { margin: 0; font-size: var(--fs-lg); }
+[data-sim="win-wsus-groups"] .wg-key { display: inline-flex; gap: 0.3rem; align-items: baseline; font-size: var(--fs-sm); }
+[data-sim="win-wsus-groups"] .wg-tl .wg-table td { padding: 0 0.3rem; }
+[data-sim="win-wsus-groups"] .wg-tl .wg-table th.wg-d, [data-sim="win-wsus-groups"] .wg-tl .wg-table td.wg-d { text-align: center; width: 6.5%; }
+[data-sim="win-wsus-groups"] .wg-gpo { font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-wsus-groups"] .wg-gpo[data-ignored] { color: var(--muted); text-decoration: line-through; }
+/* timeline marks, drawn as shapes (a font's ◐ and ● are too small): hollow, half, full circle, warning triangle */
+[data-sim="win-wsus-groups"] .wg-g { display: inline-block; width: 1em; height: 1em; vertical-align: -0.12em; border-radius: 50%; box-sizing: border-box; }
+[data-sim="win-wsus-groups"] .wg-g[data-g='na'] { border: 0.12em solid var(--muted); }
+[data-sim="win-wsus-groups"] .wg-g[data-g='det'] { border: 0.14em solid var(--warn); background: linear-gradient(90deg, var(--warn) 50%, transparent 50%); }
+[data-sim="win-wsus-groups"] .wg-g[data-g='inst'] { border: 0.14em solid var(--ok); background: var(--ok); }
+[data-sim="win-wsus-groups"] .wg-g[data-g='forced'] { border-radius: 0; background: var(--danger); clip-path: polygon(50% 0, 100% 100%, 0 100%); width: 1.15em; }
+[data-sim="win-wsus-groups"] td.wg-d.sd-changed { background: var(--hl); outline-offset: -0.1rem; }
+[data-sim="win-wsus-groups"] .wg-table .wg-today { box-shadow: inset 0.18rem 0 0 var(--ink), inset -0.18rem 0 0 var(--ink); }
+[data-sim="win-wsus-groups"] .wg-table th.wg-today { color: var(--ink); font-weight: 700; }
+[data-sim="win-wsus-groups"] .wg-dlh { font-weight: 700; color: var(--danger); }
+[data-sim="win-wsus-groups"] .wg-pcname { font-family: var(--mono); white-space: nowrap; }
+
+/* legend swatches: the approval icons in a box, the inherited box dashed */
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape^='wg-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape^='wg-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.85em; font-weight: 700; line-height: 1; }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-install']::after { content: '✓'; color: var(--ok); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-remove']::after { content: '↺'; color: var(--warn); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-not'] { border-color: var(--line); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-not']::after { content: '—'; color: var(--muted); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-declined'] { border-color: var(--danger); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-declined']::after { content: '⊘'; color: var(--danger); }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-inh'] { border-style: dashed; background: transparent; }
+[data-sim="win-wsus-groups"] .sd-swatch[data-shape='wg-inh']::after { content: '↑'; color: var(--muted); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-wsus-groups"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-wsus-groups"] .wg { height: auto; padding: 0.4rem; gap: 0.6rem; font-size: 1rem; }
+  [data-sim="win-wsus-groups"] .wg-day { margin-left: 0; }
+  [data-sim="win-wsus-groups"] .wg-con th:nth-child(3), [data-sim="win-wsus-groups"] .wg-con td:nth-child(3) { display: none; }
+  [data-sim="win-wsus-groups"] .wg-tl th:nth-child(2), [data-sim="win-wsus-groups"] .wg-tl td:nth-child(2) { display: none; }
+  [data-sim="win-wsus-groups"] .wg-table td, [data-sim="win-wsus-groups"] .wg-table th { padding: 0.1rem 0.15rem; }
+  [data-sim="win-wsus-groups"] .wg-gname { white-space: normal; }
+  [data-sim="win-wsus-groups"] .wg-gname[data-child] { padding-left: 0.4rem; }
+  [data-sim="win-wsus-groups"] .wg-ap, [data-sim="win-wsus-groups"] .wg-aw, [data-sim="win-wsus-groups"] .wg-con td:nth-child(n+3) { white-space: normal; }
+  [data-sim="win-wsus-groups"] .wg-gname[data-child]::before { content: none; }
+  [data-sim="win-wsus-groups"] .wg-box { padding: 0.2rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Grupe računala i odobrenja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var ICON = { install: '✓', remove: '↺', notApproved: '—', declined: '⊘' };
+  var WORD = { install: 'aInstall', remove: 'aRemove', notApproved: 'aNot', declined: 'aDeclined' };
+  var CELL = { na: 'cellNa', det: 'cellDet', inst: 'cellInst', forced: 'cellForced' };
+  var UPD = [['KB-A', 'kbAOld'], ['KB-B', 'kbBNew']];
+
+  function data(text, cls) { return h('span', { class: cls || '', translate: 'no' }, text); }
+  function pcB(name) { return h('b', { translate: 'no' }, name); }
+  /** Names in bold, joined "A, B and C". */
+  function names(list) {
+    var out = h('span');
+    list.forEach(function (n, i) {
+      if (i) out.append(i === list.length - 1 ? t('and') : ', ');
+      out.append(pcB(n));
+    });
+    return out;
+  }
+  /** t.parts with *term* turned into <em lang="en">. */
+  function rich(key, vars, n) {
+    var out = [];
+    var parts = n === undefined ? t.parts(key, vars) : t.parts(key, Object.assign({ n: n }, vars), n);
+    parts.forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+  // ── stage ──
+  function approvalCell(s, prev, group, update) {
+    var c = L.cell(s, group, update);
+    var changed = prev && !same(c, L.cell(prev, group, update));
+    var attrs = { class: 'wg-ap' + (changed ? ' sd-changed' : ''), dataset: { a: c.action } };
+    if (c.inherited) attrs.dataset.inh = '';
+    return h('span', attrs,
+      h('span', { class: 'wg-aw' }, h('b', { 'aria-hidden': 'true' }, ICON[c.action]), ' ', t(WORD[c.action])),
+      c.inherited ? h('span', { class: 'wg-sub' }, '↑ ', t('inherited')) : null,
+      c.deadline !== null && c.action === 'install' ? h('span', { class: 'wg-dl' }, '⏰ ', t('deadline', { d: c.deadline })) : null);
+  }
+
+  function renderConsole(c) {
+    var s = c.state, prev = c.prev, ev = s.ev;
+    var touched = {};
+    if (ev) {
+      ev.reg.forEach(function (pc) { touched[pc] = true; });
+      ev.member.forEach(function (m) { touched[m.pc] = true; });
+      ev.admin.forEach(function (a) { if (a.kind === 'move') touched[a.pc] = a.rejected ? 'rejected' : true; });
+    }
+    var registered = s.computers.filter(function (x) { return x.registered; }).length;
+    var rows = s.groups.map(function (g) {
+      var child = g.parent !== null;
+      var n = child ? g.members.length : registered;
+      var prevG = prev && prev.groups.filter(function (x) { return x.name === g.name; })[0];
+      var prevN = prevG ? (child ? prevG.members.length : prev.computers.filter(function (x) { return x.registered; }).length) : n;
+      var members = child
+        ? (g.members.length
+          ? g.members.map(function (pc) {
+            var mark = touched[pc];
+            var attrs = { class: 'wg-pc' + (mark === true ? ' sd-changed' : ''), translate: 'no' };
+            if (mark === 'rejected') attrs.dataset = { rejected: '' };
+            return h('span', attrs, pc, mark === 'rejected' ? h('span', { class: 'wg-rej', translate: 'yes' }, ' ✕ ', t('moveRejected')) : null);
+          })
+          : h('span', { class: 'wg-none' }, t('noMembers')))
+        : h('span', { class: 'wg-none' }, t.n('allMembers', registered));
+      return h('tr', null,
+        h('td', { class: 'wg-gname', dataset: child ? { child: '' } : {} }, data(g.name),
+          h('span', { class: 'wg-n' + (n !== prevN ? ' sd-changed' : '') }, String(n))),
+        h('td', null, h('div', { class: 'wg-members' }, members)),
+        UPD.map(function (u) { return h('td', null, approvalCell(s, prev, g.name, u[0])); }));
+    });
+    return h('div', { class: 'wg-box wg-con' }, h('table', { class: 'wg-table' },
+      h('thead', null, h('tr', null, h('th', null, t('colGroup')), h('th', null, t('colMembers')),
+        UPD.map(function (u) { return h('th', null, data(u[0]), ' ', h('span', null, '(', t(u[1]), ')')); }))),
+      h('tbody', null, rows)));
+  }
+
+  function renderTimeline(c) {
+    var s = c.state, d = s.day;
+    var client = s.targeting === 'client';
+    // the deadline days of KB-B's install approvals, while it is not declined
+    var dls = s.declined.indexOf(L.SUBJECT) >= 0 ? [] : s.approvals
+      .filter(function (a) { return a.update === L.SUBJECT && a.action === 'install' && a.deadline !== null; })
+      .map(function (a) { return a.deadline; });
+    var days = [];
+    for (var i = 0; i < L.DAYS; i++) days.push(i);
+    var head = h('tr', null, h('th', null, t('colPc')), h('th', null, t(client ? 'colGpo' : 'colGpoIgnored')),
+      days.map(function (k) {
+        return h('th', { class: 'wg-d' + (k === d ? ' wg-today' : '') },
+          dls.indexOf(k) >= 0 ? h('span', { class: 'wg-dlh' }, '⏰') : null, String(k));
+      }));
+    var body = s.computers.map(function (pc) {
+      var hist = s.hist[pc.name];
+      return h('tr', null,
+        h('td', { class: 'wg-pcname', translate: 'no' }, pc.name),
+        h('td', null, h('span', { class: 'wg-gpo', translate: 'no', dataset: client ? {} : { ignored: '' } }, pc.gpoGroup)),
+        days.map(function (k) {
+          var code = k <= d ? hist[k] : null;
+          var before = k === 0 ? 'na' : hist[k - 1];
+          var changed = k === d && code && code !== before;
+          return h('td', { class: 'wg-d' + (k === d ? ' wg-today' : '') + (changed ? ' sd-changed' : '') },
+            code ? h('span', { class: 'wg-g', dataset: { g: code }, role: 'img', title: t(CELL[code]), 'aria-label': t(CELL[code]) }) : null);
+        }));
+    });
+    var key = ['na', 'det', 'inst', 'forced'].map(function (k) {
+      return h('span', { class: 'wg-key' }, h('span', { class: 'wg-g', dataset: { g: k }, 'aria-hidden': 'true' }), t(CELL[k]));
+    });
+    return h('div', { class: 'wg-box wg-tl' },
+      h('div', { class: 'wg-tl-head' }, h('h2', null, t('tlTitle')), key),
+      h('table', { class: 'wg-table' }, h('thead', null, head), h('tbody', null, body)));
+  }
+
+  function render(c) {
+    var s = c.state;
+    var cnt = L.countOf(s);
+    var top = h('div', { class: 'wg-top' },
+      h('b', { class: 'wg-srv', translate: 'no' }, t('server')),
+      h('span', { class: 'wg-mode', dataset: { mode: s.targeting } }, t(s.targeting === 'client' ? 'modeClient' : 'modeServer')),
+      h('span', { class: 'wg-count' }, t('kbCount', { n: cnt.installed, m: cnt.computers })),
+      h('span', { class: 'wg-day' }, s.day < 0 ? t('dayBefore') : t('day', { d: s.day })));
+    c.stage.replaceChildren(h('div', { class: 'wg' }, top, renderConsole(c), renderTimeline(c)));
+  }
+
+  // ── caption ──
+  function caption(c) {
+    var s = c.state, ev = s.ev;
+    if (c.first || !ev) {
+      return rich('capStart', { mode: h('span', null, rich(s.targeting === 'client' ? 'capModeClient' : 'capModeServer')) });
+    }
+    var out = [];
+    function add(parts) { if (out.length) out.push(' '); out.push.apply(out, parts); }
+    // 1. the admin
+    var skipped = ev.admin.filter(function (a) { return a.kind === 'skipped'; }).map(function (a) { return a.group; });
+    var kioskToo = ev.admin.some(function (a) { return a.kind === 'approve' && a.group === 'Kiosks'; });
+    ev.admin.forEach(function (a) {
+      if (a.kind === 'decline') add(rich('capDecline'));
+      else if (a.kind === 'skipped') {
+        if (a.group === skipped[0]) add(rich('capSkipped', { groups: h('span', { translate: 'no' }, skipped.join(t('and'))) }));
+      } else if (a.kind === 'move' && a.rejected) add(rich('capMoveRejected', { pc: pcB(a.pc) }));
+      else if (a.kind === 'move') {
+        add(rich('capMove', { pc: pcB(a.pc) }));
+        // only when Pilot's own Install approval stands does the move bring PC-P3 something new
+        var pil = L.cell(s, 'Pilot', L.SUBJECT);
+        if (pil.action === 'install' && !pil.inherited) add(rich('capMoveSees'));
+        else if (pil.action === 'install') add(rich('capMoveSame', { pc: pcB(a.pc) }));
+      } else if (a.kind === 'approve' && a.update === L.SUBJECT) {
+        if (a.group === L.ALL) add(rich(kioskToo ? 'capApproveAllBut' : 'capApproveAll'));
+        else if (a.group === 'Pilot') add(rich('capApprovePilot'));
+        else if (a.group === 'Kiosks') add(rich('capKioskRemove'));
+        else if (a.group === 'Production') add(a.deadline === null ? rich('capApproveProd') : rich('capApproveProdDeadline', { d: data(String(a.deadline)) }));
+      }
+    });
+    // a computer in two groups with different approvals, on the day they are made
+    if (ev.admin.some(function (a) { return a.kind === 'approve' && a.group === 'Kiosks'; })) {
+      var both = s.computers.filter(function (x) {
+        var gs = L.groupsOf(s, x.name);
+        return gs.indexOf('Kiosks') >= 0 && gs.length > 1 && s.effective[x.name] && s.effective[x.name][L.SUBJECT].action === 'install';
+      });
+      if (both.length) add(rich('capTwoGroups', { pc: pcB(both[0].name) }));
+    }
+    // 2. registration
+    ev.reg.forEach(function (pc) {
+      var x = s.computers.filter(function (y) { return y.name === pc; })[0];
+      var gs = L.groupsOf(s, pc);
+      var gpo = data(x.gpoGroup);
+      if (s.targeting !== 'client') add(rich('capRegServer', { pc: pcB(pc), gpo: gpo }));
+      else if (gs.length === 1 && gs[0] === L.UNASSIGNED) add(rich('capRegTypo', { pc: pcB(pc), gpo: gpo }));
+      else add(rich('capRegClient', { pc: pcB(pc), gpo: gpo }));
+    });
+    // 3. the computers, for KB-B
+    var by = { detected: [], postponed: [], installed: [], forced: [], withdrawn: [], removed: [] };
+    ev.pcs.forEach(function (x) { if (x.update === L.SUBJECT) by[x.what].push(x.pc); });
+    [['detected', 'capDetected'], ['installed', 'capInstalled'], ['postponed', 'capPostponed'], ['forced', 'capForced'],
+      ['withdrawn', 'capWithdrawn'], ['removed', 'capRemoved']].forEach(function (k) {
+      var list = by[k[0]];
+      if (list.length) add(rich(k[1], { pcs: names(list) }, list.length));
+    });
+    if (ev.admin.some(function (a) { return a.kind === 'decline'; })) {
+      var keep = s.computers.filter(function (x) { return s.pc[x.name][L.SUBJECT].st === 'installed'; }).map(function (x) { return x.name; });
+      if (keep.length) add(rich(keep.length > 1 ? 'capKeepsN' : 'capKeeps', { pcs: names(keep) }));
+    }
+    if (!out.length) {
+      var waiting = s.computers.filter(function (x) { return s.pc[x.name][L.SUBJECT].st === 'detected'; }).map(function (x) { return x.name; });
+      add(waiting.length ? rich('capWaiting', { pcs: names(waiting) }, waiting.length) : rich('capQuiet'));
+      // the typo: Pilot's approval stands and PC-P3 still cannot see it
+      var p3 = L.groupsOf(s, L.NEW_PC);
+      if (p3.length === 1 && p3[0] === L.UNASSIGNED && L.cell(s, 'Pilot', L.SUBJECT).action === 'install' &&
+          L.cell(s, L.UNASSIGNED, L.SUBJECT).action !== 'install') add(rich('capStillUnassigned', { pc: pcB(L.NEW_PC) }));
+    }
+    if (c.last) {
+      var cnt = L.countOf(s);
+      add(rich('capEnd', { n: data(String(cnt.installed)), m: data(String(cnt.computers)) }));
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'targeting', type: 'choice', label: t('targeting'), options: [['server', t('tServer')], ['client', t('tClient')]] },
+      { key: 'gpoName', type: 'choice', label: t('gpoName'), options: [['Pilot', t('gpoPilot')], ['Pliot', t('gpoTypo')]] },
+      { key: 'firstApproval', type: 'choice', label: t('firstApproval'), options: [['pilot', t('faPilot')], ['all', t('faAll')]] },
+      { key: 'prodDeadline', type: 'choice', label: t('prodDeadline'), options: [[-1, t('pdNone')], [7, t('pd7')]],
+        disabled: function (p) { return p.firstApproval === 'all' ? t('prodDisabled') : false; } },
+      { key: 'kioskRemove', type: 'toggle', label: t('kioskRemove') },
+      // declineAt (in the model's defaults, no control of its own): KB-B is declined on day declineAt, the next step
+      { type: 'button', label: t('decline'), hint: t('declineHint'), key: 'd', run: function (sim) {
+        // one decline per run, never at the last day or before an earlier decline (that would rewrite the past)
+        if (sim.n >= L.steps || (sim.params.declineAt >= 0 && sim.params.declineAt < sim.n)) return;
+        sim.set({ declineAt: sim.n });
+      } }
+    ],
+
+    presets: [
+      { id: 'pilot-first', label: t('presetPilot'), hint: t('presetPilotHint'), params: {} },
+      { id: 'production-deadline', label: t('presetDeadline'), hint: t('presetDeadlineHint'), params: { prodDeadline: 7 } },
+      { id: 'typo-unassigned', label: t('presetTypo'), hint: t('presetTypoHint'), params: { targeting: 'client', gpoName: 'Pliot' } },
+      { id: 'two-groups', label: t('presetTwo'), hint: t('presetTwoHint'), params: { kioskRemove: true } },
+      { id: 'approve-all', label: t('presetAll'), hint: t('presetAllHint'), params: { firstApproval: 'all' } },
+      { id: 'decline', label: t('presetDecline'), hint: t('presetDeclineHint'), params: { declineAt: 2 } }
+    ],
+
+    legend: [
+      { shape: 'wg-install', label: t('legendInstall') },
+      { shape: 'wg-remove', label: t('legendRemove') },
+      { shape: 'wg-not', label: t('legendNot') },
+      { shape: 'wg-declined', label: t('legendDeclined') },
+      { shape: 'wg-inh', label: t('legendInherited') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
