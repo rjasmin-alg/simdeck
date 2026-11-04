@@ -1,0 +1,568 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ou-vs-group: a stepper. Left, the OU tree of quillmoor.example (from sims/win-ad-structure) with user ana in
+     her one OU; middle, the groups and the shares' ACLs; right, the deck of task cards and four bins (OU, group, both,
+     neither). One step turns one card: it drops into its bin, and the mechanism that decides it lights on the
+     directory (a GPO link on an OU, an ACE naming a group SID, a delegation ACE on an OU naming a group). In quiz mode
+     a click on a bin is the student's answer and turns the card. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ou-vs-group">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OU ili grupa? · simdeck</title>
+<meta name="description" content="Razvrstaj osam zadataka: GPO i delegiranje idu na OU, dozvole na grupe, ponešto na oboje; korisnica ana je u jednom OU-u i u tri grupe.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ou-vs-group",
+  "title": {
+    "hr": "OU ili grupa?",
+    "en": "OU or group?"
+  },
+  "concept": {
+    "hr": "OU nosi pravila i delegiranje, grupa dozvole; jedan OU, mnogo grupa",
+    "en": "OUs carry policy and delegation, groups permissions; one OU, many groups"
+  },
+  "summary": {
+    "hr": "Razvrstaj osam zadataka u OU, grupu, oboje ili ništa: GPO se povezuje s OU-om, ACE navodi SID grupe, a delegiranje je na OU-u za grupu.",
+    "en": "Sort eight tasks into OU, group, both or neither: a GPO links to an OU, an ACE names a group's SID, and delegation sits on an OU for a group."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ou-vs-group"]; colours only from kit tokens.
+   Layout: tree | groups and ACLs | deck and bins; an SVG layer over the first two draws the membership, delegation
+   and filter lines. */
+[data-sim="win-ou-vs-group"] .og {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr) minmax(0, 1.2fr);
+  gap: 0 2.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-ou-vs-group"] .og h2 { margin: 0 0 0.35rem; font-size: 1em; font-weight: 700; }
+[data-sim="win-ou-vs-group"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-ou-vs-group"] .og-col { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; position: relative; z-index: 1; }
+[data-sim="win-ou-vs-group"] .og-small { font-size: var(--fs-sm); }
+[data-sim="win-ou-vs-group"] .og-muted { color: var(--muted); }
+
+/* ── tree ── */
+[data-sim="win-ou-vs-group"] .og-tree { display: flex; flex-direction: column; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="win-ou-vs-group"] .og-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.4rem;
+  margin-left: calc(var(--depth, 0) * 1.1rem);
+  padding: 0.1rem 0.45rem; min-height: 2rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel);
+}
+[data-sim="win-ou-vs-group"] .og-row[data-kind="container"] { border-style: dashed; background: var(--bg); }
+[data-sim="win-ou-vs-group"] .og-row[data-kind="domain"] { border-width: 0.2rem; }
+[data-sim="win-ou-vs-group"] .og-row[data-reach="true"] { box-shadow: inset 0.4rem 0 0 var(--c1); }
+[data-sim="win-ou-vs-group"] .og-row[data-now="true"] { box-shadow: 0 0 0 0.12rem var(--c1); }
+[data-sim="win-ou-vs-group"] .og-nosid { font-style: italic; }
+[data-sim="win-ou-vs-group"] .og-row[data-reach="true"][data-now="true"] { box-shadow: inset 0.4rem 0 0 var(--c1), 0 0 0 0.12rem var(--c1); }
+[data-sim="win-ou-vs-group"] .og-name { font-weight: 700; }
+[data-sim="win-ou-vs-group"] .og-count { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ou-vs-group"] .og-end { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-end; }
+
+/* kind badges: OU folder tab, CN dashed, D thick */
+[data-sim="win-ou-vs-group"] .og-tab,
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-ou"] {
+  position: relative; display: inline-grid; place-items: center; min-width: 2.2rem; height: 1.3rem; margin-top: 0.3rem;
+  padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: 0 var(--radius-sm) var(--radius-sm) var(--radius-sm);
+  background: var(--bg); color: var(--ink); font-size: var(--fs-sm); font-weight: 700; line-height: 1;
+}
+[data-sim="win-ou-vs-group"] .og-tab::before,
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-ou"]::before {
+  content: ''; position: absolute; left: calc(-1 * var(--line-w)); top: -0.42rem; width: 45%; height: 0.36rem;
+  border: var(--line-w) solid var(--ink); border-bottom: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--bg);
+}
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-ou"] { min-width: 0; height: 0.8em; margin-top: 0.3em; }
+[data-sim="win-ou-vs-group"] .og-tab[data-kind="container"] { border-style: dashed; border-radius: var(--radius-sm); margin-top: 0; }
+[data-sim="win-ou-vs-group"] .og-tab[data-kind="container"]::before { display: none; }
+[data-sim="win-ou-vs-group"] .og-tab[data-kind="domain"] { border-width: 0.2rem; border-radius: var(--radius-sm); margin-top: 0; }
+[data-sim="win-ou-vs-group"] .og-tab[data-kind="domain"]::before { display: none; }
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-cn"] { border-style: dashed; background: transparent; }
+
+/* chips on the stage */
+[data-sim="win-ou-vs-group"] .og-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%;
+  padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink);
+  font-size: var(--fs-sm); line-height: 1.5;
+}
+[data-sim="win-ou-vs-group"] .og-chip b { font-weight: 700; }
+[data-sim="win-ou-vs-group"] .og-chip[data-k="refused"] { border-style: dashed; color: var(--danger); }
+[data-sim="win-ou-vs-group"] .og-chip[data-k="refused"] s { color: var(--ink); }
+/* .sd-changed is an outline and a ring; the page adds the highlighter fill, so dark text on it reads in both themes. */
+[data-sim="win-ou-vs-group"] .og-chip.sd-changed, [data-sim="win-ou-vs-group"] .og-chip.sd-changed[data-k="refused"],
+[data-sim="win-ou-vs-group"] .og-chip.sd-changed[data-k="refused"] s { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ou-vs-group"] .og-user {
+  display: inline-flex; align-items: center; padding: 0 0.6rem; border: 0.2rem solid var(--ink); border-radius: 1rem;
+  background: var(--bg); font-weight: 700; line-height: 1.4;
+}
+[data-sim="win-ou-vs-group"] .og-user.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* icons drawn in CSS: chain link (GPO link), key (ACE) */
+[data-sim="win-ou-vs-group"] .og-link,
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-link"] {
+  position: relative; display: inline-block; width: 1.1em; height: 0.6em; flex: none;
+  border: 0; border-radius: 0; background: transparent; color: currentColor;
+}
+[data-sim="win-ou-vs-group"] .og-link::before, [data-sim="win-ou-vs-group"] .og-link::after,
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-link"]::before, [data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-link"]::after {
+  content: ''; position: absolute; top: 0; width: 0.62em; height: 0.6em; box-sizing: border-box;
+  border: 0.13em solid currentColor; border-radius: 0.3em;
+}
+[data-sim="win-ou-vs-group"] .og-link::before, [data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-link"]::before { left: 0; }
+[data-sim="win-ou-vs-group"] .og-link::after, [data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-link"]::after { right: 0; }
+[data-sim="win-ou-vs-group"] .og-key,
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-key"] {
+  position: relative; display: inline-block; width: 1.05em; height: 0.6em; flex: none;
+  border: 0; border-radius: 0; background: transparent; color: currentColor;
+}
+[data-sim="win-ou-vs-group"] .og-key::before, [data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-key"]::before {
+  content: ''; position: absolute; left: 0; top: 0; width: 0.55em; height: 0.55em; box-sizing: border-box;
+  border: 0.13em solid currentColor; border-radius: 50%;
+}
+[data-sim="win-ou-vs-group"] .og-key::after, [data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-key"]::after {
+  content: ''; position: absolute; left: 0.5em; top: 0.21em; width: 0.55em; height: 0.13em; background: currentColor;
+  box-shadow: 0.38em 0.12em 0 0 currentColor;
+}
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-group"] { width: 1.6em; border-radius: 1rem; border-color: var(--ink); background: transparent; }
+[data-sim="win-ou-vs-group"] .sd-swatch[data-shape="og-line"] { height: 0.22rem; border: 0; border-radius: 0; background: var(--ink); }
+
+/* ── groups and ACLs ── */
+[data-sim="win-ou-vs-group"] .og-groups { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="win-ou-vs-group"] .og-group {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.4rem;
+  padding: 0.1rem 0.7rem; border: var(--line-w) solid var(--ink); border-radius: 1.2rem; background: var(--panel);
+}
+[data-sim="win-ou-vs-group"] .og-group[data-type="distribution"] { border-style: dashed; background: var(--bg); }
+[data-sim="win-ou-vs-group"] .og-group.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ou-vs-group"] .og-group.sd-changed .og-muted { color: var(--on-hl); }
+[data-sim="win-ou-vs-group"] .og-sid { font-size: var(--fs-sm); }
+[data-sim="win-ou-vs-group"] .og-line2 { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; align-items: center; }
+[data-sim="win-ou-vs-group"] .og-acl {
+  margin-top: 0.4rem; padding: 0.25rem 0.6rem 0.35rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-ou-vs-group"] .og-acl ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="win-ou-vs-group"] .og-ace { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.4rem; padding: 0.05rem 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="win-ou-vs-group"] .og-ace.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* ── deck and bins ── */
+[data-sim="win-ou-vs-group"] .og-card {
+  display: flex; flex-direction: column; gap: 0.25rem; min-height: 7.2rem;
+  padding: 0.5rem 0.9rem; border: 0.22rem solid var(--ink); border-radius: var(--radius);
+  background: var(--panel); box-shadow: 0.35rem 0.35rem 0 0 var(--line);
+}
+[data-sim="win-ou-vs-group"] .og-card[data-done="true"] { border-style: dashed; box-shadow: none; justify-content: center; }
+[data-sim="win-ou-vs-group"] .og-card-q { font-size: 1.25em; font-weight: 700; line-height: 1.3; }
+[data-sim="win-ou-vs-group"] .og-card-q [translate="no"] { font-size: 0.9em; }
+[data-sim="win-ou-vs-group"] .og-card-hint { font-size: var(--fs-sm); color: var(--muted); font-style: italic; }
+[data-sim="win-ou-vs-group"] .og-bins { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.6rem; flex: 1; min-height: 0; }
+[data-sim="win-ou-vs-group"] .og-bin {
+  display: flex; flex-direction: column; align-items: stretch; gap: 0.2rem; min-width: 0; margin: 0;
+  padding: 0.3rem 0.6rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink); font: inherit; text-align: left;
+}
+[data-sim="win-ou-vs-group"] button.og-bin { cursor: pointer; border-color: var(--accent); border-width: 0.18rem; }
+[data-sim="win-ou-vs-group"] button.og-bin:hover { background: var(--panel); }
+[data-sim="win-ou-vs-group"] button.og-bin:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="win-ou-vs-group"] .og-bin-head { display: flex; align-items: center; gap: 0.45rem; font-weight: 700; }
+[data-sim="win-ou-vs-group"] .og-bin-why { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ou-vs-group"] .og-bin ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="win-ou-vs-group"] .og-item { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 0.35rem; font-size: var(--fs-sm); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="win-ou-vs-group"] .og-item.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ou-vs-group"] .og-item.sd-changed .og-num { background: var(--on-hl); color: var(--hl); }
+[data-sim="win-ou-vs-group"] .og-num {
+  display: inline-grid; place-items: center; flex: none; min-width: 1.4rem; height: 1.4rem; border-radius: 50%;
+  background: var(--ink); color: var(--bg); font-weight: 700;
+}
+[data-sim="win-ou-vs-group"] .og-verdict { grid-column: 2; justify-self: end; white-space: nowrap; font-weight: 700; }
+[data-sim="win-ou-vs-group"] .og-bin-icon { display: inline-flex; align-items: center; gap: 0.2rem; }
+[data-sim="win-ou-vs-group"] .og-pill { display: inline-block; width: 1.7rem; height: 1rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; }
+[data-sim="win-ou-vs-group"] .og-x { font-weight: 700; color: var(--danger); }
+[data-sim="win-ou-vs-group"] .og-score { margin-top: 0.4rem; font-weight: 700; }
+
+/* The kit's .sd-ctl { display: flex } beats [hidden] (shared request in NOTES.md): the hidden guess params stay hidden. */
+[data-sim="win-ou-vs-group"] .sd-ctl[hidden] { display: none; }
+
+/* ── lines ── */
+[data-sim="win-ou-vs-group"] .og-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; overflow: visible; }
+[data-sim="win-ou-vs-group"] .og-lines path { fill: none; stroke: var(--ink); stroke-width: 2.5; }
+[data-sim="win-ou-vs-group"] .og-lines path[data-k="delegation"] { stroke-dasharray: 9 6; }
+[data-sim="win-ou-vs-group"] .og-lines path[data-k="filter"] { stroke-dasharray: 2 5; stroke-linecap: round; stroke-width: 3; }
+[data-sim="win-ou-vs-group"] .og-lines path[data-now="true"] { stroke-width: 5; }
+[data-sim="win-ou-vs-group"] .og-lines circle { fill: var(--ink); }
+
+/* Phone and portrait: one column; lines off (members, trustees and filters are written in the chips). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ou-vs-group"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ou-vs-group"] .og { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.9rem; }
+  [data-sim="win-ou-vs-group"] .og-lines { display: none; }
+  [data-sim="win-ou-vs-group"] .og-row { margin-left: calc(var(--depth, 0) * 0.6rem); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">OU ili grupa?</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PRESET_WORDS = { basic: 'presetBasic', quiz: 'presetQuiz', quillmoor: 'presetQuillmoor' };
+  var BIN_WORDS = { ou: 'binOu', group: 'binGroup', both: 'binBoth', neither: 'binNeither' };
+  var VERDICT_WORDS = { right: 'vRight', half: 'vHalf', wrong: 'vWrong', skipped: 'vSkipped' };
+  var VERDICT_MARK = { right: '✓', half: '½', wrong: '✗', skipped: '–' };
+  var RIGHT_WORDS = { read: 'rightRead', 'reset-password': 'rightReset' };
+
+  /** Data (OU, group, GPO, user and share names, SIDs) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function nameOf(id) { var n = L.node(id); return n ? n.name : id; }
+  function key(cardId) { return cardId.replace(/-([a-z])/g, function (m, c) { return c.toUpperCase(); }); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(k, vars) {
+    var out = [], seen = [];
+    t.parts(k, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(k, vars) { return [' '].concat(rich(k, vars)); }
+  function linkIcon() { return h('span', { class: 'og-link', 'aria-hidden': 'true' }); }
+  function keyIcon() { return h('span', { class: 'og-key', 'aria-hidden': 'true' }); }
+
+  /** The placeholders of a card's strings, from its need and its mechanism (every value is data). */
+  function varsOf(need) {
+    var r = L.classify(need), m = r.mech || {};
+    var v = { user: data('ana') };
+    if (need.gpo) v.gpo = data(need.gpo);
+    if (m.at) v.ou = data(nameOf(m.at));
+    if (need.on) v.ou = data(nameOf(need.on));
+    if (m.moveTo) v.ou = data(nameOf(m.moveTo));
+    if (need.boxes) {
+      v.a = data(nameOf(need.boxes[0]));
+      if (need.boxes[1]) v.b = data(nameOf(need.boxes[1]));
+      var cn = need.boxes.filter(function (b) { return L.kindOf(b) === 'container'; })[0];
+      if (cn) v.cn = data(nameOf(cn));
+    }
+    if (need.filter) v.group = data(nameOf(need.filter));
+    if (need.trustee) { v.group = data(nameOf(need.trustee)); v.sid = data(L.sidOf(need.trustee) || '—'); }
+    if (need.group) v.group = data(nameOf(need.group));
+    if (need.resource) v.share = data(need.resource);
+    if (need.kind === 'membership') v.ou = data(nameOf(L.placement()[need.obj]));
+    return v;
+  }
+
+  // ── left: the OU tree ──
+
+  function renderTree(c) {
+    var s = c.state;
+    var now = s.lit.filter(function (m) { return m.now; })[0] || null;
+    var nowReach = now && now.type === 'gpo-link' ? now.reach : [];
+    var place = L.placement();
+    var aceNow = !!(now && now.type === 'ace');
+    // The estate deck shows only the estate's boxes (OU=Kiosks is invented for the basic deck).
+    var boxes = L.BOXES.filter(function (b) { return !(b.invented && s.deck === 'quillmoor'); });
+    var rows = boxes.map(function (b) {
+      var depth = L.pathTo(b.id).length - 1;
+      var counts = [];
+      if (b.users) counts.push(t.n('users', b.users));
+      if (b.computers) counts.push(t.n('computers', b.computers));
+      var end = [];
+      s.lit.forEach(function (m) {
+        var cls = 'og-chip' + (m.now ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '');
+        if (m.type === 'gpo-link' && m.at === b.id) {
+          end.push(h('span', { class: cls, dataset: { line: m.filter ? 'filter-' + m.card : null } }, linkIcon(), h('b', null, data(m.gpo))));
+        } else if (m.type === 'link-refused' && m.at === b.id) {
+          end.push(h('span', { class: cls, dataset: { k: 'refused' } }, h('span', { 'aria-hidden': 'true' }, '✕'), h('s', null, data(m.gpo)), t('chipRefused')));
+        } else if (m.type === 'delegation' && m.on === b.id) {
+          end.push(h('span', { class: cls, dataset: { line: 'delegation-' + m.card } }, keyIcon(), h('b', null, data(nameOf(m.trustee))),
+            t('chipDelegated', { right: t(RIGHT_WORDS[m.right]) })));
+        }
+      });
+      Object.keys(place).forEach(function (u) {
+        if (place[u] !== b.id) return;
+        var hot = !!(now && now.type === 'membership' && now.obj === u);
+        end.push(h('span', { class: 'og-user' + (hot ? ' sd-changed' : ''), dataset: { line: 'user-' + u } }, data(u)));
+      });
+      var kindWord = b.kind === 'ou' ? 'kindOu' : b.kind === 'container' ? 'kindCn' : 'kindDomain';
+      return h('li', { class: 'og-row', style: { '--depth': depth }, dataset: { kind: b.kind, box: b.id,
+        reach: String(nowReach.indexOf(b.id) >= 0), now: String(!!(now && (now.at === b.id || now.on === b.id))) } },
+        h('span', { class: 'og-tab', dataset: { kind: b.kind }, title: t(kindWord + 'Long') }, t(kindWord)),
+        h('span', { class: 'og-name' }, data(b.name)),
+        counts.length ? h('span', { class: 'og-count' }, counts.join(' · ')) : null,
+        aceNow && b.kind !== 'domain' ? h('span', { class: 'og-count og-nosid' }, t('noSid')) : null,
+        end.length ? h('span', { class: 'og-end' }, end) : null);
+    });
+    return h('section', { class: 'og-col' }, h('h2', null, t('treeTitle')), h('ul', { class: 'og-tree' }, rows));
+  }
+
+  // ── middle: groups and the shares' ACLs ──
+
+  function renderGroups(c) {
+    var s = c.state;
+    var now = s.lit.filter(function (m) { return m.now; })[0] || null;
+    var groups = L.GROUPS.map(function (g) {
+      var chips = [];
+      var hot = false;
+      L.membersOf(g.id).forEach(function (u) {
+        var on = !!(now && now.type === 'membership' && now.obj === u);
+        hot = hot || on;
+        chips.push(h('span', { class: 'og-chip' + (on ? ' sd-changed' : '') }, t('member'), h('b', null, data(u))));
+      });
+      s.lit.forEach(function (m) {
+        var cls = 'og-chip' + (m.now ? ' sd-changed' : '');
+        if (m.type === 'ace' && m.trustee === g.id) {
+          chips.push(h('span', { class: cls }, keyIcon(), h('span', null, t.parts('chipAce', { share: data(m.on), right: t(RIGHT_WORDS[m.right]) }))));
+          hot = hot || m.now;
+        } else if (m.type === 'delegation' && m.trustee === g.id) {
+          chips.push(h('span', { class: cls }, keyIcon(), h('span', null, t.parts('chipTrustee', { right: t(RIGHT_WORDS[m.right]), ou: data(nameOf(m.on)) }))));
+          hot = hot || m.now;
+        } else if (m.type === 'gpo-link' && m.filter === g.id) {
+          chips.push(h('span', { class: cls }, h('span', null, t.parts('chipFilter', { gpo: data(m.gpo) }))));
+          hot = hot || m.now;
+        } else if (m.type === 'mail' && m.group === g.id) {
+          chips.push(h('span', { class: cls }, t('chipMail')));
+          hot = hot || m.now;
+        }
+      });
+      var sid = L.sidOf(g.id);
+      return h('li', { class: 'og-group' + (hot ? ' sd-changed' : ''), dataset: { type: g.type, group: g.id } },
+        h('b', null, data(g.name)),
+        h('span', { class: 'og-small og-muted' }, t(g.type === 'security' ? 'typeSecurity' : 'typeDistribution')),
+        sid ? h('span', { class: 'og-sid og-muted' }, data(sid)) : null,
+        chips.length ? h('span', { class: 'og-line2' }, chips) : null);
+    });
+    var aces = s.lit.filter(function (m) { return m.type === 'ace'; }).map(function (m) {
+      return h('li', { class: 'og-ace' + (m.now ? ' sd-changed' : '') },
+        h('b', null, data(m.on)), keyIcon(), data(nameOf(m.trustee)), h('span', { class: 'og-sid' }, data(m.sid)),
+        h('span', null, t(RIGHT_WORDS[m.right])));
+    });
+    return h('section', { class: 'og-col' },
+      h('h2', null, t('groupsTitle')),
+      h('ul', { class: 'og-groups' }, groups),
+      h('div', { class: 'og-acl' }, h('h2', null, t('aclTitle')),
+        aces.length ? h('ul', null, aces) : h('div', { class: 'og-small og-muted' }, t('aclNone'))));
+  }
+
+  // ── right: the deck and the bins ──
+
+  function binIcon(a) {
+    if (a === 'ou') return h('span', { class: 'og-bin-icon', 'aria-hidden': 'true' }, h('span', { class: 'og-tab', dataset: { kind: 'ou' } }, ''));
+    if (a === 'group') return h('span', { class: 'og-bin-icon', 'aria-hidden': 'true' }, h('span', { class: 'og-pill' }));
+    if (a === 'both') return h('span', { class: 'og-bin-icon', 'aria-hidden': 'true' }, h('span', { class: 'og-tab', dataset: { kind: 'ou' } }, ''), '+', h('span', { class: 'og-pill' }));
+    return h('span', { class: 'og-bin-icon og-x', 'aria-hidden': 'true' }, '✕');
+  }
+
+  function renderDeck(c) {
+    var s = c.state, total = s.cards.length, top = s.cursor < total ? s.cursor : -1;
+    var quiz = s.mode === 'quiz';
+    var deck = L.cardsOf(c.params);
+    var card;
+    if (top >= 0) {
+      card = h('div', { class: 'og-card' },
+        h('div', { class: 'og-small og-muted' }, t('cardOf', { k: top + 1, n: total })),
+        h('div', { class: 'og-card-q' }, t.parts('q_' + key(deck[top].id), varsOf(deck[top].need))),
+        h('div', { class: 'og-card-hint' }, t(quiz ? 'hintQuiz' : 'hintShow')));
+    } else {
+      card = h('div', { class: 'og-card', dataset: { done: 'true' } }, h('div', { class: 'og-card-q' }, t('deckDone')),
+        quiz ? h('div', { class: 'og-score' }, t('score', { r: s.score.right, h: s.score.half, w: s.score.wrong, s: s.score.skipped })) : null);
+    }
+    var bins = L.ANSWERS.map(function (a) {
+      var items = L.binOf(s, a).map(function (k) {
+        var cd = s.cards[k];
+        return h('li', { class: 'og-item' + (k === s.last ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') },
+          h('span', { class: 'og-num', translate: 'no' }, String(k + 1)),
+          h('span', { class: 'og-item-t' }, t.parts('s_' + key(cd.id), varsOf(deck[k].need))),
+          quiz && cd.verdict ? h('span', { class: 'og-verdict', dataset: { v: cd.verdict } }, VERDICT_MARK[cd.verdict] + ' ', t(VERDICT_WORDS[cd.verdict])) : null);
+      });
+      var body = [
+        h('span', { class: 'og-bin-head' }, binIcon(a), t(BIN_WORDS[a])),
+        h('span', { class: 'og-bin-why' }, t(BIN_WORDS[a] + 'Why')),
+        items.length ? h('ol', null, items) : null
+      ];
+      if (quiz && top >= 0) {
+        return h('button', {
+          type: 'button', class: 'og-bin', dataset: { bin: a }, 'aria-label': t('binPick', { bin: t(BIN_WORDS[a]) }),
+          onmousedown: function (e) { e.preventDefault(); },
+          onclick: function () {
+            var patch = {};
+            patch['g' + (top + 1)] = a;
+            window.simdeck.set(patch);
+            window.simdeck.next();
+          }
+        }, body);
+      }
+      return h('div', { class: 'og-bin', dataset: { bin: a } }, body);
+    });
+    return h('section', { class: 'og-col' }, card, h('div', { class: 'og-bins' }, bins));
+  }
+
+  // ── lines: ana to her groups, a delegation's OU to its group, a filtered link to its group ──
+
+  function drawLines(c, wrap) {
+    var svg = wrap.querySelector('.og-lines');
+    if (!svg || getComputedStyle(svg).display === 'none') return;
+    var box = wrap.getBoundingClientRect();
+    var paths = [];
+    function from(sel) { var e = wrap.querySelector(sel); return e ? e.getBoundingClientRect() : null; }
+    function link(a, groupId, k, now) {
+      var g = from('[data-group="' + groupId + '"]');
+      if (!a || !g) return;
+      var x1 = a.right - box.left, y1 = a.top + a.height / 2 - box.top;
+      var x2 = g.left - box.left, y2 = g.top + g.height / 2 - box.top;
+      var mx = (x1 + x2) / 2;
+      paths.push(h('path', { d: 'M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2, 'data-k': k, 'data-now': String(!!now) }));
+      paths.push(h('circle', { cx: x2, cy: y2, r: 4 }));
+    }
+    var s = c.state;
+    var now = s.lit.filter(function (m) { return m.now; })[0] || null;
+    var u = L.USERS[0];
+    u.memberOf.forEach(function (g) { link(from('[data-line="user-' + u.id + '"]'), g, 'member', now && now.type === 'membership'); });
+    s.lit.forEach(function (m) {
+      if (m.type === 'delegation') link(from('[data-line="delegation-' + m.card + '"]'), m.trustee, 'delegation', m.now);
+      if (m.type === 'gpo-link' && m.filter) link(from('[data-line="filter-' + m.card + '"]'), m.filter, 'filter', m.now);
+    });
+    var NS = 'http://www.w3.org/2000/svg';
+    svg.replaceChildren();
+    paths.forEach(function (p) {
+      var el = document.createElementNS(NS, p.tagName.toLowerCase());
+      Array.prototype.forEach.call(p.attributes, function (at) { el.setAttribute(at.name, at.value); });
+      svg.appendChild(el);
+    });
+  }
+
+  // ── captions ──
+
+  function captionStart(s) {
+    var out = s.deck === 'quillmoor'
+      ? rich('capStartQuillmoor', { cu: data('CN=Users'), cc: data('CN=Computers') })
+      : rich('capStart', { domain: data(L.DOMAIN.name), user: data('ana') });
+    if (s.mode === 'quiz') out = out.concat(sentence('capStartQuiz'));
+    return out;
+  }
+  function captionCard(c) {
+    var s = c.state, k = s.last, cd = s.cards[k], need = L.cardsOf(c.params)[k].need, v = varsOf(need);
+    var out = [];
+    if (s.mode === 'quiz') {
+      out = out.concat(cd.guess ? rich('capGuess', { guess: t(BIN_WORDS[cd.guess]), verdict: t(VERDICT_WORDS[cd.verdict]) }) : rich('capNoGuess'), [' ']);
+    }
+    out.push(h('b', null, String(k + 1) + '. ', t.parts('s_' + key(cd.id), v)));
+    out = out.concat(sentence('binIs', { bin: h('b', null, t(BIN_WORDS[cd.answer])) }), sentence('r_' + key(cd.id), v));
+    if (c.last) {
+      out = out.concat(sentence('capEnd'));
+      if (s.mode === 'quiz') out = out.concat(sentence('capEndScore', { score: t('score', { r: s.score.right, h: s.score.half, w: s.score.wrong, s: s.score.skipped }) }));
+    }
+    return out;
+  }
+
+  var stageWrap = null;
+  function hiddenGuess(i) {
+    return { key: 'g' + i, type: 'select', label: t('hidden'), visible: function () { return false; },
+      options: [['', '—']].concat(L.ANSWERS.map(function (a) { return [a, t(BIN_WORDS[a])]; })) };
+  }
+  var params = [
+    { key: 'deck', type: 'choice', label: t('deck'), resets: true, options: [['basic', t('deckBasic')], ['quillmoor', t('deckQuillmoor')]] },
+    { key: 'mode', type: 'choice', label: t('mode'), resets: true, hint: t('modeHint'), options: [['show', t('modeShow')], ['quiz', t('modeQuiz')]] }
+  ];
+  for (var gi = 1; gi <= L.MAX_CARDS; gi++) params.push(hiddenGuess(gi));
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: params,
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { shape: 'og-ou', label: t('legOu') },
+      { shape: 'og-cn', label: t('legCn') },
+      { shape: 'og-group', label: t('legGroup') },
+      { shape: 'og-link', label: t('legLink') },
+      { shape: 'og-key', label: t('legAce') },
+      { shape: 'og-line', label: t('legLine') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'og-lines');
+      svg.setAttribute('aria-hidden', 'true');
+      stageWrap = h('div', { class: 'og' }, renderTree(c), renderGroups(c), renderDeck(c));
+      stageWrap.appendChild(svg);
+      c.stage.replaceChildren(stageWrap);
+      drawLines(c, stageWrap);
+    },
+
+    caption: function (c) {
+      if (!c.state.cards.some(function (x) { return x.revealed; })) return captionStart(c.state);
+      return captionCard(c);
+    }
+  });
+
+  window.addEventListener('resize', function () { if (window.simdeck) window.simdeck.render(); });
+})();
+</script>
+</body>
+</html>
