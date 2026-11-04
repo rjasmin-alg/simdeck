@@ -1,0 +1,505 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-fgpp: a stepper. Left, user ana with her groups and directly applied PSO, the PSOs in the domain, and where the
+     password GPOs are linked; right, the password policies competing for ana as a rule table (kit view K4,
+     kit/ruletable.js, docs/sim-ui.md §12, with marks the page sets: the selection rule is direct first, then the
+     lowest precedence number, then the smallest GUID). One step looks at one tier (direct, group, domain); the last
+     names the winner and fills msDS-ResultantPSO. Model: sim.js; rules: SPEC.md; words: strings.js. The table and
+     the "winning row" box follow sims/win-gpo-precedence. -->
+<html lang="hr" data-sim="win-fgpp">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detaljna pravila lozinki: koji PSO pobjeđuje · simdeck</title>
+<meta name="description" content="Korisnica ana i PSO-ovi izravno i preko grupa: izravni prvi, zatim najmanji broj prednosti, kod iste prednosti manji GUID; inače pravilo domene.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-fgpp",
+  "title": {
+    "hr": "Detaljna pravila lozinki: koji PSO pobjeđuje",
+    "en": "Fine-grained password policies: which PSO wins"
+  },
+  "concept": {
+    "hr": "Jedno pravilo domene iz GPO-a na korijenu; PSO-ovi ga nadjačavaju po prednosti",
+    "en": "One domain policy from the domain root GPO; PSOs override it by precedence"
+  },
+  "summary": {
+    "hr": "Korisnica ana i PSO-ovi izravno i preko grupa: izravni prvi, zatim najmanji broj prednosti, kod iste prednosti manji GUID; inače pravilo domene.",
+    "en": "User ana and PSOs applied directly and through groups: direct first, then the lowest precedence number, ties to the smaller GUID; else the domain policy."
+  },
+  "tags": [
+    "group-policy"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-fgpp"]; colours only from kit tokens.
+   Layout: the user, the PSOs and the GPO links on the left; the competing policies (kit view K4) and the result box
+   on the right. */
+[data-sim="win-fgpp"] .fg {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 2.4fr);
+  gap: 1.4cqw;
+  height: 100%;
+  padding: 2cqh 1.4cqw;
+  font-size: 1.05rem;
+}
+[data-sim="win-fgpp"] .fg h2 { margin: 0 0 0.35rem; font-size: 1em; font-weight: 700; }
+[data-sim="win-fgpp"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-fgpp"] .fg-left { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+[data-sim="win-fgpp"] .fg-right { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+[data-sim="win-fgpp"] .fg-muted { color: var(--muted); font-style: italic; }
+[data-sim="win-fgpp"] .fg-small { font-size: var(--fs-sm); }
+
+/* user card */
+[data-sim="win-fgpp"] .fg-card {
+  padding: 0.4rem 0.7rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-fgpp"] .fg-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin-top: 0.25rem; }
+[data-sim="win-fgpp"] .fg-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.05rem 0.55rem; border: var(--line-w) solid var(--ink); border-radius: 1.2rem; background: var(--bg); line-height: 1.4;
+}
+[data-sim="win-fgpp"] .fg-user { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+[data-sim="win-fgpp"] .fg-user b { padding: 0.05rem 0.6rem; border: 0.22rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+
+/* PSO list */
+[data-sim="win-fgpp"] .fg-psos { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="win-fgpp"] .fg-pso {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.45rem;
+  padding: 0.2rem 0.55rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel);
+}
+[data-sim="win-fgpp"] .fg-pso[data-reach="false"] { border-style: dashed; color: var(--muted); background: var(--bg); }
+[data-sim="win-fgpp"] .fg-pso[data-mark="won"] { border: 0.22rem solid var(--ink); font-weight: 700; }
+[data-sim="win-fgpp"] .fg-pso[data-mark="beaten"] .fg-name,
+[data-sim="win-fgpp"] .fg-pso[data-mark="dropped"] .fg-name { text-decoration: line-through; }
+[data-sim="win-fgpp"] .fg-pso .fg-reach { font-size: var(--fs-sm); font-weight: 400; font-style: italic; }
+[data-sim="win-fgpp"] .fg-prec {
+  display: inline-grid; place-items: center; min-width: 1.7rem; height: 1.5rem; padding: 0 0.3rem;
+  border-radius: 0.75rem; background: var(--ink); color: var(--bg); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="win-fgpp"] .fg-pso[data-reach="false"] .fg-prec { background: var(--muted); }
+
+/* GPO links */
+[data-sim="win-fgpp"] .fg-box {
+  margin-top: 0.3rem;
+  padding: 0.25rem 0.6rem 0.35rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-fgpp"] .fg-sub { margin: 0.25rem 0 0 0.6rem; padding-left: 0.7rem; border-left: var(--line-w) solid var(--line); }
+[data-sim="win-fgpp"] .fg-here { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 400; }
+[data-sim="win-fgpp"] .fg-ounote { flex-basis: 100%; color: var(--muted); font-style: italic; }
+[data-sim="win-fgpp"] .fg-first { margin-top: 0; }
+[data-sim="win-fgpp"] .fg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; font-weight: 700; }
+[data-sim="win-fgpp"] .fg-kind {
+  display: inline-grid; place-items: center; min-width: 2.1rem; height: 1.5rem; padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink);
+  font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="win-fgpp"] .fg-gpo { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.4rem; margin-top: 0.2rem; }
+[data-sim="win-fgpp"] .fg-gpo .fg-chip { font-weight: 700; }
+[data-sim="win-fgpp"] .fg-gpo[data-kind="ou"] .fg-chip { border-style: dashed; }
+
+/* icons: pin (applied directly) and chain link (through a group), drawn in CSS so they follow the theme */
+[data-sim="win-fgpp"] .fg-pin,
+[data-sim="win-fgpp"] .sd-swatch[data-shape="fg-pin"] {
+  position: relative; display: inline-block; width: 0.7em; height: 1em; flex: none;
+  border: 0; border-radius: 0; background: transparent; color: var(--ink); vertical-align: -0.1em;
+}
+[data-sim="win-fgpp"] .fg-pin::before,
+[data-sim="win-fgpp"] .sd-swatch[data-shape="fg-pin"]::before {
+  content: ''; position: absolute; left: 0.05em; top: 0; width: 0.6em; height: 0.6em; border-radius: 50%; background: currentColor;
+}
+[data-sim="win-fgpp"] .fg-pin::after,
+[data-sim="win-fgpp"] .sd-swatch[data-shape="fg-pin"]::after {
+  content: ''; position: absolute; left: 0.29em; bottom: 0; width: 0.12em; height: 0.5em; background: currentColor;
+}
+[data-sim="win-fgpp"] .fg-link,
+[data-sim="win-fgpp"] .sd-swatch[data-shape="fg-link"] {
+  position: relative; display: inline-block; width: 1.1em; height: 0.6em; flex: none;
+  border: 0; border-radius: 0; background: transparent; color: var(--ink); vertical-align: 0;
+}
+[data-sim="win-fgpp"] .fg-link::before, [data-sim="win-fgpp"] .fg-link::after,
+[data-sim="win-fgpp"] .sd-swatch[data-shape="fg-link"]::before, [data-sim="win-fgpp"] .sd-swatch[data-shape="fg-link"]::after {
+  content: ''; position: absolute; top: 0; width: 0.62em; height: 0.6em; box-sizing: border-box;
+  border: 0.13em solid currentColor; border-radius: 0.3em;
+}
+[data-sim="win-fgpp"] .fg-link::before, [data-sim="win-fgpp"] .sd-swatch[data-shape="fg-link"]::before { left: 0; }
+[data-sim="win-fgpp"] .fg-link::after, [data-sim="win-fgpp"] .sd-swatch[data-shape="fg-link"]::after { right: 0; }
+[data-sim="win-fgpp"] .fg-via { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+
+/* the table's own bits */
+[data-sim="win-fgpp"] .sd-rt-table td .fg-muted { font-family: var(--sans); }
+[data-sim="win-fgpp"] .fg-guid { display: block; font-family: var(--mono); font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="win-fgpp"] [translate="no"].fg-sans { font-family: var(--sans); }
+[data-sim="win-fgpp"] .sd-rt-table td.sd-rt-no { white-space: normal; }
+/* Several rows change in one step, so a dropped (skip) or beaten mark cell can carry the highlight: keep its words
+   readable on it (the kit greys them; shared request in NOTES.md). */
+[data-sim="win-fgpp"] .sd-rt-table td.sd-rt-mark.sd-changed,
+[data-sim="win-fgpp"] .sd-rt-table td.sd-rt-mark.sd-changed .sd-rt-tag { color: var(--on-hl); }
+
+/* result box */
+[data-sim="win-fgpp"] .fg-result {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.5rem 0.9rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+  font-size: 1.05em;
+}
+[data-sim="win-fgpp"] .fg-result .fg-line { margin: 0; }
+[data-sim="win-fgpp"] .fg-result.fg-final { border: 0.22rem solid var(--ink); }
+[data-sim="win-fgpp"] .fg-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-fgpp"] .fg-result.sd-changed .sd-rt-verdict,
+[data-sim="win-fgpp"] .fg-result.sd-changed .fg-muted { color: var(--on-hl); }
+[data-sim="win-fgpp"] .fg-attr { overflow-wrap: anywhere; }
+
+/* Phone and portrait: the stage grows with its content; the left column above the table; the table scrolls in its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-fgpp"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-fgpp"] .fg { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Detaljna pravila lozinki: koji PSO pobjeđuje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var PRESET_WORDS = {
+    quillmoor: 'presetQuillmoor', 'two-groups': 'presetTwoGroups', 'direct-beats-group': 'presetDirect',
+    tie: 'presetTie', 'ou-gpo': 'presetOuGpo'
+  };
+  var MARK = { kept: 'hit', beaten: 'beaten', dropped: 'skip', won: 'win' };
+  var WHY = { precedence: 'whyPrecedence', guid: 'whyGuid', 'direct-first': 'whyDirectFirst', pso: 'whyPso', 'ou-gpo': 'whyOuGpo' };
+
+  /** Data (user, group, PSO, GPO and OU names, numbers, GUIDs) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function bold(text) { return h('b', null, data(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(key, vars) { return [' '].concat(rich(key, vars)); }
+  /** Names joined with the language's "and": the names stay data, the joining words are words. */
+  function list(names) {
+    var nodes = names.map(function (x) { return data(x); });
+    if (nodes.length === 1) return nodes[0];
+    var last = nodes.pop();
+    var head = nodes.reduce(function (acc, it) { return acc === null ? it : h('span', null, t.parts('listMore', { a: acc, b: it })); }, null);
+    return h('span', null, t.parts('list2', { a: head, b: last }));
+  }
+
+  function user(s) { return data(s.user); }
+  function pinIcon() { return h('span', { class: 'fg-pin', 'aria-hidden': 'true' }); }
+  function linkIcon() { return h('span', { class: 'fg-link', 'aria-hidden': 'true' }); }
+  function chars(n) { return t.n('chars', n); }
+  function lockText(n) { return n === 0 ? t('lockNever') : t.n('lockN', n); }
+  /** A name in the sans font: still data (translate="no"), but narrower than the mono default in the table. */
+  function name(text) { return h('span', { translate: 'no', class: 'fg-sans' }, String(text)); }
+  function cxText(on) { return t(on ? 'on' : 'off'); }
+  function settingsLine(st) {
+    return t('resultSettings', { min: chars(st.minLength), cx: cxText(st.complexity), lock: lockText(st.lockout) });
+  }
+  function domainRow(s) { return s.rows.filter(function (r) { return r.kind === 'domain'; })[0]; }
+  function rowOf(s, id, kind) { var k = -1; s.rows.forEach(function (r, i) { if (r.id === id && r.kind === kind) k = i; }); return k; }
+  function reachNode(r) {
+    if (r.via === 'direct') return h('span', { class: 'fg-via' }, pinIcon(), t('reachDirect'));
+    if (r.kind === 'pso') return h('span', { class: 'fg-via', title: t('reachGroup', { group: r.via }) }, linkIcon(), name(r.via));
+    if (r.kind === 'domain') return h('span', null, t('reachDomain'));
+    return name(r.via);
+  }
+
+  // ── left: the user, the PSOs, the GPO links ──
+
+  function renderLeft(c) {
+    var s = c.state, scene = L.sceneOf(c.params);
+    var direct = s.rows.filter(function (r) { return r.tier === 'direct'; });
+    var card = h('section', null,
+      h('h2', null, t.parts('userTitle', { user: user(s) })),
+      h('div', { class: 'fg-card' },
+        h('div', { class: 'fg-line fg-first' }, h('span', null, t('groupsLabel')),
+          s.groups.length ? s.groups.map(function (g) { return h('span', { class: 'fg-chip' }, linkIcon(), name(g)); })
+            : h('span', { class: 'fg-muted' }, t('noGroups'))),
+        h('div', { class: 'fg-line' }, h('span', null, t('directLabel')),
+          direct.length ? direct.map(function (r) { return h('span', { class: 'fg-chip' }, pinIcon(), name(r.id)); })
+            : h('span', { class: 'fg-muted' }, t('none')))));
+
+    var psos = h('section', null, h('h2', null, t('psoTitle')),
+      h('ul', { class: 'fg-psos' }, scene.psos.map(function (pso) {
+        var i = rowOf(s, pso.id, 'pso');
+        var targets = pso.appliesTo.length ? pso.appliesTo.map(function (a) {
+          return a === s.user ? h('span', { class: 'fg-via' }, pinIcon(), name(a))
+            : h('span', { class: 'fg-via' }, linkIcon(), name(a));
+        }) : [h('span', { class: 'fg-muted' }, t('appliesNobody'))];
+        return h('li', { class: 'fg-pso', dataset: { reach: String(i >= 0), mark: i >= 0 && s.marks[i] ? s.marks[i] : 'pending' } },
+          h('span', { class: 'fg-prec', translate: 'no', title: t('colPrec') }, String(pso.precedence)),
+          h('b', { class: 'fg-name' }, name(pso.id)), '→', targets,
+          i >= 0 ? null : h('span', { class: 'fg-reach' }, t('reachesNo')));
+      })));
+
+    var ddp = scene.gpos.filter(function (g) { return g.link === 'domain'; })[0];
+    var ouGpo = scene.gpos.filter(function (g) { return g.link === 'OU=Staff'; })[0];
+    function gpoPill(g, kind) {
+      return h('div', { class: 'fg-gpo', dataset: { kind: kind } },
+        h('span', { class: 'fg-chip' }, name(g.id)),
+        h('span', { class: 'fg-small' }, t('minChars', { min: chars(g.settings.minLength) })),
+        kind === 'ou' ? h('span', { class: 'fg-small fg-ounote' }, t('ouNote')) : null);
+    }
+    var gpos = h('section', null, h('h2', null, t('gpoTitle')),
+      h('div', { class: 'fg-box' },
+        h('div', { class: 'fg-head' }, data('D', 'fg-kind'), data(scene.domain)),
+        gpoPill(ddp, 'domain'),
+        h('div', { class: 'fg-sub' },
+          h('div', { class: 'fg-head' }, data('OU', 'fg-kind'), data('OU=Staff')),
+          ouGpo ? gpoPill(ouGpo, 'ou') : h('div', { class: 'fg-small fg-muted' }, t('noPwGpo')),
+          h('div', { class: 'fg-sub' },
+            h('div', { class: 'fg-head' }, data('OU', 'fg-kind'), data('OU=HQ'), '·',
+              h('span', { class: 'fg-here' }, pinIcon(), h('b', null, name(s.user)), h('span', { class: 'fg-small' }, t('userHereShort'))))))));
+    return h('div', { class: 'fg-left' }, card, psos, gpos);
+  }
+
+  // ── right: the competing policies as a rule table ──
+
+  function renderTable(c) {
+    var s = c.state, ev = s.event, done = s.winner !== null;
+    var at = !ev ? -1 : ev.kind === 'winner' ? s.winner : ev.kind === 'tier' && ev.kept >= 0 ? ev.kept : ev.rows[0];
+    var el = Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'specific',
+      title: h('span', null, t.parts('tableTitle', { user: user(s) })),
+      noLabel: t('colPolicy'),
+      columns: [{ key: 'reach', label: t('colReach') }, { key: 'prec', label: t('colPrec') }],
+      actionLabel: t('colMin'),
+      extra: [{ key: 'cx', label: t('colCx') }, { key: 'lock', label: t('colLock') }],
+      markLabel: t('colMark'),
+      stickyMark: true,
+      rows: s.rows.map(function (r, i) {
+        var tag = h('span', { class: 'sd-rt-tag', dataset: { k: r.kind === 'pso' ? 'dashed' : 'muted' } }, t(r.kind === 'pso' ? 'tagPso' : 'tagGpo'));
+        return {
+          no: name(r.id),
+          tags: [tag],
+          cells: {
+            reach: reachNode(r),
+            prec: r.precedence == null ? '—' : h('span', null, data(r.precedence), h('span', { class: 'fg-guid', translate: 'no', title: 'objectGUID' }, r.guid.slice(0, 8) + '…')),
+            cx: h('span', null, cxText(r.settings.complexity)),
+            lock: r.settings.lockout === 0 ? h('span', null, t('lockNever')) : r.settings.lockout
+          },
+          action: r.settings.minLength,
+          hit: null,
+          mark: s.marks[i] ? MARK[s.marks[i]] : null,
+          note: s.why[i] ? [{ k: 'muted', text: t(WHY[s.why[i]]) }] : null
+        };
+      }),
+      at: at,
+      subject: ev ? { mark: s.user, c: 1 } : null,
+      done: done,
+      words: { hit: t('markKept'), beaten: t('markBeaten'), win: t('markWin'), skip: t('markDropped') }
+    });
+    // Several rows change in one step (a tier, or everything dropped at once): mark each, not only the pointer's row.
+    if (ev && ev.kind !== 'winner') {
+      var trs = el.querySelectorAll('tbody tr');
+      ev.rows.forEach(function (i) {
+        var cell = trs[i] && trs[i].querySelector('.sd-rt-mark');
+        if (cell) cell.classList.add('sd-changed');
+      });
+    }
+    return el;
+  }
+
+  function renderResult(c) {
+    var s = c.state, done = s.winner !== null;
+    var changed = !!c.prev && (done || c.prev.kept !== s.kept);
+    var body = [];
+    if (done) {
+      var r = s.rows[s.resultant.row];
+      body.push(h('div', { class: 'fg-line' }, h('span', null, t.parts('resultFinal', { user: user(s) })),
+        Simdeck.ruleTable.verdict(true, ''), h('b', null, name(r.id)), h('span', null, settingsLine(r.settings))));
+    } else if (s.kept >= 0) {
+      var k = s.rows[s.kept];
+      body.push(h('div', { class: 'fg-line' }, h('span', null, t('resultKept')), h('b', null, name(k.id)), h('span', null, settingsLine(k.settings))));
+    } else {
+      body.push(h('div', { class: 'fg-line' }, h('span', null, t('resultNow')), h('span', { class: 'fg-muted' }, t('resultNone'))));
+    }
+    var attr = !done ? data('—') : s.resultant.resultantPso
+      ? h('b', { class: 'fg-attr' }, data('CN=' + s.resultant.resultantPso + ',CN=Password Settings Container,…'))
+      : h('span', { class: 'fg-muted' }, t('resultEmpty'));
+    body.push(h('div', { class: 'fg-line' }, data('msDS-ResultantPSO:'), attr));
+    return h('section', { class: 'fg-result' + (done ? ' fg-final' : '') + (changed ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '') }, body);
+  }
+
+  // ── captions ──
+
+  function captionStart(s, p) {
+    var out = rich('capStart', { user: user(s), ddp: data('Default Domain Policy') });
+    if (p.ouGpo) out = out.concat(sentence('capStartOu', { gpo: data('Staff Passwords'), ou: data('OU=Staff'), user: user(s) }));
+    if (!s.rows.some(function (r) { return r.kind === 'pso'; })) out = out.concat(sentence('capStartNone', { user: user(s) }));
+    return out;
+  }
+
+  function beatenSentences(s, ev) {
+    var kept = s.rows[ev.kept], out = [];
+    ev.beaten.forEach(function (b) {
+      var r = s.rows[b.row];
+      if (b.by === 'guid') {
+        out = out.concat(sentence('capBeatenGuid', { pso: bold(kept.id), loser: data(r.id), p: data(kept.precedence),
+          g1: data(kept.guid.slice(0, 8)), g2: data(r.guid.slice(0, 8)) }));
+      } else out = out.concat(sentence('capBeatenPrec', { loser: data(r.id), q: data(r.precedence) }));
+    });
+    return out;
+  }
+  function ouSentences(s, ev, key) {
+    var out = [];
+    ev.dropped.forEach(function (d) {
+      if (d.by !== 'ou-gpo') return;
+      var r = s.rows[d.row];
+      out = out.concat(sentence(key, { gpo: data(r.id), ou: data(r.via) }));
+    });
+    return out;
+  }
+  function lowestGroup(s) {
+    var g = s.rows.filter(function (r) { return r.tier === 'group'; });
+    return g.length ? g[0] : null;   // rows are sorted by precedence within the tier
+  }
+
+  function captionEvent(c) {
+    var s = c.state, ev = s.event, n = c.n;
+    if (ev.kind === 'tier') {
+      if (ev.tier === 'domain') return rich('capDomainKept', { n: n, user: user(s), ddp: data(s.rows[ev.kept].id) }).concat(ouSentences(s, ev, 'capOuDropped'));
+      var kept = s.rows[ev.kept];
+      var names = list(ev.rows.map(function (i) { return s.rows[i].id; }));
+      var out;
+      if (ev.rows.length === 1) {
+        out = ev.tier === 'direct' ? rich('capDirectOne', { n: n, pso: bold(kept.id), user: user(s) })
+          : rich('capGroupOne', { n: n, pso: bold(kept.id), group: data(kept.via), prec: t('prec', { p: kept.precedence }) });
+      } else if (ev.tier === 'direct') {
+        out = rich('capDirectMany', { n: n, list: names, pso: bold(kept.id), p: data(kept.precedence) });
+      } else if (ev.beaten.some(function (b) { return b.by === 'guid'; })) {
+        out = rich('capGroupManyFirst', { n: n, list: names });
+      } else {
+        out = rich('capGroupMany', { n: n, list: names, pso: bold(kept.id), p: data(kept.precedence) });
+      }
+      return out.concat(beatenSentences(s, ev));
+    }
+    // drop: everything below the tier that kept a row
+    var k = s.rows[ev.kept];
+    if (ev.tier === 'group') {
+      var g = lowestGroup(s);
+      return rich('capDropDirect', { n: n, group: data(g.id), q: data(g.precedence) }).concat(ouSentences(s, ev, 'capOuDroppedToo'));
+    }
+    var d = domainRow(s);
+    return rich('capDropDomain', { n: n, pso: bold(k.id), ddp: data(d.id), min: chars(d.settings.minLength), user: user(s) })
+      .concat(ouSentences(s, ev, 'capOuDroppedToo'));
+  }
+
+  function captionWinner(c) {
+    var s = c.state;
+    var w = s.rows[s.winner], d = domainRow(s);
+    if (w.kind !== 'pso') return rich('capWinDomain', { user: user(s) });
+    var out;
+    var g = lowestGroup(s);
+    var tie = s.why.indexOf('guid') >= 0;
+    if (w.tier === 'direct' && g) out = rich('capWinDirect', { pso: bold(w.id), p: data(w.precedence), group: data(g.id), q: data(g.precedence) });
+    else if (tie) out = rich('capWinTie', { pso: bold(w.id) });
+    else out = rich('capWin', { pso: bold(w.id), p: data(w.precedence) });
+    if (w.settings.minLength < d.settings.minLength) out = out.concat(sentence('capWeak', { n: w.settings.minLength, pso: data(w.id) }));
+    if (w.settings.lockout !== d.settings.lockout) out = out.concat(sentence('capWhole', { a: lockText(w.settings.lockout), b: lockText(d.settings.lockout) }));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'directPso', type: 'toggle', label: t('directPso'), resets: true },
+      { key: 'group2', type: 'toggle', label: t('group2'), resets: true },
+      { key: 'samePrecedence', type: 'toggle', label: t('samePrecedence'), resets: true },
+      { key: 'ouGpo', type: 'toggle', label: t('ouGpo'), resets: true },
+      { key: 'noStaff', type: 'toggle', label: t('noStaff'), resets: true }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { shape: 'fg-link', label: t('legLink') },
+      { shape: 'fg-pin', label: t('legPin') },
+      { shape: 'rt-hit', label: t('legKept') },
+      { shape: 'rt-beaten', label: t('legBeaten') },
+      { shape: 'rt-skip', label: t('legDropped') },
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'fg' }, renderLeft(c), h('div', { class: 'fg-right' }, renderTable(c), renderResult(c))));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (!s.event) return captionStart(s, c.params);
+      if (s.event.kind === 'winner') return captionWinner(c);
+      return captionEvent(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
