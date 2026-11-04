@@ -1,0 +1,653 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-terraform-drift: desired vs state vs real; plan shows the diff. Top: one row per resource across three columns
+     (configuration, state, real infrastructure) and the plan's badge for it; below: the output of this step in the
+     tool family's notation. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-terraform-drift">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infrastruktura kao kod: konfiguracija, stanje i odmak · simdeck</title>
+<meta name="description" content="Promijeni infrastrukturu ručno, uredi konfiguraciju ili izbriši zapis iz stanja pa pokreni plan: osvježavanje čita što stanje zna, razlika kaže što će apply.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-terraform-drift",
+  "title": {
+    "hr": "Infrastruktura kao kod: konfiguracija, stanje i odmak",
+    "en": "Infrastructure as code: configuration, state and drift"
+  },
+  "concept": {
+    "hr": "Željeno, zapisano i stvarno: plan pokazuje razliku",
+    "en": "Desired, recorded and real: plan shows the difference"
+  },
+  "summary": {
+    "hr": "Promijeni infrastrukturu ručno, uredi konfiguraciju ili izbriši zapis iz stanja pa pokreni plan: osvježavanje čita što stanje zna, razlika kaže što će apply.",
+    "en": "Change infrastructure by hand, edit the configuration or drop a state entry, then run plan: refresh reads what state knows, the diff says what apply will do."
+  },
+  "tags": [
+    "automation"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-terraform-drift"]; colours only from kit tokens.
+   Layout: the resource grid (configuration | state | real | plan) on top, the output of the step below. */
+[data-sim="lnx-terraform-drift"] .tf {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-terraform-drift"] .tf-mono { font-family: var(--mono); }
+[data-sim="lnx-terraform-drift"] .tf-muted { color: var(--muted); }
+
+/* the grid */
+[data-sim="lnx-terraform-drift"] .tf-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(8.5rem, 0.5fr);
+  gap: 0.25rem 0.6rem;
+  align-items: stretch;
+  min-width: 0;
+}
+[data-sim="lnx-terraform-drift"] .tf-grid.tf-nostate { grid-template-columns: minmax(0, 1fr) 9rem minmax(0, 1fr) minmax(8.5rem, 0.5fr); }
+[data-sim="lnx-terraform-drift"] .tf-colhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; border-bottom: 0.15rem solid var(--ink); padding: 0 0.2rem 0.1rem; min-width: 0; }
+[data-sim="lnx-terraform-drift"] .tf-colhead b { font-size: var(--fs-md); }
+[data-sim="lnx-terraform-drift"] .tf-colhead span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-terraform-drift"] .tf-colhead .tf-hand { width: 1.1em; height: 1.1em; align-self: center; }
+[data-sim="lnx-terraform-drift"] .tf-strip {
+  grid-column: 2;
+  border: var(--line-w) dashed var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* a cell: a card, or a ghost where the resource is missing */
+[data-sim="lnx-terraform-drift"] .tf-card {
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.05rem 0.5rem 0.1rem;
+  min-width: 0;
+}
+[data-sim="lnx-terraform-drift"] .tf-card.tf-lone { border-style: dashed; }
+[data-sim="lnx-terraform-drift"] .tf-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; font-family: var(--mono); font-weight: 700; line-height: 1.2; padding: 0 0.2rem; }
+[data-sim="lnx-terraform-drift"] .tf-head i { font-style: normal; font-weight: 400; color: var(--muted); }
+[data-sim="lnx-terraform-drift"] .tf-head.sd-changed, [data-sim="lnx-terraform-drift"] .tf-line.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-terraform-drift"] .tf-head.sd-changed i { color: var(--on-hl); }
+[data-sim="lnx-terraform-drift"] .tf-attrs { display: flex; flex-direction: column; gap: 0.05rem; }
+[data-sim="lnx-terraform-drift"] .tf-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  line-height: 1.12;
+  padding: 0 0.2rem;
+  border: 0.12rem solid transparent;
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-terraform-drift"] .tf-line.tf-differs { border-style: dashed; border-color: var(--ink); font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-mark { font-family: var(--sans); font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-fresh {
+  font-size: var(--fs-sm);
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 0 0.3rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 700;
+}
+[data-sim="lnx-terraform-drift"] .tf-fresh.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-terraform-drift"] .tf-fresh-gone .tf-attrs { text-decoration: line-through; text-decoration-thickness: 0.12em; color: var(--muted); }
+[data-sim="lnx-terraform-drift"] .tf-hand { display: inline-block; width: 1em; height: 1em; vertical-align: -0.12em; fill: currentColor; flex: none; }
+[data-sim="lnx-terraform-drift"] .tf-ghost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 0.5rem;
+  border: var(--line-w) dashed var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  padding: 0.2rem 0.4rem;
+  min-width: 0;
+  text-align: center;
+}
+[data-sim="lnx-terraform-drift"] .tf-ghost s { font-family: var(--mono); }
+[data-sim="lnx-terraform-drift"] .tf-ghost.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); box-shadow: none; }
+
+/* the plan column: badges, each with its own shape */
+[data-sim="lnx-terraform-drift"] .tf-plan { display: flex; align-items: center; gap: 0.4rem; min-width: 0; padding: 0 0.2rem; font-size: var(--fs-sm); }
+[data-sim="lnx-terraform-drift"] .tf-plan.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; border-radius: var(--radius-sm); }
+[data-sim="lnx-terraform-drift"] .tf-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  padding: 0 0.3rem;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.1rem;
+  border: 0.18rem solid var(--ink);
+  background: var(--bg);
+  color: var(--ink);
+  flex: none;
+}
+[data-sim="lnx-terraform-drift"] .tf-badge[data-a='create'] { border-radius: 50%; border-color: var(--ok); color: var(--ok); }
+[data-sim="lnx-terraform-drift"] .tf-badge[data-a='update'] { border-radius: 0.6rem; border-color: var(--warn); color: var(--ink); }
+[data-sim="lnx-terraform-drift"] .tf-badge[data-a='delete'] { border-radius: 0; border-color: var(--danger); color: var(--danger); border-width: 0.25rem; }
+[data-sim="lnx-terraform-drift"] .tf-badge[data-a='replace'] { border-radius: 1.1rem; border-color: var(--danger); color: var(--danger); border-style: double; border-width: 0.32rem; padding: 0 0.5rem; }
+
+/* the output of the step */
+[data-sim="lnx-terraform-drift"] .tf-out {
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+[data-sim="lnx-terraform-drift"] .tf-out-bar { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; align-items: baseline; border-bottom: var(--line-w) solid var(--line); padding: 0.1rem 0.6rem; }
+[data-sim="lnx-terraform-drift"] .tf-out-bar b { font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-cmd { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-phase { font-size: var(--fs-sm); border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); padding: 0 0.4rem; }
+[data-sim="lnx-terraform-drift"] .tf-lines { display: flex; flex-direction: column; padding: 0.15rem 0.6rem; min-height: 0; }
+[data-sim="lnx-terraform-drift"] .tf-lines.tf-two { display: block; column-count: 2; column-gap: 1.6rem; column-rule: var(--line-w) dashed var(--line); }
+[data-sim="lnx-terraform-drift"] .tf-two .tf-ln { break-inside: avoid; }
+[data-sim="lnx-terraform-drift"] .tf-ln { font-family: var(--mono); font-size: 0.9rem; line-height: 1.22; white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-sim="lnx-terraform-drift"] .tf-ln-head { font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-ln-note { font-family: var(--sans); font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-ln-sum { font-weight: 700; border-top: var(--line-w) dashed var(--line); margin-top: 0.15rem; padding-top: 0.1rem; }
+[data-sim="lnx-terraform-drift"] .tf-ln-err { font-weight: 700; color: var(--danger); }
+[data-sim="lnx-terraform-drift"] .tf-ln-hand { font-family: var(--sans); display: flex; gap: 0.4rem; align-items: baseline; font-weight: 700; }
+[data-sim="lnx-terraform-drift"] .tf-ln-text { font-family: var(--sans); }
+
+/* kit 0.6.0: .sd-ctl's display: flex beats the hidden attribute that a param's visible() sets (see lnx-rsync-delete) */
+[data-sim="lnx-terraform-drift"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape^='tf-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape^='tf-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); font-family: var(--mono); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-differs'] { border-style: dashed; }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-differs']::after { content: '!'; font-family: var(--sans); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-missing'] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-create'] { border-radius: 50%; border-color: var(--ok); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-create']::after { content: '+'; color: var(--ok); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-update'] { border-color: var(--warn); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-update']::after { content: '~'; }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-delete'] { border-radius: 0; border-color: var(--danger); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-delete']::after { content: '-'; color: var(--danger); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-replace'] { border-radius: 0.5em; border-color: var(--danger); border-style: double; border-width: 0.22rem; }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-replace']::after { content: '±'; color: var(--danger); }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-hand'] { border-color: transparent; background: transparent; }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-hand']::after { content: none; }
+[data-sim="lnx-terraform-drift"] .sd-swatch[data-shape='tf-hand'] .tf-hand { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--ink); }
+
+/* Phone and portrait: one card per row, the column named in each cell; the stage grows with its content. */
+[data-sim="lnx-terraform-drift"] .tf-cellname { display: none; }
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-terraform-drift"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-terraform-drift"] .tf { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-terraform-drift"] .tf-grid, [data-sim="lnx-terraform-drift"] .tf-grid.tf-nostate { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-terraform-drift"] .tf-colhead { display: none; }
+  [data-sim="lnx-terraform-drift"] .tf-strip { grid-column: 1; }
+  [data-sim="lnx-terraform-drift"] .tf-cellname { display: block; font-size: var(--fs-sm); color: var(--muted); font-family: var(--sans); font-weight: 400; }
+  [data-sim="lnx-terraform-drift"] .tf-rowgap { height: 0.4rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Infrastruktura kao kod: konfiguracija, stanje i odmak</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (addresses, IDs, values, commands, the tool's output) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  /** A value as the configuration language writes it: strings quoted, numbers bare. */
+  function val(v) { return v === null || v === undefined ? 'null' : typeof v === 'string' ? '"' + v + '"' : String(v); }
+
+  /** Caption parts: t.parts (vars may be nodes), then *English term* in <em lang="en"> (terms the glossary lacks). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var text = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (text === null) { out.push(p); return; }
+      text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  /** The person icon of a hand change (an inline SVG: a head and shoulders). */
+  function hand() {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'tf-hand');
+    svg.setAttribute('aria-hidden', 'true');
+    var c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', '12'); c.setAttribute('cy', '7'); c.setAttribute('r', '4.5');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', 'M3 22c0-5 4-8.5 9-8.5s9 3.5 9 8.5z');
+    svg.append(c, p);
+    return svg;
+  }
+
+  var SYM = { create: '+', update: '~', delete: '-', replace: '-/+' };
+  var ACT = { create: 'actCreate', update: 'actUpdate', delete: 'actDelete', replace: 'actReplace' };
+  function badge(action) { return h('span', { class: 'tf-badge', dataset: { a: action }, translate: 'no' }, SYM[action]); }
+
+  // ── stage: the grid ──
+
+  function has(s, key) { return s.changed.indexOf(key) >= 0; }
+
+  /** Are config, state and real values of one attribute different (among the columns that have the resource)? */
+  function differs(vals) {
+    var seen = vals.filter(function (v) { return v !== undefined; }).map(val);
+    return seen.some(function (v) { return v !== seen[0]; });
+  }
+
+  function attrLine(key, v, opts) {
+    return h('div', { class: 'tf-line' + (opts.diff ? ' tf-differs' : '') + (opts.changed ? ' sd-changed' : '') },
+      opts.diff ? h('span', { class: 'tf-mark', 'aria-hidden': 'true' }, '!') : null,
+      opts.hand ? hand() : null,
+      data(key + ' = ' + val(v)), opts.extra || null);
+  }
+
+  function cellName(key) { return h('span', { class: 'tf-cellname' }, t(key)); }
+
+  function ghost(key, opts) {
+    return h('div', { class: 'tf-ghost' + (opts.changed ? ' sd-changed' : '') },
+      opts.id ? h('s', { translate: 'no' }, opts.id) : null, h('span', null, t(key)));
+  }
+
+  function row(s, r, showState, prevHand) {
+    var cfg = r.addr ? s.config[r.addr] : null;
+    var st = r.addr ? s.state[r.addr] : null;
+    var real = r.id ? s.real[r.id] : null;
+    var fresh = s.refreshed && r.addr && r.addr in s.refreshed ? s.refreshed[r.addr] : undefined;
+    var keys = L.keysOf(r.type);
+    var lone = [cfg, st, real].filter(Boolean).length === 1;
+    var diffOf = {};
+    keys.forEach(function (k) {
+      diffOf[k] = differs([cfg ? cfg[k] : undefined, st ? st.attrs[k] : undefined, real ? real.attrs[k] : undefined]);
+    });
+    var cells = [];
+
+    // configuration
+    if (cfg) {
+      cells.push(h('div', { class: 'tf-card' + (lone ? ' tf-lone' : '') }, cellName('colConfig'),
+        h('div', { class: 'tf-head' + (has(s, 'config:' + r.addr) ? ' sd-changed' : '') }, data(r.addr)),
+        h('div', { class: 'tf-attrs' }, keys.map(function (k) {
+          return attrLine(k, cfg[k], { diff: diffOf[k], changed: has(s, 'config:' + r.addr + ':' + k) || has(s, 'config:' + r.addr) });
+        }))));
+    } else {
+      cells.push(ghost(r.addr ? 'notDeclared' : 'unmanaged', { changed: r.addr && has(s, 'unconfig:' + r.addr) }));
+    }
+
+    // state
+    if (!showState) {
+      cells.push(null);
+    } else if (st) {
+      var gone = fresh === null;
+      cells.push(h('div', { class: 'tf-card' + (lone ? ' tf-lone' : '') + (gone ? ' tf-fresh-gone' : '') }, cellName('colState'),
+        h('div', { class: 'tf-head' + (has(s, 'state:' + r.addr) ? ' sd-changed' : '') }, data(r.addr), h('i', { translate: 'no' }, '→ ' + st.id)),
+        gone ? h('div', { class: 'tf-line' }, h('span', { class: 'tf-fresh' + (has(s, 'fresh:' + r.addr) ? ' sd-changed' : '') }, '↻ ' + t('freshGone'))) : null,
+        h('div', { class: 'tf-attrs' }, keys.map(function (k) {
+          var extra = null;
+          if (fresh && val(fresh.attrs[k]) !== val(st.attrs[k])) {
+            extra = h('span', { class: 'tf-fresh' + (has(s, 'fresh:' + r.addr) ? ' sd-changed' : '') }, '↻ ' + t('freshRead') + ' ', data(val(fresh.attrs[k])));
+          }
+          return attrLine(k, st.attrs[k], { diff: diffOf[k], changed: has(s, 'state:' + r.addr + ':' + k) || has(s, 'state:' + r.addr), extra: extra });
+        }))));
+    } else {
+      cells.push(ghost('notInState', { changed: r.addr && has(s, 'state:' + r.addr) }));
+    }
+
+    // real
+    if (real) {
+      var made = has(s, 'real:' + r.id);
+      cells.push(h('div', { class: 'tf-card' + (lone ? ' tf-lone' : '') }, cellName('colReal'),
+        h('div', { class: 'tf-head' + (made ? ' sd-changed' : '') },
+          prevHand[r.id] === 'create' ? hand() : null, data(r.id), h('i', { translate: 'no' }, r.type)),
+        h('div', { class: 'tf-attrs' }, keys.map(function (k) {
+          var ch = has(s, 'real:' + r.id + ':' + k);
+          return attrLine(k, real.attrs[k], { diff: diffOf[k], changed: ch || made, hand: prevHand[r.id + ':' + k] });
+        }))));
+    } else {
+      cells.push(ghost('notReal', { id: r.stateId, changed: r.stateId && has(s, 'gone:' + r.stateId) }));
+    }
+
+    // plan
+    var entry = s.plan && r.addr ? s.plan.filter(function (x) { return x.addr === r.addr; })[0] : null;
+    var planCell;
+    if (entry) planCell = h('div', { class: 'tf-plan' + (has(s, 'plan:' + r.addr) ? ' sd-changed' : '') }, cellName('colPlan'), badge(entry.action), h('span', null, t(ACT[entry.action])));
+    else if (s.phase && s.phase.at === 'refresh' && r.addr && (s.config[r.addr] || s.state[r.addr])) planCell = h('div', { class: 'tf-plan tf-muted' }, cellName('colPlan'), '… ' + t('planWait'));
+    else if (s.plan && r.addr) planCell = h('div', { class: 'tf-plan tf-muted' }, cellName('colPlan'), '— ' + t('planNone'));
+    else planCell = h('div', { class: 'tf-plan' });
+    cells.push(planCell);
+    return cells;
+  }
+
+  /** Hand changes stay marked with the person icon until a later apply or edit overwrites them. */
+  function handMarks(c) {
+    var marks = {};
+    var o = L.norm(c.params);
+    for (var n = 1; n <= c.n; n++) {
+      var a = L.actionAt(o.script, n);
+      if (!a) continue;
+      if (a.op === 'apply') marks = {};
+      if (a.op === 'hand' && a.kind === 'create') marks[a.id] = 'create';
+      if (a.op === 'hand' && a.kind === 'edit') {
+        var id = null, st = c.state;
+        Object.keys(st.real).forEach(function (k) { if (st.real[k].type === a.type && st.real[k].attrs.name === a.name) id = k; });
+        if (id) marks[id + ':' + a.key] = true;
+      }
+    }
+    return marks;
+  }
+
+  function grid(s, c) {
+    var o = L.norm(c.params), prevHand = handMarks(c);
+    var handNow = s.out.some(function (l) { return l.kind === 'hand'; });
+    var rows = L.rows(s);
+    var kids = [
+      h('div', { class: 'tf-colhead' }, h('b', null, t('colConfig')), h('span', null, t('colConfigSub'))),
+      o.showState ? h('div', { class: 'tf-colhead' }, h('b', null, t('colState')), h('span', null, t('colStateSub'))) : h('div', { class: 'tf-colhead' }),
+      h('div', { class: 'tf-colhead' }, handNow ? hand() : null, h('b', null, t('colReal')), h('span', null, t('colRealSub'))),
+      h('div', { class: 'tf-colhead' }, h('b', null, t('colPlan')))
+    ];
+    if (!o.showState) kids.push(h('div', { class: 'tf-strip', style: { gridRow: '2 / span ' + Math.max(1, rows.length) } }, t('stateHidden')));
+    rows.forEach(function (r) {
+      row(s, r, o.showState, prevHand).forEach(function (cell) { if (cell) kids.push(cell); });
+      kids.push(h('div', { class: 'tf-cellname tf-rowgap' }));
+    });
+    return h('div', { class: 'tf-grid' + (o.showState ? '' : ' tf-nostate') }, kids);
+  }
+
+  // ── stage: the output of the step ──
+
+  function ln(text, cls) { return h('div', { class: 'tf-ln' + (cls ? ' ' + cls : ''), translate: 'no' }, text); }
+
+  /** One resource block as the tool prints it: attributes in name order, '=' aligned, unchanged ones counted. */
+  function block(addr, sym, rowsIn, hidden) {
+    var parts = addr.split('.'), rows = rowsIn.slice().sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+    var w = rows.reduce(function (m, x) { return Math.max(m, x.key.length); }, 0);
+    var out = [ln((sym.length > 1 ? '' : '  ') + sym + ' resource "' + parts[0] + '" "' + parts[1] + '" {')];
+    rows.forEach(function (x) {
+      var k = x.key + new Array(w - x.key.length + 1).join(' ');
+      out.push(ln('      ' + x.sym + ' ' + k + ' = ' + x.text + (x.forces ? ' # forces replacement' : '')));
+    });
+    if (hidden) out.push(ln('        # (' + hidden + ' unchanged attribute' + (hidden === 1 ? '' : 's') + ' hidden)', 'tf-muted'));
+    out.push(ln('    }'));
+    return out;
+  }
+
+  function changed(addr, diffs, sym) {
+    return block(addr, sym, diffs.map(function (d) { return { key: d.key, sym: '~', text: val(d.from) + ' -> ' + val(d.to), forces: d.forces }; }),
+      L.keysOf(L.typeOf(addr)).length - diffs.length);
+  }
+  function whole(addr, attrs, sym) {
+    return block(addr, sym, Object.keys(attrs).map(function (k) {
+      return { key: k, sym: sym, text: sym === '-' ? val(attrs[k]) + ' -> null' : val(attrs[k]) };
+    }), 0);
+  }
+
+  var WILL = { create: 'will be created', update: 'will be updated in-place', delete: 'will be destroyed', replace: 'must be replaced' };
+
+  function outLine(l, s) {
+    switch (l.kind) {
+      case 'refreshing': return ln(l.addr + ': Refreshing state... [id=' + l.id + ']');
+      case 'outsideHead': return h('div', { class: 'tf-ln tf-ln-note' }, t('outsideHead'));
+      case 'outside':
+        if (l.change === 'deleted') return [ln('  # ' + l.addr + ' has been deleted', 'tf-ln-head')].concat(whole(l.addr, s.state[l.addr].attrs, '-'));
+        return [ln('  # ' + l.addr + ' has changed', 'tf-ln-head')].concat(changed(l.addr, l.diffs, '~'));
+      case 'action': {
+        var head = [ln('  # ' + l.addr + ' ' + WILL[l.action], 'tf-ln-head')];
+        if (l.action === 'create') return head.concat(whole(l.addr, s.config[l.addr], '+'));
+        if (l.action === 'delete') {
+          head.push(ln('  # (because ' + l.addr + ' is not in configuration)', 'tf-ln-head'));
+          var from = s.refreshed && s.refreshed[l.addr] ? s.refreshed[l.addr].attrs : s.state[l.addr].attrs;
+          return head.concat(whole(l.addr, from, '-'));
+        }
+        return head.concat(changed(l.addr, l.diffs, SYM[l.action]));
+      }
+      case 'summary': return ln('Plan: ' + l.add + ' to add, ' + l.change + ' to change, ' + l.destroy + ' to destroy.', 'tf-ln-sum');
+      case 'nochanges': return ln('No changes. Your infrastructure matches the configuration.', 'tf-ln-sum');
+      case 'refreshOnly': return ln('This is a refresh-only plan, so the tool will not take any actions to undo these.', 'tf-ln-sum');
+      case 'done':
+        if (l.action === 'delete') return ln(l.addr + ': Destruction complete');
+        if (l.action === 'update') return ln(l.addr + ': Modifications complete [id=' + l.id + ']');
+        if (l.action === 'replace') return [ln(l.addr + ': Destruction complete'), ln(l.addr + ': Creation complete [id=' + l.id + ']')];
+        return ln(l.addr + ': Creation complete [id=' + l.id + ']');
+      case 'applied': return ln('Apply complete! Resources: ' + l.add + ' added, ' + l.change + ' changed, ' + l.destroy + ' destroyed.', 'tf-ln-sum');
+      case 'error': return ln('Error: creating ' + l.addr + ': a ' + l.type + ' named "' + l.name + '" already exists (' + l.clash + ')', 'tf-ln-err');
+      case 'removed': return [ln('Removed ' + l.addr), ln('Successfully removed 1 resource instance(s).', 'tf-ln-sum')];
+      case 'notInState': return ln('Error: ' + l.addr + ' is not in state', 'tf-ln-err');
+      case 'imported': return [ln(l.addr + ': Importing from ID "' + l.id + '"...'), ln('Import successful!', 'tf-ln-sum')];
+      case 'importError': return ln('Error: cannot import ' + l.addr + ' (' + l.id + '): ' + l.why, 'tf-ln-err');
+      case 'hand': {
+        var vars = { id: data(l.id), key: data(l.key || ''), from: data(val(l.from)), to: data(val(l.to)), name: data(l.name || '') };
+        var key = l.what === 'edit' ? 'handEdit' : l.what === 'delete' ? 'handDelete' : 'handCreate';
+        return h('div', { class: 'tf-ln tf-ln-hand' }, hand(), h('span', null, t.parts(key, vars)));
+      }
+      case 'edit':
+        return [h('div', { class: 'tf-ln tf-ln-note' }, t('editHead'))].concat(l.changes.map(function (x) {
+          var k = x.add ? 'editAdd' : x.remove ? 'editRemove' : 'editSet';
+          return h('div', { class: 'tf-ln tf-ln-text' }, '  ', t.parts(k, { addr: data(x.addr), key: data(x.key || ''), from: data(val(x.from)), to: data(val(x.to)) }));
+        }));
+      default: return null;
+    }
+  }
+
+  var PHASE = { 1: 'phaseRefresh', 2: 'phaseDiff' };
+
+  function output(s) {
+    var cmd = s.out.filter(function (l) { return l.kind === 'cmd'; })[0];
+    var bar = [h('b', null, t('outTitle'))];
+    if (cmd) {
+      bar.push(data('$ ' + cmd.text, 'tf-cmd'));
+      if (cmd.phase) bar.push(h('span', { class: 'tf-phase' }, t(cmd.phase === 2 && /^apply/.test(cmd.text) ? 'phaseWrite' : PHASE[cmd.phase])));
+    }
+    var body = [].concat.apply([], s.out.filter(function (l) { return l.kind !== 'cmd'; }).map(function (l) { return outLine(l, s); }))
+      .filter(Boolean);
+    if (!s.out.length) body = [h('div', { class: 'tf-ln tf-ln-text tf-muted' }, t('outEmpty'))];
+    // long output (over 10 lines) flows into two columns, so the grid above keeps its height
+    return h('div', { class: 'tf-out' }, h('div', { class: 'tf-out-bar' }, bar),
+      h('div', { class: 'tf-lines' + (body.length > 10 ? ' tf-two' : '') }, body));
+  }
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'tf' }, grid(s, c), output(s)));
+  }
+
+  // ── captions ──
+
+  var START = { 'drift-revert': 'capStartRevert', 'hand-delete': 'capStartDelete', 'hand-create': 'capStartCreate',
+    'state-lost': 'capStartLost', 'accept-drift': 'capStartAccept', 'edit-config': 'capStartEdit', 'import': 'capStartImport' };
+
+  /** The first real object nobody's state points to, if any (rule 5, 6). */
+  function unmanaged(s) {
+    var ids = {};
+    Object.keys(s.state).forEach(function (a) { ids[s.state[a].id] = true; });
+    return Object.keys(s.real).sort().filter(function (id) { return !ids[id]; })[0] || null;
+  }
+
+  function caption(c) {
+    var s = c.state, o = L.norm(c.params), ev = s.ev[0];
+    if (c.n === 0 || !ev) return rich(START[o.script]);
+    var v = function (x) { return data(val(x)); };
+    if (ev.kind === 'apply') {
+      if (ev.error) return rich('capApplyClash', { type: data(ev.error.type), name: data(val(ev.error.name)), id: data(ev.error.clash) });
+      var acts = ev.actions;
+      if (ev.counts.add === 3 && acts.length === 3 && acts.every(function (a) { return a === 'create'; })) return rich('capApplyCreate');
+      if (acts.length === 1 && acts[0] === 'update') {
+        var d = s.plan[0].diffs[0];
+        return rich('capApplyRevert', { key: data(d.key), want: v(d.to), id: data(s.plan[0].id) });
+      }
+      if (acts.indexOf('replace') >= 0) {
+        var rep = s.out.filter(function (l) { return l.kind === 'done' && l.action === 'replace'; })[0];
+        return rich('capApplyEdit', { id: data(rep.id) });
+      }
+      return rich('capApplyOther');
+    }
+    if (ev.kind === 'hand') {
+      if (ev.what === 'edit') return rich('capHandEdit', { key: data(ev.key), id: data(ev.id), from: v(ev.from), to: v(ev.to) });
+      if (ev.what === 'delete') {
+        var addr = Object.keys(s.state).filter(function (a) { return s.state[a].id === ev.id; })[0] || '';
+        return rich('capHandDelete', { id: data(ev.id), addr: data(addr) });
+      }
+      return rich('capHandCreate', { id: data(ev.id) });
+    }
+    if (ev.kind === 'staterm') return rich('capStateRm', { addr: data(ev.addr), id: data(ev.id || '') });
+    if (ev.kind === 'edit') {
+      var added = ev.changes.filter(function (x) { return x.add; })[0];
+      return added ? rich('capEditAdd', { addr: data(added.addr) }) : rich('capEdit');
+    }
+    if (ev.kind === 'import') return rich('capImport', { addr: data(ev.addr || ''), id: data(ev.id || '') });
+    if (ev.kind === 'refresh') {
+      var first = ev.outside[0];
+      if (ev.op === 'applyRefreshOnly' && first && first.diffs.length) {
+        return rich('capROnlyRefresh', { key: data(first.diffs[0].key), to: v(first.diffs[0].to), addr: data(first.addr) });
+      }
+      if (first && first.kind === 'deleted') return rich('capRefreshDeleted', { id: data(first.id), addr: data(first.addr) });
+      if (first) return rich('capRefreshChanged', { addr: data(first.addr), key: data(first.diffs[0].key), from: v(first.diffs[0].from), to: v(first.diffs[0].to) });
+      var lost = unmanaged(s);
+      if (lost) return rich('capRefreshUnseen', { id: data(lost) });
+      return [t.n('capRefreshNone', ev.read)];
+    }
+    if (ev.kind === 'refreshOnlyWrite') {
+      var w = ev.outside[0] && ev.outside[0].diffs[0];
+      return w ? rich('capROnlyWrite', { key: data(w.key), to: v(w.to) }) : rich('capApplyOther');
+    }
+    if (ev.kind === 'diff') {
+      var plan = ev.plan, free = unmanaged(s);
+      if (!plan.length) {
+        if (free) return rich('capDiffUnseen', { id: data(free) });
+        if (o.script === 'import') return rich('capDiffImported', { addr: data('firewall_rule.rdp') });
+        return rich('capDiffNone');
+      }
+      if (plan.length === 1 && plan[0].action === 'update') {
+        var dd = plan[0].diffs[0];
+        var drift = ev.outside.some(function (x) { return x.addr === plan[0].addr; });
+        return rich(drift ? 'capDiffRevert' : 'capDiffStill', { key: data(dd.key), hand: v(dd.from), want: v(dd.to) });
+      }
+      if (plan.length === 1 && plan[0].action === 'create') {
+        if (free && s.real[free].type === L.typeOf(plan[0].addr) && s.real[free].attrs.name === s.config[plan[0].addr].name) {
+          return rich('capDiffClash', { addr: data(plan[0].addr), id: data(free) });
+        }
+        return rich('capDiffRecreate', { addr: data(plan[0].addr) });
+      }
+      if (o.script === 'edit-config') return rich('capDiffMixed');
+      return rich('capDiffOther');
+    }
+    return rich('capApplyOther');
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // the scenario is chosen with the presets; the select stays hidden so the panel fits
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; }, options: [
+        ['drift-revert', t('presetRevert')], ['hand-delete', t('presetDelete')], ['hand-create', t('presetCreate')],
+        ['state-lost', t('presetLost')], ['accept-drift', t('presetAccept')], ['edit-config', t('presetEdit')],
+        ['import', t('presetImport')]] },
+      { key: 'showState', type: 'toggle', label: t('showState'), hint: t('showStateHint') }
+    ],
+
+    presets: [
+      { id: 'drift-revert', label: t('presetRevert'), params: { script: 'drift-revert' }, hint: t('presetRevertHint') },
+      { id: 'hand-delete', label: t('presetDelete'), params: { script: 'hand-delete' }, hint: t('presetDeleteHint') },
+      { id: 'hand-create', label: t('presetCreate'), params: { script: 'hand-create' }, hint: t('presetCreateHint') },
+      { id: 'state-lost', label: t('presetLost'), params: { script: 'state-lost' }, hint: t('presetLostHint') },
+      { id: 'accept-drift', label: t('presetAccept'), params: { script: 'accept-drift' }, hint: t('presetAcceptHint') },
+      { id: 'edit-config', label: t('presetEdit'), params: { script: 'edit-config' }, hint: t('presetEditHint') },
+      { id: 'import', label: t('presetImport'), params: { script: 'import' }, hint: t('presetImportHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'tf-differs', label: t('legDiffers') },
+      { shape: 'tf-missing', label: t('legMissing') },
+      { shape: 'tf-create', label: t('legCreate') },
+      { shape: 'tf-update', label: t('legUpdate') },
+      { shape: 'tf-delete', label: t('legDelete') },
+      { shape: 'tf-replace', label: t('legReplace') },
+      { shape: 'tf-hand', label: t('legHand') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+
+  // the person icon inside its legend swatch (the kit draws empty swatches)
+  var sw = document.querySelector('[data-sd-legend] .sd-swatch[data-shape="tf-hand"]');
+  if (sw) sw.append(hand());
+})();
+</script>
+</body>
+</html>
