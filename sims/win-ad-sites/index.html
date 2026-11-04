@@ -1,0 +1,564 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ad-sites: sites, site links and the KCC. Explorer: costs, intervals, bridging and subnets change the
+     inter-site tree, the worst-case arrival of one change at every DC and each client's DC at once; a clock since
+     the change shows who holds it. Model in sim.js, rules in SPEC.md, words in strings.js. -->
+<html lang="hr" data-sim="win-ad-sites">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lokacije, veze lokacija i KCC · simdeck</title>
+<meta name="description" content="Replikacija unutar i između lokacija AD-a: trošak i interval veza lokacija, premošćivanje, poslužitelji mosta i izbor DC-a po podmreži.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ad-sites",
+  "title": {
+    "hr": "Lokacije, veze lokacija i KCC",
+    "en": "Sites, site links and the KCC"
+  },
+  "concept": {
+    "hr": "Replikacija unutar i između lokacija, trošak i raspored; izbor DC-a po lokaciji",
+    "en": "Intra-site vs inter-site replication, cost and schedule; site-aware DC choice"
+  },
+  "summary": {
+    "hr": "Mijenjaj troškove, intervale i premošćivanje veza lokacija, promijeni lozinku i čekaj: kada je ima koji DC, i koji DC dobiva klijent u svakoj lokaciji.",
+    "en": "Change site link costs, intervals and bridging, change a password and wait: when each DC has it, and which DC each site's client is sent to."
+  },
+  "tags": [
+    "active-directory",
+    "replication"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ad-sites"]; colours only from kit tokens.
+   Layout: one K2 grid of 14 columns. Top: the clock box (left), HQ's zone (middle), the arrival table (right).
+   Bottom: Branch's zone (left) and Colo's zone (right). Each zone holds its site card (the end of the site links),
+   its DCs and its client. Zones and the cost/interval labels are drawn by the page (K2 has neither; NOTES.md). */
+[data-sim="win-ad-sites"] .as { height: 100%; display: flex; padding: 1.2cqh 1.2cqw; font-size: 1rem; }
+[data-sim="win-ad-sites"] .as .sd-topo { flex: 1; height: 100%; align-content: stretch; row-gap: 0.7rem; column-gap: 0.8cqw; }
+
+/* site zones: a tinted box behind the cards of one site, in the site's series colour; the site card names it */
+[data-sim="win-ad-sites"] .as-zone {
+  margin: -0.45rem;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--sw) 9%, var(--bg));
+}
+[data-sim="win-ad-sites"] .as-zone[data-empty] { border-style: dashed; }
+
+/* the site card (K2 cloud): the name in the series colour's ink, the subnet under it */
+[data-sim="win-ad-sites"] .sd-topo-card[data-kind='cloud'] { border-style: solid; border-color: var(--sw, var(--ink)); padding: 0.15rem 0.6rem; }
+[data-sim="win-ad-sites"] .sd-topo-card[data-kind='cloud'] > b { font-size: var(--fs-md); }
+[data-sim="win-ad-sites"] .as-site[data-c] { border-width: 0.2rem; }
+
+/* DC cards: the server mark holds the name; a removed DC is the kit's "down" */
+[data-sim="win-ad-sites"] .sd-topo-card[data-kind='server'] .sd-topo-mark { min-width: 3.9rem; font-size: var(--fs-md); }
+[data-sim="win-ad-sites"] .sd-topo-card[data-kind='host'] .sd-topo-mark { min-width: 2.6rem; font-size: var(--fs-sm); }
+[data-sim="win-ad-sites"] .sd-topo-card .sd-topo-badges { min-height: 0; }
+
+/* the cost · interval label in the middle of each site link */
+[data-sim="win-ad-sites"] .as-labels { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+[data-sim="win-ad-sites"] .as-lbl {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+  padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; line-height: 1.5;
+}
+[data-sim="win-ad-sites"] .as-lbl[data-idle] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="win-ad-sites"] .as-lbl.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* the clock box */
+[data-sim="win-ad-sites"] .as-clock { align-self: start; min-width: 0; padding: 0.3rem 0.6rem 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); position: relative; z-index: 1; }
+[data-sim="win-ad-sites"] .as-clock h3, [data-sim="win-ad-sites"] .as-tab h3 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="win-ad-sites"] .as-time { display: block; font-family: var(--mono); font-size: 2.3rem; font-weight: 700; line-height: 1.15; }
+[data-sim="win-ad-sites"] .as-what { display: block; font-size: var(--fs-sm); }
+
+[data-sim="win-ad-sites"] .as-pick { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.3rem 0.5rem; align-items: center; margin-top: 0.4rem; }
+[data-sim="win-ad-sites"] .as-pick-l { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ad-sites"] .as-pick .sd-seg button { padding-inline: 0.4rem; }
+[data-sim="win-ad-sites"] .as-btns { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+[data-sim="win-ad-sites"] .as-btns .sd-btn { min-height: var(--hit); }
+
+/* the panel: presets in two columns, a little less air between controls (it holds 12 settings) */
+[data-sim="win-ad-sites"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-ad-sites"] .sd-group { gap: 0.45rem; }
+
+/* the arrival table */
+[data-sim="win-ad-sites"] .as-tab { align-self: start; min-width: 0; position: relative; z-index: 1; padding: 0.3rem 0.5rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-ad-sites"] .as-tab table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+[data-sim="win-ad-sites"] .as-tab th { text-align: left; color: var(--muted); font-weight: 700; padding: 0 0.4rem 0 0; }
+[data-sim="win-ad-sites"] .as-tab td { padding: 0.05rem 0.4rem 0.05rem 0; border-top: var(--line-w) solid var(--line); vertical-align: top; }
+[data-sim="win-ad-sites"] .as-tab td.as-num { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-ad-sites"] .as-tab td.as-dc { font-weight: 700; white-space: nowrap; }
+[data-sim="win-ad-sites"] .as-tab td.as-now { white-space: nowrap; }
+[data-sim="win-ad-sites"] .as-tab tr[data-has] td.as-now { font-weight: 700; }
+[data-sim="win-ad-sites"] .as-tab tr:not([data-has]) td.as-now { color: var(--muted); }
+[data-sim="win-ad-sites"] .as-tab tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ad-sites"] .as-tab tr.sd-changed td:first-child { box-shadow: inset 0.25rem 0 0 var(--ink); }
+
+/* legend swatches the kit lacks: the zone, the bridgehead star */
+[data-sim="win-ad-sites"] .sd-swatch[data-shape="as-zone"] { background: color-mix(in srgb, var(--c1) 9%, var(--bg)); border: var(--line-w) solid var(--c1); }
+[data-sim="win-ad-sites"] .sd-swatch[data-shape="as-star"] { position: relative; background: var(--bg); border-radius: 1rem; }
+[data-sim="win-ad-sites"] .sd-swatch[data-shape="as-star"]::after { content: '★'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; line-height: 1; color: var(--ink); }
+[data-sim="win-ad-sites"] .sd-swatch[data-shape="as-idle"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--muted) 0 0.3em, transparent 0.3em 0.48em); }
+
+[data-sim="win-ad-sites"] .sd-caption [translate="no"] { white-space: nowrap; }
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as in amdahl, csma-cd). */
+[data-sim="win-ad-sites"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="win-ad-sites"] .sd-topo-card[data-kind='host'] .sd-topo-addr { white-space: nowrap; font-size: var(--fs-sm); }
+
+/* Phone and portrait: the kit's card list; zones and labels go, the site card heads its DCs and client. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ad-sites"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ad-sites"] .as { height: auto; padding: 0.5rem; }
+  [data-sim="win-ad-sites"] .as .sd-topo { height: auto; }
+  [data-sim="win-ad-sites"] .as-zone, [data-sim="win-ad-sites"] .as-labels { display: none; }
+  [data-sim="win-ad-sites"] .as-clock, [data-sim="win-ad-sites"] .as-tab { grid-column: 1 / -1 !important; grid-row: auto !important; }
+  [data-sim="win-ad-sites"] .as-tab td { overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Lokacije, veze lokacija i KCC</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var USER = 'ana';
+  var COLOUR = { HQ: '1', Branch: '2', Colo: '3' };
+  var SITE_KEY = { HQ: 'siteHQ', Branch: 'siteBranch', Colo: 'siteColo' };
+  var LINK_KEY = { HB: 'linkHB', HC: 'linkHC', BC: 'linkBC' };
+  // [col, row, span] in 14 columns; rows: 0 DCs and client at HQ, 1 HQ's site card, 2 room for the links,
+  // 3 the branch and colo site cards, 4 their DCs and clients
+  var POS = {
+    'site-HQ': [5, 1, 2], DC01: [3, 0, 2], DC02: [5, 0, 2], 'pc-HQ': [7, 0, 2],
+    'site-Branch': [2, 3, 2], DC04: [0, 4, 2], 'pc-Branch': [2, 4, 2],
+    'site-Colo': [10, 3, 2], 'pc-Colo': [10, 4, 2], DC03: [12, 4, 2]
+  };
+  var ZONE = { HQ: [3, 0, 6, 2], Branch: [0, 3, 4, 2], Colo: [10, 3, 4, 2] }; // col, row, colspan, rowspan
+  // phone order: each site card, then its DCs and client
+  var ORDER = ['site-HQ', 'DC01', 'DC02', 'pc-HQ', 'site-Branch', 'DC04', 'pc-Branch', 'site-Colo', 'DC03', 'pc-Colo'];
+
+  /** Data is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no', class: 'sd-mono' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function clock(sec) {
+    if (sec == null) return t('never');
+    var hh = Math.floor(sec / 3600), mm = Math.floor(sec % 3600 / 60), ss = sec % 60;
+    return hh + ':' + (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
+  }
+  function site(id) { return t(SITE_KEY[id]); }
+  function sepList(nodes) {
+    var out = h('span', null);
+    nodes.forEach(function (n, i) { if (i) out.append(t(i === nodes.length - 1 ? 'andSep' : 'listSep')); out.append(n); });
+    return out;
+  }
+  function route(sites) { return sites.map(site).join(' → '); }
+  function siteOfDc(s, dc) { return s.sites.filter(function (x) { return x.dcs.indexOf(dc) >= 0; })[0]; }
+
+  // ── "changed": against the state of the render before the last change ──
+  var last = null, track = { dcs: [], clients: [], links: [] }, before = null, dir = 'jump';
+  function sameParams(a, c) { return Object.keys(L.defaults).every(function (k) { return a[k] === c[k]; }); }
+  function onlyClock(a, c) { return Object.keys(L.defaults).every(function (k) { return k === 'clock' || k === 'edit' || a[k] === c[k]; }); }
+  function update(c) {
+    if (last && sameParams(last.params, c.params) && last.preset === c.preset) return;
+    if (!last || (c.preset && c.preset !== last.preset)) {
+      // a preset (or the first render) is a fresh start: nothing is marked
+      track = { dcs: [], clients: [], links: [] }; before = null; dir = 'jump';
+      last = { params: Object.assign({}, c.params), state: c.state, preset: c.preset };
+      return;
+    }
+    if (last && Object.keys(L.defaults).every(function (k) { return k === 'edit' || last.params[k] === c.params[k]; })) {
+      last = { params: Object.assign({}, c.params), state: c.state, preset: c.preset };
+      return; // only the link being edited changed: keep the marks
+    }
+    track = L.diff(last && last.state, c.state);
+    before = last && !onlyClock(last.params, c.params) ? last.state : null;
+    dir = last && onlyClock(last.params, c.params) && c.params.clock > last.params.clock ? 'forward' : 'jump';
+    last = { params: Object.assign({}, c.params), state: c.state, preset: c.preset };
+  }
+
+  // ── the drawing (kit view K2) ──
+
+  function dcNode(s, dc) {
+    var siteRec = siteOfDc(s, dc);
+    var sid = L.siteOf(dc);
+    var present = !!siteRec;
+    var a = s.arrival[dc];
+    var badges = [];
+    if (!present) badges.push({ text: t('bRemoved'), k: 'muted' });
+    else {
+      if (s.bridgeheads[sid] === dc) badges.push({ text: t('bHead'), k: 'solid' });
+      if (a.from && a.from.kind === 'origin') badges.push({ text: t('bOrigin'), k: 'fill' });
+      else if (a.t === null) badges.push({ text: t('bNever'), k: 'muted' });
+      else if (s.has[dc]) badges.push({ text: t('bHas', { t: clock(a.t) }), k: 'fill' });
+      else badges.push({ text: t('bWait', { t: clock(a.t) }), k: 'dashed' });
+    }
+    var changed = track.dcs.indexOf(dc) >= 0;
+    return { id: dc, kind: 'server', c: COLOUR[sid], mark: dc,
+      lines: [dc === s.pdc && present ? { text: t('rolePdc'), kind: 'role' } : null],
+      badges: badges, state: !present ? 'down' : changed || L.arrivingNow(s).indexOf(dc) >= 0 ? 'active' : null, changed: changed };
+  }
+
+  function clientNode(s, sid) {
+    var c = s.clients[sid];
+    var badges = [];
+    if (c.how === 'any') badges.push({ text: t('bToAny'), k: 'solid' });
+    else if (!c.dcs.length) badges.push({ text: t('bToNone'), k: 'dashed' });
+    else badges.push({ text: t('bTo', { dc: c.dcs.join('/') }), k: 'solid' });
+    if (c.logon === 'local') badges.push({ text: c.dcs.length > 2 ? t('bLogonAny') : t('bLogonLocal', { dc: c.dcs.join('/') }), k: 'fill' });
+    else if (c.logon === 'pdc') badges.push({ text: t('bLogonPdc'), k: 'fill' });
+    else if (c.logon === 'depends') badges.push({ text: t('bLogonDepends'), k: 'dashed' });
+    var line = c.how === 'any' ? t('clientNoSite') : c.how === 'coverage' ? t('clientCovered', { s: site(c.coveredBy) }) : t('clientSite', { s: site(sid) });
+    var changed = track.clients.indexOf(sid) >= 0;
+    return { id: 'pc-' + sid, kind: 'host', c: COLOUR[sid], mark: 'PC',
+      lines: [{ text: c.ip, kind: 'addr' }, { text: line, kind: 'role' }],
+      badges: badges, changed: changed, state: changed ? 'active' : null };
+  }
+
+  function siteNode(s, rec) {
+    return { id: 'site-' + rec.id, kind: 'cloud', c: COLOUR[rec.id], name: site(rec.id),
+      lines: [rec.subnets.length ? { text: rec.subnets[0], kind: 'sub' } : { text: t('noSubnet'), kind: 'role' }] };
+  }
+
+  /** The packets at this clock: every arrival exactly now, along its own route. */
+  function packetsNow(s) {
+    var out = [];
+    var chip = s.change.kind === 'password' ? t('chipPassword') : t('chipPhone');
+    L.arrivingNow(s).forEach(function (dc) {
+      var f = s.arrival[dc].from;
+      if (f.kind === 'intra') out.push({ from: f.dc, to: dc, label: chip });
+      else if (f.kind === 'inter') {
+        var sites = f.edge.sites;
+        for (var i = 0; i + 1 < sites.length; i++) out.push({ from: 'site-' + sites[i], to: 'site-' + sites[i + 1], label: chip, cast: f.edge.bridged ? 'broadcast' : null, at: 0.3 });
+      } else if (f.kind === 'pdc') {
+        var path = L.bestPath(s.links, L.siteOf(f.dc), L.siteOf(dc));
+        if (path) for (var k = 0; k + 1 < path.sites.length; k++) out.push({ from: 'site-' + path.sites[k], to: 'site-' + path.sites[k + 1], label: t('chipPdc'), cast: 'broadcast', at: 0.3 });
+      }
+    });
+    return out;
+  }
+
+  function linkLabels(el, s) {
+    var layer = h('div', { class: 'as-labels', 'aria-hidden': 'true' });
+    el.append(layer);
+    function place() {
+      if (!el.isConnected) return;
+      layer.replaceChildren();
+      var R = el.getBoundingClientRect();
+      s.links.forEach(function (l) {
+        var A = el.querySelector('.sd-topo-card[data-id="site-' + l.a + '"]'), B = el.querySelector('.sd-topo-card[data-id="site-' + l.b + '"]');
+        if (!A || !B) return;
+        var ra = A.getBoundingClientRect(), rb = B.getBoundingClientRect();
+        var x = (ra.left + ra.width / 2 + rb.left + rb.width / 2) / 2 - R.left;
+        var y = (ra.top + ra.height / 2 + rb.top + rb.height / 2) / 2 - R.top;
+        var used = L.linkUsed(s, l.id);
+        var e = h('span', { class: 'as-lbl' + (track.links.indexOf(l.id) >= 0 ? ' sd-changed' : ''), translate: 'no',
+          dataset: used ? {} : { idle: '1' }, style: { left: Math.round(x) + 'px', top: Math.round(y) + 'px' } },
+          t('linkLabel', { c: l.cost, i: l.intervalMin }));
+        layer.append(e);
+      });
+    }
+    if (typeof ResizeObserver === 'function') {
+      var ro = new ResizeObserver(function () { if (!el.isConnected) { ro.disconnect(); return; } place(); });
+      ro.observe(el);
+    } else requestAnimationFrame(place);
+  }
+
+  function clockBox(s) {
+    var what = s.change.kind === 'password' ? t('whatPassword') : t('whatPhone');
+    return h('div', { class: 'as-clock', style: { gridColumn: '1 / span 3', gridRow: '1 / span 2' } },
+      h('h3', null, t('clockTitle')),
+      h('span', { class: 'as-time', translate: 'no' }, clock(s.clock)),
+      h('span', { class: 'as-what' }, t.parts('changeOf', { what: what, u: b(USER), dc: b(s.change.dc + ' (' + L.siteOf(s.change.dc) + ')') })),
+      h('div', { class: 'as-pick' },
+        h('span', { class: 'as-pick-l' }, t('pWhere')),
+        seg(L.SITES.map(function (x) { return [x, site(x)]; }), s.change.site, function (v) { stopRun(); api().set({ origin: v, clock: 0 }); }, t('pOrigin')),
+        h('span', { class: 'as-pick-l' }, t('pWhat')),
+        seg([[true, t('kindPassword')], [false, t('kindPhone')]], s.change.kind === 'password', function (v) { stopRun(); api().set({ password: v, clock: 0 }); }, t('pPassword'))),
+      h('div', { class: 'as-btns' },
+        stageBtn(t('btnRun'), 'P', function () { run(api()); }),
+        stageBtn(t('btnNext'), 'W', function () { next(api()); })));
+  }
+  /** Segmented buttons on the stage, styled as the kit's choice control. */
+  function seg(options, value, pick, label) {
+    return h('div', { class: 'sd-seg', role: 'group', 'aria-label': label }, options.map(function (o) {
+      return h('button', { type: 'button', 'aria-pressed': String(o[0] === value),
+        onmousedown: function (e) { e.preventDefault(); }, onclick: function () { pick(o[0]); } }, o[1]);
+    }));
+  }
+  /** A button on the stage: like the kit's, it never takes focus on click, so the clicker keys keep working. */
+  function stageBtn(label, key, fn) {
+    return h('button', { type: 'button', class: 'sd-btn', 'aria-keyshortcuts': key.toLowerCase(),
+      onmousedown: function (e) { e.preventDefault(); }, onclick: fn }, h('span', null, label), h('kbd', null, key));
+  }
+
+  function viaText(s, dc) {
+    var f = s.arrival[dc].from;
+    if (!f) return '—';
+    if (f.kind === 'origin') return t('viaOrigin');
+    if (f.kind === 'pdc') return t('viaPdc', { dc: f.dc });
+    if (f.kind === 'intra') return t('viaIntra', { dc: f.dc });
+    // the whole route from the change's site: walk back through the inter-site hops
+    var sites = f.edge.sites.slice(), cur = f.dc, guard = 0;
+    while (guard++ < 8) {
+      var g = s.arrival[cur].from;
+      if (!g || g.kind === 'origin' || g.kind === 'pdc') break;
+      if (g.kind === 'inter') sites = g.edge.sites.slice(0, -1).concat(sites);
+      cur = g.dc;
+    }
+    return f.edge.bridged ? t('viaBridged', { route: route(sites) }) : route(sites);
+  }
+
+  function arrivalTable(s) {
+    var rows = L.ALL_DCS.slice().sort().map(function (dc) {
+      var a = s.arrival[dc];
+      var present = !!siteOfDc(s, dc);
+      var changed = track.dcs.indexOf(dc) >= 0;
+      return h('tr', { class: changed ? 'sd-changed' : null, dataset: s.has[dc] ? { has: '1' } : {} },
+        h('td', { class: 'as-dc', translate: 'no' }, dc),
+        h('td', null, present ? viaText(s, dc) : t('bRemoved')),
+        h('td', { class: 'as-num', translate: 'no' }, present ? clock(a.t) : '—'),
+        h('td', { class: 'as-now' }, !present ? '—' : s.has[dc] ? t('yes') : a.t === null ? t('never') : t('no')));
+    });
+    return h('div', { class: 'as-tab', style: { gridColumn: '10 / span 5', gridRow: '1 / span 2' } },
+      h('h3', null, t('tabTitle')),
+      h('table', null,
+        h('thead', null, h('tr', null, h('th', null, t('thDc')), h('th', null, t('thVia')), h('th', null, t('thAt')), h('th', null, ''))),
+        h('tbody', null, rows)));
+  }
+
+  function renderTopo(c) {
+    var s = c.state;
+    var nodes = [];
+    s.sites.forEach(function (rec) { nodes.push(siteNode(s, rec)); });
+    L.ALL_DCS.forEach(function (dc) { nodes.push(dcNode(s, dc)); });
+    L.SITES.forEach(function (sid) { nodes.push(clientNode(s, sid)); });
+    nodes.forEach(function (n) { var P = POS[n.id]; n.col = P[0]; n.row = P[1]; n.span = P[2]; });
+    nodes.sort(function (x, y) { return ORDER.indexOf(x.id) - ORDER.indexOf(y.id); });
+    var links = s.links.map(function (l) {
+      var used = L.linkUsed(s, l.id);
+      return { id: l.id, a: 'site-' + l.a, b: 'site-' + l.b, state: used ? 'up' : 'off', active: used };
+    });
+    var hq = s.sites.filter(function (x) { return x.id === 'HQ'; })[0];
+    links.push({ id: 'ring', a: 'DC01', b: 'DC02', state: hq.dcs.length ? 'up' : 'off', active: hq.dcs.length > 0 });
+    var el = Simdeck.topology({ cols: 14, rows: ['auto', 'auto', 'minmax(1.5rem, 1fr)', 'auto', 'auto'], dir: dir,
+      nodes: nodes, links: links, packets: packetsNow(s), gap: '0.8cqw' });
+    // zones behind everything (grid items before the cards; the links' SVG and the cards are positioned above them)
+    Object.keys(ZONE).forEach(function (sid) {
+      var z = ZONE[sid];
+      var rec = s.sites.filter(function (x) { return x.id === sid; })[0];
+      el.prepend(h('div', { class: 'as-zone', 'aria-hidden': 'true', dataset: Object.assign({ c: COLOUR[sid] }, rec.dcs.length ? {} : { empty: '1' }),
+        style: { gridColumn: (z[0] + 1) + ' / span ' + z[2], gridRow: (z[1] + 1) + ' / span ' + z[3] } }));
+    });
+    el.prepend(clockBox(s));
+    el.append(arrivalTable(s));
+    linkLabels(el, s);
+    return el;
+  }
+
+  // ── captions: what the clock shows, then at most two sentences on why ──
+
+  function dcList(list) { return sepList(list.map(function (d) { return b(d); })); }
+
+  function hopSentence(s, dc) {
+    var f = s.arrival[dc].from;
+    if (f.kind === 'intra') return t.parts('capIntra', { site: b(L.siteOf(dc)) });
+    if (f.kind === 'pdc') return s.clock ? t.parts('capPdcHop', { dc: b(dc) }) : null; // at 0 the first sentence says it
+    if (f.kind === 'inter') {
+      var e = f.edge;
+      if (e.bridged) return t.parts('capBridged', { a: b(e.sites[0]), b: b(e.sites[e.sites.length - 1]), mid: b(e.sites.slice(1, -1).join(', ')), i: data(e.intervalMin) });
+      var l = s.links.filter(function (x) { return x.id === e.links[0]; })[0];
+      return t.parts('capInter', { a: b(e.sites[0]), b: b(e.sites[1]), c: data(l.cost), i: data(e.intervalMin) });
+    }
+    return null;
+  }
+
+  function why(s) {
+    var out = [];
+    // a param (not the clock) just changed: the first DC whose arrival moved
+    if (before) {
+      // only a time that moved; a DC that stops or starts being reached is told by the "never" sentences
+      var moved = L.ALL_DCS.slice().sort().filter(function (d) {
+        return before.arrival[d].t !== s.arrival[d].t && before.arrival[d].t !== null && s.arrival[d].t !== null;
+      });
+      if (moved.length) out.push(t.parts('capMoved', { dc: b(moved[0]), t: data(clock(s.arrival[moved[0]].t)), old: data(clock(before.arrival[moved[0]].t)) }));
+    }
+    var now = L.arrivingNow(s);
+    if (now.length) { var hs = hopSentence(s, now[now.length - 1]); if (hs) out.push(hs); }
+    var hq = s.sites.filter(function (x) { return x.id === 'HQ'; })[0];
+    var apart = L.ALL_DCS.some(function (d) { return siteOfDc(s, d) && s.arrival[d].t === null; });
+    if (apart) out.push(t.parts('capApart'));
+    if (!hq.dcs.length && s.clients.HQ.how === 'coverage') out.push(t.parts('capCoverage', { dc: b(s.clients.HQ.dcs[0]), cov: b(s.clients.HQ.coveredBy) }));
+    if (s.clients.Branch.how === 'any') out.push(t.parts('capNoSubnets'));
+    L.SITES.forEach(function (sid) {
+      var c = s.clients[sid];
+      if (c.logon === 'pdc' && out.length < 3) out.push(t.parts('capLogonPdc', { site: b(sid), dc: b(c.lacking[0]), pdc: b(s.pdc) }));
+    });
+    if (s.links.length === 3) {
+      var idle = s.links.filter(function (l) { return !L.linkUsed(s, l.id); });
+      if (idle.length === 1) {
+        // the edge left out ties with the dearest edge kept: the choice was by name, not by cost
+        var out3 = s.edges.filter(function (e) { return s.tree.indexOf(e) < 0; })[0];
+        var top = s.tree.reduce(function (m, e) { return e.cost > m.cost || (e.cost === m.cost && e.links.length > m.links.length) ? e : m; }, s.tree[0]);
+        var tie = !!out3 && !!top && out3.cost === top.cost && out3.links.length === top.links.length;
+        out.push(tie ? t.parts('capTie') : t.parts('capSkip', { l: b(t(LINK_KEY[idle[0].id])) }));
+      }
+    }
+    return out.slice(0, 2);
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var parts = [];
+    if (s.clock === 0) {
+      parts.push(t.parts(s.change.covered ? 'capCovered' : s.change.kind === 'password' ? 'capZeroPassword' : 'capZeroPhone', { dc: b(s.change.dc), u: b(USER), site: b(s.change.site) }));
+      if (s.change.kind === 'password' && s.pdc !== s.change.dc) parts.push(t.parts('capPdcNow', { pdc: b(s.pdc) }));
+    } else {
+      var present = L.ALL_DCS.filter(function (d) { return siteOfDc(s, d); });
+      var n = present.filter(function (d) { return s.has[d]; }).length;
+      parts.push(t.parts('capHave', { n: n, m: present.length, clock: data(clock(s.clock)) }));
+    }
+    var next = L.nextArrival(s);
+    if (next !== null) {
+      var who = L.ALL_DCS.slice().sort().filter(function (d) { return s.arrival[d].t === next; });
+      parts.push(t.parts('capNext', { dcs: dcList(who), t: data(clock(next)) }));
+    } else if (s.clock > 0) {
+      var never = L.ALL_DCS.slice().sort().filter(function (d) { return siteOfDc(s, d) && s.arrival[d].t === null; });
+      parts.push(never.length ? t.parts('capNever', { dcs: dcList(never) }) : t.parts('capAll'));
+    }
+    var out = [];
+    parts.concat(why(s)).forEach(function (p, i) { if (i) out.push(' '); out = out.concat(p); });
+    return out;
+  }
+
+  // ── the clock: "change now" runs it from arrival to arrival; "next arrival" jumps once ──
+  var runTimer = 0;
+  function stopRun() { if (runTimer) { clearInterval(runTimer); runTimer = 0; } }
+  function nextOf(sim) { return L.nextArrival(sim.state); }
+  function jumpNext(sim) {
+    var nx = nextOf(sim);
+    if (nx === null) { stopRun(); return false; }
+    sim.set({ clock: nx }, { preset: sim.preset });
+    return true;
+  }
+  function next(sim) { stopRun(); jumpNext(sim); }
+  function api() { return window.simdeck; }
+  function run(sim) {
+    stopRun();
+    sim.set({ clock: 0 }, { preset: sim.preset });
+    var keep = Object.assign({}, sim.params);
+    runTimer = setInterval(function () {
+      if (!Object.keys(keep).every(function (k) { return k === 'clock' || k === 'edit' || keep[k] === sim.params[k]; })) { stopRun(); return; }
+      if (!jumpNext(sim)) stopRun();
+    }, 1600);
+  }
+
+  function linkParam(kind, id) {
+    var isCost = kind === 'cost';
+    return { key: kind + id, type: 'range', label: t(kind + id), min: isCost ? 1 : 15, max: isCost ? 500 : 360, step: isCost ? 1 : 15,
+      format: isCost ? null : function (v) { return t('minutes', { v: v }); },
+      visible: function (p) { return p.edit === id; },
+      disabled: id === 'BC' ? function (p) { return p.linkBC ? false : t('noBC'); } : null };
+  }
+
+  var sim = Simdeck.mount({
+    steps: 0,
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'edit', type: 'choice', label: t('pEdit'), options: [['HB', t('linkHB')], ['HC', t('linkHC')], ['BC', t('linkBC')]] },
+      linkParam('cost', 'HB'), linkParam('interval', 'HB'),
+      linkParam('cost', 'HC'), linkParam('interval', 'HC'),
+      linkParam('cost', 'BC'), linkParam('interval', 'BC'),
+      { key: 'linkBC', type: 'toggle', label: t('pLinkBC') },
+      { key: 'bridging', type: 'toggle', label: t('pBridging') },
+      { key: 'subnets', type: 'toggle', label: t('pSubnets') },
+      { key: 'hqDcs', type: 'toggle', label: t('pHqDcs') },
+      // the change (where, what, when) is set from the stage's clock box (its buttons, keys P and W); these controls
+      // stay, hidden, so the address and the language switch keep them
+      { key: 'origin', type: 'choice', label: t('pOrigin'), visible: function () { return false; },
+        options: [['HQ', t('siteHQ')], ['Branch', t('siteBranch')], ['Colo', t('siteColo')]] },
+      { key: 'password', type: 'toggle', label: t('pPassword'), visible: function () { return false; } },
+      { key: 'clock', type: 'range', label: t('pClock'), min: 0, step: 15, visible: function () { return false; },
+        max: function (p) { return Math.max(60, L.lastArrival(L.initial(Object.assign({}, p, { clock: 0 })))); },
+        format: clock }
+    ],
+    keys: [
+      { key: 'p', label: t('btnRunKey'), run: run },
+      { key: 'w', label: t('btnNextKey'), run: next }
+    ],
+
+    presets: [
+      { id: 'two-sites', label: t('presetTwo'), hint: t('presetTwoHint'), params: { clock: 15 } },
+      { id: 'hub-spoke', label: t('presetHub'), hint: t('presetHubHint'), params: { intervalHC: 60, origin: 'Branch', password: false, clock: 10800, edit: 'HC' } },
+      { id: 'cheap-detour', label: t('presetDetour'), hint: t('presetDetourHint'), params: { linkBC: true, costBC: 300, intervalBC: 15, origin: 'Branch', password: false, clock: 10800, edit: 'BC' } },
+      { id: 'empty-middle', label: t('presetEmpty'), hint: t('presetEmptyHint'), params: { hqDcs: false, intervalHC: 60, origin: 'Branch', password: false, clock: 10800, edit: 'HC' } },
+      { id: 'no-subnets', label: t('presetNoSubnets'), hint: t('presetNoSubnetsHint'), params: { subnets: false, clock: 60 } },
+      { id: 'fresh-password', label: t('presetFresh'), hint: t('presetFreshHint'), params: { origin: 'Branch', clock: 300 } }
+    ],
+
+    legend: [
+      { shape: 'as-zone', label: t('legSite') },
+      { shape: 'line', label: t('legUsed') },
+      { shape: 'as-idle', label: t('legIdle') },
+      { shape: 'as-star', label: t('legHead') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      update(c);
+      c.stage.replaceChildren(h('div', { class: 'as' }, renderTopo(c)));
+    },
+    caption: caption
+  });
+  window.addEventListener('pagehide', stopRun);
+  void sim;
+})();
+</script>
+</body>
+</html>
