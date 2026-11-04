@@ -1,0 +1,581 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-wsus-client-cycle: a working week (Mon 00:00 → Sat 00:00) of two Windows clients, DESK-1 (always on) and
+     LAP-1 (off at night), in 6-hour steps. KB-A is approved on WSUS Monday 10:00; each client finds it at its own
+     scan and downloads, installs and restarts as its Automatic Updates option, active hours and a deadline allow.
+     Stage: a timeline (WSUS row and one row per machine: active hours, off, scan, download, install, restart), then a
+     card per machine (state chip, stages, what it waits for) and the events of this window.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-wsus-client-cycle">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ciklus ažuriranja na klijentu · simdeck</title>
+<meta name="description" content="Tjedan dvaju klijenata u koracima od 6 sati: opcije automatskog ažuriranja, laptop ugašen u vrijeme instalacije, aktivni sati i rok na WSUS-u.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-wsus-client-cycle",
+  "title": {
+    "hr": "Ciklus ažuriranja na klijentu",
+    "en": "The client update cycle"
+  },
+  "concept": {
+    "hr": "Nađi, preuzmi, instaliraj, pokreni ponovno; učestalost, rok, aktivni sati",
+    "en": "Detect, download, install, restart; scan interval, deadlines, active hours"
+  },
+  "summary": {
+    "hr": "Tjedan dvaju klijenata u koracima od 6 sati: opcije automatskog ažuriranja, laptop ugašen u vrijeme instalacije, aktivni sati i rok na WSUS-u.",
+    "en": "A week of two clients in 6-hour steps: Automatic Updates options, a laptop that is off at install time, active hours and a WSUS deadline."
+  },
+  "tags": [
+    "updates"
+  ],
+  "class": "stepper",
+  "steps": 20
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-wsus-client-cycle"]; colours only from kit tokens.
+   Layout: the clock on top; the timeline; under it two machine cards and the list of this window's events. */
+[data-sim="win-wsus-client-cycle"] .cc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1.4cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-wsus-client-cycle"] .cc-mono { font-family: var(--mono); }
+[data-sim="win-wsus-client-cycle"] .cc-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="win-wsus-client-cycle"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* clock */
+[data-sim="win-wsus-client-cycle"] .cc-clock { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.4rem 2rem; align-items: end; }
+[data-sim="win-wsus-client-cycle"] .cc-now { display: flex; flex-direction: column; }
+[data-sim="win-wsus-client-cycle"] .cc-now b { font-size: var(--fs-xl); line-height: 1.1; white-space: nowrap; }
+[data-sim="win-wsus-client-cycle"] .cc-kb { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; align-items: center; }
+[data-sim="win-wsus-client-cycle"] .cc-kb .cc-tag { padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-wsus-client-cycle"] .cc-kb .cc-tag[data-off] { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+
+/* timeline */
+[data-sim="win-wsus-client-cycle"] .cc-tl { grid-column: 1 / -1; display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); row-gap: 0.35rem; }
+[data-sim="win-wsus-client-cycle"] .cc-lab { display: flex; flex-direction: column; justify-content: center; line-height: 1.2; padding-right: 0.5rem; }
+[data-sim="win-wsus-client-cycle"] .cc-lab b { font-family: var(--mono); }
+[data-sim="win-wsus-client-cycle"] .cc-track { position: relative; border-left: var(--line-w) solid var(--line); border-right: var(--line-w) solid var(--line); }
+[data-sim="win-wsus-client-cycle"] .cc-days { height: 1.6rem; border: 0; }
+[data-sim="win-wsus-client-cycle"] .cc-day { position: absolute; top: 0; font-size: var(--fs-sm); color: var(--muted); padding-left: 0.3rem; white-space: nowrap; }
+[data-sim="win-wsus-client-cycle"] .cc-day b { color: var(--ink); }
+[data-sim="win-wsus-client-cycle"] .cc-wsus { height: 2.6rem; }
+[data-sim="win-wsus-client-cycle"] .cc-mtrack { height: 6.6rem; }
+[data-sim="win-wsus-client-cycle"] .cc-grid { position: absolute; top: 0; bottom: 0; width: 0; border-left: 0.12rem dotted var(--line); }
+[data-sim="win-wsus-client-cycle"] .cc-grid[data-day] { border-left: var(--line-w) solid var(--muted); }
+/* bands: active hours (hatched strip on top), machine off (grey, ⏻) */
+[data-sim="win-wsus-client-cycle"] .cc-active { position: absolute; top: 0.25rem; height: 1.4rem; border: 0.12rem solid var(--ink); border-radius: 0.2rem; }
+[data-sim="win-wsus-client-cycle"] .cc-off {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(0deg, color-mix(in srgb, var(--muted) 34%, var(--bg)) 0 0.3rem, color-mix(in srgb, var(--muted) 22%, var(--bg)) 0.3rem 0.6rem);
+  color: var(--ink); font-size: var(--fs-sm); overflow: hidden;
+}
+/* the current window and what is still to come */
+[data-sim="win-wsus-client-cycle"] .cc-win { position: absolute; top: -0.2rem; bottom: -0.2rem; border: 0.2rem solid var(--accent); border-radius: 0.2rem; z-index: 2; pointer-events: none; }
+[data-sim="win-wsus-client-cycle"] .cc-future { position: absolute; top: 0; bottom: 0; right: 0; background: color-mix(in srgb, var(--bg) 55%, transparent); z-index: 1; }
+/* event marks */
+[data-sim="win-wsus-client-cycle"] .cc-mk {
+  position: absolute; display: grid; place-items: center; width: 1.8rem; height: 1.8rem; transform: translateX(-50%);
+  font-size: 1.45rem; line-height: 1; color: var(--sw, var(--ink)); z-index: 3;
+}
+[data-sim="win-wsus-client-cycle"] .cc-mk[data-k="scan"] { top: 1.8rem; }
+[data-sim="win-wsus-client-cycle"] .cc-mk.cc-quiet { width: 1.1rem; height: 1.1rem; margin-top: 0.35rem; font-size: 1rem; }
+[data-sim="win-wsus-client-cycle"] .cc-mk[data-k="install"], [data-sim="win-wsus-client-cycle"] .cc-mk[data-k="missed"] { top: 4.6rem; transform: translateX(-100%); }
+[data-sim="win-wsus-client-cycle"] .cc-mk[data-k="restart"] { top: 4.6rem; transform: none; font-weight: 700; }
+[data-sim="win-wsus-client-cycle"] .cc-mk[data-k="missed"] { color: var(--ink); }
+[data-sim="win-wsus-client-cycle"] .cc-wsus .cc-mk { top: 0.4rem; font-weight: 700; }
+[data-sim="win-wsus-client-cycle"] .cc-mk.sd-changed { background: var(--hl); color: var(--on-hl); border-radius: 0.2rem; }
+[data-sim="win-wsus-client-cycle"] .cc-dl { position: absolute; top: 3.7rem; height: 0.75rem; min-width: 0.4rem; background: var(--sw, var(--c2)); border: 0.12rem solid var(--ink); z-index: 2; }
+[data-sim="win-wsus-client-cycle"] .cc-dl.sd-changed { outline-offset: 0.1rem; }
+
+/* machine cards */
+[data-sim="win-wsus-client-cycle"] .cc-card {
+  min-width: 0; align-self: start; display: flex; flex-direction: column; gap: 0.35rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.7rem;
+}
+[data-sim="win-wsus-client-cycle"] .cc-card h2 { margin: 0; font-size: 1.1em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; }
+[data-sim="win-wsus-client-cycle"] .cc-card h2 b { font-family: var(--mono); }
+[data-sim="win-wsus-client-cycle"] .cc-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem; padding: 0 0.5rem; border: var(--line-w) solid var(--ink);
+  border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; background: var(--bg);
+}
+[data-sim="win-wsus-client-cycle"] .cc-chip[data-st="idle"] { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+[data-sim="win-wsus-client-cycle"] .cc-chip[data-st="done"] { border-color: var(--ok); }
+[data-sim="win-wsus-client-cycle"] .cc-chip[data-st="pending"] { border-style: double; border-width: 0.25rem; }
+[data-sim="win-wsus-client-cycle"] .cc-chip.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-wsus-client-cycle"] .cc-set { margin: 0; font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="win-wsus-client-cycle"] .cc-stages { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 0.6rem; }
+[data-sim="win-wsus-client-cycle"] .cc-stages li {
+  display: grid; grid-template-columns: 1.2rem minmax(0, 1fr); column-gap: 0.3rem; align-items: center;
+  font-size: var(--fs-sm); line-height: 1.3; color: var(--muted); padding: 0 0.2rem; border-radius: var(--radius-sm);
+}
+[data-sim="win-wsus-client-cycle"] .cc-stages li[data-done] { color: var(--ink); }
+[data-sim="win-wsus-client-cycle"] .cc-stages li.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-wsus-client-cycle"] .cc-stages .cc-g { text-align: center; color: var(--sw, var(--ink)); }
+[data-sim="win-wsus-client-cycle"] .cc-stages li:not([data-done]) .cc-g { color: var(--muted); }
+[data-sim="win-wsus-client-cycle"] .cc-stages .cc-when { grid-column: 2; font-family: var(--mono); }
+[data-sim="win-wsus-client-cycle"] .cc-wait { margin: 0; line-height: 1.3; }
+
+/* this window */
+[data-sim="win-wsus-client-cycle"] .cc-log {
+  min-width: 0; align-self: start; max-height: 100%; overflow: hidden;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.5rem 0.7rem;
+}
+[data-sim="win-wsus-client-cycle"] .cc-log h2 { margin: 0 0 0.3rem; font-size: 1.1em; }
+[data-sim="win-wsus-client-cycle"] .cc-log ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="win-wsus-client-cycle"] .cc-log li {
+  display: grid; grid-template-columns: 4.6rem 4.4rem minmax(0, 1fr); gap: 0 0.4rem; font-size: var(--fs-sm); line-height: 1.3;
+  padding: 0 0.25rem; border-left: 0.3rem solid transparent;
+}
+[data-sim="win-wsus-client-cycle"] .cc-log li[data-who="DESK-1"] { border-left-color: var(--c1); }
+[data-sim="win-wsus-client-cycle"] .cc-log li[data-who="LAP-1"] { border-left-color: var(--c2); border-left-style: dotted; }
+[data-sim="win-wsus-client-cycle"] .cc-log li[data-who="WSUS"] { border-left-color: var(--ink); border-left-style: double; }
+[data-sim="win-wsus-client-cycle"] .cc-log li.cc-more { display: block; color: var(--muted); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape^='cc-'] { position: relative; background: transparent; border: 0; }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape^='cc-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--sw, var(--ink)); }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-active'] { border: 0.12rem solid var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-off'] { background: color-mix(in srgb, var(--muted) 34%, var(--bg)); }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-off']::after { content: '⏻'; color: var(--ink); font-size: 0.8em; }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-scan']::after { content: '◆'; }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-dl'] { height: 0.6em; background: var(--sw); border: 0.12rem solid var(--ink); }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-install']::after { content: '■'; }
+[data-sim="win-wsus-client-cycle"] .sd-swatch[data-shape='cc-restart']::after { content: '↻'; }
+
+/* Phone and portrait: the stage grows with its content; cards and the window list stack under the timeline. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-wsus-client-cycle"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-wsus-client-cycle"] .cc { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-wsus-client-cycle"] .cc-tl { grid-template-columns: 4.6rem minmax(0, 1fr); }
+  [data-sim="win-wsus-client-cycle"] .cc-lab .cc-sub { display: none; }
+  [data-sim="win-wsus-client-cycle"] .cc-day { padding-left: 0.1rem; }
+  [data-sim="win-wsus-client-cycle"] .cc-log { max-height: none; }
+  [data-sim="win-wsus-client-cycle"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Ciklus ažuriranja na klijentu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SPAN = L.HORIZON;   // 7200 minutes, Mon 00:00 → Sat 00:00
+  var C = { 'DESK-1': 1, 'LAP-1': 2 };
+  var GLYPH = { scan: '◆', install: '■', missed: '□', restart: '↻', approve: '✓', deadline: '⏰', off: '⏻' };
+  var MC = { scan: 1, download: 2, install: 3, restart: 4 };   // series colour per event kind
+  var STATE_GLYPH = { idle: '○', detected: '!', downloading: '▬', ready: '■', pending: '↻', done: '✓' };
+  var STATE_KEY = { idle: 'stIdle', detected: 'stDetected', downloading: 'stDownloading', ready: 'stReady', pending: 'stPending', done: 'stDone' };
+
+  /** Data (names, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'cc-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  function pct(m) { return (Math.max(0, Math.min(SPAN, m)) / SPAN * 100) + '%'; }
+  function hm(m) { return L.clockOf(m).hm; }
+  /** The end of a window: midnight is 24:00 of the day it closes. */
+  function endHm(m) { return m % 1440 ? hm(m) : '24:00'; }
+  /** "uto 03:00" / "Tue 03:00": the day is a word, the time data. */
+  function when(m) { var c = L.clockOf(m); return h('span', null, t('d' + c.day), ' ', data(c.hm, '')); }
+  function whenB(m) { var c = L.clockOf(m); return h('b', null, t('d' + c.day), ' ', data(c.hm, '')); }
+  function dur(min) { var hh = Math.floor(min / 60), mm = min % 60; return (hh ? hh + ' h' : '') + (hh && mm ? ' ' : '') + (mm ? mm + ' min' : ''); }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  /** t.parts with a node that fills two placeholders cloned (a DOM node can stand in one place only). */
+  function P(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || p.nodeType === 3) return p;
+      var dup = seen.indexOf(p) >= 0;
+      seen.push(p);
+      return dup ? p.cloneNode(true) : p;
+    });
+  }
+  /** Parts with *term* (or *=term*) turned into <em lang="en">. */
+  function rich(key, vars) {
+    var out = [];
+    P(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*=?([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function macOf(s, id) { return s.machines.filter(function (m) { return m.id === id; })[0]; }
+  function inWindow(c, e) { return c.n > 0 && e.t > (c.n - 1) * L.WINDOW && e.t <= c.n * L.WINDOW; }
+
+  // ── clock and the update ──
+  function renderClock(c) {
+    var s = c.state, u = s.update;
+    var now = c.n === 0
+      ? h('div', { class: 'cc-now' }, h('span', { class: 'cc-sub' }, t('clockStart')), whenB(0))
+      : h('div', { class: 'cc-now' }, h('span', { class: 'cc-sub' }, t('clockNow')),
+        h('b', null, t('d' + L.clockOf(s.t - L.WINDOW).day), ' ', data(hm(s.t - L.WINDOW) + '–' + endHm(s.t), '')));
+    var kb = h('div', { class: 'cc-kb' }, q(u.id),
+      u.approved ? h('span', { class: 'cc-tag' }, '✓ ', t('approved'), ' ', when(u.approvedAt)) : h('span', { class: 'cc-tag', dataset: { off: '' } }, t('notApproved')),
+      u.deadline !== null ? h('span', { class: 'cc-tag' }, '⏰ ', t('deadlineAt'), ' ', when(u.deadline)) : null);
+    return h('div', { class: 'cc-clock' }, now, kb);
+  }
+
+  // ── timeline ──
+  function grid(track, withSix) {
+    for (var m = 0; m <= SPAN; m += withSix ? 360 : 1440) {
+      if (m === 0 || m === SPAN) continue;
+      track.append(h('span', { class: 'cc-grid', dataset: m % 1440 ? {} : { day: '' }, style: { left: pct(m) } }));
+    }
+  }
+  function overlay(track, c) {
+    if (c.n > 0) track.append(h('span', { class: 'cc-win', style: { left: pct((c.n - 1) * L.WINDOW), width: (L.WINDOW / SPAN * 100) + '%' } }));
+    if (c.state.t < SPAN) track.append(h('span', { class: 'cc-future', style: { left: pct(c.state.t) } }));
+  }
+  function mark(kind, m, c, changed, colour, title) {
+    return h('span', { class: 'cc-mk' + (changed ? ' sd-changed' : ''), dataset: { k: kind, c: colour ? String(colour) : '' },
+      style: { left: pct(m) }, 'aria-hidden': 'true', translate: 'no', title: title || null }, GLYPH[kind]);
+  }
+  /** The parts of [a, b] when the machine is on (a download makes progress only then). */
+  function onSpans(mac, a, b) {
+    if (!mac.onHours) return [[a, b]];
+    var out = [];
+    for (var d = Math.floor(a / 1440); d * 1440 < b; d++) {
+      var x = Math.max(a, d * 1440 + mac.onHours[0] * 60), y = Math.min(b, d * 1440 + mac.onHours[1] * 60);
+      if (y > x) out.push([x, y]);
+    }
+    return out.length ? out : [[a, a]];
+  }
+  function renderTimeline(c) {
+    var s = c.state;
+    var tl = h('div', { class: 'cc-tl', 'aria-hidden': 'true' });
+    // days
+    var days = h('div', { class: 'cc-track cc-days' });
+    for (var d = 0; d < 5; d++) days.append(h('span', { class: 'cc-day', style: { left: pct(d * 1440) } }, h('b', null, t('d' + d))));
+    tl.append(h('span'), days);
+    // WSUS
+    var ws = h('div', { class: 'cc-track cc-wsus' });
+    grid(ws, true);
+    s.log.forEach(function (e) {
+      if (e.who === 'WSUS') ws.append(mark(e.kind, e.t, c, inWindow(c, e), null));
+    });
+    if (s.update.approved && s.update.deadline !== null && s.update.deadline > s.t) ws.append(mark('deadline', s.update.deadline, c, false, null));
+    overlay(ws, c);
+    tl.append(h('div', { class: 'cc-lab' }, h('b', { translate: 'no' }, t('rowWsus'))), ws);
+    // machines
+    s.machines.forEach(function (mac) {
+      var tr = h('div', { class: 'cc-track cc-mtrack' });
+      grid(tr, true);
+      for (var day = 0; day < 5; day++) {
+        tr.append(h('span', { class: 'cc-active sd-hatch', style: { left: pct(day * 1440 + mac.activeHours[0] * 60), width: ((mac.activeHours[1] - mac.activeHours[0]) * 60 / SPAN * 100) + '%' } }));
+      }
+      if (mac.onHours) {
+        // off from 00:00 to on, and from off to the next on (the last one runs past Saturday 00:00)
+        var spans = [[0, mac.onHours[0] * 60]];
+        for (var dd = 0; dd < 5; dd++) spans.push([dd * 1440 + mac.onHours[1] * 60, (dd + 1) * 1440 + mac.onHours[0] * 60]);
+        spans.forEach(function (sp) {
+          var a = sp[0], b = Math.min(sp[1], SPAN);
+          tr.append(h('span', { class: 'cc-off', style: { left: pct(a), width: ((b - a) / SPAN * 100) + '%' } }, GLYPH.off));
+        });
+      }
+      if (mac.dlStartT !== null) {
+        var dlEnd = mac.dlEndT !== null ? mac.dlEndT : s.t;
+        var dlChanged = c.n > 0 && dlEnd > (c.n - 1) * L.WINDOW && mac.dlStartT <= c.n * L.WINDOW;
+        onSpans(mac, mac.dlStartT, dlEnd).forEach(function (sp) {
+          tr.append(h('span', { class: 'cc-dl' + (dlChanged ? ' sd-changed' : ''), dataset: { c: String(MC.download) }, style: { left: pct(sp[0]), width: ((sp[1] - sp[0]) / SPAN * 100) + '%' } }));
+        });
+      }
+      s.log.forEach(function (e) {
+        if (e.who !== mac.id || !GLYPH[e.kind] || e.kind === 'off') return;
+        var mk = mark(e.kind, e.t, c, inWindow(c, e), MC[e.kind]);
+        if (e.kind === 'scan' && e.found !== 'new') mk.classList.add('cc-quiet');
+        tr.append(mk);
+      });
+      overlay(tr, c);
+      tl.append(h('div', { class: 'cc-lab' }, h('b', { translate: 'no' }, mac.id), h('span', { class: 'cc-sub' }, t(mac.onHours ? 'offNight' : 'alwaysOn'))), tr);
+    });
+    return tl;
+  }
+
+  // ── machine cards ──
+  function waitText(s, mac) {
+    var w = L.waitingFor(s, mac, s.t);
+    switch (w.what) {
+      case 'scan': return P('wScan', { t: when(w.at) });
+      case 'user': return w.deadline !== null && w.deadline !== undefined ? P('wUserDeadline', { t: when(w.deadline) }) : P('wUser', {});
+      case 'download': return P('wDownload', {});
+      case 'install': return P('wInstall', { t: when(w.at) });
+      case 'startup': return P('wStartup', { t: when(w.at) });
+      case 'restart': return P('wRestart', { t: when(w.at) });
+      case 'shutdown': return P('wShutdown', { t: when(w.at) });
+    }
+    return P('wNone', {});
+  }
+  function renderCard(c, mac) {
+    var s = c.state, pmac = c.prev ? macOf(c.prev, mac.id) : mac;
+    var stages = [
+      ['stgFound', '◆', MC.scan, mac.detectT, pmac.detectT],
+      ['stgDownloaded', '▬', MC.download, mac.dlEndT, pmac.dlEndT],
+      ['stgInstalled', '■', MC.install, mac.installT, pmac.installT],
+      ['stgRestarted', '↻', MC.restart, mac.restartT, pmac.restartT]
+    ].map(function (st) {
+      var done = st[3] !== null, changed = c.n > 0 && done && st[4] === null;
+      return h('li', { class: changed ? 'sd-changed' : null, dataset: done ? { done: '' } : {} },
+        h('span', { class: 'cc-g', dataset: { c: String(st[2]) }, 'aria-hidden': 'true', translate: 'no' }, done ? st[1] : '·'),
+        h('span', null, t(st[0])), done ? h('span', { class: 'cc-when' }, when(st[3])) : null);
+    });
+    var chipChanged = c.n > 0 && mac.state !== pmac.state;
+    return h('section', { class: 'cc-card' },
+      h('h2', null, h('b', { translate: 'no' }, mac.id),
+        h('span', { class: 'cc-chip' + (chipChanged ? ' sd-changed' : ''), dataset: { st: mac.state } },
+          h('span', { 'aria-hidden': 'true', translate: 'no' }, STATE_GLYPH[mac.state]), t(STATE_KEY[mac.state]))),
+      h('p', { class: 'cc-set' }, data('AU ' + mac.au, ''), ' · ', P('scanEvery', { t: data(dur(mac.interval), '') }), ' · ',
+        t('activeHours'), ' ', data(two(mac.activeHours[0]) + '–' + two(mac.activeHours[1]), '')),
+      h('ol', { class: 'cc-stages' }, stages),
+      h('p', { class: 'cc-wait' }, h('b', null, t('waitsFor')), ' ', waitText(s, mac)));
+  }
+
+  // ── this window ──
+  function evText(e, count) {
+    switch (e.kind) {
+      case 'on': return t('evOn');
+      case 'off': return t('evOff');
+      case 'approve': return t('evApprove');
+      case 'deadline': return t('evDeadline');
+      case 'scan': return e.found === 'new' ? t('evScanNew') : count === 1 && e.late ? t('evScanLate') : t.n('evScanNone', count);
+      case 'user': return t('evUser');
+      case 'downloaded': return t('evDownloaded');
+      case 'missed': return t('evMissed');
+      case 'install': return t({ scheduled: 'evInstallScheduled', missed: 'evInstallMissed', user: 'evInstallUser', deadline: 'evInstallDeadline' }[e.how]);
+      case 'restart': return t({ outside: 'evRestartOutside', deadline: 'evRestartDeadline', shutdown: 'evRestartShutdown' }[e.how]);
+    }
+    return '';
+  }
+  function renderLog(c) {
+    var s = c.state, rows = [];
+    var evs = s.log.filter(function (e) { return inWindow(c, e); });
+    var quiet = {};   // scans that found nothing, one row per machine
+    evs.forEach(function (e) {
+      if (e.kind === 'scan' && e.found !== 'new') {
+        if (quiet[e.who]) { quiet[e.who].n++; return; }
+        quiet[e.who] = { e: e, n: 1 };
+        rows.push(quiet[e.who]);
+        return;
+      }
+      rows.push({ e: e, n: 1 });
+    });
+    var body = rows.length
+      ? h('ol', null, rows.map(function (r) {
+        return h('li', { dataset: { who: r.e.who } }, when(r.e.t), data(r.e.who, 'cc-mono'), h('span', null, evText(r.e, r.n)));
+      }))
+      : h('p', { class: 'cc-sub' }, c.n === 0 ? t('winStart') : t('windowEmpty'));
+    return h('section', { class: 'cc-log' }, h('h2', null, t('windowTitle')), body);
+  }
+  /** Drop the last rows that do not fit, and say how many. */
+  function fitLog(box) {
+    var ol = box.querySelector('ol');
+    if (!ol) return;
+    var dropped = 0;
+    while (box.scrollHeight > box.clientHeight + 1 && ol.children.length > 2) {
+      ol.removeChild(ol.children[ol.children.length - (dropped ? 2 : 1)]);
+      if (!dropped) ol.append(h('li', { class: 'cc-more' }));
+      dropped++;
+    }
+    if (dropped) ol.lastChild.textContent = '+ ' + dropped;
+  }
+
+  // ── captions ──
+  /** Every sentence about one machine's events in this window, in order (deadline restarts are told once, above). */
+  function machineSentences(s, c, mac, evs) {
+    var out = [];
+    // fresh nodes for every sentence: a DOM node can stand in one place only
+    var pc = function () { return q(mac.id); }, kb = function () { return q(s.update.id); };
+    var mine = evs.filter(function (e) { return e.who === mac.id; });
+    var by = function (kind) { return mine.filter(function (e) { return e.kind === kind; })[0]; };
+    var scan = mine.filter(function (e) { return e.kind === 'scan' && e.found === 'new'; })[0];
+    var dl = by('downloaded'), inst = by('install'), rst = by('restart'), user = by('user'), missed = by('missed');
+    var w = L.waitingFor(s, mac, s.t);
+    var what = function () { return h('span', null, waitText(s, mac)); };
+    var dline = s.update.deadline;
+    var forcedHere = rst && rst.how === 'deadline';
+    if (scan) {
+      var vars = { pc: pc(), kb: kb(), t: q(hm(scan.t)), dl: dl ? q(hm(dl.t)) : '' };
+      var waitsAnyway = mac.userActs.postpone && !user && !forcedHere;
+      if (mac.au === 2) {
+        if (waitsAnyway && dline === null) out.push(P('capScanAu2', vars));
+        else {
+          out.push(P('capScanAu2Wait', vars));
+          if (waitsAnyway) out.push(P('capNobodyDeadline', { d: when(dline) }));
+        }
+      } else if (!dl) out.push(P('capScanAu4Dl', vars));
+      else if (mac.au === 4) out.push(rich('capScanAu4', vars));
+      else {
+        out.push(P('capScanAu3', vars));
+        if (waitsAnyway) out.push(dline === null ? P('capNobody', {}) : P('capNobodyDeadline', { d: when(dline) }));
+      }
+    } else if (dl && !user && !inst) out.push(P('capDownloaded', { pc: pc(), t: q(hm(dl.t)) }));
+    if (missed) out.push(P('capMissed', { pc: pc() }));
+    if (forcedHere) return out;
+    var restartTold = false;
+    if (inst && inst.how === 'user') {
+      var u = user ? q(hm(user.t)) : whenB(mac.userT);   // an answer from an earlier window keeps its day
+      if (rst && rst.how === 'outside') { out.push(P('capUserDone', { pc: pc(), kb: kb(), u: u, t: q(hm(inst.t)), r: q(hm(rst.t)) })); restartTold = true; }
+      else out.push(P('capUser', { pc: pc(), kb: kb(), u: u, t: q(hm(inst.t)), what: rst ? h('span', null, P('wShutdown', { t: when(rst.t) })) : what() }));
+    } else if (user) out.push(P('capUserDl', { pc: pc(), t: q(hm(user.t)) }));
+    if (inst && inst.how === 'missed') {
+      var shut = w.what === 'shutdown' || (rst && rst.how === 'shutdown');
+      out.push(rich(shut ? 'capMissedInstallShut' : 'capMissedInstall',
+        { pc: pc(), t: q(hm(inst.t)), end: q(rst ? hm(rst.t) : w.at !== null ? hm(w.at) : '') }));
+      if (rst && rst.how === 'outside') restartTold = true;
+    }
+    if (inst && inst.how === 'scheduled') {
+      if (rst && rst.t === inst.t) { out.push(P('capScheduled', { pc: pc(), kb: kb(), t: q(hm(inst.t)) })); restartTold = true; }
+      else out.push(P('capScheduledWait', { pc: pc(), kb: kb(), t: q(hm(inst.t)), what: what() }));
+    }
+    if (rst && !restartTold) out.push(rst.how === 'shutdown' ? P('capShutdown', { pc: pc(), t: q(hm(rst.t)) }) : P('capRestart', { pc: pc(), kb: kb(), t: q(hm(rst.t)) }));
+    return out;
+  }
+  function joinPcs(ids) {
+    var out = [];
+    ids.forEach(function (id, i) { if (i) out.push(t('and')); out.push(q(id)); });
+    return h('span', null, out);
+  }
+  function caption(c) {
+    var s = c.state;
+    if (c.first) {
+      var lap = macOf(s, 'LAP-1');
+      return P('capStart', { desk: q('DESK-1'), lap: q('LAP-1'), lapPower: t(lap.onHours ? 'capLapNight' : 'capLapOn') });
+    }
+    var evs = s.log.filter(function (e) { return inWindow(c, e); });
+    var from = s.t - L.WINDOW;
+    var out = P('capWindow', { w: h('b', null, t('d' + L.clockOf(from).day), ' ', data(hm(from) + '–' + endHm(s.t), '')) });
+    var parts = [];
+    var approve = evs.filter(function (e) { return e.kind === 'approve'; })[0];
+    if (approve) parts.push(rich('capApprove', { kb: q(s.update.id), t: q(hm(approve.t)) }));
+    var forcedRestarts = evs.filter(function (e) { return e.kind === 'restart' && e.how === 'deadline'; });
+    var dlAt = s.update.deadline, dlEv = evs.filter(function (e) { return e.kind === 'deadline'; })[0];
+    var ids = function (list) { return list.map(function (e) { return e.who; }); };
+    if (forcedRestarts.length) {
+      if (dlEv && forcedRestarts.every(function (e) { return e.t === dlAt; })) {
+        parts.push(P(forcedRestarts.length > 1 ? 'capDeadlineBoth' : 'capDeadline', { day: t('dA' + L.clockOf(dlAt).day), t: q(hm(dlAt)), pcs: joinPcs(ids(forcedRestarts)) }));
+      } else {
+        var groups = {};
+        forcedRestarts.forEach(function (e) { (groups[e.t] = groups[e.t] || []).push(e); });
+        Object.keys(groups).sort(function (x, y) { return x - y; }).forEach(function (k) {
+          var g = groups[k];
+          parts.push(g.length > 1 ? P('capDeadlineAtBoth', { pcs: joinPcs(ids(g)), kb: q(s.update.id), t: q(hm(g[0].t)) })
+            : P('capDeadlineAt', { pc: q(g[0].who), kb: q(s.update.id), t: q(hm(g[0].t)) }));
+        });
+      }
+    } else if (dlEv) {
+      var starting = s.machines.filter(function (m) { return m.dlStartT !== null && m.dlStartT >= dlAt && m.dlStartT <= s.t; });
+      if (starting.length) parts.push(P('capDeadlineArrives', { t: q(hm(dlAt)), pcs: joinPcs(starting.map(function (m) { return m.id; })) }));
+      else if (s.machines.every(function (m) { return m.state === 'done'; })) parts.push(P('capDeadlineNothing', { t: q(hm(dlAt)) }));
+    }
+    s.machines.forEach(function (mac) {
+      machineSentences(s, c, mac, evs).forEach(function (sen) { parts.push(sen); });
+    });
+    if (!parts.length) {
+      var open = s.machines.filter(function (m) { return m.state !== 'done'; });
+      if (!open.length) parts.push(P('capAllDone', {}));
+      else {
+        parts.push(P('capQuiet', {}));
+        open.forEach(function (m) { parts.push(P('capWaits', { pc: q(m.id), what: h('span', null, waitText(s, m)) })); });
+      }
+    }
+    parts.forEach(function (p) { out = out.concat([' ']).concat(p); });
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'au', type: 'choice', label: t('au'), options: [[2, t('au2')], [3, t('au3')], [4, t('au4')]] },
+      { key: 'detection', type: 'range', label: t('detection'), min: 1, max: 22, step: 1, format: function (v) { return t('detectionFmt', { n: v }); } },
+      { key: 'activeHours', type: 'choice', label: t('activeHours'), options: [['08-17', t('active0817')], ['06-23', t('active0623')]] },
+      { key: 'deadline', type: 'choice', label: t('deadline'), options: [['none', t('deadlineNone')], ['thu12', t('deadlineThu')]] },
+      { key: 'laptopOffAtNight', type: 'toggle', label: t('laptopOff') },
+      { key: 'userClicks', type: 'toggle', label: t('userClicks'), disabled: function (p) { return p.au === 4 ? t('userNoEffect') : false; } }
+    ],
+
+    presets: [
+      { id: 'desktop-scheduled', label: t('presetDesktop'), hint: t('presetDesktopHint'), params: { laptopOffAtNight: false } },
+      { id: 'laptop-missed', label: t('presetLaptop'), hint: t('presetLaptopHint'), params: {} },
+      { id: 'notify-ignored', label: t('presetIgnored'), hint: t('presetIgnoredHint'), params: { au: 3, deadline: 'thu12' } },
+      { id: 'notify-only', label: t('presetNotifyOnly'), hint: t('presetNotifyOnlyHint'), params: { au: 2 } },
+      { id: 'short-detection', label: t('presetShort'), hint: t('presetShortHint'), params: { detection: 4 } }
+    ],
+
+    legend: [
+      { shape: 'cc-active', label: t('legendActive') },
+      { shape: 'cc-off', label: t('legendOff') },
+      { shape: 'cc-scan', c: 1, label: t('legendScan') },
+      { shape: 'cc-dl', c: 2, label: t('legendDownload') },
+      { shape: 'cc-install', c: 3, label: t('legendInstall') },
+      { shape: 'cc-restart', c: 4, label: t('legendRestart') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var log = renderLog(c);
+      c.stage.replaceChildren(h('div', { class: 'cc' }, renderClock(c), renderTimeline(c),
+        renderCard(c, macOf(c.state, 'DESK-1')), renderCard(c, macOf(c.state, 'LAP-1')), log));
+      fitLog(log);
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
