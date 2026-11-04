@@ -1,0 +1,445 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-gpo-tattooing: a stepper. Top, the GPO "Quillmoor Desktop" (linked to OU=Staff or not) and the event strip
+     (logon, the admin's or the user's action, a refresh). Left, the two items side by side: the policy (padlock) and the
+     preference (pencil), each with the registry value it leaves on PC07 and what the user sees. Right, what a
+     processing pass does with an item, as a first-match rule table (kit view K4, kit/ruletable.js, docs/sim-ui.md §12,
+     with the page's own marks: one deciding row per item). One step is one event.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-gpo-tattooing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPO: pravila i preference (tetoviranje) · simdeck</title>
+<meta name="description" content="Jedan GPO s pravilom i preferencom za ana na PC07: odspoji GPO i vrijednost u ključu Policies nestaje, a ProxyMode ostaje. Korisnik mijenja, osvježavanje vraća.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-gpo-tattooing",
+  "title": {
+    "hr": "GPO: pravila i preference (tetoviranje)",
+    "en": "GPO policies vs preferences (tattooing)"
+  },
+  "concept": {
+    "hr": "Kad GPO nestane, pravilo se vraća, a preferenca ostaje",
+    "en": "When the GPO goes away, a policy reverts; a preference stays"
+  },
+  "summary": {
+    "hr": "Jedan GPO s pravilom i preferencom za ana na PC07: odspoji GPO i vrijednost u ključu Policies nestaje, a ProxyMode ostaje. Korisnik mijenja, osvježavanje vraća.",
+    "en": "One GPO with a policy and a preference for ana on PC07: unlink it and the Policies value goes, ProxyMode stays. The user edits it; a refresh puts it back."
+  },
+  "tags": [
+    "group-policy"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-gpo-tattooing"]; colours only from kit tokens.
+   Layout: the GPO line and event strip across the top; the two item columns on the left; the rule table (K4) on the
+   right. */
+[data-sim="win-gpo-tattooing"] .tt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem 1.4cqw;
+  height: 100%;
+  padding: 1.5cqh 1.4cqw;
+  font-size: 1.1rem;
+}
+[data-sim="win-gpo-tattooing"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-gpo-tattooing"] .tt-top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.6rem 1rem; }
+[data-sim="win-gpo-tattooing"] .tt-gpo {
+  display: flex; flex-direction: column; justify-content: center; gap: 0.1rem;
+  padding: 0.35rem 0.8rem; border: 0.2rem solid var(--ink); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-gpo-tattooing"] .tt-gpo.tt-off { border-style: dashed; border-color: var(--muted); background: var(--bg); }
+[data-sim="win-gpo-tattooing"] .tt-gpo.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-tattooing"] .tt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; font-weight: 700; }
+[data-sim="win-gpo-tattooing"] .tt-kind {
+  display: inline-grid; place-items: center; height: 1.5rem; padding: 0 0.35rem;
+  border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="win-gpo-tattooing"] .tt-line { font-size: var(--fs-sm); line-height: 1.35; }
+
+/* event strip: done solid, now highlighted, next dashed */
+[data-sim="win-gpo-tattooing"] .tt-strip { flex: 1 1 32rem; display: flex; align-items: center; gap: 0.4rem; min-width: 0; list-style: none; margin: 0; padding: 0; }
+[data-sim="win-gpo-tattooing"] .tt-ev {
+  flex: 1 1 0; min-width: 0; padding: 0.3rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius);
+  background: var(--panel); line-height: 1.25;
+}
+[data-sim="win-gpo-tattooing"] .tt-ev b { display: block; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="win-gpo-tattooing"] .tt-ev[data-st="next"] { border-style: dashed; border-color: var(--muted); background: var(--bg); color: var(--muted); }
+[data-sim="win-gpo-tattooing"] .tt-ev[data-st="now"] { border-width: 0.3rem; background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-tattooing"] .tt-arrow { flex: none; color: var(--muted); font-weight: 700; }
+
+/* the two item columns */
+[data-sim="win-gpo-tattooing"] .tt-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.2cqw; min-width: 0; align-content: start; }
+[data-sim="win-gpo-tattooing"] .tt-col { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+[data-sim="win-gpo-tattooing"] .tt-item, [data-sim="win-gpo-tattooing"] .tt-reg, [data-sim="win-gpo-tattooing"] .tt-user {
+  padding: 0.35rem 0.7rem 0.45rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+  overflow-wrap: anywhere;
+}
+[data-sim="win-gpo-tattooing"] .tt-item.tt-off { border-style: dashed; color: var(--muted); background: var(--bg); }
+[data-sim="win-gpo-tattooing"] .tt-item .tt-head { font-size: 1.15em; }
+[data-sim="win-gpo-tattooing"] .tt-setting { margin: 0.2rem 0 0; font-weight: 700; line-height: 1.25; }
+[data-sim="win-gpo-tattooing"] .tt-setting > span:last-child { font-weight: 400; }
+[data-sim="win-gpo-tattooing"] .tt-opt { display: flex; gap: 0.4rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-gpo-tattooing"] .tt-box { flex: none; font-family: var(--mono); font-weight: 700; }
+[data-sim="win-gpo-tattooing"] .tt-opt[data-on="false"] { color: var(--muted); }
+[data-sim="win-gpo-tattooing"] .tt-down { padding: 0.25rem 0 0.25rem 1.2rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-gpo-tattooing"] .tt-down::before { content: '↓ '; font-weight: 700; color: var(--ink); }
+[data-sim="win-gpo-tattooing"] .tt-key { display: block; font-size: var(--fs-sm); line-height: 1.3; overflow-wrap: normal; }
+[data-sim="win-gpo-tattooing"] .tt-slot {
+  display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; min-height: 2.6rem; padding: 0.25rem 0.6rem;
+  border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); font-weight: 700; font-size: 1.05em;
+}
+[data-sim="win-gpo-tattooing"] .tt-slot[data-empty="true"] { border-style: dashed; border-color: var(--muted); color: var(--muted); font-weight: 400; font-style: italic; font-size: 1em; }
+[data-sim="win-gpo-tattooing"] .tt-slot.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-tattooing"] .tt-out { margin-top: 0.25rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="win-gpo-tattooing"] .tt-out[data-quiet="true"] { font-weight: 400; color: var(--muted); }
+[data-sim="win-gpo-tattooing"] .tt-user { margin-top: 0.6rem; background: var(--bg); }
+[data-sim="win-gpo-tattooing"] .tt-user h3 { margin: 0 0 0.15rem; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="win-gpo-tattooing"] .tt-sees { display: flex; gap: 0.4rem; align-items: baseline; line-height: 1.3; }
+[data-sim="win-gpo-tattooing"] .tt-sees .tt-mk { flex: none; font-weight: 700; }
+[data-sim="win-gpo-tattooing"] .tt-sees.sd-changed { margin: 0 -0.3rem; padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-tattooing"] .tt-sees.sd-changed .tt-mk { color: var(--on-hl); }
+[data-sim="win-gpo-tattooing"] .tt-sees[data-ok="false"] .tt-mk { color: var(--danger); }
+[data-sim="win-gpo-tattooing"] .tt-sees[data-ok="true"] .tt-mk { color: var(--ok); }
+[data-sim="win-gpo-tattooing"] .tt-can { font-size: var(--fs-sm); color: var(--muted); }
+
+/* icons: padlock (policy), pencil (preference), ink drop (tattoo); also the legend swatches */
+[data-sim="win-gpo-tattooing"] .tt-ico { position: relative; display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: -0.12em; }
+[data-sim="win-gpo-tattooing"] .tt-ico[data-i="lock"]::after,
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-lock"]::after {
+  content: ''; position: absolute; left: 0.1em; right: 0.1em; bottom: 0; height: 0.58em; background: currentColor; border-radius: 0.12em;
+}
+[data-sim="win-gpo-tattooing"] .tt-ico[data-i="lock"]::before,
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-lock"]::before {
+  content: ''; position: absolute; left: 0.24em; right: 0.24em; top: 0; height: 0.62em;
+  border: 0.13em solid currentColor; border-bottom: 0; border-radius: 0.3em 0.3em 0 0; box-sizing: border-box;
+}
+[data-sim="win-gpo-tattooing"] .tt-ico[data-i="pencil"]::after,
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-pencil"]::after {
+  content: ''; position: absolute; left: 0.02em; top: 0.38em; width: 0.8em; height: 0.26em; background: currentColor;
+  transform: rotate(-45deg); border-radius: 0.04em;
+}
+[data-sim="win-gpo-tattooing"] .tt-ico[data-i="pencil"]::before,
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-pencil"]::before {
+  content: ''; position: absolute; left: 0; bottom: 0; width: 0; height: 0;
+  border-left: 0.22em solid currentColor; border-top: 0.22em solid transparent;
+}
+[data-sim="win-gpo-tattooing"] .tt-ico[data-i="drop"]::after,
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-drop"]::after {
+  content: ''; position: absolute; left: 0.17em; top: 0.2em; width: 0.66em; height: 0.66em; background: var(--c3);
+  border: 0.08em solid var(--ink); border-radius: 0 50% 50% 50%; transform: rotate(45deg); box-sizing: border-box;
+}
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape^="tt-"] { position: relative; border: 0; background: transparent; color: var(--ink); }
+[data-sim="win-gpo-tattooing"] .sd-swatch[data-shape="tt-empty"] { border: var(--line-w) dashed var(--muted); background: var(--bg); }
+[data-sim="win-gpo-tattooing"] .tt-tattoo { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; font-size: var(--fs-sm); font-weight: 700; }
+
+/* the rule table */
+[data-sim="win-gpo-tattooing"] .tt-table { min-width: 0; align-self: start; font-size: 0.95rem; }
+[data-sim="win-gpo-tattooing"] .tt-rk { display: inline-flex; align-items: center; gap: 0.35rem; }
+[data-sim="win-gpo-tattooing"] .tt-table .sd-rt-mark b { font-weight: 700; }
+
+/* Phone and portrait: the stage grows with its content; everything stacked. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-gpo-tattooing"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-gpo-tattooing"] .tt { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+  [data-sim="win-gpo-tattooing"] .tt-strip { flex-direction: column; align-items: stretch; flex-basis: 100%; }
+  [data-sim="win-gpo-tattooing"] .tt-arrow { display: none; }
+  [data-sim="win-gpo-tattooing"] .tt-items { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">GPO: pravila i preference (tetoviranje)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var GPO = 'Quillmoor Desktop', OU = 'OU=Staff', PC = 'PC07', USER = 'ana';
+  var POL = L.ITEMS[0], PREF = L.ITEMS[1];
+  var PRESET_WORDS = { unlink: 'presetUnlink', 'remove-flag': 'presetRemove', 'user-edit': 'presetEdit', 'apply-once': 'presetOnce', 'policy-locked': 'presetLocked' };
+  var EVENT_WORDS = { logon: 'evLogon', unlink: 'evUnlink', refresh: 'evRefresh', unlinkRefresh: 'evUnlinkRefresh', edit: 'evEdit', 'try': 'evTry' };
+  var OUT_WORDS = {
+    write: 'outWrite', same: 'outSame', overwrite: 'outOverwrite', once: 'outOnce', remove: 'outRemove', tattoo: 'outTattoo',
+    none: 'outNone', waits: 'outWaits', blocked: 'outBlocked', open: 'outOpen', untouched: 'outUntouched', userSet: 'outUserSet'
+  };
+  var COND_WORDS = { policyKey: 'condPolicyKey', outsideKey: 'condOutside', remove: 'condRemove', onceApplied: 'condOnce' };
+
+  /** Data (names, registry paths and values) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(key, vars) { return [' '].concat(rich(key, vars)); }
+  function valueText(item, v) { return item.name + ' = ' + v; }
+  /** A registry path that breaks only after a backslash. */
+  function keyNode(key) {
+    var node = h('span', { translate: 'no', class: 'tt-key' });
+    key.split('\\').forEach(function (part, i) {
+      if (i) node.append('\\', h('wbr'));
+      node.append(part);
+    });
+    return node;
+  }
+  function ico(i) { return h('span', { class: 'tt-ico', dataset: { i: i }, 'aria-hidden': 'true' }); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function eventWord(ev) { return ev.kind === 'edit' || ev.kind === 'try' ? t.parts(EVENT_WORDS[ev.kind], { user: data(USER) }) : t(EVENT_WORDS[ev.kind]); }
+
+  // ── top: the GPO and the event strip ──
+
+  function renderTop(c) {
+    var s = c.state, p = c.params;
+    var script = L.SCRIPTS[p.script];
+    var justUnlinked = s.event && (s.event.kind === 'unlink' || s.event.kind === 'unlinkRefresh');
+    var gpo = h('section', { class: 'tt-gpo' + (s.linked ? '' : ' tt-off') + (justUnlinked ? ' sd-changed' + anim(c) : '') },
+      h('div', { class: 'tt-head' }, h('span', { class: 'tt-kind' }, t('gpoKind')), data(GPO)),
+      h('div', { class: 'tt-line' }, t.parts(s.linked ? 'gpoLinked' : 'gpoUnlinked', { ou: data(OU) }), ' · ',
+        t.parts('gpoFor', { user: data(USER), pc: data(PC) })));
+    var strip = h('ol', { class: 'tt-strip' });
+    script.forEach(function (ev, i) {
+      if (i) strip.appendChild(h('li', { class: 'tt-arrow', 'aria-hidden': 'true' }, '→'));
+      var st = i + 1 < c.n ? 'done' : i + 1 === c.n ? 'now' : 'next';
+      strip.appendChild(h('li', { class: 'tt-ev' + (st === 'now' ? ' sd-changed' + anim(c) : ''), dataset: { st: st } },
+        h('b', null, t('evTime', { t: ev.t })), h('span', null, eventWord(ev))));
+    });
+    return h('div', { class: 'tt-top' }, gpo, strip);
+  }
+
+  // ── left: the two items, their registry values, what the user sees ──
+
+  function outcome(item, it) {
+    if (!it) return null;
+    var vars = {};
+    if (it.code === 'overwrite' || it.code === 'userSet') {
+      vars = { before: data(it.before == null ? '–' : it.before), after: data(it.after == null ? '–' : it.after), user: data(USER) };
+    }
+    var quiet = it.code === 'waits' || it.code === 'none' || it.code === 'untouched';
+    var word = it.code === 'tattoo'
+      ? h('span', { class: 'tt-tattoo' }, ico('drop'), t(OUT_WORDS[it.code]))
+      : h('span', null, t.parts(OUT_WORDS[it.code], vars));
+    return h('div', { class: 'tt-out', dataset: { quiet: String(quiet) } }, '→ ', word);
+  }
+
+  function renderItem(c, item) {
+    var s = c.state, isPol = item.kind === 'policy';
+    var v = s.registry[L.pathOf(item)];
+    var it = s.items ? s.items[item.id] : null;
+    var changed = it && it.before !== it.after;
+    var card;
+    if (isPol) {
+      card = h('section', { class: 'tt-item' + (s.linked ? '' : ' tt-off') },
+        h('div', { class: 'tt-head' }, ico('lock'), t('kindPolicy')),
+        h('div', { class: 'tt-line' }, t('polPath')),
+        h('p', { class: 'tt-setting' }, t('polSetting'), ': ', h('span', null, t('polState'))));
+    } else {
+      var f = s.itemFlags;
+      var opt = function (on, key) {
+        return h('div', { class: 'tt-opt', dataset: { on: String(on) } }, h('span', { class: 'tt-box', 'aria-hidden': 'true' }, on ? '☑' : '☐'), h('span', null, t(key)));
+      };
+      card = h('section', { class: 'tt-item' + (s.linked ? '' : ' tt-off') },
+        h('div', { class: 'tt-head' }, ico('pencil'), t('kindPref')),
+        h('div', { class: 'tt-line' }, t('prefPath')),
+        h('p', { class: 'tt-setting' }, data(valueText(item, item.value))),
+        h('div', { class: 'tt-line' }, t('prefAction'), ' ', data(L.actionOf(f))),
+        opt(f.removeWhenNotApplied, 'optRemove'),
+        opt(f.applyOnce, 'optOnce'));
+    }
+    var tattooed = it && it.code === 'tattoo';
+    var slot = h('div', { class: 'tt-slot' + (changed ? ' sd-changed' + anim(c) : ''), dataset: { empty: String(v == null) } },
+      v == null ? t('noValue') : data(valueText(item, v)),
+      tattooed ? h('span', { class: 'tt-tattoo' }, ico('drop')) : null);
+    var reg = h('section', { class: 'tt-reg' }, keyNode(item.key), slot, outcome(item, it));
+    var sees, seen = it && (it.code === 'blocked' || changed) ? ' sd-changed' + anim(c) : '';
+    if (isPol) {
+      var blocked = v === item.value;
+      sees = h('div', { class: 'tt-sees' + seen, dataset: { ok: String(!blocked) } }, h('span', { class: 'tt-mk', 'aria-hidden': 'true' }, blocked ? '✕' : '✓'),
+        h('span', null, t(blocked ? 'cpBlocked' : 'cpOpen')));
+    } else {
+      sees = h('div', { class: 'tt-sees' + seen, dataset: { ok: 'true' } }, h('span', { class: 'tt-mk', 'aria-hidden': 'true' }, '✎'),
+        h('span', null, v == null ? t('proxyDefault') : t.parts('proxyOn', { v: data(v) })));
+    }
+    var locked = isPol && v === item.value && L.isPolicyKey(item.key);
+    var can = isPol && !locked ? null : h('div', { class: 'tt-can' }, t(locked ? 'cannotChange' : 'canChange'));
+    var user = h('section', { class: 'tt-user' }, h('h3', null, t.parts('userSees', { user: data(USER) })), sees, can);
+    return h('div', { class: 'tt-col' }, card, h('div', { class: 'tt-down' }, t.parts('writesTo', { pc: data(PC) })), reg, user);
+  }
+
+  // ── right: the rule table ──
+
+  var ACT_WORDS = ['actWrite', 'actDeleteDefault', 'actTattoo', 'actDelete', 'actTattoo', 'actKeep', 'actWrite'];
+
+  function renderTable(c) {
+    var s = c.state;
+    var isPass = !!(s.items && s.items.policy.hits);
+    var header = !s.event ? t('markStart') : isPass
+      ? t.parts('markPass', { time: h('span', null, t('evTime', { t: s.event.t })), event: eventWord(s.event) })
+      : t('markNone');
+    return Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'first',
+      className: 'tt-table',
+      stickyMark: true,
+      title: t('tableTitle'),
+      noLabel: t('colItem'),
+      columns: [
+        { key: 'applies', label: t('colApplies') },
+        { key: 'cond', label: t('colCond'), wrap: true }
+      ],
+      actionLabel: t('colAct'),
+      markLabel: header,
+      rows: L.ROWS.map(function (r, i) {
+        var isPol = r.kind === 'policy';
+        var mark = null;
+        if (isPass) {
+          var hit = s.items[isPol ? 'policy' : 'pref'].hits[i];
+          mark = hit === true ? 'win' : hit === false ? 'no' : 'skip';
+        }
+        return {
+          no: h('span', { class: 'tt-rk', 'aria-label': t(isPol ? 'kindPolicy' : 'kindPref') }, ico(isPol ? 'lock' : 'pencil'), data(i + 1)),
+          cells: {
+            applies: h('span', null, t(r.applies ? 'yes' : 'no')),
+            cond: r.cond ? h('span', null, t(COND_WORDS[r.cond])) : '–'
+          },
+          action: h('span', null, t(ACT_WORDS[i])),
+          hit: null,
+          mark: mark
+        };
+      }),
+      at: isPass ? 'all' : -1,
+      done: isPass,
+      changed: false,
+      outcome: function (i) {
+        var it = s.items[L.ROWS[i].kind === 'policy' ? 'policy' : 'pref'];
+        var vars = { before: data(it.before == null ? '–' : it.before), after: data(it.after == null ? '–' : it.after) };
+        return h('b', null, t.parts(OUT_WORDS[it.code], vars));
+      },
+      words: { win: '', skip: t('markSkip') }
+    });
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.event;
+    var pv = data(valueText(POL, 1)), fv = data(valueText(PREF, 1)), fv0 = data(valueText(PREF, 0));
+    if (!ev) return rich('capStart', { gpo: data(GPO), user: data(USER), pc: data(PC) });
+    var out;
+    if (ev.kind === 'logon') {
+      out = rich('capLogon', { t: ev.t, pv: pv, fv: fv, key: data(PREF.key) });
+      if (p.removeWhenNotApplied) out = out.concat(sentence('capLogonReplace'));
+      if (p.applyOnce) out = out.concat(sentence('capLogonOnce'));
+      return out;
+    }
+    if (ev.kind === 'unlink') return rich('capUnlink', { t: ev.t, pc: data(PC) });
+    if (ev.kind === 'edit') return rich('capEdit', { t: ev.t, user: data(USER), fv0: fv0, pv: pv });
+    if (ev.kind === 'try') return rich('capTry', { t: ev.t, user: data(USER), fv0: fv0 });
+    var joint = ev.kind === 'unlinkRefresh';
+    out = joint ? rich('capUnlinkRefresh', { t: ev.t }) : rich('capRefreshAt', { t: ev.t });
+    var pref = s.items.pref;
+    if (!s.linked) {
+      if (!joint) out = out.concat(sentence('capUnlinked'));
+      out = out.concat(sentence(pref.code === 'remove' ? 'capRemoved' : 'capTattoo', { fv: fv, name: data(PREF.name) }));
+      return out.concat(sentence('capCpBack'));
+    }
+    if (pref.code === 'once') return out.concat(sentence('capOnce', { name: data(PREF.name) }));
+    out = out.concat(sentence('capOverwrite'), sentence('capOverwriteWhy'));
+    if (p.removeWhenNotApplied) out = out.concat(sentence('capOverwriteReplace'));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'script', type: 'select', label: t('script'), resets: true,
+        options: [['unlink', t('scrUnlink')], ['unlinkAtRefresh', t('scrUnlinkAtRefresh')], ['edit', t('scrEdit')], ['try', t('scrTry')]] },
+      { key: 'removeWhenNotApplied', type: 'toggle', label: t('removeWhenNotApplied'), hint: t('removeHint'), resets: true },
+      { key: 'applyOnce', type: 'toggle', label: t('applyOnce'), resets: true }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { shape: 'tt-lock', label: t('legPolicy') },
+      { shape: 'tt-pencil', label: t('legPref') },
+      { shape: 'tt-drop', label: t('legTattoo') },
+      { shape: 'tt-empty', label: t('legEmpty') },
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'tt' }, renderTop(c),
+        h('div', { class: 'tt-items' }, renderItem(c, POL), renderItem(c, PREF)), renderTable(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
