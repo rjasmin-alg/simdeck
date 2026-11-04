@@ -1,0 +1,665 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dhcp-dns-update: a DHCP server registers DNS records for its clients. A client gets a lease (DISCOVER/OFFER,
+     REQUEST/ACK with option 81), then the server and the client send the DNS updates the server's DNS settings call
+     for to DC1 (zones corp.example and 10.0.10.in-addr.arpa, both Secure only), which checks prerequisites (Name
+     Protection) and each name's owner. Events: DHCP1 down with DHCP2 answering, and a lease expiring.
+     Left: the two zones as record tables with owner chips, the DHCP server's DNS settings and leases, and the message
+     card. Right: kit view K1 (message sequence chart, kit/sequence.js) with lanes for the client, DHCP1, DHCP2 (failover
+     only) and DC1. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dhcp-dns-update">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHCP upisuje klijente u DNS · simdeck</title>
+<meta name="description" content="Windows klijent traži od DHCP-a samo PTR, pisač ništa. Drugi DHCP ne smije mijenjati tuđe zapise, a zaštita imena čuva ime fs1.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dhcp-dns-update",
+  "title": {
+    "hr": "DHCP upisuje klijente u DNS",
+    "en": "DHCP registering clients in DNS"
+  },
+  "concept": {
+    "hr": "Poslužitelj upisuje zapise za klijente: vlasnik, zaštita imena, DnsUpdateProxy",
+    "en": "The server registers records for clients: owner, Name Protection, DnsUpdateProxy"
+  },
+  "summary": {
+    "hr": "Windows klijent traži od DHCP-a samo PTR, pisač ništa. Drugi DHCP ne smije mijenjati tuđe zapise, a zaštita imena čuva ime fs1.",
+    "en": "A Windows client asks DHCP for the PTR only, a printer for nothing. A second DHCP server may not change the other's records; Name Protection keeps fs1."
+  },
+  "tags": [
+    "dns",
+    "dhcp"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dhcp-dns-update"]; colours only from kit tokens.
+   Layout: left the zones, the DHCP settings and the message card; right the K1 chart. */
+[data-sim="win-dhcp-dns-update"] .dd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.1cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dhcp-dns-update"] .dd-left { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; overflow: hidden; }
+[data-sim="win-dhcp-dns-update"] .dd > .sd-seq { grid-column: 2; grid-row: 1; }
+[data-sim="win-dhcp-dns-update"] .dd-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.65rem 0.5rem;
+  min-height: 0;
+}
+[data-sim="win-dhcp-dns-update"] .dd-box h2 .dd-muted { font-size: var(--fs-sm); }
+[data-sim="win-dhcp-dns-update"] .dd-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-box h3 { margin: 0.2rem 0 0; font-size: var(--fs-sm); font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-mono { font-family: var(--mono); }
+[data-sim="win-dhcp-dns-update"] .dd-muted { color: var(--muted); font-weight: 400; }
+[data-sim="win-dhcp-dns-update"] .dd-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; font-weight: 400; }
+[data-sim="win-dhcp-dns-update"] .dd-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; min-height: 0; }
+[data-sim="win-dhcp-dns-update"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* eight controls and five presets: a tighter panel than the kit's default spacing (as ddos-amplification) */
+[data-sim="win-dhcp-dns-update"] .sd-panel { gap: 0.5rem; }
+[data-sim="win-dhcp-dns-update"] .sd-group { gap: 0.4rem; }
+[data-sim="win-dhcp-dns-update"] .sd-ctl { gap: 0.2rem; }
+
+/* record tables */
+[data-sim="win-dhcp-dns-update"] .dd-table { width: 100%; border-collapse: separate; border-spacing: 0 0.2rem; font-size: 1rem; line-height: 1.15; }
+[data-sim="win-dhcp-dns-update"] .dd-table th { font-size: var(--fs-sm); text-align: left; font-weight: 400; color: var(--muted); padding: 0 0.35rem; }
+[data-sim="win-dhcp-dns-update"] .dd-table td { padding: 0.16rem 0.35rem; background: var(--bg); border-top: var(--line-w) solid var(--line); border-bottom: var(--line-w) solid var(--line); vertical-align: middle; }
+[data-sim="win-dhcp-dns-update"] .dd-table td:first-child { border-left: 0.4rem solid var(--line); border-radius: var(--radius-sm) 0 0 var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="win-dhcp-dns-update"] .dd-table td:last-child { border-right: var(--line-w) solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+[data-sim="win-dhcp-dns-update"] .dd-table td:nth-child(-n+3) { white-space: nowrap; }
+[data-sim="win-dhcp-dns-update"] .dd-table tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr.sd-changed .dd-sub { color: var(--on-hl); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="target"] td { border-top-style: dashed; border-bottom-style: dashed; border-color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="target"] td:first-child { border-left-color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="target"] td:last-child { border-right-style: dashed; border-right-color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="refused"] td { border-color: var(--ink); border-top-width: 0.2rem; border-bottom-width: 0.2rem; }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="refused"] td:first-child { border-left-color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="refused"] td:last-child { border-right-width: 0.2rem; border-right-color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="removed"] td:not(:last-child) { text-decoration: line-through; }
+[data-sim="win-dhcp-dns-update"] .dd-mark { display: inline-flex; flex-wrap: wrap; gap: 0 0.25rem; align-items: baseline; font-size: var(--fs-sm); }
+[data-sim="win-dhcp-dns-update"] .dd-sym { display: inline-grid; place-items: center; width: 1.2em; height: 1.2em; border: var(--line-w) solid currentColor; border-radius: 50%; font-weight: 700; line-height: 1; font-family: var(--mono); flex: none; }
+[data-sim="win-dhcp-dns-update"] .dd-sym[data-k="no"] { border-radius: var(--radius-sm); background: var(--ink); color: var(--bg); }
+[data-sim="win-dhcp-dns-update"] .sd-changed .dd-sym[data-k="no"] { background: var(--on-hl); color: var(--hl); }
+
+/* owner chip: a server mark (DHCP), a computer mark (a client or DC), or an open lock (nobody) */
+[data-sim="win-dhcp-dns-update"] .dd-owner {
+  display: inline-flex; align-items: center; gap: 0 0.35rem;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+[data-sim="win-dhcp-dns-update"] .dd-owner[data-k="open"] { border-style: dotted; font-family: var(--sans); }
+[data-sim="win-dhcp-dns-update"] .dd-pc { position: relative; display: inline-block; width: 0.8em; height: 0.55em; border: 0.12em solid currentColor; border-radius: 0.08em; margin-bottom: 0.2em; box-sizing: border-box; flex: none; }
+[data-sim="win-dhcp-dns-update"] .dd-pc::after { content: ''; position: absolute; left: 25%; right: 25%; top: 100%; height: 0.16em; margin-top: 0.06em; background: currentColor; }
+[data-sim="win-dhcp-dns-update"] .dd-srv { display: inline-block; width: 0.55em; height: 0.85em; border: 0.12em solid currentColor; border-radius: 0.06em; box-sizing: border-box; flex: none;
+  background: linear-gradient(currentColor, currentColor) 50% 30% / 60% 0.1em no-repeat, linear-gradient(currentColor, currentColor) 50% 60% / 60% 0.1em no-repeat; }
+[data-sim="win-dhcp-dns-update"] .dd-open { display: inline-flex; align-items: baseline; flex: none; }
+[data-sim="win-dhcp-dns-update"] .dd-open .sd-seq-lock { margin: 0.35em 0.1em 0 0; }
+[data-sim="win-dhcp-dns-update"] .dd-open .sd-seq-lock::before { left: 0.36em; bottom: 115%; }
+
+/* DHCP settings */
+[data-sim="win-dhcp-dns-update"] .dd-set { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.12rem; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="win-dhcp-dns-update"] .dd-set li { display: flex; gap: 0.4rem; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-set li[data-off] { color: var(--muted); }
+[data-sim="win-dhcp-dns-update"] .dd-set li[data-off] .dd-label { text-decoration: line-through; }
+[data-sim="win-dhcp-dns-update"] .dd-box-k { display: inline-grid; place-items: center; width: 0.95em; height: 0.95em; border: var(--line-w) solid currentColor; border-radius: 0.15em; font-weight: 700; line-height: 1; flex: none; font-family: var(--mono); }
+[data-sim="win-dhcp-dns-update"] .dd-val { font-weight: 700; }
+[data-sim="win-dhcp-dns-update"] .dd-leases { margin: 0.15rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; font-size: var(--fs-sm); }
+[data-sim="win-dhcp-dns-update"] .dd-leases li { display: flex; flex-wrap: wrap; gap: 0 0.4rem; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-leases li[data-down] { color: var(--muted); }
+[data-sim="win-dhcp-dns-update"] .dd-leases li[data-new] { font-weight: 700; }
+[data-sim="win-dhcp-dns-update"] .dd-rr { padding: 0 0.25rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-family: var(--mono); }
+
+/* lane cards */
+[data-sim="win-dhcp-dns-update"] .dd-line { display: flex; flex-wrap: wrap; gap: 0.1rem 0.4rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.3; margin-top: 0.1rem; }
+
+/* message card */
+[data-sim="win-dhcp-dns-update"] .dd-msg { flex: none; }
+[data-sim="win-dhcp-dns-update"] .dd-chip { padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="win-dhcp-dns-update"] .dd-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.12rem 0.6rem; margin: 0; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-dhcp-dns-update"] .dd-kv dt { color: var(--muted); }
+[data-sim="win-dhcp-dns-update"] .dd-kv dd { margin: 0; overflow-wrap: anywhere; }
+[data-sim="win-dhcp-dns-update"] .dd-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.2rem; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-dhcp-dns-update"] .dd-checks li { display: flex; gap: 0.4rem; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-checks li > span:last-child { min-width: 0; }
+[data-sim="win-dhcp-dns-update"] .dd-checks li[data-bad] { font-weight: 700; }
+[data-sim="win-dhcp-dns-update"] .dd-checks li[data-skip] { color: var(--muted); }
+[data-sim="win-dhcp-dns-update"] .dd-verdict { font-weight: 700; padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); }
+[data-sim="win-dhcp-dns-update"] .dd-verdict[data-bad] { background: var(--ink); color: var(--bg); }
+[data-sim="win-dhcp-dns-update"] .dd-lock { display: inline-flex; align-items: baseline; }
+[data-sim="win-dhcp-dns-update"] .dd-lock .sd-seq-lock { margin-top: 0; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="signed"] { height: 0.5rem; border: 0; border-radius: 0; border-top: 0.13rem solid var(--ink); border-bottom: 0.13rem solid var(--ink); background: transparent; }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="server"], [data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="client"], [data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="open"] { border-color: var(--ink); background: var(--bg); position: relative; }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="server"]::after { content: ''; position: absolute; inset: 15% 35%; border: 0.1rem solid var(--ink); }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="client"]::after { content: ''; position: absolute; inset: 25% 20% 35%; border: 0.1rem solid var(--ink); }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="open"] { border-style: dotted; }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="open"]::after { content: ''; position: absolute; left: 30%; right: 30%; bottom: 20%; height: 35%; background: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="ok"], [data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="no"] { position: relative; border-color: var(--ink); background: var(--bg); border-radius: 50%; }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="no"] { border-radius: var(--radius-sm); background: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="ok"]::after, [data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="no"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="ok"]::after { content: '✓'; color: var(--ink); }
+[data-sim="win-dhcp-dns-update"] .sd-swatch[data-shape="no"]::after { content: '✕'; color: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; everything stacks (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dhcp-dns-update"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dhcp-dns-update"] .dd { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-dhcp-dns-update"] .dd-left, [data-sim="win-dhcp-dns-update"] .dd > .sd-seq { grid-column: 1; grid-row: auto; overflow: visible; }
+  [data-sim="win-dhcp-dns-update"] .dd-row2 { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-dhcp-dns-update"] .dd-table { font-size: var(--fs-sm); }
+  [data-sim="win-dhcp-dns-update"] .dd-table thead { display: none; }
+  [data-sim="win-dhcp-dns-update"] .dd-table, [data-sim="win-dhcp-dns-update"] .dd-table tbody { display: block; }
+  [data-sim="win-dhcp-dns-update"] .dd-table tr {
+    display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 0.15rem 0.5rem; align-items: center;
+    margin-bottom: 0.35rem; padding: 0.25rem 0.45rem;
+    border: var(--line-w) solid var(--line); border-left-width: 0.4rem; border-radius: var(--radius-sm); background: var(--bg);
+  }
+  [data-sim="win-dhcp-dns-update"] .dd-table td { display: block; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; }
+  [data-sim="win-dhcp-dns-update"] .dd-table td:nth-child(4) { grid-column: 1 / 3; grid-row: 2; }
+  [data-sim="win-dhcp-dns-update"] .dd-table td:nth-child(5) { grid-column: 3; grid-row: 2; }
+  [data-sim="win-dhcp-dns-update"] .dd-table tr.sd-changed { background: var(--hl); }
+  [data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="target"] { border-style: dashed; border-color: var(--ink); }
+  [data-sim="win-dhcp-dns-update"] .dd-table tr[data-mark="refused"] { border-color: var(--ink); border-width: 0.2rem; border-left-width: 0.4rem; }
+  [data-sim="win-dhcp-dns-update"] .dd-owner { white-space: normal; }
+  [data-sim="win-dhcp-dns-update"] .dd-phone-hide { display: none; }
+  [data-sim="win-dhcp-dns-update"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DHCP upisuje klijente u DNS</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { client: '1', DHCP1: '2', DHCP2: '3', dc: '4' };
+  var OPT = { off: 'optOff', onRequest: 'optOnRequest', always: 'optAlways' };
+  var OS = { windows: 'osWindows', other: 'osOther', printer: 'osPrinter' };
+  var CLIENT_KEY = { windows: 'cWindows', other: 'cOther', printer: 'cPrinter', clash: 'cClash' };
+
+  /** Data (names, addresses, accounts, codes, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'dd-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule); repeated nodes are cloned. */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function two(v) { return (v < 10 ? '0' : '') + v; }
+  function hms(sec) { var r = sec % 86400; return two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)) + ':' + two(r % 60); }
+  function hm(sec) { var r = sec % 86400; return two(Math.floor(r / 3600)) + ':' + two(Math.floor(r % 3600 / 60)); }
+  function stamp(sec) { return t('dayAt', { d: Math.floor(sec / 86400), t: hm(sec) }); }
+  function lock() { return h('span', { class: 'dd-lock', 'aria-hidden': 'true' }, h('span', { class: 'sd-seq-lock' })); }
+  function sym(k) { return h('span', { class: 'dd-sym', dataset: { k: k }, 'aria-hidden': 'true', translate: 'no' }, { ok: '✓', no: '✕', add: '+', del: '−', to: '→' }[k]); }
+  function last(c) { return c.n > 0 ? c.state.msgs[c.state.msgs.length - 1] : null; }
+  function srvOf(s, id) { return s.dhcp.filter(function (d) { return d.id === id; })[0]; }
+  function fqdn(host) { return host + '.' + L.FWD; }
+
+  /** Owner chip: a server mark for the DHCP servers' accounts, a computer mark for others, an open lock for nobody. */
+  function isServerAcc(acc) { return acc === L.SVC || /^DHCP\d\$$/.test(acc); }
+  function ownerChip(acc) {
+    if (acc === null) return h('span', { class: 'dd-owner', dataset: { k: 'open' } }, h('span', { class: 'dd-open', 'aria-hidden': 'true' }, h('span', { class: 'sd-seq-lock' })), t('ownerNone'));
+    return h('span', { class: 'dd-owner' }, h('span', { class: isServerAcc(acc) ? 'dd-srv' : 'dd-pc', 'aria-hidden': 'true' }), data(acc, ''));
+  }
+  /** "prn-3 A", "62 PTR" as data for lists in captions and cards. */
+  function rrList(items) {
+    var out = [];
+    items.forEach(function (x, i) { if (i) out.push(', '); out.push(data(x, '')); });
+    return h('b', null, out);
+  }
+
+  // ── zones ──
+  function zoneMarks(c, zk) {
+    var e = last(c), marks = {};
+    if (!e) return marks;
+    if (e.kind === 'update' && e.update.zone === zk) {
+      e.update.adds.concat(e.update.deletes).forEach(function (x) { marks[L.key(x.name) + ' ' + x.type] = 'target'; });
+    }
+    if (e.kind === 'answer' && e.zone === zk) {
+      e.added.forEach(function (k) { marks[k] = 'added'; });
+      e.updated.forEach(function (k) { marks[k] = 'updated'; });
+      e.removed.forEach(function (k) { marks[k] = 'removed'; });
+      if (e.rcode !== 'NOERROR') {
+        var u = c.prev && c.prev.msgs.length ? c.prev.msgs[c.prev.msgs.length - 1].update : null;
+        if (u) c.state.zones[zk].records.forEach(function (r) {
+          u.adds.concat(u.deletes).forEach(function (x) { if (L.key(x.name) === L.key(r.name)) marks[L.key(r.name) + ' ' + r.type] = 'refused'; });
+        });
+      }
+    }
+    return marks;
+  }
+  function dataCell(r) {
+    if (r.type === 'DHCID') return h('span', { class: 'dd-sub' }, t.parts('dhcidOf', { mac: data('…' + r.data.slice(-5), '') }));
+    return data(r.data);
+  }
+  function renderTable(c, zk) {
+    var s = c.state, marks = zoneMarks(c, zk), rows = s.zones[zk].records.slice();
+    if (c.prev) c.prev.zones[zk].records.forEach(function (r) {
+      if (marks[L.key(r.name) + ' ' + r.type] === 'removed' && !L.find(rows, r.name, r.type)) rows.push(r);
+    });
+    rows.sort(L.byName);
+    var anim = c.dir === 'forward' ? ' sd-anim-in' : '';
+    var MARK = { added: ['add', 'markAdded'], updated: ['ok', 'markUpdated'], removed: ['del', 'markRemoved'], refused: ['no', 'markRefused'], target: ['to', 'markTarget'] };
+    return h('table', { class: 'dd-table' },
+      h('thead', null, h('tr', null, ['colName', 'colType', 'colData', 'colOwner', 'colMark'].map(function (k) { return h('th', null, t(k)); }))),
+      h('tbody', null, rows.map(function (r) {
+        var m = marks[L.key(r.name) + ' ' + r.type];
+        var changed = m && m !== 'target';
+        return h('tr', { class: changed ? 'sd-changed' + anim : null, dataset: m ? { mark: m } : {} },
+          h('td', null, data(r.name, '')),
+          h('td', null, data(r.type)),
+          h('td', null, dataCell(r)),
+          h('td', null, ownerChip(r.owner)),
+          h('td', null, m ? h('span', { class: 'dd-mark' }, sym(MARK[m][0]), t(MARK[m][1])) : null));
+      })));
+  }
+  function renderZones(c) {
+    var s = c.state;
+    return h('section', { class: 'dd-box' },
+      h('h2', null, t('zonesTitle'), h('span', { class: 'dd-muted' }, t('zoneSecure'))),
+      h('h3', null, data(s.zones.fwd.name, ''), h('span', { class: 'dd-sub' }, t('fwdTitle'))),
+      renderTable(c, 'fwd'),
+      h('h3', null, data(s.zones.rev.name, ''), h('span', { class: 'dd-sub' }, t('revTitle'))),
+      renderTable(c, 'rev'));
+  }
+
+  // ── DHCP settings and leases ──
+  function renderDhcp(c) {
+    var s = c.state, d = s.dhcp[0], st = d.settings, e = last(c);
+    var updatesOn = st.mode !== 'off';
+    function item(on, label, val) {
+      return h('li', { dataset: on ? {} : { off: '' } }, h('span', { class: 'dd-box-k', 'aria-hidden': 'true', translate: 'no' }, on ? '✓' : ' '),
+        h('span', { class: 'dd-label' }, label), val ? h('span', { class: 'dd-val' }, val) : null);
+    }
+    var acc = d.creds === 'dedicated' ? L.SVC : null;
+    var list = h('ul', { class: 'dd-set' },
+      h('li', null, h('span', { class: 'dd-sub' }, t('setMode')), h('span', { class: 'dd-val' }, t(OPT[st.mode])), st.nameProtection && st.mode === 'onRequest' ? h('span', { class: 'dd-sub' }, '(', t('npAsAlways'), ')') : null),
+      item(updatesOn && st.discardOnDelete, t('setDiscard')),
+      item(updatesOn && st.legacyClients, t('setLegacy')),
+      item(st.nameProtection, t('setNp')),
+      h('li', null, h('span', { class: 'dd-sub' }, t('setCreds')),
+        acc ? ownerChip(acc) : [h('span', null, t('credsComputer')), d.inDnsUpdateProxy ? h('b', null, t('inProxy')) : null]));
+    var leases = h('ul', { class: 'dd-leases' });
+    s.dhcp.forEach(function (x) {
+      // only the leases of this run's client (SPEC rule 9), not FS1's reservation in the clash scene
+      x.leases.filter(function (l) { return l.mac === s.clients[0].mac; }).forEach(function (l) {
+        var fresh = e && e.kind === 'ra' && e.by === x.id;
+        var ds = fresh ? { new: '' } : !x.up ? { down: '' } : {};
+        leases.append(h('li', { dataset: ds }, data(x.id, ''), data(l.ip),
+          l.dns.map(function (r) { return r.types.map(function (ty) { return h('span', { class: 'dd-rr', translate: 'no' }, ty); }); }),
+          h('span', { class: 'dd-sub' }, t.parts('leaseTo', { when: data(stamp(l.expires), '') }))));
+      });
+    });
+    if (!leases.children.length) leases.append(h('li', { class: 'dd-sub' }, t('leaseNone')));
+    var title = s.dhcp.length > 1 ? [data('DHCP1, DHCP2', ''), h('span', { class: 'dd-muted' }, t('dnsTab'), ' · ', t('sameBoth'))]
+      : [data('DHCP1', ''), h('span', { class: 'dd-muted' }, t('dnsTab'))];
+    return h('section', { class: 'dd-box' }, h('h2', null, title), list, h('h3', null, t('leasesTitle')), leases);
+  }
+
+  // ── chart ──
+  function laneIds(s) { return ['client'].concat(s.dhcp.map(function (d) { return d.id; })).concat(['dc']); }
+  function lanes(c) {
+    var s = c.state, cl = s.clients[0], e = last(c);
+    var lease = null;
+    // the client's newest lease, from any server (it keeps DHCP1's address until DHCP2 gives it another)
+    s.dhcp.forEach(function (d) { d.leases.forEach(function (l) { if (l.mac === cl.mac && (!lease || l.granted > lease.granted)) lease = l; }); });
+    var osKey = cl.id === 'clash' ? 'osWorkgroup' : OS[cl.os];
+    var clBody = [h('div', { class: 'dd-line' }, lease ? data(lease.ip) : h('span', { class: 'dd-sub' }, t('noAddress'))),
+      h('div', { class: 'dd-line' }, h('b', null, t(cl.sendsOpt81 ? 'opt81Yes' : 'opt81No')))];
+    clBody.push(h('div', { class: 'dd-line dd-phone-hide' }, cl.account ? [h('span', { class: 'dd-sub' }, t('account')), data(cl.account)] : h('span', { class: 'dd-sub' }, t('noAccount'))));
+    var out = [{ id: 'client', mark: cl.os === 'printer' ? 'P' : cl.os === 'other' ? 'H' : 'W', c: COLOUR.client, shape: 'square', name: data(cl.name, ''),
+      state: e && (e.by === 'client' || e.kind === 'do' || e.kind === 'ra') ? 'active' : null,
+      tags: h('span', { class: 'dd-sub' }, t(osKey)), body: clBody }];
+    s.dhcp.forEach(function (d) {
+      var snd = L.senderOf(d);
+      out.push({ id: d.id, mark: d.id.slice(-1), c: COLOUR[d.id], name: data(d.id, ''),
+        state: !d.up ? 'down' : e && e.by === d.id ? 'active' : null,
+        tags: h('span', { class: 'dd-sub' }, d.up ? t('roleDhcp') : t('down')),
+        body: [h('div', { class: 'dd-line' }, data(d.ip)), h('div', { class: 'dd-line' }, snd.proxy ? h('span', { class: 'dd-open', 'aria-hidden': 'true' }, h('span', { class: 'sd-seq-lock' })) : null,
+          data(snd.principal, 'dd-sub dd-mono'))] });
+    });
+    out.push({ id: 'dc', mark: 'DC', c: COLOUR.dc, name: data('DC1', ''), state: e && (e.kind === 'update' || e.kind === 'answer') ? 'active' : null,
+      tags: h('span', { class: 'dd-sub' }, t('roleDns')),
+      body: [h('div', { class: 'dd-line' }, data('10.0.10.10'))] });
+    return out;
+  }
+  function laneOf(by) { return by === 'client' ? 'client' : by; }
+  /** The chart's field: the record types only (+A, −PTR, +A+DHCID, ?DHCID +A); names are in the message card, so the
+      field stays between two lifelines with four lanes. */
+  function updField(u) {
+    var bits = u.adds.map(function (a) { return '+' + a.type; }).concat(u.deletes.map(function (d) { return '−' + d.type; }));
+    return data((u.prereq && u.prereq.dhcid ? '?DHCID ' : '') + bits.join(''), '');
+  }
+  function rows(c) {
+    var s = c.state, cl = s.clients[0], out = [];
+    var servers = s.dhcp.map(function (d) { return d.id; });
+    var downAt = {};
+    s.msgs.forEach(function (e) {
+      var ch = e.n === c.n, time = hms(e.t);
+      var down = s.dhcp.filter(function (d) { return !d.up && downAt[d.id] !== undefined && downAt[d.id] < e.n; }).map(function (d) { return d.id; });
+      if (e.kind === 'down') {
+        downAt[e.server] = e.n;
+        out.push({ kind: 'note', lane: e.server, text: t('noteDown'), k: 'fill', time: time, changed: ch });
+      } else if (e.kind === 'expire') {
+        out.push({ kind: 'note', lane: e.server, text: t.parts('noteExpire', { ip: data(e.ip, '') }), k: 'solid', time: time, changed: ch, cause: data(Math.round(L.LEASE / 86400) + ' d', '') });
+      } else if (e.kind === 'do') {
+        var re = {};
+        e.lost.forEach(function (id) { re[id] = t('reDown'); });
+        out.push({ from: 'client', to: servers, label: 'DISCOVER', c: COLOUR.client, line: 'dashed', lost: e.lost, re: e.lost.length ? re : undefined, time: time, changed: ch, down: down });
+        out.push({ from: e.by, to: 'client', label: 'OFFER', c: COLOUR[e.by], line: 'dashed', fields: data(e.ip, ''), time: time, changed: ch, down: down });
+      } else if (e.kind === 'ra') {
+        out.push({ from: 'client', to: e.by, label: 'REQUEST', c: COLOUR.client, line: 'dashed', fields: e.opt81 ? data('81 S=0', '') : null, time: time, changed: ch, down: down });
+        out.push({ from: e.by, to: 'client', label: 'ACK', c: COLOUR[e.by], line: 'dashed',
+          fields: data(e.reply ? '81 S=' + e.reply.s + (e.reply.o ? ' O=1' : '') : e.ip, ''), time: time, changed: ch, down: down });
+      } else if (e.kind === 'update') {
+        out.push({ from: laneOf(e.by), to: 'dc', label: 'UPDATE', c: COLOUR[laneOf(e.by)], lock: e.sender.signed, fields: updField(e.update), time: time, changed: ch, down: down });
+      } else if (e.kind === 'answer') {
+        out.push({ from: 'dc', to: laneOf(e.by), label: e.rcode, c: COLOUR.dc, line: 'dashed', fields: data(e.rcode === 'NOERROR' ? '✓' : '✕', ''), time: time, changed: ch, down: down });
+        if (e.gaveUp) out.push({ kind: 'note', lane: 'client', text: t('noteGaveUp'), k: 'fill', time: time, changed: ch });
+      }
+    });
+    return out;
+  }
+  function renderChart(c) {
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: rows(c),
+      timeWidth: '6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── message card ──
+  function planList(names) { return h('b', { translate: 'no' }, names.join(' + ')); }
+  function updLines(u) {
+    return u.adds.map(function (a) {
+      return h('div', null, t('opAdd'), ' ', a.type === 'DHCID' ? [data(a.name + ' DHCID', ''), ' ', h('span', { class: 'dd-sub' }, t.parts('dhcidOf', { mac: data('…' + a.data.slice(-5), '') }))] : data(a.name + ' ' + a.type + ' ' + a.data));
+    }).concat(u.deletes.map(function (d) { return h('div', null, t('opDel'), ' ', data(d.name + ' ' + d.type)); }));
+  }
+  function checkList(c, e) {
+    var li = [];
+    var u = c.prev.msgs[c.prev.msgs.length - 1].update;
+    function row(k, content) { li.push(h('li', { dataset: k === 'no' ? { bad: '' } : k === 'skip' ? { skip: '' } : {} }, k === 'skip' ? null : sym(k), h('span', null, content))); }
+    if (e.reason === 'unsigned') { row('no', t('chkZoneNo')); row('skip', t('chkSkipped')); return h('ul', { class: 'dd-checks' }, li); }
+    row('ok', t('chkZoneOk'));
+    if (u.prereq && u.prereq.nxdomain) {
+      var nm = data(u.prereq.nxdomain, '');
+      if (e.rcode === 'YXDOMAIN') { row('no', t.parts('chkFreeNo', { name: nm })); row('skip', t('chkSkipped')); return h('ul', { class: 'dd-checks' }, li); }
+      row('ok', t.parts('chkFreeOk', { name: nm }));
+    }
+    if (u.prereq && u.prereq.dhcid) {
+      if (e.rcode === 'NXRRSET') { row('no', t(e.reason === 'otherDhcid' ? 'chkDhcidOther' : 'chkDhcidNone')); row('skip', t('chkSkipped')); return h('ul', { class: 'dd-checks' }, li); }
+      row('ok', t('chkDhcidOk'));
+    }
+    e.items.forEach(function (it) {
+      var n = data(it.name, '');
+      if (!it.exists) row('ok', t.parts('chkNew', { name: n, owner: ownerChip(L.find(c.state.zones[e.zone].records, it.name) ? L.find(c.state.zones[e.zone].records, it.name).owner : null) }));
+      else if (it.owner === null) row('ok', t.parts('chkOpen', { name: n }));
+      else if (it.may) row('ok', t.parts('chkOwn', { name: n, owner: ownerChip(it.owner) }));
+      else row('no', t.parts('chkNotOwn', { name: n, owner: ownerChip(it.owner), sender: data(e.principal, '') }));
+    });
+    return h('ul', { class: 'dd-checks' }, li);
+  }
+  function renderMsg(c) {
+    var s = c.state, e = last(c), cl = s.clients[0];
+    var box = h('section', { class: 'dd-box dd-msg' });
+    if (!e) { box.append(h('h2', null, t('msgNone'))); return box; }
+    var anim = c.dir === 'forward' ? ' sd-anim-in' : '';
+    var kind = { down: 'kEvent', expire: 'kEvent', do: 'kDhcp', ra: 'kDhcp', update: 'kUpdate', answer: 'kAnswer' }[e.kind];
+    var from = e.kind === 'answer' ? 'dc' : e.kind === 'update' ? laneOf(e.by) : e.by || e.server || 'client';
+    var head = [t('msgTitle', { n: e.n }), ' ', h('b', { class: 'dd-chip sd-fill' + anim, dataset: { c: COLOUR[from] } }, e.kind === 'update' && e.sender.signed ? lock() : null, t(kind))];
+    if (e.kind === 'answer') head.push(h('span', { class: 'dd-verdict', translate: 'no', dataset: e.rcode === 'NOERROR' ? {} : { bad: '' } }, e.rcode));
+    box.append(h('h2', null, head));
+    if (e.kind === 'down') box.append(h('ul', { class: 'dd-checks' }, h('li', null, sym('no'), h('span', null, t('evDown')))));
+    else if (e.kind === 'expire') {
+      var names = e.dns.map(function (d) { return d.name + ' ' + d.types.join('+'); });
+      var li = [h('li', null, sym('del'), h('span', null, t.parts('evExpire', { ip: data(e.ip, '') })))];
+      if (!names.length) li.push(h('li', { dataset: { skip: '' } }, h('span', null, t('evNothing'))));
+      else li.push(h('li', e.discard ? null : { dataset: { skip: '' } }, e.discard ? sym('del') : null, h('span', null, t.parts(e.discard ? 'evDiscard' : 'evKeep', { list: rrList(names) }))));
+      box.append(h('ul', { class: 'dd-checks' }, li));
+    } else if (e.kind === 'do') {
+      box.append(h('dl', { class: 'dd-kv' }, h('dt', null, data(e.by, '')), h('dd', null, t('offers'), ' ', data(e.ip))));
+    } else if (e.kind === 'ra') {
+      var will = [];
+      if (e.server.length) will.push(h('div', null, t.parts('willServer', { srv: data(e.by, ''), list: planList(e.server) })));
+      if (e.client.length) will.push(h('div', null, t.parts('willClient', { c: data(cl.name, ''), list: planList(e.client) })));
+      if (!will.length) will.push(h('div', null, t('willNobody')));
+      box.append(h('dl', { class: 'dd-kv' },
+        h('dt', null, t('request')), h('dd', null, e.opt81 ? [data('81: ' + e.opt81.fqdn), ' · ', t('flagS0')] : t('noOpt81')),
+        h('dt', null, t('reply')), h('dd', null, e.reply ? t(e.reply.s ? 'flagS1' : 'flagS0') : t('noOpt81')),
+        h('dt', null, data('DNS', '')), h('dd', null, will)));
+    } else if (e.kind === 'update') {
+      var pq = e.update.prereq;
+      box.append(h('dl', { class: 'dd-kv' },
+        h('dt', null, t('zone')), h('dd', null, data(s.zones[e.update.zone].name)),
+        h('dt', null, t('condition')), h('dd', null, !pq ? t('condNone') : pq.nxdomain ? t.parts('condFree', { name: data(pq.nxdomain, '') }) : t.parts('condDhcid', { name: data(pq.dhcid.name, '') })),
+        h('dt', null, data('UPDATE', '')), h('dd', null, updLines(e.update)),
+        h('dt', null, t('signature')), h('dd', null, e.sender.signed ? [lock(), ownerChip(e.sender.proxy ? null : e.sender.principal), e.sender.proxy ? [' ', data(e.sender.principal, 'dd-sub')] : null] : t('sigNone'))));
+    } else if (e.kind === 'answer') {
+      box.append(checkList(c, e));
+    }
+    return box;
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, cl = s.clients[0], n = c.n;
+    var init = L.initial(p);
+    var oldA = L.find(init.zones.fwd.records, cl.host, 'A');
+    if (c.first) {
+      var key = s.event === 'lease' ? 'capStart_lease_' + cl.id : 'capStart_' + s.event;
+      var st = rich(key, { c: q(cl.name), fqdn: q(fqdn(cl.host)), name: q(cl.host), old: q(s.event === 'lease' ? (oldA ? oldA.data : '') : cl.ip) });
+      if (p.mode === 'off') st.push(t('capOffTail'));
+      return st;
+    }
+    var e = last(c);
+    var srv = e.by && e.by !== 'client' ? q(e.by) : q('DHCP1');
+    var ip = s.lease ? s.lease.ip : cl.ip;
+    switch (e.kind) {
+      case 'down': return rich('capDown', { n: n, c: q(cl.name) });
+      case 'expire': {
+        var names = e.dns.map(function (d) { return d.name + ' ' + d.types.join('+'); });
+        var vars = { n: n, time: q(stamp(e.t)), ip: q(e.ip), c: q(cl.name), list: rrList(names) };
+        if (!names.length) return rich('capExpireNone', vars);
+        if (!e.discard) return rich('capExpireKeep', vars);
+        return rich('capExpireDel', vars);
+      }
+      case 'do': return rich(e.lost.length ? 'capDoFailover' : 'capDo', { n: n, c: q(cl.name), srv: q(e.by), ip: q(e.ip) });
+      case 'ra': {
+        var v = { n: n, c: q(cl.name), srv: q(e.by), ip: q(e.ip) };
+        if (e.opt81) {
+          if (!e.reply) return rich('capRaOff', v);
+          if (!e.reply.s) return rich('capRaS0', v);
+          return rich(srvOf(s, e.by).settings.nameProtection ? 'capRaNp' : 'capRaS1', v);
+        }
+        if (e.server.length) return rich('capRaLegacy', v);
+        if (p.mode === 'off') return rich('capRaNoneOff', v);
+        var none = rich('capRaNone', v);
+        none.push(t('capRaNoneHint'));
+        return none;
+      }
+      case 'update': {
+        var u = e.update, a = u.adds[0];
+        var acc = q(e.sender.principal || '');
+        if (e.by === 'client') {
+          var rr = q(a.name + ' ' + a.type + ' ' + a.data);
+          return rich(e.sender.signed ? 'capUpdClient' : 'capUpdClientUnsigned', { n: n, c: q(cl.name), rr: rr, acc: acc });
+        }
+        if (e.op === 'del') return rich('capUpdDel', { n: n, srv: srv, list: rrList(u.deletes.map(function (d) { return d.name + ' ' + d.type; })) });
+        if (e.op === 'PTR') return rich('capUpdPtr', { n: n, srv: srv, ptr: q(a.name), fqdn: q(a.data), acc: acc });
+        if (u.prereq && u.prereq.nxdomain) return rich('capUpdNp1', { n: n, srv: srv, name: q(a.name), ip: q(a.data) });
+        if (u.prereq && u.prereq.dhcid) return rich('capUpdNp2', { n: n, srv: srv, name: q(a.name), ip: q(a.data) });
+        return rich('capUpdA', { n: n, srv: srv, name: q(a.name), ip: q(a.data), acc: acc });
+      }
+      case 'answer': {
+        var pu = c.prev.msgs[c.prev.msgs.length - 1].update;
+        var nm = pu.adds.length ? pu.adds[0].name : pu.deletes[0].name;
+        var zk = e.zone;
+        var before = L.find(c.prev.zones[zk].records, nm, pu.adds.length ? pu.adds[0].type : null) || L.find(c.prev.zones[zk].records, nm);
+        var now = L.find(s.zones[zk].records, nm, pu.adds.length ? pu.adds[0].type : null);
+        var oldData = q(before ? before.data : '—');
+        if (e.rcode === 'YXDOMAIN') return rich('capYx', { n: n, name: q(nm) });
+        if (e.rcode === 'NXRRSET') {
+          var cur = L.find(s.zones.fwd.records, nm, 'A');
+          return rich(e.reason === 'otherDhcid' ? 'capNxOther' : 'capNxNone', { n: n, name: q(nm), old: q(cur ? cur.data : '—'), srv: srv, ip: q(ip) });
+        }
+        if (e.rcode === 'REFUSED') {
+          if (e.reason === 'unsigned') {
+            var g = rich('capGaveUp', { n: n, c: q(cl.name) });
+            var held = L.find(s.zones.fwd.records, nm, 'A');
+            if (held) g = g.concat(rich('capGaveUpKeeps', { name: q(nm), old: q(held.data) }));
+            return g;
+          }
+          var it = e.items.filter(function (x) { return !x.may; })[0];
+          var ref;
+          if (e.by === 'DHCP2' && it.owner === 'DHCP1$') ref = rich('capFailoverRefused', { n: n, name: q(nm), old: oldData });
+          else ref = rich('capRefusedOwner', { n: n, name: q(nm), owner: q(it.owner), sender: q(e.principal), old: oldData });
+          return ref;
+        }
+        // NOERROR
+        if (e.op === 'del') return e.items[0].owner === null ? rich('capOkDelOpen', { n: n, list: rrList(e.removed) })
+          : rich('capOkDel', { n: n, list: rrList(e.removed), owner: q(e.items[0].owner) });
+        var out;
+        var item = e.items[0];
+        // the server rewrites a name it owns for the laptop (only while fs1 still led to the file server)
+        if (cl.id === 'clash' && e.by !== 'client' && pu.adds[0].type === 'A' && item.exists && item.owner !== null && before && before.data === L.FS1.ip) {
+          out = rich('capHijack', { n: n, name: q(nm), owner: q(item.owner), data: q(now.data) });
+        } else if (!item.exists) {
+          out = now.owner === null ? rich('capOkNewOpen', { n: n, name: q(nm), acc: q(e.principal) }) : rich('capOkNew', { n: n, name: q(nm), owner: q(now.owner) });
+        } else if (item.owner === null) {
+          out = rich('capOkOpen', { n: n, name: q(nm), data: q(now.data) });
+          if (now.owner !== null) out = out.concat(rich('capOkTake', { owner: q(now.owner) }));
+        } else {
+          out = rich('capOkOwn', { n: n, name: q(nm), owner: q(item.owner), data: q(now.data) });
+        }
+        // in the failover event the last step leaves DHCP1's old PTR behind
+        if (s.event === 'failover' && c.last) {
+          var oldPtr = L.find(s.zones.rev.records, L.ptrName(cl.ip), 'PTR');
+          // only a PTR the down server wrote (or nobody owns) waits for DHCP1; the client's own PTR is the client's
+          if (oldPtr && oldPtr.data === fqdn(cl.host) && (oldPtr.owner === null || isServerAcc(oldPtr.owner))) out = out.concat(rich('capStaleTail', { ptr: q(L.ptrName(cl.ip)) }));
+        }
+        return out;
+      }
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'client', type: 'select', label: t('pClient'),
+        options: L.CLIENT_IDS.map(function (k) { return [k, t(CLIENT_KEY[k])]; }) },
+      { key: 'event', type: 'select', label: t('pEvent'),
+        options: [['lease', t('evLease')], ['failover', t('evFailover')], ['expiry', t('evExpiry')]] },
+      { key: 'mode', type: 'choice', label: t('pMode'),
+        options: [['off', t('optOff')], ['onRequest', t('optOnRequest')], ['always', t('optAlways')]] },
+      { key: 'legacy', type: 'toggle', label: t('pLegacy'), disabled: function (p) { return L.matters(p).legacy ? false : t('pLegacyOff'); } },
+      { key: 'nameProtection', type: 'toggle', label: t('pNp'), disabled: function (p) { return L.matters(p).nameProtection ? false : t('pNpOff'); } },
+      { key: 'discard', type: 'toggle', label: t('pDiscard') },
+      { key: 'creds', type: 'select', label: t('pCreds'),
+        options: [['computer', t('credsComputer')], ['proxy', t('credsProxy')], ['dedicated', t('credsDedicated')]] }
+    ],
+
+    presets: [
+      { id: 'windows-default', label: t('presetWindows'), hint: t('presetWindowsHint'), params: {} },
+      { id: 'failover-refused', label: t('presetFailover'), hint: t('presetFailoverHint'), params: { client: 'printer', legacy: true, event: 'failover' } },
+      { id: 'printer-none', label: t('presetPrinter'), hint: t('presetPrinterHint'), params: { client: 'printer' } },
+      { id: 'lease-expiry', label: t('presetExpiry'), hint: t('presetExpiryHint'), params: { client: 'other', legacy: true, event: 'expiry' } },
+      { id: 'name-protection', label: t('presetNp'), hint: t('presetNpHint'), params: { client: 'clash', nameProtection: true } }
+    ],
+
+    legend: [
+      { shape: 'dash', label: t('legDhcp') },
+      { shape: 'signed', label: t('legSigned') },
+      { shape: 'server', label: t('legServer') },
+      { shape: 'client', label: t('legClient') },
+      { shape: 'open', label: t('legOpen') },
+      { shape: 'ok', label: t('legOk') },
+      { shape: 'no', label: t('legNo') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'dd' },
+        h('div', { class: 'dd-left' }, renderZones(c), h('div', { class: 'dd-row2' }, renderDhcp(c), renderMsg(c))), chart));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
