@@ -1,0 +1,634 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ipam-audit: "who had 10.0.40.57 on Monday 28 Sep at 14:32?", answered from the audit trail one link of the
+     chain per step: IP → lease → device (MAC, host name) → logons inside the lease → users still on → answer. A stepper.
+     Scene: the question card with the sources and how long each keeps its events, the DNS record as it is now, the day
+     08:00–18:00 as one time axis (leases and logons), the lease events and the logon events as two kit K4 rule tables
+     (kit/ruletable.js), and the chain. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ipam-audit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tko je imao ovu adresu u 14:32? · simdeck</title>
+<meta name="description" content="Odgovori na pitanje iz incidenta iz revizijskog traga: dodjela u to vrijeme, MAC i ime, prijave unutar dodjele, korisnik ili zašto odgovora nema.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ipam-audit",
+  "title": {
+    "hr": "Tko je imao ovu adresu u 14:32?",
+    "en": "Who had this IP at 14:32?"
+  },
+  "concept": {
+    "hr": "Povezivanje dodjela i prijava do uređaja i korisnika",
+    "en": "Correlating leases and logon events to find a machine and a user"
+  },
+  "summary": {
+    "hr": "Odgovori na pitanje iz incidenta iz revizijskog traga: dodjela u to vrijeme, MAC i ime, prijave unutar dodjele, korisnik ili zašto odgovora nema.",
+    "en": "Answer an incident question from the audit trail: the lease at that time, the MAC and name, logons inside the lease, the user, or why there is no answer."
+  },
+  "tags": [
+    "ip-addressing",
+    "dhcp"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ipam-audit"]; colours only from kit tokens.
+   Layout: question and DNS on top, the time axis under them, the two evidence tables side by side, the chain at the
+   bottom. */
+[data-sim="win-ipam-audit"] .au {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0.6rem 0.8rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="win-ipam-audit"] .au-top { grid-column: 1 / -1; display: flex; gap: 0.8rem; align-items: stretch; min-width: 0; }
+[data-sim="win-ipam-audit"] .au-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-ipam-audit"] .au-q { flex: 1 1 auto; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="win-ipam-audit"] .au-qtitle { margin: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+[data-sim="win-ipam-audit"] .au-qtitle [translate='no'] { font-family: var(--mono); }
+[data-sim="win-ipam-audit"] .au-qline { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-qline b { color: var(--ink); }
+[data-sim="win-ipam-audit"] .au-srcs { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; }
+[data-sim="win-ipam-audit"] .au-src {
+  display: inline-flex; gap: 0.35rem; align-items: baseline;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+[data-sim="win-ipam-audit"] .au-src b { white-space: nowrap; }
+[data-sim="win-ipam-audit"] .au-src .au-keep { color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-src[data-ok="false"] { border-style: dashed; }
+[data-sim="win-ipam-audit"] .au-src[data-ok="false"] .au-st { color: var(--danger); font-weight: 700; }
+[data-sim="win-ipam-audit"] .au-src[data-ok="true"] .au-st { color: var(--ok); font-weight: 700; }
+[data-sim="win-ipam-audit"] .au-src[data-ok="off"] .au-st { color: var(--muted); font-weight: 700; }
+[data-sim="win-ipam-audit"] .au-dns { flex: 0 0 auto; max-width: 22rem; display: flex; flex-direction: column; gap: 0.15rem; border-style: dashed; }
+[data-sim="win-ipam-audit"] .au-dns h2 { margin: 0; font-size: 1em; }
+[data-sim="win-ipam-audit"] .au-dns .au-rr { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-ipam-audit"] .au-dns .au-note { font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="win-ipam-audit"] .au-dns .au-note b { color: var(--danger); }
+
+/* the time axis: a label column and the tracks; positions are percentages of 08:00–18:00 */
+[data-sim="win-ipam-audit"] .au-tl { grid-column: 1 / -1; display: grid; grid-template-columns: 6rem minmax(0, 1fr); row-gap: 0.25rem; padding: 0.35rem 0.9rem 0.35rem 0.5rem; }
+[data-sim="win-ipam-audit"] .au-tlname { font-size: var(--fs-sm); font-weight: 700; align-self: center; }
+[data-sim="win-ipam-audit"] .au-track { position: relative; height: 1.7rem; }
+[data-sim="win-ipam-audit"] .au-axis { position: relative; height: 1.3rem; border-top: var(--line-w) solid var(--line); }
+[data-sim="win-ipam-audit"] .au-hour { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-hour::before { content: ''; position: absolute; left: 50%; top: -0.35rem; height: 0.3rem; border-left: var(--line-w) solid var(--line); }
+[data-sim="win-ipam-audit"] .au-bar {
+  position: absolute; top: 0.15rem; bottom: 0.15rem;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--c1) 22%, var(--bg));
+  font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap;
+}
+[data-sim="win-ipam-audit"] .au-bar[data-c="2"] { background: color-mix(in srgb, var(--c3) 22%, var(--bg)); }
+[data-sim="win-ipam-audit"] .au-bar[data-c="3"] { background: color-mix(in srgb, var(--c5) 22%, var(--bg)); }
+[data-sim="win-ipam-audit"] .au-bar[data-open] { border-right-style: dashed; }
+[data-sim="win-ipam-audit"] .au-bar[data-used] { border-width: 0.22rem; }
+[data-sim="win-ipam-audit"] .au-bar.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ipam-audit"] .au-tick { position: absolute; top: 50%; transform: translate(-50%, -50%); font-size: var(--fs-sm); line-height: 1; color: var(--ink); background: var(--bg); border-radius: 50%; }
+[data-sim="win-ipam-audit"] .au-mark { position: absolute; top: 0; display: flex; align-items: center; gap: 0.15rem; height: 100%; font-size: var(--fs-sm); white-space: nowrap; transform: translateX(-0.45em); }
+[data-sim="win-ipam-audit"] .au-mark span[translate='no'] { font-family: var(--mono); font-weight: 700; }
+[data-sim="win-ipam-audit"] .au-mark[data-in] { outline: var(--line-w) solid var(--ink); outline-offset: 0.05rem; border-radius: var(--radius-sm); background: var(--bg); padding-right: 0.2rem; }
+[data-sim="win-ipam-audit"] .au-mark[data-out] { color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-mark[data-out] span[translate='no'] { text-decoration: line-through; text-decoration-color: var(--danger); }
+[data-sim="win-ipam-audit"] .au-gone {
+  position: absolute; inset: 0.15rem 0; display: grid; place-items: center;
+  border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(45deg, transparent 0 0.3rem, color-mix(in srgb, var(--ink) 18%, transparent) 0.3rem 0.45rem);
+  font-size: var(--fs-sm); font-weight: 700; color: var(--ink);
+}
+[data-sim="win-ipam-audit"] .au-gone > span { background: var(--bg); padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="win-ipam-audit"] .au-tline { position: absolute; top: -0.15rem; bottom: -0.15rem; z-index: 2; transform: translateX(-50%); border-left: 0.2rem solid var(--danger); pointer-events: none; }
+[data-sim="win-ipam-audit"] .au-tlabel {
+  position: absolute; top: 0.05rem; z-index: 2; transform: translateX(-50%);
+  padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--danger); color: var(--bg);
+  font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; line-height: 1.3;
+}
+
+/* the two evidence tables */
+[data-sim="win-ipam-audit"] .au > .sd-rt { font-size: 0.9rem; min-height: 0; overflow: hidden; }
+[data-sim="win-ipam-audit"] .au .sd-rt-title { display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-ipam-audit"] .au .sd-rt-title .au-via { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td.sd-rt-act, [data-sim="win-ipam-audit"] .au .sd-rt-table th.sd-rt-act { padding: 0; width: 0; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table .sd-rt-ptr { width: 1.9rem; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td { padding: 0.25rem 0.3rem; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table th { padding: 0 0.3rem 0.2rem; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td.sd-rt-mark .sd-rt-tag { white-space: normal; }
+[data-sim="win-ipam-audit"] .au > .sd-rt { padding: 0.45rem 0.55rem 0.5rem; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td.sd-rt-mark { min-width: 5.5rem; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table th { white-space: normal; line-height: 1.15; }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td.sd-changed[data-col] { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ipam-audit"] .au .sd-rt-table td [translate='no'].au-sans { font-family: var(--sans); }
+
+/* the chain */
+[data-sim="win-ipam-audit"] .au-chain { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.5fr); gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="win-ipam-audit"] .au-link {
+  position: relative;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.4rem; align-content: start;
+  padding: 0.25rem 0.5rem 0.35rem;
+  border: var(--line-w) dashed var(--muted);
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-width: 0;
+}
+[data-sim="win-ipam-audit"] .au-link + .au-link::before { content: '→'; position: absolute; left: -0.55rem; top: 50%; transform: translate(-50%, -50%); font-weight: 700; color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-glyph { grid-row: 1 / 3; align-self: center; display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: var(--line-w) solid var(--muted); font-weight: 700; color: var(--muted); }
+[data-sim="win-ipam-audit"] .au-lhead { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.25; }
+[data-sim="win-ipam-audit"] .au-lbody { font-size: var(--fs-sm); line-height: 1.3; overflow-wrap: anywhere; }
+[data-sim="win-ipam-audit"] .au-lbody [translate='no'] { font-family: var(--mono); font-weight: 700; }
+[data-sim="win-ipam-audit"] .au-link[data-ok="found"] { border: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-audit"] .au-link[data-ok="found"] .au-glyph { border-color: var(--ok); background: var(--ok); color: var(--bg); }
+[data-sim="win-ipam-audit"] .au-link[data-ok="missing"] { border: var(--line-w) dashed var(--danger); }
+[data-sim="win-ipam-audit"] .au-link[data-ok="missing"] .au-glyph { border-color: var(--danger); color: var(--danger); }
+[data-sim="win-ipam-audit"] .au-link[data-ok="ambiguous"] { border: 0.2rem dotted var(--ink); }
+[data-sim="win-ipam-audit"] .au-link[data-ok="ambiguous"] .au-glyph { border-color: var(--ink); color: var(--ink); }
+[data-sim="win-ipam-audit"] .au-link[data-ok] .au-lhead { color: var(--ink); }
+[data-sim="win-ipam-audit"] .au-link.sd-changed { background: var(--hl); color: var(--on-hl); outline: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-audit"] .au-link.sd-changed .au-lhead { color: var(--on-hl); }
+[data-sim="win-ipam-audit"] .au-link[data-k="answer"] .au-lbody { font-size: 1rem; }
+
+/* legend swatches the kit lacks: the question time (a red vertical line) and the chain marks */
+[data-sim="win-ipam-audit"] .sd-swatch[data-shape="tline"] { border: 0; border-radius: 0; background: linear-gradient(90deg, transparent 0 40%, var(--danger) 40% 60%, transparent 60%); }
+[data-sim="win-ipam-audit"] .sd-swatch[data-shape="chain"] { position: relative; border-radius: 50%; background: var(--ok); border-color: var(--ok); }
+[data-sim="win-ipam-audit"] .sd-swatch[data-shape="chain"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--bg); line-height: 1; }
+
+[data-sim="win-ipam-audit"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-ipam-audit"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content and everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ipam-audit"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ipam-audit"] .au { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; }
+  [data-sim="win-ipam-audit"] .au-top { flex-direction: column; }
+  [data-sim="win-ipam-audit"] .au-dns { max-width: none; }
+  [data-sim="win-ipam-audit"] .au-src { display: block; }
+  [data-sim="win-ipam-audit"] .au-src > * { margin-right: 0.35rem; }
+  [data-sim="win-ipam-audit"] .au-tl { grid-template-columns: 4.2rem minmax(0, 1fr); }
+  [data-sim="win-ipam-audit"] .au-hour:nth-child(even) { display: none; }
+  [data-sim="win-ipam-audit"] .au > .sd-rt { overflow: visible; font-size: 1rem; }
+  [data-sim="win-ipam-audit"] .au-chain { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-ipam-audit"] .au-link + .au-link::before { content: none; }
+  [data-sim="win-ipam-audit"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tko je imao ovu adresu u 14:32?</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var EV_ID = { 'new': '10', renew: '11', release: '12', expire: '17' };
+  var EV_WORD = { 'new': 'evNew', renew: 'evRenew', release: 'evRelease', expire: 'evExpire' };
+  var EV_GLYPH = { 'new': '●', renew: '◆', release: '○', expire: '◌' };
+  var SPAN = L.DAY_END - L.DAY_START;
+
+  /** Data (addresses, MACs, names, times, event IDs) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function clock(m) { return L.clock(m); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function richN(key, n, vars) { return rich(key, Object.assign({ n: n }, vars || {})); }
+  function dateOf(day) { return t('date', { wd: t('wd' + day.wd), d: day.d, m: t('mon' + day.m) }); }
+  function pct(m) { return ((Math.min(Math.max(m, L.DAY_START), L.DAY_END) - L.DAY_START) / SPAN * 100) + '%'; }
+  function hostOf(a) { return a.host || a.mac; }
+
+  /** One line for an answer (the chain's last box and the earlier question). */
+  function answerParts(a) {
+    if (a.kind === 'unknown') return [h('b', null, a.why === 'free' ? t('ansNobody') : t('ansUnknown'))];
+    var out = [data(hostOf(a))];
+    if (a.users.length) out.push(a.users.length > 1 ? ' · ' : ', ', data(a.users.join(' / ')));
+    else out.push(' · ', h('span', null, t('ansUserUnknown')));
+    return out;
+  }
+
+  // ── top: the question, the sources, DNS now ──
+  function renderTop(c) {
+    var s = c.state, q = s.question, av = s.avail, R = s.retentionDays;
+    var asked = s.askedDaysAgo === 0 ? t('qSameDay') : t.n('qLater', s.askedDaysAgo) + ', ' + dateOf(s.asked);
+    var line = h('div', { class: 'au-qline' });
+    if (q.of > 1) line.append(h('b', null, t('qNo', { i: q.qi + 1, of: q.of })));
+    line.append(h('span', null, t.parts('qAsked', { date: h('b', null, asked) })));
+    s.prior.forEach(function (pr) { line.append(h('span', null, t.parts('qPrior', { at: data(clock(pr.at)), answer: h('b', null, answerParts(pr.answer)) }))); });
+    function src(name, keep, ok) {
+      var st = ok === 'off' ? '– ' + t('srcOff') : ok ? '✓ ' + t('srcOk') : '✕ ' + t('srcGone');
+      return h('span', { class: 'au-src', dataset: { ok: String(ok) } }, h('b', null, name), h('span', { class: 'au-keep' }, keep), h('span', { class: 'au-st' }, st));
+    }
+    var srcs = h('div', { class: 'au-srcs' },
+      src(t('srcDhcp'), t.n('keepDays', R.dhcp), av.dhcp),
+      src(t('srcDc'), t('keepDc', { n: R.dc }), av.dc),
+      src(t('srcIpam'), t('keepIpam'), av.ipam ? true : 'off'));
+    var qbox = h('section', { class: 'au-box au-q' },
+      h('h2', { class: 'au-qtitle' }, t.parts('qTitle', { ip: data(q.ip), at: data(clock(q.at)) })), line, srcs);
+    var dns = h('section', { class: 'au-box au-dns' },
+      h('h2', null, t('dnsTitle'), ' · ', h('span', { class: 'au-note' }, dateOf(s.asked))),
+      h('span', { class: 'au-rr', translate: 'no' }, s.dnsNow.name + '  A  ' + s.dnsNow.ip),
+      h('span', { class: 'au-note' }, h('b', null, '✕ '), t.parts('dnsNote', { at: data(clock(q.at)) })));
+    return h('div', { class: 'au-top' }, qbox, dns);
+  }
+
+  // ── the time axis ──
+  /** The day's leases as bars: from a new lease (or the first event) to its release or expiry, or open to 18:00. */
+  function bars(events) {
+    var out = [], open = null;
+    L.chronological(events, L.IP).forEach(function (i) {
+      var e = events[i];
+      if (e.id === 'new' || e.id === 'renew') {
+        if (open && open.mac !== e.mac) { out.push(open); open = null; }
+        if (!open) open = { mac: e.mac, host: e.host, from: e.t, to: null, events: [] };
+        open.events.push(i);
+      } else if (open) { open.to = e.t; open.events.push(i); out.push(open); open = null; }
+    });
+    if (open) out.push(open);
+    return out;
+  }
+  function renderTimeline(c) {
+    var s = c.state, link = s.link, av = s.avail;
+    var leaseTrack = h('div', { class: 'au-track' });
+    var logonTrack = h('div', { class: 'au-track' });
+    if (!av.leases) leaseTrack.append(h('div', { class: 'au-gone' }, h('span', null, t('tlGone'))));
+    else {
+      var cover = s.cover && s.cover.kind === 'lease' ? s.cover.decider : -1;
+      var macs = [];
+      s.leaseEvents.forEach(function (e) { if (macs.indexOf(e.mac) < 0) macs.push(e.mac); });
+      bars(s.leaseEvents).forEach(function (bar) {
+        var used = link >= 1 && bar.events.indexOf(cover) >= 0;
+        var ds = { c: String(macs.indexOf(bar.mac) % 3 + 1) };
+        if (bar.to == null) ds.open = '';
+        if (used) ds.used = '';
+        var end = bar.to == null ? L.DAY_END : bar.to;
+        leaseTrack.append(h('div', { class: 'au-bar' + (used && link === 1 ? ' sd-changed' : ''), dataset: ds,
+          style: { left: pct(bar.from), width: 'calc(' + pct(end) + ' - ' + pct(bar.from) + ')' } }, data(bar.host || bar.mac)));
+      });
+      s.leaseEvents.forEach(function (e) {
+        leaseTrack.append(h('span', { class: 'au-tick', 'aria-hidden': 'true', style: { left: pct(e.t) } }, EV_GLYPH[e.id]));
+      });
+    }
+    if (!av.logons) logonTrack.append(h('div', { class: 'au-gone' }, h('span', null, t('tlGone'))));
+    else {
+      s.logonEvents.forEach(function (g, i) {
+        var ds = {};
+        if (link >= 3 && s.logons) {
+          if (s.logons.inside.indexOf(i) >= 0) ds['in'] = '';
+          else ds.out = '';
+        }
+        logonTrack.append(h('span', { class: 'au-mark', dataset: ds, style: { left: pct(g.t) } },
+          h('span', { 'aria-hidden': 'true' }, g.kind === 'tgt' ? '▲' : '▽'), data(g.user)));
+      });
+    }
+    var axis = h('div', { class: 'au-axis' });
+    for (var hr = 8; hr <= 18; hr++) axis.append(h('span', { class: 'au-hour', style: { left: pct(hr * 60) } }, data((hr < 10 ? '0' : '') + hr)));
+    var at = s.question.at;
+    [leaseTrack, logonTrack].forEach(function (tr) { tr.append(h('span', { class: 'au-tline', 'aria-hidden': 'true', style: { left: pct(at) } })); });
+    axis.append(h('span', { class: 'au-tlabel', translate: 'no', style: { left: pct(at), transform: at > 17 * 60 ? 'translateX(-90%)' : null } }, clock(at)));
+    return h('section', { class: 'au-box au-tl' },
+      h('span', { class: 'au-tlname' }, t('tlLeases')), leaseTrack,
+      h('span', { class: 'au-tlname' }, t('tlLogons')), logonTrack,
+      h('span'), axis);
+  }
+
+  // ── the lease table (K4, first match, newest first) ──
+  function renderLeases(c) {
+    var s = c.state, link = s.link, at = s.question.at, av = s.avail, E = s.leaseEvents;
+    var title = [t('leaseTitle', { ip: L.IP, at: clock(at) }), ' ', h('span', { class: 'au-via' }, av.via === 'ipam' ? t('viaIpam') : t('viaDhcp'))];
+    var rows = [], idx = [], ptr = -1, implicitText, outcomeFor;
+    if (!av.leases) {
+      implicitText = data(t('impLeaseGone', { date: dateOf(L.dayAfter(L.RETENTION.dhcp)) }), 'au-sans');
+      ptr = link >= 1 ? 0 : -1;
+    } else {
+      var cv = s.cover;
+      idx = cv.order;
+      rows = idx.map(function (i) {
+        var e = E[i];
+        var row = { no: clock(e.t), hit: null, tags: [], cells: {
+          ev: h('span', null, data(EV_ID[e.id]), ' ', t(EV_WORD[e.id])),
+          mac: e.mac,
+          host: e.host ? e.host : h('span', null, t('noHost')) }, action: '' };
+        if (link >= 1) {
+          if (cv.read.indexOf(i) >= 0) { row.hit = false; row.note = [{ k: 'muted', text: t('tagAfter', { at: clock(at) }) }]; }
+          if (i === cv.decider) row.hit = true;
+        }
+        if (link >= 2 && cv.kind === 'lease' && i === s.start) row.tags.push({ k: link === 2 ? 'hl' : 'dashed', text: t('tagStart') });
+        return row;
+      });
+      implicitText = h('span', null, t('impLease', { at: clock(at) }));
+      if (link >= 1) ptr = cv.decider >= 0 ? idx.indexOf(cv.decider) : rows.length;
+    }
+    outcomeFor = function (i) {
+      if (i >= rows.length) return Simdeck.ruleTable.verdict(false, av.leases ? t('outNone') : t('outGone'));
+      return Simdeck.ruleTable.verdict(s.cover.kind === 'lease', s.cover.kind === 'lease' ? t('outLease') : t('outFree'));
+    };
+    var el = Simdeck.ruleTable({
+      dir: c.dir, mode: 'first', title: title, noLabel: t('colTime'),
+      columns: [{ key: 'ev', label: t('colEvent') }, { key: 'mac', label: t('colMac') }, { key: 'host', label: t('colHost') }],
+      actionLabel: '', markLabel: t('colMark', { at: clock(at) }),
+      rows: rows, implicit: { text: implicitText, action: '' },
+      at: ptr, subject: { mark: String(s.question.qi + 1), c: 1 }, done: link >= 1, outcome: outcomeFor,
+      words: { win: '', skip: t('wSkip') }, changed: link === 1 && c.n > 0
+    });
+    // link 2 reads the device from the deciding row: mark its MAC and name as changed
+    if (link === 2 && s.cover && s.cover.kind === 'lease') {
+      var tr = el.querySelectorAll('tbody tr')[idx.indexOf(s.cover.decider)];
+      if (tr) Array.prototype.forEach.call(tr.querySelectorAll('td[data-col="mac"], td[data-col="host"]'), function (td) { td.classList.add('sd-changed'); });
+    }
+    return el;
+  }
+
+  // ── the logon table (K4: every row read; matches add up, so mode 'deny' with no deny rows) ──
+  function renderLogons(c) {
+    var s = c.state, link = s.link, at = s.question.at, av = s.avail, G = s.logonEvents;
+    var title = [t('logonTitle', { ip: L.IP }), ' ', h('span', { class: 'au-via' }, av.via === 'ipam' ? t('viaIpamDc') : t('viaDc'))];
+    var rows = [], implicitText = h('span', null, t('impLogon')), ptr = -1, done = false;
+    var held = s.cover && s.cover.kind === 'lease';
+    var changedRows = [];
+    if (!av.logons) {
+      implicitText = h('span', null, t('impLogonGone'));
+      if (link >= 3) { ptr = 0; done = true; }
+    } else {
+      var lg = s.logons, on = s.on;
+      rows = G.map(function (g, i) {
+        var row = { no: clock(g.t), hit: null, action: '', cells: {
+          ev: g.kind === 'tgt' ? h('span', null, data('4768'), ' ', data(t('evTgt'))) : h('span', null, t('evLogoff')),
+          user: g.user, addr: g.clientIp, dc: g.dc } };
+        if (link >= 3 && !held) row.mark = 'skip';
+        else if (link >= 3) {
+          if (lg.inside.indexOf(i) >= 0) { row.hit = true; if (link === 3) changedRows.push(i); }
+          else {
+            row.hit = false;
+            if (lg.before.indexOf(i) >= 0) row.note = [{ k: 'muted', text: t('tagBefore', { t: clock(s.leaseEvents[s.start].t) }) }];
+            else if (lg.after.indexOf(i) >= 0) row.note = [{ k: 'muted', text: t('tagAfter', { at: clock(at) }) }];
+          }
+          if (link >= 4 && on) {
+            if (on.dropped.indexOf(i) >= 0) { row.hit = false; row.mark = 'beaten'; if (link === 4) changedRows.push(i); }
+            if (on.by.indexOf(i) >= 0) { row.mark = 'hit'; row.note = [{ k: 'dashed', text: t('tagLogoff') }]; if (link === 4) changedRows.push(i); }
+            if (link === 4 && on.kept.indexOf(i) >= 0) changedRows.push(i);
+          }
+          if (link === 5 && row.hit) changedRows.push(i);
+        }
+        return row;
+      });
+      if (link >= 3) { ptr = 'all'; done = link >= 5 || !held; }
+      if (!held && link >= 3) implicitText = h('span', null, t('impLogonNoLease'));
+    }
+    var el = Simdeck.ruleTable({
+      dir: c.dir, mode: 'deny', title: title, noLabel: t('colTime'),
+      columns: [{ key: 'ev', label: t('colEvent') }, { key: 'user', label: t('colUser') }, { key: 'addr', label: t('colAddr') }, { key: 'dc', label: t('colDc') }],
+      actionLabel: '', markLabel: t('colMark', { at: clock(at) }),
+      rows: rows, implicit: { text: implicitText, action: '' },
+      at: ptr, done: done,
+      outcome: function (i) {
+        if (i >= rows.length) return Simdeck.ruleTable.verdict(false, av.logons ? t('outNoUser') : t('outGone'));
+        return Simdeck.ruleTable.verdict(true, t('outCand'));
+      },
+      words: { hit: t('wHit'), win: '', beaten: t('wBeaten'), skip: t('wSkip') },
+      changed: link >= 3 && c.n > 0 && typeof ptr === 'number'
+    });
+    var trs = el.querySelectorAll('tbody tr');
+    changedRows.forEach(function (i) { var td = trs[i] && trs[i].querySelector('td.sd-rt-mark'); if (td) td.classList.add('sd-changed'); });
+    if (link >= 3 && !rows.length || (link >= 5 && s.on && !s.on.users.length)) {
+      var imp = trs[trs.length - 1] && trs[trs.length - 1].querySelector('td.sd-rt-mark');
+      if (imp && (link === 3 || link === 5)) imp.classList.add('sd-changed');
+    }
+    return el;
+  }
+
+  // ── the chain ──
+  var LINK_HEAD = { lease: 'lnLease', device: 'lnDevice', logons: 'lnLogons', logoffs: 'lnLogoffs', answer: 'lnAnswer' };
+  var GLYPH = { found: '✓', missing: '✕', ambiguous: '≈' };
+  function linkBody(s, k, ch) {
+    var E = s.leaseEvents, at = s.question.at;
+    if (k === 'lease') {
+      if (ch.why === 'gone') return t('evGone');
+      if (ch.why === 'none') return t('evNone', { at: clock(at) });
+      var e = E[ch.evidence[0]];
+      return t.parts(ch.why === 'free' ? 'evFree' : 'evLease', { t: data(clock(e.t)), ev: t(EV_WORD[e.id]) });
+    }
+    if (k === 'device') {
+      if (ch.ok === 'missing') return t('evNoLease');
+      var d = E[ch.evidence[0]];
+      return [data(d.mac), h('br'), d.host ? data(d.host) : t('noHost')];
+    }
+    if (k === 'logons') {
+      if (ch.why === 'gone') return t('evGone');
+      if (ch.why === 'no-lease') return t('evNoLease');
+      var since = t.parts('evSince', { t: data(clock(E[s.start].t)) });
+      if (!ch.evidence.length) return [t('evNoLogon'), ' · '].concat(since);
+      return [data(ch.evidence.map(function (i) { return s.logonEvents[i].user + ' ' + clock(s.logonEvents[i].t); }).join(', ')), h('br')].concat(since);
+    }
+    if (k === 'logoffs') {
+      if (ch.ok === 'missing' && ch.why !== 'all-off') return ch.why === 'gone' ? t('evGone') : ch.why === 'no-lease' ? t('evNoLease') : t('evNoLogon');
+      return [t.n('evCands', s.on.users.length), s.on.users.length ? ': ' : '', s.on.users.length ? data(s.on.users.join(', ')) : ''];
+    }
+    return answerParts(s.answer);
+  }
+  function renderChain(c) {
+    var s = c.state;
+    var list = h('ol', { class: 'au-chain' });
+    ['lease', 'device', 'logons', 'logoffs', 'answer'].forEach(function (k, i) {
+      var ch = s.chain[i];
+      var head = h('span', { class: 'au-lhead' }, (i + 1) + ' · ' + t(LINK_HEAD[k], { at: clock(s.question.at) }));
+      var li = h('li', { class: 'au-link' + (ch && i === s.link - 1 && c.n > 0 ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : ''),
+        dataset: ch ? { ok: ch.ok, k: k } : { k: k } },
+        h('span', { class: 'au-glyph', 'aria-hidden': 'true' }, ch ? GLYPH[ch.ok] : t('lnPending')),
+        head, h('span', { class: 'au-lbody' }, ch ? linkBody(s, k, ch) : ''));
+      list.append(li);
+    });
+    return list;
+  }
+
+  // ── captions ──
+  /** A node placed twice would move: the second and later uses get a copy. */
+  function dedupe(parts) {
+    var seen = [];
+    return parts.map(function (x) {
+      if (!x || !x.nodeType) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function caption(c) { return dedupe(captionParts(c)); }
+  function captionParts(c) {
+    var s = c.state, p = c.params, n = c.n, at = s.question.at, link = s.link;
+    var AT = data(clock(at)), IPd = b(L.IP);
+    if (c.first) return t.parts('capStart', { ip: IPd, at: AT });
+    var out = [];
+    var add = function (parts) { if (out.length) out.push(' '); out.push.apply(out, parts); };
+    if (s.question.qi > 0 && link === 1) add(t.parts('capNextQ', { at: AT }));
+    var ch = s.chain[link - 1], E = s.leaseEvents, G = s.logonEvents;
+    if (link === 1) {
+      if (ch.why === 'gone') add(t.parts('capGone', { n: n, date: h('b', null, dateOf(L.dayAfter(L.RETENTION.dhcp))) }));
+      else if (ch.why === 'free') {
+        var fe = E[s.cover.decider];
+        add(t.parts('capFree', { n: n, at: AT, ev: h('b', null, t(EV_WORD[fe.id])), t: b(clock(fe.t)) }));
+      } else if (ch.why === 'none') add(t.parts('capNone', { n: n, ip: IPd, at: AT }));
+      else {
+        var de = E[s.cover.decider];
+        add(rich(de.id === 'new' ? 'capLeaseNew' : 'capLeaseRenew', { n: n, at: AT, ip: IPd, t: b(clock(de.t)), host: b(de.host || de.mac) }));
+        // the earlier holder whose lease ended before this one began
+        var chron = L.chronological(E, L.IP), prevEnd = null;
+        chron.forEach(function (i) { var e = E[i]; if (e.t <= de.t && e.mac !== de.mac && (e.id === 'release' || e.id === 'expire')) prevEnd = e; });
+        if (prevEnd) add(t.parts(prevEnd.id === 'release' && prevEnd.t < 12 * 60 ? 'capEarlierMorning' : 'capEarlier', { host: b(prevEnd.host || prevEnd.mac), t: b(clock(prevEnd.t)) }));
+      }
+      if (s.cover && s.cover.read.length) add(t.parts('capLater', { n: s.cover.read.length, at: AT }));
+      if (s.avail.ipam && !s.avail.dhcp) add([t('capIpamHas')]);
+      return out;
+    }
+    if (link === 2) {
+      if (ch.ok === 'missing') add(t.parts('capNoDevice', { n: n }));
+      else {
+        var d = E[s.cover.decider];
+        add(t.parts(d.host ? 'capDevice' : 'capDeviceNoHost', { n: n, mac: b(d.mac), host: b(d.host || ''), start: b(clock(E[s.start].t)) }));
+      }
+      return out;
+    }
+    if (link === 3) {
+      if (ch.why === 'gone') add(t.parts('capLogonsGone', { n: n, d: L.RETENTION.dc }));
+      else if (ch.why === 'no-lease') add(t.parts('capLogonsNoLease', { n: n }));
+      else {
+        var start = b(clock(E[s.start].t));
+        if (ch.why === 'none') add(t.parts('capLogonsNone', { n: n, start: start, at: AT, ip: IPd }));
+        else add(t.parts('capLogons', { n: n, start: start, at: AT, ip: IPd,
+          list: b(ch.evidence.map(function (i) { return G[i].user + ' ' + clock(G[i].t); }).join(', ')) }));
+        s.logons.before.forEach(function (i) { add(t.parts('capLogonBefore', { user: b(G[i].user), t: b(clock(G[i].t)) })); });
+        s.logons.after.forEach(function (i) { add(t.parts('capLogonAfter', { user: b(G[i].user), t: b(clock(G[i].t)), at: AT })); });
+      }
+      return out;
+    }
+    if (link === 4) {
+      if (!s.on) add(t.parts(ch.why === 'gone' ? 'capOffGone' : ch.why === 'no-lease' ? 'capOffNoLease' : 'capOffMissing', { n: n }));
+      else if (s.on.by.length) {
+        var gone = [];
+        s.on.by.forEach(function (i) { if (gone.indexOf(G[i].user) < 0) gone.push(G[i].user); });
+        add(t.parts('capOffDropped', { n: n, at: AT, gone: b(gone.join(', ')), left: s.on.users.length ? b(s.on.users.join(', ')) : t('ansNobody') }));
+      } else if (s.on.users.length === 1) add(t.parts('capOffOne', { n: n, at: AT, user: b(s.on.users[0]) }));
+      else add(t.parts('capOffMany', { n: s.on.users.length, s: n, at: AT }));
+      return out;
+    }
+    var a = s.answer;
+    if (a.kind === 'one') add(t.parts('capAnswerOne', { n: n, at: AT, ip: IPd, host: b(hostOf(a)), mac: b(a.mac), user: b(a.users[0]) }));
+    else if (a.kind === 'several') { add(t.parts('capAnswerMany', { n: a.users.length, s: n, at: AT })); add([t('capAnswerManyWhy')]); }
+    else if (a.kind === 'device') add(t.parts('capAnswerDevice', { n: n, host: b(hostOf(a)), mac: b(a.mac) }));
+    else if (a.why === 'free') add(t.parts('capAnswerFree', { n: n, at: AT, ip: IPd }));
+    else if (a.why === 'none') add(t.parts('capAnswerNone', { n: n, at: AT, ip: IPd }));
+    else add(rich('capAnswerGone', { n: n, d: L.RETENTION.dc }));
+    if (a.host && s.dnsNow.name.toLowerCase() !== a.host.toLowerCase()) add(t.parts('capDnsTrap', { dns: b(s.dnsNow.name), at: AT }));
+    s.prior.forEach(function (pr) {
+      if (!pr.answer.host || !a.host) return;
+      add(t.parts(pr.answer.mac !== a.mac ? 'capCompare' : 'capSame', { at: data(clock(pr.at)), host: b(hostOf(pr.answer)) }));
+    });
+    return out;
+  }
+
+  var EVIDENCE_IDS = Object.keys(L.EVIDENCE);
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'evidence', type: 'select', label: t('hidden'), resets: true, options: EVIDENCE_IDS.map(function (id) { return [id, id]; }), visible: function () { return false; } },
+      { key: 'at', type: 'choice', label: t('pAt'), resets: true, options: [[L.AT['09:10'], '09:10'], [L.AT['14:32'], '14:32'], [L.AT['17:55'], '17:55']] },
+      { key: 'askedDaysAgo', type: 'range', label: t('pDays'), resets: true, min: 0, max: 14 },
+      { key: 'ipamCollected', type: 'toggle', label: t('pIpam'), hint: t('pIpamHint'), resets: true }
+    ],
+
+    presets: [
+      { id: 'one-user', label: t('prOne'), hint: t('prOneHint'), params: { evidence: 'one-user', at: 872, askedDaysAgo: 0, ipamCollected: true } },
+      { id: 'address-reused', label: t('prReused'), hint: t('prReusedHint'), params: { evidence: 'address-reused', at: 872, askedDaysAgo: 0, ipamCollected: true } },
+      { id: 'two-users', label: t('prTwo'), hint: t('prTwoHint'), params: { evidence: 'two-users', at: 872, askedDaysAgo: 0, ipamCollected: true } },
+      { id: 'too-old', label: t('prOld'), hint: t('prOldHint'), params: { evidence: 'one-user', at: 872, askedDaysAgo: 9, ipamCollected: false } },
+      { id: 'dns-trap', label: t('prDns'), hint: t('prDnsHint'), params: { evidence: 'dns-trap', at: 872, askedDaysAgo: 2, ipamCollected: true } }
+    ],
+
+    legend: [
+      { shape: 'tline', label: t('legendT') },
+      { shape: 'rt-win', label: t('legendUsed') },
+      { shape: 'chain', label: t('legendLinks') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'au' }, renderTop(c), renderTimeline(c), renderLeases(c), renderLogons(c), renderChain(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
