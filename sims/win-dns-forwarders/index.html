@@ -1,0 +1,497 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-forwarders: PC-07 asks DC1 for a name; DC1 decides once per query along cache → hosted zone → conditional
+     forwarder → server forwarders → root hints → SERVFAIL, and the chosen server answers, times out or refers. A
+     stepper, one message per step. Drawn with kit view K1 (message sequence chart, kit/sequence.js; five or six lanes
+     by the name asked) and kit view K4 (rule table, kit/ruletable.js) for DC1's decision order, with DC1's cache under
+     it. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-forwarders">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prosljeđivači, uvjetni prosljeđivači i root hints · simdeck</title>
+<meta name="description" content="Razriješi interno, partnerovo i internetsko ime: zona, uvjetni prosljeđivač, prosljeđivač, root hints ili SERVFAIL, i zašto NXDOMAIN zaustavlja potragu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-forwarders",
+  "title": {
+    "hr": "Prosljeđivači, uvjetni prosljeđivači i root hints",
+    "en": "Forwarders, conditional forwarders, root hints"
+  },
+  "concept": {
+    "hr": "Kamo DC šalje imena koja nisu njegova",
+    "en": "Where a DC sends names it doesn't own"
+  },
+  "summary": {
+    "hr": "Razriješi interno, partnerovo i internetsko ime: zona, uvjetni prosljeđivač, prosljeđivač, root hints ili SERVFAIL, i zašto NXDOMAIN zaustavlja potragu.",
+    "en": "Resolve internal, partner and internet names: zone, conditional forwarder, forwarder, root hints or SERVFAIL, and why NXDOMAIN ends the search."
+  },
+  "tags": [
+    "dns"
+  ],
+  "class": "stepper",
+  "steps": 2
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-forwarders"]; colours only from kit tokens.
+   Layout: left the K1 chart; right DC1's decision table (K4) on top and its cache under it. */
+[data-sim="win-dns-forwarders"] .fw {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 25rem);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh 1.2cqw;
+  height: 100%;
+  padding: 1.6cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dns-forwarders"] .fw > .sd-seq { grid-column: 1; grid-row: 1 / 3; }
+[data-sim="win-dns-forwarders"] .fw > .sd-rt { grid-column: 2; grid-row: 1; }
+[data-sim="win-dns-forwarders"] .fw-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.45rem 0.7rem 0.55rem;
+  min-height: 0;
+}
+[data-sim="win-dns-forwarders"] .fw-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-dns-forwarders"] .fw-muted { color: var(--muted); font-weight: 400; }
+[data-sim="win-dns-forwarders"] .fw-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="win-dns-forwarders"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* the toggles share rows two by two, so the panel fits at 1920×1080; the switch shows on/off itself */
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.8rem; }
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group > [data-key="condFwd"],
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group > [data-key="forwarderUp"],
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group > [data-key="rootHints"],
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-group > [data-key="recursion"] { grid-column: auto; }
+[data-sim="win-dns-forwarders"] [data-sd-controls] .sd-switch-state { display: none; }
+
+/* the final answers drawn bold (K1 has thin and normal; NOTES.md, "Shared requests") */
+[data-sim="win-dns-forwarders"] .sd-seq-arrow[data-weight="bold"] { border-top-width: 0.5rem; top: calc(1.95rem - 0.12rem); }
+/* the aa badge on a chip's fields */
+[data-sim="win-dns-forwarders"] .fw-aa {
+  display: inline-block;
+  padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+/* the rule that matched, on DC1's card; "down" on the forwarder's */
+[data-sim="win-dns-forwarders"] .fw-badge {
+  display: inline-block;
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.3;
+}
+[data-sim="win-dns-forwarders"] .fw-badge[data-k="fail"], [data-sim="win-dns-forwarders"] .fw-badge[data-k="down"] { border-style: dashed; }
+[data-sim="win-dns-forwarders"] .sd-seq .fw-badge { margin-bottom: 0.2rem; }
+[data-sim="win-dns-forwarders"] .fw-badge.sd-changed { background: var(--hl); color: var(--on-hl); }
+/* legend swatches the kit lacks: dotted (referral), bold (answer), timeout (⏱ ✕) */
+[data-sim="win-dns-forwarders"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.3rem, transparent 0.3rem 0.55rem); }
+[data-sim="win-dns-forwarders"] .sd-swatch[data-shape="bold"] { height: 0.55rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="win-dns-forwarders"] .sd-swatch[data-shape="tmo"] { position: relative; background: var(--bg); border-style: dashed; }
+[data-sim="win-dns-forwarders"] .sd-swatch[data-shape="tmo"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.85em; line-height: 1; color: var(--danger); }
+
+/* decision table: the deciding row's outcome; a waiting row */
+[data-sim="win-dns-forwarders"] .fw-wait { font-style: italic; color: var(--muted); }
+[data-sim="win-dns-forwarders"] .fw > .sd-rt { font-size: 0.92rem; }
+/* the row names and actions wrap, so the mark column stays inside the box */
+[data-sim="win-dns-forwarders"] .sd-rt-table td.sd-rt-no, [data-sim="win-dns-forwarders"] .sd-rt-table td.sd-rt-act { white-space: normal; }
+[data-sim="win-dns-forwarders"] .sd-rt-table .sd-rt-ptr { width: 2.2rem; }
+[data-sim="win-dns-forwarders"] .sd-rt-table td.sd-rt-act { padding: 0; }
+[data-sim="win-dns-forwarders"] .sd-rt-table tr.sd-rt-implicit td { white-space: normal; }
+[data-sim="win-dns-forwarders"] .sd-rt-table td.sd-rt-mark { min-width: 5.5rem; }
+/* six lanes beside the table: lane names a little smaller than the kit's 1.05rem (still above the 16 px floor) */
+[data-sim="win-dns-forwarders"] .sd-seq-name { font-size: 0.88rem; }
+[data-sim="win-dns-forwarders"] .sd-rt-table .fw-scope { font-weight: 400; white-space: normal; }
+[data-sim="win-dns-forwarders"] .sd-rt-table .fw-scope [translate='no'], [data-sim="win-dns-forwarders"] .sd-rt-table td[data-col="to"] [translate='no'] { font-family: var(--sans); }
+
+/* cache */
+[data-sim="win-dns-forwarders"] .fw-cache { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; overflow: hidden; }
+[data-sim="win-dns-forwarders"] .fw-rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; min-height: 0; }
+[data-sim="win-dns-forwarders"] .fw-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.5rem;
+  padding: 0.05rem 0.4rem 0.2rem;
+  border: var(--line-w) solid var(--line);
+  border-left-width: 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+[data-sim="win-dns-forwarders"] .fw-row-name { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="win-dns-forwarders"] .fw-row-name .fw-type { font-weight: 400; margin-left: 0.4rem; }
+[data-sim="win-dns-forwarders"] .fw-row-ttl { font-family: var(--mono); text-align: right; white-space: nowrap; }
+[data-sim="win-dns-forwarders"] .fw-row-data { grid-column: 1 / 3; font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="win-dns-forwarders"] .fw-row-data .fw-sans { font-family: var(--sans); }
+[data-sim="win-dns-forwarders"] .fw-bar { grid-column: 1 / 3; height: 0.4rem; margin-top: 0.15rem; border: 1px solid var(--line); background: var(--bg); }
+[data-sim="win-dns-forwarders"] .fw-bar > span { display: block; height: 100%; background: var(--c2); }
+[data-sim="win-dns-forwarders"] .fw-row[data-hint] { border-style: dashed; }
+[data-sim="win-dns-forwarders"] .fw-row[data-hint] .fw-row-data { font-family: var(--sans); }
+[data-sim="win-dns-forwarders"] .fw-row[data-neg] .fw-bar > span { background: repeating-linear-gradient(45deg, var(--ink) 0 0.2rem, var(--bg) 0.2rem 0.4rem); }
+[data-sim="win-dns-forwarders"] .fw-row.sd-changed { background: var(--hl); color: var(--on-hl); outline: var(--line-w) solid var(--ink); }
+[data-sim="win-dns-forwarders"] .fw-row.sd-changed .fw-row-data, [data-sim="win-dns-forwarders"] .fw-row.sd-changed .fw-row-ttl { color: var(--on-hl); }
+[data-sim="win-dns-forwarders"] .fw-row[data-how="used"] { border-left-color: var(--ink); }
+[data-sim="win-dns-forwarders"] .fw-neg { margin-right: 0.3rem; }
+
+/* Phone and portrait: the stage grows with its content; the boxes go under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-forwarders"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-forwarders"] .fw { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-dns-forwarders"] .fw > .sd-seq, [data-sim="win-dns-forwarders"] .fw > .sd-rt, [data-sim="win-dns-forwarders"] .fw-cache { grid-column: 1; grid-row: auto; }
+  [data-sim="win-dns-forwarders"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="win-dns-forwarders"] .fw > .sd-rt { font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prosljeđivači, uvjetni prosljeđivači i root hints</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { PC: '1', DC: '2', partner: '6', fwd: '3', root: '4', tld: '5', auth: '7' };
+  var MARK = { PC: 'P', DC: 'D', partner: 'p', fwd: 'F', root: '.', tld: 'o', auth: 'e' };
+  var LANE_KEYS = { PC: 'PC', DC: 'DC', partner: 'Partner', fwd: 'Fwd', root: 'Root', tld: 'Tld', auth: 'Auth' };
+  var BADGE = { cache: 'badgeCache', zone: 'badgeZone', cond: 'badgeCond', fwd: 'badgeFwd', hints: 'badgeHints', fail: 'badgeFail' };
+
+  /** Data (names, addresses, flags, rcodes, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sec(v) { return t('sec', { v: v }); }
+  function secData(v) { return data(sec(v)); }
+  function q(name) { return h('b', { translate: 'no' }, name); }
+  /** The address behind a lane, or the server a message names. */
+  function addr(lane) { return L.HOSTS[lane] ? L.HOSTS[lane].ip : lane; }
+
+  /** The rule that sent the current lookup where it went (the badge on DC1's card), once DC1 has decided. */
+  function ruleNow(s) { return s.route && s.msgs.length ? s.route.kind : null; }
+
+  // ── lanes ──
+  function lanes(c) {
+    var s = c.state, cur = s.msgs[s.msgs.length - 1];
+    var fresh = c.prev && s.msgs.length > c.prev.msgs.length;
+    var rule = ruleNow(s), prevRule = c.prev ? ruleNow(c.prev) : null;
+    return L.lanes(c.params).map(function (id) {
+      var k = LANE_KEYS[id];
+      var active = fresh && cur && (cur.from === id || cur.to === id);
+      var down = id === 'fwd' && !c.params.forwarderUp;
+      var tags = null;
+      if (id === 'DC' && rule) {
+        tags = h('span', { class: 'fw-badge' + (rule !== prevRule || (cur && cur.n === c.n && cur.from === 'PC') ? ' sd-changed' : ''), dataset: { k: rule } }, rich(BADGE[rule]));
+      }
+      if (down) tags = h('span', { class: 'fw-badge', dataset: { k: 'down' } }, t('down'));
+      var name = id === 'tld' || id === 'auth' || id === 'PC' || id === 'DC' ? data(t('lane' + k)) : t('lane' + k);
+      return { id: id, mark: MARK[id], c: COLOUR[id], shape: id === 'PC' ? 'square' : null, name: name, tags: tags,
+        state: down ? 'down' : active ? 'active' : null,
+        body: [h('div', { class: 'fw-sub' }, rich('role' + k)), h('div', { class: 'fw-sub' }, data(addr(id)))] };
+    });
+  }
+
+  // ── chart rows ──
+  function chipOf(m) {
+    if (m.kind === 'nxdomain') return 'NXDOMAIN';
+    if (m.kind === 'servfail') return 'SERVFAIL';
+    return h('span', null, t({ query: 'kQuery', referral: 'kReferral', answer: 'kAnswer' }[m.kind]));
+  }
+  function fieldsOf(m) {
+    if (m.kind === 'query') return m.rd ? 'rd' : null;
+    if (m.kind === 'referral') return 'NS ' + m.zone;
+    if (m.kind === 'servfail') return m.ra ? 'ra' : null;
+    var bits = [];
+    if (m.aa) bits.push(h('span', { class: 'fw-aa' }, 'aa'), ' ');
+    if (m.ra) bits.push('ra ');
+    if (m.ttl != null) bits.push(sec(m.ttl));
+    return h('span', { translate: 'no' }, bits);
+  }
+  function rows(c) {
+    var s = c.state, out = [], bold = [], timers = [], openLost = null;
+    var down = c.params.forwarderUp ? null : ['fwd'];
+    s.msgs.forEach(function (m) {
+      if (m.lookup === 2 && m.from === 'PC') {
+        out.push({ kind: 'note', lane: 'PC', text: t('noteLater', { adv: sec(L.ADVANCE) }), k: 'solid', time: sec(m.t), changed: m.n === c.n, down: down });
+      }
+      if (openLost) { timers.push({ lane: 'DC', from: openLost.row, to: out.length, label: t('timer', { s: sec(openLost.wait) }), end: 'expired' }); openLost = null; }
+      if (m.to === 'PC' && m.kind !== 'query') bold.push(out.length);
+      var row = { from: m.from, to: m.to, label: chipOf(m), c: COLOUR[m.from], fields: fieldsOf(m), line: m.kind === 'referral' ? 'dotted' : null,
+        time: sec(m.t), changed: m.n === c.n, down: down };
+      if (m.lost) { row.lost = [m.to]; openLost = { row: out.length, wait: m.wait }; }
+      out.push(row);
+    });
+    if (openLost) timers.push({ lane: 'DC', from: openLost.row, label: t('timer', { s: sec(openLost.wait) }) });
+    return { rows: out, bold: bold, timers: timers };
+  }
+  function renderChart(c) {
+    var r = rows(c);
+    var chart = Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: r.rows,
+      timers: r.timers,
+      timeWidth: '3.6rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+    var rowEls = chart.querySelectorAll('.sd-seq-row');
+    r.bold.forEach(function (i) { var a = rowEls[i] && rowEls[i].querySelector('.sd-seq-arrow'); if (a) a.dataset.weight = 'bold'; });
+    return chart;
+  }
+
+  // ── DC1's decision table (K4) ──
+  function renderTable(c) {
+    var s = c.state, tb = s.table, fi = 0;
+    var rowsSpec = tb.rows.map(function (r) {
+      // # = the check and, under it, what it applies to; one column = where it sends the query (the table must fit
+      // beside a six-lane chart, so the K4 action column stays empty)
+      var no, scope, to, tags = [], note = null;
+      switch (r.kind) {
+        case 'cache': no = t('rCache'); scope = h('span', null, t('mCacheName')); to = h('span', null, t('aCache')); break;
+        case 'zone': no = t('rZone'); scope = data(r.domain); to = h('span', null, t('aZone')); break;
+        case 'cond': no = t('rCond'); scope = data(r.domain); to = data(r.targets.join(', ')); break;
+        case 'fwd': fi++; no = t('rFwd', { i: fi }); scope = h('span', null, t('mAny')); to = data(r.ip); break;
+        default: no = rich('rHints'); scope = h('span', null, t('mAfterFwd')); to = h('span', null, t('aHints')); break;
+      }
+      tags.push(h('span', { class: 'sd-rt-tag fw-scope' }, scope));
+      if (r.note === 'off') tags.push({ k: 'muted', text: t('tagOff') });
+      if (r.note === 'norec') tags.push({ k: 'muted', text: t('tagNorec') });
+      if (r.note === 'shorter') note = [{ k: 'dashed', text: t('noteShorter') }];
+      if (r.note === 'same') note = [{ k: 'dashed', text: t('noteSame') }];
+      if (r.note === 'timeout') note = [{ k: 'dashed', text: t('noteTimeout', { s: sec(r.kind === 'cond' ? L.COND_TIMEOUT : L.FWD_TIMEOUT) }) }];
+      var row = { no: h('span', null, no), cells: { to: to }, action: '', hit: r.hit, tags: tags, note: note };
+      if (r.mark) row.mark = r.mark;
+      return row;
+    });
+    var res = tb.result;
+    return Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'first',
+      title: t('tableTitle'),
+      noLabel: t('colMatch'),
+      columns: [{ key: 'to', label: t('colAction'), wrap: true }],
+      actionLabel: '',
+      markLabel: t('colMark'),
+      rows: rowsSpec,
+      implicit: { text: h('span', null, t('implicit'), ' → ', data('SERVFAIL')), action: '', effect: 'deny' },
+      at: tb.at,
+      subject: { mark: String(s.lookup), c: 1 },
+      done: tb.at >= 0,
+      outcome: function () {
+        if (!res) return h('span', { class: 'fw-wait' }, t('waiting'));
+        var v = Simdeck.ruleTable.verdict(res.kind === 'answer', res.kind === 'answer' ? res.ip : res.kind.toUpperCase());
+        v.setAttribute('translate', 'no');
+        return v;
+      },
+      words: { skip: t('wSkip'), beaten: t('wBeaten') },
+      stickyMark: true,
+      changed: c.n > 0 && s.msgs.length > 0 && (s.msgs[s.msgs.length - 1].from === 'PC' || (c.prev && c.prev.table.at !== tb.at))
+    });
+  }
+
+  // ── cache ──
+  function renderCache(c) {
+    var s = c.state, touched = {};
+    if (c.n > 0) s.touched.forEach(function (x) { if (!touched[x.key]) touched[x.key] = x.how; });
+    var box = h('section', { class: 'fw-box fw-cache' },
+      h('h2', null, t('cacheTitle'), h('span', { class: 'fw-muted' }, t.parts('cacheAt', { t: secData(s.t) }))));
+    var list = h('ul', { class: 'fw-rows' });
+    // the root hints: one row for the NS set and its addresses
+    list.append(h('li', { class: 'fw-row', dataset: { hint: '' } },
+      h('span', { class: 'fw-row-name' }, data('.'), data('NS', 'fw-type')), h('span', { class: 'fw-row-ttl' }),
+      h('span', { class: 'fw-row-data' }, rich('cacheHint'))));
+    s.cache.forEach(function (e) {
+      if (e.hint || (e.type === 'A' && e.glue)) return;
+      var key = L.keyOf(e.name, e.type), how = touched[key], leftNow = L.left(e, s.t);
+      if (!L.valid(e, s.t)) return;
+      var ds = {};
+      if (e.negative) ds.neg = '';
+      if (how) ds.how = how;
+      var name = h('span', { class: 'fw-row-name' }, e.negative ? h('span', { class: 'fw-neg', 'aria-hidden': 'true' }, '⊘') : null,
+        data(e.name), e.negative ? null : data(e.type, 'fw-type'));
+      var body = e.negative ? h('span', { class: 'fw-row-data' }, h('span', { class: 'fw-sans' }, t('cacheNx')))
+        : h('span', { class: 'fw-row-data' }, data(e.data.join(', ')), e.type === 'NS' ? [' ', h('span', { class: 'fw-sans' }, t('cacheGlue'))] : null);
+      list.append(h('li', { class: 'fw-row' + (how ? ' sd-changed' + (how === 'added' && c.dir === 'forward' ? ' sd-anim-in' : '') : ''), dataset: ds },
+        name, h('span', { class: 'fw-row-ttl' }, data(sec(leftNow) + ' / ' + sec(e.ttl))), body,
+        h('div', { class: 'fw-bar' }, h('span', { style: { width: (Math.round(leftNow / e.ttl * 1000) / 10) + '%' } }))));
+    });
+    box.append(list);
+    return box;
+  }
+
+  // ── captions ──
+  /** The decision DC1 made when the query arrived (one sentence after the client's query). */
+  function decision(s, p) {
+    var m = s.msgs[s.msgs.length - 1], rule = s.route.kind;
+    if (rule === 'cache') {
+      var hit = L.cachedAnswer(s.cache, m.q.name, 'A', s.t);
+      return t.parts('decCache', { left: secData(L.left(hit.entry, s.t)) });
+    }
+    if (rule === 'zone') return t('decZone');
+    if (rule === 'cond') return t('decCond');
+    if (rule === 'fwd') return L.inDomain(m.q.name, 'partner.example') && !p.condFwd ? t('decFwdCondOff') : t('decFwd');
+    if (rule === 'hints') return t('decHints');
+    return s.dc.recursion ? t('decFail') : t('decNorec');
+  }
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    if (c.first) return t.parts('capStart', { name: q(L.NAMES[p.name]) });
+    var m = s.msgs[s.msgs.length - 1], parts;
+    if (m.from === 'PC') {
+      parts = m.lookup === 1 ? t.parts('capQuery', { n: n, name: q(m.q.name) }) : t.parts('capQueryAgain', { n: n, adv: sec(L.ADVANCE), name: q(m.q.name) });
+      parts.push(' ', decision(s, p));
+      return parts;
+    }
+    if (m.from === 'DC' && m.to !== 'PC') {
+      var prevMsg = s.msgs[s.msgs.length - 2];
+      if (m.rule === 'cond') parts = rich('capCondSend', { n: n, name: q(m.q.name), ip: q(m.server) });
+      else if (m.rule === 'fwd') parts = t.parts('capFwdSend', { n: n, ip: q(m.server) });
+      else if (prevMsg && prevMsg.lost) parts = rich('capHintsStart', { n: n, s: secData(prevMsg.wait) });
+      else parts = t.parts('capAsk', { n: n, server: q(m.server) });
+      if (m.lost) parts.push(' ', t.parts('capLost', { s: secData(m.wait) }));
+      return parts;
+    }
+    if (m.to === 'DC') {
+      if (m.kind === 'referral') return t.parts('capReferral', { n: n, server: q(m.server), zone: q(m.zone), ttl: secData(m.ttl) });
+      var cached = L.find(s.cache, m.kind === 'answer' ? m.rr.name : m.q.name, m.kind === 'answer' ? 'A' : 'NXDOMAIN');
+      if (m.rule === 'cond') {
+        return m.kind === 'answer' ? t.parts('capCondAnswer', { n: n, ip: q(m.rr.data[0]), ttl: secData(cached.ttl) })
+          : t.parts('capCondNx', { n: n, ttl: secData(cached.ttl) });
+      }
+      if (m.rule === 'fwd') {
+        if (m.kind === 'answer') return t.parts('capFwdAnswer', { n: n, ip: q(m.rr.data[0]), ttl: secData(cached.ttl) });
+        parts = t.parts('capFwdNx', { n: n });
+        if (L.inDomain(m.q.name, 'partner.example')) parts.push(' ', t('capFwdNxWhy'));
+        parts.push(' ', t.parts('capNegCached', { ttl: secData(cached.ttl), soa: data(Math.min(m.soa.ttl, m.soa.minimum) + ' s') }));
+        return parts;
+      }
+      if (m.kind === 'answer') return t.parts('capAuthAnswer', { n: n, server: q(m.server), ip: q(m.rr.data[0]), ttl: secData(m.ttl) });
+      return t.parts('capRootNx', { n: n, ttl: secData(cached.ttl) });
+    }
+    // DC1's reply to PC-07
+    var o = s.outcome[s.outcome.length - 1];
+    if (m.kind === 'servfail') {
+      var lostMsg = s.msgs.filter(function (x) { return x.lookup === m.lookup && x.lost; })[0];
+      if (!s.dc.recursion) parts = t.parts('capReplyNorec', { n: n });
+      else if (lostMsg && lostMsg.rule === 'cond') parts = t.parts('capReplyCondDown', { n: n, s: secData(o.end - o.start) });
+      else if (lostMsg) parts = rich('capReplyNoHints', { n: n, s: secData(o.end - o.start) });
+      else parts = t.parts('capReplyFail', { n: n });
+    } else if (m.source === 'zone') parts = t.parts('capReplyZone', { n: n, ip: q(m.rr.data[0]) });
+    else if (m.fromCache) parts = m.kind === 'nxdomain' ? t.parts('capReplyCacheNx', { n: n, left: secData(m.ttl) }) : t.parts('capReplyCache', { n: n, ip: q(m.rr.data[0]), left: secData(m.ttl) });
+    else {
+      parts = m.kind === 'nxdomain' ? t.parts('capReplyNx', { n: n }) : t.parts('capReply', { n: n, ip: q(m.rr.data[0]) });
+      if (o.end > o.start) parts.push(' ', t.parts('capSlower', { s: secData(o.end - o.start) }));
+    }
+    if (o.lookup === 2) parts.push(' ', t.n('capCompare', s.outcome[0].msgs, { b: o.msgs }));
+    return parts;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'name', type: 'choice', label: t('pName'), resets: true, options: [['fs1', L.NAMES.fs1], ['crm', L.NAMES.crm], ['www', L.NAMES.www]] },
+      { key: 'condFwd', type: 'toggle', label: t('pCond'), resets: true },
+      { key: 'forwarderUp', type: 'toggle', label: t('pFwdUp'), resets: true },
+      { key: 'rootHints', type: 'toggle', label: t('pHints'), resets: true },
+      { key: 'recursion', type: 'toggle', label: t('pRec'), resets: true },
+      { key: 'repeat', type: 'toggle', label: t('pRepeat'), resets: true }
+    ],
+
+    presets: [
+      { id: 'internal', label: t('prInternal'), hint: t('prInternalHint'), params: { name: 'fs1' } },
+      { id: 'partner', label: t('prPartner'), hint: t('prPartnerHint'), params: { name: 'crm' } },
+      { id: 'internet', label: t('prInternet'), hint: t('prInternetHint'), params: { name: 'www', repeat: true } },
+      { id: 'forwarder-down', label: t('prFwdDown'), hint: t('prFwdDownHint'), params: { name: 'www', forwarderUp: false } },
+      { id: 'no-cond-fwd', label: t('prNoCond'), hint: t('prNoCondHint'), params: { name: 'crm', condFwd: false } },
+      { id: 'no-fallback', label: t('prNoFallback'), hint: t('prNoFallbackHint'), params: { name: 'www', forwarderUp: false, rootHints: false } },
+      { id: 'no-recursion', label: t('prNoRec'), hint: t('prNoRecHint'), params: { name: 'crm', recursion: false } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legendQuery') },
+      { shape: 'dot', label: t('legendReferral') },
+      { shape: 'bold', label: t('legendAnswer') },
+      { shape: 'tmo', label: t('legendTimeout') },
+      { shape: 'rt-win', label: t('legendWin') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'fw' }, chart, renderTable(c), renderCache(c)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
