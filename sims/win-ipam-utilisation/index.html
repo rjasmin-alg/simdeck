@@ -1,0 +1,565 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ipam-utilisation: an explorer. Top: the block 10.0.0.0/16 as a card with its aggregate utilisation bar,
+     threshold ticks and status, and when IPAM collected the numbers. Middle: IPAM's range table across DHCP1 and
+     DHCP2 (size, used, utilisation bar with threshold ticks, status chip with shape, trend sparkline of the weeks so
+     far). Bottom: the selected range (or the block): what its used addresses are, and its trend over the term with
+     the first week over and the first week full. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ipam-utilisation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iskorištenost i pragovi · simdeck</title>
+<meta name="description" content="Pusti da dodjele rastu kroz semestar: IPAM zbraja raspone s dva DHCP poslužitelja, označava prepunjene i nedovoljno iskorištene i upozorava na vrijeme.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ipam-utilisation",
+  "title": {
+    "hr": "Iskorištenost i pragovi",
+    "en": "Utilisation and thresholds"
+  },
+  "concept": {
+    "hr": "Popunjenost opsega na poslužiteljima; upozorenje prije nego što se raspon napuni",
+    "en": "Scope fill across servers; an alert before a range runs out"
+  },
+  "summary": {
+    "hr": "Pusti da dodjele rastu kroz semestar: IPAM zbraja raspone s dva DHCP poslužitelja, označava prepunjene i nedovoljno iskorištene i upozorava na vrijeme.",
+    "en": "Let leases grow over a term: IPAM adds up ranges from two DHCP servers, flags over- and under-utilised ones and alerts before a range runs out."
+  },
+  "tags": [
+    "ip-addressing",
+    "dhcp",
+    "performance"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ipam-utilisation"]; colours only from kit tokens.
+   Status colours: under --c6, optimal --ok, over --warn, full --danger; each also has a shape (▽ ○ △ ✕) and a word. */
+[data-sim="win-ipam-utilisation"] .iu {
+  display: flex; flex-direction: column; gap: 0.55rem;
+  height: 100%; padding: 0.5rem 0.9rem 0.6rem; font-size: 1rem; line-height: 1.25;
+}
+[data-sim="win-ipam-utilisation"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-ipam-utilisation"] [translate="no"] { font-variant-numeric: tabular-nums; }
+[data-sim="win-ipam-utilisation"] .iu-mono { font-family: var(--mono); }
+[data-sim="win-ipam-utilisation"] .iu-note { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-ipam-utilisation"] .iu-under { --st: var(--c6); }
+[data-sim="win-ipam-utilisation"] .iu-optimal { --st: var(--ok); }
+[data-sim="win-ipam-utilisation"] .iu-over { --st: var(--warn); }
+[data-sim="win-ipam-utilisation"] .iu-full { --st: var(--danger); }
+
+[data-sim="win-ipam-utilisation"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-ipam-utilisation"] .sd-preset { line-height: 1.15; }
+
+/* ── selectable names (the block and each range) ── */
+[data-sim="win-ipam-utilisation"] .iu-name {
+  display: inline-flex; align-items: center; gap: 0.35rem; min-height: 1.9rem; padding: 0 0.4rem; margin: 0;
+  border: var(--line-w) solid transparent; border-radius: var(--radius-sm);
+  background: transparent; font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-align: left;
+}
+[data-sim="win-ipam-utilisation"] .iu-name:hover { border-color: var(--line); }
+[data-sim="win-ipam-utilisation"] .iu-name[aria-pressed="true"] { border-color: var(--ink); background: var(--panel); }
+[data-sim="win-ipam-utilisation"] .iu-name:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="win-ipam-utilisation"] .iu-name.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); outline: 0.15rem solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-name::before { content: '▸'; font-weight: 400; color: var(--muted); }
+[data-sim="win-ipam-utilisation"] .iu-name[aria-pressed="true"]::before { content: '▾'; color: var(--ink); }
+
+/* ── a utilisation bar with threshold ticks ── */
+[data-sim="win-ipam-utilisation"] .iu-bar {
+  position: relative; height: 1.15rem; min-width: 6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="win-ipam-utilisation"] .iu-bar.iu-big { height: 1.6rem; }
+[data-sim="win-ipam-utilisation"] .iu-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--st); }
+[data-sim="win-ipam-utilisation"] .iu-full .iu-fill, [data-sim="win-ipam-utilisation"] .iu-fill.iu-full {
+  background: repeating-linear-gradient(135deg, var(--st) 0 0.35em, color-mix(in srgb, var(--st) 55%, var(--bg)) 0.35em 0.55em);
+}
+[data-sim="win-ipam-utilisation"] .iu-tick { position: absolute; top: -0.35rem; bottom: -0.35rem; width: 0; border-left: 0.2rem solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-tick.iu-tunder { border-left-style: dotted; }
+
+/* ── status chip: shape + word, colour as the third carrier ── */
+[data-sim="win-ipam-utilisation"] .iu-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.45rem; border: var(--line-w) solid var(--st);
+  border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; color: var(--ink);
+}
+[data-sim="win-ipam-utilisation"] .iu-chip b { color: var(--st); font-size: 1.05em; }
+[data-sim="win-ipam-utilisation"] .iu-chip.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-chip.sd-changed b { color: var(--on-hl); }
+[data-sim="win-ipam-utilisation"] .iu-fullchip { border-style: dashed; --st: var(--danger); }
+
+/* ── the block card ── */
+[data-sim="win-ipam-utilisation"] .iu-block {
+  display: grid; grid-template-columns: auto minmax(8rem, 1fr) auto auto; align-items: center; gap: 0.3rem 0.9rem;
+  padding: 0.4rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-ipam-utilisation"] .iu-block .iu-name { font-size: 1.15rem; }
+[data-sim="win-ipam-utilisation"] .iu-block .iu-name[aria-pressed="true"] { background: var(--bg); }
+[data-sim="win-ipam-utilisation"] .iu-bnums { white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-bnums b { font-size: 1.15rem; }
+[data-sim="win-ipam-utilisation"] .iu-bline { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1.2rem; }
+[data-sim="win-ipam-utilisation"] .iu-bline em { font-style: italic; }
+
+/* ── the range table ── */
+[data-sim="win-ipam-utilisation"] .iu-tablebox { flex: 0 0 auto; }
+[data-sim="win-ipam-utilisation"] table { border-collapse: collapse; width: 100%; font-size: 1rem; }
+[data-sim="win-ipam-utilisation"] caption { text-align: left; font-weight: 700; font-size: 1.1rem; padding-bottom: 0.15rem; }
+[data-sim="win-ipam-utilisation"] th { text-align: left; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; padding: 0.1rem 0.35rem; border-bottom: var(--line-w) solid var(--ink); white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] td { padding: 0.12rem 0.35rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+[data-sim="win-ipam-utilisation"] .iu-num { text-align: right; white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] tr.iu-sel td { background: var(--panel); }
+[data-sim="win-ipam-utilisation"] .iu-addr { display: block; margin-top: 0.2rem; padding-left: 1.6rem; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); font-weight: 400; white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-srv { white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-srv small { display: block; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ipam-utilisation"] .iu-srv small em { font-style: italic; }
+[data-sim="win-ipam-utilisation"] .iu-utilcell { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="win-ipam-utilisation"] .iu-utilcell .iu-bar { flex: 1 1 auto; }
+[data-sim="win-ipam-utilisation"] .iu-pct { min-width: 4.2rem; text-align: right; font-weight: 700; white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-stcell { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+[data-sim="win-ipam-utilisation"] td.iu-utiltd { width: 30%; }
+
+/* ── trend charts (sparkline and the large one): lines in SVG, every word in HTML ── */
+[data-sim="win-ipam-utilisation"] .iu-spark { position: relative; width: 8rem; height: 2.1rem; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+[data-sim="win-ipam-utilisation"] .iu-chart svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-past { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linejoin: round; }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-future { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 2 5; }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-hline { position: absolute; left: 0; right: 0; height: 0; border-top: 0.15rem dashed var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-hline.iu-tunder { border-top-style: dotted; }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-overzone { position: absolute; left: 0; right: 0; top: 0; background: color-mix(in srgb, var(--warn) 14%, transparent); }
+[data-sim="win-ipam-utilisation"] .iu-chart .iu-dot { position: absolute; width: 0.7rem; height: 0.7rem; margin: -0.35rem 0 0 -0.35rem; border-radius: 50%; background: var(--ink); border: 0.12rem solid var(--bg); }
+[data-sim="win-ipam-utilisation"] .iu-big { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+[data-sim="win-ipam-utilisation"] .iu-plot { position: relative; flex: 1 1 auto; min-height: 6rem; margin: 1.7rem 4.6rem 2.6rem 3.6rem; border-left: var(--line-w) solid var(--ink); border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-ylab { position: absolute; right: calc(100% + 0.4rem); transform: translateY(-50%); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-rlab { position: absolute; left: calc(100% + 0.4rem); transform: translateY(-50%); font-size: var(--fs-sm); white-space: nowrap; font-weight: 700; }
+[data-sim="win-ipam-utilisation"] .iu-xlab { position: absolute; top: calc(100% + 0.2rem); transform: translateX(-50%); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-xlab.iu-now { font-weight: 700; padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-ipam-utilisation"] .iu-xname { position: absolute; top: calc(100% + 0.2rem); left: calc(100% + 1.4rem); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ipam-utilisation"] .iu-mark { position: absolute; transform: translate(-50%, -100%); margin-top: -0.35rem; padding: 0 0.25rem; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; border: var(--line-w) solid var(--st); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-mark.iu-full { border-style: dashed; }
+[data-sim="win-ipam-utilisation"] .iu-mark.iu-later { opacity: 0.75; border-style: dotted; }
+[data-sim="win-ipam-utilisation"] .iu-proj { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ipam-utilisation"] .iu-proj::before { content: ''; display: inline-block; width: 1.6rem; margin-right: 0.35rem; vertical-align: middle; border-top: 0.15rem dotted var(--line); }
+
+/* ── the detail of the selected range ── */
+[data-sim="win-ipam-utilisation"] .iu-detail { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0.6rem 1.4rem; border-top: var(--line-w) solid var(--ink); padding-top: 0.45rem; }
+[data-sim="win-ipam-utilisation"] .iu-detail h3 { margin: 0 0 0.3rem; font-size: 1.1rem; }
+[data-sim="win-ipam-utilisation"] .iu-comp { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+[data-sim="win-ipam-utilisation"] .iu-stack { position: relative; display: flex; height: 2.2rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-ipam-utilisation"] .iu-part { flex: 0 0 auto; height: 100%; border-right: 1px solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-part:last-child { border-right: 0; }
+[data-sim="win-ipam-utilisation"] .iu-part.sd-fill, [data-sim="win-ipam-utilisation"] .iu-key.sd-fill { background: var(--sw); }
+[data-sim="win-ipam-utilisation"] .iu-part.iu-gone, [data-sim="win-ipam-utilisation"] .iu-key.iu-gone { background: repeating-linear-gradient(135deg, var(--c2) 0 0.3em, var(--bg) 0.3em 0.5em); }
+[data-sim="win-ipam-utilisation"] .iu-part.iu-rfree, [data-sim="win-ipam-utilisation"] .iu-key.iu-rfree { background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--ink) 35%, transparent) 0 0.12em, transparent 0.12em 0.45em); }
+[data-sim="win-ipam-utilisation"] .iu-part.iu-dots, [data-sim="win-ipam-utilisation"] .iu-key.iu-dots { background: radial-gradient(circle, var(--bg) 0.12em, transparent 0.16em) 0 0 / 0.5em 0.5em, var(--c2); }
+[data-sim="win-ipam-utilisation"] .iu-part.iu-free, [data-sim="win-ipam-utilisation"] .iu-key.iu-free { background: var(--bg); }
+[data-sim="win-ipam-utilisation"] .iu-refused { position: absolute; left: 100%; top: -0.2rem; bottom: -0.2rem; margin-left: 0.3rem; display: grid; place-items: center; padding: 0 0.3rem; border: 0.2rem dashed var(--danger); color: var(--danger); font-weight: 700; white-space: nowrap; }
+[data-sim="win-ipam-utilisation"] .iu-stackwrap { margin-right: 6rem; }
+[data-sim="win-ipam-utilisation"] .iu-keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
+[data-sim="win-ipam-utilisation"] .iu-keys li { display: flex; align-items: center; gap: 0.45rem; }
+[data-sim="win-ipam-utilisation"] .iu-key { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; border: 1px solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .iu-key.iu-x { border: 0.15rem dashed var(--danger); display: grid; place-items: center; color: var(--danger); font-size: 0.8em; font-weight: 700; line-height: 1; }
+[data-sim="win-ipam-utilisation"] .iu-keys .iu-n { min-width: 3.4rem; text-align: right; font-weight: 700; }
+[data-sim="win-ipam-utilisation"] .iu-keys li.iu-hl .iu-lab { background: var(--hl); color: var(--on-hl); padding: 0 0.2rem; }
+
+/* legend swatches */
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape^='iu-'] { position: relative; background: var(--bg); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape^='iu-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-bar'] { background: linear-gradient(90deg, var(--ok) 0 60%, var(--bg) 60%); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-bar']::after { content: ''; inset: -0.2rem auto -0.2rem 80%; border-left: 0.15rem solid var(--ink); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-under'] { border-color: var(--c6); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-under']::after { content: '▽'; color: var(--c6); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-optimal'] { border-color: var(--ok); border-radius: 50%; }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-optimal']::after { content: '○'; color: var(--ok); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-over'] { border-color: var(--warn); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-over']::after { content: '△'; color: var(--warn); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-full'] { border: 2px dashed var(--danger); }
+[data-sim="win-ipam-utilisation"] .sd-swatch[data-shape='iu-full']::after { content: '✕'; color: var(--danger); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ipam-utilisation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ipam-utilisation"] .iu { height: auto; padding: 0.4rem; }
+  [data-sim="win-ipam-utilisation"] .iu-tablebox { overflow-x: auto; }
+  [data-sim="win-ipam-utilisation"] .iu-block { grid-template-columns: minmax(0, 1fr) auto; }
+  [data-sim="win-ipam-utilisation"] .iu-bnums { white-space: normal; grid-column: 1 / -1; }
+  [data-sim="win-ipam-utilisation"] .iu-block .iu-bar { grid-column: 1 / -1; grid-row: 2; }
+  [data-sim="win-ipam-utilisation"] .iu-detail { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-ipam-utilisation"] .iu-plot { min-height: 10rem; }
+  [data-sim="win-ipam-utilisation"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title"></h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+
+  var PRESET_KEY = { 'byod-term': 'presetByod', 'short-lease': 'presetShort', 'hidden-hotspot': 'presetHotspot', 'server-vlan-under': 'presetServers', 'threshold-70': 'presetT70' };
+  var SHAPE = { under: '▽', optimal: '○', over: '△' };
+  var LEG = { under: 'legUnder', optimal: 'legOptimal', over: 'legOver' };
+
+  // ── words and data ──
+  /** Data (addresses, server names, counts, percentages) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function B(node) { return h('b', null, node); }
+  /** 65 536, 5 865: a space between thousands (four-digit numbers too, so 5 865 and 65 536 read alike side by side). */
+  function grouped(n) { return n >= 1000 ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : String(n); }
+  /** A percentage to one decimal, ",0"/".0" dropped, the decimal sign of the page language: 27,5 % / 27.5 %. */
+  function pctText(u) {
+    var r = Math.round(u * 10) / 10;
+    var s = r % 1 === 0 ? String(r) : r.toFixed(1);
+    return (Simdeck.lang === 'hr' ? s.replace('.', ',') : s) + ' %';
+  }
+  function pct(u) { return data(pctText(u)); }
+  function thr(v) { return data(v + ' %'); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule); repeated nodes are cloned. */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  /** A count for t.parts plural forms: the kit picks the form from Number(n) and writes String(n). */
+  function count(n) { return { valueOf: function () { return n; }, toString: function () { return String(n); } }; }
+  function rangeById(s, id) { for (var i = 0; i < s.ranges.length; i++) if (s.ranges[i].id === id) return s.ranges[i]; return null; }
+  function selOf(s, p) { return p.sel === 'block' || rangeById(s, p.sel) ? p.sel : 'students'; }
+  function leaseText(r) { return t(r.lease === 1 ? 'lease1' : 'lease8'); }
+  function stClass(r) { return r.full ? 'iu-full' : 'iu-' + r.status; }
+
+  // ── "status changed by the last param": page memory, not model state ──
+  var memo = null;
+  function changedSet(c) {
+    var p = Object.assign({}, c.params); delete p.sel;
+    var key = JSON.stringify(p);
+    if (memo && memo.key === key) return memo.changed;
+    var now = { block: c.state.block.status };
+    c.state.ranges.forEach(function (r) { now[r.id] = r.status + (r.full ? '+full' : ''); });
+    var changed = {};
+    if (memo) Object.keys(now).forEach(function (id) { if (memo.st[id] !== now[id]) changed[id] = true; });
+    memo = { key: key, st: now, changed: changed };
+    return changed;
+  }
+
+  // ── pieces ──
+  function bar(util, status, th, big, full) {
+    return h('div', { class: 'iu-bar iu-' + status + (big ? ' iu-big' : '') + (full ? ' iu-full' : ''), 'aria-hidden': 'true' },
+      h('span', { class: 'iu-fill', style: { width: Math.min(100, util).toFixed(3) + '%' } }),
+      h('span', { class: 'iu-tick iu-tunder', style: { left: th.under + '%' } }),
+      h('span', { class: 'iu-tick', style: { left: th.over + '%' } }));
+  }
+  function chip(status, changed) {
+    return h('span', { class: 'iu-chip iu-' + status + (changed ? ' sd-changed' : '') }, h('b', { 'aria-hidden': 'true' }, SHAPE[status]), t('st_' + status));
+  }
+  function fullChip(r) {
+    return h('span', { class: 'iu-chip iu-fullchip' }, h('b', { 'aria-hidden': 'true' }, '✕'), t('full'),
+      r.refused ? [' · ', data(r.refused), ' ', t('refused')] : null);
+  }
+
+  /** A trend chart: the weeks so far as a solid line, the rest of the term dotted (big chart only), thresholds as
+      dashed lines. Lines are SVG (no text in it); labels are HTML, so they never scale. */
+  function chart(trend, week, th, big) {
+    var N = trend.length - 1;
+    function X(k) { return 100 * k / N; }
+    function Y(u) { return 100 - Math.min(100, u); }
+    function pts(from, to) { var a = []; for (var k = from; k <= to; k++) a.push(X(k).toFixed(2) + ',' + Y(trend[k]).toFixed(2)); return a.join(' '); }
+    var svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    function line(cls, p) {
+      var l = document.createElementNS(SVG, 'polyline');
+      l.setAttribute('class', cls); l.setAttribute('points', p); l.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(l);
+    }
+    if (big && week < N) line('iu-future', pts(week, N));
+    if (week > 0) line('iu-past', pts(0, week));
+    var box = h('div', { class: 'iu-chart ' + (big ? 'iu-plot' : 'iu-spark') },
+      h('span', { class: 'iu-overzone', style: { height: (100 - th.over) + '%' } }),
+      h('span', { class: 'iu-hline', style: { top: (100 - th.over) + '%' } }),
+      h('span', { class: 'iu-hline iu-tunder', style: { top: (100 - th.under) + '%' } }),
+      svg,
+      h('span', { class: 'iu-dot', style: { left: X(week) + '%', top: Y(trend[week]) + '%' } }));
+    return { el: box, X: X, Y: Y };
+  }
+
+  // ── the block card ──
+  function blockCard(s, sel, changed) {
+    var b = s.block;
+    return h('div', { class: 'iu-block' },
+      h('button', { type: 'button', class: 'iu-name' + (changed.block ? ' sd-changed' : ''), 'aria-pressed': sel === 'block' ? 'true' : 'false', dataset: { sel: 'block' } },
+        data(b.name), h('span', { class: 'iu-note' }, t('blockKind'))),
+      bar(b.util, b.status, s.thresholds, true),
+      h('span', { class: 'iu-bnums' }, B(pct(b.util)), ' · ', data(grouped(b.used)), ' ', t('blockOf'), ' ', data(grouped(b.size)), ' ', t('blockAddr')),
+      chip(b.status, changed.block),
+      h('div', { class: 'iu-bline iu-note' },
+        h('span', null, rich('failoverOnce'), ' ', data(grouped(b.naiveUsed)), '.'),
+        h('span', null, t('collected', { w: s.collected.week, h: (s.collected.hour < 10 ? '0' : '') + s.collected.hour + ':00', i: s.collected.interval }))));
+  }
+
+  // ── the range table ──
+  function table(s, sel, changed) {
+    var rows = s.ranges.map(function (r) {
+      var on = sel === r.id;
+      var srv = r.servers.map(function (x) { return data(x); });
+      return h('tr', { class: on ? 'iu-sel' : null },
+        h('td', null,
+          h('button', { type: 'button', class: 'iu-name' + (changed[r.id] ? ' sd-changed' : ''), 'aria-pressed': on ? 'true' : 'false', dataset: { sel: r.id } }, t('n_' + r.id)),
+          h('span', { class: 'iu-addr', translate: 'no' }, r.start + ' – ' + r.end)),
+        h('td', { class: 'iu-srv' }, srv.length > 1 ? [srv[0], ' + ', srv[1], h('small', null, rich('failover'))] : srv),
+        h('td', { class: 'iu-num' }, data(grouped(r.size))),
+        h('td', { class: 'iu-num' }, data(grouped(r.used))),
+        h('td', { class: 'iu-utiltd' }, h('div', { class: 'iu-utilcell ' + stClass(r) }, bar(r.util, r.status, s.thresholds, false, r.full), h('span', { class: 'iu-pct' }, pct(r.util)))),
+        h('td', null, h('div', { class: 'iu-stcell' }, chip(r.status, changed[r.id]), r.full ? fullChip(r) : null)),
+        h('td', null, chart(r.trend, s.week, s.thresholds, false).el));
+    });
+    return h('table', null,
+      h('caption', null, t('ipamTitle')),
+      h('thead', null, h('tr', null,
+        h('th', null, t('thRange')), h('th', null, t('thServer')), h('th', { class: 'iu-num' }, t('thSize')), h('th', { class: 'iu-num' }, t('thUsed')),
+        h('th', null, t('thUtil')), h('th', null, t('thStatus')), h('th', null, t('thTrend'), ' ', data('0–' + s.week)))),
+      h('tbody', null, rows));
+  }
+
+  // ── the detail: composition and the big trend ──
+  function composition(s, sel) {
+    var parts, total, refused = 0, title;
+    if (sel === 'block') {
+      var b = s.block;
+      title = data(b.name);
+      total = b.size;
+      parts = [
+        { n: b.used, cls: 'sd-fill', c: 1, key: 'c_ranges' },
+        { n: b.inRanges - b.used, cls: 'iu-rfree', key: 'c_rfree' },
+        { n: b.size - b.inRanges, cls: 'iu-free', key: 'c_outside' }
+      ];
+    } else {
+      var r = rangeById(s, sel);
+      title = t('n_' + r.id);
+      total = r.size;
+      refused = r.refused;
+      parts = r.live ? [
+        { n: r.residents, cls: 'sd-fill', c: 1, key: 'c_residents' },
+        { n: r.gone, cls: 'iu-gone', key: 'c_gone', hl: r.gone > 0 },
+        { n: r.today, cls: 'iu-dots', key: 'c_today' }
+      ] : [{ n: r.residents, cls: 'sd-fill', c: 1, key: 'c_inuse' }];
+      if (r.reserved) parts.push({ n: r.reserved, cls: 'sd-fill', c: 4, key: 'c_reserved' });
+      parts.push({ n: r.free, cls: 'iu-free', key: 'c_free' });
+    }
+    var shown = parts.filter(function (x) { return x.n > 0 || x.key === 'c_free'; });
+    var stack = h('div', { class: 'iu-stack', 'aria-hidden': 'true' },
+      shown.filter(function (x) { return x.n > 0; }).map(function (x) {
+        return h('span', { class: 'iu-part ' + x.cls, dataset: x.c ? { c: String(x.c) } : null, style: { width: (100 * x.n / total).toFixed(3) + '%' } });
+      }),
+      refused ? h('span', { class: 'iu-refused' }, '✕ ', data(refused)) : null);
+    var keys = shown.map(function (x) {
+      return h('li', { class: x.hl ? 'iu-hl' : null },
+        h('span', { class: 'iu-key ' + x.cls, dataset: x.c ? { c: String(x.c) } : null }),
+        h('span', { class: 'iu-n' }, data(grouped(x.n))), h('span', { class: 'iu-lab' }, t(x.key)));
+    });
+    if (refused) keys.push(h('li', null, h('span', { class: 'iu-key iu-x' }, '✕'), h('span', { class: 'iu-n' }, data(refused)), h('span', { class: 'iu-lab' }, t('c_refused'))));
+    return h('div', { class: 'iu-comp' },
+      h('h3', null, title, ' · ', data(grouped(total))),
+      h('span', { class: 'iu-note' }, t('detUsed')),
+      h('div', { class: 'iu-stackwrap' }, stack),
+      h('ul', { class: 'iu-keys' }, keys));
+  }
+
+  function bigTrend(s, sel) {
+    var obj = sel === 'block' ? s.block : rangeById(s, sel);
+    var th = s.thresholds;
+    var c = chart(obj.trend, s.week, th, true);
+    var el = c.el;
+    [0, th.under, th.over, 100].forEach(function (u) {
+      el.append(h('span', { class: 'iu-ylab', style: { top: c.Y(u) + '%' } }, data(u + ' %')));
+    });
+    el.append(h('span', { class: 'iu-rlab iu-over', style: { top: c.Y(th.over) + '%' } }, '△ ', thr(th.over)));
+    el.append(h('span', { class: 'iu-rlab iu-under', style: { top: c.Y(th.under) + '%' } }, '▽ ', thr(th.under)));
+    [0, 4, 8, 12, 16].forEach(function (k) {
+      if (k !== s.week) el.append(h('span', { class: 'iu-xlab', style: { left: c.X(k) + '%' } }, data(k)));
+    });
+    el.append(h('span', { class: 'iu-xlab iu-now', style: { left: c.X(s.week) + '%' } }, data(s.week)));
+    el.append(h('span', { class: 'iu-xname' }, t('weekAxis')));
+    function mark(k, cls, sym) {
+      if (k === null || k === undefined) return;
+      el.append(h('span', { class: 'iu-mark ' + cls + (k > s.week ? ' iu-later' : ''), style: { left: c.X(k) + '%', top: c.Y(obj.trend[k]) + '%' } }, sym, ' ', data(k)));
+    }
+    var ff = obj.firstFull;
+    if (ff !== undefined && ff !== null && ff === obj.firstOver) mark(ff, 'iu-full', '△✕');
+    else { mark(obj.firstOver, 'iu-over', '△'); mark(ff, 'iu-full', '✕'); }
+    return h('div', { class: 'iu-big' },
+      h('h3', null, t('trendTitle')),
+      el,
+      s.week < s.weeks ? h('span', { class: 'iu-proj' }, t('projection')) : null);
+  }
+
+  // ── stage clicks: select the block or a range ──
+  function wire(stage) {
+    if (stage.dataset.wired) return;
+    stage.dataset.wired = '1';
+    stage.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+    stage.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-sel]');
+      if (b && window.simdeck) window.simdeck.set({ sel: b.dataset.sel });
+    });
+  }
+
+  // ── captions ──
+  function studentsCaption(s, r) {
+    // every placeholder gets a fresh node: a node put into two sentences would move out of the first one
+    function over() { return thr(s.thresholds.over); }
+    function under() { return thr(s.thresholds.under); }
+    var w = data(s.week), fo = r.firstOver, ff = r.firstFull;
+    var gone = r.gone ? [' '].concat(t.parts('capGone', { n: data(r.gone) })) : [];
+    function aheadKey() { return ff === null ? 'capAheadNoFull' : ff === fo ? 'capAheadSame' : 'capAhead'; }
+    if (r.full) {
+      // a full range is always over (100 % > any threshold), so firstOver ≤ firstFull ≤ week
+      var out = fo === 0 ? rich('capStartFull', { w: w })
+        : fo === s.week ? rich('capCrossFull', { w: w, over: over() })
+        : fo === ff ? rich('capFullSame', { w: w, size: data(r.size) })
+        : rich('capFull', { w: w, size: data(r.size), fo: data(fo) });
+      if (r.refused) out = out.concat([' '], t.parts('capRefused', { n: data(r.refused) }));
+      return out.concat(gone);
+    }
+    if (r.status === 'over') {
+      var v = { w: w, used: data(r.used), size: data(r.size), pct: pct(r.util), over: over(), fo: data(fo), ff: data(ff) };
+      // over from week 0: nothing crossed, the term started above the threshold
+      if (fo === 0) return t.parts(ff === null ? 'capStartOverNoFull' : 'capStartOver', v).concat(gone);
+      if (fo === s.week) {
+        return (ff === null ? rich('capCrossNoFull', { w: w, over: over() }) : rich('capCross', { w: w, over: over(), n: count(ff - fo) })).concat(gone);
+      }
+      return t.parts(ff === null ? 'capOverSinceNoFull' : 'capOverSince', v).concat(gone);
+    }
+    var head = r.visitors
+      ? t.parts('capWeek', { w: w, used: data(r.used), size: data(r.size), pct: pct(r.util), res: data(r.residents), vis: data(r.visitorLeases), v: data(r.visitors), l: leaseText(r) })
+      : t.parts('capWeekNoVis', { w: w, used: data(r.used), size: data(r.size), pct: pct(r.util), res: data(r.residents) });
+    var tail = [];
+    function add(parts) { tail = tail.concat([' '], parts); }
+    if (r.status === 'under') add(t.parts('capUnderSt', { under: under() }));
+    else if (r.used * 100 === s.thresholds.under * r.size) add(t.parts('capTieUnder', { under: under() }));
+    if (r.used * 100 === s.thresholds.over * r.size) add(t.parts('capTie', { over: over() }));
+    if (fo === null) add(t.parts('capNever', { over: over() }));
+    else add(t.parts(aheadKey(), { over: over(), fo: data(fo), ff: data(ff) }));
+    return head.concat(tail);
+  }
+
+  function blockCaption(s) {
+    var b = s.block;
+    // the hot spot: the fullest range (ties: table order)
+    var hottest = s.ranges.reduce(function (m, r) { return r.util > m.util ? r : m; });
+    if (hottest.full && b.status !== 'over') return t.parts('capHotspot', { pct: pct(b.util) });
+    if (hottest.status === 'over' && b.status !== 'over') return t.parts('capHotOver', { pct: pct(b.util), name: B(t('n_' + hottest.id)), rp: pct(hottest.util) });
+    return rich('capBlock', { name: data(b.name), used: data(grouped(b.used)), size: data(grouped(b.size)), pct: pct(b.util) });
+  }
+
+  function rangeCaption(s, r) {
+    var v = { name: B(t('n_' + r.id)), used: data(grouped(r.used)), size: data(grouped(r.size)), pct: pct(r.util) };
+    if (r.status === 'under') return t.parts('capUnder', v);
+    return t.parts('capSteady', Object.assign(v, { status: t(LEG[r.status]) }));
+  }
+
+  var lastFocus = null;
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'week', type: 'range', label: t('week'), min: 0, max: L.weeks, step: 1 },
+      { key: 'lease', type: 'choice', label: t('lease'), options: [[1, t('lease1')], [8, t('lease8')]] },
+      { key: 'growth', type: 'range', label: t('growth'), min: 0, max: 20, step: 1, format: function (v) { return v + ' ' + t('growthUnit'); } },
+      { key: 'visitors', type: 'range', label: t('visitors'), min: 0, max: 30, step: 1, format: function (v) { return v + ' ' + t('visitorsUnit'); } },
+      { key: 'over', type: 'range', label: t('over'), min: 60, max: 95, step: 5, format: function (v) { return v + ' %'; } },
+      { key: 'under', type: 'range', label: t('under'), min: 5, max: 40, step: 5, format: function (v) { return v + ' %'; } },
+      { key: 'sel', type: 'select', label: t('hidden'), options: ['block'].concat(L.ids).map(function (v) { return [v, v]; }), visible: function () { return false; } }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(PRESET_KEY[x.id]), hint: t(PRESET_KEY[x.id] + 'Hint'), params: x.params };
+    }),
+
+    legend: [
+      { shape: 'iu-bar', label: t('legBar') },
+      { shape: 'iu-under', label: t('legUnder') },
+      { shape: 'iu-optimal', label: t('legOptimal') },
+      { shape: 'iu-over', label: t('legOver') },
+      { shape: 'iu-full', label: t('legFull') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var sel = selOf(s, c.params);
+      var changed = changedSet(c);
+      // keep keyboard focus on the pressed name: the stage is rebuilt on every change
+      var a = document.activeElement;
+      lastFocus = a && c.stage.contains(a) && a.dataset && a.dataset.sel ? a.dataset.sel : null;
+      c.stage.replaceChildren(h('div', { class: 'iu' },
+        blockCard(s, sel, changed),
+        h('div', { class: 'iu-tablebox' }, table(s, sel, changed)),
+        h('div', { class: 'iu-detail' }, composition(s, sel), bigTrend(s, sel))));
+      wire(c.stage);
+      if (lastFocus) { var el = c.stage.querySelector('[data-sel="' + lastFocus + '"]'); if (el) el.focus({ preventScroll: true }); }
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      var sel = selOf(s, c.params);
+      if (sel === 'block') return blockCaption(s);
+      var r = rangeById(s, sel);
+      return r.live ? studentsCaption(s, r) : rangeCaption(s, r);
+    }
+  });
+})();
+</script>
+</body>
+</html>
