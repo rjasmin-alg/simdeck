@@ -1,0 +1,501 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-sysvol-dfsr: one GPO in two halves on two DCs, DC01 at HQ and DC03 at Branch. A stepper, one event per step:
+     a save (both halves bump on that DC), an AD replication delivery (the GPC), a DFS Replication delivery (the GPT
+     folder), the WAN going down or coming back, or a refresh of the branch client PC-B, which applies the GPO only when
+     the GPC version is newer than the one it last applied. Drawn in the page: the two DC cards with their halves and
+     GPMC status, the two pipes between them, PC-B and the timeline. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-sysvol-dfsr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replikacija SYSVOL-a · simdeck</title>
+<meta name="description" content="Uredi GPO i prekini WAN prema podružnici: GPC putuje replikacijom AD-a, GPT DFS replikacijom, a klijent primijeni stare datoteke pod novim brojem.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-sysvol-dfsr",
+  "title": {
+    "hr": "Replikacija SYSVOL-a",
+    "en": "SYSVOL replication"
+  },
+  "concept": {
+    "hr": "Verzija GPO-a u AD-u i u SYSVOL-u; GPO koji je u podružnicu stigao napola",
+    "en": "GPO version in AD vs in SYSVOL; a GPO that half-arrived at a branch"
+  },
+  "summary": {
+    "hr": "Uredi GPO i prekini WAN prema podružnici: GPC putuje replikacijom AD-a, GPT DFS replikacijom, a klijent primijeni stare datoteke pod novim brojem.",
+    "en": "Edit a GPO and cut the WAN to a branch: the GPC travels by AD replication, the GPT by DFS Replication, and a client applies old files under the new number."
+  },
+  "tags": [
+    "active-directory",
+    "group-policy",
+    "replication"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-sysvol-dfsr"]; colours only from kit tokens.
+   Layout: DC01 | the pipes | DC03 in the first row; the timeline under DC01 and the pipes, PC-B under DC03. */
+[data-sim="win-sysvol-dfsr"] .sv { height: 100%; display: grid; font-size: max(16px, 0.9rem);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 3.4fr) minmax(0, 5fr); grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.4cqh 1.2cqw; padding: 1.2cqh 1.2cqw; align-content: start; }
+[data-sim="win-sysvol-dfsr"] [translate="no"].sv-d { font-family: var(--mono); font-size: max(16px, 0.92em); }
+[data-sim="win-sysvol-dfsr"] .sv-nw { white-space: nowrap; }
+[data-sim="win-sysvol-dfsr"] .sv-muted { color: var(--muted); }
+/* changed in this step: the kit's highlight colour plus an ink underline, so it survives grayscale */
+[data-sim="win-sysvol-dfsr"] .sv-ch { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* cards */
+[data-sim="win-sysvol-dfsr"] .sv-card { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+  padding: 0.5rem 0.75rem 0.6rem; display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+[data-sim="win-sysvol-dfsr"] .sv-card[data-active] { border-color: var(--ink); border-width: 0.22rem; padding: calc(0.5rem - 0.22rem + 2px) calc(0.75rem - 0.22rem + 2px) calc(0.6rem - 0.22rem + 2px); }
+[data-sim="win-sysvol-dfsr"] .sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; font-size: var(--fs-md); }
+[data-sim="win-sysvol-dfsr"] .sv-mark { display: inline-grid; place-items: center; min-width: 3.4rem; padding: 0.1rem 0.45rem; border-radius: var(--radius-sm); font-weight: 700; font-family: var(--mono); }
+[data-sim="win-sysvol-dfsr"] .sv-host { font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-site { padding: 0 0.4rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-sysvol-dfsr"] .sv-role { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-sysvol-dfsr"] .sv-badge { margin-left: auto; padding: 0 0.5rem; border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700;
+  background: var(--ink); color: var(--bg); }
+[data-sim="win-sysvol-dfsr"] .sv-badge[data-k="skip"] { background: transparent; color: var(--ink); border: var(--line-w) dashed var(--ink); }
+[data-sim="win-sysvol-dfsr"] .sv-gpo { font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-half { border-left: 0.3rem solid var(--line); padding: 0.1rem 0 0.15rem 0.5rem; display: flex; flex-direction: column; gap: 0.05rem; }
+[data-sim="win-sysvol-dfsr"] .sv-half[data-k="gpt"] { border-left-style: dashed; }
+[data-sim="win-sysvol-dfsr"] .sv-hh { display: flex; align-items: center; gap: 0.45rem; font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-hh .sv-ver { margin-left: auto; }
+[data-sim="win-sysvol-dfsr"] .sv-sub { overflow-wrap: anywhere; }
+[data-sim="win-sysvol-dfsr"] .sv-sub.sv-muted, [data-sim="win-sysvol-dfsr"] .sv-role, [data-sim="win-sysvol-dfsr"] .sv-site { font-size: var(--fs-sm); }
+[data-sim="win-sysvol-dfsr"] .sv-ver { display: inline-block; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-weight: 700; font-size: var(--fs-md); }
+[data-sim="win-sysvol-dfsr"] .sv-gpmc { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.45rem; padding: 0.15rem 0.45rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="win-sysvol-dfsr"] .sv-gpmc[data-k="bad"] { border: 0.2rem dashed var(--danger); }
+[data-sim="win-sysvol-dfsr"] .sv-sign { font-weight: 700; font-size: var(--fs-md); font-family: var(--mono); }
+[data-sim="win-sysvol-dfsr"] .sv-gpmc[data-k="bad"] .sv-sign, [data-sim="win-sysvol-dfsr"] .sv-gpmc[data-k="bad"] .sv-word { color: var(--danger); font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-cad { padding: 0.1rem 0.45rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+[data-sim="win-sysvol-dfsr"] .sv-strike { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+
+/* the icons for the two halves (also the legend swatches): a cylinder for the directory, a folder for SYSVOL */
+[data-sim="win-sysvol-dfsr"] .sv-ico { display: inline-block; flex: none; position: relative; width: 1.05em; height: 1.2em; }
+[data-sim="win-sysvol-dfsr"] .sv-ico[data-k="gpc"], [data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-gpc"] {
+  border: 2px solid var(--ink); border-radius: 50% / 0.32em; background: var(--bg); position: relative; }
+[data-sim="win-sysvol-dfsr"] .sv-ico[data-k="gpc"]::before, [data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-gpc"]::before {
+  content: ''; position: absolute; left: -2px; right: -2px; top: -2px; height: 0.5em; border: 2px solid var(--ink); border-radius: 50%; box-sizing: border-box; }
+[data-sim="win-sysvol-dfsr"] .sv-ico[data-k="gpt"], [data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-gpt"] {
+  width: 1.25em; height: 0.9em; margin-top: 0.25em; border: 2px solid var(--ink); border-radius: 0 0.15em 0.15em 0.15em; background: var(--bg); position: relative; }
+[data-sim="win-sysvol-dfsr"] .sv-ico[data-k="gpt"]::before, [data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-gpt"]::before {
+  content: ''; position: absolute; left: -2px; top: -0.35em; width: 0.55em; height: 0.35em; border: 2px solid var(--ink); border-bottom: 0;
+  border-radius: 0.15em 0.15em 0 0; background: var(--bg); box-sizing: border-box; }
+[data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-ver"] { background: var(--bg); position: relative; width: 1.6em; }
+[data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-ver"]::after { content: 'v6'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--mono); font-weight: 700; font-size: 0.7em; color: var(--ink); }
+[data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-neq"] { background: var(--bg); border: 0.16rem dashed var(--danger); position: relative; }
+[data-sim="win-sysvol-dfsr"] .sd-swatch[data-shape="sv-neq"]::after { content: '≠'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; font-size: 0.85em; color: var(--danger); }
+
+/* the pipes between the DCs */
+[data-sim="win-sysvol-dfsr"] .sv-pipes { display: flex; flex-direction: column; justify-content: center; gap: 1.2rem; min-width: 0; }
+[data-sim="win-sysvol-dfsr"] .sv-clock { align-self: center; padding: 0.1rem 0.7rem; border: var(--line-w) solid var(--ink); border-radius: 1rem;
+  font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="win-sysvol-dfsr"] .sv-pipe { display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-sysvol-dfsr"] .sv-plabel { font-weight: 700; text-align: center; }
+[data-sim="win-sysvol-dfsr"] .sv-line { display: flex; align-items: center; gap: 0.4rem; height: 1.4rem; margin-inline: calc(-1.2cqw - 0.22rem); }
+[data-sim="win-sysvol-dfsr"] .sv-line > i { flex: 1; height: 0; border-top: 0.3rem solid var(--ink); }
+[data-sim="win-sysvol-dfsr"] .sv-pipe[data-k="dfsr"] .sv-line > i { border-top-style: dashed; }
+[data-sim="win-sysvol-dfsr"] .sv-line[data-k="down"] > i { border-top-color: var(--muted); }
+[data-sim="win-sysvol-dfsr"] .sv-cut { font-weight: 700; font-size: var(--fs-lg); color: var(--danger); line-height: 1; }
+[data-sim="win-sysvol-dfsr"] .sv-items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="win-sysvol-dfsr"] .sv-items li { padding: 0.05rem 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-sysvol-dfsr"] .sv-items li[data-s="held"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="win-sysvol-dfsr"] .sv-items li[data-s="done"] { border-width: 0.2rem; }
+[data-sim="win-sysvol-dfsr"] .sv-items li[data-s="lost"] { border-color: var(--danger); }
+[data-sim="win-sysvol-dfsr"] .sv-items li[data-s="none"] { border-style: dashed; border-color: var(--muted); color: var(--muted); text-align: center; }
+[data-sim="win-sysvol-dfsr"] .sv-mk { display: inline-block; min-width: 1.1em; font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-wan { align-self: center; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0.7rem;
+  border: var(--line-w) solid var(--ink); border-radius: 1rem; font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-wan[data-k="down"] { border: 0.2rem dashed var(--danger); color: var(--danger); }
+
+/* the client */
+[data-sim="win-sysvol-dfsr"] .sv-client { grid-column: 3; grid-row: 2; align-self: start; }
+[data-sim="win-sysvol-dfsr"] .sv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.45rem; }
+[data-sim="win-sysvol-dfsr"] .sv-warn { padding: 0.1rem 0.45rem; border: 0.2rem dashed var(--danger); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="win-sysvol-dfsr"] .sv-warn .sv-sign { color: var(--danger); }
+
+/* the timeline */
+[data-sim="win-sysvol-dfsr"] .sv-tl { grid-column: 1 / span 2; grid-row: 2; align-self: start; }
+[data-sim="win-sysvol-dfsr"] .sv-tl > b { font-size: var(--fs-md); }
+[data-sim="win-sysvol-dfsr"] .sv-tl ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-flow: column;
+  grid-template-rows: repeat(var(--rows), auto); gap: 0.15rem 1rem; }
+[data-sim="win-sysvol-dfsr"] .sv-tl li { display: flex; gap: 0.45rem; padding: 0 0.35rem; border-radius: var(--radius-sm); }
+[data-sim="win-sysvol-dfsr"] .sv-tl li[data-s="future"] { color: var(--muted); }
+[data-sim="win-sysvol-dfsr"] .sv-tl li[data-s="now"] { font-weight: 700; outline: 0.18rem solid var(--ink); }
+[data-sim="win-sysvol-dfsr"] .sv-tl .sv-t { min-width: 3.2em; font-family: var(--mono); }
+
+[data-sim="win-sysvol-dfsr"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: one column (DC01, the pipes, DC03, PC-B, the timeline); nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-sysvol-dfsr"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-sysvol-dfsr"] .sv { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="win-sysvol-dfsr"] .sv > * { grid-column: auto; grid-row: auto; }
+  [data-sim="win-sysvol-dfsr"] .sv-line { margin-inline: 0; }
+  [data-sim="win-sysvol-dfsr"] .sv-tl ol { grid-template-columns: minmax(0, 1fr); grid-auto-flow: row; grid-template-rows: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Replikacija SYSVOL-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour, host and site per DC (the estate's names, student side); the GPO's GUID is made up. */
+  var COLOUR = { DC01: '1', DC03: '2', 'PC-B': '4' };
+  var HOST = { DC01: 'qm-dc01', DC03: 'brk-dc03' };
+  var SITE = { DC01: 'HQ', DC03: 'Branch', 'PC-B': 'Branch' };
+  var GUID = '{3F2A9C41-…}';
+  /** Drives.xml contents (SPEC.md "Versions"): data. */
+  var MAP = {
+    m5: 'P: → \\\\qm-fs01\\projekti',
+    m6a: 'P: → \\\\brk-fs01\\projekti',
+    m6b: 'P: → \\\\qm-fs01\\projekti, R: → \\\\brk-fs01\\arhiva'
+  };
+  var CMD = 'gpupdate /force';
+
+  /** Data (names, versions, paths, drive maps) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'sv-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function ver(v, cls) { return h('span', { class: 'sv-ver' + (cls ? ' ' + cls : ''), translate: 'no' }, 'v' + v); }
+  function icon(k) { return h('span', { class: 'sv-ico', dataset: { k: k }, 'aria-hidden': 'true' }); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Nodes are cloned, so one
+      vars object may serve several sentences and a placeholder may appear twice. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Highlight a part whose value differs from the step before. */
+  function ch(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev));
+  }
+
+  // ── the DC cards ──
+
+  function badgeOf(s, id) {
+    var e = s.last;
+    if (!e) return null;
+    if (e.kind === 'edit') return e.dc === id ? { text: t('bSaves') } : null;
+    if (e.kind === 'ad' || e.kind === 'dfsr') return e.items.some(function (x) { return x.to === id; }) ? { text: t('bReceives') } : null;
+    return null;
+  }
+
+  function dcCard(c, id) {
+    var s = c.state, d = s.dcs[id];
+    var b = badgeOf(s, id);
+    var bad = L.mismatch(s, id);
+    var gpcCh = ch(c, function (x) { return x.dcs[id].gpc.ver; });
+    var gptCh = ch(c, function (x) { return [x.dcs[id].gpt.ver, x.dcs[id].gpt.content]; });
+    var cad = d.cad.length ? h('div', { class: 'sv-cad' + (ch(c, function (x) { return x.dcs[id].cad.length; }) ? ' sv-ch' : '') },
+      t('cadHead'), ': ', data('ConflictAndDeleted'), ' ', t.parts('cadFrom', { dc: data(d.cad[0].by) }), ' — ',
+      data(MAP[d.cad[0].content], 'sv-strike')) : null;
+    return h('div', { class: 'sv-card', dataset: { dc: id, active: b ? '' : null } },
+      h('div', { class: 'sv-head' },
+        h('span', { class: 'sv-mark sd-fill', dataset: { c: COLOUR[id] }, translate: 'no' }, id),
+        data(HOST[id], 'sv-host'), data(SITE[id], 'sv-site'),
+        id === 'DC01' ? h('span', { class: 'sv-role' }, t('pdc')) : null,
+        b ? h('span', { class: 'sv-badge' }, b.text) : null),
+      h('div', { class: 'sv-gpo' }, t('gpoName'), ' ', data(GUID, 'sv-muted')),
+      h('div', { class: 'sv-half', dataset: { k: 'gpc' } },
+        h('div', { class: 'sv-hh' }, icon('gpc'), h('span', null, t('gpcHead')), ver(d.gpc.ver, gpcCh ? 'sv-ch' : null)),
+        h('div', { class: 'sv-sub sv-muted' }, data('CN=' + GUID + ',CN=Policies,CN=System')),
+        h('div', { class: 'sv-sub' }, data('versionNumber = ' + L.versionNumber(d.gpc.ver), gpcCh ? 'sv-ch' : null), ' (',
+          t.parts('verSplit', { u: data(d.gpc.ver), c: data(L.COMPUTER) }), ')')),
+      h('div', { class: 'sv-half', dataset: { k: 'gpt' } },
+        h('div', { class: 'sv-hh' }, icon('gpt'), h('span', null, t('gptHead')), ver(d.gpt.ver, gptCh ? 'sv-ch' : null)),
+        h('div', { class: 'sv-sub sv-muted' }, data('\\Policies\\' + GUID + '\\')),
+        h('div', { class: 'sv-sub' }, data('GPT.INI Version=' + L.versionNumber(d.gpt.ver), gptCh ? 'sv-ch' : null)),
+        h('div', { class: 'sv-sub' }, data('Drives.xml'), ' ', t('mapLabel'), ': ', data(MAP[d.gpt.content], gptCh ? 'sv-ch' : null))),
+      h('div', { class: 'sv-gpmc', dataset: { k: bad ? 'bad' : 'ok' } },
+        t('gpmc'), data('AD v' + d.gpc.ver), h('span', { class: 'sv-sign', 'aria-hidden': 'true' }, bad ? '≠' : '='), data('SYSVOL v' + d.gpt.ver),
+        h('span', { class: 'sv-word' }, bad ? t('mismatch') : t('inSync'))),
+      cad);
+  }
+
+  // ── the pipes ──
+
+  function arrowOf(x) { return x.from === 'DC01' ? 'DC01 → DC03' : 'DC03 → DC01'; }
+  function halfOf(k, v) { return (k === 'ad' ? 'GPC' : 'GPT') + ' v' + v; }
+
+  function pipe(c, k) {
+    var s = c.state, e = s.last;
+    var down = s.wan === 'down';
+    var items = [];
+    if (e && e.kind === k) {
+      e.items.forEach(function (x) {
+        var st = x.outcome === 'lost' ? 'lost' : 'done';
+        var mk = x.outcome === 'lost' ? '✕' : '✓';
+        var word = x.outcome === 'applied' ? t('arrived') : x.outcome === 'older' ? t('arrivedOld') : x.outcome === 'equal' ? t('arrivedEqual')
+          : x.outcome === 'lost' ? t('lostItem') : x.outcome === 'won' ? t('wonItem') : t('arrivedEqual');
+        items.push(h('li', { dataset: { s: st }, class: 'sv-ch' }, h('span', { class: 'sv-mk', 'aria-hidden': 'true' }, mk),
+          data(arrowOf(x) + ' · ' + halfOf(k, x.ver), 'sv-nw'), ' ', word));
+      });
+    }
+    s.inflight[k].forEach(function (x) {
+      items.push(h('li', { dataset: { s: x.held ? 'held' : 'flight' } }, data(arrowOf(x) + ' · ' + halfOf(k, x.ver), 'sv-nw'), ' ',
+        x.held ? t('held') : t.parts('due', { t: data(x.due) })));
+    });
+    if (!items.length) items.push(h('li', { dataset: { s: 'none' } }, t('empty')));
+    var line = down
+      ? h('div', { class: 'sv-line', dataset: { k: 'down' } }, h('i'), h('span', { class: 'sv-cut', 'aria-hidden': 'true' }, '✕'), h('i'))
+      : h('div', { class: 'sv-line' }, h('i'));
+    return h('div', { class: 'sv-pipe', dataset: { k: k } },
+      h('div', { class: 'sv-plabel' }, t(k === 'ad' ? 'pipeAd' : 'pipeDfsr')), line, h('ul', { class: 'sv-items' }, items));
+  }
+
+  function pipes(c) {
+    var s = c.state;
+    var down = s.wan === 'down';
+    return h('div', { class: 'sv-pipes' },
+      h('div', { class: 'sv-clock', translate: 'no' }, 't = ' + s.t),
+      pipe(c, 'ad'), pipe(c, 'dfsr'),
+      h('div', { class: 'sv-wan' + (ch(c, function (x) { return x.wan; }) ? ' sv-ch' : ''), dataset: { k: down ? 'down' : 'up' } },
+        down ? h('span', { 'aria-hidden': 'true' }, '✕') : null, t(down ? 'wanDown' : 'wanUp')));
+  }
+
+  // ── the client ──
+
+  function clientCard(c) {
+    var s = c.state, cl = s.client, e = s.last;
+    var b = null;
+    if (e && (e.kind === 'refresh' || e.kind === 'force')) {
+      b = e.kind === 'force' ? { text: t('bForce') } : e.outcome === 'applied' ? { text: t('bApplies') } : { text: t('bSkip'), k: 'skip' };
+    }
+    var hit = ch(c, function (x) { return x.client.applied; });
+    var bad = cl.report === 'mismatch';
+    return h('div', { class: 'sv-card sv-client', dataset: { active: b ? '' : null } },
+      h('div', { class: 'sv-head' },
+        h('span', { class: 'sv-mark sd-fill', dataset: { c: COLOUR['PC-B'] }, translate: 'no' }, 'PC-B'),
+        data(SITE['PC-B'], 'sv-site'),
+        b ? h('span', { class: 'sv-badge', dataset: { k: b.k || null } }, b.text) : null),
+      h('div', { class: 'sv-row sv-muted' }, t.parts('reads', { dc: data(L.CLIENT_DC) })),
+      h('div', { class: 'sv-row' }, t('applied'), ':', ver(cl.applied.ver, hit ? 'sv-ch' : null), data(L.versionNumber(cl.applied.ver), 'sv-muted'),
+        t('withFiles'), ver(cl.applied.gptVer, hit ? 'sv-ch' : null),
+        bad ? h('span', { class: 'sv-sign', 'aria-hidden': 'true' }, '≠') : null),
+      h('div', { class: 'sv-row' }, t('mapLabel'), ':', data(MAP[cl.applied.content], hit ? 'sv-ch' : null)),
+      bad ? h('div', { class: 'sv-warn' }, h('span', { class: 'sv-sign', 'aria-hidden': 'true' }, '≠ '), t('staleNote')) : null);
+  }
+
+  // ── the timeline ──
+
+  function evLabel(x) {
+    if (x.kind === 'edit') return t('evEdit', { dc: x.dc });
+    if (x.kind === 'ad') return t('evAd');
+    if (x.kind === 'dfsr') return t('evDfsr');
+    if (x.kind === 'cut') return t('evCut');
+    if (x.kind === 'restore') return t('evRestore');
+    if (x.kind === 'force') return t('evForce');
+    return x.final ? t('evFinal') : t('evRefresh');
+  }
+
+  function timeline(c) {
+    var plan = L.plan(c.params);
+    var rows = [{ t: 0, label: t('evStart') }].concat(plan.map(function (x) { return { t: x.t, label: evLabel(x) }; }));
+    var lis = rows.map(function (r, i) {
+      var st = i === c.n ? 'now' : i > c.n ? 'future' : 'past';
+      return h('li', { dataset: { s: st } }, h('span', { class: 'sv-mk', 'aria-hidden': 'true' }, st === 'now' ? '▶' : ''),
+        h('span', { class: 'sv-t', translate: 'no' }, 't = ' + r.t), h('span', null, r.label));
+    });
+    return h('div', { class: 'sv-card sv-tl' }, h('b', null, t('tlTitle')),
+      h('ol', { style: { '--rows': String(Math.ceil(rows.length / 2)) } }, lis));
+  }
+
+  // ── captions ──
+
+  function capStart(c) {
+    var e = L.eff(c.params);
+    var out = [rich('capStart', { v: data(5) })];
+    out.push(rich(e.twoEditors ? 'planTwo' : 'planOne', { dc: data('DC01') }));
+    out.push(rich('planTiming', { a: t.n('ticks', e.adDelay), d: t.n('ticks', e.dfsrDelay) }));
+    if (e.wanCut !== 'never') out.push(rich(e.wanCut === 'afterAd' ? 'planCutAd' : 'planCutDfsr'));
+    return join(out);
+  }
+
+  function capEdit(c) {
+    var e = c.state.last;
+    var vars = { dc: data(e.dc), v0: data(e.from.gpc), v: data(e.ver), n0: data(L.versionNumber(e.from.gpc)), n: data(L.versionNumber(e.ver)) };
+    return rich(e.seq === 1 ? 'capEdit' : 'capEdit2', vars);
+  }
+
+  /** The state of one DC's halves after a delivery: half-arrived (either way) or whole. */
+  function halves(s, dc) {
+    var d = s.dcs[dc];
+    var vars = { dc: data(dc), c: data(d.gpc.ver), g: data(d.gpt.ver), v: data(d.gpc.ver) };
+    if (d.gpc.ver > d.gpt.ver) return rich('capHalf', vars);
+    if (d.gpt.ver > d.gpc.ver) return rich('capHalfFiles', vars);
+    return rich('capWhole', vars);
+  }
+  /** The first delivery of the run (the other pipe has not delivered yet): say there are two paths. */
+  function firstDelivery(c) {
+    var plan = L.plan(c.params);
+    for (var i = 0; i < c.n - 1; i++) if (plan[i].kind === 'ad' || plan[i].kind === 'dfsr') return false;
+    return true;
+  }
+
+  function capDelivery(c) {
+    var s = c.state, e = s.last;
+    var two = e.items.length > 1;
+    var out = [];
+    if (e.kind === 'ad') {
+      if (two) out.push(rich('capAdTwo', { v: data(e.items[0].ver) }));
+      else {
+        out.push(rich('capAd', { to: data(e.items[0].to), v: data(e.items[0].ver) }));
+        out.push(halves(s, e.items[0].to));
+      }
+    } else {
+      if (two) {
+        var lost = e.items.filter(function (x) { return x.outcome === 'lost'; })[0];
+        var win = lost ? lost.to : e.items[0].from;
+        out.push(rich('capDfsrTwo', { win: data(win), lose: data(lost ? lost.by : e.items[1].from), v: data(e.items[0].ver) }));
+      } else {
+        out.push(rich('capDfsr', { to: data(e.items[0].to), v: data(e.items[0].ver) }));
+        out.push(halves(s, e.items[0].to));
+      }
+    }
+    if (firstDelivery(c)) out.push(rich('capTwoPaths'));
+    return join(out);
+  }
+
+  function waitList(ks) {
+    var out = [];
+    ks.forEach(function (k, i) { if (i) out.push(t('wAnd')); out.push(t(k === 'ad' ? 'wAd' : 'wDfsr')); });
+    return out.join('');
+  }
+
+  function capRefresh(c) {
+    var s = c.state, e = s.last;
+    var dc = L.CLIENT_DC;
+    var vars = { dc: data(dc), c: data(e.gpc), g: data(e.gpt), old: data(e.was.ver), map: data(MAP[e.content]), cmd: data(CMD) };
+    if (e.kind === 'force') return rich('capForce', vars);
+    var out;
+    if (e.outcome === 'skipped') {
+      out = [rich('capRefSkip', vars)];
+      // newer files under an older GPC; old settings recorded under the new number; or nothing newer at all
+      if (e.gpt > e.gpc) out.push(rich('capRefSkipFiles', vars));
+      else if (e.stale && s.client.report === 'mismatch') out.push(rich('capRefSkipStale', vars));
+      else out.push(rich('capRefUpToDate', vars));
+    } else if (e.gpt !== e.gpc) out = [rich('capRefApplyStale', vars)];
+    else out = [rich('capRefApply', vars)];
+    if (c.last && s.dcs.DC01.cad.length) out.push(rich('capRefTwo'));
+    return join(out);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'wanCut', type: 'choice', label: t('pCut'), hint: t('pCutHint'), resets: true,
+        options: [['never', t('cutNever')], ['afterAd', t('cutAfterAd')], ['afterDfsr', t('cutAfterDfsr')]] },
+      { key: 'adDelay', type: 'range', label: t('pAd'), min: 1, max: 10, step: 1, resets: true, format: function (v) { return t.n('ticks', v); } },
+      { key: 'dfsrDelay', type: 'range', label: t('pDfsr'), min: 1, max: 10, step: 1, resets: true, format: function (v) { return t.n('ticks', v); } },
+      { key: 'refreshAt', type: 'range', label: t('pRefresh'), min: 1, max: 12, step: 1, resets: true, format: function (v) { return 't = ' + v; } },
+      { key: 'twoEditors', type: 'toggle', label: t('pTwo'), hint: t('pTwoHint'), resets: true }
+    ],
+
+    presets: [
+      { id: 'normal', label: t('prNormal'), params: { wanCut: 'never', adDelay: 2, dfsrDelay: 4, refreshAt: 5, twoEditors: false } },
+      { id: 'half-arrived', label: t('prHalf'), params: { wanCut: 'afterAd', adDelay: 2, dfsrDelay: 4, refreshAt: 3, twoEditors: false } },
+      { id: 'files-first', label: t('prFiles'), params: { wanCut: 'never', adDelay: 4, dfsrDelay: 2, refreshAt: 3, twoEditors: false } },
+      { id: 'two-editors', label: t('prTwo'), params: { wanCut: 'never', adDelay: 2, dfsrDelay: 4, refreshAt: 5, twoEditors: true } }
+    ],
+
+    legend: [
+      { shape: 'sv-gpc', label: t('lgGpc') },
+      { shape: 'sv-gpt', label: t('lgGpt') },
+      { shape: 'line', label: t('lgAd') },
+      { shape: 'dash', label: t('lgDfsr') },
+      { shape: 'sv-ver', label: t('lgVer') },
+      { shape: 'sv-neq', label: t('lgNeq') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'sv' }, dcCard(c, 'DC01'), pipes(c), dcCard(c, 'DC03'), timeline(c), clientCard(c)));
+    },
+
+    caption: function (c) {
+      var e = c.state.last;
+      if (!e) return capStart(c);
+      if (e.kind === 'edit') return capEdit(c);
+      if (e.kind === 'ad' || e.kind === 'dfsr') return capDelivery(c);
+      if (e.kind === 'cut') {
+        return e.waiting.length ? rich('capCut', { list: waitList(e.waiting) })
+          : e.later.length ? rich('capCutLater', { list: waitList(e.later) }) : rich('capCutNone');
+      }
+      if (e.kind === 'restore') return e.waiting.length ? rich('capRestore', { list: waitList(e.waiting) }) : rich('capRestoreNone');
+      return capRefresh(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
