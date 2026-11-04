@@ -1,0 +1,498 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dns-client-order: how a Windows client resolves a typed name. A stepper, one try per step: the hosts file, the
+     DNS client cache, the DNS servers (one candidate FQDN and one server per try), LLMNR, NetBIOS; the lookup stops at
+     the first positive answer. Page-drawn: the pipeline on the left (each stage with its mark and outcome), the
+     candidate names and the cache table on the right. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-dns-client-order">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kako Windows klijent razrješava ime · simdeck</title>
+<meta name="description" content="Razriješi kratka i puna imena uz razne postavke: redak u hosts, popis sufiksa, zamjenski DNS, negativni zapis u predmemoriji, LLMNR.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dns-client-order",
+  "title": {
+    "hr": "Kako Windows klijent razrješava ime",
+    "en": "How a Windows client resolves a name"
+  },
+  "concept": {
+    "hr": "hosts, predmemorija, DNS sa sufiksima, LLMNR i NetBIOS; zašto kratko ime zakaže",
+    "en": "Hosts file, cache, DNS with suffixes, LLMNR/NetBIOS; why a short name goes wrong"
+  },
+  "summary": {
+    "hr": "Razriješi kratka i puna imena uz razne postavke: redak u hosts, popis sufiksa, zamjenski DNS, negativni zapis u predmemoriji, LLMNR.",
+    "en": "Resolve short and full names with different settings: a hosts line, a suffix search list, an alternate DNS server, a negative cache entry, LLMNR."
+  },
+  "tags": [
+    "dns",
+    "caches"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dns-client-order"]; colours only from kit tokens.
+   Layout: the client card and the pipeline on the left, candidates and cache on the right. */
+[data-sim="win-dns-client-order"] .dc { height: 100%; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 1.4cqw; padding: 1.2cqh 1.4cqw; align-items: start; font-size: max(16px, 1rem); }
+[data-sim="win-dns-client-order"] .dc-d { font-family: var(--mono); }
+[data-sim="win-dns-client-order"] .dc-col { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+
+/* client card */
+[data-sim="win-dns-client-order"] .dc-client { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.9rem;
+  padding: 0.4rem 0.7rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius); }
+[data-sim="win-dns-client-order"] .dc-pc { font-weight: 700; }
+[data-sim="win-dns-client-order"] .dc-typed { font-family: var(--mono); font-weight: 700; font-size: var(--fs-xl); color: var(--c1); }
+[data-sim="win-dns-client-order"] .dc-chip { padding: 0 0.6rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-weight: 700; }
+[data-sim="win-dns-client-order"] .dc-note { color: var(--muted); font-size: var(--fs-sm); }
+
+/* the pipeline */
+[data-sim="win-dns-client-order"] .dc-pipe { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.45rem; }
+[data-sim="win-dns-client-order"] .dc-row { position: relative; display: grid; grid-template-columns: 2.2rem minmax(0, 1fr); column-gap: 0.6rem;
+  align-items: start; padding: 0.3rem 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg); }
+[data-sim="win-dns-client-order"] .dc-row + .dc-row::before { content: ''; position: absolute; left: 1.7rem; top: -0.5rem; height: 0.5rem;
+  border-left: var(--line-w) solid var(--ink); }
+[data-sim="win-dns-client-order"] .dc-mk { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%;
+  border: var(--line-w) solid var(--ink); font-weight: 700; font-size: var(--fs-md); line-height: 1; }
+[data-sim="win-dns-client-order"] .dc-row[data-st="ok"] { border-color: var(--ok); border-width: 0.2rem; }
+[data-sim="win-dns-client-order"] .dc-row[data-st="ok"] .dc-mk { background: var(--ok); color: var(--bg); border-color: var(--ok); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="no"] .dc-mk { color: var(--danger); border-color: var(--danger); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="neg"] { border-style: dashed; border-color: var(--danger); border-width: 0.2rem; }
+[data-sim="win-dns-client-order"] .dc-row[data-st="neg"] .dc-mk { color: var(--danger); border-color: var(--danger); border-style: dashed; }
+[data-sim="win-dns-client-order"] .dc-row[data-st="next"] .dc-mk { background: var(--ink); color: var(--bg); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="trying"] .dc-mk { border-style: dashed; }
+[data-sim="win-dns-client-order"] .dc-row[data-st="idle"], [data-sim="win-dns-client-order"] .dc-row[data-st="skip"] { color: var(--muted); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="idle"] .dc-mk, [data-sim="win-dns-client-order"] .dc-row[data-st="skip"] .dc-mk { border-color: var(--muted); color: var(--muted); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="skip"] { border-style: dotted; }
+[data-sim="win-dns-client-order"] .dc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
+[data-sim="win-dns-client-order"] .dc-head b { font-size: var(--fs-md); }
+[data-sim="win-dns-client-order"] .dc-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-dns-client-order"] .dc-row[data-st="idle"] .dc-sub, [data-sim="win-dns-client-order"] .dc-row[data-st="skip"] .dc-sub { color: inherit; }
+[data-sim="win-dns-client-order"] .dc-out { margin: 0; padding: 0; list-style: none; }
+[data-sim="win-dns-client-order"] .dc-out li { overflow-wrap: anywhere; }
+[data-sim="win-dns-client-order"] .dc-srv { display: inline-flex; gap: 0.3rem; align-items: baseline; padding: 0 0.4rem; border: 0.12rem solid var(--ink);
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-dns-client-order"] .dc-srv[data-up="no"] { border-style: dashed; color: var(--danger); }
+[data-sim="win-dns-client-order"] .dc-q { font-weight: 700; }
+
+/* result */
+[data-sim="win-dns-client-order"] .dc-res { padding: 0.35rem 0.7rem; border-radius: var(--radius); border: 0.2rem solid var(--ink); font-weight: 700;
+  font-size: var(--fs-lg); }
+[data-sim="win-dns-client-order"] .dc-res[data-ok="no"] { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+[data-sim="win-dns-client-order"] .dc-res[data-ok="prev"] { font-size: var(--fs-md); font-weight: 400; border-color: var(--line); border-width: var(--line-w); }
+
+/* right column */
+[data-sim="win-dns-client-order"] .dc-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); padding: 0.45rem 0.6rem;
+  display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+[data-sim="win-dns-client-order"] .dc-box > b { font-size: var(--fs-md); }
+[data-sim="win-dns-client-order"] .dc-cands { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-dns-client-order"] .dc-cands li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); column-gap: 0.4rem; align-items: baseline;
+  padding: 0.1rem 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+[data-sim="win-dns-client-order"] .dc-cands .dc-cm { font-weight: 700; text-align: center; }
+[data-sim="win-dns-client-order"] .dc-cands .dc-src { grid-column: 2; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-dns-client-order"] .dc-cands li[data-r="nx"], [data-sim="win-dns-client-order"] .dc-cands li[data-r="neg"],
+[data-sim="win-dns-client-order"] .dc-cands li[data-r="timeout"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="win-dns-client-order"] .dc-cands li[data-r="nx"] .dc-cm, [data-sim="win-dns-client-order"] .dc-cands li[data-r="neg"] .dc-cm,
+[data-sim="win-dns-client-order"] .dc-cands li[data-r="timeout"] .dc-cm { color: var(--danger); }
+[data-sim="win-dns-client-order"] .dc-cands li[data-r="ok"] .dc-cm, [data-sim="win-dns-client-order"] .dc-cands li[data-r="cache"] .dc-cm { color: var(--ok); }
+[data-sim="win-dns-client-order"] .dc-cands li.dc-skipped { border-style: dotted; border-color: var(--muted); color: var(--muted); }
+[data-sim="win-dns-client-order"] .dc-cands li.dc-skipped .dc-fq { text-decoration: line-through; }
+[data-sim="win-dns-client-order"] .dc-cache { border-collapse: collapse; width: 100%; table-layout: auto; }
+[data-sim="win-dns-client-order"] .dc-cache th { text-align: left; font-size: var(--fs-sm); color: var(--muted); font-weight: 400; padding: 0 0.3rem; }
+[data-sim="win-dns-client-order"] .dc-cache td { padding: 0.1rem 0.3rem; border-top: var(--line-w) solid var(--line); overflow-wrap: anywhere; }
+[data-sim="win-dns-client-order"] .dc-cache tr[data-neg="yes"] td:nth-child(2) { color: var(--danger); font-weight: 700; }
+[data-sim="win-dns-client-order"] .dc-empty { color: var(--muted); }
+/* changed in this step: the kit's highlight colour plus an ink underline, so it survives grayscale */
+[data-sim="win-dns-client-order"] .dc-ch { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 -0.18rem var(--ink); }
+[data-sim="win-dns-client-order"] .dc-ch .dc-src, [data-sim="win-dns-client-order"] .dc-ch .dc-cm { color: var(--on-hl); }
+
+/* legend swatches */
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape^="dc-"] { position: relative; background: var(--bg); border-radius: 50%; }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape^="dc-"]::after { position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; font-size: 0.75em; line-height: 1; color: var(--ink); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-ok"] { background: var(--ok); border-color: var(--ok); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-ok"]::after { content: '✓'; color: var(--bg); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-no"] { border-color: var(--danger); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-no"]::after { content: '✕'; color: var(--danger); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-neg"] { border-color: var(--danger); border-style: dashed; }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-neg"]::after { content: '⊘'; color: var(--danger); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-to"] { border-style: dashed; }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-to"]::after { content: '⏱'; }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-next"] { background: var(--ink); }
+[data-sim="win-dns-client-order"] .sd-swatch[data-shape="dc-next"]::after { content: '▶'; color: var(--bg); font-size: 0.6em; }
+
+[data-sim="win-dns-client-order"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the toggles share rows two by two, so the panel fits without its own scroll at 1920×1080 */
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.8rem; }
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > [data-key="preferredUp"],
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > [data-key="hostsEntry"],
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > [data-key="llmnr"],
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > [data-key="repeat"],
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-group > [data-key="flush"] { grid-column: auto; }
+/* the switch itself shows on/off (and carries it for screen readers); the word would push the labels onto three lines */
+[data-sim="win-dns-client-order"] [data-sd-controls] .sd-switch-state { display: none; }
+
+/* Phone and portrait: one column; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dns-client-order"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dns-client-order"] .dc { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kako Windows klijent razrješava ime</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var LLMNR_ADDR = '224.0.0.252 · UDP 5355';
+  var WHO = { '10.0.0.77': 'whoLaptop' };
+  var MARK = { ok: '✓', cache: '✓', no: '✕', nx: '✕', neg: '⊘', timeout: '⏱', trying: '⏱', idle: '○', next: '▶', skip: '–' };
+  var STAGES = [['hosts', 'stHosts'], ['cache', 'stCache'], ['dns', 'stDns'], ['llmnr', 'stLlmnr'], ['netbios', 'stNetbios']];
+  var SRC = { typed: 'srcTyped', primary: 'srcPrimary', devolution: 'srcDevolution', connection: 'srcConnection', list: 'srcList' };
+  var VIA = { hosts: 'viaHosts', cache: 'viaCache', dns: 'viaDns', llmnr: 'viaLlmnr', netbios: 'viaNetbios' };
+
+  /** Data (names, addresses, durations) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'dc-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function secs(n) { return h('span', { translate: 'no' }, n + ' s'); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Nodes are cloned, so
+      one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+
+  function bare(s) { return s.typed.toLowerCase().replace(/\.+$/, ''); }
+  /** What the corp.example DNS servers hold for a name (for "DNS would have said …"). */
+  function dnsKnows(fqdn) { return L.scene(L.defaults).zones[L.PREFERRED][fqdn] || null; }
+  /** The real file server the short name means: name + primary suffix. */
+  function meant(s) { return bare(s).indexOf('.') < 0 ? bare(s) + '.' + L.PC.primarySuffix : bare(s); }
+  function ended(s) { return s.next.phase === 'end'; }
+  function thisLookup(s) { return s.last && s.last.lookup === s.lookup; }
+  function cacheLeft(s, name) {
+    var row = s.cache.filter(function (r) { return r.name === name && r.from === 'dns'; })[0];
+    return row ? row.expiresAt - s.t : null;
+  }
+
+  // ── the stage ──
+
+  function stState(s, key) {
+    var st = s.stages[key];
+    if (st === 'idle' && !ended(s) && s.next.phase === key) return 'next';
+    if (key === 'dns' && st === 'trying') return 'trying';
+    return st;
+  }
+
+  function rowOut(c, key, st) {
+    var s = c.state, p = c.params, name = bare(s), out = [];
+    if (st === 'idle' || st === 'next') return [h('li', null, t(st === 'next' ? 'rNext' : 'rNotTried'))];
+    if (key === 'hosts') {
+      var hit = s.answer && s.answer.stage === 'hosts';
+      out.push(h('li', null, hit ? data(name + ' → ' + s.answer.ip, 'dc-q') : t.parts('rHostsNo', { name: data(name) })));
+    } else if (key === 'cache') {
+      if (st === 'ok') out.push(h('li', null, data(s.last && s.last.stage === 'cache' && s.last.fqdn ? s.last.fqdn + ' → ' + s.answer.ip : '', 'dc-q')));
+      else if (st === 'neg') s.candidates.forEach(function (cd) {
+        if (cd.result === 'neg') out.push(h('li', null, t.parts('rNeg', { name: data(cd.fqdn), left: secs(cacheLeft(s, cd.fqdn)) })));
+      });
+      else out.push(h('li', null, t('rCacheNo')));
+    } else if (key === 'dns') {
+      if (st === 'skip') out.push(h('li', null, t('rSkipNeg')));
+      s.queries.forEach(function (q) {
+        var res = q.result === 'ok' ? data(q.ip, 'dc-q') : q.result === 'nx' ? data('NXDOMAIN', 'dc-q') : t.parts('rTimeout', { w: secs(q.wait) });
+        out.push(h('li', null, h('span', { 'aria-hidden': 'true' }, MARK[q.result === 'ok' ? 'ok' : q.result]), ' ', data(q.fqdn + ' @ ' + q.server + ' →'), ' ', res));
+      });
+    } else {
+      if (st === 'skip') {
+        var off = key === 'llmnr' ? !p.llmnr : !p.netbios;
+        out.push(h('li', null, t(off ? 'rSkipOff' : 'rSkipDot')));
+      } else if (st === 'ok') {
+        out.push(h('li', null, t.parts('rLinkOk', { ip: data(s.answer.ip, 'dc-q'), who: t(WHO[s.answer.ip] || 'whoLaptop') })));
+      } else out.push(h('li', null, t('rLinkNo')));
+    }
+    return out;
+  }
+
+  function rowSub(c, key) {
+    var s = c.state;
+    if (key === 'hosts') return s.hosts.length ? data(s.hosts.map(function (x) { return x.ip + ' ' + x.name; }).join(', ')) : t('hostsEmpty');
+    if (key === 'dns') return s.servers.map(function (v) {
+      return h('span', { class: 'dc-srv', dataset: { up: v.up ? 'yes' : 'no' } }, data(v.ip),
+        t(v.role === 'preferred' ? 'rolePref' : 'roleAlt') + (v.kind === 'public' ? ', ' + t('kindPublic') : ''),
+        h('span', { 'aria-hidden': 'true' }, v.up ? '●' : '✕'), t(v.up ? 'srvUp' : 'srvDown'));
+    });
+    if (key === 'llmnr') return [t('subLlmnr'), ' ', data(LLMNR_ADDR)];
+    if (key === 'netbios') return t('subNetbios');
+    return null;
+  }
+
+  function pipeline(c) {
+    var s = c.state;
+    return h('ol', { class: 'dc-pipe' }, STAGES.map(function (pair) {
+      var key = pair[0], st = stState(s, key);
+      var changed = c.n > 0 && thisLookup(s) && s.last.stage === key;
+      return h('li', { class: 'dc-row' + (changed ? ' sd-changed' : ''), dataset: { st: st, k: key } },
+        h('span', { class: 'dc-mk', 'aria-hidden': 'true' }, MARK[st]),
+        h('div', null,
+          h('div', { class: 'dc-head' }, h('b', null, t(pair[1])), h('span', { class: 'dc-sub' }, rowSub(c, key))),
+          h('ul', { class: 'dc-out' }, rowOut(c, key, st))));
+    }));
+  }
+
+  function resultLine(s, ans) {
+    return ans ? t.parts('resOkShort', { ip: data(ans.ip), via: t(VIA[ans.stage]) }) : t('resNoShort');
+  }
+
+  function left(c) {
+    var s = c.state;
+    var client = h('div', { class: 'dc-client' },
+      h('span', { class: 'dc-pc' }, data('PC-07')), data(L.PC.primarySuffix + ' · ' + L.PC.ip),
+      h('span', null, t('typedHead'), ' ', h('span', { class: 'dc-typed', translate: 'no' }, s.typed)),
+      h('span', { class: 'dc-chip' }, t('lookup', { n: s.lookup }), ' · ', data('t = ' + s.t + ' s')),
+      s.lookup > 1 && (!c.params.preferredUp || s.flushed) ? h('span', { class: 'dc-note' },
+        [!c.params.preferredUp ? t('backUp') : null, s.flushed ? t('flushedNote') : null].filter(Boolean).join(' · ')) : null);
+    var res = null;
+    if (ended(s)) {
+      res = h('div', { class: 'dc-res', dataset: { ok: s.answer ? 'yes' : 'no' } },
+        s.answer ? t.parts('resOk', { name: data(s.typed), ip: data(s.answer.ip), via: t(VIA[s.answer.stage]) })
+          : t.parts('resNo', { name: data(s.typed) }));
+    } else if (s.lookup > 1) {
+      res = h('div', { class: 'dc-res', dataset: { ok: 'prev' } }, t.parts('prev', { res: h('span', null, resultLine(s, s.results[0])) }));
+    }
+    return h('div', { class: 'dc-col' }, client, pipeline(c), res);
+  }
+
+  function right(c) {
+    var s = c.state, p = c.params;
+    var changedName = c.n > 0 && thisLookup(s) && (s.last.stage === 'dns' || s.last.stage === 'cache') ? s.last.fqdn : null;
+    var cands = s.candidates.map(function (cd) {
+      var r = cd.result || 'idle';
+      return h('li', { dataset: { r: r }, class: cd.fqdn === changedName ? 'dc-ch' : null },
+        h('span', { class: 'dc-cm', 'aria-hidden': 'true' }, MARK[r]),
+        data(cd.fqdn, 'dc-fq'),
+        h('span', { class: 'dc-src' }, t(SRC[cd.src])));
+    });
+    if (p.searchList !== 'none' && L.singleLabel(s.typed)) {
+      cands.push(h('li', { class: 'dc-skipped' }, h('span', { class: 'dc-cm', 'aria-hidden': 'true' }, '–'),
+        h('span', null, t.parts('candSkipped', { name: data(meant(s), 'dc-fq') }))));
+    }
+    var before = c.prev && c.n > 0 ? c.prev.cache : s.cache;
+    var rows = s.cache.map(function (r) {
+      var fresh = !before.some(function (b) { return b.name === r.name && b.from === r.from && b.expiresAt === r.expiresAt && b.ip === r.ip; });
+      return h('tr', { dataset: { neg: r.ip ? 'no' : 'yes' }, class: fresh ? 'dc-ch' : null },
+        h('td', null, data(r.name)),
+        h('td', null, r.ip ? data(r.ip) : t('cNeg')),
+        h('td', null, r.expiresAt === null ? t('cForever') : secs(r.expiresAt - s.t)),
+        h('td', null, data(r.from === 'hosts' ? 'hosts' : 'DNS')));
+    });
+    var table = rows.length
+      ? h('table', { class: 'dc-cache' },
+        h('thead', null, h('tr', null, h('th', null, t('cName')), h('th', null, t('cAnswer')), h('th', null, t('cLeft')), h('th', null, t('cFrom')))),
+        h('tbody', null, rows))
+      : h('span', { class: 'dc-empty' }, t('cacheEmpty'));
+    return h('div', { class: 'dc-col' },
+      h('section', { class: 'dc-box' }, h('b', null, t('candHead')), h('ul', { class: 'dc-cands' }, cands)),
+      h('section', { class: 'dc-box' }, h('b', null, t('stCache')), table));
+  }
+
+  // ── captions ──
+
+  function capStart(c) {
+    var s = c.state, p = c.params, out = [rich('capStart', { name: data(s.typed) })];
+    if (p.hostsEntry) out.push(rich('startHosts', { line: data('10.0.0.99 fs1') }));
+    if (!p.preferredUp) out.push(rich('startDown', { srv: data(L.PREFERRED) }));
+    if (p.searchList !== 'none') out.push(rich('startList', { list: data(p.searchList) }));
+    return join(out);
+  }
+
+  /** The sentence that ends a lookup without an answer. */
+  function capFail(c) {
+    var s = c.state, p = c.params, name = data(s.typed);
+    var real = meant(s);
+    if (p.searchList !== 'none' && L.singleLabel(s.typed) && dnsKnows(real)) return rich('capFailList', { name: name, real: data(real) });
+    if (s.stages.cache === 'neg') {
+      var cd = s.candidates.filter(function (x) { return x.result === 'neg'; })[0];
+      return rich('capFailNeg', { name: name, left: secs(cacheLeft(s, cd.fqdn)) });
+    }
+    return rich('capFail', { name: name });
+  }
+
+  function capDns(c) {
+    var s = c.state, lt = s.last, out = [];
+    var q = s.queries[s.queries.length - 1];
+    var idx = -1;
+    s.candidates.forEach(function (cd, i) { if (cd.fqdn === lt.fqdn) idx = i; });
+    var cd = s.candidates[idx];
+    var first = lt.server === s.servers[0].ip;
+    var srvIdx = -1;
+    s.servers.forEach(function (v, i) { if (v.ip === lt.server) srvIdx = i; });
+    if (first) {
+      var fq = data(cd.fqdn);
+      if (/\.$/.test(s.typed)) out.push(rich('capDot'));
+      else if (cd.src === 'typed') out.push(rich('capMulti'));
+      else if (idx === 0 && cd.src === 'primary') out.push(rich('capSuffix', { short: data(s.typed), fqdn: fq }));
+      else if (idx === 0 && cd.src === 'list') out.push(rich('capList', { short: data(s.typed), fqdn: fq, skipped: data(meant(s)) }));
+      else out.push(rich('capNextName', { fqdn: fq }));
+    }
+    var srv = data(lt.server);
+    if (q.result === 'ok') out.push(rich('capDnsOk', { srv: srv, fqdn: data(q.fqdn), ip: data(q.ip), ttl: secs(cacheLeft(s, q.fqdn)) }));
+    else if (q.result === 'nx') {
+      out.push(rich('capDnsNx', { srv: srv, fqdn: data(q.fqdn), neg: secs(L.NEG_TTL) }));
+      if (s.servers[srvIdx].kind === 'public' && /\.corp\.example$/.test(q.fqdn)) out.push(rich('capNxPublic', { zone: data(L.PC.primarySuffix) }));
+      else if (srvIdx === 0 && s.servers.length > 1) out.push(rich('capNxPreferred'));
+    } else if (q.gaveUp) out.push(rich('capTimeoutGiveUp', { total: secs(L.GIVE_UP), fqdn: data(q.fqdn) }));
+    else out.push(rich('capTimeoutMore', { srv: srv, w: secs(q.wait), alt: data(s.servers[srvIdx + 1].ip) }));
+    if (ended(s) && !s.answer) {
+      if (!L.singleLabel(s.typed)) out.push(rich('capNoFallback'));
+      out.push(capFail(c));
+    }
+    return out;
+  }
+
+  function capStep(c) {
+    var s = c.state, lt = s.last, p = c.params, out = [];
+    var name = data(bare(s));
+    if (lt.lookup > 1 && lt.stage === 'hosts') {
+      out.push(rich('capRepeat', { t: secs(L.REPEAT_AT) }));
+      if (!p.preferredUp) out.push(rich('capRepeatBack'));
+      if (s.flushed) out.push(rich('capFlushed'));
+    }
+    if (lt.stage === 'hosts') {
+      if (lt.result === 'ok') {
+        out.push(rich('capHostsOk', { name: name, ip: data(lt.ip) }));
+        // what DNS would answer for the names it would be asked: nothing to say when it would say NXDOMAIN too
+        var real = s.candidates.map(function (x) { return dnsKnows(x.fqdn); }).filter(Boolean)[0];
+        if (real && real !== lt.ip) out.push(rich('capHostsStale', { real: data(real) }));
+      } else out.push(rich('capHostsNo', { name: name }));
+    } else if (lt.stage === 'cache') {
+      if (lt.result === 'ok') out.push(rich('capCacheOk', { name: data(lt.fqdn), ip: data(lt.ip), left: secs(cacheLeft(s, lt.fqdn)) }));
+      else if (lt.result === 'neg') {
+        var cd = s.candidates.filter(function (x) { return x.result === 'neg'; })[0];
+        out.push(rich('capCacheNeg', { name: data(cd.fqdn), left: secs(cacheLeft(s, cd.fqdn)) }));
+        if (s.lookup > 1 && !p.preferredUp) out.push(rich('capNegBack'));
+      } else out.push(rich('capCacheNo', { name: data(s.candidates.map(function (x) { return x.fqdn; }).join(', ')) }));
+    } else if (lt.stage === 'dns') {
+      out = out.concat(capDns(c));
+    } else if (lt.stage === 'llmnr') {
+      var addr = data('224.0.0.252');
+      out.push(lt.result === 'ok' ? rich('capLlmnrOk', { addr: addr, ip: data(lt.ip), name: name }) : rich('capLlmnrNo', { addr: addr, name: name }));
+      if (ended(s) && !s.answer) out.push(capFail(c));
+    } else if (lt.stage === 'netbios') {
+      if (!p.llmnr) out.push(rich('capLlmnrOff'));
+      out.push(lt.result === 'ok' ? rich('capNbOk', { ip: data(lt.ip), name: name }) : rich('capNbNo'));
+      if (ended(s) && !s.answer) out.push(capFail(c));
+    }
+    return join(out);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'typed', type: 'choice', label: t('pTyped'), resets: true,
+        options: [['fs1', t('oFs1')], ['fs1.corp.example', t('oFsFq')], ['fs1.corp.example.', t('oFsDot')], ['printer', t('oPrinter')], ['fs1.', t('oShortDot')]] },
+      { key: 'searchList', type: 'choice', label: t('pSearch'), resets: true, options: [['none', t('oNone')], ['example.com', t('oExample')]] },
+      { key: 'alternate', type: 'choice', label: t('pAlt'), resets: true,
+        options: [['none', t('oNone')], ['10.0.0.11', t('oAlt11')], ['203.0.113.53', t('oAltPub')]] },
+      { key: 'preferredUp', type: 'toggle', label: t('pPrefUp'), resets: true },
+      { key: 'hostsEntry', type: 'toggle', label: t('pHosts'), resets: true },
+      { key: 'llmnr', type: 'toggle', label: t('pLlmnr'), resets: true },
+      { key: 'repeat', type: 'toggle', label: t('pRepeat'), resets: true },
+      { key: 'flush', type: 'toggle', label: t('pFlush'), resets: true,
+        disabled: function (p) { return p.repeat ? false : t('flushNeedsRepeat'); } }
+    ],
+
+    presets: [
+      { id: 'short-name', label: t('prShort'), params: {} },
+      { id: 'search-list', label: t('prList'), params: { searchList: 'example.com' } },
+      { id: 'fqdn-dot', label: t('prDot'), params: { typed: 'fs1.corp.example.' } },
+      { id: 'stale-hosts', label: t('prStale'), params: { hostsEntry: true, repeat: true, flush: true } },
+      { id: 'public-alternate', label: t('prPublic'), params: { preferredUp: false, alternate: '203.0.113.53', repeat: true } },
+      { id: 'llmnr-answer', label: t('prLlmnr'), params: { typed: 'printer' } }
+    ],
+
+    legend: [
+      { shape: 'dc-ok', label: t('lgOk') },
+      { shape: 'dc-no', label: t('lgNo') },
+      { shape: 'dc-neg', label: t('lgNeg') },
+      { shape: 'dc-to', label: t('lgTimeout') },
+      { shape: 'dc-next', label: t('lgNext') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'dc' }, left(c), right(c)));
+    },
+
+    caption: function (c) {
+      return c.n === 0 ? capStart(c) : capStep(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
