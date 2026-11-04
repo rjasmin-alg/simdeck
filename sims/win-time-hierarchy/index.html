@@ -1,0 +1,397 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-time-hierarchy: time in one AD domain. A stepper, one sync round per step: every clock drifts, then every
+     syncing node takes its source's time top-down, then the Kerberos strip compares fixed pairs (refused past 5 min).
+     Drawn with the kit's K2 topology view (kit/topology.js): the tree loom → DC01 → DC02, DC03 → PC-A, PC-B, each card
+     with its offset from true time; the page draws the Kerberos strip and the event log beside it.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-time-hierarchy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vrijeme u domeni · simdeck</title>
+<meta name="description" content="Pusti satove da odmiču, zaustavi uslugu vremena, premjesti ulogu PDC-a: tko koga slijedi i kada Kerberos odbija prijavu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-time-hierarchy",
+  "title": {
+    "hr": "Vrijeme u domeni",
+    "en": "Time in a domain"
+  },
+  "concept": {
+    "hr": "Emulator PDC-a je izvor, članovi slijede DC-ove, Kerberos pada nakon 5 minuta",
+    "en": "PDC emulator is the source, members follow DCs, Kerberos fails past 5 minutes"
+  },
+  "summary": {
+    "hr": "Pusti satove da odmiču, zaustavi uslugu vremena, premjesti ulogu PDC-a: tko koga slijedi i kada Kerberos odbija prijavu.",
+    "en": "Let clocks drift, stop a time service, move the PDC role: see who follows whom and when Kerberos refuses a logon."
+  },
+  "tags": [
+    "time-sync",
+    "active-directory",
+    "kerberos"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-time-hierarchy"]; colours only from kit tokens.
+   Layout: the tree (K2) on the left, the side column (round, Kerberos strip, event log) on the right. */
+[data-sim="win-time-hierarchy"] .th { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  gap: 1.2cqw; padding: 1cqh 1.2cqw; align-items: start; font-size: max(16px, 0.95rem); }
+[data-sim="win-time-hierarchy"] .th-d { font-family: var(--mono); }
+[data-sim="win-time-hierarchy"] .th-nw { white-space: nowrap; }
+[data-sim="win-time-hierarchy"] .th .sd-topo-addr { font-size: var(--fs-lg); }
+[data-sim="win-time-hierarchy"] .th .sd-topo-card[data-kind='server'] .sd-topo-mark,
+[data-sim="win-time-hierarchy"] .th .sd-topo-card[data-kind='host'] .sd-topo-mark,
+[data-sim="win-time-hierarchy"] .th .sd-topo-card[data-kind='router'] .sd-topo-mark { font-size: var(--fs-md); }
+[data-sim="win-time-hierarchy"] .th .sd-topo-card[data-kind='host'] .sd-topo-mark { border-radius: 1.3rem; }
+
+/* side column */
+[data-sim="win-time-hierarchy"] .th-side { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; }
+[data-sim="win-time-hierarchy"] .th-round { align-self: flex-start; padding: 0.1rem 0.8rem; border: var(--line-w) solid var(--ink); border-radius: 1rem;
+  font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="win-time-hierarchy"] .th-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); padding: 0.45rem 0.6rem;
+  display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-time-hierarchy"] .th-box > b { font-size: var(--fs-md); }
+[data-sim="win-time-hierarchy"] .th-krb { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-time-hierarchy"] .th-krb li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; align-items: center; column-gap: 0.4rem;
+  padding: 0.1rem 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="win-time-hierarchy"] .th-krb li[data-ok="no"] { border: 0.2rem dashed var(--danger); }
+[data-sim="win-time-hierarchy"] .th-krb .th-mk { grid-row: span 2; font-weight: 700; font-size: var(--fs-lg); text-align: center; }
+[data-sim="win-time-hierarchy"] .th-krb li[data-ok="yes"] .th-mk { color: var(--ok); }
+[data-sim="win-time-hierarchy"] .th-krb li[data-ok="no"] .th-mk, [data-sim="win-time-hierarchy"] .th-krb li[data-ok="no"] .th-word { color: var(--danger); font-weight: 700; }
+[data-sim="win-time-hierarchy"] .th-pair { font-weight: 700; }
+[data-sim="win-time-hierarchy"] .th-kind { grid-column: 2; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-time-hierarchy"] .th-skew { grid-row: 1; grid-column: 3; text-align: right; font-weight: 700; }
+[data-sim="win-time-hierarchy"] .th-word { grid-column: 3; text-align: right; font-size: var(--fs-sm); }
+[data-sim="win-time-hierarchy"] .th-log { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="win-time-hierarchy"] .th-log li { padding: 0 0.35rem; border-left: 0.25rem solid var(--ink); }
+[data-sim="win-time-hierarchy"] .th-log li[data-k="fail"] { border-left: 0.25rem dashed var(--danger); }
+[data-sim="win-time-hierarchy"] .th-log li[data-k="none"] { border-left-color: var(--muted); color: var(--muted); }
+[data-sim="win-time-hierarchy"] .th-log .th-r { font-size: var(--fs-sm); color: var(--muted); margin-right: 0.35rem; }
+/* changed in this step: the kit's highlight colour plus an ink underline, so it survives grayscale */
+[data-sim="win-time-hierarchy"] .th-ch { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* legend swatches */
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-pdc"] { background: var(--ink); position: relative; width: 2.2em; border-radius: 1rem; }
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-pdc"]::after { content: 'PDC'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; font-size: 0.6em; color: var(--bg); }
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-off"] { background: var(--bg); position: relative; width: 2.2em; }
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-off"]::after { content: '+40 s'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--mono); font-weight: 700; font-size: 0.6em; color: var(--ink); }
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-krb"] { background: var(--bg); position: relative; width: 2em; border: 0.16rem dashed var(--danger); }
+[data-sim="win-time-hierarchy"] .sd-swatch[data-shape="th-krb"]::after { content: '✓✕'; position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; font-size: 0.75em; color: var(--ink); }
+
+[data-sim="win-time-hierarchy"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the two choices share a row, so the panel fits without its own scroll at 1920×1080 */
+[data-sim="win-time-hierarchy"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.6rem; }
+[data-sim="win-time-hierarchy"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="win-time-hierarchy"] [data-sd-controls] .sd-group > [data-key="pdcSource"],
+[data-sim="win-time-hierarchy"] [data-sd-controls] .sd-group > [data-key="pdcOn"] { grid-column: auto; }
+
+/* Phone and portrait: the tree becomes a list (K2), the side column under it; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-time-hierarchy"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-time-hierarchy"] .th { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Vrijeme u domeni</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Drawing: grid place, card kind and series colour per node; hosts from the estate's forest (student side). */
+  var POS = { loom: [4, 0], DC01: [4, 2], DC02: [0, 4], DC03: [8, 4], 'PC-A': [0, 6], 'PC-B': [8, 6] };
+  var KIND = { loom: 'router', DC01: 'server', DC02: 'server', DC03: 'server', 'PC-A': 'host', 'PC-B': 'host' };
+  var COLOUR = { loom: 7, DC01: 1, DC02: 2, DC03: 3, 'PC-A': 4, 'PC-B': 5 };
+  var HOST = { loom: '10.40.1.5', DC01: 'qm-dc01', DC02: 'qm-dc02', DC03: 'brk-dc03', 'PC-A': null, 'PC-B': null };
+  /** The tree as drawn when nothing is moved: parent, child. */
+  var EDGES = [['loom', 'DC01'], ['DC01', 'DC02'], ['DC01', 'DC03'], ['DC02', 'PC-A'], ['DC03', 'PC-B']];
+
+  /** Data (names, addresses, offsets) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'th-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function signed(v) { return (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v) + ' s'; }
+  /** A distance between two clocks, in seconds. */
+  function dur(v) { return Math.abs(v) + ' s'; }
+  /** The same in words when it is whole minutes ("10 minutes"), for the whole domain against true time. */
+  function mins(v) { v = Math.abs(v); return v >= 60 && v % 60 === 0 ? t.n('minutes', v / 60) : data(v + ' s'); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Nodes are cloned, so
+      one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  function dirOf(v) { return t(v >= 0 ? 'dirAhead' : 'dirBehind'); }
+
+  // ── the tree ──
+
+  function badges(c, id) {
+    var s = c.state, x = s.nodes[id], out = [];
+    if (x.pdc) out.push({ text: t('bPdc'), k: 'fill', anim: false });
+    if (s.events.some(function (e) { return e.code === 'noSource' && e.node === id; })) out.push({ text: t('bE12'), k: 'dashed', anim: false });
+    if (!x.syncs && id !== 'loom') out.push({ text: t('bStopped'), k: 'dashed', anim: false });
+    if (c.n > 0 && x.corrected) out.push({ text: t('bCorrected', { d: signed(x.corrected) }), k: 'muted', anim: false });
+    return out;
+  }
+
+  function cfgLine(id, x) {
+    var word = id === 'loom' ? t('cfgLocal') : x.config === 'manual' ? t.parts('cfgManual', { peer: data('loom') })
+      : !x.syncs ? t('cfgStopped') : x.source ? t.parts('cfgDomhier', { src: data(x.source) }) : t('cfgTop');
+    return word;
+  }
+
+  function node(c, id) {
+    var s = c.state, x = s.nodes[id];
+    var lines = [{ text: signed(x.offset), kind: 'addr' }, HOST[id] ? { text: HOST[id], kind: 'sub' } : null,
+      { text: h('span', null, cfgLine(id, x)), kind: 'role' }];
+    if (id !== 'loom') lines.push({ text: h('span', null, t.parts('drift', { d: data(signed(x.driftPerRound)) })), kind: 'role' });
+    return {
+      id: id, kind: KIND[id], col: POS[id][0], row: POS[id][1], span: 4, c: COLOUR[id], mark: id,
+      lines: lines, badges: id === 'loom' ? null : badges(c, id), changed: c.n > 0 && s.changed.indexOf(id) >= 0
+    };
+  }
+
+  function tree(c) {
+    var s = c.state;
+    var links = [], packets = [];
+    function linked(a, b) { return s.nodes[b].source === a || s.nodes[a].source === b; }
+    EDGES.forEach(function (e) {
+      var a = e[0], b = e[1];
+      var up = linked(a, b);
+      // a sync that should be there and is not: the child's service is stopped
+      var broken = !up && !s.nodes[b].syncs && b !== 'loom';
+      links.push({ id: a + '~' + b, a: a, b: b, state: up ? 'up' : broken ? 'down' : 'off', active: up });
+    });
+    L.IDS.forEach(function (id) {
+      var src = s.nodes[id].source;
+      if (!src) return;
+      var known = EDGES.some(function (e) { return (e[0] === src && e[1] === id) || (e[1] === src && e[0] === id); });
+      if (!known) links.push({ id: src + '~' + id, a: src, b: id, state: 'up', active: true });
+      if (c.n > 0) packets.push({ from: src, to: id, label: signed(s.nodes[src].offset), c: COLOUR[src], at: 0.55 });
+    });
+    return Simdeck.topology({
+      cols: 12, rows: ['auto', 'minmax(0.5rem, 1.4rem)', 'auto', 'minmax(0.5rem, 1.4rem)', 'auto', 'minmax(0.5rem, 1.4rem)', 'auto'],
+      dir: c.dir, gap: '1cqw',
+      nodes: L.IDS.map(function (id) { return node(c, id); }), links: links, packets: packets
+    });
+  }
+
+  // ── the side column ──
+
+  function side(c) {
+    var s = c.state;
+    var steps = L.steps(c.params);
+    var krb = s.krb.map(function (k, i) {
+      var was = c.prev && c.n > 0 ? c.prev.krb[i] : null;
+      var hit = was && was.skew !== k.skew;
+      return h('li', { dataset: { ok: k.ok ? 'yes' : 'no' } },
+        h('span', { class: 'th-mk', 'aria-hidden': 'true' }, k.ok ? '✓' : '✕'),
+        h('span', { class: 'th-pair' }, data(k.a + ' ↔ ' + k.b, 'th-nw')),
+        data(k.skew + ' s', 'th-skew' + (hit ? ' th-ch' : '')),
+        h('span', { class: 'th-kind' }, t(k.kind === 'logon' ? 'kLogon' : 'kDc')),
+        h('span', { class: 'th-word' }, t(k.ok ? 'kOk' : 'kFail')));
+    });
+    var log = s.events.map(function (e) {
+      var text = e.code === 'noSource' ? t.parts('logE12', { node: data(e.node) })
+        : t.parts(e.code === 'krbFail' ? 'logFail' : 'logOk', { a: data(e.node), b: data(e.peer) });
+      return h('li', { dataset: { k: e.code === 'krbFail' ? 'fail' : 'info' }, class: e.round === c.n ? 'th-ch' : null },
+        h('span', { class: 'th-r' }, t('logRound', { n: e.round })), text);
+    });
+    if (!log.length) log.push(h('li', { dataset: { k: 'none' } }, t('logEmpty')));
+    return h('div', { class: 'th-side' },
+      h('div', { class: 'th-round' }, c.n === 0 ? t('roundStart') : t('round', { n: c.n, of: steps })),
+      h('div', { class: 'th-box' }, h('b', null, t('krbHead')), h('ul', { class: 'th-krb' }, krb)),
+      h('div', { class: 'th-box' }, h('b', null, t('logHead')), h('ul', { class: 'th-log' }, log)));
+  }
+
+  // ── captions ──
+
+  /** "loom → DC01; DC01 → DC02, DC03; DC02 → PC-A; DC03 → PC-B": each source and who follows it, in rule 7's order. */
+  function orderText(s) {
+    var out = [];
+    s.order.forEach(function (id) {
+      var kids = s.order.filter(function (x) { return s.nodes[x].source === id; });
+      if (kids.length) out.push(id + ' → ' + kids.join(', '));
+    });
+    return out.join('; ');
+  }
+
+  function capStart(c) {
+    var e = L.eff(c.params);
+    var vars = { pdc: data(e.pdcOn), peer: data('loom'), addr: data(HOST.loom) };
+    var out = [rich('capStart')];
+    if (e.pdcOn === 'DC01') out.push(rich(e.pdcSource === 'external' ? 'startExt' : 'startNone', vars));
+    else out.push(rich(e.pdcSource === 'external' ? 'startMoved' : 'startMovedNone', vars));
+    out.push(rich(e.pdcOn !== 'DC01' && e.pdcSource === 'external' ? 'startTreeMoved' : 'startTree'));
+    if (e.memberStopped) out.push(rich('startStopped'));
+    out.push(rich('startGo'));
+    return join(out);
+  }
+
+  function capRound(c) {
+    var s = c.state, n = c.n;
+    var out = [];
+    var lone = L.lonePdc(c.params);
+    var pulledPdc = false;
+    if (n === 1) out.push(rich('capMech', { n: n, order: data(orderText(s)) }));
+    if (lone) {
+      var d = s.nodes[lone].driftPerRound;
+      if (s.events.some(function (e) { return e.code === 'noSource' && e.round === n; })) {
+        out.push(rich('capE12', { pdc: data(lone) }));
+      } else if (d) out.push(rich('capFree', { pdc: data(lone), d: data(signed(d)), off: data(signed(s.nodes[lone].offset)) }));
+      else out.push(rich('capFreeZero', { pdc: data(lone) }));
+    } else {
+      // the PDC syncs from loom: its own drift is set back every round
+      var pdc = L.DCS.filter(function (id) { return s.nodes[id].pdc; })[0];
+      var pd = s.nodes[pdc].driftPerRound;
+      if (pd && s.nodes[pdc].source === 'loom') {
+        out.push(rich('capPdcPulled', { pdc: data(pdc), d: data(signed(pd)), peer: data('loom') }));
+        pulledPdc = true;
+      }
+      else if (n > 1) out.push(rich('capPulled', { peer: data('loom') }));
+    }
+
+    // the strip: new failures first, then failures that stand, then a pair back in time
+    var fresh = s.events.filter(function (e) { return e.round === n && e.code === 'krbFail'; });
+    var said = false;
+    s.krb.forEach(function (k, i) {
+      var v = s.nodes[k.a].offset - s.nodes[k.b].offset;
+      var vars = { a: data(k.a), b: data(k.b), d: data(dur(v)), dir: dirOf(v) };
+      if (fresh.some(function (e) { return e.node === k.a && e.peer === k.b; })) {
+        // two DC pairs failing together read as one sentence about the first
+        if (k.kind === 'dc' && said) return;
+        out.push(rich(k.kind === 'logon' ? 'capFailLogon' : 'capFailDc', vars));
+        if (k.kind === 'dc') said = true;
+      } else if (!k.ok && i === s.krb.indexOf(s.krb.filter(function (x) { return !x.ok; })[0])) {
+        if (!fresh.length) out.push(rich('capStillFail', vars));
+      } else if (k.ok && c.prev && !c.prev.krb[i].ok) out.push(rich('capOkAgain', vars));
+    });
+
+    var allOk = s.krb.every(function (k) { return k.ok; });
+    var dom = L.domainOffset(s);
+    var pcb = s.nodes['PC-B'];
+    // round 1 with a lone or corrected PDC already says a lot: the stopped member and the old PDC wait for round 2
+    var busy = n === 1 && (lone || pulledPdc);
+    if (!busy && !pcb.syncs && s.krb[1].ok && pcb.offset !== s.nodes.DC03.offset) {
+      var v = pcb.offset - s.nodes.DC03.offset;
+      out.push(rich('capStopped', { a: data('PC-B'), b: data('DC03'), d: data(dur(v)), dir: dirOf(v) }));
+      busy = true;
+    }
+    if (allOk && dom !== null && Math.abs(dom) >= 300) out.push(rich(dom > 0 ? 'capAgreeAhead' : 'capAgreeBehind', { d: mins(dom) }));
+    if (lone && lone !== 'DC01' && s.nodes.DC01.source === 'loom') {
+      if (n === 2) out.push(rich('capOldPdc', { peer: data('loom') }));
+      else if (n > 2 && !busy && s.krb[2].ok && s.krb[2].skew) out.push(rich('capSplit', { d: data(dur(s.krb[2].skew)) }));
+    }
+    return join(out);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'pdcSource', type: 'choice', label: t('pPdcSource'), resets: true,
+        options: [['external', t('srcExternal')], ['none', t('srcNone')]] },
+      { key: 'pdcOn', type: 'choice', label: t('pPdcOn'), resets: true, options: [['DC01', 'DC01'], ['DC02', 'DC02']] },
+      { key: 'pdcDrift', type: 'range', label: t('pPdcDrift'), min: -60, max: 60, step: 5, resets: true,
+        format: function (v) { return t('perRound', { d: signed(v) }); } },
+      { key: 'memberStopped', type: 'toggle', label: t('pStopped'), resets: true },
+      { key: 'pcbDrift', type: 'range', label: t('pPcbDrift'), min: 0, max: 120, step: 5, resets: true,
+        format: function (v) { return t('perRound', { d: signed(v) }); } },
+      { key: 'rounds', type: 'range', label: t('pRounds'), min: 1, max: 10, step: 1, resets: true }
+    ],
+
+    presets: [
+      { id: 'healthy', label: t('prHealthy'), params: { pdcSource: 'external', pdcDrift: 0, memberStopped: false, pcbDrift: 40, pdcOn: 'DC01', rounds: 4 } },
+      { id: 'pdc-no-source', label: t('prNoSource'), params: { pdcSource: 'none', pdcDrift: 60, memberStopped: false, pcbDrift: 40, pdcOn: 'DC01', rounds: 10 } },
+      { id: 'member-stopped', label: t('prStopped'), params: { pdcSource: 'external', pdcDrift: 0, memberStopped: true, pcbDrift: 40, pdcOn: 'DC01', rounds: 9 } },
+      { id: 'move-pdc', label: t('prMove'), params: { pdcSource: 'external', pdcDrift: 30, memberStopped: false, pcbDrift: 40, pdcOn: 'DC02', rounds: 6 } },
+      { id: 'quillmoor', label: t('prQuillmoor'), params: { pdcSource: 'external', pdcDrift: 15, memberStopped: false, pcbDrift: 40, pdcOn: 'DC01', rounds: 3 } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('lgSync') },
+      { shape: 'dash', label: t('lgBroken') },
+      { shape: 'th-pdc', label: t('lgPdc') },
+      { shape: 'th-off', label: t('lgOffset') },
+      { shape: 'th-krb', label: t('lgKrb') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'th' }, tree(c), side(c)));
+    },
+
+    caption: function (c) {
+      return c.n === 0 ? capStart(c) : capRound(c);
+    }
+  });
+})();
+</script>
+</body>
+</html>
