@@ -1,0 +1,416 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ec-vs-replication: overhead vs failures tolerated vs rebuild cost (k+m). Left, two K3 block grids over the same
+     host columns: the chosen scheme and the compared one, each with its pieces and a rebuild row (the new piece on the
+     first free host, one arrow per piece it reads). Right, the comparison table (SPEC.md rule 6). Clicking a host's
+     column head or any cell of its column fails or restores it. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ec-vs-replication">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodiranje s brisanjem ili kopije · simdeck</title>
+<meta name="description" content="Biraj n, k i m i ruši poslužitelje: koliko prostora troši koja shema, koliko kvarova podaci prežive, kada U/I stane i koliko se čita za obnovu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ec-vs-replication",
+  "title": {
+    "hr": "Kodiranje s brisanjem ili kopije",
+    "en": "Erasure coding vs replication"
+  },
+  "concept": {
+    "hr": "Prostor, preživljeni kvarovi i cijena obnove: n kopija ili k+m dijelova",
+    "en": "Overhead vs failures tolerated vs rebuild cost: n replicas or k+m shards"
+  },
+  "summary": {
+    "hr": "Biraj n, k i m i ruši poslužitelje: koliko prostora troši koja shema, koliko kvarova podaci prežive, kada U/I stane i koliko se čita za obnovu.",
+    "en": "Choose n, k and m and fail hosts: how much space each scheme uses, how many failures the data survives, when I/O stops and what a rebuild reads."
+  },
+  "tags": [
+    "storage-cluster",
+    "replication"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "ec-4-2"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ec-vs-replication"]; colours only from kit tokens. */
+[data-sim="ec-vs-replication"] .ev {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+  align-content: center;
+  height: 100%;
+  padding: 0.45rem 0.7rem;
+  font-size: 1rem;
+}
+[data-sim="ec-vs-replication"] .ev-grids { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="ec-vs-replication"] .ev-tag {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="ec-vs-replication"] .ev-tag[data-role="alt"] { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+[data-sim="ec-vs-replication"] .ev-cur .sd-bg { box-shadow: inset 0 0 0 0.12rem var(--ink); }
+
+/* the status badge in each grid's header: colour and words; I/O stops = warn, lost = danger */
+[data-sim="ec-vs-replication"] .ev-st { display: inline-block; padding: 0 0.45rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="ec-vs-replication"] .ev-st[data-st="ok"] { color: var(--ok); }
+[data-sim="ec-vs-replication"] .ev-st[data-st="degraded"] { color: var(--ink); border-style: dashed; }
+[data-sim="ec-vs-replication"] .ev-st[data-st="stopped"] { color: var(--ink); background: color-mix(in srgb, var(--warn) 35%, var(--bg)); border-color: var(--warn); border-width: 0.2rem; }
+[data-sim="ec-vs-replication"] .ev-st[data-st="lost"] { color: var(--danger); border-width: 0.2rem; }
+
+/* host buttons in the column heads; every cell of the grids is clickable too */
+[data-sim="ec-vs-replication"] .ev-host {
+  font: inherit;
+  font-family: var(--mono);
+  font-weight: 700;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0.1rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+[data-sim="ec-vs-replication"] .ev-host[aria-pressed="true"] { color: var(--danger); border-color: var(--danger); border-width: 0.18rem; text-decoration: line-through; text-decoration-thickness: 0.15rem; }
+[data-sim="ec-vs-replication"] .ev-host.ev-now { background: var(--hl); color: var(--on-hl); }
+[data-sim="ec-vs-replication"] .ev-host:focus-visible { outline: 0.2rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="ec-vs-replication"] .sd-bg-cell { cursor: pointer; }
+[data-sim="ec-vs-replication"] .sd-bg-colhead { justify-self: stretch; text-align: center; }
+[data-sim="ec-vs-replication"] .ev-rebuild { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* the comparison table */
+[data-sim="ec-vs-replication"] .ev-table-box {
+  padding: 0.35rem 0.6rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  min-width: 0;
+  overflow-x: auto;
+}
+[data-sim="ec-vs-replication"] .ev-table-box h2 { margin: 0 0 0.2rem; font-size: 1.1em; }
+[data-sim="ec-vs-replication"] .ev-table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+[data-sim="ec-vs-replication"] .ev-table th,
+[data-sim="ec-vs-replication"] .ev-table td { padding: 0.22rem 0.35rem; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+[data-sim="ec-vs-replication"] .ev-table th[scope="row"] { text-align: left; font-weight: 400; white-space: normal; min-width: 7rem; }
+[data-sim="ec-vs-replication"] .ev-table thead th { vertical-align: bottom; font-size: 1rem; }
+[data-sim="ec-vs-replication"] .ev-table .ev-col-tag { display: block; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="ec-vs-replication"] .ev-table .ev-cur { font-weight: 700; background: color-mix(in srgb, var(--ink) 7%, var(--panel)); }
+[data-sim="ec-vs-replication"] .ev-table td[data-bad] { color: var(--danger); font-weight: 700; }
+[data-sim="ec-vs-replication"] .ev-table td[data-st="stopped"] { background: color-mix(in srgb, var(--warn) 35%, var(--bg)); color: var(--ink); }
+[data-sim="ec-vs-replication"] .ev-table td[data-st="lost"] { color: var(--danger); }
+
+/* legend swatches of the page's own marks */
+[data-sim="ec-vs-replication"] .sd-swatch[data-shape="ev-stop"] { background: color-mix(in srgb, var(--warn) 35%, var(--bg)); border: 0.2rem solid var(--warn); }
+
+/* the panel: presets and the sliders in two columns, so five presets and the controls fit 1920×1080 */
+[data-sim="ec-vs-replication"] .sd-ctl[hidden] { display: none; }
+[data-sim="ec-vs-replication"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ec-vs-replication"] .sd-group { gap: 0.2rem; }
+[data-sim="ec-vs-replication"] .sd-ctl { gap: 0; }
+[data-sim="ec-vs-replication"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.9rem; }
+[data-sim="ec-vs-replication"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="ec-vs-replication"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="n"], [data-key="k"], [data-key="m"], [data-key="hosts"]) { grid-column: auto; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ec-vs-replication"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ec-vs-replication"] .ev { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.4rem; }
+  [data-sim="ec-vs-replication"] .ev-host { min-width: 1.6rem; }
+  [data-sim="ec-vs-replication"] .ev-table th[scope="row"] { min-width: 6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kodiranje s brisanjem ili kopije</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var MIB = 1048576, TIB = 1099511627776, TB = 1e12;
+  var C = { rep: 1, data: 2, coding: 3 };       // series colour per piece role
+  var sim = null;
+
+  // ── numbers in the page's language ──
+
+  /** x with at most d decimals, trailing zeros dropped, in the page's language. */
+  function dec(x, d) {
+    var s = x.toFixed(d).replace(/\.?0+$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function mib(b) { return t('mib', { n: dec(b / MIB, 2) }); }
+  function tib(b) { return t('tib', { n: dec(b / TIB, 1) }); }
+  function tb(b) { return t('tb', { n: dec(b / TB, 1) }); }
+  function pct(x) { return t('pct', { n: dec(x, 1) }); }
+  /** Emphasis: *word* in a caption is an English term in italics. */
+  function emph(text) {
+    return text.split(/\*([^*]+)\*/).map(function (bit, i) { return i % 2 ? h('em', { lang: 'en' }, bit) : bit; });
+  }
+  function data(x) { return h('span', { translate: 'no' }, String(x)); }
+
+  // ── the grids ──
+
+  function hostButtons(s, chg) {
+    return s.hosts.map(function (x) {
+      var n = x.id + 1;
+      return h('button', {
+        type: 'button', class: 'ev-host' + (chg.hosts.indexOf(x.id) >= 0 ? ' ev-now' : ''), translate: 'no',
+        'aria-pressed': String(!x.up), 'aria-label': t('hostAria', { n: n, state: t(x.up ? 'stateUp' : 'stateDown') }),
+        dataset: { host: String(x.id) }
+      }, t(x.up ? 'hostHead' : 'hostDown', { n: n }));
+    });
+  }
+
+  function statusBadge(e) {
+    var text = e.status === 'ok' ? t(e.kind === 'rep' ? 'stOk' : 'stOkEc')
+      : e.status === 'degraded' ? t('stDegraded', { min: e.min })
+      : e.status === 'stopped' ? t('stStopped', { live: e.live, min: e.min })
+      : t('stLost', { live: e.live, need: e.need });
+    return h('span', { class: 'ev-st', dataset: { st: e.status } }, text);
+  }
+
+  function grid(s, e, role, chg) {
+    var hosts = s.p.hosts;
+    var byHost = {};
+    e.pieces.forEach(function (x) { if (x.host !== null) byHost[x.host] = x; });
+    var plan = e.plan;
+    var planChanged = chg.plan[role];
+
+    var pieceCells = [], rebuildCells = [];
+    for (var hh = 0; hh < hosts; hh++) {
+      var x = byHost[hh];
+      var down = L.isDown(s.p.failed, hh);
+      var now = chg.hosts.indexOf(hh) >= 0;
+      if (x) {
+        pieceCells.push(down
+          ? { text: x.label, kind: 'dead', now: now }
+          : { text: x.label, kind: x.role === 'coding' ? 'soft' : 'fill', c: C[x.role], now: now });
+      } else pieceCells.push(down ? { kind: 'dead', now: now } : { now: now });
+      if (plan && plan.target === hh) {
+        var p = e.pieces[plan.piece];
+        rebuildCells.push({ text: p.label, kind: 'ghost', now: planChanged });
+      } else rebuildCells.push(null);
+    }
+
+    var links = [];
+    if (plan && plan.target !== null) {
+      plan.sources.forEach(function (i) {
+        links.push({ from: { row: 'pieces', cell: e.pieces[i].host }, to: { row: 'rebuild', cell: plan.target }, now: planChanged });
+      });
+    }
+    var rebuildAside = !plan ? (e.status === 'lost' ? t('rebuildLost') : t('rebuildNone'))
+      : plan.target === null ? t('rebuildNoHost')
+      : t('rebuildText', { read: mib(plan.read), write: mib(plan.write) });
+    var aside = h('span', null, t('asideLive', { live: e.live, w: e.width }), e.holes ? [h('br'), t.n('asideHoles', e.holes)] : null);
+
+    var title = h('span', null, e.kind === 'rep' ? t('gridRep', { n: e.n }) : t('gridEc', { k: e.k, m: e.m }), ' ',
+      h('span', { class: 'ev-tag', dataset: { role: role } }, t(role === 'cur' ? 'tagCur' : 'tagAlt')));
+    var meta = e.kind === 'rep'
+      ? t('metaRep', { n: e.n, piece: mib(e.piece), raw: mib(e.rawObj), obj: mib(L.OBJECT) })
+      : t.n('metaEc', e.width, { w: e.width, piece: mib(e.piece), raw: mib(e.rawObj), obj: mib(L.OBJECT) });
+
+    var spec = {
+      title: title,
+      meta: [meta],
+      count: statusBadge(e),
+      cellHeight: '2.8rem',
+      colLabels: hostButtons(s, chg),
+      rows: [
+        { id: 'pieces', label: h('span', null, t('rowPieces')), aside: aside, cells: pieceCells },
+        { id: 'rebuild', label: h('span', null, t('rowRebuild')), aside: h('span', { class: 'ev-rebuild' }, rebuildAside), cells: rebuildCells }
+      ],
+      links: links
+    };
+    return h('div', { class: 'ev-' + role }, Simdeck.blockGrid(spec));
+  }
+
+  // ── the comparison table ──
+
+  function table(s) {
+    var cols = s.cols;
+    function row(label, f) {
+      return h('tr', null, h('th', { scope: 'row' }, label), cols.map(function (c) {
+        var cell = f(c);
+        var attrs = { class: c.current ? 'ev-cur' : null, translate: 'no' };
+        if (cell && cell.attrs) Object.assign(attrs, cell.attrs);
+        return h('td', attrs, cell && cell.text != null ? cell.text : cell);
+      }));
+    }
+    var head = h('tr', null, h('th'), cols.map(function (c) {
+      return h('th', { scope: 'col', class: c.current ? 'ev-cur' : null },
+        data(c.name), h('span', { class: 'ev-col-tag' }, t(c.role === 'cur' ? 'colCur' : c.role === 'alt' ? 'colAlt' : 'colTwin')));
+    }));
+    var nowKey = { ok: 'nowOk', degraded: 'nowDegraded', stopped: 'nowStopped', lost: 'nowLost' };
+    return h('section', { class: 'ev-table-box' },
+      h('h2', null, t('tblTitle')),
+      h('table', { class: 'ev-table' },
+        h('thead', null, head),
+        h('tbody', null,
+          row(t('tblRaw'), function (c) { return pct(c.rawPct); }),
+          row(t('tblEff'), function (c) { return pct(c.effPct); }),
+          row(t('tblPool'), function (c) { return tib(c.rawPool); }),
+          row(t('tblSurvive'), function (c) { return String(c.tolerated); }),
+          row(t('minCustomVal'), function (c) { return String(c.min); }),
+          row(t('tblIo'), function (c) { return String(c.ioTolerated); }),
+          row(t('tblRebuild'), function (c) { return tb(c.rebuildDisk); }),
+          row(t('tblHosts'), function (c) { return c.placeable ? String(c.hostsNeeded) : { text: '✕ ' + c.hostsNeeded, attrs: { 'data-bad': 'true' } }; }),
+          row(t('tblNow'), function (c) { return { text: t(nowKey[c.status]), attrs: { 'data-st': c.status, translate: null } }; }))));
+  }
+
+  // ── render; the changed marks follow clicks on hosts ──
+
+  // Rule 7: only a click on a host marks what it changed; presets, sliders and reset mark nothing.
+  var NONE = { hosts: [], plan: { cur: false, alt: false } };
+  var lastP = null, lastState = null, clicked = false, chg = NONE;
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (lastP === key) return;
+    chg = clicked ? L.changed(lastState, c.state) : NONE;
+    clicked = false;
+    lastP = key;
+    lastState = c.state;
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'ev' },
+      h('div', { class: 'ev-grids' }, grid(s, s.cur, 'cur', chg), grid(s, s.alt, 'alt', chg)),
+      table(s)));
+  }
+
+  /** A click on a host button or on any cell of a host's column fails or restores that host. */
+  function hostOf(target) {
+    var b = target.closest('.ev-host');
+    if (b) return Number(b.dataset.host);
+    var cell = target.closest('.sd-bg-cell');
+    if (!cell) return null;
+    var g = cell.closest('.sd-bg-grid');
+    var col = parseInt(cell.style.gridColumn, 10) - (g && g.dataset.label ? 2 : 1);
+    return Number.isFinite(col) ? col : null;
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.cur, a = s.alt;
+    var k = L.captionKey(s);
+    var f = e.lost;                  // down hosts that held a piece of the chosen scheme
+    var plan = e.plan;
+    var vars = {
+      cur: e.name, alt: a.name, name: e.name, curPct: pct(e.rawPct), altPct: pct(a.rawPct),
+      curPool: tib(e.rawPool), altPool: tib(a.rawPool), curRead: tb(e.rebuildDisk), altRead: tb(a.rebuildDisk),
+      times: (e.kind === 'ec' ? e.k : a.k) + ' ×', f: f, live: e.live, w: e.width, need: e.need, min: e.min,
+      tol: e.tolerated, hosts: s.p.hosts, miss: e.lost + e.holes
+    };
+    var main = (k.key === 'cDegraded' || k.key === 'cStopped') ? t.n(k.key, f, vars) : t(k.key, vars);
+    var out = emph(main);
+    k.notes.forEach(function (key) {
+      var txt;
+      if (key === 'nHoles') txt = t('nHoles', { holes: e.holes });
+      else if (key === 'nTwin') txt = t.n('nTwin', k.twin.tolerated, { twin: k.twin.name, eff: pct(k.twin.effPct), tt: k.twin.tolerated, t: e.tolerated });
+      else if (key === 'sDegraded' || key === 'sStopped' || key === 'sLost') txt = t(key, vars);
+      else if (key === 'nRebuild') txt = t.n('nRebuild', plan.sources.length, { read: mib(plan.read), write: mib(plan.write), src: plan.sources.length });
+      else txt = t(key);
+      out.push(' ', txt);
+    });
+    return out;
+  }
+
+  var labels = { 'three-copies': 'pThree', 'ec-4-2': 'pEc42', 'ec-8-3': 'pEc83', 'same-hardware': 'pSame', 'min-size-k': 'pMinK' };
+  function curScheme(p) { return p.scheme === 'rep' ? { kind: 'rep', n: p.n } : { kind: 'ec', k: p.k, m: p.m }; }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'scheme', type: 'choice', label: t('scheme'), options: [['rep', t('schemeRep')], ['ec', t('schemeEc')]] },
+      { key: 'n', type: 'range', label: t('n'), min: 2, max: 4, step: 1 },
+      { key: 'k', type: 'range', label: t('k'), min: 2, max: 8, step: 1 },
+      { key: 'm', type: 'range', label: t('m'), min: 1, max: 3, step: 1 },
+      { key: 'minSize', type: 'choice', label: t('minSize'), options: [['default', t('minDefault')], ['custom', t('minCustom')]] },
+      { key: 'minCustom', type: 'range', label: t('minCustomVal'), step: 1,
+        min: function (p) { return L.minRange(curScheme(p))[0]; }, max: function (p) { return L.minRange(curScheme(p))[1]; },
+        visible: function (p) { return p.minSize === 'custom'; } },
+      { key: 'hosts', type: 'range', label: t('hosts'), min: 3, max: L.MAX_HOSTS, step: 1 },
+      { key: 'failed', type: 'range', label: t('failedCtl'), min: 0, max: L.RANGE.failed[1], step: 1, visible: function () { return false; } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'bg-fill', c: C.rep, label: t('legRep') },
+      { shape: 'bg-fill', c: C.data, label: t('legData') },
+      { shape: 'bg-soft', c: C.coding, label: t('legCoding') },
+      { shape: 'bg-dead', label: t('legDown') },
+      { shape: 'bg-ghost', label: t('legRebuild') },
+      { shape: 'ev-stop', label: t('legStop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+
+  document.querySelector('[data-sd-stage]').addEventListener('click', function (ev) {
+    var hh = hostOf(ev.target);
+    if (hh === null || hh < 0 || hh >= sim.params.hosts) return;
+    clicked = true;
+    sim.set({ failed: L.toggleHost(sim.params.failed, hh) });
+    // keep the keyboard on the same host button (in the same grid) after the redraw
+    var btn = ev.target.closest('.ev-host'), inAlt = btn && btn.closest('.ev-alt');
+    var again = document.querySelector('[data-sim="ec-vs-replication"] ' + (inAlt ? '.ev-alt' : '.ev-cur') + ' .ev-host[data-host="' + hh + '"]');
+    if (again && btn) again.focus();
+  });
+})();
+</script>
+</body>
+</html>
