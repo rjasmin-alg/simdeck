@@ -231,6 +231,144 @@ test('params: a read scenario has no failure; prefer only with two replicas; lag
   assert.equal(logic.eff(P({ readFrom: 'primary', rywWait: true, read: true })).rywWait, false);
 });
 
+// ── sync-async-replication (SPEC.md "Synchronous commit"): tie-breaks first ──
+
+const SYNC = P({ mode: 'sync', rttMs: 1 });
+const ackOf = (s, k) => s.writes[k - 1];
+
+test('S5: a confirmation in the failure tick counts: apply, then fail', () => {
+  const p = P({ mode: 'sync', rttMs: 1, failAt: 1000 });
+  const f = at(p, stepOf(p, 'fail'));
+  assert.equal(f.t, 1000);
+  assert.equal(ackOf(f, 10).acked, true, 'write 10 (at 1000 ms) is acknowledged before the failure');
+  assert.equal(ackOf(f, 10).ackAt, 1001);
+  assert.equal(f.servers.R1.applied, 10);
+  assert.deepEqual(end(p).lost, []);
+  // the same holds at 600 ms and at 40 ms RTT (RTT < one tick)
+  const q = P({ mode: 'sync', rttMs: 40, failAt: 600 });
+  assert.equal(ackOf(at(q, stepOf(q, 'fail')), 6).ackAt, 640);
+  assert.deepEqual(end(q).lost, []);
+});
+
+test('S4 order: R1 becomes unreachable after the tick at 500 ms, in a step of its own that takes no time', () => {
+  const p = P({ mode: 'sync', replicaDown: 500 });
+  const n = stepOf(p, 'replicaDown');
+  assert.equal(n, 6);
+  const s = at(p, n);
+  assert.equal(s.t, 500);
+  assert.equal(s.servers.R1.reachable, false);
+  assert.equal(s.servers.R1.up, true, 'unreachable from the primary, not failed');
+  assert.equal(ackOf(s, 5).acked, true, 'write 5 was confirmed before the cut');
+  assert.deepEqual(s.changed.roles, ['R1']);
+  assert.deepEqual(logic.planOf(logic.eff(p)), [1, 2, 3, 4, 5, 'replicaDown', 6, 7, 8, 9, 10]);
+});
+
+test('S1: synchronous: acknowledged only once R1 has the record, one round trip after the write', () => {
+  for (const rttMs of [1, 10, 40]) {
+    const p = P({ mode: 'sync', rttMs });
+    for (let n = 1; n <= 10; n++) {
+      const s = at(p, n);
+      assert.equal(s.servers.R1.applied, n, 'R1 has every record in its tick');
+      assert.equal(ackOf(s, n).acked, true);
+      assert.equal(ackOf(s, n).ackAt, n * 100 + rttMs);
+      assert.deepEqual(s.ackLatency[n - 1], { lsn: n, ms: rttMs });
+      assert.deepEqual(s.changed.acked, [n]);
+    }
+  }
+  assert.equal(logic.commitLatency('sync', 40), 40);
+  assert.equal(logic.commitLatency('async', 40), 0);
+  // a client waiting for each commit: 1000 / RTT commits per second
+  assert.equal(logic.serialRate(40), 25);
+  assert.equal(logic.serialRate(10), 100);
+  assert.equal(logic.serialRate(1), 1000);
+  assert.equal(logic.serialRate(0), null);
+  // synchronous commit is shown with one replica (quorum commit is out of scope)
+  assert.deepEqual(end(P({ mode: 'sync', replicas: 2 })).ids, ['P', 'R1']);
+});
+
+test('S2: with a synchronous replica every acknowledged commit is on two servers: failover loses nothing', () => {
+  for (const failAt of [600, 1000]) for (const rttMs of [1, 10, 40]) {
+    const p = P({ mode: 'sync', rttMs, failAt });
+    const s = end(p);
+    assert.equal(s.promoted, 'R1');
+    assert.equal(s.servers.R1.applied, failAt / 100);
+    assert.deepEqual(s.lost, [], `fail ${failAt}, RTT ${rttMs}`);
+  }
+  // the old primary coming back has nothing extra: it attaches
+  const b = P({ mode: 'sync', failAt: 1000, oldBack: true });
+  assert.equal(at(b, stepOf(b, 'return')).refused, false);
+});
+
+test('S3: asynchronous: acknowledged at once (the host\'s rule 1); failover loses the lag', () => {
+  // the host's failover-tail is the asynchronous twin of sync-failover
+  const s = end(P({ failAt: 1000 }));
+  assert.ok(s.writes.every((w) => w.acked));
+  assert.deepEqual(s.lost, [8, 9, 10]);
+  assert.deepEqual(end(P({ mode: 'async', rttMs: 40, failAt: 1000 })).lost, [8, 9, 10], 'RTT does nothing asynchronously');
+  assert.equal(steps(P({ replicaDown: 500 })), 10, 'R1 unreachable only with a synchronous R1');
+  // the same failure with a synchronous R1 at RTT 1: nothing lost (S2), each commit 1 ms later
+  const sy = end(P({ mode: 'sync', failAt: 1000 }));
+  assert.deepEqual([sy.lost, sy.writes[7].ackAt - sy.writes[7].at], [[], 1]);
+});
+
+test('S4 block: with the only synchronous replica unreachable, commits wait and nothing is acknowledged', () => {
+  const p = P({ mode: 'sync', replicaDown: 500, onSyncLost: 'block' });
+  const s = end(p);
+  assert.deepEqual(s.blocked, [6, 7, 8, 9, 10]);
+  assert.deepEqual(s.writes.filter((w) => w.acked).map((w) => w.lsn), [1, 2, 3, 4, 5]);
+  assert.equal(s.servers.P.applied, 10, 'the primary has them in its own log');
+  assert.equal(s.servers.R1.applied, 5);
+  assert.equal(s.degraded, false);
+  assert.deepEqual(at(p, stepOf(p, 'replicaDown') + 1).changed.blocked, [6]);
+  assert.deepEqual(at(p, stepOf(p, 'replicaDown') + 1).changed.acked, []);
+  // a failure now: R1 promoted with 5; 6–10 were never acknowledged, so they are not lost acknowledged data
+  const f = end(P({ mode: 'sync', replicaDown: 500, failAt: 1000 }));
+  assert.equal(f.promoted, 'R1');
+  assert.deepEqual(f.lost, []);
+  assert.ok(f.writes.every((w) => !w.lost));
+});
+
+test('S4 degrade: the primary switches to asynchronous and keeps going; a failure loses 6–10', () => {
+  const p = P({ mode: 'sync', replicaDown: 500, onSyncLost: 'degrade' });
+  const d = at(p, stepOf(p, 'replicaDown'));
+  assert.equal(d.degraded, true);
+  const s = end(p);
+  assert.deepEqual(s.blocked, []);
+  assert.deepEqual(s.writes.map((w) => w.acked), Array(10).fill(true));
+  assert.deepEqual(s.ackLatency.map((a) => a.ms), [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]);
+  assert.equal(s.servers.R1.applied, 5, 'no replica has 6–10');
+  const f = end(P({ mode: 'sync', replicaDown: 500, onSyncLost: 'degrade', failAt: 1000 }));
+  assert.equal(f.promoted, 'R1');
+  assert.deepEqual(f.lost, [6, 7, 8, 9, 10]);
+  // with block it never degrades
+  assert.equal(end(P({ mode: 'sync', replicaDown: 500, onSyncLost: 'block' })).degraded, false);
+});
+
+test('sync params: not with the read scenario; RTT 1/10/40; replicaDown only at 500', () => {
+  const e = logic.eff(P({ read: true, mode: 'sync', replicaDown: 500 }));
+  assert.deepEqual([e.mode, e.r1DownAt], ['async', 0]);
+  assert.equal(logic.eff(P({ mode: 'sync', rttMs: 25 })).rttMs, 1);
+  assert.equal(logic.eff(P({ mode: 'sync', rttMs: '40' })).rttMs, 40);
+  assert.equal(logic.eff(P({ mode: 'sync', replicaDown: 300 })).r1DownAt, 0);
+  assert.equal(logic.eff(P({ mode: 'sync', replicaDown: 500 })).r1DownAt, 500);
+  assert.equal(logic.eff(P({ replicaDown: 500 })).r1DownAt, 0, 'asynchronous: ignored');
+  assert.equal(logic.eff(P({ mode: 'sync', replicas: 2 })).replicas, 1);
+  assert.equal(logic.eff(P({ onSyncLost: 'x' })).onSyncLost, 'block');
+  assert.equal(logic.extOf(logic.eff(P({}))), false);
+});
+
+test('the host\'s states carry no field of the sync params', () => {
+  for (const p of [P({}), P({ read: true, rywWait: true }), P({ replicas: 2, failAt: 1000, oldBack: true })]) {
+    for (let n = 0; n <= steps(p); n++) {
+      const s = at(p, n);
+      for (const k of ['mode', 'rttMs', 'ackLatency', 'blocked', 'degraded', 'onSyncLost']) assert.ok(!(k in s), `${k} at ${n}`);
+      for (const id of s.ids) assert.ok(!('mode' in s.servers[id]) && !('reachable' in s.servers[id]));
+      for (const w of s.writes) assert.ok(!('ackAt' in w));
+      assert.ok(!('acked' in s.changed));
+    }
+  }
+});
+
 // ── presets (SPEC.md table) ──
 
 const PRESETS = {
@@ -238,7 +376,11 @@ const PRESETS = {
   'read-own-write': P({ read: true }),
   'failover-tail': P({ failAt: 1000 }),
   'two-replicas': P({ replicas: 2, failAt: 1000 }),
-  'old-primary-returns': P({ failAt: 1000, oldBack: true })
+  'old-primary-returns': P({ failAt: 1000, oldBack: true }),
+  'sync-failover': P({ mode: 'sync', rttMs: 1, failAt: 1000 }),
+  'sync-over-wan': P({ mode: 'sync', rttMs: 40 }),
+  'sync-replica-down': P({ mode: 'sync', rttMs: 1, replicaDown: 500, onSyncLost: 'block' }),
+  'degrade-silently': P({ mode: 'sync', rttMs: 1, replicaDown: 500, onSyncLost: 'degrade', failAt: 1000 })
 };
 
 test('presets: the numbers in SPEC.md', () => {
@@ -255,6 +397,28 @@ test('presets: the numbers in SPEC.md', () => {
   assert.deepEqual(end(PRESETS['old-primary-returns']).servers.P.discarded, [8, 9, 10]);
 });
 
+test('sync presets: the numbers in SPEC.md', () => {
+  const want = { 'sync-failover': 12, 'sync-over-wan': 10, 'sync-replica-down': 11, 'degrade-silently': 13 };
+  for (const id of Object.keys(want)) assert.equal(steps(PRESETS[id]), want[id], id);
+  const sf = end(PRESETS['sync-failover']);
+  assert.deepEqual([sf.servers.R1.applied, sf.lost.length], [10, 0]);
+  assert.ok(sf.ackLatency.every((a) => a.ms === 1), 'each commit ≈ 1 ms longer');
+  const wan = end(PRESETS['sync-over-wan']);
+  assert.ok(wan.ackLatency.every((a) => a.ms >= 40));
+  assert.equal(logic.serialRate(logic.commitLatency(wan.mode, wan.rttMs)), 25);
+  const down = end(PRESETS['sync-replica-down']);
+  assert.deepEqual(down.blocked, [6, 7, 8, 9, 10]);
+  assert.equal(down.writes.filter((w) => w.acked).length, 5);
+  assert.deepEqual(end(PRESETS['degrade-silently']).lost, [6, 7, 8, 9, 10]);
+});
+
+test('page: the sync presets set every sync param, and the entry in sim.json is a page preset', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const meta = JSON.parse(fs.readFileSync(path.join(__dirname, 'sim.json'), 'utf8'));
+  const ids = [...html.matchAll(/\{ id: '([a-z-]+)', label:/g)].map((m) => m[1]);
+  for (const e of meta.entries || []) assert.ok(ids.includes(e.preset), e.preset);
+});
+
 test('the page lists exactly these presets, in this order', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const ids = [...html.matchAll(/\{ id: '([a-z-]+)', label:/g)].map((m) => m[1]);
@@ -268,11 +432,20 @@ test('no combination of params exceeds 20 steps; the most is 15', () => {
       max = Math.max(max, steps(P({ replicas, lag1, read, readFrom, failAt, oldBack, rywWait: true })));
     }
   assert.equal(max, 15);
+  // with the sync params (one replica, R1 unreachable): 10 ticks + 1 + fail, promote, return, rebuild
+  let maxSync = 0;
+  for (const replicas of [1, 2]) for (const mode of ['async', 'sync']) for (const replicaDown of [0, 500])
+    for (const failAt of [0, 600, 1000]) for (const oldBack of [false, true]) for (const onSyncLost of ['block', 'degrade']) {
+      maxSync = Math.max(maxSync, steps(P({ replicas, mode, replicaDown, failAt, oldBack, onSyncLost })));
+    }
+  assert.equal(maxSync, 15);
 });
 
 // ── generic checks every sim keeps ──
 
-const SAMPLES = [P({}), P({ read: true, rywWait: true }), P({ replicas: 2, failAt: 600, oldBack: true }), P({ replicas: 2, lag1: 1000, lag2: 0, failAt: 1000, oldBack: true })];
+const SAMPLES = [P({}), P({ read: true, rywWait: true }), P({ replicas: 2, failAt: 600, oldBack: true }), P({ replicas: 2, lag1: 1000, lag2: 0, failAt: 1000, oldBack: true }),
+  P({ mode: 'sync', rttMs: 40, failAt: 600, oldBack: true }), P({ mode: 'sync', replicaDown: 500, onSyncLost: 'degrade', failAt: 1000, oldBack: true }),
+  P({ mode: 'sync', replicaDown: 500, failAt: 1000 })];
 
 test('state is JSON-safe at every step', () => {
   for (const p of SAMPLES) for (let n = 0; n <= steps(p); n++) {

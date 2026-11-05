@@ -155,6 +155,58 @@
       lgStale: 'zastarjelo čitanje',
       lgChanged: 'promijenjeno',
 
+      // sync-async-replication (preset task): synchronous commit, R1 unreachable, block or degrade
+      subtitleSync: 'Sinkrono: RPO 0 uz sporije upise; asinkrono: gubitak pri padu',
+      syncLine: 'sinkrona · RTT {ms} ms',
+      bUnreach: 'nedostupna',
+      bDegraded: 'prešao na asinkrono',
+      bWaits: '⌛ čeka {list}',
+      bAckedSync: '✓ {k} potvrđen nakon {ms} ms',
+      bBlocked: '⌛ {k} čeka',
+      cellWaits: 'čeka',
+      asideAckWait: 'potvrđeno {a}, čeka {w}',
+      asideUnreach: 'nedostupna',
+      capStartSync: 'Klijent svakih 100 ms upisuje x na primarni. Replika R1 je sinkrona, RTT {rtt} ms (1 ms: ista prostorija; 40 ms: druga lokacija preko WAN-a): ' +
+        '*synchronous replication* (sinkrona replikacija). Primarni potvrđuje upis tek kad R1 javi da ga je spremila.',
+      capStartDown: 'U {at} ms replika R1 postaje nedostupna.',
+      capStartBlock: 'Bez sinkrone replike primarni čeka.',
+      capStartDegrade: 'Bez sinkrone replike primarni prelazi na asinkrono.',
+      capWriteSync: '{t} ms: *synchronous replication* (sinkrona replikacija): zapis {k} potvrđen je tek kad ga je replika ' +
+        'R1 spremila, u {ack} ms. Pad primarnog sada ne gubi ništa — ali svaki upis čeka povratni put do replike, {rtt} ms.',
+      capBlocked: '{t} ms: sinkrona replika nije dostupna, pa upisi {list} čekaju potvrdu. Ništa nije izgubljeno, ali se ' +
+        'ništa ni ne potvrđuje.',
+      capWriteDegraded: '{t} ms: primarni odmah potvrđuje upis {k}, iako ga replika nema: prešao je na asinkrono.',
+      capRepUnreach: 'Replika {id} nije dostupna i ne prima ništa; zapisi {list} postoje samo na primarnom.',
+      capRate: 'Svaka potvrda trajala je {rtt} ms dulje. Klijent koji čeka svaku potvrdu prije sljedećeg upisa stigne ' +
+        'najviše {rate} potvrda u sekundi (1000 / {rtt}).',
+      capDownBlock: '{t} ms: replika R1 postaje nedostupna (pala je ona ili veza do nje). Primarni je sinkron, a politika ' +
+        'je „čekaj": od sada ne potvrđuje nijedan upis dok se R1 ne vrati.',
+      capDownDegrade: '{t} ms: replika R1 postaje nedostupna (pala je ona ili veza do nje). Politika je „prijeđi na ' +
+        'asinkrono": primarni nastavlja potvrđivati bez nje. Upisi teku, ali novi zapisi postoje samo na primarnom, i ' +
+        'nitko za to ne zna.',
+      capFailBlocked: 'Upisi {list} nikad nisu potvrđeni: klijent za njih nije dobio „potvrđeno".',
+      capRpo0: 'To je *RPO* 0 (ciljna točka oporavka). Usporedi s primjerom „{tail}": isti pad, asinkrono.',
+      capNoLossBlocked: 'Upisi {list} nikad nisu potvrđeni, pa nema izgubljenih potvrđenih podataka.',
+      capLostDegraded: 'Klijent je za njih dobio „potvrđeno": {n}, svi upisi otkad je R1 postala nedostupna u {at} ms. I ' +
+        'sinkrona replika može zaostajati: uz „prijeđi na asinkrono" zaostaje bez upozorenja.',
+      pMode: 'Replika R1',
+      optAsync: 'asinkrona',
+      optSync: 'sinkrona',
+      pRtt: 'RTT do R1',
+      pDown: 'R1 nedostupna',
+      pOnLost: 'Bez sinkrone replike',
+      optBlock: 'čekaj',
+      optDegrade: 'prijeđi na asinkrono',
+      prSync: 'Sinkrono',
+      prSyncHint: 'Usporedi s „Gubi se rep": isti pad, asinkrono.',
+      prWan: 'Preko WAN-a',
+      prDown: 'Bez replike',
+      prDegrade: 'Tiho asinkrono',
+      prDegradeHint: 'Isto kao „Bez replike", ali primarni prelazi na asinkrono, a zatim pada.',
+      lgWait: 'čeka potvrdu',
+      lgConfirm: 'potvrda replike',
+      lgBlocked: 'blokirano',
+
       explain: '<p>Kod asinkrone replikacije [[primary server]] potvrđuje upis čim ga zapiše u svoj ' +
         '<em lang="en">write-ahead log</em> (dnevnik unaprijednog pisanja). Replike primaju iste zapise redom po LSN-u i ' +
         'primjenjuju ih kasnije, nakon <em lang="en">replication lag</em> (zaostatak replikacije). Replika je zato primarni ' +
@@ -168,8 +220,15 @@
         '<p>Stari primarni koji se vrati ne smije primati upise ni priključiti se takav kakav je: njegovi zapisi iznad ' +
         'novog primarnog sukobljavaju se s novom poviješću. Zato ga se ogradi, <em lang="en">fencing</em> (ograđivanje), ' +
         'pa obnovi iz novog primarnog.</p>' +
-        '<p>Sinkrona potvrda (primarni čeka repliku prije potvrde) uklanja taj gubitak, uz cijenu kašnjenja svakog upisa; ' +
-        'ona nije dio ove stranice.</p>'
+        '<p><em lang="en">Synchronous replication</em> (sinkrona replikacija): primarni potvrđuje upis tek kad sinkrona ' +
+        'replika javi da ga je spremila. Svaki potvrđeni zapis tada postoji na dva poslužitelja, pa preuzimanje na tu ' +
+        'repliku ne gubi ništa: <em lang="en">RPO</em> 0 (ciljna točka oporavka, vidi <a href="../rpo-rto/index.html">RPO ' +
+        'i RTO</a>). Nije besplatno: svaki upis čeka <em lang="en">round-trip time</em> (vrijeme povratnog puta) do ' +
+        'replike, pa raste [[latency]]. Uz 40 ms do druge lokacije klijent koji čeka svaku potvrdu stigne najviše 25 ' +
+        'potvrda u sekundi.</p>' +
+        '<p>Kad sinkrona replika nije dostupna, primarni čeka (upisi stoje, ništa se ne gubi) ili prelazi na asinkrono i ' +
+        'nastavlja; tada se tiho vraća rizik gubitka, pa i sinkrona replika može zaostajati. A RPO 0 ne štiti od pogrešnog ' +
+        'brisanja: replika odmah dobije i brisanje (vidi <a href="../restore-drill/index.html">Kopija koja laže</a>).</p>'
     },
 
     en: {
@@ -321,6 +380,59 @@
       lgStale: 'stale read',
       lgChanged: 'changed',
 
+      // sync-async-replication (preset task): synchronous commit, R1 unreachable, block or degrade
+      subtitleSync: 'Sync: RPO 0 but slower commits; async: loss on failover',
+      syncLine: 'synchronous · RTT {ms} ms',
+      bUnreach: 'unreachable',
+      bDegraded: 'switched to async',
+      bWaits: '⌛ waiting {list}',
+      bAckedSync: '✓ {k} committed after {ms} ms',
+      bBlocked: '⌛ {k} waiting',
+      cellWaits: 'waits',
+      asideAckWait: '{a} acknowledged, {w} waiting',
+      asideUnreach: 'unreachable',
+      capStartSync: 'Every 100 ms the client writes x to the primary. Replica R1 is synchronous, RTT {rtt} ms (1 ms: same room; 40 ms: another site over a WAN): ' +
+        '*synchronous replication*. The primary acknowledges a write only once R1 reports it has stored it.',
+      capStartDown: 'At {at} ms replica R1 becomes unreachable.',
+      capStartBlock: 'Without the synchronous replica the primary blocks.',
+      capStartDegrade: 'Without the synchronous replica the primary degrades to asynchronous.',
+      capWriteSync: '{t} ms: *synchronous replication*: record {k} is acknowledged only once replica R1 has stored it, at ' +
+        '{ack} ms. A primary failure now loses nothing, but every write waits a round trip to the replica, {rtt} ms.',
+      capBlocked: '{t} ms: the synchronous replica is unreachable, so commits {list} are waiting. Nothing is lost, and ' +
+        'nothing is being committed.',
+      capWriteDegraded: '{t} ms: the primary acknowledges write {k} at once, although the replica does not have it: it has ' +
+        'switched to asynchronous.',
+      capRepUnreach: 'Replica {id} is unreachable and receives nothing; records {list} exist only on the primary.',
+      capRate: 'Every commit took {rtt} ms longer. A client that waits for each commit before its next write manages at ' +
+        'most {rate} commits per second (1000 / {rtt}).',
+      capDownBlock: '{t} ms: replica R1 becomes unreachable (it or the link to it failed). The primary is synchronous and ' +
+        'the policy is "block": from now on it acknowledges no write until R1 is back.',
+      capDownDegrade: '{t} ms: replica R1 becomes unreachable (it or the link to it failed). The policy is "degrade to ' +
+        'async": the primary goes on acknowledging without it. Writes continue, but new records exist only on the ' +
+        'primary, and nobody is told.',
+      capFailBlocked: 'Writes {list} were never acknowledged: the client was never told "committed" for them.',
+      capRpo0: 'That is an *RPO* of 0. Compare with the "{tail}" example: the same failure, asynchronous.',
+      capNoLossBlocked: 'Writes {list} were never acknowledged, so no acknowledged data is lost.',
+      capLostDegraded: 'The client was told "committed" for them: {n}, every write since R1 became unreachable at {at} ms. ' +
+        'A synchronous replica can fall behind too: with "degrade to async" it does so without warning.',
+      pMode: 'Replica R1',
+      optAsync: 'asynchronous',
+      optSync: 'synchronous',
+      pRtt: 'RTT to R1',
+      pDown: 'R1 unreachable',
+      pOnLost: 'Without the sync replica',
+      optBlock: 'block',
+      optDegrade: 'degrade to async',
+      prSync: 'Synchronous',
+      prSyncHint: 'Compare with "Lost tail": the same failure, asynchronous.',
+      prWan: 'Over a WAN',
+      prDown: 'Replica gone',
+      prDegrade: 'Silent degrade',
+      prDegradeHint: 'As "Replica gone", but the primary degrades to async, then fails.',
+      lgWait: 'awaits confirmation',
+      lgConfirm: 'replica confirms',
+      lgBlocked: 'blocked',
+
       explain: '<p>With asynchronous replication the [[primary server]] acknowledges a write as soon as it is in its own ' +
         '<em lang="en">write-ahead log</em>. The replicas receive the same records in LSN order and apply them later, after ' +
         'the <em lang="en">replication lag</em>. A replica is the primary as it was a few records ago, not a live copy of ' +
@@ -333,8 +445,15 @@
         'worth of writes is lost.</p>' +
         '<p>An old primary that comes back must not take writes or rejoin as it is: its records above the new primary ' +
         'conflict with the new history. It is fenced (<em lang="en">fencing</em>) and rebuilt from the new primary.</p>' +
-        '<p>Synchronous commit (the primary waits for a replica before it acknowledges) removes that loss, at the cost of ' +
-        'latency on every write; it is not part of this page.</p>'
+        '<p>With <em lang="en">synchronous replication</em> the primary acknowledges a write only once the synchronous ' +
+        'replica reports it has stored it. Every acknowledged record then exists on two servers, so a failover to that ' +
+        'replica loses nothing: an <em lang="en">RPO</em> of 0 (see <a href="../rpo-rto/index.html">RPO and RTO</a>). It ' +
+        'is not free: every write waits a <em lang="en">round-trip time</em> to the replica, which adds [[latency]]. With ' +
+        '40 ms to another site, a client that waits for each commit manages at most 25 commits per second.</p>' +
+        '<p>When the synchronous replica is unreachable, the primary either blocks (writes stop, nothing is lost) or ' +
+        'degrades to asynchronous and carries on; that silently brings the risk of loss back, so a synchronous replica can ' +
+        'fall behind too. And RPO 0 does not protect against a bad delete: the replica gets the delete at once (see ' +
+        '<a href="../restore-drill/index.html">The backup that lies</a>).</p>'
     }
   };
 

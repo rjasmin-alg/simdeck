@@ -123,3 +123,120 @@ None. K2 and K3 had everything this page needed.
 ## Time
 
 Start 2026-10-24 08:39, done 2026-10-24 09:02 by the machine clock (one session).
+
+# Preset task sync-async-replication (catalogue `sto-sync-async-replication`)
+
+Task `docs/tasks/w3/sync-async-replication.md`, wave 3. One concept: **RPO 0 at the cost of latency vs lag and data
+loss on failover**. Rules, tie-break and numbers: `SPEC.md`, "Synchronous commit".
+
+## Decisions (sync-async-replication)
+
+- **The host model was extended additively, not requested and stopped.** The task says to write the needed change under
+  Shared requests and stop if the host cannot express it; it could not (no commit mode, no acknowledgement time, no
+  RTT, no replica-down event, no policy). As the `win-vss`, `win-boot`, `win-update-rings` and `win-failover-cluster`
+  preset tasks did with their hosts, and running unattended with the host done, I made the change inside this folder:
+  `eff` gains `mode`, `rttMs`, `onSyncLost`, `r1DownAt`; `planOf` (the step list, with the `replicaDown` step);
+  `tickExt`; `commitLatency`, `serialRate`, `extOf`. With `mode: 'async'` (the default) the model runs the host's
+  `tick` and its states carry no new field (tested); the 24 host tests pass unchanged except the max-steps test, which
+  now also covers the sync params.
+- **Synchronous is one replica.** With `mode: 'sync'` the model forces one replica and the page hides the replica count
+  (quorum commit over several replicas is out of scope, and the panel fits). The mode choice shows only with one
+  replica (or while sync is on).
+- **"R1 down" is "R1 unreachable from the primary"**: the replica or the link fails, the primary cannot tell which. R1
+  keeps its log and can be promoted. That is what lets `degrade-silently` end with a failover that loses 6–10 ("no
+  replica had them"): a replica that had truly failed could not be promoted, and nothing would be lost, only down. The
+  K2 link P–R1 is drawn cut, R1 gets an "unreachable" badge; the task's en caption says "down", the page says
+  "unreachable".
+- **`replicaDown` is sync-only.** With an asynchronous R1 a cut changes nothing in the commit path, so the control is
+  shown (and the model acts on it) only with `mode: 'sync'`. One concept.
+- **The cut is a step of its own** after the tick at 500 ms, without clock time, like the host's failover events: that
+  gives the task's 11 steps for `sync-replica-down`.
+- **Local commit takes no time** (the host acknowledges in the same tick), so the latency the page shows is the
+  replication's share: "+1 ms", "+40 ms". The rate cap (25/s at 40 ms) is said in the last caption of the run and in
+  the explanation; with writes every 100 ms the client itself never hits it.
+- **Applied = durably received** on a synchronous R1: the K3 strip does not split received from replayed (the host's
+  lag is one number too). Reads are off in sync mode (the read scenario forces async), so "synchronous means fresh
+  reads" is never shown.
+- **Only acknowledged records count as lost.** `lost` filters on `acked` (no change for the host: every host write is
+  acknowledged). Block plus a failure loses nothing acknowledged; the caption says 6–10 were never acknowledged.
+- **Presets on top of the defaults**: the host's five presets need no change (the kit applies a preset over the
+  defaults, so they reset `mode` to async). Nine presets fill the keys 1–9.
+- **Legend per params**: the kit has no per-mode legend, so `setMode` hides items that cannot appear (`data-off`), as
+  `lnx-cow-filesystem` does; with all ten shown the header wrapped to two lines. The subtitle swaps to the sync concept
+  in sync mode (same pattern; see Shared requests).
+- **Panel fit**: nine presets and the sync controls needed tighter spacing: preset gap 0.2rem, panel gap 0.4rem, group
+  gap 0.35rem (page CSS; button heights and text sizes unchanged). Measured by a sweep (below).
+- **Explanation**: the host's last paragraph ("synchronous commit is not part of this page") is replaced by two on
+  synchronous replication, the block / degrade policies and the misconceptions, with links to `rpo-rto` and
+  `restore-drill`.
+
+## Deviations from the task (sync-async-replication)
+
+- **`async-failover` is the host's `failover-tail`** (identical params and numbers: 3 lost at lag 250 ms). A second
+  button with the same params would be a duplicate (the kit marks the active preset by params) and a tenth preset has no
+  number key. `sync-failover`'s hint points to it ("Compare with Lost tail").
+- **`degrade-silently` has 13 steps, not 12**: 10 ticks, the cut, fail and promote. The task's 12 seems to leave out
+  either the cut or the promotion.
+- **`mode` defaults to `async`**, not `sync`: the host's default page is asynchronous and its five presets rely on it.
+  The sync presets set `mode: 'sync'`.
+- **Term rule in the captions**: „*Synchronous replication* (sinkrona replikacija): zapis 7 potvrđen je tek kad ga je
+  replika R1 spremila, u 701 ms. Pad primarnog sada ne gubi ništa — ali svaki upis čeka povratni put do replike, 1 ms."
+  (the task wrote „Sinkrono (*synchronous*)", reversed). The en caption for the blocked commits says "nothing is being
+  committed" (the task: "written": the primary does write them to its own log).
+- **Legend**: the confirmation is "↩ replica confirms" and the record's chip carries ⌛ while it travels to R1 (the
+  wait is inside one 100 ms tick, so it is never a state of its own); "blocked" is a crossed ⌛ with "čeka" on the cell.
+- **Topic**: the task names `storage`; the host's topic is `distributed`, and a preset has no topic of its own. The
+  entry is listed under the host's topic. Tag `replication` as the task says.
+
+## Sources (sync-async-replication)
+
+- M. Kleppmann, *Designing Data-Intensive Applications*, ch. 5 "Synchronous Versus Asynchronous Replication"
+  *(check: from memory, no local copy)*.
+- PostgreSQL documentation, "Synchronous Replication": commits wait for the synchronous standby; while none is
+  connected they wait *(check: from memory)*. Which database blocks and which degrades by default *(check)*.
+- `~/projects/dr-lecture-estate/student/handbook/sites.md`, "WAN links": one-way latencies 0.8–14 ms (hq–brk IPsec 9
+  ms), so 40 ms RTT is a long WAN link, 10 ms a regional one *(not re-read in this session; the task's numbers used)*.
+- NLA `meta/toc.md` T55 (chapter not written).
+
+## Checks (sync-async-replication)
+
+- Numbers printed by a script from the model before the page, asserted in `sim.test.js` (11 new tests, 35 in all):
+  tie-break S5 and the cut's order first, then S1–S4, params, "host states carry no new field", the four presets, max
+  steps 15.
+- **Mutations**: 20 one-at-a-time mutations of the new code (no round trip, the sync replica applying by its lag, block
+  not waiting, degrade ignored or applied on block, unacknowledged counted lost, the cut a tick late or merged into the
+  tick, an unreachable replica still receiving, the confirmation in the next tick, a wrong rate, async latency = RTT,
+  sync with two replicas, a cut while async, blocked listed twice, the cut failing R1, `ackAt` without the RTT, no
+  latency record, new fields on host states, RTT not validated): each fails at least one test.
+- **Browser sweep**: the nine presets at every step, plus the heaviest control sets (sync + cut + degrade + failure +
+  old primary back; sync + cut + block + failure + old primary back at RTT 40; sync + failure at 600 + old primary; two
+  replicas with a tie and the old primary back), both languages, 342 states: no console error, no unfilled placeholder,
+  no page or panel overflow at 1920×1080. It found a caption with a repeated placeholder that lost its first value
+  (fixed with the page's `rich`).
+- Gate: `npm run gate -- db-replication` passes (63/63 browser checks, the `sync-failover` entry opens); screenshots at
+  1920×1080 light, dark, grayscale and 375×812 in both languages reviewed, plus sync steps of every new preset.
+- **No fresh reviewer**: COMMON.md §8 asks for one on new sims; this is a preset on a reviewed host.
+
+## Term pairs (sync-async-replication)
+
+| English | Croatian | Note |
+|---|---|---|
+| synchronous replication | sinkrona replikacija | task |
+| asynchronous replication | asinkrona replikacija | task |
+| round-trip time (RTT) | vrijeme povratnog puta | task, URM *(check)* |
+| commit | potvrda transakcije | task *(check)*; the page says "potvrda" / "upis" |
+| acknowledgement | potvrda | task |
+| RPO | RPO (ciljna točka oporavka) | task; links `rpo-rto` |
+
+`latency` / `latencija` is in the glossary (ossimulator) and used as `[[latency]]` in the explanation.
+
+## Shared requests (sync-async-replication)
+
+- **kit.js legend per params**: a legend item's optional `visible(params)` (as a param's), so a page with modes does not
+  hide `li` elements itself (also asked by `win-vss`).
+- **kit.js subtitle per preset entry**: when a `sim.json` entry is the active preset, show its `concept` as the
+  subtitle (also asked by `win-vss`); this page swaps the subtitle in sync mode itself.
+
+## Time (sync-async-replication)
+
+Start 2026-11-05 07:41, done 08:00 by the machine clock (one session).

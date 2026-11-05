@@ -81,14 +81,33 @@
   font-weight: 700; color: var(--ink); line-height: 1; }
 [data-sim="db-replication"] .sd-swatch[data-shape="dr-stale"] { border-color: var(--danger); border-radius: 0.5em; }
 
+/* sync-async-replication: the hourglass, the confirmation and the blocked commit (legend swatches and the log cell) */
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-wait"],
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-confirm"],
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-blocked"] { border: 0; background: transparent; }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-wait"]::after { content: '⌛'; position: absolute; inset: 0; display: grid;
+  place-items: center; line-height: 1; color: var(--ink); }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-confirm"]::after { content: '↩'; position: absolute; inset: 0; display: grid;
+  place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="db-replication"] .sd-swatch[data-shape="dr-blocked"]::after { content: '⌛'; position: absolute; inset: 0; display: grid;
+  place-items: center; line-height: 1; color: var(--danger); text-decoration: line-through; text-decoration-thickness: 0.15em; }
+[data-sim="db-replication"] .dr-wait { white-space: nowrap; }
+[data-sim="db-replication"] .dr-wait i { font-style: normal; text-decoration: line-through; text-decoration-thickness: 0.15em; }
+/* legend items that do not apply to the current params are hidden (setMode sets data-off) */
+[data-sim="db-replication"] [data-sd-legend] > li[data-off] { display: none; }
+
 [data-sim="db-replication"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
-[data-sim="db-replication"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="db-replication"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.2rem; }
+/* nine presets and the sync controls: tighter spacing so the panel fits at 1920×1080 (sizes and targets unchanged) */
+[data-sim="db-replication"] .sd-panel { gap: 0.4rem; }
+[data-sim="db-replication"] .sd-panel .sd-group { gap: 0.35rem; }
 
 /* Phone and portrait: the drawing becomes the kit's card list, the log strips follow; nothing scrolls sideways. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
   [data-sim="db-replication"] .sd-stage { height: auto; container-type: inline-size; }
   [data-sim="db-replication"] .dr { grid-template-rows: auto auto; height: auto; padding: 0.5rem; gap: 0.8rem; }
   [data-sim="db-replication"] .dr-draw .sd-topo { height: auto; }
+  [data-sim="db-replication"] .sd-presets { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -172,9 +191,19 @@
     var e = L.eff(p);
     return e.read ? 5 : L.ticksOf(e);
   }
+  /** The synchronous-commit params are in use (sync-async-replication presets): the state has their fields. */
+  function ext(s) { return s.ackLatency !== undefined; }
+  function isSync(s, id) { return ext(s) && s.servers[id] && s.servers[id].mode === 'sync'; }
+  function reachable(s, id) { return !ext(s) || s.servers[id].reachable !== false; }
+  /** Acknowledged records the primary has and R1 lacks: they exist only on the primary. */
+  function onlyOnP(s) {
+    var r = s.servers.R1.applied;
+    return s.writes.filter(function (w) { return w.acked && w.lsn > r; }).map(function (w) { return w.lsn; });
+  }
+  function ackedCount(s) { return s.writes.filter(function (w) { return w.acked; }).length; }
   function inFlight(s, id) {
     var r = s.servers[id], P = s.servers.P;
-    if (!P.up || r.follows !== 'P') return [];
+    if (!P.up || r.follows !== 'P' || !reachable(s, id)) return [];
     var out = [];
     for (var k = r.applied + 1; k <= P.applied; k++) out.push(k);
     return out;
@@ -190,14 +219,26 @@
     return t('nReplica');
   }
 
+  /** This tick's write was acknowledged in this tick (always, unless a synchronous primary blocks it). */
+  function wroteAcked(s) { return !ext(s) || s.changed.acked.indexOf(s.changed.wrote) >= 0; }
+  function ackMs(s, k) {
+    var a = (s.ackLatency || []).filter(function (x) { return x.lsn === k; })[0];
+    return a ? a.ms : 0;
+  }
+
   function serverBadges(s, id) {
     var sv = s.servers[id], out = [];
     if (!sv.up) out.push({ text: t('bDown'), k: 'muted' });
+    if (sv.up && !reachable(s, id) && sv.follows === 'P') out.push({ text: t('bUnreach'), k: 'muted' });
+    if (id === 'P' && ext(s) && sv.role === 'primary') {
+      if (s.degraded) out.push({ text: t('bDegraded'), k: 'dashed' });
+      if (s.blocked.length) out.push({ text: t.parts('bWaits', { list: data(range(s.blocked)) }), k: 'dashed' });
+    }
     if (s.phase === 'promote' && s.promoted === id) out.push({ text: t('bPromoted'), k: 'fill' });
     if (sv.role === 'returned') out.push({ text: s.refused ? t('bRefused') : t('bBack'), k: s.refused ? 'dashed' : 'solid' });
     if (s.phase === 'rebuild' && id === 'P') out.push({ text: sv.discarded.length ? t('bRebuilt') : t('bAttached'), k: 'solid' });
     if (sv.role === 'replica' && sv.follows && sv.follows !== 'P') out.push({ text: t.parts('bFollows', { id: data(sv.follows) }), k: 'solid' });
-    if (s.changed.wrote && id === 'P') out.push({ text: t.parts('bAck', { k: data(s.changed.wrote) }), k: 'solid' });
+    if (s.changed.wrote && id === 'P' && wroteAcked(s)) out.push({ text: t.parts('bAck', { k: data(s.changed.wrote) }), k: 'solid' });
     var rd = s.reads[0];
     if (rd && rd.from === id && rd.servedAt === null) out.push({ text: t.parts('bHolds', { k: data(rd.wait) }), k: 'dashed' });
     return out;
@@ -206,7 +247,9 @@
   function serverLines(s, id) {
     var sv = s.servers[id];
     var lines = [{ text: 'LSN ' + sv.applied, kind: 'addr' }];
-    if (sv.role === 'replica' && sv.follows === 'P' && s.servers.P.up) lines.push({ text: t('lagLine', { ms: sv.lagMs }), kind: 'role' });
+    if (sv.role === 'replica' && sv.follows === 'P' && s.servers.P.up) {
+      lines.push(isSync(s, id) ? { text: t('syncLine', { ms: s.rttMs }), kind: 'role' } : { text: t('lagLine', { ms: sv.lagMs }), kind: 'role' });
+    }
     return lines;
   }
 
@@ -232,11 +275,20 @@
     return kids.length ? h('div', { class: 'dr-extra' }, kids) : null;
   }
 
+  function clientBadges(s) {
+    var k = s.changed.wrote;
+    if (!k) return [];
+    if (!wroteAcked(s)) return [{ text: t.parts('bBlocked', { k: data(k) }), k: 'dashed' }];
+    var ms = ackMs(s, k);
+    if (ms) return [{ text: t.parts('bAckedSync', { k: data(k), ms: data(ms) }), k: 'solid' }];
+    return [{ text: t.parts('bAcked', { k: data(k) }), k: 'solid' }];
+  }
+
   function renderTopo(c) {
     var s = c.state, e = eff(c);
     var promoted = s.promoted;
     var nodes = [{ id: 'C', kind: 'host', mark: t('cMark'), col: POS.C[0], row: POS.C[1], span: 2, c: COLOUR.C, name: t('nClient'),
-      lines: [], badges: s.changed.wrote ? [{ text: t.parts('bAcked', { k: data(s.changed.wrote) }), k: 'solid' }] : [],
+      lines: [], badges: clientBadges(s),
       extra: clientExtra(s, c), changed: c.n > 0 && !!(s.changed.asked || s.changed.served), align: 'center' }];
     s.ids.forEach(function (id) {
       var sv = s.servers[id];
@@ -252,7 +304,7 @@
     links.push({ id: 'CP', a: 'C', b: 'P', state: Pup && !promoted ? 'up' : 'down', active: !promoted && !!s.changed.wrote });
     if (s.changed.wrote) {
       packets.push({ from: 'C', to: 'P', label: 'x = ' + s.changed.wrote, c: COLOUR.C });
-      packets.push({ from: 'P', to: 'C', label: '✓ ' + s.changed.wrote, c: COLOUR.P });
+      if (wroteAcked(s)) packets.push({ from: 'P', to: 'C', label: '✓ ' + s.changed.wrote, c: COLOUR.P });
     }
     // the read path, or the write path to a promoted R1
     if (e.read && e.readFrom === 'R1' || writeTo === 'R1') links.push({ id: 'CR1', a: 'C', b: 'R1', state: 'up', active: writeTo === 'R1' });
@@ -265,11 +317,19 @@
     replicaIds(s).forEach(function (id) {
       var sv = s.servers[id];
       var fromP = sv.follows === 'P' || id === promoted;
-      links.push({ id: 'P' + id, a: 'P', b: id, state: Pup && sv.follows === 'P' ? 'up' : s.phase === 'rebuild' && id === promoted ? 'up' : 'down' });
+      var cut = !reachable(s, id) && sv.follows === 'P';
+      links.push({ id: 'P' + id, a: 'P', b: id, state: Pup && sv.follows === 'P' && !cut ? 'up' : s.phase === 'rebuild' && id === promoted ? 'up' : 'down' });
       if (!fromP) return;
       var got = s.changed.applied[id] || [];
       var flying = inFlight(s, id);
-      if (sv.follows === 'P' && got.length && s.phase === 'tick') packets.push({ from: 'P', to: id, label: range(got), c: COLOUR.P, at: 0.75 });
+      var sync = isSync(s, id) && !cut;
+      // a synchronous replica: the record travels while the commit waits (⌛), and its confirmation comes back (✓)
+      if (sv.follows === 'P' && got.length && s.phase === 'tick') {
+        packets.push({ from: 'P', to: id, label: range(got) + (sync ? ' ⌛' : ''), c: COLOUR.P, at: 0.75 });
+        if (sync) packets.push({ from: id, to: 'P', label: '✓ ' + range(got), c: COLOUR[id], at: 0.75 });
+      }
+      // the primary cannot reach the replica: this tick's record dies on the cut link
+      if (cut && s.phase === 'tick' && s.changed.wrote) packets.push({ from: 'P', to: id, label: String(s.changed.wrote), c: COLOUR.P, mid: true, drop: true, at: 0.5 });
       if (flying.length) packets.push({ from: 'P', to: id, label: range(flying), c: COLOUR.P, mid: true, arrow: !got.length, at: 0.5, move: false });
       // the failure: what was still on the way never arrives
       var stranded = L.lostTail(s.servers.P.applied, sv.applied);
@@ -297,10 +357,16 @@
     if (sv.discarded.indexOf(k) >= 0) return { text: k, kind: 'dead', now: s.phase === 'rebuild' || s.phase === 'follow' };
     if (k <= sv.applied) {
       if (lost && (id === 'P')) return { text: k, kind: 'bad', now: s.phase === 'promote' };
+      // a blocked commit: on the primary's log, never acknowledged (crossed hourglass, "waits")
+      if (id === 'P' && ext(s) && s.blocked.indexOf(k) >= 0) {
+        return { text: k, kind: 'fill', c: COLOUR.P, now: now, sub: h('span', { class: 'dr-wait' }, h('i', null, '⌛'), ' ', t('cellWaits')) };
+      }
       return { text: k, kind: 'fill', c: COLOUR.P, now: now };
     }
     if (k > s.writes.length) return null;
     if (lost) return { text: k, kind: 'bad', now: s.phase === 'promote' };
+    // a replica the primary cannot reach gets nothing: not in flight, never sent
+    if (!reachable(s, id) && sv.follows === 'P') return {};
     // not yet applied: in flight while the primary is up, stranded after it failed, or coming from the new primary
     return { text: k, kind: 'ghost' };
   }
@@ -311,7 +377,9 @@
     var word = function (text) { return h('span', null, text); };
     if (!sv.up) return word(t('asideDown'));
     if (sv.role === 'returned') return word(t(s.refused ? 'asideRefused' : 'asideBack'));
-    if (sv.role === 'primary') return id === 'P' ? word(t.n('ackedN', sv.applied)) : word(t('asideNewPrimary'));
+    if (id === 'P' && ext(s) && s.blocked.length) return h('span', null, t.parts('asideAckWait', { a: data(ackedCount(s)), w: data(s.blocked.length) }));
+    if (sv.role === 'primary') return id === 'P' ? word(t.n('ackedN', ext(s) ? ackedCount(s) : sv.applied)) : word(t('asideNewPrimary'));
+    if (!reachable(s, id) && sv.follows === 'P') return word(t('asideUnreach'));
     if (sv.follows !== 'P') return word(t.parts('asideFollows', { id: data(sv.follows) }));
     if (!s.servers.P.up) return word(t('asideNoPrimary'));
     var n = behind(s, id);
@@ -333,6 +401,7 @@
     var n = plannedWrites(c.params);
     var cols = [];
     for (var k = 1; k <= n; k++) cols.push(k);
+    var tall = ext(s) && s.blocked.length > 0;
     var rows = s.ids.map(function (id) {
       var row = { id: id, label: data(id), aside: asideOf(s, id), cells: cols.map(function (k) { return cellOf(s, id, k); }) };
       if (e.failAt) row.brackets = bracketsOf(s, id);
@@ -346,6 +415,7 @@
       cols: n,
       colLabels: cols.map(function (k) { return String(k * L.TICK); }),
       rows: rows,
+      cellHeight: tall ? '3rem' : undefined,
       className: 'dr-log'
     });
   }
@@ -358,11 +428,52 @@
 
   function capStart(s, c) {
     var e = eff(c);
+    if (ext(s)) return capStartExt(s, e);
     var out = [rich('capStart', { reps: t.n('repsN', s.ids.length - 1), lags: data(lagList(s)) })];
     if (e.read) out.push(rich(e.readFrom === 'P' ? 'capStartReadP' : e.rywWait ? 'capStartReadWait' : 'capStartRead', { at: data(L.READ_AT) }));
     else if (e.failAt) out.push(rich(e.oldBack ? 'capStartFailBack' : 'capStartFail', { at: data(e.failAt) }));
     else out.push(t('capStartPlain'));
     return join(out);
+  }
+
+  function capStartExt(s, e) {
+    var out = [rich('capStartSync', { rtt: data(e.rttMs) })];
+    if (e.r1DownAt) {
+      out.push(t.parts('capStartDown', { at: data(e.r1DownAt) }));
+      out.push(t(e.onSyncLost === 'degrade' ? 'capStartDegrade' : 'capStartBlock'));
+    }
+    if (e.failAt) out.push(rich(e.oldBack ? 'capStartFailBack' : 'capStartFail', { at: data(e.failAt) }));
+    else if (!e.r1DownAt) out.push(t('capStartPlain'));
+    return join(out);
+  }
+
+  /** A tick with the synchronous-commit params: the write, its acknowledgement (or the wait), the replicas. */
+  function capTickExt(s, c) {
+    var out = [], k = s.changed.wrote;
+    var vars = { t: data(s.t), k: data(k), ack: data(k * L.TICK + ackMs(s, k)), rtt: data(s.rttMs), list: data(range(s.blocked)) };
+    var others = replicaIds(s);
+    if (s.blocked.length) { out.push(t.parts('capBlocked', vars)); others = others.filter(function (id) { return id !== 'R1'; }); }
+    else if (ackMs(s, k)) { out.push(rich('capWriteSync', vars)); others = others.filter(function (id) { return id !== 'R1'; }); }
+    else if (s.degraded) out.push(t.parts('capWriteDegraded', vars));
+    else out.push(t.parts('capWrite', vars));
+    others.forEach(function (id) {
+      if (!reachable(s, id)) { out.push(t.parts('capRepUnreach', { id: data(id), list: data(range(onlyOnP(s))) })); return; }
+      var got = s.changed.applied[id] || [], n = behind(s, id);
+      var v = { id: data(id), list: data(range(got)), n: data(n) };
+      if (got.length) out.push(t.parts(n ? 'repApplied' : 'repAppliedLevel', v));
+      else if (!s.servers[id].applied) out.push(t.parts('repNothingYet', v));
+      else out.push(t.parts(n ? 'repNothing' : 'repNothingLevel', v));
+    });
+    var e = eff(c);
+    if (c.last && !s.blocked.length && !s.degraded) {
+      var lat = L.commitLatency(e.mode, e.rttMs);
+      out.push(rich('capRate', { rtt: data(lat), rate: data(L.serialRate(lat)) }));
+    }
+    return join(out);
+  }
+
+  function capReplicaDown(s) {
+    return t.parts(s.degraded ? 'capDownDegrade' : 'capDownBlock', { t: data(s.t) });
   }
 
   /** What each replica applied in this tick, and how far behind it is. */
@@ -377,6 +488,7 @@
   }
 
   function capTick(s, c) {
+    if (ext(s)) return capTickExt(s, c);
     var e = eff(c), out = [];
     var rd = s.reads[0];
     if (s.changed.wrote) out.push(t.parts('capWrite', { t: data(s.t), k: data(s.changed.wrote) }));
@@ -403,7 +515,10 @@
 
   function capFail(s) {
     var P = s.servers.P;
-    var out = [t.parts('capFail', { t: data(s.failedAt), k: data(P.applied) })];
+    var acked = ext(s) ? s.writes.filter(function (w) { return w.acked; }).map(function (w) { return w.lsn; }) : [];
+    var lastAcked = ext(s) ? (acked.length ? acked[acked.length - 1] : 0) : P.applied;
+    var out = [t.parts('capFail', { t: data(s.failedAt), k: data(lastAcked) })];
+    if (ext(s) && s.blocked.length) out.push(t.parts('capFailBlocked', { list: data(range(s.blocked)) }));
     replicaIds(s).forEach(function (id) {
       var n = P.applied - s.servers[id].applied;
       out.push(t.parts(!n ? 'capFailRepAll' : s.servers[id].applied ? 'capFailRep' : 'capFailRepNone', { id: data(id), k: data(s.servers[id].applied),
@@ -422,8 +537,14 @@
     if (s.lost.length) {
       out.push(rich(s.lost.length === 1 ? 'capLostOne' : 'capLost', { list: data(listAnd(s.lost)), id: data(s.promoted) }));
       // the lost records were written in the last `lag` ms before the failure, never before the first write
-      out.push(t.parts('capLostSize', { n: t.n('recordsN', s.lost.length), ms: data(Math.min(np.lagMs, s.failedAt)) }));
-    } else out.push(t.parts('capNoLoss', { id: data(s.promoted) }));
+      if (ext(s) && s.servers[s.promoted].reachable === false) {
+        out.push(t.parts('capLostDegraded', { n: t.n('recordsN', s.lost.length), at: data(L.DOWN_AT) }));
+      } else out.push(t.parts('capLostSize', { n: t.n('recordsN', s.lost.length), ms: data(Math.min(np.lagMs, s.failedAt)) }));
+    } else {
+      out.push(t.parts('capNoLoss', { id: data(s.promoted) }));
+      if (ext(s) && s.blocked.length) out.push(t.parts('capNoLossBlocked', { list: data(range(s.blocked)) }));
+      else if (isSync(s, s.promoted)) out.push(rich('capRpo0', { tail: t('prTail') }));
+    }
     return join(out);
   }
 
@@ -454,6 +575,41 @@
   }
 
 
+  /** The sync presets' legend items and subtitle; the host's otherwise (data-only, CSS above). */
+  function setMode(p) {
+    var e = L.eff(p);
+    var sync = L.extOf(e);
+    if (sync) document.documentElement.dataset.mode = 'sync';
+    else delete document.documentElement.dataset.mode;
+    var sub = document.querySelector('.sd-subtitle');
+    if (sub) {
+      if (sub.dataset.host === undefined) sub.dataset.host = sub.textContent;
+      sub.textContent = sync ? t('subtitleSync') : sub.dataset.host;
+    }
+    var lis = document.querySelectorAll('[data-sd-legend] > li');
+    LEGEND.forEach(function (it, i) {
+      if (!lis[i]) return;
+      if (!it.show || it.show(e)) delete lis[i].dataset.off;
+      else lis[i].dataset.off = '';
+    });
+  }
+
+  /** The host's items show as before; in sync mode only what the drawing can show (the header stays one line). */
+  function host(e) { return e.mode !== 'sync'; }
+  var LEGEND = [
+    { shape: 'bg-fill', c: 1, label: t('lgApplied') },
+    { shape: 'bg-ghost', label: t('lgFlight'), show: host },
+    { shape: 'dr-ack', label: t('lgAck') },
+    { shape: 'dr-wait', label: t('lgWait'), show: function (e) { return !host(e); } },
+    { shape: 'dr-confirm', label: t('lgConfirm'), show: function (e) { return !host(e); } },
+    { shape: 'dr-blocked', label: t('lgBlocked'), show: function (e) { return !host(e) && e.r1DownAt > 0 && e.onSyncLost === 'block'; } },
+    // with a synchronous R1 only a failure after degrading loses anything (S2, S4)
+    { shape: 'bg-bad', label: t('lgLost'), show: function (e) { return host(e) || e.failAt > 0 && e.r1DownAt > 0 && e.onSyncLost === 'degrade'; } },
+    { shape: 'bg-dead', label: t('lgDiscarded'), show: function (e) { return host(e) || e.oldBack; } },
+    { shape: 'dr-stale', label: t('lgStale'), show: host },
+    { shape: 'hl', label: t('lgChanged') }
+  ];
+
   /** Two replicas with the same applied LSN when the primary fails: only then does the priority decide (rule 4, T1). */
   function tieAtFailure(p) {
     var e = L.eff(p);
@@ -469,16 +625,27 @@
     step: L.step,
 
     params: [
-      { key: 'replicas', type: 'choice', label: t('pReplicas'), resets: true, options: [[1, '1'], [2, '2']] },
-      { key: 'lag1', type: 'range', label: t('pLag1'), min: 0, max: 1000, step: 50, format: function (v) { return v + ' ms'; } },
+      { key: 'replicas', type: 'choice', label: t('pReplicas'), resets: true, options: [[1, '1'], [2, '2']],
+        visible: function (p) { return L.eff(p).mode !== 'sync'; } },
+      // synchronous commit is shown with one replica: the choice is offered with one
+      { key: 'mode', type: 'choice', label: t('pMode'), resets: true, options: [['async', t('optAsync')], ['sync', t('optSync')]],
+        visible: function (p) { return !p.read && (Number(p.replicas) !== 2 || p.mode === 'sync'); } },
+      { key: 'rttMs', type: 'choice', label: t('pRtt'), resets: true, options: [[1, '1 ms'], [10, '10 ms'], [40, '40 ms']],
+        visible: function (p) { return L.eff(p).mode === 'sync'; } },
+      { key: 'lag1', type: 'range', label: t('pLag1'), min: 0, max: 1000, step: 50, format: function (v) { return v + ' ms'; },
+        visible: function (p) { return L.eff(p).mode !== 'sync'; } },
       { key: 'lag2', type: 'range', label: t('pLag2'), min: 0, max: 1000, step: 50, format: function (v) { return v + ' ms'; },
         visible: function (p) { return Number(p.replicas) === 2; } },
       { key: 'read', type: 'toggle', label: t('pRead'), hint: t('pReadHint'), resets: true,
-        visible: function (p) { return !!p.read || !(Number(p.failAt) > 0); } },
+        visible: function (p) { return !!p.read || !(Number(p.failAt) > 0) && p.mode !== 'sync' && !(Number(p.replicaDown) > 0); } },
       { key: 'readFrom', type: 'choice', label: t('pReadFrom'), resets: true, options: [['primary', t('optPrimary')], ['replica', t('optReplica')]],
         visible: function (p) { return !!p.read; } },
       { key: 'rywWait', type: 'toggle', label: t('pWait'), hint: t('pWaitHint'), resets: true,
         visible: function (p) { return !!p.read && p.readFrom !== 'primary'; } },
+      { key: 'replicaDown', type: 'choice', label: t('pDown'), resets: true, options: [[0, t('optNever')], [500, '500 ms']],
+        visible: function (p) { return L.eff(p).mode === 'sync'; } },
+      { key: 'onSyncLost', type: 'choice', label: t('pOnLost'), resets: true, options: [['block', t('optBlock')], ['degrade', t('optDegrade')]],
+        visible: function (p) { var e = L.eff(p); return e.mode === 'sync' && e.r1DownAt > 0; } },
       { key: 'failAt', type: 'choice', label: t('pFailAt'), resets: true, options: [[0, t('optNever')], [600, '600 ms'], [1000, '1000 ms']],
         visible: function (p) { return !p.read; } },
       // the priority matters only on a tie: shown when both replicas have the same LSN at the failure
@@ -493,20 +660,18 @@
       { id: 'read-own-write', label: t('prRead'), hint: t('prReadHint'), params: { replicas: 1, lag1: 250, lag2: 600, read: true, readFrom: 'replica', rywWait: false, failAt: 0, prefer: 'none', oldBack: false } },
       { id: 'failover-tail', label: t('prTail'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: false } },
       { id: 'two-replicas', label: t('prTwo'), params: { replicas: 2, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: false } },
-      { id: 'old-primary-returns', label: t('prOld'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: true } }
+      { id: 'old-primary-returns', label: t('prOld'), params: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 1000, prefer: 'none', oldBack: true } },
+      // sync-async-replication: the asynchronous twin of sync-failover is failover-tail above
+      { id: 'sync-failover', label: t('prSync'), hint: t('prSyncHint'), params: { replicas: 1, mode: 'sync', rttMs: 1, replicaDown: 0, onSyncLost: 'block', failAt: 1000, oldBack: false } },
+      { id: 'sync-over-wan', label: t('prWan'), params: { replicas: 1, mode: 'sync', rttMs: 40, replicaDown: 0, onSyncLost: 'block', failAt: 0, oldBack: false } },
+      { id: 'sync-replica-down', label: t('prDown'), params: { replicas: 1, mode: 'sync', rttMs: 1, replicaDown: 500, onSyncLost: 'block', failAt: 0, oldBack: false } },
+      { id: 'degrade-silently', label: t('prDegrade'), hint: t('prDegradeHint'), params: { replicas: 1, mode: 'sync', rttMs: 1, replicaDown: 500, onSyncLost: 'degrade', failAt: 1000, oldBack: false } }
     ],
 
-    legend: [
-      { shape: 'bg-fill', c: 1, label: t('lgApplied') },
-      { shape: 'bg-ghost', label: t('lgFlight') },
-      { shape: 'dr-ack', label: t('lgAck') },
-      { shape: 'bg-bad', label: t('lgLost') },
-      { shape: 'bg-dead', label: t('lgDiscarded') },
-      { shape: 'dr-stale', label: t('lgStale') },
-      { shape: 'hl', label: t('lgChanged') }
-    ],
+    legend: LEGEND,
 
     render: function (c) {
+      setMode(c.params);
       c.stage.replaceChildren(h('div', { class: 'dr' }, h('div', { class: 'dr-draw' }, renderTopo(c)), renderLog(c)));
     },
 
@@ -517,6 +682,7 @@
         case 'tick': return capTick(s, c);
         case 'fail': return capFail(s);
         case 'promote': return capPromote(s, c);
+        case 'replicaDown': return capReplicaDown(s);
         case 'follow': return capFollow(s);
         case 'return': return capReturn(s);
         default: return capRebuild(s);

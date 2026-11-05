@@ -4,6 +4,9 @@
    x back from a replica (stale unless it waits for its own LSN), or the primary fails: the replica with the highest
    applied LSN is promoted, acknowledged records above it are lost, the other replica follows it, and the old primary
    coming back is refused and rebuilt. Rules, tie-breaks and numbers: SPEC.md.
+   Preset sync-async-replication (SPEC.md "Synchronous commit"): R1 may be synchronous (the primary acknowledges a write
+   only once R1 has it, one round trip later), R1 may become unreachable at 500 ms, and the primary then blocks its
+   commits or degrades to asynchronous. Those params add fields to the state; without them every state is the host's.
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON; time is an integer in ms.
    The page loads this as a classic script (window.SimLogic); node tests require() it. */
 (function (root) {
@@ -15,6 +18,8 @@
   var READ_TICKS = 8;      // the read scenario runs at least to 800 ms
   var PLAIN_TICKS = 10;    // no read and no failure: ten writes
   var REPLICAS = ['R1', 'R2'];
+  var RTTS = [1, 10, 40];  // the synchronous replica's round-trip time (ms): same room, same city, another site
+  var DOWN_AT = 500;       // R1 becomes unreachable from the primary after the write at 500 ms
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function clampLag(v) {
@@ -25,8 +30,10 @@
 
   /** The params the model acts on (SPEC.md "Params"): a read scenario has no failure; prefer only with two replicas. */
   function eff(p) {
-    var replicas = Number(p.replicas) === 2 ? 2 : 1;
     var read = !!p.read;
+    var sync = !read && p.mode === 'sync';
+    // synchronous commit is shown with one replica (quorum commit over several is out of scope)
+    var replicas = Number(p.replicas) === 2 && !sync ? 2 : 1;
     var fail = Number(p.failAt);
     var failAt = !read && (fail === 600 || fail === 1000) ? fail : 0;
     var prefer = replicas === 2 && (p.prefer === 'R1' || p.prefer === 'R2') ? p.prefer : 'none';
@@ -38,9 +45,23 @@
       rywWait: read && p.readFrom !== 'primary' && !!p.rywWait,
       failAt: failAt,
       prefer: prefer,
-      oldBack: !!failAt && !!p.oldBack
+      oldBack: !!failAt && !!p.oldBack,
+      // synchronous commit (SPEC.md S1–S5): not with the read scenario; R1 unreachable only when it is synchronous
+      mode: sync ? 'sync' : 'async',
+      rttMs: RTTS.indexOf(Number(p.rttMs)) >= 0 ? Number(p.rttMs) : RTTS[0],
+      onSyncLost: p.onSyncLost === 'degrade' ? 'degrade' : 'block',
+      r1DownAt: sync && Number(p.replicaDown) === DOWN_AT ? DOWN_AT : 0
     };
   }
+
+  /** The synchronous-commit params are in use: the state carries their fields (SPEC.md "State added"). */
+  function extOf(e) { return e.mode === 'sync'; }
+
+  /** Commit latency the replication adds: one round trip to a synchronous replica, nothing when asynchronous (S1, S3). */
+  function commitLatency(mode, rttMs) { return mode === 'sync' ? rttMs : 0; }
+
+  /** A client that waits for each commit before the next one manages at most 1000 / latency commits per second (S1). */
+  function serialRate(latencyMs) { return latencyMs > 0 ? Math.floor(1000 / latencyMs) : null; }
 
   /** Clock ticks before any failover step (SPEC.md "Steps"). */
   function ticksOf(e) {
@@ -56,6 +77,19 @@
     if (e.replicas === 2) out.push('follow');
     if (e.oldBack) out.push('return', 'rebuild');
     return out;
+  }
+
+  /**
+   * Every step in order: the ticks 1 … n (numbers), the replica becoming unreachable right after its tick
+   * ('replicaDown', no clock time), then the failover events.
+   */
+  function planOf(e) {
+    var out = [], ticks = ticksOf(e);
+    for (var n = 1; n <= ticks; n++) {
+      out.push(n);
+      if (e.r1DownAt && n * TICK === e.r1DownAt) out.push('replicaDown');
+    }
+    return out.concat(eventsOf(e));
   }
 
   /** Rule 1: the highest LSN a replica has applied at time t (records apply in LSN order, at `at + lag`). */
@@ -155,17 +189,67 @@
     }
   }
 
+  /**
+   * A tick with the synchronous-commit params (S1–S5): (1) the write reaches the primary's log, (2) each reachable
+   * replica takes what has come (a synchronous one: everything, it confirms within the tick since RTT < 100 ms),
+   * (3) the primary acknowledges what it may: at once when asynchronous or degraded, one round trip later when R1 has
+   * confirmed, and never while R1 is unreachable and the policy is block.
+   */
+  function tickExt(s, e, n) {
+    s.t = n * TICK;
+    s.phase = 'tick';
+    var P = s.servers.P;
+    var lsn = s.writes.length + 1;
+    s.writes.push({ lsn: lsn, at: s.t, key: 'x', value: lsn, acked: false, ackAt: null });
+    P.applied = lsn;
+    s.changed.applied.P = [lsn];
+    s.changed.wrote = lsn;
+    REPLICAS.slice(0, e.replicas).forEach(function (id) {
+      var r = s.servers[id];
+      if (!r.reachable) return;
+      var to = r.mode === 'sync' ? s.writes.length : appliedAt(s.writes, r.lagMs, s.t);
+      if (to > r.applied) {
+        var got = [];
+        for (var k = r.applied + 1; k <= to; k++) got.push(k);
+        s.changed.applied[id] = got;
+        r.applied = to;
+      }
+    });
+    var R1 = s.servers.R1;
+    var waits = R1.mode === 'sync' && !s.degraded;
+    s.writes.forEach(function (w) {
+      if (w.acked) return;
+      var ms;
+      if (!waits) ms = 0;
+      else if (R1.reachable && R1.applied >= w.lsn) ms = s.rttMs;
+      else {
+        if (s.blocked.indexOf(w.lsn) < 0) { s.blocked.push(w.lsn); s.changed.blocked.push(w.lsn); }
+        return;
+      }
+      w.acked = true;
+      w.ackAt = w.at + ms;
+      s.ackLatency.push({ lsn: w.lsn, ms: ms });
+      s.changed.acked.push(w.lsn);
+    });
+  }
+
+  function freshChanged(e) {
+    var c = { applied: {}, roles: [], received: {}, discarded: {} };
+    if (extOf(e)) { c.acked = []; c.blocked = []; }
+    return c;
+  }
+
   var logic = {
     TICK: TICK,
+    DOWN_AT: DOWN_AT,
     READ_AT: READ_AT,
 
     defaults: { replicas: 1, lag1: 250, lag2: 600, read: false, readFrom: 'replica', rywWait: false, failAt: 0,
-      prefer: 'none', oldBack: false },
+      prefer: 'none', oldBack: false, mode: 'async', rttMs: 1, onSyncLost: 'block', replicaDown: 0 },
 
-    /** Ticks (8–15, 6 or 10 before a failure), then fail, promote, [follow], [return, rebuild]: at most 15. */
+    /** Ticks (8–15, 6 or 10 before a failure), [replicaDown], then fail, promote, [follow], [return, rebuild]: at most 15. */
     steps: function (p) {
-      var e = eff(p);
-      return ticksOf(e) + eventsOf(e).length;
+      return planOf(eff(p)).length;
     },
 
     initial: function (p) {
@@ -173,24 +257,47 @@
       var servers = { P: { id: 'P', up: true, applied: 0, role: 'primary', lagMs: 0, follows: null, extra: [], discarded: [] } };
       REPLICAS.slice(0, e.replicas).forEach(function (id) {
         servers[id] = { id: id, up: true, applied: 0, role: 'replica', lagMs: e.lags[id], follows: 'P', extra: [], discarded: [] };
+        if (extOf(e)) {
+          servers[id].mode = e.mode;
+          servers[id].reachable = true;
+        }
       });
-      return {
+      var s = {
         t: 0, phase: 'start', ids: ['P'].concat(REPLICAS.slice(0, e.replicas)),
         writes: [], servers: servers, reads: [],
         primary: 'P', failedAt: null, promoted: null, lost: [], refused: false,
-        changed: { applied: {}, roles: [], received: {}, discarded: {} }
+        changed: freshChanged(e)
       };
+      if (extOf(e)) {
+        s.mode = e.mode;
+        s.rttMs = e.rttMs;
+        s.onSyncLost = e.onSyncLost;
+        s.degraded = false;
+        s.ackLatency = [];
+        s.blocked = [];
+      }
+      return s;
     },
 
     step: function (prev, n, p) {
       var e = eff(p);
       var s = clone(prev);
-      s.changed = { applied: {}, roles: [], received: {}, discarded: {} };
-      var ticks = ticksOf(e);
-      if (n <= ticks) { tick(s, e, n); return s; }
-      var ev = eventsOf(e)[n - ticks - 1];
+      s.changed = freshChanged(e);
+      var ev = planOf(e)[n - 1];
+      if (typeof ev === 'number') {
+        if (extOf(e)) tickExt(s, e, ev);
+        else tick(s, e, ev);
+        return s;
+      }
       s.phase = ev;
       var P = s.servers.P;
+      if (ev === 'replicaDown') {
+        // S4: R1 (or the link to it) fails; the primary cannot reach it. A synchronous primary blocks or degrades.
+        s.servers.R1.reachable = false;
+        if (e.onSyncLost === 'degrade') s.degraded = true;
+        s.changed.roles = ['R1'];
+        return s;
+      }
       if (ev === 'fail') {
         // the primary stops; records it had not yet shipped never reach a replica
         P.up = false;
@@ -208,7 +315,8 @@
         s.primary = id;
         s.promoted = id;
         P.role = 'old';
-        s.lost = lostTail(P.applied, np.applied);
+        // only what the client was told was committed is lost; a blocked commit was never acknowledged (S4)
+        s.lost = lostTail(P.applied, np.applied).filter(function (k) { return s.writes[k - 1].acked; });
         s.writes.forEach(function (w) { if (s.lost.indexOf(w.lsn) >= 0) w.lost = true; });
         s.changed.roles = [id, 'P'];
         return s;
@@ -259,7 +367,11 @@
     valueAt: valueAt,
     pickPromoted: pickPromoted,
     lostTail: lostTail,
-    followPlan: followPlan
+    followPlan: followPlan,
+    extOf: extOf,
+    planOf: planOf,
+    commitLatency: commitLatency,
+    serialRate: serialRate
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;
