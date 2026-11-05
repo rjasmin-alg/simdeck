@@ -1,0 +1,534 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- crush-failure-domain: the same data placed by `chooseleaf … type host` or `type rack` on three racks of three hosts,
+     then a rack is lost. Left: the pool and its health, the rule with its one word, the CRUSH tree (root → rack → host)
+     and the totals for every PG (the comparison of both rules in the last step). Right: the copies of the first twelve
+     PGs as a K3 block grid (kit/blockgrid.js), cells by host and coloured by rack, or every PG of the pool by state.
+     Model: sim.js (placement: placement.js); rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="crush-failure-domain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Domena kvara u pravilu smještaja · simdeck</title>
+<meta name="description" content="Promijeni jednu riječ u CRUSH pravilu pa izgubi ormar: uz type host dvije kopije dijele ormar i 453 od 2048 PG-ova staje, uz type rack nijedan.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "crush-failure-domain",
+  "title": {
+    "hr": "Domena kvara u pravilu smještaja",
+    "en": "Failure domain in a placement rule"
+  },
+  "concept": {
+    "hr": "Isti podaci uz type host i uz type rack, pa se izgubi ormar",
+    "en": "Same data, rule by host vs by rack; then lose a rack"
+  },
+  "summary": {
+    "hr": "Promijeni jednu riječ u CRUSH pravilu pa izgubi ormar: uz type host dvije kopije dijele ormar i 453 od 2048 PG-ova staje, uz type rack nijedan.",
+    "en": "Change one word in a CRUSH rule, then lose a rack: by host two copies can share a rack and 453 of 2048 PGs stop; by rack, none do."
+  },
+  "tags": [
+    "storage-cluster"
+  ],
+  "class": "stepper",
+  "steps": 2
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="crush-failure-domain"]; colours only from kit tokens.
+   Layout: left, the pool line, the rule, the tree and the totals; right, the copies of twelve PGs (or every PG). */
+[data-sim="crush-failure-domain"] .cf {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 0.8rem 1.1rem;
+  align-items: start;
+  align-content: center;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="crush-failure-domain"] .cf-col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+[data-sim="crush-failure-domain"] .cf-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.8rem; font-size: var(--fs-md); }
+[data-sim="crush-failure-domain"] .cf-head b { font-family: var(--mono); }
+[data-sim="crush-failure-domain"] .cf-badge {
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 0 0.45rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="crush-failure-domain"] .cf-health { margin-left: auto; font-family: var(--mono); font-weight: 700; padding: 0 0.45rem; border-radius: var(--radius-sm); border: var(--line-w) solid currentColor; }
+[data-sim="crush-failure-domain"] .cf-health[data-h="ok"] { color: var(--ok); }
+[data-sim="crush-failure-domain"] .cf-health[data-h="warn"] { color: var(--warn); border-style: dashed; }
+[data-sim="crush-failure-domain"] .cf-now { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+
+/* the rule, its one word outlined (on the highlight when it changed) */
+[data-sim="crush-failure-domain"] .cf-rule {
+  margin: 0;
+  padding: 0.35rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  white-space: pre;
+  overflow-x: auto;
+}
+[data-sim="crush-failure-domain"] .cf-word { font-weight: 700; padding: 0 0.2rem; outline: 0.18rem solid var(--ink); outline-offset: 0.05rem; border-radius: 0.15rem; }
+[data-sim="crush-failure-domain"] .cf-word.cf-now { outline-color: var(--ink); }
+[data-sim="crush-failure-domain"] .cf-sub { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="crush-failure-domain"] .cf-sub b { color: var(--ink); }
+
+/* the tree: root, three rack frames (border in the rack's colour), three host boxes each */
+[data-sim="crush-failure-domain"] .cf-tree { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+[data-sim="crush-failure-domain"] .cf-root { font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; padding: 0 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="crush-failure-domain"] .cf-racks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; width: 100%; }
+[data-sim="crush-failure-domain"] .cf-rack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem 0.3rem;
+  border: 0.24rem solid var(--rc, var(--ink));
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+[data-sim="crush-failure-domain"] .cf-rack-h { line-height: 1.2; display: flex; justify-content: space-between; gap: 0.3rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="crush-failure-domain"] .cf-rack-h b { font-family: var(--mono); }
+[data-sim="crush-failure-domain"] .cf-host {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  text-align: center;
+  line-height: 1.25;
+  padding: 0 0.2rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: 0.15rem;
+  background: var(--bg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-sim="crush-failure-domain"] .cf-rack[data-lost] { border-style: dashed; border-color: var(--danger); }
+[data-sim="crush-failure-domain"] .cf-rack[data-lost]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to top right, transparent calc(50% - 0.1rem), var(--danger) calc(50% - 0.1rem), var(--danger) calc(50% + 0.1rem), transparent calc(50% + 0.1rem)),
+    linear-gradient(to bottom right, transparent calc(50% - 0.1rem), var(--danger) calc(50% - 0.1rem), var(--danger) calc(50% + 0.1rem), transparent calc(50% + 0.1rem));
+}
+[data-sim="crush-failure-domain"] .cf-rack[data-lost] .cf-host { color: var(--muted); text-decoration: line-through; }
+[data-sim="crush-failure-domain"] .cf-lostword { color: var(--danger); }
+
+/* totals card / the comparison */
+[data-sim="crush-failure-domain"] .cf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.45rem 0.9rem;
+  font-size: var(--fs-sm);
+}
+[data-sim="crush-failure-domain"] .cf-card h3 { margin: 0; font-size: var(--fs-md); }
+[data-sim="crush-failure-domain"] .cf-counts { display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
+[data-sim="crush-failure-domain"] .cf-counts span { white-space: nowrap; padding: 0 0.25rem; }
+[data-sim="crush-failure-domain"] .cf-muted { color: var(--muted); }
+[data-sim="crush-failure-domain"] .cf-riskline { font-weight: 700; color: var(--warn); }
+[data-sim="crush-failure-domain"] .cf-st { font-weight: 700; color: var(--ink); }
+[data-sim="crush-failure-domain"] .cf-st-inactive, [data-sim="crush-failure-domain"] .cf-st-stale { color: var(--danger); }
+[data-sim="crush-failure-domain"] .cf-st-degraded { color: var(--warn); }
+[data-sim="crush-failure-domain"] .cf-st-clean { color: var(--ok); }
+[data-sim="crush-failure-domain"] .cf-bang { font-weight: 700; color: var(--warn); margin-right: 0.3rem; }
+[data-sim="crush-failure-domain"] .cf-cmp { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+[data-sim="crush-failure-domain"] .cf-cmp th, [data-sim="crush-failure-domain"] .cf-cmp td { padding: 0.08rem 0.4rem; text-align: right; white-space: nowrap; }
+[data-sim="crush-failure-domain"] .cf-cmp th:first-child, [data-sim="crush-failure-domain"] .cf-cmp td:first-child { text-align: left; }
+[data-sim="crush-failure-domain"] .cf-cmp thead th { color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--line); }
+[data-sim="crush-failure-domain"] .cf-cmp tr.cf-cur td { font-weight: 700; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+[data-sim="crush-failure-domain"] .cf-cmp td.cf-bad { color: var(--danger); }
+
+/* the grids */
+[data-sim="crush-failure-domain"] .cf .sd-bg-label { font-size: var(--fs-sm); }
+[data-sim="crush-failure-domain"] .cf .sd-bg-aside { font-size: var(--fs-sm); min-width: 10.5rem; }
+[data-sim="crush-failure-domain"] .cf-strip .sd-bg-grid { --bg-row-gap: 0.25rem; }
+[data-sim="crush-failure-domain"] .cf-strip .sd-bg-cell { font-size: var(--fs-sm); }
+[data-sim="crush-failure-domain"] .cf-all .sd-bg-grid { --bg-row-gap: 0.1rem; column-gap: 0.1rem; }
+
+/* the overview of every PG: a bitmap of small squares */
+[data-sim="crush-failure-domain"] .cf-allbox { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.5rem 0.9rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="crush-failure-domain"] .cf-allhead { font-size: var(--fs-sm); }
+[data-sim="crush-failure-domain"] .cf-allhead b { font-size: var(--fs-md); }
+[data-sim="crush-failure-domain"] .cf-map { display: grid; grid-template-columns: repeat(var(--per), minmax(0, 1fr)); gap: 0.12rem; }
+[data-sim="crush-failure-domain"] .cf-px { display: block; aspect-ratio: 1; min-height: 0.45rem; box-sizing: border-box; border: 1px solid var(--line); background: var(--bg); }
+[data-sim="crush-failure-domain"] .cf-px[data-g="c"] { background: var(--c3); border-color: var(--c3); }
+[data-sim="crush-failure-domain"] .cf-px[data-g="d"] { background: repeating-linear-gradient(135deg, var(--c7) 0 0.12rem, var(--bg) 0.12rem 0.24rem); border-color: var(--c7); }
+[data-sim="crush-failure-domain"] .cf-px[data-g="i"] { background: var(--bg); border: 0.16rem solid var(--danger); }
+[data-sim="crush-failure-domain"] .cf-px[data-g="s"] { background: linear-gradient(to top right, var(--panel) calc(50% - 1px), var(--muted) calc(50% - 1px), var(--muted) calc(50% + 1px), var(--panel) calc(50% + 1px)); border-color: var(--muted); }
+[data-sim="crush-failure-domain"] .cf-px[data-risk] { box-shadow: 0 0.14rem 0 0 var(--ink); }
+[data-sim="crush-failure-domain"] .cf-px-key { display: inline-block; width: 0.8em; height: 0.8em; min-height: 0; vertical-align: -0.05em; }
+
+/* state marks drawn in CSS (as ceph-min-size): degraded, a half disc; inactive, a pause sign */
+[data-sim="crush-failure-domain"] .cf-ic { display: inline-block; font-weight: 700; }
+[data-sim="crush-failure-domain"] .cf-ic-degraded, [data-sim="crush-failure-domain"] .cf-ic-inactive { width: 0.8em; height: 0.8em; vertical-align: -0.05em; }
+[data-sim="crush-failure-domain"] .cf-ic-degraded { border: 0.12em solid currentColor; border-radius: 50%; background: linear-gradient(90deg, currentColor 50%, var(--bg) 50%); }
+[data-sim="crush-failure-domain"] .cf-ic-inactive { border-left: 0.25em solid currentColor; border-right: 0.25em solid currentColor; width: 0.75em; }
+
+/* panel: presets in two columns; controls in two, the toggles across both */
+[data-sim="crush-failure-domain"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="crush-failure-domain"] [data-sd-controls] > .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 0.8rem; align-items: end; }
+[data-sim="crush-failure-domain"] [data-sd-controls] > .sd-group > :not(.sd-ctl),
+[data-sim="crush-failure-domain"] [data-sd-controls] .sd-ctl[data-key="lostRack"],
+[data-sim="crush-failure-domain"] [data-sd-controls] .sd-ctl[data-key="compare"],
+[data-sim="crush-failure-domain"] [data-sd-controls] .sd-ctl[data-key="showAll"] { grid-column: 1 / -1; }
+
+/* Phone and portrait: one column; the stage grows with its content; the grids scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="crush-failure-domain"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="crush-failure-domain"] .cf { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="crush-failure-domain"] .cf-health { margin-left: 0; }
+  [data-sim="crush-failure-domain"] .cf-racks { gap: 0.3rem; }
+  [data-sim="crush-failure-domain"] .cf-rack { padding: 0.2rem; }
+  [data-sim="crush-failure-domain"] .cf .sd-bg-aside { min-width: 0; }
+  [data-sim="crush-failure-domain"] [data-sd-controls] > .sd-group { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Domena kvara u pravilu smještaja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="placement.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  /** Series colours: racks 1–3 (copies and rack frames), clean and degraded PGs (as ceph-min-size). */
+  var C_RACK = [1, 2, 4], C_CLEAN = 3, C_DEG = 7;
+  var RACK_VAR = ['var(--c1)', 'var(--c2)', 'var(--c4)'];                // the frames, in the colours of C_RACK
+
+  function icon(g) {
+    if (g === 'clean') return h('span', { class: 'cf-ic', translate: 'no' }, '✓');
+    if (g === 'stale') return h('span', { class: 'cf-ic', translate: 'no' }, '∅');
+    return h('span', { class: 'cf-ic cf-ic-' + g, 'aria-hidden': 'true' });
+  }
+  /** Data (pool, host and PG names, numbers, rule text) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, t('thsep')); }
+  function pct(n, all) { return (Math.round(1000 * n / all) / 10).toFixed(1).replace('.', t('dec')) + (t('dec') === ',' ? ' %' : '%'); }
+  function stopped(c) { return c.inactive + c.stale; }
+  function P(s) { return L.POOLS[s.pool]; }
+  function hostLabel(i) { return L.hostName(i).slice(5); }                 // ceph-r1-3 → r1-3 in the cells
+
+  /** Caption parts from t(key) or t.n(key, n): node placeholders are put back where they land (cloned); *English term*
+      becomes <em lang="en"> (the Croatian term rule, for terms the glossary lacks); `rule text` becomes <code>. */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+      if (!bit) return;
+      if (bit[0] === '`') { out.push(h('code', { translate: 'no' }, bit.slice(1, -1))); return; }
+      var em = bit[0] === '*';
+      if (em) bit = bit.slice(1, -1);
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(em ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+
+  // ── stage ──
+
+  function head(c) {
+    var s = c.state, p = P(s), prev = c.prev;
+    var setting = p.type === 'erasure' ? 'EC ' + p.k + '+' + p.m + ' · min_size ' + p.minSize
+      : 'size ' + p.width + ' · min_size ' + p.minSize;
+    return h('div', { class: 'cf-head' },
+      h('span', null, t('poolWord'), ' ', h('b', { translate: 'no' }, p.name)),
+      h('span', { class: 'cf-badge', translate: 'no' }, setting),
+      h('span', null, t.n('pgCount', p.pgNum, { c: num(p.pgNum) })),
+      s.health ? h('span', { class: 'cf-health' + (prev && prev.health && prev.health !== s.health ? ' cf-now' : ''),
+        dataset: { h: s.health === 'HEALTH_OK' ? 'ok' : 'warn' }, translate: 'no' }, (s.health === 'HEALTH_OK' ? '✓ ' : '⚠ ') + s.health) : null);
+  }
+
+  function rule(c) {
+    var s = c.state, p = P(s);
+    var changed = !!(s.ev && s.ev.switched);
+    var name = p.type === 'erasure' ? 'ec_rule' : 'replicated_rule';
+    return h('pre', { class: 'cf-rule', translate: 'no', 'aria-label': t('ruleTitle') },
+        'rule ' + name + ' {\n    type ' + p.type + '\n    step take default\n    step chooseleaf ' + L.ruleMode(s.pool) + ' 0 type ',
+        h('span', { class: 'cf-word' + (changed ? ' cf-now' : '') }, s.rule),
+        '\n    step emit\n}');
+  }
+
+  function tree(c) {
+    var s = c.state;
+    var racks = [];
+    for (var r = 1; r <= L.RACKS; r++) {
+      var hosts = [];
+      for (var k = 0; k < L.HOSTS_PER_RACK; k++) hosts.push(h('div', { class: 'cf-host', translate: 'no' }, L.hostName((r - 1) * L.HOSTS_PER_RACK + k)));
+      var lost = s.lostRack === r;
+      var lostNow = lost && s.ev && s.ev.kind === 'lose';
+      racks.push(h('div', { class: 'cf-rack', dataset: lost ? { lost: 'true' } : null, style: { '--rc': RACK_VAR[r - 1] } },
+        h('div', { class: 'cf-rack-h' }, h('b', { translate: 'no' }, 'rack' + r),
+          lost ? h('span', { class: 'cf-lostword' + (lostNow ? ' cf-now' : '') }, t('rackLost')) : null),
+        hosts));
+    }
+    return h('div', { class: 'cf-col' },
+      h('p', { class: 'cf-sub' }, h('b', null, t('treeTitle')), ' · ', h('span', { translate: 'no' }, 'root → rack → host'), ' · ', t('hostOsds')),
+      h('div', { class: 'cf-tree' }, h('div', { class: 'cf-root', translate: 'no' }, 'root default'), h('div', { class: 'cf-racks' }, racks)));
+  }
+
+  function totalsCard(c) {
+    var s = c.state, p = P(s), prev = c.prev;
+    if (s.ev && s.ev.kind === 'totals') return cmpCard(c);
+    var kids = [h('h3', null, t('totalsTitle'))];
+    if (!s.placed) { kids.push(h('div', { class: 'cf-muted' }, t('notPlaced'))); return h('div', { class: 'cf-card' }, kids); }
+    kids.push(h('div', { class: 'cf-counts' }, L.GROUPS.map(function (g) {
+      var moved = !!(prev && prev.counts) && prev.counts[g] !== s.counts[g];
+      return h('span', { class: 'cf-st cf-st-' + g + (moved ? ' cf-now' : '') }, icon(g), ' ', t.n('cnt_' + g, s.counts[g], { c: num(s.counts[g]) }));
+    })));
+    if (s.risk) {
+      kids.push(h('div', { class: (s.risky ? 'cf-riskline' : 'cf-st cf-st-clean') + (s.ev && s.ev.kind === 'risk' ? ' cf-now' : '') },
+        s.risky ? t(s.pool === 'ec' ? 'riskLineEc' : 'riskLine', { n: num(s.risky), all: num(p.pgNum) }) : t(s.pool === 'ec' ? 'riskNoneEc' : 'riskNone')));
+    } else kids.push(h('div', { class: 'cf-muted' }, t('riskUnknown')));
+    if (s.holes) kids.push(h('div', { class: 'cf-st cf-st-inactive' }, t('holesLine', { n: num(s.holes), all: num(p.pgNum) })));
+    return h('div', { class: 'cf-card' }, kids);
+  }
+
+  function cmpCard(c) {
+    var s = c.state, ev = s.ev, lost = ev.lost;
+    var headRow = [h('th', null, t('totRule')), h('th', null, t('totRisk')), h('th', null, t('totBefore'))];
+    if (lost) headRow.push(h('th', null, t('totStop')), h('th', null, t('totDegraded')), h('th', null, t('totClean')));
+    var rows = ev.totals.map(function (r) {
+      var cur = r.rule === s.rule;
+      var tds = [
+        h('td', null, h('code', { translate: 'no' }, 'type ' + r.rule), cur ? h('span', { class: 'cf-muted' }, ' · ' + t('totNow')) : null),
+        h('td', { class: r.risky ? 'cf-bad' : null, translate: 'no' }, num(r.risky)),
+        h('td', { class: r.health === 'HEALTH_OK' ? null : 'cf-bad', translate: 'no' }, r.health)
+      ];
+      if (lost) {
+        tds.push(h('td', { class: stopped(r.after) ? 'cf-bad' : null, translate: 'no' }, num(stopped(r.after))),
+          h('td', { translate: 'no' }, num(r.after.degraded)), h('td', { translate: 'no' }, num(r.after.clean)));
+      }
+      return h('tr', { class: cur ? 'cf-cur' : null }, tds);
+    });
+    return h('div', { class: 'cf-card' },
+      h('h3', null, t(lost ? 'totTitle' : 'totTitleNone')),
+      lost ? h('div', { class: 'cf-muted' }, t('totAfter', { r: lost })) : null,
+      h('table', { class: 'cf-cmp' }, h('thead', null, h('tr', null, headRow)), h('tbody', null, rows)));
+  }
+
+  /** The copies of the twelve sample PGs: a row per PG, a cell per copy (its host, coloured by rack), grouped by rack;
+      a rack holding too many of them outlined (a span) with "!" in the aside; copies in the lost rack crossed; holes
+      dashed. The aside gives the state after a loss. */
+  function strip(c) {
+    var s = c.state, p = P(s), ev = s.ev;
+    var riskNow = !!(ev && (ev.kind === 'risk' || (ev.kind === 'totals' && !ev.lost)));
+    var rows = s.sample.map(function (pg) {
+      var id = L.pgId(s.pool, pg);
+      if (!s.placed) {
+        var empty = [];
+        for (var k = 0; k < p.width; k++) empty.push({ kind: 'ghost' });
+        return { id: 'pg' + pg, label: id, cells: empty, aside: '' };
+      }
+      var order = L.drawOrder(s.pool, s.rule, pg);
+      var cells = order.map(function (x) {
+        if (!x) return { kind: 'ghost', text: 'NONE' };
+        var down = s.down.indexOf(x.osd) >= 0;
+        return { text: hostLabel(x.host), kind: down ? 'dead' : 'fill', c: C_RACK[x.rack - 1] };
+      });
+      var spans = [], risky = s.risk ? L.riskRacks(s.pool, s.rule, pg) : [];
+      risky.forEach(function (r) {
+        var from = -1, len = 0;
+        order.forEach(function (x, k) { if (x && x.rack === r) { if (from < 0) from = k; len += 1; } });
+        spans.push({ from: from, len: len, now: riskNow });
+      });
+      var g = L.groupOf(s, pg);
+      var showState = s.lostRack !== null || g !== 'clean';
+      var changed = !!(ev && ev.kind === 'lose' && ev.changed.indexOf(pg) >= 0);
+      var aside = h('span', null,
+        risky.length ? h('span', { class: 'cf-bang', translate: 'no' }, '! rack' + risky.join(',')) : null,
+        showState ? h('span', { class: 'cf-st cf-st-' + g + (changed ? ' cf-now' : '') }, icon(g), ' ', t('g_' + g)) : null);
+      return { id: 'pg' + pg, label: id, cells: cells, spans: spans, aside: aside };
+    });
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'cf-strip',
+      title: t(s.pool === 'ec' ? 'stripTitleEc' : 'stripTitle', { k: s.sample.length }),
+      meta: [t(s.pool === 'ec' ? 'stripMetaEc' : 'stripMeta')],
+      cols: p.width,
+      cellHeight: '1.4rem',
+      rows: rows
+    });
+  }
+
+  /** Every PG of the pool as one small square by state, drawn in the page (K3 is made for a few rows of up to ~40
+      cells; NOTES.md "Shared requests"): clean solid, degraded hatched, inactive a hollow --danger frame, no copy grey
+      with a diagonal; before a loss, a PG one rack can stop has an ink bar under it once the risk is shown. */
+  function allGrid(c) {
+    var s = c.state, p = P(s);
+    var perRow = p.pgNum > 1024 ? 64 : 32;
+    var px = [];
+    for (var pg = 0; pg < p.pgNum; pg++) {
+      var ds = s.placed ? { g: s.pgs[pg] } : {};
+      if (s.placed && s.risk && s.lostRack === null && L.riskRacks(s.pool, s.rule, pg).length) ds.risk = 'true';   // after a loss the frames say it
+      px.push(h('i', { class: 'cf-px', dataset: ds }));
+    }
+    return h('div', { class: 'sd-bg cf-allbox' },
+      h('div', { class: 'cf-allhead' }, h('b', null, t('allTitle', { n: num(p.pgNum) })), ' ', h('span', { class: 'cf-muted' }, t('allMeta'))),
+      h('div', { class: 'cf-map', style: { '--per': String(perRow) }, role: 'img', 'aria-label': t('allTitle', { n: num(p.pgNum) }) }, px),
+      s.counts ? h('div', { class: 'cf-counts' }, L.GROUPS.map(function (g) {
+        return h('span', { class: 'cf-st cf-st-' + g }, h('i', { class: 'cf-px cf-px-key', dataset: { g: g[0] } }), ' ', t.n('cnt_' + g, s.counts[g], { c: num(s.counts[g]) }));
+      })) : null);
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'cf' },
+      h('div', { class: 'cf-col' }, head(c), rule(c), tree(c), totalsCard(c)),
+      h('div', { class: 'cf-col' }, c.params.showAll ? allGrid(c) : strip(c))));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, p = P(s), o = L.norm(c.params);
+    var N = data(num(p.pgNum)), out = [];
+    var add = function (parts) { out = out.concat(out.length ? [' '].concat(parts) : parts); };
+    if (!ev) return rich(s.pool === 'ec' ? 'capStartEc' : 'capStart', { pool: data(p.name), n: N });
+
+    function placeCap() {
+      if (ev.switched) add(rich(ev.back ? 'capSwitchBack' : 'capSwitch', { a: c.prev.rule, b: s.rule, r: data(ev.back) }));
+      add(rich(s.pool === 'ec' ? (s.rule === 'host' ? 'capPlaceEcHost' : 'capPlaceEcRack') : (s.rule === 'host' ? 'capPlaceHost' : 'capPlaceRack')));
+    }
+    function riskCap() {
+      var v = { n: data(num(s.risky)), all: N, p: data(pct(s.risky, p.pgNum)) };
+      add(rich(s.pool === 'ec' ? (s.rule === 'host' ? 'capRiskEcHost' : 'capRiskEcRack') : (s.rule === 'host' ? 'capRiskHost' : 'capRiskRack'), v));
+    }
+
+    if (ev.kind === 'place') {
+      placeCap();
+      if (s.health === 'HEALTH_OK') add(rich('capHealthOk', { n: N }));
+      return out;
+    }
+    if (ev.kind === 'risk') {
+      if (ev.placedNow) placeCap();
+      riskCap();
+      return out;
+    }
+    if (ev.kind === 'lose') {
+      var R = data(ev.rack), before = c.prev.counts;
+      add(rich('capLose', { r: R, c: data(num(ev.hit)) }, ev.hit));
+      if (stopped(before) === p.pgNum) { add(rich('capLoseWasDown')); return out; }
+      var stop = stopped(s.counts);
+      if (stop) add(rich('capLoseStop', { c: data(num(stop)), m: data(p.minSize) }, stop));
+      if (s.counts.stale) add(rich('capLoseStale', { c: data(num(s.counts.stale)), r: R }, s.counts.stale));
+      if (s.counts.degraded) add(rich('capLoseDegraded', { c: data(num(s.counts.degraded)) }, s.counts.degraded));
+      if (s.counts.clean) add(rich('capLoseClean', { c: data(num(s.counts.clean)) }, s.counts.clean));
+      if (ev.alt) add(rich('capLoseEcAlt', { m: data(ev.alt.minSize), n: data(num(ev.alt.inactive)) }));
+      else if (s.rule === 'host') add(rich('capLoseHost'));
+      else add(rich(o.compare && o.rule === 'host' ? 'capLoseRack' : 'capLoseRackPlain'));   // "one word changed" only after the host run
+      return out;
+    }
+    // totals
+    var host = ev.totals[0], rack = ev.totals[1];
+    if (ev.lost) {
+      add(rich('capTotals', { a: data(num(stopped(host.after))), b: data(num(stopped(rack.after))) }));
+      if (host.health === 'HEALTH_OK' && rack.health === 'HEALTH_OK') add(rich('capTotalsOk'));
+      else if (stopped(rack.before) === p.pgNum) add(rich('capTotalsEcRack'));
+    } else if (s.pool === 'ec') add(rich('capTotalsNoneEc', { n: N, a: data(num(host.risky)) }));
+    else add(rich('capTotalsNone', { n: N, a: data(num(host.risky)), b: data(num(rack.risky)) }));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'pool', type: 'choice', label: t('pool'), options: [['rbd', t('poolRbd')], ['ec', t('poolEc')]], resets: true },
+      { key: 'rule', type: 'choice', label: t('rule'), options: [['host', 'host'], ['rack', 'rack']], resets: true },
+      { key: 'lostRack', type: 'choice', label: t('lostRack'), options: [['none', t('lostNone')], [1, '1'], [2, '2'], [3, '3']], resets: true },
+      { key: 'compare', type: 'toggle', label: t('compare'), resets: true },
+      { key: 'showAll', type: 'toggle', label: t('showAll') }
+    ],
+
+    presets: [
+      { id: 'by-host-lose-rack', label: t('pHost'), params: { lostRack: 1 }, hint: t('pHostHint') },
+      { id: 'by-rack-lose-rack', label: t('pRack'), params: { rule: 'rack', lostRack: 1 }, hint: t('pRackHint') },
+      { id: 'before-the-loss', label: t('pBefore'), params: { compare: true }, hint: t('pBeforeHint') },
+      { id: 'ec-by-host', label: t('pEc'), params: { pool: 'ec', lostRack: 1 }, hint: t('pEcHint') },
+      { id: 'host-then-rack', label: t('pBoth'), params: { compare: true, lostRack: 1 }, hint: t('pBothHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: C_RACK[0], label: t('legCopy') },
+      { shape: 'bg-span', label: t('legRisk') },
+      { shape: 'bg-dead', label: t('legLostCopy') },
+      { shape: 'bg-ghost', label: t('legHole') },
+      { shape: 'bg-fill', c: C_CLEAN, label: t('legClean') },
+      { shape: 'bg-soft', c: C_DEG, label: t('legDegraded') },
+      { shape: 'bg-bad', label: t('legInactive') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
