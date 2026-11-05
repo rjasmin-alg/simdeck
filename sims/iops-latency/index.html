@@ -1,0 +1,417 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- IOPS, throughput and latency: a closed loop of QD requests of one block size on a device with P lanes, an access
+     time and a bandwidth ceiling (task docs/tasks/w3/iops-latency.md). An explorer: the params drive the stage live; the
+     model is in sim.js (rules in SPEC.md), the words in strings.js. No kit view fits (curves against queue depth), so
+     the page draws its own SVG at 1:1 (no viewBox); the queue, device, gauges and badge are HTML. The queue drawing
+     follows sims/utilisation-latency/. -->
+<html lang="hr" data-sim="iops-latency">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IOPS, propusnost i kašnjenje · simdeck</title>
+<meta name="description" content="Dubina reda i veličina bloka mijenjaju IOPS, propusnost i kašnjenje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "iops-latency",
+  "title": { "hr": "IOPS, propusnost i kašnjenje", "en": "IOPS, throughput and latency" },
+  "concept": { "hr": "Dubina reda i veličina bloka mijenjaju IOPS, propusnost i kašnjenje", "en": "Queue depth and block size trade IOPS, throughput and latency off" },
+  "summary": {
+    "hr": "Biraj uređaj, blok i dubinu reda: dok ima slobodnih traka, IOPS raste; kad su pune ili je dosegnut strop propusnosti, raste samo kašnjenje.",
+    "en": "Choose the device, block and queue depth: while lanes are free, IOPS rise; once they are full or bandwidth is at its ceiling, only latency grows."
+  },
+  "tags": ["storage-basics"],
+  "class": "explorer",
+  "entries": [{ "preset": "hdd-random" }, { "preset": "nvme-big-blocks" }]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="iops-latency"]; colours only from kit tokens. */
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="iops-latency"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+[data-sim="iops-latency"] .il {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  height: 100%;
+  padding: 1cqh 1.2cqw 1cqh;
+  font-size: var(--fs-md);
+}
+
+/* ── the scene: queue → device with P lanes → bandwidth pipe; the limit badge ── */
+[data-sim="iops-latency"] .il-scene { display: flex; align-items: center; gap: 0.8rem; min-width: 0; }
+[data-sim="iops-latency"] .il-q-title { font-weight: 700; }
+[data-sim="iops-latency"] .il-q-line { flex: 1 1 auto; min-width: 6rem; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="iops-latency"] .il-q-slots {
+  display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; align-items: center; gap: 0.25rem;
+  min-height: 2.2rem; padding: 0.2rem 0.4rem; border-bottom: 3px solid var(--ink);
+}
+[data-sim="iops-latency"] .il-q-req { width: 0.9rem; height: 0.9rem; background: var(--c3); border: 2px solid var(--ink); border-radius: 0.15rem; }
+[data-sim="iops-latency"] .il-q-more { font-weight: 700; padding: 0 0.3rem; }
+[data-sim="iops-latency"] .il-q-note { font-size: var(--fs-sm); text-align: right; }
+[data-sim="iops-latency"] .il-arrow { font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="iops-latency"] .il-dev {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+  padding: 0.35rem 0.7rem; border: 3px solid var(--ink); border-radius: 0.6rem; background: var(--panel);
+}
+[data-sim="iops-latency"] .il-dev-name { font-weight: 700; }
+[data-sim="iops-latency"] .il-lanes { display: grid; grid-template-columns: repeat(var(--cols), 1.15rem); gap: 0.2rem; }
+[data-sim="iops-latency"] .il-lane { width: 1.15rem; height: 1.15rem; border: 2px dashed var(--line); border-radius: 0.2rem; background: var(--bg); }
+[data-sim="iops-latency"] .il-lane[data-busy] { border: 2px solid var(--ink); background: var(--c1); }
+[data-sim="iops-latency"] .il-dev-sub { font-size: var(--fs-sm); text-align: center; }
+[data-sim="iops-latency"] .il-pipe { flex: 0 1 15rem; min-width: 9rem; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="iops-latency"] .il-pipe-bar {
+  height: 1.4rem; border: 3px solid var(--ink); border-radius: 0.7rem; overflow: hidden;
+  background: linear-gradient(90deg, var(--c2) 0 var(--used), var(--bg) var(--used));
+}
+[data-sim="iops-latency"] .il-pipe-bar[data-full] { border-color: var(--danger); border-width: 4px; }
+[data-sim="iops-latency"] .il-pipe-label { font-size: var(--fs-sm); }
+[data-sim="iops-latency"] .il-badge {
+  flex: 0 1 16rem; min-width: 9rem; padding: 0.3rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: 0.5rem;
+  line-height: 1.25;
+}
+[data-sim="iops-latency"] .il-badge b { display: block; }
+[data-sim="iops-latency"] .il-badge[data-bound="bandwidth"] { border: 4px double var(--danger); }
+[data-sim="iops-latency"] .il-badge[data-bound="parallelism"] { border: 3px solid var(--warn); }
+[data-sim="iops-latency"] .il-badge[data-bound="latency"] { border: 2px dashed var(--ok); }
+[data-sim="iops-latency"] .il-badge.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* ── three gauges, each over its chart against queue depth ── */
+[data-sim="iops-latency"] .il-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; min-height: 0; }
+[data-sim="iops-latency"] .il-card {
+  display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; min-width: 0;
+  padding: 0.35rem 0.6rem 0.2rem; border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel);
+}
+[data-sim="iops-latency"] .il-g-label { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="iops-latency"] .il-g-val { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+[data-sim="iops-latency"] .il-g-sub { font-size: var(--fs-sm); }
+[data-sim="iops-latency"] .il-card.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="iops-latency"] .il-card.sd-changed .il-g-label { color: var(--on-hl); }
+[data-sim="iops-latency"] .il-plot { position: relative; min-height: 10rem; }
+[data-sim="iops-latency"] .il-plot svg { position: absolute; inset: 0; overflow: visible; touch-action: none; cursor: ew-resize; }
+[data-sim="iops-latency"] .il-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); paint-order: stroke; stroke: var(--panel); stroke-width: 5px; stroke-linejoin: round; }
+[data-sim="iops-latency"] .il-card.sd-changed .il-plot text { stroke: var(--hl); fill: var(--on-hl); }
+[data-sim="iops-latency"] .il-plot .il-muted { fill: var(--muted); }
+[data-sim="iops-latency"] .il-card.sd-changed .il-plot .il-muted { fill: var(--on-hl); }
+[data-sim="iops-latency"] .il-axis { stroke: var(--ink); stroke-width: 2; }
+[data-sim="iops-latency"] .il-grid { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
+[data-sim="iops-latency"] .il-curve { fill: none; stroke-width: 4; stroke-linejoin: round; }
+[data-sim="iops-latency"] .il-curve[data-g="iops"] { stroke: var(--c1); }
+[data-sim="iops-latency"] .il-curve[data-g="mbps"] { stroke: var(--c2); }
+[data-sim="iops-latency"] .il-curve[data-g="lat"] { stroke: var(--c4); }
+[data-sim="iops-latency"] .il-card.sd-changed .il-curve { stroke: var(--on-hl); }
+[data-sim="iops-latency"] .il-pline { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 6 5; }
+[data-sim="iops-latency"] .il-ceil { stroke: var(--danger); stroke-width: 3; stroke-dasharray: 10 6; }
+[data-sim="iops-latency"] .il-guide { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 4; }
+[data-sim="iops-latency"] .il-ring { fill: var(--bg); stroke: var(--ink); stroke-width: 4; }
+[data-sim="iops-latency"] .il-ring-dot { fill: var(--ink); }
+
+/* Legend swatches: shapes, so they read in grayscale too. */
+[data-sim="iops-latency"] .sd-swatch[data-shape='il-queued'] { width: 0.7em; height: 0.7em; background: var(--c3); border: 2px solid var(--ink); border-radius: 0.1em; }
+[data-sim="iops-latency"] .sd-swatch[data-shape='il-lane'] { background: var(--c1); border: 2px solid var(--ink); border-radius: 0.15em; }
+[data-sim="iops-latency"] .sd-swatch[data-shape='il-slot'] { background: var(--bg); border: 2px dashed var(--line); border-radius: 0.15em; }
+[data-sim="iops-latency"] .sd-swatch[data-shape='il-ring'] { border-radius: 50%; border: 0.2rem solid var(--ink); background: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; scene and charts stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="iops-latency"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="iops-latency"] .il { height: auto; padding: 0.4rem; }
+  [data-sim="iops-latency"] .il-scene { flex-wrap: wrap; }
+  [data-sim="iops-latency"] .il-q-line { flex: 1 1 0; }
+  [data-sim="iops-latency"] .il-scene > .il-arrow { display: none; }
+  [data-sim="iops-latency"] .il-dev { flex: 1 1 100%; min-width: 0; }
+  [data-sim="iops-latency"] .il-pipe { flex: 1 1 100%; }
+  [data-sim="iops-latency"] .il-lanes { grid-template-columns: repeat(min(var(--cols), 8), 1.15rem); }
+  [data-sim="iops-latency"] .il-badge { flex-basis: 100%; }
+  [data-sim="iops-latency"] .il-cols { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="iops-latency"] .il-plot { height: 13rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">IOPS, propusnost i kašnjenje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var MAX_QUEUE = 40;          // queued squares drawn; the rest is "+n"
+  var Q_MAX = 256;             // the charts' x axis: 1 … 256 (log₂)
+  var sim = null;
+
+  // ── numbers in the page's language ──
+  function sep(s) {
+    var parts = s.split('.'), int = parts[0];
+    if (int.replace('-', '').length > 4) int = int.replace(/\B(?=(\d{3})+(?!\d))/g, t('thou'));
+    return int + (parts.length > 1 ? t('dec') + parts[1] : '');
+  }
+  /** IOPS: whole numbers, thousands separated from five digits. */
+  function iopsN(v) { return sep(String(Math.round(v))); }
+  /** ms: two significant digits below 100 (0.081, 5.2, 13), whole from 100. */
+  function msN(v) { return t('ms', { v: v === 0 ? '0' : sep(v >= 100 ? String(Math.round(v)) : v.toPrecision(2)) }); }
+  /** MB/s: one decimal below 10, whole from 10. */
+  function mbN(v) { return t('mbs', { v: sep(v < 10 ? v.toFixed(1) : String(Math.round(v))) }); }
+  function bsN(k) { return k >= 1024 ? t('mib', { n: String(k / 1024) }) : t('kib', { n: String(k) }); }
+  function devN(id) { return t('dev-' + id); }
+  /** Axis tick: up to three significant digits, thousands separated. */
+  function tick(v) { return sep(String(parseFloat(v.toPrecision(3)))); }
+  function b(x) { return h('b', null, x); }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+
+  // ── what changed with the last change: the params before it (caption) and the bound before it (marks) ──
+  var lastKey = null, lastP = null, prevP = null;
+  function track(p) {
+    var key = JSON.stringify(p);
+    if (key === lastKey) return;            // a redraw of the same state (theme, resize) keeps the last change
+    prevP = lastP; lastP = p; lastKey = key;
+  }
+
+  /** A nice upper bound for an axis: 1, 2, 2.5 or 5 × 10^k at or above v. */
+  function nice(v) {
+    var e = Math.pow(10, Math.floor(Math.log10(v)));
+    var m = [1, 2, 2.5, 5, 10].filter(function (x) { return x * e >= v - 1e-12; })[0];
+    return m * e;
+  }
+
+  // ── one chart: a metric against queue depth (log₂ 1…256) for the current device and block ──
+  var FIELD = { iops: 'iops', mbps: 'mbps', lat: 'latMs' };
+  function draw(box, g, st, p) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var fs = Math.max(16, 0.8 * rem);
+    var key = FIELD[g];
+    var top = 0;
+    for (var i = 0; i <= 64; i++) top = Math.max(top, L.curveAt(p, Math.pow(2, i / 8))[key]);
+    if (g === 'mbps') top = Math.max(top, st.bwMBps);
+    var ymax = nice(top * 1.08);
+    var labels = [0, ymax / 2, ymax].map(tick);
+    var lw = 0, probe = s('text', null, labels[2]);
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t(g === 'iops' ? 'plotIops' : g === 'mbps' ? 'plotMbps' : 'plotLat') });
+    box.replaceChildren(svg);
+    svg.append(probe); lw = probe.getComputedTextLength(); probe.remove();
+    var m = { l: lw + 0.6 * rem, r: 0.9 * rem, t: 1.3 * fs, b: 2.6 * fs };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    if (pw < 40 || ph < 30) return;
+    var X = function (q) { return m.l + Math.log2(q) / Math.log2(Q_MAX) * pw; };
+    var Y = function (v) { return m.t + ph - Math.min(v, ymax) / ymax * ph; };
+
+    // grid, ticks and axes
+    for (var k = 0; k <= 8; k++) {
+      var x = X(Math.pow(2, k));
+      svg.append(s('line', { class: 'il-grid', x1: x, x2: x, y1: m.t, y2: m.t + ph }));
+      if (pw > 22 * rem || k % 2 === 0) svg.append(s('text', { x: x, y: m.t + ph + 1.1 * fs, 'text-anchor': 'middle' }, String(Math.pow(2, k))));
+    }
+    [0, 1, 2].forEach(function (j) {
+      var y = Y(ymax * j / 2);
+      if (j) svg.append(s('line', { class: 'il-grid', x1: m.l, x2: m.l + pw, y1: y, y2: y }));
+      svg.append(s('text', { x: m.l - 0.3 * rem, y: y + 0.35 * fs, 'text-anchor': 'end' }, labels[j]));
+    });
+    svg.append(s('line', { class: 'il-axis', x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph }));
+    svg.append(s('line', { class: 'il-axis', x1: m.l, x2: m.l, y1: m.t, y2: m.t + ph }));
+    svg.append(s('text', { x: m.l + pw, y: m.t + ph + 2.3 * fs, 'text-anchor': 'end', class: 'il-muted' }, t('axisQd')));
+
+    // QD = P (every lane busy) and, on the throughput chart, the bandwidth ceiling
+    var xp = X(st.lanes);
+    svg.append(s('line', { class: 'il-pline', x1: xp, x2: xp, y1: m.t - 0.2 * fs, y2: m.t + ph }));
+    var right = st.lanes >= 64;
+    svg.append(s('text', { x: xp + (right ? -0.3 : 0.3) * rem, y: m.t - 0.25 * fs, 'text-anchor': right ? 'end' : 'start', class: 'il-muted' }, t('lanesMark', { n: String(st.lanes) })));
+    if (g === 'mbps') {
+      var yc = Y(st.bwMBps);
+      svg.append(s('line', { class: 'il-ceil', x1: m.l, x2: m.l + pw, y1: yc, y2: yc }));
+      svg.append(s('text', { x: m.l + pw, y: yc - 0.35 * fs, 'text-anchor': 'end' }, t('ceilMark')));
+    }
+
+    // the curve
+    var pts = [];
+    for (var n = 0; n <= 400; n++) {
+      var q = Math.pow(2, n / 50);
+      pts.push(X(q).toFixed(1) + ' ' + Y(L.curveAt(p, q)[key]).toFixed(1));
+    }
+    svg.append(s('path', { class: 'il-curve', 'data-g': g, d: 'M' + pts.join(' L') }));
+
+    // the current point
+    var xq = X(st.qd), yq = Y(st[key]);
+    svg.append(s('line', { class: 'il-guide', x1: xq, x2: xq, y1: yq, y2: m.t + ph }));
+    svg.append(s('circle', { class: 'il-ring', cx: xq, cy: yq, r: 0.55 * rem }));
+    svg.append(s('circle', { class: 'il-ring-dot', cx: xq, cy: yq, r: 0.2 * rem }));
+
+    // click or drag on a chart to set the queue depth (powers of two, 1…128)
+    svg.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      var rect = svg.getBoundingClientRect();
+      function set(e) {
+        var f = Math.max(0, Math.min(1, (e.clientX - rect.left - m.l) / pw));
+        var qd = Math.pow(2, Math.min(7, Math.round(f * Math.log2(Q_MAX))));
+        if (qd !== sim.params.qd) sim.set({ qd: qd });
+      }
+      function up() { window.removeEventListener('pointermove', set); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); }
+      set(ev);
+      window.addEventListener('pointermove', set);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  }
+
+  // ── the scene (HTML) ──
+  function scene(st, marks) {
+    var waiting = st.waiting, shown = Math.min(waiting, MAX_QUEUE), slots = [];
+    if (waiting > shown) slots.push(h('span', { class: 'il-q-more' }, t('queueMore', { n: String(waiting - shown) })));
+    for (var i = 0; i < shown; i++) slots.push(h('span', { class: 'il-q-req' }));
+    var lanes = [];
+    for (var j = 0; j < st.lanes; j++) lanes.push(h('span', j < st.busy ? { class: 'il-lane', 'data-busy': '' } : { class: 'il-lane' }));
+    var used = Math.min(1, st.mbps / st.bwMBps);
+    var boundWord = st.bound === 'parallelism' && st.lanes === 1 ? 'bound-arm' : 'bound-' + st.bound;
+    return [
+      h('span', { class: 'il-q-title' }, t('queueTitle')),
+      h('div', { class: 'il-q-line' },
+        h('div', { class: 'il-q-slots' }, slots),
+        h('div', { class: 'il-q-note' }, waiting ? t.n('waiting', waiting) : t('queueNone'))),
+      h('span', { class: 'il-arrow', 'aria-hidden': 'true' }, '→'),
+      h('div', { class: 'il-dev' },
+        h('span', { class: 'il-dev-name' }, devN(st.device)),
+        h('div', { class: 'il-lanes', style: { '--cols': String(Math.min(st.lanes, 16)) } }, lanes),
+        h('span', { class: 'il-dev-sub' }, t('lanesBusy', { busy: String(st.busy), p: String(st.lanes) })),
+        h('span', { class: 'il-dev-sub' }, t('svc', { v: msN(st.svcMs), acc: msN(st.accessMs), xfer: msN(st.xferMs) })),
+        st.capped && st.laneMs > st.svcMs * (1 + 1e-9) ? h('span', { class: 'il-dev-sub' }, b(t('laneShared', { v: msN(st.laneMs) }))) : null),
+      h('span', { class: 'il-arrow', 'aria-hidden': 'true' }, '→'),
+      h('div', { class: 'il-pipe' },
+        h('div', used >= 1 - 1e-9 ? { class: 'il-pipe-bar', 'data-full': '', style: { '--used': '100%' } } : { class: 'il-pipe-bar', style: { '--used': (used * 100).toFixed(1) + '%' } }),
+        h('span', { class: 'il-pipe-label' }, t('pipe', { v: mbN(st.mbps), max: mbN(st.bwMBps) }))),
+      h('div', { class: 'il-badge' + (marks.length ? ' sd-changed' : ''), dataset: { bound: st.bound } },
+        t('limit'), ' ', h('b', null, t(boundWord)))
+    ];
+  }
+
+  function card(g, label, val, sub, changed) {
+    var plot = h('div', { class: 'il-plot' });
+    return { el: h('div', { class: 'il-card' + (changed ? ' sd-changed' : ''), dataset: { g: g } },
+      h('div', { class: 'il-g-label' }, label),
+      h('div', { class: 'il-g-val' }, val),
+      h('div', { class: 'il-g-sub' }, sub),
+      plot), plot: plot };
+  }
+  function cards(st, marks) {
+    var bs = bsN(st.bs);
+    return [
+      card('iops', t('gIops'), iopsN(st.iops),
+        st.capped ? t('gIopsCap', { bw: mbN(st.bwMBps), bs: bs }) : t('gIopsSub', { busy: String(st.busy), svc: msN(st.svcMs) }), marks.indexOf('iops') >= 0),
+      card('mbps', t('gMbps'), mbN(st.mbps), t('gMbpsSub', { bs: bs }), marks.indexOf('mbps') >= 0),
+      card('lat', t('gLat'), msN(st.latMs), t('gLatSub', { qd: String(st.qd) }), marks.indexOf('lat') >= 0)
+    ];
+  }
+
+  // ── captions: what the last change did, then which limit binds now ──
+  function caption(c) {
+    track(c.params);
+    var st = c.state, ck = L.captionKey(st, prevP), out = [];
+    if (ck.change) {
+      var was = L.compute(prevP);
+      var vars = { i0: iopsN(was.iops), i1: b(iopsN(st.iops)), l0: msN(was.latMs), l1: b(msN(st.latMs)), m0: mbN(was.mbps), m1: b(mbN(st.mbps)) };
+      if (ck.change === 'qd') { vars.a = String(was.qd); vars.b = String(st.qd); out = out.concat(t.parts('chQd', vars)); }
+      else if (ck.change === 'bs') { vars.a = bsN(was.bs); vars.b = bsN(st.bs); out = out.concat(t.parts('chBs', vars)); }
+      else { vars.a = devN(was.device); vars.b = devN(st.device); out = out.concat(t.parts('chDevice', vars)); }
+      out.push(' ');
+    }
+    return out.concat(t.parts(ck.key, {
+      iops: b(iopsN(st.iops)), lat: b(msN(st.latMs)), mbps: mbN(st.mbps), svc: msN(st.svcMs), acc: msN(st.accessMs),
+      xfer: msN(st.xferMs), bs: bsN(st.bs), bw: b(mbN(st.bwMBps)), qd: String(st.qd), busy: String(st.busy),
+      p: String(st.lanes), w: t.n('reqs', st.waiting)
+    }));
+  }
+
+  var labels = { 'hdd-random': 'presetHddRandom', 'hdd-sequential': 'presetHddSeq', 'nvme-qd': 'presetNvmeQd', 'nvme-big-blocks': 'presetNvmeBig', 'sata-vs-nvme': 'presetSata' };
+  var stageBox = null, sceneBox = null, colsBox = null, plots = null, last = null;
+  function drawAll() { if (last) ['iops', 'mbps', 'lat'].forEach(function (g, i) { draw(plots[i], g, last.state, last.params); }); }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'device', type: 'choice', label: t('device'), options: L.DEVICE_IDS.map(function (d) { return [d, devN(d)]; }) },
+      { key: 'bs', type: 'choice', label: t('bs'), options: L.BLOCKS.map(function (k) { return [k, bsN(k)]; }) },
+      { key: 'qd', type: 'select', label: t('qd'), hint: t('qdHint'), options: L.DEPTHS.map(function (q) { return [q, String(q)]; }) }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'il-queued', label: t('legendQueued') },
+      { shape: 'il-lane', label: t('legendLane') },
+      { shape: 'il-slot', label: t('legendSlot') },
+      { shape: 'il-ring', label: t('legendPoint') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+    render: function (c) {
+      if (!stageBox) {
+        sceneBox = h('div', { class: 'il-scene' });
+        colsBox = h('div', { class: 'il-cols' });
+        stageBox = h('div', { class: 'il' }, sceneBox, colsBox);
+        c.stage.replaceChildren(stageBox);
+        new ResizeObserver(function () { drawAll(); }).observe(colsBox);
+      }
+      track(c.params);
+      var marks = prevP ? L.changed(c.state, L.compute(prevP)) : [];
+      last = { state: c.state, params: c.params };
+      sceneBox.replaceChildren.apply(sceneBox, scene(c.state, marks));
+      var cs = cards(c.state, marks);
+      colsBox.replaceChildren.apply(colsBox, cs.map(function (x) { return x.el; }));
+      plots = cs.map(function (x) { return x.plot; });
+      drawAll();
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
