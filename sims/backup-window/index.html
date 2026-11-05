@@ -1,0 +1,558 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- backup-window: data size vs bandwidth vs backup window; why the first offsite copy goes by truck. On top, four
+     numbers (first full copy, nightly change, seeding, queued changes); in the middle, one night from noon to noon
+     with the window shaded and the transfers drawn to that time scale (the nightly change, overflow into working
+     hours hatched, the first full copy wrapped over its nights); below, when seeding over the link takes more than
+     three nights or the truck is chosen, the link and the truck lanes in days. Model: sim.js; rules: SPEC.md;
+     words: strings.js. The time bars are drawn here, not with K3 (NOTES.md). -->
+<html lang="hr" data-sim="backup-window">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prozor za kopiranje i prva izmještena kopija · simdeck</title>
+<meta name="description" content="Pomiči količinu podataka, stopu promjene i brzinu veze: stane li noćna kopija u prozor, koliko noći traje prva kopija i kada je kamion s diskovima brži.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "backup-window",
+  "title": {
+    "hr": "Prozor za kopiranje i prva izmještena kopija",
+    "en": "Backup window and offsite seeding"
+  },
+  "concept": {
+    "hr": "Količina, propusnost i prozor: zašto prva kopija ide kamionom",
+    "en": "Size vs bandwidth vs window: why the first offsite copy goes by truck"
+  },
+  "summary": {
+    "hr": "Pomiči količinu podataka, stopu promjene i brzinu veze: stane li noćna kopija u prozor, koliko noći traje prva kopija i kada je kamion s diskovima brži.",
+    "en": "Move the data size, change rate and link speed: does the nightly copy fit the window, how many nights the first copy takes, and when a truck of disks wins."
+  },
+  "tags": [
+    "backup"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "truck"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="backup-window"]; colours only from kit tokens. */
+[data-sim="backup-window"] .bw {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.45rem 0.7rem;
+  font-size: 1rem;
+}
+[data-sim="backup-window"] .bw-box {
+  padding: 0.3rem 0.7rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="backup-window"] .bw-box h2 { margin: 0 0 0.15rem; font-size: 1.05em; }
+
+/* the four numbers */
+[data-sim="backup-window"] .bw-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; flex: none; }
+[data-sim="backup-window"] .bw-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.3rem 0.6rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-left-width: 0.45rem;
+  border-left-color: var(--sw, var(--line));
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="backup-window"] .bw-tile-label { color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="backup-window"] .bw-big { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+[data-sim="backup-window"] .bw-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="backup-window"] .bw-verdict { font-weight: 700; }
+[data-sim="backup-window"] .bw-verdict[data-ok="true"] { color: var(--ok); }
+[data-sim="backup-window"] .bw-verdict[data-ok="false"] { color: var(--danger); }
+[data-sim="backup-window"] .bw-tile.sd-changed .bw-verdict,
+[data-sim="backup-window"] .bw-tile.sd-changed .bw-sub,
+[data-sim="backup-window"] .bw-tile.sd-changed .bw-tile-label { color: var(--on-hl); }
+[data-sim="backup-window"] .bw-tile.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* rows: a label column and a time track; used by the clock and by the lanes */
+[data-sim="backup-window"] .bw-rows {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.2rem 0.7rem;
+}
+[data-sim="backup-window"] .bw-label { font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="backup-window"] .bw-label b { font-size: var(--fs-md); }
+[data-sim="backup-window"] .bw-label .bw-muted { color: var(--muted); }
+[data-sim="backup-window"] .bw-sep { grid-column: 1 / -1; margin-top: 0.1rem; font-weight: 700; }
+[data-sim="backup-window"] .bw-track {
+  position: relative;
+  height: 1.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="backup-window"] .bw-axis { position: relative; height: 1.2rem; font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="backup-window"] .bw-tick { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+[data-sim="backup-window"] .bw-tick:first-child { transform: none; }
+[data-sim="backup-window"] .bw-tick:last-child { transform: translateX(-100%); }
+
+/* the window: a shaded band with dashed edges (the band itself also sits in every clock row) */
+[data-sim="backup-window"] .bw-win {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--ink) 12%, var(--bg));
+  border-left: 0.15rem dashed var(--ink);
+  border-right: 0.15rem dashed var(--ink);
+}
+[data-sim="backup-window"] .bw-win-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+[data-sim="backup-window"] .bw-work {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* a transfer bar; overflow into working hours; the queue's catch-up tail */
+[data-sim="backup-window"] .bw-bar {
+  position: absolute;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  min-width: 0.25rem;
+  border-radius: 0.2rem;
+  border: 0.12rem solid var(--sw, var(--c1));
+}
+[data-sim="backup-window"] .bw-over {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 0.3rem;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0.15rem solid var(--danger);
+  border-radius: 0.2rem;
+  background: var(--bg);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--danger) 45%, transparent) 0.35em 0.55em);
+  color: var(--danger);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+[data-sim="backup-window"] .bw-over span { background: var(--bg); padding: 0 0.2rem; border-radius: 0.2rem; }
+[data-sim="backup-window"] .bw-over[data-cut]::after { content: '→'; position: absolute; right: 0.2rem; }
+[data-sim="backup-window"] .bw-bar-text {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  padding: 0 0.35rem;
+}
+[data-sim="backup-window"] .bw-bar-text[data-in] { color: var(--on-series); }
+
+/* the lanes in days */
+[data-sim="backup-window"] .bw-lanes .bw-track { height: 1.9rem; }
+[data-sim="backup-window"] .bw-lane-truck { border: 0.15rem dashed var(--ink); }
+[data-sim="backup-window"] .bw-seg {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  min-width: 0.2rem;
+  border: 0.12rem solid var(--sw, var(--c4));
+}
+[data-sim="backup-window"] .bw-seg[data-k="drive"] { background: var(--bg); border-style: dashed; }
+[data-sim="backup-window"] .bw-tail { position: absolute; top: 0.45rem; bottom: 0.45rem; min-width: 0.2rem; border: 0.12rem solid var(--sw, var(--c3)); border-radius: 0.2rem; }
+[data-sim="backup-window"] .bw-tail[data-never] { border-color: var(--danger); border-right: 0; border-radius: 0.2rem 0 0 0.2rem; }
+[data-sim="backup-window"] .bw-tail[data-never]::after { content: '→ ∞'; position: absolute; right: 0.2rem; top: 50%; transform: translateY(-50%); color: var(--danger); font-weight: 700; font-size: var(--fs-sm); background: var(--bg); padding: 0 0.2rem; }
+[data-sim="backup-window"] .bw-van { position: absolute; top: 50%; width: 2.2rem; height: 1.5rem; transform: translate(0.2rem, -50%); color: var(--ink); }
+[data-sim="backup-window"] .bw-van circle { fill: currentColor; stroke: var(--bg); stroke-width: 2; }
+[data-sim="backup-window"] .bw-chosen { margin-left: 0.3rem; padding: 0 0.3rem; border: 0.12rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+
+/* legend swatches of the page's own marks */
+[data-sim="backup-window"] .sd-swatch[data-shape="bw-window"] { background: color-mix(in srgb, var(--ink) 12%, var(--bg)); border-style: dashed; }
+[data-sim="backup-window"] .sd-swatch[data-shape="bw-over"] { position: relative; border-color: var(--danger); background: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 55%, transparent) 0.2em 0.34em); }
+[data-sim="backup-window"] .sd-swatch[data-shape="bw-truck"] { border-style: dashed; background: var(--bg); }
+[data-sim="backup-window"] .sd-swatch[data-shape="bw-catch"] { background-color: color-mix(in srgb, var(--sw) 16%, var(--bg)); border-color: var(--sw); }
+
+/* the panel: presets and the controls in two columns, so five presets and eight controls fit 1920×1080 */
+[data-sim="backup-window"] { --panel-w: minmax(17rem, 26rem); }
+[data-sim="backup-window"] .sd-ctl[hidden] { display: none; }
+[data-sim="backup-window"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="backup-window"] .sd-group { gap: 0.2rem; }
+[data-sim="backup-window"] .sd-ctl { gap: 0; }
+[data-sim="backup-window"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.9rem; }
+[data-sim="backup-window"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="backup-window"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="sizeTB"], [data-key="changePct"], [data-key="efficiency"], [data-key="windowH"], [data-key="localMBs"], [data-key="driveH"]) { grid-column: auto; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="backup-window"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="backup-window"] .bw { height: auto; padding: 0.4rem; }
+  [data-sim="backup-window"] .bw-tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="backup-window"] .bw-big { font-size: 1.4rem; }
+  [data-sim="backup-window"] .bw-rows { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="backup-window"] .bw-label { margin-top: 0.2rem; }
+  [data-sim="backup-window"] .bw-sep { margin-top: 0.4rem; }
+  [data-sim="backup-window"] .bw-axis .bw-tick:nth-child(even) { visibility: hidden; }
+  [data-sim="backup-window"] .bw-work { visibility: hidden; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prozor za kopiranje i prva izmještena kopija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HOUR = 3600, DAY = 86400;
+
+  // ── numbers in the page's language ──
+
+  /** x with d decimals in the page's language; trailing zeros dropped unless keep (a Croatian count of days keeps
+      its decimal, so 21,0 dana does not read as a whole 21). */
+  function dec(x, d, keep) {
+    var s = x.toFixed(d);
+    if (d > 0 && !keep) s = s.replace(/\.?0+$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** A whole number with thousands grouped (10 000 / 10,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '\u00a0' : ',');
+  }
+  /** t.n with the count grouped: the plural form is picked from the number, then the digits are grouped. */
+  function nn(key, n, vars) { return t.n(key, n, vars).replace(String(n), group(n)); }
+  /** A duration in seconds: seconds, minutes, hours (two decimals under one hour), or days from 48 h on. */
+  function dur(sec) {
+    var hrs = sec / HOUR;
+    if (sec === 0) return t('secs', { n: '< 1' });
+    if (hrs >= 48) return t('days', { n: hrs / 24 >= 10000 ? group(Math.round(hrs / 24)) : dec(hrs / 24, 1, Simdeck.lang === 'hr') });
+    if (hrs >= 1) return t('hours', { n: dec(hrs, 1) });
+    if (hrs >= 0.1) return t('hours', { n: dec(hrs, 2) });
+    if (sec >= 60) return t('mins', { n: dec(sec / 60, 0) });
+    return t('secs', { n: dec(sec, 0) });
+  }
+  function hoursOf(x) { return t('hours', { n: dec(x, 1) }); }
+  function tb(x) { return t('tb', { n: dec(x, 1) }); }
+  function bytes(b) {
+    var gb = b / 1e9;
+    if (gb >= 1000) return t('tb', { n: dec(gb / 1000, 2) });
+    return t('gb', { n: dec(gb, gb >= 10 ? 0 : 1) });
+  }
+  function link(m) { return m >= 1000 ? t('gbit', { n: dec(m / 1000, 0) }) : t('mbit', { n: String(m) }); }
+  function pct(x) { return t('pct', { n: dec(x, 1) }); }
+  /** Clock time of an hour after noon (0…24), as 19:00 or 18:30. */
+  function clock(afterNoon) {
+    var mins = Math.round(((afterNoon + 12) % 24) * 60);
+    var hh = Math.floor(mins / 60) % 24, mm = mins % 60;
+    return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+  }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function pos(x, total) { return (100 * Math.max(0, Math.min(x, total)) / total) + '%'; }
+
+  // ── tiles ──
+
+  function tile(label, c, big, sub, verdict, changed) {
+    return h('div', { class: 'bw-tile' + (changed ? ' sd-changed' : ''), dataset: { c: String(c) } },
+      h('span', { class: 'bw-tile-label' }, label),
+      h('span', { class: 'bw-big' }, big),
+      h('span', { class: 'bw-sub' }, sub),
+      verdict ? h('span', { class: 'bw-verdict', dataset: { ok: String(verdict.ok) } }, (verdict.ok ? '✓ ' : '✗ ') + verdict.text) : null);
+  }
+
+  function tiles(s, chg) {
+    var p = s.p;
+    var seedLink = p.seedBy === 'link';
+    return h('div', { class: 'bw-tiles' },
+      tile(t('tileFull'), 1, dur(s.fullS),
+        t('fullSub', { link: link(p.linkMbit), perTB: dur(s.perTBS) }),
+        { ok: s.fullFits, text: t(s.fullFits ? 'fullOne' : 'fullNot') }, chg.indexOf('fullFits') >= 0),
+      tile(t('tileIncr'), 2, dur(s.incrS),
+        t('incrSub', { gb: bytes(s.incrBytes), pct: pct(p.changePct) }),
+        { ok: s.fitsNightly, text: s.fitsNightly ? t('fitsYes', { win: hoursOf(p.windowH) }) : t('fitsNo', { over: dur(s.overflowS) }) },
+        chg.indexOf('fitsNightly') >= 0),
+      tile(t('tileSeed'), 4, seedLink ? nn('seedLinkBig', s.nightsToSeed) : dur(s.truckS),
+        seedLink ? t('seedLinkSub', { win: hoursOf(p.windowH) }) : t('seedTruckSub'),
+        !s.showTruck ? null : { ok: !s.slower, text: t(s.slower ? 'fasterOther' : 'fasterThis',
+          { how: t(seedLink ? 'byTruck' : 'byLink'), t: dur(seedLink ? s.truckS : s.linkS) }) },
+        chg.indexOf('best') >= 0 || chg.indexOf('showTruck') >= 0),
+      s.catchUpNights === null
+        ? tile(t('tileCatch'), 3, t('catchNever'), s.growS > 0 ? t('catchNeverSub', { grow: dur(s.growS) }) : t('catchFlatSub'), null,
+          chg.indexOf('catchesUp') >= 0)
+        : s.catchUpNights === 0
+        ? tile(t('tileCatch'), 3, t('catchNone'), t('catchNoneSub'), null, chg.indexOf('catchesUp') >= 0)
+        : tile(t('tileCatch'), 3, nn('catchBig', s.catchUpNights),
+          t('catchSub', { days: nn('dayNom', s.seedDays), backlog: dur(s.backlogS) }), null, chg.indexOf('catchesUp') >= 0));
+  }
+
+  // ── one night, noon to noon ──
+
+  function windowBand(s, withText) {
+    var from = s.windowFrom, len = s.p.windowH;
+    return h('div', { class: 'bw-win', style: { left: pos(from, 24), width: pos(len, 24) } },
+      withText ? h('span', { class: 'bw-win-text', translate: 'no' }, clock(from) + '–' + clock(from + len)) : null);
+  }
+
+  function bar(c, from, len, text) {
+    var w = 100 * len / 24;
+    return [
+      h('div', { class: 'bw-bar sd-fill', dataset: { c: String(c) }, style: { left: pos(from, 24), width: w + '%' } }),
+      text ? h('span', { class: 'bw-bar-text', dataset: w > 9 ? { in: 'true' } : {}, translate: 'no',
+        style: w > 9 ? { left: pos(from, 24) } : { left: pos(from + len, 24) } }, text) : null
+    ];
+  }
+
+  function clockRows(s) {
+    var p = s.p;
+    var from = s.windowFrom, end = from + p.windowH;
+    var ticks = [];
+    for (var k = 0; k <= 8; k++) ticks.push(h('span', { class: 'bw-tick', style: { left: pos(3 * k, 24) } }, clock(3 * k)));
+    var rows = [h('span'), h('div', { class: 'bw-axis', translate: 'no' }, ticks)];
+
+    rows.push(h('span', { class: 'bw-label' }, h('b', null, t('rowWindow'))),
+      h('div', { class: 'bw-track' },
+        h('span', { class: 'bw-work', style: { left: '0', width: pos(from, 24) } }, t('workHours')),
+        windowBand(s, true),
+        h('span', { class: 'bw-work', style: { left: pos(end, 24), right: '0' } }, t('workHours'))));
+
+    // the nightly change: inside the window, then overflow into working hours (to the end of the bar at most)
+    var incrH = s.incrS / HOUR, overH = s.overflowS / HOUR;
+    var inside = Math.min(incrH, p.windowH);
+    var room = 24 - end;
+    var incrTrack = [windowBand(s, false)].concat(bar(2, from, inside, overH > 0 ? null : dur(s.incrS)));
+    if (overH > 0) {
+      incrTrack.push(h('div', { class: 'bw-over', dataset: overH > room ? { cut: 'true' } : {},
+        style: { left: pos(end, 24), width: pos(Math.min(overH, room), 24) } },
+        h('span', { translate: 'no' }, t('overflowMark', { t: dur(s.overflowS) }))));
+    }
+    rows.push(h('span', { class: 'bw-label' }, h('b', null, t('rowIncr')), h('br'), h('span', { class: 'bw-muted' }, bytes(s.incrBytes))),
+      h('div', { class: 'bw-track' }, incrTrack));
+
+    // the first full copy, wrapped over its nights (past three: the first, an ellipsis, the last)
+    rows.push(h('span', { class: 'bw-sep' }, t('tileFull'), ' · ', data(tb(p.sizeTB)), ' · ', dur(s.fullS),
+      p.seedBy === 'truck' ? h('span', { class: 'bw-sub' }, ' · ', t('notChosen')) : null));
+    var n = s.nightsToSeed;
+    var shown = n <= 3 ? Array.from({ length: n }, function (x, i) { return i + 1; }) : [1, 0, n];
+    var lastH = (s.fullS - (n - 1) * s.windowS) / HOUR;
+    var dim = p.seedBy === 'truck';
+    shown.forEach(function (k) {
+      if (k === 0) {
+        rows.push(h('span', { class: 'bw-label bw-muted' }, nn('rowMore', n - 2)), h('span'));
+        return;
+      }
+      var len = k === n ? lastH : p.windowH;
+      rows.push(h('span', { class: 'bw-label' }, t('rowNight', { n: group(k) })),
+        h('div', { class: 'bw-track', style: dim ? { opacity: '0.45' } : {} },
+          [windowBand(s, false)].concat(bar(1, from, len, k === n ? dur(len * HOUR) : null))));
+    });
+    return h('section', { class: 'bw-box bw-clock' },
+      h('h2', null, t('clockTitle')),
+      h('div', { class: 'bw-rows' }, rows));
+  }
+
+  // ── link or truck, in days ──
+
+  var VAN = '<svg viewBox="0 0 44 30" aria-hidden="true" width="100%" height="100%"><path fill="currentColor" d="M2 5h24v17H2z' +
+    'M28 10h8l6 7v5H28z"/><circle cx="10" cy="24" r="4.5"/>' +
+    '<circle cx="34" cy="24" r="4.5"/></svg>';
+
+  /** 1, 2, 5, 10, 20, 50, … : the smallest that keeps the axis to eight ticks or fewer. */
+  function niceStep(maxD) {
+    for (var mag = 1; ; mag *= 10) {
+      var steps = [1, 2, 5];
+      for (var i = 0; i < steps.length; i++) if (maxD / (steps[i] * mag) <= 8) return steps[i] * mag;
+    }
+  }
+
+  function lanes(s) {
+    var p = s.p;
+    var linkDays = s.linkS / DAY;
+    var truckDays = s.truckS / DAY;
+    var linkSeedDays = Math.ceil(s.linkS / DAY);
+    var truckSeedDays = Math.ceil(s.truckS / DAY);
+    var never = s.catchUpNights === null;
+    // the catch-up of each plan (the model gives the chosen one; the other one is the same rule)
+    var linkCU = L.catchUp(linkSeedDays, s.incrS, s.windowS);
+    var truckCU = L.catchUp(truckSeedDays, s.incrS, s.windowS);
+    var ends = [linkDays, truckDays];
+    if (!never) ends.push(linkSeedDays + linkCU.nights, truckSeedDays + truckCU.nights);
+    var maxD = Math.max.apply(null, ends) * (never ? 1.25 : 1.04);
+    var step = niceStep(maxD);
+    var ticks = [];
+    for (var d = 0; d <= maxD + 1e-9; d += step) ticks.push(h('span', { class: 'bw-tick', style: { left: pos(d, maxD) } }, t('dayTick', { n: group(d) })));
+
+    function tail(start, cu) {
+      if (never) return h('div', { class: 'bw-tail', dataset: { never: 'true' }, style: { left: pos(start, maxD), right: '0' } });
+      return h('div', { class: 'bw-tail sd-soft sd-hatch', dataset: { c: '3' }, style: { left: pos(start, maxD), width: pos(cu.nights, maxD) } });
+    }
+    function catchText(cu) {
+      if (never) return t('laneNever');
+      return cu.nights > 0 ? t('laneCatch', { n: nn('nights', cu.nights) }) : '';
+    }
+    function chosen(k) { return p.seedBy === k ? h('span', { class: 'bw-chosen' }, t('laneChosen')) : null; }
+
+    var tp = s.truck;
+    var o = tp.out / DAY, dr = tp.drive / DAY;
+    var rows = [
+      h('span'), h('div', { class: 'bw-axis', translate: 'no' }, ticks),
+      h('span', { class: 'bw-label' }, h('b', null, t('laneLink')), chosen('link'), h('br'),
+        data(dur(s.linkS)), ' ', h('span', { class: 'bw-muted' }, catchText(linkCU))),
+      h('div', { class: 'bw-track' },
+        h('div', { class: 'bw-bar sd-fill', dataset: { c: '1' }, style: { left: '0', width: pos(linkDays, maxD) } }),
+        tail(linkSeedDays, linkCU)),
+      h('span', { class: 'bw-label' }, h('b', null, t('laneTruck')), chosen('truck'), h('br'),
+        data(dur(s.truckS)), ' ', h('span', { class: 'bw-muted' }, catchText(truckCU))),
+      h('div', { class: 'bw-track bw-lane-truck', title: [t('segOut', { t: dur(tp.out) }), t('segDrive', { t: hoursOf(p.driveH) }), t('segIn', { t: dur(tp.in) })].join(' · ') },
+        h('div', { class: 'bw-seg sd-soft', dataset: { c: '4', k: 'out' }, style: { left: '0', width: pos(o, maxD) } }),
+        h('div', { class: 'bw-seg', dataset: { c: '4', k: 'drive' }, style: { left: pos(o, maxD), width: pos(dr, maxD) } }),
+        h('div', { class: 'bw-seg sd-soft', dataset: { c: '4', k: 'in' }, style: { left: pos(o + dr, maxD), width: pos(o, maxD) } }),
+        h('span', { class: 'bw-van', style: { left: pos(truckDays, maxD) }, html: VAN }),
+        tail(truckSeedDays, truckCU))
+    ];
+    return h('section', { class: 'bw-box bw-lanes' },
+      h('h2', null, t('lanesTitle'), ' ', h('span', { class: 'bw-sub' },
+        t('segOut', { t: dur(tp.out) }), ' + ', t('segDrive', { t: hoursOf(p.driveH) }), ' + ', t('segIn', { t: dur(tp.in) }),
+        ' · ', data(t('mbs', { n: p.localMBs })))),
+      h('div', { class: 'bw-rows' }, rows));
+  }
+
+  // ── render; the changed marks follow param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'bw' }, tiles(s, chg), clockRows(s), s.showTruck ? lanes(s) : null));
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var vars = {
+      size: tb(p.sizeTB), link: link(p.linkMbit), full: dur(s.fullS), win: hoursOf(p.windowH),
+      nights: nn('nights', s.nightsToSeed), gb: bytes(s.incrBytes), incr: dur(s.incrS), over: dur(s.overflowS),
+      linkT: dur(s.linkS), truck: dur(s.truckS), out: dur(s.truck.out), drive: hoursOf(p.driveH), in: dur(s.truck.in)
+    };
+    var out = [t(k.key, vars)];
+    k.notes.forEach(function (key) {
+      var txt;
+      if (key === 'nCatchUp') txt = t('nCatchUp', { days: nn('dayGen', s.seedDays), backlog: dur(s.backlogS), k: nn('nights', s.catchUpNights) });
+      else if (key === 'nNeverDrains') txt = t('nNeverDrains', { days: nn('dayGen', s.seedDays) });
+      else txt = t(key);
+      out.push(' ', txt);
+    });
+    return out;
+  }
+
+  var labels = { 'hq-to-cloud': 'pHq', 'brk-uplink': 'pBrk', 'truck': 'pTruck', 'vm-dumps-to-nas': 'pDumps', 'never-catches-up': 'pNever' };
+  function truckShown(p) { return L.compute(p).showTruck; }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'sizeTB', type: 'range', label: t('sizeTB'), min: 0.5, max: 100, step: 0.1, format: tb },
+      { key: 'changePct', type: 'range', label: t('changePct'), min: 0.1, max: 10, step: 0.1, format: pct },
+      { key: 'linkMbit', type: 'select', label: t('linkMbit'), hint: t('linkHint'),
+        options: L.LINKS.map(function (m) { return [m, link(m)]; }) },
+      { key: 'efficiency', type: 'range', label: t('efficiency'), min: 0.5, max: 1, step: 0.05,
+        format: function (v) { return pct(v * 100); } },
+      { key: 'windowH', type: 'range', label: t('windowH'), min: 4, max: 14, step: 1, format: hoursOf },
+      { key: 'seedBy', type: 'choice', label: t('seedBy'), options: [['link', t('seedLink')], ['truck', t('seedTruck')]] },
+      { key: 'localMBs', type: 'range', label: t('localMBs'), min: 100, max: 1000, step: 50,
+        format: function (v) { return t('mbs', { n: v }); }, visible: truckShown },
+      { key: 'driveH', type: 'range', label: t('driveH'), min: 0, max: 12, step: 0.5, format: hoursOf, visible: truckShown }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'bw-window', label: t('legWindow') },
+      { c: 1, label: t('legFull') },
+      { c: 2, label: t('legIncr') },
+      { shape: 'bw-over', label: t('legOver') },
+      { shape: 'bw-truck', label: t('legTruck') },
+      { shape: 'bw-catch', c: 3, label: t('legCatch') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
