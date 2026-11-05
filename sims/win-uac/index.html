@@ -1,0 +1,540 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-uac: an administrator runs with a filtered token until elevated. ana (Administrators) logs on to PC-07: two
+     linked tokens, the desktop gets the filtered one; a task from Explorer is checked with it, "Run as administrator"
+     asks and starts a new process with the full token, children inherit their parent's token. A stepper, one action
+     and its check per step.
+     Left: the logon (who, UAC), the two token cards side by side with the chain between them (SIDs with their
+     attribute, privileges, integrity level), and the process tree with the UAC prompt. Right: the access check of the
+     last attempt: the process and token used, the target, the integrity check, the DACL as kit view K4
+     (kit/ruletable.js), or the privilege the task needs.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-uac">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UAC i podijeljeni token · simdeck</title>
+<meta name="description" content="Ana je administratorica, a Explorer ipak ne smije pisati u Program Files: SID Administrators samo za zabranu. Potvrda, puni token, nasljeđivanje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-uac",
+  "title": {
+    "hr": "UAC i podijeljeni token",
+    "en": "UAC and the split token"
+  },
+  "concept": {
+    "hr": "Administrator radi s filtriranim tokenom dok ne podigne ovlasti",
+    "en": "Admins run with a filtered token until elevated"
+  },
+  "summary": {
+    "hr": "Ana je administratorica, a Explorer ipak ne smije pisati u Program Files: SID Administrators samo za zabranu. Potvrda, puni token, nasljeđivanje.",
+    "en": "ana is an administrator, yet Explorer cannot write to Program Files: Administrators is deny-only. Consent, the full token, inheritance."
+  },
+  "tags": [
+    "permissions"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-uac"]; colours only from kit tokens.
+   Layout: two columns: the logon (tokens, processes, prompt) and the access check. */
+[data-sim="win-uac"] .uac {
+  display: grid;
+  grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "tok procs" "chk chk";
+  gap: 0.8cqh 1.4cqw;
+  height: 100%;
+  padding: 1.2cqh 1.1cqw;
+  font-size: 1rem;
+  --uac-sm: max(var(--fs-sm), 0.86em);
+}
+[data-sim="win-uac"] .uac-col { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; min-height: 0; }
+[data-sim="win-uac"] .uac-tok { grid-area: tok; }
+[data-sim="win-uac"] .uac-procs { grid-area: procs; }
+[data-sim="win-uac"] .uac-chk { grid-area: chk; }
+[data-sim="win-uac"] .uac-chk > .uac-box { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.1fr); gap: 0.3rem 1.2rem; align-items: start; }
+[data-sim="win-uac"] .uac-chk-info { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+[data-sim="win-uac"] .uac-chk-info .uac-line { line-height: 1.5; }
+[data-sim="win-uac"] .uac-chk-h { margin: 0; font-size: 1.05em; }
+[data-sim="win-uac"] .uac-col > h2 { margin: 0; font-size: 1.05em; display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; }
+[data-sim="win-uac"] .uac-sub { font-size: var(--uac-sm); color: var(--muted); font-weight: 400; line-height: 1.3; }
+[data-sim="win-uac"] .uac-mono { font-family: var(--mono); }
+[data-sim="win-uac"] .uac-tag { padding: 0 0.35rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--uac-sm); font-weight: 400; }
+[data-sim="win-uac"] .uac-tag[data-k="off"] { border-style: dashed; }
+[data-sim="win-uac"] .uac-line { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; align-items: baseline; font-size: var(--uac-sm); line-height: 1.4; }
+
+/* token cards: thin border = filtered (or a standard user's), thick = full; the chain between a linked pair */
+[data-sim="win-uac"] .uac-tokens { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0.4rem; align-items: stretch; }
+[data-sim="win-uac"] .uac-card {
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius); background: var(--panel);
+  padding: 0.35rem 0.6rem 0.45rem; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem;
+}
+[data-sim="win-uac"] .uac-card[data-k="full"] { border-width: 0.3rem; }
+[data-sim="win-uac"] .uac-card[data-k="none"] { border-style: dashed; border-color: var(--muted); color: var(--muted); background: transparent; }
+[data-sim="win-uac"] .uac-card h3 { margin: 0; font-size: 1em; display: flex; flex-wrap: wrap; gap: 0.1rem 0.5rem; align-items: center; }
+[data-sim="win-uac"] .uac-card.sd-changed { box-shadow: 0 0 0 0.25rem var(--hl); }
+[data-sim="win-uac"] .uac-chain { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.2rem; font-size: var(--uac-sm); color: var(--muted); }
+[data-sim="win-uac"] .uac-chain svg { width: 1.6rem; height: 2.8rem; }
+[data-sim="win-uac"] .uac-chain[data-k="none"] { visibility: hidden; }
+
+/* SID chips: filled = enabled; hatched with a stop octagon = deny-only */
+[data-sim="win-uac"] .uac-sids { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.12rem 0.5rem; align-items: center; font-size: var(--uac-sm); }
+[data-sim="win-uac"] .uac-sid-v { color: var(--muted); }
+[data-sim="win-uac"] .uac-sid-v > [translate] { font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-uac"] .uac-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; justify-self: start;
+  padding: 0 0.4rem; border: var(--line-w) solid var(--c1); border-radius: var(--radius-sm);
+  background: var(--c1); color: var(--on-series); font-family: var(--mono); font-size: var(--uac-sm); line-height: 1.35;
+}
+[data-sim="win-uac"] .uac-chip[data-attr="denyOnly"] {
+  background: repeating-linear-gradient(45deg, var(--bg) 0 0.28em, color-mix(in srgb, var(--danger) 35%, var(--bg)) 0.28em 0.5em);
+  color: var(--ink); border-color: var(--danger); border-style: dashed;
+}
+[data-sim="win-uac"] .uac-stop {
+  display: inline-block; width: 0.85em; height: 0.85em; flex: none; background: var(--danger);
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+}
+[data-sim="win-uac"] .uac-chip.sd-changed, [data-sim="win-uac"] .uac-priv.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); border-style: solid; }
+
+/* privileges: key chips */
+[data-sim="win-uac"] .uac-privs { display: flex; flex-wrap: wrap; gap: 0.2rem 0.3rem; align-items: center; }
+[data-sim="win-uac"] .uac-priv {
+  display: inline-flex; align-items: center; gap: 0.15rem; padding: 0 0.35rem 0 0.3rem;
+  border: var(--line-w) solid var(--ink); border-radius: 1rem; background: var(--bg);
+  font-family: var(--mono); font-size: var(--uac-sm); line-height: 1.35;
+}
+[data-sim="win-uac"] .uac-key { display: inline-flex; align-items: center; flex: none; }
+[data-sim="win-uac"] .uac-key::before { content: ''; width: 0.5em; height: 0.5em; border: 0.12em solid currentColor; border-radius: 50%; }
+[data-sim="win-uac"] .uac-key::after { content: ''; width: 0.45em; height: 0.12em; background: currentColor; }
+
+/* integrity badge: M outlined, H filled */
+[data-sim="win-uac"] .uac-il {
+  display: inline-grid; place-items: center; width: 1.7em; height: 1.7em; border-radius: 50%;
+  border: 0.14rem solid var(--ink); background: var(--bg); color: var(--ink); font-weight: 700; font-family: var(--mono); font-size: var(--uac-sm);
+}
+[data-sim="win-uac"] .uac-il[data-il="H"] { background: var(--ink); color: var(--bg); }
+
+/* processes: a tree */
+[data-sim="win-uac"] .uac-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="win-uac"] .uac-tree .uac-tree { margin: 0.35rem 0 0 1.3rem; padding-left: 0.9rem; border-left: 0.16rem solid var(--line); }
+[data-sim="win-uac"] .uac-proc {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.55rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--panel); padding: 0.15rem 0.5rem;
+}
+[data-sim="win-uac"] .uac-proc[data-k="full"] { border-width: 0.3rem; }
+[data-sim="win-uac"] .uac-proc.sd-changed { box-shadow: 0 0 0 0.25rem var(--hl); }
+[data-sim="win-uac"] .uac-proc b { font-family: var(--mono); }
+[data-sim="win-uac"] .uac-res { font-size: var(--uac-sm); font-weight: 700; }
+[data-sim="win-uac"] .uac-res[data-ok="1"] { color: var(--ok); }
+[data-sim="win-uac"] .uac-res[data-ok="0"] { color: var(--danger); }
+[data-sim="win-uac"] .uac-elev { font-size: var(--uac-sm); }
+
+/* the prompt */
+[data-sim="win-uac"] .uac-prompt {
+  border: 0.2rem solid var(--accent); border-radius: var(--radius-sm); background: var(--bg);
+  padding: 0.3rem 0.6rem 0.4rem; display: flex; flex-direction: column; gap: 0.25rem; max-width: 32rem;
+}
+[data-sim="win-uac"] .uac-prompt.sd-changed { box-shadow: 0 0 0 0.25rem var(--hl); }
+[data-sim="win-uac"] .uac-prompt h3 { margin: 0; font-size: 1em; }
+[data-sim="win-uac"] .uac-field { display: flex; gap: 0.5rem; align-items: baseline; font-size: var(--uac-sm); }
+[data-sim="win-uac"] .uac-field > span:last-child { font-family: var(--mono); border: var(--line-w) solid var(--line); padding: 0 0.4rem; min-width: 8rem; background: var(--panel); }
+[data-sim="win-uac"] .uac-btns { display: flex; gap: 0.5rem; justify-content: flex-end; }
+[data-sim="win-uac"] .uac-btn { padding: 0 0.8rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--uac-sm); }
+[data-sim="win-uac"] .uac-btn[data-k="yes"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* access check */
+[data-sim="win-uac"] .uac-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.65rem 0.5rem; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="win-uac"] .uac-path { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="win-uac"] .uac-mic[data-ok="1"]::before { content: '✓ '; color: var(--ok); font-weight: 700; }
+[data-sim="win-uac"] .uac-mic[data-ok="0"]::before { content: '✕ '; color: var(--danger); font-weight: 700; }
+[data-sim="win-uac"] .uac-verdict { font-size: 1.3em; font-weight: 700; }
+[data-sim="win-uac"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-uac"] .sd-swatch[data-shape="sid-on"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="win-uac"] .sd-swatch[data-shape="sid-deny"] { background: repeating-linear-gradient(45deg, var(--bg) 0 0.15em, color-mix(in srgb, var(--danger) 35%, var(--bg)) 0.15em 0.3em); border: 0.12rem dashed var(--danger); position: relative; }
+[data-sim="win-uac"] .sd-swatch[data-shape="sid-deny"]::after { content: ''; position: absolute; inset: 22%; background: var(--danger); clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+[data-sim="win-uac"] .sd-swatch[data-shape="priv"] { border-radius: 1rem; background: var(--bg); position: relative; }
+[data-sim="win-uac"] .sd-swatch[data-shape="priv"]::after { content: ''; position: absolute; left: 18%; top: 28%; width: 30%; height: 40%; border: 0.1rem solid var(--ink); border-radius: 50%; box-sizing: border-box; }
+[data-sim="win-uac"] .sd-swatch[data-shape="il"] { border-radius: 50%; background: var(--ink); }
+[data-sim="win-uac"] .sd-swatch[data-shape="thin"] { background: var(--panel); border: 0.1rem solid var(--ink); }
+[data-sim="win-uac"] .sd-swatch[data-shape="thick"] { background: var(--panel); border: 0.3rem solid var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; the columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-uac"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-uac"] .uac { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-areas: "tok" "procs" "chk"; padding: 0.4rem; gap: 0.8rem; }
+  [data-sim="win-uac"] .uac-chk > .uac-box { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-uac"] .uac-tokens { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-uac"] .uac-chain { flex-direction: row; }
+  [data-sim="win-uac"] .uac-chain svg { transform: rotate(90deg); }
+  [data-sim="win-uac"] .uac-chain[data-k="none"] { display: none; }
+  [data-sim="win-uac"] .uac-sid-v > [translate] { white-space: normal; overflow-wrap: anywhere; }
+  [data-sim="win-uac"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">UAC i podijeljeni token</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  /** Privileges a full token shows by name besides the five it shares with the filtered one; the rest are counted. */
+  var NOTABLE = ['SeSystemtimePrivilege', 'SeBackupPrivilege', 'SeDebugPrivilege'];
+
+  /** Data (names, SIDs, paths, levels) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'uac-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  function sub(text) { return h('span', { class: 'uac-sub' }, text); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function chg(on, c) { return on ? ' sd-changed' + anim(c) : ''; }
+  /** "SeTimeZonePrivilege" → "TimeZone" (the full name in the tooltip). */
+  function shortPriv(p) { return p.replace(/^Se/, '').replace(/Privilege$/, ''); }
+  function lastAttempt(s) { return s.attempts.length ? s.attempts[s.attempts.length - 1] : null; }
+  function ilBadge(il) { return h('span', { class: 'uac-il', dataset: { il: il }, translate: 'no', title: il === 'H' ? 'High' : 'Medium' }, il); }
+  function tokWord(kind) { return t(kind === 'full' ? 'procTokFull' : kind === 'standard' ? 'procTokStandard' : 'procTokFiltered'); }
+  function taskPhrase(s) { return t('do_' + s.task); }
+  function cap(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
+
+  /** What the last check used: { slot, sids: [names], priv } (the page marks those chips "changed"). */
+  function used(c) {
+    var s = c.state, e = s.last;
+    if (!e || e.kind !== 'attempt') return null;
+    var a = lastAttempt(s), task = L.TASKS[a.task];
+    if (a.by === 'priv') return { slot: a.token, sids: [], priv: a.priv };
+    var names = [];
+    a.rows.forEach(function (r, i) { if (r === 'decides' || r === 'denyOnly') names.push(task.dacl[i].who); });
+    return { slot: a.token, sids: names, priv: null };
+  }
+
+  // ── tokens ──
+  function chainSvg() {
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 44');
+    svg.setAttribute('aria-hidden', 'true');
+    [[4, 2], [4, 22]].forEach(function (xy) {
+      var r = document.createElementNS(SVGNS, 'rect');
+      r.setAttribute('x', xy[0]); r.setAttribute('y', xy[1]); r.setAttribute('width', 16); r.setAttribute('height', 20);
+      r.setAttribute('rx', 7); r.setAttribute('fill', 'none'); r.setAttribute('stroke', 'currentColor'); r.setAttribute('stroke-width', 3);
+      svg.appendChild(r);
+    });
+    var l = document.createElementNS(SVGNS, 'rect');
+    l.setAttribute('x', 9); l.setAttribute('y', 12); l.setAttribute('width', 6); l.setAttribute('height', 20);
+    l.setAttribute('rx', 3); l.setAttribute('fill', 'none'); l.setAttribute('stroke', 'currentColor'); l.setAttribute('stroke-width', 3);
+    svg.appendChild(l);
+    return svg;
+  }
+  function tokenCard(c, slot) {
+    var s = c.state, tok = s.tokens[slot], u = used(c);
+    var fresh = s.last && (s.last.kind === 'logon' || (s.last.kind === 'approve' && slot === 'full' && s.last.prompt === 'credentials'));
+    if (!tok) {
+      var why;
+      if (!s.last) why = slot === 'filtered' ? t('notYet', { user: s.user }) : '';
+      else if (slot === 'filtered') why = s.uacOn ? t('noFilteredBuiltin') : t('noFilteredOff');
+      else why = s.uacOn ? t('noFullYet') : t('noFullStandard', { user: s.user });
+      if (!s.last && slot === 'full') why = s.isAdmin ? '' : t('noFullStandard', { user: s.user });
+      return h('section', { class: 'uac-card', dataset: { k: 'none' } },
+        h('h3', null, t(slot === 'full' ? 'tokFull' : s.isAdmin ? 'tokFiltered' : 'tokStandard')), why ? sub(why) : null);
+    }
+    var head = t(tok.kind === 'full' ? 'tokFull' : tok.kind === 'standard' ? 'tokStandard' : 'tokFiltered');
+    var mine = u && u.slot === slot;
+    var rows = [];
+    tok.sids.forEach(function (x) {
+      var deny = x.attr === 'denyOnly';
+      var hot = mine && u.sids.indexOf(x.name) >= 0;
+      rows.push(h('span', { class: 'uac-chip' + chg(hot, c), dataset: { attr: x.attr }, title: deny ? t('denyOnlyTag') : null },
+        deny ? h('span', { class: 'uac-stop', 'aria-hidden': 'true' }) : null, data(x.name, '')));
+      rows.push(h('span', { class: 'uac-sid-v' }, data(x.sid, ''), deny ? [' ', h('span', { class: 'uac-sub' }, t('denyOnlyTag'))] : null));
+    });
+    var shown = tok.kind === 'full' ? L.LIMITED_PRIVS.concat(NOTABLE).filter(function (p) { return tok.privs.indexOf(p) >= 0; }) : tok.privs;
+    var more = tok.privs.length - shown.length;
+    var privs = shown.map(function (p) {
+      var hot = mine && u.priv === p;
+      return h('span', { class: 'uac-priv' + chg(hot, c), title: p }, h('span', { class: 'uac-key', 'aria-hidden': 'true' }), data(shortPriv(p), ''));
+    });
+    if (more > 0) privs.push(sub(t.n('privsMore', more)));
+    return h('section', { class: 'uac-card' + chg(fresh, c), dataset: { k: tok.kind === 'full' ? 'full' : 'thin' } },
+      h('h3', null, head, ilBadge(tok.il), sub(t.parts('tokOfUser', { user: data(tok.user, '') }))),
+      h('div', { class: 'uac-sids' }, rows),
+      h('div', { class: 'uac-privs' }, h('b', { class: 'uac-sub' }, t('privsLabel')), privs));
+  }
+  function tokensRow(c) {
+    var s = c.state, linked = s.tokens.filtered && s.tokens.full && s.tokens.filtered.linked;
+    return h('div', { class: 'uac-tokens' }, tokenCard(c, 'filtered'),
+      h('div', { class: 'uac-chain', dataset: linked ? {} : { k: 'none' } }, chainSvg(), h('span', null, t('linked'))),
+      tokenCard(c, 'full'));
+  }
+
+  // ── processes ──
+  function procBox(c, pr) {
+    var s = c.state, e = s.last;
+    var kind = s.tokens[pr.token].kind;
+    var fresh = e && ((e.kind === 'explorer' && pr.id === 'explorer') || (e.kind === 'approve' && pr.id === 'cmd') ||
+      (e.kind === 'spawn' && e.id === pr.id) || (e.kind === 'attempt' && e.proc === pr.id));
+    var res = s.attempts.filter(function (a) { return a.proc === pr.id; }).map(function (a) {
+      return h('span', { class: 'uac-res', dataset: { ok: a.ok ? '1' : '0' } }, (a.ok ? '✓ ' : '✕ ') + t(a.ok ? 'attemptOk' : 'attemptDenied'));
+    });
+    return h('div', { class: 'uac-proc' + chg(fresh, c), dataset: { k: kind === 'full' ? 'full' : 'thin' } },
+      h('b', { translate: 'no' }, pr.image), ilBadge(pr.il),
+      sub(t.parts('procAs', { user: data(pr.user, '') })),
+      h('span', { class: 'uac-tag' }, tokWord(kind)),
+      pr.elevated ? h('span', { class: 'uac-elev' }, '⇧ ' + t('elevatedTag')) : null,
+      res);
+  }
+  function promptBox(c) {
+    var s = c.state;
+    if (!s.prompt) return null;
+    var cred = s.prompt === 'credentials';
+    return h('div', { class: 'uac-prompt' + chg(s.last && s.last.kind === 'prompt', c), role: 'img', 'aria-label': t('promptTitle') },
+      h('h3', null, t('promptTitle')),
+      h('div', { class: 'uac-line' }, t(cred ? 'promptCred' : 'promptConsent')),
+      cred ? [h('div', { class: 'uac-field' }, h('span', null, t('promptUser')), data(L.CRED_ADMIN, '')),
+        h('div', { class: 'uac-field' }, h('span', null, t('promptPass')), data('••••••••', ''))] : null,
+      h('div', { class: 'uac-btns' }, h('span', { class: 'uac-btn', dataset: { k: 'yes' } }, t('promptYes')), h('span', { class: 'uac-btn' }, t('promptNo'))));
+  }
+  function tree(c, parent) {
+    var s = c.state;
+    var kids = s.procs.filter(function (p) { return p.parent === parent; });
+    var items = kids.map(function (p) {
+      var sub_ = tree(c, p.id);
+      var extra = p.id === 'explorer' && s.prompt ? h('ul', { class: 'uac-tree' }, h('li', null, promptBox(c))) : null;
+      return h('li', null, procBox(c, p), sub_, extra);
+    });
+    return items.length ? h('ul', { class: 'uac-tree' }, items) : null;
+  }
+  function logonCol(c) {
+    var s = c.state;
+    var kind = s.user === 'Administrator' ? 'kindBuiltin' : s.isAdmin ? 'kindAdmin' : 'kindStandard';
+    return h('div', { class: 'uac-col uac-tok' },
+      h('h2', null, t.parts('logonTitle', { pc: data(L.PC, '') }), data(s.user, ''), sub(t(kind)),
+        h('span', { class: 'uac-tag', dataset: s.uacOn ? {} : { k: 'off' } }, t(s.uacOn ? 'uacOn' : 'uacOff'))),
+      tokensRow(c));
+  }
+  function procsCol(c) {
+    var s = c.state;
+    return h('div', { class: 'uac-col uac-procs' }, h('h2', null, t('procsTitle')),
+      s.procs.length ? tree(c, null) : sub(t('procsNone')));
+  }
+
+  // ── access check ──
+  function rightsWord(ace) {
+    if (ace.level === 'all') return h('span', null, t('svcAll'));
+    if (ace.level === 'query') return h('span', null, t('svcQuery'));
+    return data({ full: 'Full control', rx: 'Read & execute', read: 'Read' }[ace.level], '');
+  }
+  function checkCol(c) {
+    var s = c.state, a = lastAttempt(s), task = L.TASKS[s.task];
+    var fresh = !!a && s.last && s.last.kind === 'attempt';
+    var head = h('h3', { class: 'uac-chk-h' }, t('chkTitle'));
+    var target = task.kind === 'priv'
+      ? h('div', { class: 'uac-line' }, h('b', null, t('task_timezone')))
+      : h('div', { class: 'uac-line' }, data(task.target, 'uac-path'), sub(t('kind_' + task.kind)), sub(t('chkTarget', { need: t('need_' + task.need) })));
+    if (!a) return h('div', { class: 'uac-col uac-chk' }, h('section', { class: 'uac-box' }, h('div', { class: 'uac-chk-info' }, head, target, sub(t('chkNone', { task: taskPhrase(s) })))));
+    var pr = s.procs.filter(function (p) { return p.id === a.proc; })[0];
+    var tokKind = s.tokens[a.token].kind;
+    var who = h('div', { class: 'uac-line' }, t.parts('chkWho', { n: String(a.n), proc: q(pr.image), tok: tokWord(tokKind) }), ilBadge(pr.il), sub(t.parts('procAs', { user: data(pr.user, '') })));
+    var body, info = [head, who, target];
+    if (a.by === 'priv') {
+      info.push(sub(t('privNoAcl')));
+      body = h('div', { class: 'uac-chk-info' }, h('div', { class: 'uac-line' }, sub(t('privNeed')),
+        h('span', { class: 'uac-priv' + chg(fresh, c) }, h('span', { class: 'uac-key', 'aria-hidden': 'true' }), data(a.priv, ''))),
+        h('div', { class: 'uac-line uac-mic', dataset: { ok: a.ok ? '1' : '0' } }, t(a.ok ? 'privHeld' : 'privMissing')));
+    } else {
+      info.push(h('div', { class: 'uac-line uac-mic', dataset: { ok: a.il.ok ? '1' : '0' } },
+        h('span', null, t.parts('micLine', { p: ilBadge(a.il.proc), o: ilBadge(a.il.obj) })), sub(t(a.il.ok ? 'micPass' : 'micFail'))));
+      var need = t('need_' + task.need);
+      var table = RT({
+        dir: c.dir,
+        mode: 'first',
+        columns: [{ key: 'who', label: t('colWho'), wrap: true }, { key: 'rights', label: t('colRights') }],
+        actionLabel: t('colAction'),
+        markLabel: t('colMark', { n: a.n }),
+        rows: task.dacl.map(function (ace, i) {
+          var r = a.rows[i];
+          var note = r === 'denyOnly' ? [{ k: 'dashed', text: t('noteDenyOnly') }]
+            : r === 'noRight' ? [{ k: 'muted', text: t('noteNoRight', { need: need }) }]
+            : r === 'absent' ? [{ k: 'muted', text: t('noteAbsent') }] : null;
+          return {
+            no: String(i + 1),
+            cells: { who: data(ace.who, ''), rights: rightsWord(ace) },
+            action: h('span', null, t(ace.type === 'allow' ? 'allow' : 'deny')),
+            effect: ace.type,
+            hit: r === 'skip' ? null : r === 'decides',
+            miss: r === 'absent' || r === 'denyOnly' ? ['who'] : r === 'noRight' ? ['rights'] : [],
+            note: note
+          };
+        }),
+        implicit: { text: t('implicitDeny'), action: h('span', null, t('deny')), effect: 'deny' },
+        at: a.row >= 0 ? a.row : task.dacl.length,
+        subject: { mark: pr.image.replace('.exe', ''), c: 1 },
+        done: true,
+        outcome: function () { return RT.verdict(a.ok, t(a.ok ? 'outOk' : 'outDenied')); },
+        words: { win: t('markWin'), skip: t('markSkip') },
+        changed: fresh,
+        bare: true,
+        stickyMark: true
+      });
+      body = table;
+    }
+    return h('div', { class: 'uac-col uac-chk' },
+      h('section', { class: 'uac-box' }, h('div', { class: 'uac-chk-info' }, info,
+        h('div', { class: 'uac-verdict' }, RT.verdict(a.ok, t(a.ok ? 'outOk' : 'outDenied')))), body));
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, e = s.last, n = c.n;
+    var task = h('span', null, cap(taskPhrase(s)));
+    var taskLow = h('span', null, taskPhrase(s));
+    if (c.first) {
+      var k = s.user === 'Administrator' ? 'capStart_builtin' : s.isAdmin ? 'capStart_admin' : 'capStart_standard';
+      var out0 = rich(k, { pc: q(L.PC), task: taskLow });
+      if (!s.uacOn) out0.push(' ', t('capStartOff'));
+      return out0;
+    }
+    var N = String(n), out;
+    switch (e.kind) {
+      case 'logon':
+        if (s.tokens.filtered && s.tokens.full) out = rich('capLogonSplit', { n: N, all: String(s.tokens.full.privs.length), few: String(s.tokens.filtered.privs.length) });
+        else if (!s.isAdmin) out = rich('capLogonStandard', { n: N, few: String(s.tokens.filtered.privs.length) });
+        else if (s.uacOn) out = rich('capLogonBuiltin', { n: N });
+        else out = rich('capLogonOff', { n: N, user: q(s.user) });
+        break;
+      case 'explorer':
+        out = rich(!s.isAdmin ? 'capExplorerStandard' : e.token === 'filtered' ? 'capExplorerFiltered' : 'capExplorerFull', { n: N });
+        break;
+      case 'attempt': {
+        var a = lastAttempt(s), kind = s.tokens[a.token].kind;
+        if (a.by === 'priv') {
+          out = rich(kind === 'filtered' ? 'capPrivOk' : kind === 'standard' ? 'capPrivOkStandard' : 'capPrivOkFull', { n: N, task: task, priv: q(a.priv) });
+        } else if (e.proc === 'cmd') {
+          out = rich(a.user === L.CRED_ADMIN ? 'capAllowedElevatedCred' : 'capAllowedElevated', { n: N, row: q(a.row + 1), task: task, admin: q(L.CRED_ADMIN) });
+        } else if (a.ok) {
+          out = rich('capAllowedSilent', { n: N, row: q(a.row + 1), task: task });
+        } else if (kind === 'filtered') {
+          out = rich('capDeniedFiltered', { n: N, task: task });
+        } else {
+          out = rich(s.uacOn ? 'capDeniedStandard' : 'capDeniedOff', { n: N, task: task, need: t('need_' + L.TASKS[s.task].need) });
+        }
+        break;
+      }
+      case 'prompt':
+        out = rich(e.prompt === 'credentials' ? 'capPromptCred' : 'capPromptConsent', { n: N, admin: q(L.CRED_ADMIN) });
+        break;
+      case 'approve':
+        out = rich(e.prompt === 'credentials' ? 'capApproveCred' : 'capApproveConsent', { n: N, admin: q(L.CRED_ADMIN) });
+        break;
+      case 'spawn':
+        if (e.parent === 'cmd') out = rich('capSpawnCmd', { n: N });
+        else {
+          var k2 = s.tokens[e.token].kind;
+          out = rich(k2 === 'filtered' ? 'capSpawnExplorer' : k2 === 'standard' ? 'capSpawnExplorerStandard' : 'capSpawnExplorerFull', { n: N, user: q(s.user) });
+        }
+        break;
+      default: out = [''];
+    }
+    if (c.last) out.push(' ', t('capEnd'));
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'account', type: 'select', label: t('pAccount'), options: [['admin', t('optAdmin')], ['standard', t('optStandard')], ['builtin-admin', t('optBuiltin')]] },
+      { key: 'uac', type: 'toggle', label: t('pUac'), hint: t('pUacHint') },
+      { key: 'task', type: 'select', label: t('pTask'), options: L.TASK_KEYS.map(function (k) { return [k, t('task_' + k)]; }) },
+      { key: 'children', type: 'toggle', label: t('pChildren'), hint: t('pChildrenHint') }
+    ],
+
+    presets: [
+      { id: 'admin-filtered', label: t('presetFiltered'), hint: t('presetFilteredHint'), params: {} },
+      { id: 'time-zone', label: t('presetTimeZone'), hint: t('presetTimeZoneHint'), params: { task: 'timezone' } },
+      { id: 'standard-user', label: t('presetStandard'), hint: t('presetStandardHint'), params: { account: 'standard' } },
+      { id: 'child-inherits', label: t('presetChildren'), hint: t('presetChildrenHint'), params: { children: true } },
+      { id: 'uac-off', label: t('presetOff'), hint: t('presetOffHint'), params: { uac: false, children: true } }
+    ],
+
+    legend: [
+      { shape: 'sid-on', label: t('legSidOn') },
+      { shape: 'sid-deny', label: t('legSidDeny') },
+      { shape: 'priv', label: t('legPriv') },
+      { shape: 'il', label: t('legIl') },
+      { shape: 'thin', label: t('legThin') },
+      { shape: 'thick', label: t('legThick') },
+      { shape: 'rt-verdict', label: t('legVerdict') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'uac' }, logonCol(c), procsCol(c), checkCol(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
