@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The published home page's one script. The build inlines it after STR (the page's own words in both languages)
+// The finder's one script (find/index.html; the home page is the tree, site/learn.js). The build inlines it after STR (the page's own words in both languages)
 // and parseSet, setParam and plural from site/core.mjs, so set links are read by the same code the tests cover.
-//   home:              search as you type (/ focuses, Enter opens the first hit, Esc clears), topic chips, and the
+//   finder:            search as you type (?q= fills it in; / focuses, Enter opens the first hit, Esc clears), topic chips, and the
 //                      selection: + on a tile or a preset chip, kept in this browser (localStorage)
 //   ?set=a,b,host:p    the lecture view: a numbered agenda and a big preview; ←/→, PgUp/PgDn, 1–9 move, Enter opens
 //   ?set=…&print=1     the handout: the same set as a one-page A4 list (also what printing the lecture view gives)
@@ -111,6 +111,8 @@
       $('#none').hidden = shown > 0 || !tiles.length;
       $('#shown').textContent = words.length ? shown + ' / ' + tiles.length : '';
     }
+    // The tree's search box sends its words here as ?q=.
+    if (params.get('q')) q.value = params.get('q');
     q.addEventListener('input', filter);
     q.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {

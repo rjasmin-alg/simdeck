@@ -3,6 +3,8 @@
 
 One line per change; the kit only grows (playbook §4). Rules and API: `docs/sim-ui.md`.
 
+- **0.6.1** (2026-11-05): the home page became the tree of subjects (learn.json) and the old home page moved to
+  `find/`: the back link also goes back in history from the finder, and returns to a lecture set stored there.
 - **0.6.0** (2026-10-04): view K3, block grid: `kit/blockgrid.js` (`Simdeck.blockGrid`, `.space`, `.split`, `.route`,
   `.meter`, `.checkSpec`), its section in `kit.css`, tests in `kit/blockgrid.test.js`, docs/sim-ui.md §13. Cell kinds
   fill, soft (hatched), dead, bad, ghost with reference counts, sub lines, under/gap marks and the changed mark; holes;

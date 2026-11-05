@@ -4,8 +4,9 @@
 // The output is plain static files with relative links, so the folder works on any web server, at
 // any path, or straight from a USB stick (file://).
 //
-//   index.html                  home: every finished simulator as a tile, by topic, one search box and a selection;
-//                               ?set=a,b is the lecture view of a set and &print=1 its handout (site/index.js)
+//   index.html                  home: "what do you want to learn about today?", the tree of learn.json (site/learn.*)
+//   find/index.html             the finder: every finished simulator as a tile, by topic, one search box and a
+//                               selection; ?set=a,b is the lecture view of a set and &print=1 its handout (site/index.js)
 //   thumbs/<id>-light.webp      the tiles' pictures, copied from the thumbnail cache (npm run thumbs) when it has
 //                               the sim's current build; without one a tile shows a placeholder
 //   fonts/*.woff2               the kit's font, for the home page
@@ -28,6 +29,7 @@ import { thumbKey, cacheDir } from '../lib/thumbs.mjs';
 import {
   renderCourse, renderIndexList, renderChips, renderLicences, licenceLine, sourceHref, isPublic, escapeHtml, biStr, loc, STR, LANGS,
   LICENCE_TEXT, LICENCES_PAGE, homeEntries, group, countStr, thumbHref, parseSet, setParam, plural,
+  renderLearn, learnNodes, refMap, FINDER,
 } from '../site/core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -171,7 +173,7 @@ function prepareOut(out) {
 /** drafts: also publish "wip" entries (for the admin's preview). */
 export function build({ root, out, log = console.log, drafts = false, thumbs = cacheDir(root) }) {
   const repo = loadRepo(root);
-  const { entries: all, courses, errors, warnings } = validate(repo);
+  const { entries: all, courses, learn, errors, warnings } = validate(repo);
   const entries = drafts ? all : all.filter(isPublic);
   const site = { title: 'simdeck', lang: 'hr', ...repo.site };
   const kitDir = join(root, 'kit');
@@ -220,16 +222,42 @@ export function build({ root, out, log = console.log, drafts = false, thumbs = c
     const to = LANGS.find((x) => x !== l);
     return `<span data-l="${l}" lang="${to}">${escapeHtml(STR[to].langName)}</span>`;
   }).join('')}</button>`;
-  // The home page names no courses (owner, 2026-10-03): it is grouped by topic only. Course pages are reached by
-  // their own (short) addresses.
+  // The home page is the tree (owner, 2026-11-05): "what do you want to learn about today?", areas › subjects ›
+  // leaves › sims (learn.json). Every node is in the page; CSS :target shows the one in the address.
+  const kitCss = kitTokens(read(join(kitDir, 'kit.css')));
+  const areas = learnNodes(learn, refMap(entries)).areas;
+  write('index.html', fill(read(join(SITE, 'learn.html')), {
+    LANG: site.lang,
+    TITLE: escapeHtml(site.title),
+    FINDER,
+    LANGJS: langJs,
+    SWITCH: langSwitch,
+    ASK: biStr('learnAsk'),
+    LEAD: biStr('learnLead'),
+    SEARCH: escapeHtml(STR[site.lang]?.learnSearch ?? STR.hr.learnSearch),
+    SEARCH_HR: escapeHtml(STR.hr.learnSearch),
+    SEARCH_EN: escapeHtml(STR.en.learnSearch),
+    FIND: biStr('learnFind'),
+    FIND_HINT: biStr('learnFindHint'),
+    COUNT: `${countStr('sims', homeEntries(ctx, drafts).length)} · ${countStr('areasN', areas.length)}`,
+    TREE: renderLearn(learn, { ...ctx, depth: 0 }),
+    CSS: kitCss + read(join(SITE, 'learn.css')),
+    SCRIPT: read(join(SITE, 'learn.js')).replace(/<\/script/gi, '<\\/script'),
+    FOOTER: licenceLine(site, 0),
+  }));
+
+  // The finder (find/): the old home page, one folder down. It names no courses (owner, 2026-10-03): it is grouped by
+  // topic only. Course pages are reached by their own (short) addresses.
   const groups = group(homeEntries(ctx, drafts), repo.vocab);
   const listed = groups.reduce((n, g) => n + g.items.length, 0);
-  write('index.html', fill(read(join(SITE, 'index.html')), {
+  const findCtx = { ...ctx, depth: 1 };
+  write(`${FINDER}index.html`, fill(read(join(SITE, 'index.html')), {
     LANG: site.lang,
+    TREE_LINK: biStr('learnAsk'),
     TITLE: escapeHtml(site.title),
     LANGJS: langJs,
     SWITCH: langSwitch,
-    SITE_URL: escapeHtml(site.siteUrl ?? ''),
+    SITE_URL: escapeHtml(site.siteUrl ? `${site.siteUrl.replace(/\/?$/, '/')}${FINDER}` : ''),
     TAGLINE: biStr('tagline'),
     COUNT: `${countStr('sims', listed)} · ${countStr('topicsN', groups.length)}`,
     SEARCH: escapeHtml(STR[site.lang]?.search ?? STR.hr.search),
@@ -245,10 +273,10 @@ export function build({ root, out, log = console.log, drafts = false, thumbs = c
     HANDOUT: biStr('handout'),
     COPY: biStr('copyLink'),
     CLEAR: biStr('clear'),
-    CSS: kitTokens(read(join(kitDir, 'kit.css'))) + read(join(SITE, 'index.css')),
-    LIST: renderIndexList(ctx, drafts),
+    CSS: kitCss.replace(/url\((['"]?)fonts\//g, 'url($1../fonts/') + read(join(SITE, 'index.css')),
+    LIST: renderIndexList(findCtx, drafts),
     SCRIPT: pageScript(read(join(SITE, 'index.js'))),
-    FOOTER: licenceLine(site, 0),
+    FOOTER: licenceLine(site, 1),
   }));
 
   // Course pages are static HTML (only a print button): students' browsers just follow links.

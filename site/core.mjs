@@ -47,6 +47,15 @@ export const STR = {
     licencesSims: 'U pojedinim simulatorima',
     licencesNone: 'Simulatori zasad ne sadrže materijale trećih strana.',
     changes: 'Izmjene',
+    learnAsk: 'Što želite danas naučiti?',
+    learnLead: 'Odaberite područje, pa temu: na kraju puta čekaju simulatori koji je pokazuju.',
+    learnRoot: 'Sve teme',
+    learnFind: 'Brzo traženje',
+    learnFindHint: 'Svi simulatori na jednom mjestu, s pretragom i odabirom za predavanje',
+    learnSearch: 'Ili odmah potražite pojam…',
+    learnUp: 'Natrag',
+    learnEmpty: 'Stablo tema još nije složeno. Svi simulatori su u brzom traženju.',
+    areasN: ['područje', 'područja', 'područja'],
   },
   en: {
     classes: { stepper: 'step by step', explorer: 'explorer', reference: 'reference', tool: 'tool' },
@@ -89,6 +98,15 @@ export const STR = {
     licencesSims: 'In single simulators',
     licencesNone: 'The simulators contain no third-party material yet.',
     changes: 'Changes',
+    learnAsk: 'What do you want to learn about today?',
+    learnLead: 'Pick an area, then a subject: at the end of the path are the simulators that show it.',
+    learnRoot: 'All subjects',
+    learnFind: 'Quick finder',
+    learnFindHint: 'Every simulator in one place, with search and a selection for a lecture',
+    learnSearch: 'Or look a concept up right away…',
+    learnUp: 'Back',
+    learnEmpty: 'The subject tree is not laid out yet. Every simulator is in the quick finder.',
+    areasN: ['area', 'areas'],
   },
 };
 
@@ -455,9 +473,12 @@ export function setParam(ids) {
   return ids.map((id) => String(id).replace('#', ':')).join(',');
 }
 
+/** The finder's folder: the search-and-shelves page, with the selection and the lecture view (?set=). */
+export const FINDER = 'find/';
+
 /** The address of a set (a lecture) on the published site, for a link to share. */
 export function setUrl(ids, site) {
-  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}?set=${setParam(ids)}`;
+  return `${String(site.siteUrl ?? '').replace(/\/?$/, '/')}${FINDER}?set=${setParam(ids)}`;
 }
 
 /** The words a list item is found by, folded, in one string. */
@@ -484,17 +505,19 @@ function itemData(e, ctx) {
  */
 export function renderTile(e, ctx, i = 0) {
   const vocab = ctx.vocab;
+  const depth = ctx.depth ?? 0;
+  const up = '../'.repeat(depth);
   const presets = presetItems(e);
   const pic = ctx.thumbs?.has(e.id)
-    ? `<img src="${escapeHtml(thumbHref(e.id))}" alt="" width="560" height="350"${i < 10 ? '' : ' loading="lazy"'}>`
+    ? `<img src="${escapeHtml(up + thumbHref(e.id))}" alt="" width="560" height="350"${i < 10 ? '' : ' loading="lazy"'}>`
     : `<span class="ph" aria-hidden="true">${escapeHtml(loc(e.title, 'hr').slice(0, 1))}</span>`;
   const steps = e.class === 'stepper' && e.steps ? ` · ${countStr('stepsN', e.steps)}` : '';
-  const chips = presets.map((p, k) => `<li class="preset${k >= 2 ? ' more' : ''}" ${itemData(p, ctx)} data-s="${flat([...wordsOf(p, vocab), normalise(p.preset)])}"><a data-lang-link href="${escapeHtml(entryHref(p, 0))}" class="t-title">${bi(p.title)}</a>`
+  const chips = presets.map((p, k) => `<li class="preset${k >= 2 ? ' more' : ''}" ${itemData(p, ctx)} data-s="${flat([...wordsOf(p, vocab), normalise(p.preset)])}"><a data-lang-link href="${escapeHtml(entryHref(p, depth))}" class="t-title">${bi(p.title)}</a>`
     + `<span class="t-concept" hidden>${bi(p.concept)}</span>${p.summary ? `<span class="t-summary" hidden>${bi(p.summary)}</span>` : ''}`
     + `<button type="button" class="pick pick-sm" data-pick="${escapeHtml(p.id)}" aria-pressed="false"><span aria-hidden="true"></span></button></li>`).join('');
   const more = presets.length > 2 ? `<li class="more-btn"><button type="button" data-more>+${presets.length - 2}</button></li>` : '';
   return `<article class="tile" ${itemData(e, ctx)} data-s="${flat(wordsOf(e, vocab))}" style="--tc:${topicAccent(e.topic, vocab)}">`
-    + `<a class="tile-link" data-lang-link href="${escapeHtml(entryHref(e, 0))}"><span class="pic">${pic}</span>`
+    + `<a class="tile-link" data-lang-link href="${escapeHtml(entryHref(e, depth))}"><span class="pic">${pic}</span>`
     + `<span class="tile-text"><h3 class="t-title">${bi(e.title)}${langBadge(e)}</h3><span class="t-concept">${bi(e.concept)}</span>`
     + `<span class="t-summary" hidden>${bi(e.summary)}</span></span></a>`
     + `<p class="tile-meta">${bi(STR.hr.classes[e.class] ? { hr: STR.hr.classes[e.class], en: STR.en.classes[e.class] } : e.class)}${steps}</p>`
@@ -527,4 +550,95 @@ export function renderIndexList(ctx, drafts = false) {
     .map((g) => `<section class="topic" id="t-${escapeHtml(g.key)}" data-topic="${escapeHtml(g.key)}" style="--tc:${topicAccent(g.key, ctx.vocab)}"><h2><span class="dot"></span><span class="t-topic">${bi(g.label)}</span> <small>${g.items.length}</small></h2>`
       + `<div class="grid">${g.items.map((e) => renderTile(e, ctx, i++)).join('')}</div></section>`)
     .join('\n');
+}
+
+// ── the home page's tree (learn.json) ──
+
+/** The tree's ready items under a node, each once, in tree order: what its count and its peek pictures are from. */
+export function learnItems(node, byId) {
+  const out = new Map();
+  const visit = (n) => {
+    for (const id of n.sims ?? []) {
+      const e = byId.get(id);
+      if (e && isPublic(e) && !out.has(id)) out.set(id, e);
+    }
+    for (const c of n.children ?? []) visit(c);
+  };
+  visit(node);
+  return [...out.values()];
+}
+
+/** Each area's colour: the kit's series colours in turn (an area spans topics, so it has none of its own). */
+export const areaAccent = (i) => `var(--c${(i % 8) + 1})`;
+
+/**
+ * The tree as nodes with their path ("networks/addresses/subnets", also the deep link #networks/addresses/subnets),
+ * parents, area colour and ready items, depth first; nodes left with no ready item are dropped.
+ */
+export function learnNodes(learn, byId) {
+  const out = [];
+  const visit = (n, parents, accent) => {
+    const path = [...parents.map((p) => p.id), n.id].join('/');
+    const items = learnItems(n, byId);
+    if (!items.length) return null;
+    const node = { ...n, path, parents, accent, items, kids: [] };
+    out.push(node);
+    for (const c of n.children ?? []) {
+      const k = visit(c, [...parents, node], accent);
+      if (k) node.kids.push(k);
+    }
+    return node;
+  };
+  const areas = (learn?.nodes ?? []).map((n, i) => visit(n, [], areaAccent(i))).filter(Boolean);
+  return { areas, all: out };
+}
+
+function learnPic(e, ctx, up) {
+  const id = (e.host ?? e).id;
+  return ctx.thumbs?.has(id)
+    ? `<img src="${escapeHtml(up + thumbHref(id))}" alt="" width="560" height="350" loading="lazy">`
+    : `<span class="ph" aria-hidden="true">${escapeHtml(loc((e.host ?? e).title, 'hr').slice(0, 1))}</span>`;
+}
+
+/** A card that opens a node: title, blurb, count, and a peek at what is inside (its children, or a leaf's sims). */
+function learnCard(n, ctx, up) {
+  const peek = n.kids.length
+    ? `<span class="c-peek">${n.kids.map((k) => bi(k.title)).join('<span class="sep" aria-hidden="true"> · </span>')}</span>`
+    : `<span class="c-pics" aria-hidden="true">${n.items.slice(0, 3).map((e) => `<span class="pic">${learnPic(e, ctx, up)}</span>`).join('')}</span>`;
+  return `<a class="card" href="#${escapeHtml(n.path)}" style="--tc:${n.accent}"><span class="c-title">${bi(n.title)}</span>`
+    + (n.blurb ? `<span class="c-blurb">${bi(n.blurb)}</span>` : '')
+    + `<span class="c-count">${countStr('sims', n.items.length)}</span>${peek}</a>`;
+}
+
+/** A sim (or a preset) in a leaf: its picture, title and concept, linked to the page (at the preset). */
+function learnSim(e, ctx, up) {
+  const steps = e.class === 'stepper' && (e.host ?? e).steps ? ` · ${countStr('stepsN', (e.host ?? e).steps)}` : '';
+  const cls = STR.hr.classes[e.class] ? bi({ hr: STR.hr.classes[e.class], en: STR.en.classes[e.class] }) : escapeHtml(e.class);
+  return `<a class="sim" data-lang-link href="${escapeHtml(entryHref(e, ctx.depth ?? 0))}" style="--tc:${topicAccent(e.topic, ctx.vocab)}">`
+    + `<span class="pic">${learnPic(e, ctx, up)}</span><span class="s-text">${hostLabel(e)}<strong class="s-title">${bi(e.title)}${langBadge(e)}</strong>`
+    + `<span class="s-concept">${bi(e.concept)}</span><span class="s-meta">${cls}${steps}</span></span></a>`;
+}
+
+/**
+ * The home page's tree, as static HTML: one <section> per node, its id the node's path, so #networks/addresses opens
+ * it by CSS :target alone (site/learn.css) and works without script, from file:// and as a link to share. The root
+ * section shows the areas when no node is targeted. Each section carries its own breadcrumbs. ctx: { entries, vocab,
+ * thumbs, depth }.
+ */
+export function renderLearn(learn, ctx) {
+  const up = '../'.repeat(ctx.depth ?? 0);
+  const byId = refMap(ctx.entries);
+  const { areas, all } = learnNodes(learn, byId);
+  if (!areas.length) return `<p class="empty">${biStr('learnEmpty')}</p>`;
+  const crumbs = (n) => `<nav class="crumbs" aria-label="${escapeHtml(`${STR.hr.learnRoot} / ${STR.en.learnRoot}`)}"><a href="#">${biStr('learnRoot')}</a>`
+    + n.parents.map((p) => ` <span aria-hidden="true">›</span> <a href="#${escapeHtml(p.path)}">${bi(p.title)}</a>`).join('')
+    + ` <span aria-hidden="true">›</span> <span aria-current="page">${bi(n.title)}</span></nav>`;
+  const root = `<section class="node root" data-path=""><div class="cards areas">${areas.map((n) => learnCard(n, ctx, up)).join('')}</div></section>`;
+  const nodes = all.map((n) => `<section class="node${n.kids.length ? '' : ' leaf'}" id="${escapeHtml(n.path)}" data-path="${escapeHtml(n.path)}" data-up="${escapeHtml(n.parents.at(-1)?.path ?? '')}" style="--tc:${n.accent}">`
+    + `${crumbs(n)}<h2 tabindex="-1">${bi(n.title)} <small>${countStr('sims', n.items.length)}</small></h2>${n.blurb ? `<p class="n-blurb">${bi(n.blurb)}</p>` : ''}`
+    + (n.kids.length
+      ? `<div class="cards">${n.kids.map((k) => learnCard(k, ctx, up)).join('')}</div>`
+      : `<div class="sims">${n.items.map((e) => learnSim(e, ctx, up)).join('')}</div>`)
+    + '</section>');
+  return [root, ...nodes].join('\n');
 }

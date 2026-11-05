@@ -203,8 +203,8 @@ test('set links: order kept, repeats dropped, unknown ids named, at most 30; "ho
   assert.equal(SET_MAX, 30);
   assert.equal(setParam(['dns', 'stp#broadcast-storm']), 'dns,stp:broadcast-storm');
   assert.deepEqual(parseSet(setParam(['stp#belady', 'dns']), known).items, ['stp#belady', 'dns'], 'round trip');
-  assert.equal(setUrl(['dns', 'stp#belady'], site), 'https://m.o/simdeck/?set=dns,stp:belady');
-  assert.equal(setUrl(['dns'], { siteUrl: 'https://m.o/simdeck' }), 'https://m.o/simdeck/?set=dns');
+  assert.equal(setUrl(['dns', 'stp#belady'], site), 'https://m.o/simdeck/find/?set=dns,stp:belady');
+  assert.equal(setUrl(['dns'], { siteUrl: 'https://m.o/simdeck' }), 'https://m.o/simdeck/find/?set=dns');
 });
 
 test('empty states: no finished sims on the home page, none on a course page', () => {

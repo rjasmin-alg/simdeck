@@ -42,8 +42,8 @@ test('a course page lists a preset entry, and its link opens the sim paused at t
     p.on('pageerror', (e) => errors.push(String(e)));
     const url = (f) => pathToFileURL(join(out, f)).href;
 
-    // The home page shows the entry as a chip on its sim's tile, and the search finds it.
-    await p.goto(url('index.html'));
+    // The finder shows the entry as a chip on its sim's tile, and the search finds it.
+    await p.goto(url('find/index.html'));
     assert.equal(await p.locator('.tile[data-id="demo"] li.preset a[href*="sims/demo/index.html?preset=carry"]').count(), 1);
     await p.fill('#q', 'carry');
     assert.ok(await p.locator('li.preset[data-id="demo#carry"]').isVisible());

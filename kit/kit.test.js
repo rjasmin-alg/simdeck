@@ -41,17 +41,19 @@ test('back link goes back in history only from the index or a course page', () =
   const back = 'https://materijali.online/simdeck/index.html';
   const yes = ['https://materijali.online/simdeck/index.html', 'https://materijali.online/simdeck/',
     'https://materijali.online/simdeck/index.html?q=dns', 'https://materijali.online/simdeck/courses/linux-essentials/',
-    'https://materijali.online/simdeck/courses/linux-essentials/index.html'];
+    'https://materijali.online/simdeck/courses/linux-essentials/index.html', 'https://materijali.online/simdeck/find/',
+    'https://materijali.online/simdeck/find/index.html?q=dns&lang=en'];
   const no = ['', 'https://materijali.online/ossim/index.html', 'https://example.org/simdeck/index.html',
     'https://materijali.online/simdeck/sims/dns-resolution/index.html', 'https://materijali.online/simdeck/courses/',
-    'https://materijali.online/simdeck/courses/a/b/', 'https://materijali.online/linux', 'not a url'];
+    'https://materijali.online/simdeck/courses/a/b/', 'https://materijali.online/linux', 'not a url',
+    'https://materijali.online/simdeck/find/x/', 'https://materijali.online/simdeck/finder/'];
   for (const r of yes) assert.equal(kit.cameFromSite(r, back), true, r);
   for (const r of no) assert.equal(kit.cameFromSite(r, back), false, r);
   // Unbuilt from file:// the index is the repo root; the rule is the same.
   assert.equal(kit.cameFromSite('file:///repo/courses/os/index.html', 'file:///repo/index.html'), true);
 });
 
-test('back link returns to the lecture set the home page stored, only on this site\'s index with ?set=', () => {
+test('back link returns to the lecture set the finder stored, only on this site\'s finder or index with ?set=', () => {
   const back = 'https://materijali.online/simdeck/index.html?lang=hr';
   const set = 'https://materijali.online/simdeck/index.html?set=vlan,stp:broadcast-storm#2';
   assert.equal(kit.setReturn(set, back, 'en'), 'https://materijali.online/simdeck/index.html?set=vlan%2Cstp%3Abroadcast-storm&lang=en#2');
@@ -60,6 +62,10 @@ test('back link returns to the lecture set the home page stored, only on this si
   for (const no of [null, '', 'not a url', 'https://materijali.online/simdeck/index.html', 'https://materijali.online/simdeck/index.html?q=set',
     'https://example.org/simdeck/index.html?set=a', 'https://materijali.online/other/index.html?set=a',
     'https://materijali.online/simdeck/courses/x/index.html?set=a']) assert.equal(kit.setReturn(no, back, 'hr'), null, String(no));
+  // The lecture view lives in the finder (find/) since the tree became the home page (kit 0.6.1).
+  assert.equal(kit.setReturn('https://materijali.online/simdeck/find/index.html?set=a#3', back, 'en'), 'https://materijali.online/simdeck/find/index.html?set=a&lang=en#3');
+  assert.equal(kit.setReturn('https://materijali.online/simdeck/find/?set=a', back, null), 'https://materijali.online/simdeck/find/?set=a');
+  assert.equal(kit.setReturn('https://materijali.online/simdeck/find/x/index.html?set=a', back, null), null);
   // Unbuilt or from a USB stick: file:// has no referrer, so this is the only way back to the set.
   assert.equal(kit.setReturn('file:///usb/simdeck/index.html?set=a#1', 'file:///usb/simdeck/index.html', 'hr'), 'file:///usb/simdeck/index.html?set=a&lang=hr#1');
 });

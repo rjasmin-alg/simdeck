@@ -47,6 +47,9 @@ Example: *Linux Essentials* → DNS, DHCP, LVM and disk partitioning, at `materi
 - **Home page** (owner, 2026-10-03; mockups in the coordinator's library, t-0067): mockup A's home page (topic shelves
   of screenshot tiles, chips, search, a selection bar along the bottom) with mockup B's lecture view (a numbered
   agenda beside a big preview, `?set=`). **No course names on the home page**; it is grouped by topic only (§3.1).
+- **The tree is the home page** (owner, 2026-11-05): "what do you want to learn about today?", three levels of
+  clickable cards (areas › subjects › leaves) and the sims under each leaf; one sim may sit in many leaves (§3.0,
+  `learn.json`). The page above, with its search, selection and lecture view, stays as the **finder** at `find/`.
 
 ## 1. Layout
 
@@ -60,11 +63,13 @@ sims/<id>/                 one folder per simulator (the folder name is the id)
   NOTES.md                 optional: decisions, deviations, timing (playbook §10.8)
 courses/<course-id>.json   one file per course: the playlist (ordered sims, optional sections)
 tags.json                  the controlled vocabulary: topics and tags
+learn.json                 the home page's tree: areas › subjects › leaves, each leaf listing sims (§3.0)
 site.json                  site title, UI language, public URL, source link, server paths short addresses must avoid
 LICENSE                    AGPL-3.0-or-later, the whole of simdeck (docs/tasks/w0/licence.md)
 site/                      templates for the published pages (home, course page, licences) and core.mjs
   core.mjs                 search, grouping, links, renderers (both languages), set links, nginx rules; build and admin
-  index.js                 the home page's script: search, chips, selection, lecture view, handout (inlined)
+  learn.html, .css, .js     the home page: the tree (learn.json); CSS :target shows one node, the script is a nicety
+  index.html, .css, .js     the finder (find/): search, chips, selection, lecture view, handout (script inlined)
   lang.js                  the published pages' language switch (inlined into home and course pages)
 admin/                     the admin app's page, script and styles
 lib/manifest.mjs           loads and validates every manifest source (read side)
@@ -217,7 +222,35 @@ shows the spans of `html[lang]`. `site/lang.js` (inlined) picks the language the
 language button switches without a reload and remembers the choice; links to sims and to the home page carry
 `?lang=`. Without script a page reads in its default language.
 
-### 3.1 Home page (`index.html`)
+### 3.0 Home page: the tree (`index.html`, from `learn.json`)
+
+The home page asks "Što želite danas naučiti? / What do you want to learn about today?" and answers with a tree
+(owner, 2026-11-05): **areas** (the first screen, about ten cards), each with **subjects**, each with **leaves**, and
+a leaf's **sims** as picture cards. A visitor clicks at most four times to reach a sim.
+
+- **`learn.json`**: `{ "nodes": [area] }`; a node is `{ id, title, blurb?, children }`, a leaf (the third level)
+  `{ id, title, blurb?, sims }`. Ids are kebab-case and unique among siblings; titles and blurbs are in both
+  languages (a blurb ≤ 110 chars). Items are sim ids or `"<sim>#<preset>"` as in course files, and **one sim may
+  sit in many leaves** (RAID under storage and under failure). Unknown ids or presets, repeats in a leaf, a fourth
+  level or sims above a leaf are errors (`checkLearn`, lib/manifest.mjs). A finished sim that no leaf reaches is a
+  **warning**: tasks change only their own folder, so the **coordinator places each new sim** after merging it,
+  as with course files. Until then it is in the finder only. Nodes with no finished sim are left off the page.
+- **Static and scriptless**: every node is in the page as a `<section>` whose id is its path, and CSS `:target`
+  shows the one in the address, so `#networks/addressing/subnets` is a deep link that works without script, from
+  `file://`, and is fine to share. The root section (the areas) shows when no node is targeted. Each node carries
+  its breadcrumbs, its title with a count, and cards for its children: title, blurb, count, and a peek (the
+  children's titles, or a leaf's first three pictures). Rendered by `renderLearn` in `site/core.mjs`.
+- **Script** (`site/learn.js`, a nicety): a new node starts at the top with its heading focused; the tab's title
+  names it; Backspace or Esc goes up one level, `/` focuses the search, L switches the language.
+- **Search** is a plain form: its words go to the finder as `find/index.html?q=…`, which fills its box with them.
+  A link "Brzo traženje / Quick finder" leads there too, and the finder links back to the tree.
+- **Old lecture links** (`<site>/?set=…`) are redirected to `find/index.html?set=…` before the page paints.
+- Areas take the kit's series colours in turn (an area spans topics); a sim card takes its topic's colour.
+
+### 3.1 The finder (`find/index.html`)
+
+Until 2026-11-05 this was the home page. Links in it are one folder down (`../sims/`, `../thumbs/`, `../fonts/`),
+a set's address is `<site>/find/?set=…`, and the kit's back link goes back in history from it (kit 0.6.1).
 
 Mockup A's home page with mockup B's lecture view (owner, 2026-10-03). The tiles are static HTML from
 `site/core.mjs` (`renderIndexList`, `renderTile`); one inlined script (`site/index.js`) does the rest, and builds

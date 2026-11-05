@@ -25,7 +25,15 @@ test('home and course pages switch between Croatian and English', { skip }, asyn
     p.on('pageerror', (e) => errors.push(String(e)));
     const visible = (text) => p.getByText(text, { exact: true }).first().isVisible();
 
+    // The home page (the tree) switches too, and the choice carries over to the finder.
     await p.goto(url('index.html'));
+    assert.ok(await visible('Što želite danas naučiti?'));
+    await p.click('[data-lang-switch]');
+    assert.ok(await visible('What do you want to learn about today?'));
+    assert.match(await p.getAttribute('.sim[href*="sims/dhcp-dora"]', 'href'), /\?lang=en$/, 'the tree\'s sim links follow the switch');
+    await p.click('[data-lang-switch]');
+
+    await p.goto(url('find/index.html'));
     assert.equal(await p.evaluate(() => document.documentElement.lang), 'hr');
     assert.ok(await visible('Računalne mreže'));
     assert.ok(!(await visible('Computer networks')));

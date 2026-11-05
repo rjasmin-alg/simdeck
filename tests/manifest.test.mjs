@@ -250,3 +250,56 @@ test('entries: course items naming a preset entry are checked', () => {
   const wip = withPage(repo({ natives: [nativeJson({ status: 'wip', entries: [entry()] })], courses: course(['dns-x#storm']) }), 'dns-x', presetPage);
   assert.match(validate(wip).warnings.join('\n'), /"dns-x#storm" is not ready/);
 });
+
+// ── learn.json: the home page's tree ──
+
+const leaf = (id, sims) => ({ id, title: two(`List ${id}`), sims });
+const learnOf = (...leaves) => ({ nodes: [{ id: 'area', title: two('Područje', 'Area'), blurb: two('Kratko.', 'Short.'), children: [{ id: 'subject', title: two('Tema', 'Subject'), children: leaves }] }] });
+const withLearn = (learn, over = {}) => ({ ...repo(over), learn });
+
+test('learn.json: a valid tree passes; one sim may sit in many leaves; no learn.json is no check', () => {
+  assert.equal(errorsOf(withLearn(learnOf(leaf('a', ['dns-x', 'lvm-x']), leaf('b', ['dns-x'])))), '');
+  assert.equal(errorsOf(repo()), '');
+});
+
+test('learn.json: a finished sim in no leaf (itself or a preset) is warned about, for the coordinator to place', () => {
+  const missing = validate(withLearn(learnOf(leaf('a', ['dns-x']))));
+  assert.deepEqual(missing.errors, [], 'tasks change only their own folder, so this cannot fail their gate');
+  assert.match(missing.warnings.join('\n'), /lvm-x is in no leaf yet/);
+  const natives = [nativeJson({ entries: [{ preset: 'p', title: two('P'), concept: two('P') }] }), nativeJson({ id: 'wip-x', status: 'wip' })];
+  const r = withLearn(learnOf(leaf('a', ['dns-x#p'])), { natives });
+  r.natives[0].sources = "'p'";
+  assert.equal(errorsOf(r), '');
+  assert.doesNotMatch(validate(r).warnings.join('\n'), /dns-x is in no leaf/, 'a preset places its sim');
+  const w = validate(withLearn(learnOf(leaf('a', ['dns-x#p', 'wip-x'])), { natives }));
+  assert.match(w.warnings.join('\n'), /"wip-x" is not ready/);
+});
+
+test('learn.json: rejects unknown ids, an unknown preset, a repeat in a leaf', () => {
+  const e = errorsOf(withLearn(learnOf(leaf('a', ['dns-x', 'lvm-x', 'nope', 'dns-x#none', 'dns-x']))));
+  assert.match(e, /unknown sim id "nope"/);
+  assert.match(e, /dns-x has no preset entry "none"/);
+  assert.match(e, /"dns-x" is listed twice in this leaf/);
+});
+
+test('learn.json: three levels exactly, sims only in leaves, kebab-case ids unique per level, both languages', () => {
+  const ok = ['dns-x', 'lvm-x'];
+  // sims above the leaves, and a fourth level
+  let t = learnOf(leaf('a', ok));
+  t.nodes[0].sims = ok;
+  assert.match(errorsOf(withLearn(t)), /only the 3rd level lists sims/);
+  t = learnOf({ id: 'a', title: two('A'), children: [leaf('deep', ok)] });
+  assert.match(errorsOf(withLearn(t)), /a leaf has "sims", not "children"/);
+  // a subject without children, an empty leaf
+  t = learnOf(leaf('a', ok));
+  t.nodes[0].children.push({ id: 'empty', title: two('E') });
+  assert.match(errorsOf(withLearn(t)), /area\/empty: "children" must be a non-empty array/);
+  assert.match(errorsOf(withLearn(learnOf(leaf('a', ok), leaf('b', [])))), /area\/subject\/b: "sims" must be a non-empty array/);
+  // ids, titles, unknown fields, the top level
+  assert.match(errorsOf(withLearn(learnOf(leaf('Bad Id', ok)))), /"id" must be kebab-case/);
+  assert.match(errorsOf(withLearn(learnOf(leaf('a', ok), leaf('a', ok)))), /id is used twice at this level/);
+  assert.match(errorsOf(withLearn(learnOf({ id: 'a', title: { hr: 'Samo hrvatski' }, sims: ok }))), /"title.en" must be a non-empty string/);
+  assert.match(errorsOf(withLearn(learnOf({ ...leaf('a', ok), icon: 'x' }))), /unknown field "icon"/);
+  assert.match(errorsOf(withLearn({ nodes: [] })), /must be \{ "nodes": \[ … \] \}/);
+  assert.match(errorsOf(withLearn({ ...learnOf(leaf('a', ok)), title: two('x') })), /learn.json: unknown field "title"/);
+});

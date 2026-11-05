@@ -203,7 +203,8 @@ see the test fail.
 - [ ] `npm run gate -- <id>` passes (§7); screenshots at 1920×1080 (light, dark, grayscale) and 375×812 reviewed.
 - [ ] Both languages complete (§4): `strings.js` tables match, the gate's browser checks pass in hr and en (every visible word
       from the tables), and the screenshots of both languages are reviewed.
-- [ ] `sim.json` valid; `status` set to `"ready"` last.
+- [ ] `sim.json` valid; `status` set to `"ready"` last. (`npm run check` then warns that the sim is in no leaf of
+      `learn.json`, the home page's tree: that is expected, the coordinator places it. Suggest a leaf in your report.)
 - [ ] Offline single file works from `file://`.
 - [ ] `NOTES.md`: decisions, deviations from the task, sources, unchecked items marked *(check)*, term pairs,
       shared requests, and **time from start to done** (the proposal's "one session per sim" measure).

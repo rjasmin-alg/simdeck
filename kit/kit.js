@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
 
-  var VERSION = '0.6.0';
+  var VERSION = '0.6.1';
   var hasDom = typeof document !== 'undefined';
 
   // ── pure core ──
@@ -48,7 +48,8 @@
 
   /**
    * True when the back link should go back in history: the visitor came from this site's index (the back link's
-   * target, also as its folder URL) or from one of its course pages (<site root>/courses/<id>/), on the same origin.
+   * target, also as its folder URL: the tree of subjects), its finder (<site root>/find/) or one of its course pages
+   * (<site root>/courses/<id>/), on the same origin.
    */
   function cameFromSite(referrer, backHref) {
     try {
@@ -60,18 +61,18 @@
       var p = ref.pathname;
       if (p === back.pathname || p === rootPath) return true;
       if (p.slice(0, rootPath.length) !== rootPath) return false;
-      return /^courses\/[a-z0-9]+(-[a-z0-9]+)*\/(index\.html)?$/.test(p.slice(rootPath.length));
+      return /^(find|courses\/[a-z0-9]+(-[a-z0-9]+)*)\/(index\.html)?$/.test(p.slice(rootPath.length));
     } catch (e) {
       return false;
     }
   }
 
   /**
-   * Where the back link goes when the visitor came from a lecture set on the home page (index.html?set=…#3): the
-   * address the lecture view keeps in sessionStorage ("simdeck.set"), if it is this site's index (the back link's
-   * target, also as its folder URL) on the same origin and carries ?set=; with ?lang= set to `lang` when given, so
-   * the way back stays in the sim's language. Otherwise null, and the back link goes home. It works from file://,
-   * where there is no referrer.
+   * Where the back link goes when the visitor came from a lecture set in the finder (find/index.html?set=…#3): the
+   * address the lecture view keeps in sessionStorage ("simdeck.set"), if it is this site's finder or its index (the
+   * back link's target; each also as its folder URL) on the same origin and carries ?set=; with ?lang= set to `lang`
+   * when given, so the way back stays in the sim's language. Otherwise null, and the back link goes home. It works
+   * from file://, where there is no referrer.
    */
   function setReturn(stored, backHref, lang) {
     try {
@@ -79,7 +80,9 @@
       var u = new URL(stored);
       var back = new URL(backHref);
       if (u.origin !== back.origin || !u.searchParams.has('set')) return null;
-      if (u.pathname !== back.pathname && u.pathname !== back.pathname.replace(/[^/]*$/, '')) return null;
+      var rootPath = back.pathname.replace(/[^/]*$/, '');
+      var ok = [back.pathname, rootPath, rootPath + 'find/', rootPath + 'find/index.html'];
+      if (ok.indexOf(u.pathname) < 0) return null;
       if (lang) u.searchParams.set('lang', lang);
       return u.href;
     } catch (e) {

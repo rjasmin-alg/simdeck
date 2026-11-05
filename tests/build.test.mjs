@@ -92,16 +92,28 @@ test('the real repository builds every page, and only finished ones', () => {
       assert.doesNotMatch(html, /<script[^>]+src=/, `${e.id} is self-contained`);
     }
     for (const c of r.courses) assert.ok(existsSync(join(out, 'courses', c.id, 'index.html')), c.id);
-    const index = readFileSync(join(out, 'index.html'), 'utf8');
-    assert.doesNotMatch(index, /\{\{\w+\}\}/, 'all template variables filled');
-    assert.doesNotMatch(index, /application\/json/, 'no data blob: the home page is plain HTML');
-    assert.doesNotMatch(index, /(src|href)="\//, 'no root-absolute links: the folder can move');
-    assert.doesNotMatch(index, /courses\//, 'the home page names no courses (owner, 2026-10-03)');
-    assert.match(index, /<body data-site-url="https:\/\/materijali\.online\/simdeck\/">/, 'the address "copy link" shares');
+    // The home page is the tree (learn.json); the finder, the old home page, is find/index.html.
+    const tree = readFileSync(join(out, 'index.html'), 'utf8');
+    const index = readFileSync(join(out, 'find', 'index.html'), 'utf8');
+    for (const [name, page] of [['tree', tree], ['finder', index]]) {
+      assert.doesNotMatch(page, /\{\{\w+\}\}/, `${name}: all template variables filled`);
+      assert.doesNotMatch(page, /application\/json/, `${name}: no data blob, plain HTML`);
+      assert.doesNotMatch(page, /(src|href)="\//, `${name}: no root-absolute links, the folder can move`);
+      assert.doesNotMatch(page, /courses\//, `${name}: names no courses (owner, 2026-10-03)`);
+    }
+    for (const e of r.entries) assert.match(tree, new RegExp(`href="sims/${e.id}/index\\.html`), `${e.id} is in the tree`);
+    assert.equal((tree.match(/<section class="node root"/g) ?? []).length, 1, 'one root: the areas');
+    assert.match(tree, /<section class="node leaf" id="[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+"/, 'a leaf\'s id is its path, the deep link');
+    assert.match(tree, /<form class="search" action="find\/index\.html"/, 'the tree\'s search goes to the finder');
+    assert.match(tree, /location\.replace\('find\/index\.html' \+ location\.search/, 'an old ?set= link opens in the finder');
+    assert.match(index, /<body data-site-url="https:\/\/materijali\.online\/simdeck\/find\/">/, 'the address "copy link" shares');
+    assert.match(index, /class="to-tree" data-lang-link href="\.\.\/index\.html"/, 'the finder links back to the tree');
     assert.equal((index.match(/<article class="tile" /g) ?? []).length, r.entries.length, 'one tile per finished sim');
     assert.equal((index.match(/class="chip" /g) ?? []).length, new Set(r.entries.map((e) => e.topic)).size, 'one chip per topic in use');
+    assert.match(index, /<a class="tile-link" data-lang-link href="\.\.\/sims\//, 'the finder links sims from one folder down');
     for (const f of ['atkinson-hyperlegible-latin-400-normal.woff2', 'atkinson-hyperlegible-latin-ext-700-normal.woff2']) assert.ok(existsSync(join(out, 'fonts', f)), f);
-    assert.match(index, /url\('fonts\/atkinson-hyperlegible-latin-400-normal\.woff2'\)/, 'the kit\'s font, from the copy next to the page');
+    assert.match(tree, /url\('fonts\/atkinson-hyperlegible-latin-400-normal\.woff2'\)/, 'the kit\'s font, from the copy next to the page');
+    assert.match(index, /url\('\.\.\/fonts\/atkinson-hyperlegible-latin-400-normal\.woff2'\)/, 'the finder takes it from one folder up');
   } finally {
     rmSync(dirname(out), { recursive: true, force: true });
   }
@@ -115,8 +127,8 @@ test('thumbnails: a cached one is used only when it was shot from this build of 
     // First build without a cache: every tile has a placeholder, and no thumbs/ folder.
     let r = build({ root: ROOT, out, log: () => {}, thumbs: cache });
     assert.ok(r.ok, r.errors.join());
-    let index = readFileSync(join(out, 'index.html'), 'utf8');
-    assert.doesNotMatch(index, /<img src="thumbs\//);
+    let index = readFileSync(join(out, 'find', 'index.html'), 'utf8');
+    assert.doesNotMatch(index, /<img src="\.\.\/thumbs\//);
     assert.match(index, /<article class="tile" data-id="vlan"[^]*?<span class="ph" aria-hidden="true">V<\/span>/);
     assert.ok(!existsSync(join(out, 'thumbs')));
     // A thumbnail keyed by vlan's built file is copied as thumbs/vlan-light.webp; a stale key for nat is not.
@@ -124,10 +136,12 @@ test('thumbnails: a cached one is used only when it was shot from this build of 
     writeFileSync(join(cache, thumbKey(readFileSync(join(out, 'sims', 'vlan', 'index.html'), 'utf8'))), 'webp');
     writeFileSync(join(cache, thumbKey('an older build of nat')), 'webp');
     r = build({ root: ROOT, out, log: () => {}, thumbs: cache });
-    index = readFileSync(join(out, 'index.html'), 'utf8');
+    index = readFileSync(join(out, 'find', 'index.html'), 'utf8');
+    const tree = readFileSync(join(out, 'index.html'), 'utf8');
     assert.equal(readFileSync(join(out, 'thumbs', 'vlan-light.webp'), 'utf8'), 'webp');
+    assert.match(tree, /<a class="sim" data-lang-link href="sims\/vlan\/index\.html"[^>]*><span class="pic"><img src="thumbs\/vlan-light\.webp"/, 'the tree uses it too');
     assert.ok(!existsSync(join(out, 'thumbs', 'nat-light.webp')));
-    assert.match(index, /<article class="tile" data-id="vlan"[^>]*>[^]*?<img src="thumbs\/vlan-light\.webp" alt="" width="560" height="350"/);
+    assert.match(index, /<article class="tile" data-id="vlan"[^>]*>[^]*?<img src="\.\.\/thumbs\/vlan-light\.webp" alt="" width="560" height="350"/);
     assert.match(index, /<article class="tile" data-id="nat"[^]*?<span class="ph"/);
     assert.notEqual(thumbKey('a'), thumbKey('b'));
     assert.equal(thumbKey('a'), thumbKey('a'));
@@ -216,9 +230,15 @@ test('home and course pages carry both languages, the switch and the language sc
     assert.match(index, /<html lang="hr">/, 'site.json lang is the default');
     assert.match(index, /data-lang-switch/);
     assert.match(index, /simdeck\.lang/, 'site/lang.js is inlined');
-    assert.match(index, /<span data-l="hr" lang="hr">Računalne mreže<\/span><span data-l="en" lang="en">Computer networks<\/span>/);
-    assert.match(index, /data-en="Find a simulator, a concept or a command…"/);
+    assert.match(index, /<h1><span data-l="hr" lang="hr">Što želite danas naučiti\?<\/span><span data-l="en" lang="en">What do you want to learn about today\?<\/span><\/h1>/);
+    assert.match(index, /data-en="Or look a concept up right away…"/);
     assert.match(index, /html\[lang="hr"\] \[data-l="en"\]/, 'the CSS hides the other language');
+    const finder = readFileSync(join(out, 'find', 'index.html'), 'utf8');
+    assert.match(finder, /data-lang-switch/);
+    assert.match(finder, /simdeck\.lang/, 'site/lang.js is inlined');
+    assert.match(finder, /<span data-l="hr" lang="hr">Računalne mreže<\/span><span data-l="en" lang="en">Computer networks<\/span>/);
+    assert.match(finder, /data-en="Find a simulator, a concept or a command…"/);
+    assert.match(finder, /html\[lang="hr"\] \[data-l="en"\]/, 'the CSS hides the other language');
     const course = readFileSync(join(out, 'courses', 'linux-essentials', 'index.html'), 'utf8');
     assert.match(course, /<span data-l="hr" lang="hr">Mreža<\/span><span data-l="en" lang="en">Networking<\/span>/);
     assert.match(course, /href="\.\.\/\.\.\/sims\/dhcp-dora\/index.html\?lang=hr"/, 'sims linked in the course language');

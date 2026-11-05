@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The published home page in a browser, built from this repo: the first screen at 1920×1080 (light and dark) and on a
-// phone, search, the topic chips, a selection of five, the lecture view and its keys, the handout as one A4 page, and
-// the way back from a sim to the lecture set (from file://, which has no referrer, and over http, which has one).
+// The published home page in a browser, built from this repo: the tree of subjects (learn.json) at 1920×1080 and on a
+// phone, with and without script, its deep links and its search; then the finder (find/, the old home page): the first
+// screen (light and dark) and on a phone, search, the topic chips, a selection of five, the lecture view and its keys,
+// the handout as one A4 page, and the way back from a sim to the lecture set (from file://, which has no referrer, and
+// over http, which has one).
 // Thumbnails come from the repo's cache when npm run thumbs has filled it; without them tiles show placeholders.
 // SIMDECK_SHOTS=<dir> also saves a screenshot of each view there (and the handout's PDF).
 // Skipped without Playwright's Chromium (npx playwright install chromium).
@@ -45,7 +47,8 @@ after(async () => {
   if (out) rmSync(dirname(out), { recursive: true, force: true });
 });
 
-const home = () => pathToFileURL(join(out, 'index.html')).href;
+const tree = () => pathToFileURL(join(out, 'index.html')).href;
+const home = () => pathToFileURL(join(out, 'find', 'index.html')).href; // the finder
 async function open(opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, reducedMotion: 'reduce', ...opts });
   await ctx.route(/^(https?|wss?):\/\/(?!127\.0\.0\.1)/, (r) => r.abort()); // offline, but for the test's own server
@@ -171,7 +174,7 @@ test('a selection of five → lecture view: agenda, preview, keys; Enter opens t
   await shot(page, 'home-1920-selection-open');
   await page.locator('[data-tray-act="copy"]').click();
   await page.waitForFunction(() => document.getElementById('toast').classList.contains('on'));
-  assert.equal(copied, 'https://materijali.online/simdeck/?set=nat,vlan,routing-table,amdahl,student-picker');
+  assert.equal(copied, 'https://materijali.online/simdeck/find/?set=nat,vlan,routing-table,amdahl,student-picker');
   await page.locator('[data-tray-act="lecture"]').click();
   await page.waitForURL(/index\.html\?set=nat,vlan,routing-table,amdahl,student-picker/);
 
@@ -213,13 +216,13 @@ test('a selection of five → lecture view: agenda, preview, keys; Enter opens t
   await page.waitForSelector('#list');
   await page.locator('.tile[data-id="vlan"] .tile-link').click();
   await page.waitForURL(/sims\/vlan\//);
-  assert.match(await page.getAttribute('[data-sd-back]', 'href'), /^\.\.\/\.\.\/index\.html\?lang=hr$/);
+  assert.match(await page.getAttribute('[data-sd-back]', 'href'), /^\.\.\/\.\.\/index\.html\?lang=hr$/, 'home: the tree');
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
 test('lecture view in dark, in English, and on a phone', { skip }, async () => {
-  const set = `${home()}?set=nat,vlan,routing-table,amdahl,student-picker,nope#2`;
+  const set = `${home()}?set=nat,vlan,routing-table,amdahl,student-picker,nope#2`; // the finder's
   const { ctx, page, errors } = await open({ colorScheme: 'dark' });
   await page.goto(set);
   assert.match(await page.textContent('.skipped'), /nope/, 'an unknown id is named, not hidden');
@@ -245,7 +248,7 @@ test('handout: the set as one A4 page, tools left off it', { skip }, async () =>
   await page.waitForURL(/print=1/);
   assert.equal(await page.locator('.handout li').count(), 4, 'four sims; the student picker is a tool');
   assert.match(await page.textContent('.h-left'), /Slučajni odabir studenta|student/i);
-  assert.match(await page.textContent('.h-url'), /materijali\.online\/simdeck\/\?set=nat,vlan,routing-table,amdahl,student-picker/);
+  assert.match(await page.textContent('.h-url'), /materijali\.online\/simdeck\/find\/\?set=nat,vlan,routing-table,amdahl,student-picker/);
   assert.match(await page.textContent('.handout li:first-child .h-link'), /materijali\.online\/simdeck\/sims\/nat\//);
   await shot(page, 'handout-screen', { fullPage: true });
   const pdf = await page.pdf({ format: 'A4', printBackground: true });
@@ -265,7 +268,10 @@ test('handout: the set as one A4 page, tools left off it', { skip }, async () =>
 
 test('over http, the back link goes back in history to the set (the referrer is the index with ?set=)', { skip }, async () => {
   const { ctx, page, errors } = await open();
+  // An address shared before the finder moved (the site root with ?set=) opens the set in the finder.
   await page.goto(`${http}index.html?set=vlan,nat,amdahl`);
+  await page.waitForURL(/\/find\/index\.html\?set=vlan,nat,amdahl/);
+  await page.waitForSelector('.lt.cur');
   await page.keyboard.press('2');
   await page.keyboard.press('Enter');
   await page.waitForURL(/sims\/nat\//);
@@ -274,6 +280,104 @@ test('over http, the back link goes back in history to the set (the referrer is 
   await page.waitForURL(/index\.html\?set=vlan,nat,amdahl(&lang=hr)?#2$/);
   await page.waitForSelector('.lt.cur');
   assert.equal(await page.$eval('.lt.cur', (a) => a.dataset.i), '1');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// ── the tree (the home page) ──
+
+test('tree at 1920×1080: the question, the search and every area on the first screen; click down to a leaf and back', { skip }, async () => {
+  for (const colorScheme of ['light', 'dark']) {
+    const { ctx, page, errors } = await open({ colorScheme });
+    await page.goto(tree());
+    await page.waitForLoadState('load');
+    assert.equal(await page.locator('h1').innerText(), 'Što želite danas naučiti?');
+    const areas = page.locator('.node.root .card');
+    const n = await areas.count();
+    assert.ok(n >= 6, `${n} areas`);
+    for (let i = 0; i < n; i++) {
+      const b = await areas.nth(i).locator('.c-title').boundingBox();
+      assert.ok(b.y + b.height <= 1080, `area ${i + 1}'s title on the first screen`);
+    }
+    assert.ok((await page.locator('#learn-q').boundingBox()).y < 400);
+    await shot(page, `tree-1920-${colorScheme}`);
+    if (colorScheme === 'dark') { await ctx.close(); continue; }
+
+    // Area → subject → leaf: one level at a time, its path in the address and its breadcrumbs above it.
+    await areas.first().click();
+    const area = await page.evaluate(() => location.hash.slice(1));
+    assert.match(area, /^[a-z0-9-]+$/);
+    assert.equal(await page.locator('.node.root').isVisible(), false);
+    assert.equal(await page.locator('.node:visible').count(), 1);
+    await page.locator('.node:target .card').first().click();
+    await page.locator('.node:target .card').first().click();
+    const leaf = await page.evaluate(() => location.hash.slice(1));
+    assert.match(leaf, new RegExp(`^${area}/[a-z0-9-]+/[a-z0-9-]+$`));
+    assert.ok(await page.locator('.node:target .sim').count() >= 1, 'a leaf lists sims');
+    assert.equal(await page.locator('.node:target .crumbs a').count(), 3, 'all subjects › area › subject');
+    assert.match(await page.title(), / · simdeck$/, 'the tab names the node');
+    await shot(page, 'tree-1920-leaf');
+    // Backspace goes up one level, and the crumbs go anywhere above.
+    await page.keyboard.press('Backspace');
+    assert.equal(await page.evaluate(() => location.hash.slice(1)), leaf.split('/').slice(0, 2).join('/'));
+    await page.locator('.node:target .crumbs a').first().click();
+    assert.equal(await page.locator('.node.root').isVisible(), true);
+    // A sim opens from its leaf, in the page's language.
+    await page.goto(`${tree()}#${leaf}`);
+    const sim = page.locator('.node:target .sim').first();
+    assert.match(await sim.getAttribute('href'), /^sims\/[a-z0-9-]+\/index\.html\?(preset=[^&]+&)?lang=hr$/);
+    await sim.click();
+    await page.waitForURL(/\/sims\//);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test('tree without script: the cards and a deep link still work (CSS :target)', { skip }, async () => {
+  const { ctx, page } = await open({ javaScriptEnabled: false });
+  await page.goto(tree());
+  await page.locator('.node.root .card').first().click();
+  const area = await page.evaluate(() => location.hash.slice(1));
+  assert.equal(await page.locator('.node:target').isVisible(), true);
+  assert.equal(await page.locator('.node.root').isVisible(), false);
+  await page.locator('.node:target .card').first().click();
+  const subject = await page.evaluate(() => location.hash.slice(1));
+  assert.ok(subject.startsWith(`${area}/`));
+  // A deep link opened afresh shows its node, not the areas.
+  const fresh = await ctx.newPage();
+  await fresh.goto(`${tree()}#${subject}`);
+  assert.equal(await fresh.locator(`[id="${subject}"]`).isVisible(), true);
+  assert.equal(await fresh.locator('.node.root').isVisible(), false);
+  await ctx.close();
+});
+
+test('tree on a phone (390 wide): one column of cards, no sideways page scroll', { skip }, async () => {
+  const { ctx, page, errors } = await open({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await page.goto(tree());
+  const cols = await page.$eval('.node.root .cards', (g) => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+  assert.equal(cols, 1);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await page.locator('.node.root .card').first().click();
+  await page.locator('.node:target .card').first().click();
+  await page.locator('.node:target .card').first().click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'a leaf too');
+  await shot(page, 'tree-phone-leaf');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the tree\'s search opens the finder with the words in its box; the finder links back to the tree', { skip }, async () => {
+  const { ctx, page, errors } = await open();
+  await page.goto(tree());
+  await page.keyboard.press('/');
+  await page.keyboard.type('vlan');
+  await page.keyboard.press('Enter');
+  await page.waitForURL(/\/find\/index\.html\?q=vlan&lang=hr/);
+  assert.equal(await page.inputValue('#q'), 'vlan');
+  assert.ok((await visibleIds(page)).includes('vlan'));
+  assert.ok((await visibleIds(page)).length < 20, 'filtered');
+  await page.locator('.to-tree').click();
+  await page.waitForSelector('.node.root .card');
   assert.deepEqual(errors, []);
   await ctx.close();
 });
