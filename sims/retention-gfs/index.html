@@ -1,0 +1,425 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Retention, grandfather-father-son: one backup a night through 2026 and a prune after every successful job; the
+     calendar shows which backups survive and by which rule (task docs/tasks/w3/retention-gfs.md). An explorer: the
+     params drive the stage live; the model is in sim.js (rules in SPEC.md), the words in strings.js. The calendar is
+     the page's own HTML grid (ISO weeks as columns, Monday to Sunday as rows), not kit view K3: a year strip is not a
+     block grid (NOTES.md). -->
+<html lang="hr" data-sim="retention-gfs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retencija: djed-otac-sin · simdeck</title>
+<meta name="description" content="Koliko kopija raspored čuva i koliko se daleko unatrag može vratiti.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "retention-gfs",
+  "title": { "hr": "Retencija: djed-otac-sin", "en": "Retention: grandfather-father-son" },
+  "concept": { "hr": "Koliko kopija raspored čuva i koliko se daleko unatrag može vratiti", "en": "How many copies a schedule keeps and how far back you can go" },
+  "summary": {
+    "hr": "Postavi broj dnevnih, tjednih i mjesečnih kopija i pusti godinu: vidi koliko točaka oporavka ostaje, koliko sežu unatrag i što bude kad posao pada.",
+    "en": "Set the daily, weekly and monthly counts and run a year: see how many recovery points stay, how far back they reach, and what failing jobs do."
+  },
+  "tags": ["backup"],
+  "class": "explorer",
+  "entries": [{ "preset": "ul-primjer-6" }, { "preset": "dr-vm-dumps-failing" }]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="retention-gfs"]; colours only from kit tokens. */
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="retention-gfs"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+/* The five counts and the job's outcome two to a row, so the panel fits at 1920×1080 without its own scroll. */
+[data-sim="retention-gfs"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.9rem; }
+[data-sim="retention-gfs"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="retention-gfs"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="last"], [data-key="daily"], [data-key="weekly"], [data-key="monthly"], [data-key="yearly"], [data-key="failFrom"]) { grid-column: auto; }
+
+[data-sim="retention-gfs"] .rg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.6rem;
+  height: 100%;
+  padding: 0.8cqh 1cqw;
+  font-size: var(--fs-md);
+}
+
+/* ── the numbers: points kept, oldest, newest, largest gap, and the verdict for a fault noticed late ── */
+[data-sim="retention-gfs"] .rg-stats { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+[data-sim="retention-gfs"] .rg-card {
+  flex: 1 1 10rem; min-width: 0; padding: 0.3rem 0.7rem;
+  border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel); line-height: 1.2;
+}
+[data-sim="retention-gfs"] .rg-card-label { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="retention-gfs"] .rg-card-val { font-size: 1.7rem; font-weight: 700; }
+[data-sim="retention-gfs"] .rg-card-sub { font-size: var(--fs-sm); }
+[data-sim="retention-gfs"] .rg-card[data-verdict] { flex-basis: 15rem; }
+[data-sim="retention-gfs"] .rg-card[data-verdict="no"] { border: 4px double var(--danger); }
+[data-sim="retention-gfs"] .rg-card[data-verdict="yes"] { border: 3px solid var(--ok); }
+[data-sim="retention-gfs"] .rg-card[data-stale] { border: 4px double var(--danger); }
+[data-sim="retention-gfs"] .rg-card.rg-hl { background: var(--hl); color: var(--on-hl); }
+[data-sim="retention-gfs"] .rg-card.rg-hl .rg-card-label { color: var(--on-hl); }
+
+[data-sim="retention-gfs"] .rg-head { font-size: var(--fs-sm); display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; align-items: center; }
+[data-sim="retention-gfs"] .rg-head .rg-fault-sw {
+  display: inline-block; width: 1.1em; height: 1.1em; margin-right: 0.35rem; vertical-align: -0.15em;
+  outline: 3px dashed var(--danger); outline-offset: -3px;
+}
+[data-sim="retention-gfs"] .rg-head .rg-today-sw {
+  display: inline-block; width: 1.1em; height: 1.1em; margin-right: 0.35rem; vertical-align: -0.15em;
+  outline: 3px solid var(--ink); outline-offset: -3px;
+}
+
+/* ── the calendar: blocks of ISO weeks (columns), Monday … Sunday (rows), months tinted in turn ── */
+[data-sim="retention-gfs"] .rg-cal { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.4rem; overflow: hidden; }
+[data-sim="retention-gfs"] .rg-block {
+  display: grid; grid-template-columns: 2.6rem repeat(var(--k), var(--cw));
+  grid-template-rows: 1.4rem repeat(7, var(--ch)); gap: 0;
+}
+[data-sim="retention-gfs"] .rg-wd { font-size: var(--fs-sm); color: var(--muted); align-self: center; line-height: 1; }
+[data-sim="retention-gfs"] .rg-wd[data-sun] { color: var(--ink); font-weight: 700; }
+[data-sim="retention-gfs"] .rg-mon { font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; line-height: 1.4rem; overflow: visible; }
+[data-sim="retention-gfs"] .rg-c {
+  position: relative; display: grid; place-items: center; min-width: 0; min-height: 0;
+  border-right: 1px solid var(--bg); border-bottom: 1px solid var(--bg);
+}
+[data-sim="retention-gfs"] .rg-c[data-odd] { background: color-mix(in srgb, var(--ink) 9%, var(--bg)); }
+[data-sim="retention-gfs"] .rg-c[data-out] { background: transparent; }
+[data-sim="retention-gfs"] .rg-c[data-future] { background: transparent; border: 1px dotted var(--line); }
+[data-sim="retention-gfs"] .rg-c[data-today] { outline: 3px solid var(--ink); outline-offset: -3px; z-index: 1; }
+[data-sim="retention-gfs"] .rg-c[data-fault] { outline: 3px dashed var(--danger); outline-offset: -3px; z-index: 1; }
+[data-sim="retention-gfs"] .rg-c.rg-hl { background: var(--hl); outline: 3px solid var(--ink); outline-offset: -3px; z-index: 2; }
+
+/* marks: the shape carries the rule (square, circle, diamond, star, triangle), the letter repeats it, so grayscale
+   reads; the colour is a third carrier. */
+[data-sim="retention-gfs"] .rg-m {
+  position: relative; display: grid; place-items: center; width: var(--m); height: var(--m);
+  font-size: var(--fs-sm); font-weight: 700; line-height: 1; color: var(--on-series);
+}
+[data-sim="retention-gfs"] .rg-m::before { content: ''; position: absolute; inset: 0; background: var(--mc); }
+[data-sim="retention-gfs"] .rg-m > span { position: relative; }
+[data-sim="retention-gfs"] .rg-m[data-r="daily"] { --mc: var(--c1); }
+[data-sim="retention-gfs"] .rg-m[data-r="daily"]::before { border-radius: 0.15rem; inset: 8%; }
+[data-sim="retention-gfs"] .rg-m[data-r="weekly"] { --mc: var(--c2); }
+[data-sim="retention-gfs"] .rg-m[data-r="weekly"]::before { border-radius: 50%; }
+[data-sim="retention-gfs"] .rg-m[data-r="monthly"] { --mc: var(--c3); }
+[data-sim="retention-gfs"] .rg-m[data-r="monthly"]::before { inset: -12%; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+[data-sim="retention-gfs"] .rg-m[data-r="yearly"] { --mc: var(--c4); }
+[data-sim="retention-gfs"] .rg-m[data-r="yearly"]::before { inset: -18%; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+[data-sim="retention-gfs"] .rg-m[data-r="last"] { --mc: var(--c5); }
+[data-sim="retention-gfs"] .rg-m[data-r="last"]::before { inset: -10%; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="retention-gfs"] .rg-m[data-r="last"] > span { top: 0.15em; }
+[data-sim="retention-gfs"] .rg-m[data-r="all"] { --mc: var(--c8); }
+[data-sim="retention-gfs"] .rg-m[data-r="all"]::before { inset: 8%; }
+/* a pruned backup: a faded dashed outline; a failed job: a cross */
+[data-sim="retention-gfs"] .rg-p { width: calc(var(--m) * 0.55); height: calc(var(--m) * 0.55); border: 2px dashed var(--muted); border-radius: 0.1rem; opacity: 0.75; }
+[data-sim="retention-gfs"] .rg-x { font-size: var(--fs-sm); font-weight: 700; color: var(--danger); line-height: 1; }
+
+/* Legend swatches: the same shapes. */
+[data-sim="retention-gfs"] .sd-swatch[data-shape^='rg-'] { border: 0; background: transparent; position: relative; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape^='rg-']::before { content: ''; position: absolute; inset: 0; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-daily']::before { background: var(--c1); border-radius: 0.15em; inset: 8%; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-weekly']::before { background: var(--c2); border-radius: 50%; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-monthly']::before { background: var(--c3); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); inset: -10%; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-yearly']::before { background: var(--c4); inset: -15%; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-last']::before { background: var(--c5); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-all']::before { background: var(--c8); inset: 8%; }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-pruned'] { border: 2px dashed var(--muted); transform: scale(0.7); }
+[data-sim="retention-gfs"] .sd-swatch[data-shape='rg-failed']::before { content: '×'; color: var(--danger); font-weight: 700; display: grid; place-items: center; line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; the calendar breaks into more, narrower blocks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="retention-gfs"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="retention-gfs"] .rg { height: auto; padding: 0.4rem; }
+  [data-sim="retention-gfs"] .rg-card { flex-basis: 8rem; }
+  [data-sim="retention-gfs"] .rg-card-val { font-size: 1.3rem; }
+  [data-sim="retention-gfs"] .rg-cal { overflow: visible; }
+  [data-sim="retention-gfs"] .rg-block { grid-template-columns: 2.2rem repeat(var(--k), var(--cw)); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Retencija: djed-otac-sin</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COUNT_RULES = ['last', 'daily', 'weekly', 'monthly', 'yearly'];
+  var PHONE = window.matchMedia('(max-width: 900px), (max-aspect-ratio: 1/1)');
+
+  // ── words for numbers and dates ──
+  /** A date in the page's language; with its year only when it falls outside the calendar's year (a fault in 2025). */
+  function date(s) {
+    var v = { d: String(+s.slice(8, 10)), mon: t('dmon' + (+s.slice(5, 7))), y: s.slice(0, 4) };
+    return t(+v.y === L.YEAR ? 'date' : 'dateY', v);
+  }
+  function dateOfDay(day) { return date(L.iso(L.START + day - 1)); }
+  function days(n) { return t.n('daysN', n); }
+  function b(x) { return h('b', null, x); }
+  /** "7 dnevnih, 4 tjedne i 10 mjesečnih" from the counts each rule keeps. */
+  function ruleList(byRule) {
+    var parts = COUNT_RULES.filter(function (r) { return byRule[r]; }).map(function (r) { return t.n('adj-' + r, byRule[r]); });
+    if (parts.length < 2) return parts.join('');
+    return parts.slice(0, -1).join(', ') + t('and') + parts[parts.length - 1];
+  }
+  function tagList(byRule) {
+    return COUNT_RULES.concat(['all']).filter(function (r) { return byRule[r]; }).map(function (r) { return byRule[r] + ' ' + t('tag-' + r); }).join(' · ');
+  }
+
+  // ── what changed with the last change: the params before it ──
+  var lastKey = null, lastP = null, prevP = null;
+  function track(p) {
+    var key = JSON.stringify(p);
+    if (key === lastKey) return;            // a redraw of the same state (theme, resize) keeps the last change
+    prevP = lastP; lastP = p; lastKey = key;
+  }
+
+  // ── the numbers ──
+  function card(label, val, sub, attrs) {
+    return h('div', Object.assign({ class: 'rg-card' }, attrs || {}),
+      h('div', { class: 'rg-card-label' }, label),
+      h('div', { class: 'rg-card-val' }, val),
+      h('div', { class: 'rg-card-sub' }, sub));
+  }
+  function stats(s, prev) {
+    var none = t('stNone');
+    var hl = function (k) { return prev && prev[k] !== s[k] ? { class: 'rg-card rg-hl' } : {}; };
+    var out = [
+      card(t('stPoints'), String(s.copies), s.byRule.all ? t('stAll') : tagList(s.byRule) || none, hl('copies')),
+      card(t('stOldest'), s.oldest ? days(s.oldestAge) : none, s.oldest ? date(s.oldest) : '', hl('oldestAge')),
+      card(t('stNewest'), s.newest ? (s.newestAge ? days(s.newestAge) : t('stToday')) : none, s.newest ? date(s.newest) : '',
+        Object.assign(hl('newestAge'), s.failing && s.newestAge > 1 ? { 'data-stale': '' } : {})),
+      card(t('stGap'), s.gap ? days(s.gap.days) : none, s.gap ? t('stRange', { from: date(s.gap.from), to: date(s.gap.to) }) : '',
+        prev && JSON.stringify(prev.gap) !== JSON.stringify(s.gap) ? { class: 'rg-card rg-hl' } : {})
+    ];
+    var v = s.verdict;
+    if (v) {
+      out.push(card(t('stVerdict', { after: days(v.after) }),
+        v.clean ? t('vYes', { date: date(v.clean) }) : t('vNo'),
+        v.clean ? t('vYesSub', { age: days(v.cleanAge) }) : t('vNoSub', { fault: date(v.faultDate) }),
+        { 'data-verdict': v.clean ? 'yes' : 'no' }));
+    }
+    return out;
+  }
+
+  // ── the calendar ──
+  var W0 = L.weekStart(L.START), W1 = L.weekStart(L.START + L.DAYS - 1), WEEKS = (W1 - W0) / 7 + 1;   // 53
+
+  /** Blocks of weeks and cell sizes that fill the box: the most blocks whose cells stay the largest. */
+  function layout(box) {
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var W = box.clientWidth, H = box.clientHeight;
+    var labW = (PHONE.matches ? 2.2 : 2.6) * rem, monH = 1.4 * rem, gap = 0.4 * rem;
+    if (PHONE.matches) {
+      var k0 = Math.max(6, Math.floor((W - labW) / (1.75 * rem)));
+      var n0 = Math.ceil(WEEKS / k0), k1 = Math.ceil(WEEKS / n0);
+      var c = Math.floor((W - labW) / k1);
+      return { n: n0, k: k1, cw: c, ch: c };
+    }
+    var best = null;
+    for (var n = 1; n <= 6; n++) {
+      var k = Math.ceil(WEEKS / n);
+      var cw = Math.floor((W - labW - 2) / k);
+      var ch = Math.floor((H - n * monH - (n - 1) * gap - 2) / (7 * n));
+      var size = Math.min(cw, ch);
+      if (!best || size > best.size) best = { n: n, k: k, cw: cw, ch: Math.min(ch, Math.round(cw * 1.1)), size: size };
+    }
+    return best;
+  }
+
+  function calendar(box, s, marks) {
+    var lay = layout(box);
+    if (!lay || lay.cw < 4 || lay.ch < 4) return;
+    var kept = {}, pruned = {}, failed = {};
+    s.kept.forEach(function (k) { kept[k.date] = k.rule; });
+    s.pruned.forEach(function (d) { pruned[d] = true; });
+    s.failedDays.forEach(function (d) { failed[d] = true; });
+    var changed = {};
+    marks.appeared.concat(marks.gone).forEach(function (d) { changed[d] = true; });
+    var today = L.dayNum(s.today), first = L.START, last = L.START + L.DAYS - 1;
+    var fault = s.verdict ? L.dayNum(s.verdict.faultDate) : null;
+    var m = Math.max(10, Math.floor(Math.min(lay.cw, lay.ch) * 0.78));
+    var blocks = [];
+    for (var bi = 0; bi < lay.n; bi++) {
+      var w0 = bi * lay.k, w1 = Math.min(WEEKS, w0 + lay.k);
+      if (w0 >= WEEKS) break;
+      var cells = [];
+      // month labels: in the column of the week that holds the 1st of the month
+      cells.push(h('span', { style: { gridColumn: '1', gridRow: '1' } }));
+      for (var w = w0; w < w1; w++) {
+        var mon = null;
+        for (var d = 0; d < 7; d++) {
+          var n = W0 + w * 7 + d;
+          if (n >= first && n <= last && L.civil(n).d === 1) mon = L.civil(n).m;
+        }
+        if (w === w0 && mon === null) { var c0 = L.civil(Math.max(first, Math.min(last, W0 + w * 7 + 6))); mon = c0.m; }
+        if (mon !== null) cells.push(h('span', { class: 'rg-mon', style: { gridColumn: String(w - w0 + 2), gridRow: '1' } }, t('mon' + mon)));
+      }
+      for (var wd = 1; wd <= 7; wd++) {
+        cells.push(h('span', { class: 'rg-wd', style: { gridColumn: '1', gridRow: String(wd + 1) }, 'data-sun': wd === 7 ? '' : null }, t('wd' + wd)));
+        for (var w2 = w0; w2 < w1; w2++) {
+          var day = W0 + w2 * 7 + wd - 1, iso = L.iso(day);
+          var attrs = { class: 'rg-c', style: { gridColumn: String(w2 - w0 + 2), gridRow: String(wd + 1) } };
+          var inner = null;
+          if (day < first || day > last) attrs['data-out'] = '';
+          else {
+            if (L.civil(day).m % 2) attrs['data-odd'] = '';
+            if (day > today) attrs['data-future'] = '';
+            if (day === today) attrs['data-today'] = '';
+            if (day === fault) attrs['data-fault'] = '';
+            if (changed[iso]) attrs.class = 'rg-c rg-hl';
+            if (kept[iso]) inner = h('span', { class: 'rg-m', 'data-r': kept[iso] }, h('span', null, t('tag-' + kept[iso])));
+            else if (pruned[iso]) inner = h('span', { class: 'rg-p' });
+            else if (failed[iso]) inner = h('span', { class: 'rg-x', 'aria-hidden': 'true' }, '×');
+          }
+          cells.push(h('div', attrs, inner));
+        }
+      }
+      blocks.push(h('div', { class: 'rg-block', style: { '--k': String(w1 - w0), '--cw': lay.cw + 'px', '--ch': lay.ch + 'px', '--m': m + 'px' } }, cells));
+    }
+    box.replaceChildren.apply(box, blocks);
+  }
+
+  function head(s) {
+    var parts = [h('span', null, h('span', { class: 'rg-today-sw', 'aria-hidden': 'true' }), t('stripHead', { time: L.JOB_TIME, today: date(s.today) }))];
+    if (s.verdict) parts.push(h('span', null, h('span', { class: 'rg-fault-sw', 'aria-hidden': 'true' }), t('stripFault', { fault: date(s.verdict.faultDate) })));
+    return parts;
+  }
+
+  // ── captions: what the last count change did, then the state now, then the verdict ──
+  function caption(c) {
+    track(c.params);
+    var s = c.state, ck = L.captionKey(s, prevP), out = [];
+    if (ck.change && COUNT_RULES.indexOf(ck.change) >= 0) {
+      var was = L.compute(prevP), r = ck.change;
+      out = out.concat(t.parts('chRule', {
+        rule: t('c-' + r), a: String(was.params[r]), b: String(s.params[r]),
+        c0: String(was.copies), c1: b(String(s.copies)),
+        o0: was.oldest ? days(was.oldestAge) : t('stNone'), o1: b(s.oldest ? days(s.oldestAge) : t('stNone'))
+      }));
+      out.push(' ');
+    }
+    var pts = t.n('pointsN', s.copies);
+    if (ck.key === 'sFailing') out = out.concat(t.parts('sFailing', { fail: date(s.failFrom), points: b(pts), newest: b(days(s.newestAge)) }));
+    else if (ck.key === 'sAll') out = out.concat(t.parts('sAll', { points: b(pts) }));
+    else if (ck.key === 'sNone') out = out.concat(t.parts('sNone'));
+    else {
+      out = out.concat(t.parts('sPlain', { list: ruleList(s.byRule), points: b(pts), oldest: b(days(s.oldestAge)), gap: s.gap ? days(s.gap.days) : t('stNone') }));
+      if (s.short && !ck.verdict) {
+        var sh = s.short;
+        out.push(' ');
+        out = out.concat(t.parts(sh.covered ? 'sShortCovered' : 'sShortRun', {
+          rule: t('rule-' + sh.rule), got: String(sh.got), asked: String(sh.asked),
+          total: t.n('per-' + sh.rule, sh.total), covered: String(sh.covered)
+        }));
+      }
+    }
+    if (ck.verdict) {
+      var v = s.verdict;
+      out.push(' ');
+      out = out.concat(ck.verdict === 'vcNo'
+        ? t.parts('vcNo', { after: b(days(v.after)), fault: date(v.faultDate), oldest: s.oldest ? date(s.oldest) : t('stNone') })
+        : t.parts('vcYes', { after: b(days(v.after)), clean: b(date(v.clean)), age: days(v.cleanAge) }));
+    }
+    return out;
+  }
+
+  var labels = {
+    'ul-primjer-6': 'presetUl', 'gfs-7-4-12': 'presetGfs', 'last-30': 'presetLast',
+    'dr-vm-dumps': 'presetDr', 'dr-vm-dumps-failing': 'presetDrFail'
+  };
+  var stageBox = null, statsBox = null, headBox = null, calBox = null, last = null;
+  function drawCal() { if (last) calendar(calBox, last.state, last.marks); }
+
+  function countSpec(key) { return { key: key, type: 'range', min: 0, max: L.LIMITS[key], step: 1, label: t('c-' + key) }; }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      countSpec('last'), countSpec('daily'), countSpec('weekly'), countSpec('monthly'), countSpec('yearly'),
+      { key: 'failFrom', type: 'choice', label: t('cFail'), options: L.FAIL_IDS.map(function (f) { return [f, t('fail-' + f)]; }) },
+      { key: 'detectAfter', type: 'range', min: 0, max: L.LIMITS.detectAfter, step: 1, label: t('cDetect'),
+        format: function (v) { return v ? days(v) : t('detectOff'); } },
+      { key: 'day', type: 'range', min: 1, max: L.DAYS, step: 1, label: t('cDay'), format: dateOfDay }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'rg-daily', label: t('lgDaily') },
+      { shape: 'rg-weekly', label: t('lgWeekly') },
+      { shape: 'rg-monthly', label: t('lgMonthly') },
+      { shape: 'rg-yearly', label: t('lgYearly') },
+      { shape: 'rg-last', label: t('lgLast') },
+      { shape: 'rg-all', label: t('lgAll') },
+      { shape: 'rg-pruned', label: t('lgPruned') },
+      { shape: 'rg-failed', label: t('lgFailed') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+    render: function (c) {
+      if (!stageBox) {
+        statsBox = h('div', { class: 'rg-stats' });
+        headBox = h('div', { class: 'rg-head' });
+        calBox = h('div', { class: 'rg-cal' });
+        stageBox = h('div', { class: 'rg' }, statsBox, headBox, calBox);
+        c.stage.replaceChildren(stageBox);
+        new ResizeObserver(function () { drawCal(); }).observe(PHONE.matches ? stageBox : calBox);
+      }
+      track(c.params);
+      // "changed" marks follow a change of one param (a drag, a click); a preset loads several at once and marks nothing
+      var prev = prevP && L.captionKey(c.state, prevP).change ? L.compute(prevP) : null;
+      var marks = L.changed(c.state, prev);
+      last = { state: c.state, marks: marks };
+      statsBox.replaceChildren.apply(statsBox, stats(c.state, prev));
+      headBox.replaceChildren.apply(headBox, head(c.state));
+      drawCal();
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
