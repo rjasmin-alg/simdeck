@@ -1,0 +1,423 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- raft: Raft leader election and log replication on five servers S1–S5. A stepper: each step is the next event time
+     that changes something (timers, votes, AppendEntries, client commands, a crash, a partition). Kit view K2 draws the
+     servers in a ring with the messages in flight; the log panel beside it shows each server's log (index:term, solid
+     when committed). Buttons crash the leader, split the network, heal it and send a client command; they act in the
+     next step. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="raft">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raft: izbor vođe i replikacija dnevnika · simdeck</title>
+<meta name="description" content="Pet poslužitelja bira vođu i prepisuje dnevnik: sruši vođu, razdvoji mrežu i prati poruke korak po korak. Zapis je potvrđen tek na 3 od 5.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "raft",
+  "title": {
+    "hr": "Raft: izbor vođe i replikacija dnevnika",
+    "en": "Raft: leader election and log replication"
+  },
+  "concept": {
+    "hr": "Mandati, glasovi i potvrda zapisa na većini poslužitelja",
+    "en": "Terms, votes and committing an entry on a majority"
+  },
+  "summary": {
+    "hr": "Pet poslužitelja bira vođu i prepisuje dnevnik: sruši vođu, razdvoji mrežu i prati poruke korak po korak. Zapis je potvrđen tek na 3 od 5.",
+    "en": "Five servers elect a leader and replicate a log: crash the leader, split the network and step the messages. An entry is committed only on 3 of 5."
+  },
+  "tags": [
+    "consensus"
+  ],
+  "class": "stepper",
+  "steps": 4,
+  "entries": [
+    {
+      "preset": "minority-leader"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="raft"]; colours only from kit tokens.
+   Layout: the K2 ring on the left (time and majority above it), the log panel on the right. */
+[data-sim="raft"] .rf {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 1.5cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="raft"] .rf-draw { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+[data-sim="raft"] .rf-draw .sd-topo { flex: 1; min-height: 0; align-content: stretch; }
+[data-sim="raft"] .rf-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin: 0; }
+[data-sim="raft"] .rf-time { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="raft"] .rf-time b { font-family: var(--mono); font-size: var(--fs-lg); color: var(--ink); }
+[data-sim="raft"] .rf-pill { padding: 0 0.6rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.7; }
+[data-sim="raft"] .rf-pill[data-k="split"] { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+
+/* server cards: the mark carries the role (follower hollow, candidate dashed with "?", leader filled with a crown) */
+[data-sim="raft"] .sd-topo-card { grid-template-columns: auto minmax(0, 1fr); }
+[data-sim="raft"] .sd-topo-mark:has(> .rf-m) { min-width: 3rem; height: 3rem; }
+[data-sim="raft"] .sd-topo-mark:has(> .rf-m[data-role="follower"]),
+[data-sim="raft"] .sd-topo-mark:has(> .rf-m[data-role="candidate"]) { background: var(--bg); color: var(--ink); border: 0.2rem solid var(--ink); }
+[data-sim="raft"] .sd-topo-mark:has(> .rf-m[data-role="candidate"]) { border-style: dashed; }
+[data-sim="raft"] .rf-m[data-role="candidate"]::after { content: '?'; }
+[data-sim="raft"] .rf-m[data-role="leader"]::before { content: '♛'; margin-right: 0.1em; }
+[data-sim="raft"] .sd-topo-name { font-size: var(--fs-md); }
+[data-sim="raft"] .sd-topo-role { line-height: 1.3; }
+[data-sim="raft"] .sd-topo-role b { font-family: var(--mono); color: var(--ink); }
+[data-sim="raft"] .rf-ring { display: inline-block; width: 0.95em; height: 0.95em; margin-right: 0.3rem; vertical-align: -0.12em; border-radius: 50%;
+  border: 0.12rem solid var(--ink); background: conic-gradient(var(--ink) calc(var(--f, 0) * 1turn), var(--bg) 0); }
+[data-sim="raft"] .sd-topo-badge b { font-family: var(--mono); }
+
+/* the log panel: one row per server, one square per entry */
+[data-sim="raft"] .rf-logs { min-width: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+[data-sim="raft"] .rf-logs h2 { margin: 0; font-size: var(--fs-md); }
+[data-sim="raft"] .rf-logs h2 span { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); margin-left: 0.5rem; }
+[data-sim="raft"] .rf-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.5rem;
+  padding: 0.3rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background-color: var(--bg); }
+[data-sim="raft"] .rf-row[data-down] { border-style: dashed; color: var(--muted); }
+[data-sim="raft"] .rf-rid { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="raft"] .rf-log { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; padding: 0; list-style: none; min-height: 3.2rem; align-items: center; }
+[data-sim="raft"] .rf-e { display: grid; place-items: center; min-width: 4.4rem; padding: 0.15rem 0.35rem; border: 0.18rem solid var(--sw, var(--ink));
+  border-radius: var(--radius-sm); line-height: 1.25; font-family: var(--mono); }
+[data-sim="raft"] .rf-e b { font-size: var(--fs-md); }
+[data-sim="raft"] .rf-e span { font-size: var(--fs-sm); }
+[data-sim="raft"] .rf-e[data-pend] { border-style: dashed; background: var(--bg); color: var(--ink); }
+[data-sim="raft"] .rf-empty { color: var(--muted); font-size: var(--fs-sm); }
+
+/* legend swatches the kit lacks */
+[data-sim="raft"] .sd-swatch[data-shape^="rf-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="raft"] .sd-swatch[data-shape="rf-f"],
+[data-sim="raft"] .sd-swatch[data-shape="rf-c"],
+[data-sim="raft"] .sd-swatch[data-shape="rf-l"] { border-radius: 50%; }
+[data-sim="raft"] .sd-swatch[data-shape="rf-c"] { border-style: dashed; }
+[data-sim="raft"] .sd-swatch[data-shape="rf-l"] { background: var(--ink); }
+[data-sim="raft"] .sd-swatch[data-shape="rf-p"] { border-style: dashed; border-color: var(--sw, var(--ink)); }
+[data-sim="raft"] .sd-swatch[data-shape="rf-x"] { border-style: dashed; border-color: var(--muted); overflow: hidden; }
+[data-sim="raft"] .sd-swatch[data-shape="rf-x"]::before,
+[data-sim="raft"] .sd-swatch[data-shape="rf-x"]::after { content: ''; position: absolute; left: -0.1em; top: 42%; width: 130%; height: 0.12em;
+  background: var(--danger); transform: rotate(45deg); }
+[data-sim="raft"] .sd-swatch[data-shape="rf-x"]::after { transform: rotate(-45deg); }
+
+[data-sim="raft"] .sd-presets { grid-template-columns: 1fr; }
+
+/* Phone and portrait: the drawing becomes the kit's card list, the logs follow; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="raft"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="raft"] .rf { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="raft"] .rf-draw .sd-topo { height: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Raft: izbor vođe i replikacija dnevnika</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Ring positions in a 16-column grid, cards span 4 (SPEC.md "Scene"): S1 on top, S2 and S5 at the sides, S3 and S4 below. */
+  var POS = { S1: [6, 0], S2: [12, 1], S3: [10, 2], S4: [2, 2], S5: [0, 1] };
+
+  /** Data (server ids, times, entries) is not language: the word check skips translate="no". */
+  function d(text) { return h('b', { translate: 'no' }, String(text)); }
+  function list(ids) {
+    var out = [];
+    ids.forEach(function (id, i) {
+      if (i) out.push(i === ids.length - 1 ? ' ' + t('and') + ' ' : ', ');
+      out.push(d(id));
+    });
+    return h('span', null, out);
+  }
+  function srv(s, id) { return s.servers.filter(function (v) { return v.id === id; })[0]; }
+  function termC(term) { return term > 0 ? String((term - 1) % 8 + 1) : null; }
+  function entryText(v, i) { var e = v.log[i - 1]; return i + ':' + e.term + ' ' + e.cmd; }
+
+  // ── the drawing (kit view K2) ──
+
+  function chipOf(m) {
+    if (m.type === 'RV') return t('chipRV', { term: m.term });
+    if (m.type === 'RVR') return t(m.granted ? 'chipYes' : 'chipNo', { term: m.term });
+    if (m.type === 'AE') return m.entries.length ? t('chipAE', { e: (m.prevIndex + 1) + ':' + m.entries[0].term + (m.entries.length > 1 ? '…' : ''), term: m.term })
+      : t('chipHb', { term: m.term });
+    return m.success ? t('chipOk', { i: m.match }) : t('chipFail');
+  }
+
+  function renderTopo(c) {
+    var s = c.state, p = c.params;
+    var slow = L.SCENARIOS[p.sc] && L.SCENARIOS[p.sc].slow || {};
+    var nodes = s.servers.map(function (v) {
+      var role = v.up ? v.role : 'down';
+      var lines = [
+        { text: h('span', null, t('termN', { n: v.term }), ' · ', t.parts('voted', { id: d(v.votedFor || '–') })), kind: 'role' },
+        v.role === 'follower' ? { text: h('span', null, t.parts('leaderIs', { id: d(v.up && v.leader || '–') })), kind: 'role' } : null
+      ];
+      var badges = [];
+      if (!v.up) badges = [];
+      else if (v.role === 'leader') badges.push({ text: t('hb', { ms: L.HEARTBEAT }), k: 'fill' });
+      else {
+        var f = Math.max(0, Math.min(1, (v.timerAt - s.t) / v.timeout));
+        badges.push({ text: [h('span', { class: 'rf-ring', style: { '--f': String(f) }, 'aria-hidden': 'true' }), h('span', null, t.parts('timer', { t: d(v.timerAt) }))], k: 'dashed' });
+      }
+      if (v.up && v.role !== 'follower') badges.push({ text: h('span', null, t.parts('votesN', { n: d(v.votes.length), total: d(L.IDS.length) })), k: v.votes.length >= L.MAJORITY ? 'solid' : 'muted' });
+      return { id: v.id, kind: 'host', col: POS[v.id][0], row: POS[v.id][1], span: 4, align: 'center',
+        mark: h('span', { class: 'rf-m', dataset: { role: role } }, v.id), c: v.role === 'leader' && v.up ? termC(v.term) : null,
+        name: t('role_' + role), lines: lines, badges: badges, state: v.up ? null : 'down', changed: c.n > 0 && s.changed.indexOf(v.id) >= 0 };
+    });
+    var links = [];
+    L.IDS.forEach(function (a, i) {
+      L.IDS.slice(i + 1).forEach(function (b) {
+        var cut = s.partition && !s.partition.some(function (g) { return g.indexOf(a) >= 0 && g.indexOf(b) >= 0; });
+        var dead = !srv(s, a).up || !srv(s, b).up;
+        var ms = slow[a + '-' + b];
+        links.push({ id: a + b, a: a, b: b, state: cut ? 'down' : dead ? 'off' : 'up', ends: ms ? { a: t('slow', { ms: ms }) } : null });
+      });
+    });
+    var packets = s.msgs.map(function (m) {
+      return { from: m.from, to: m.to, mid: true, label: chipOf(m), c: termC(m.term), at: 0.45 };
+    });
+    var seen = {};
+    // lost messages: votes and entries; a lost heartbeat or ack is routine and the cut link already shows it
+    s.ev.dropped.forEach(function (m) {
+      if (seen[m.from + m.to] || m.type === 'AER' || (m.type === 'AE' && !m.entries.length)) return;
+      seen[m.from + m.to] = true;
+      var cut = s.partition && !s.partition.some(function (g) { return g.indexOf(m.from) >= 0 && g.indexOf(m.to) >= 0; });
+      packets.push({ from: m.from, to: m.to, drop: true, mid: !!cut, chip: false });
+    });
+    return Simdeck.topology({ cols: 16, rows: ['auto', 'minmax(2rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '0.8cqw' });
+  }
+
+  // ── the log panel ──
+
+  function renderLogs(c) {
+    var s = c.state, prev = c.prev;
+    return h('div', { class: 'rf-logs' },
+      h('h2', null, t('logs'), h('span', null, t('logsHint'))),
+      s.servers.map(function (v) {
+        var u = prev ? srv(prev, v.id) : null;
+        var changed = c.n > 0 && u && JSON.stringify([u.log, u.commitIndex]) !== JSON.stringify([v.log, v.commitIndex]);
+        var cells = v.log.map(function (e, i) {
+          var done = i < v.commitIndex;
+          return h('li', { class: 'rf-e' + (done ? ' sd-fill' : ''), dataset: Object.assign({ c: termC(e.term) }, done ? {} : { pend: '1' }), translate: 'no' },
+            h('b', null, (i + 1) + ':' + e.term), h('span', null, e.cmd));
+        });
+        return h('div', { class: 'rf-row' + (changed ? ' sd-changed' : ''), dataset: v.up ? {} : { down: '1' } },
+          h('span', { class: 'rf-rid', translate: 'no' }, v.id),
+          cells.length ? h('ol', { class: 'rf-log' }, cells) : h('ol', { class: 'rf-log' }, h('li', { class: 'rf-empty' }, t('logEmpty'))));
+      }));
+  }
+
+  // ── captions: sentences from the step's notes (SPEC.md "Captions") ──
+
+  function byKey(notes, k, key) {
+    var groups = [], idx = {};
+    notes.filter(function (n) { return n.k === k; }).forEach(function (n) {
+      var g = key(n);
+      if (!(g in idx)) { idx[g] = groups.length; groups.push({ first: n, items: [] }); }
+      groups[idx[g]].items.push(n);
+    });
+    return groups;
+  }
+  function sentence(out, key, vars) { out.push(h('span', null, t.parts(key, vars)), ' '); }
+  function many(key, n) { return n > 1 ? key + 'Many' : key; }
+
+  function caption(c) {
+    var s = c.state, p = c.params;
+    if (c.first) {
+      var lead = s.servers.filter(function (v) { return v.role === 'leader'; })[0];
+      var down = s.servers.filter(function (v) { return !v.up; })[0];
+      return t.parts('start_' + p.sc, { s: d(lead ? lead.id : 'S1'), t: d(p.sc === 'first-election' || p.sc === 'split-vote' ? 150 : s.t),
+        a: list(L.PARTITION[0]), b: list(L.PARTITION[1]), d: d(down ? down.id : '') });
+    }
+    var N = s.notes, out = [h('b', { translate: 'no' }, t('at', { t: s.t }))];
+    N.forEach(function (n) {
+      if (n.k === 'crash') sentence(out, 'crash', { s: d(n.s) });
+      if (n.k === 'partition') sentence(out, 'partition', { a: list(n.groups[0]), b: list(n.groups[1]) });
+      if (n.k === 'heal') {
+        sentence(out, 'heal', {});
+        if (n.restarted.length) sentence(out, 'restarted', { list: list(n.restarted) });
+      }
+      if (n.k === 'already') sentence(out, n.act === 'heal' ? 'alreadyHeal' : 'alreadyPartition', {});
+      if (n.k === 'noLeader') sentence(out, 'noLeader', {});
+    });
+    N.filter(function (n) { return n.k === 'timeout'; }).forEach(function (n) { sentence(out, 'timeout', { s: d(n.s), term: n.term }); });
+    // votes: the granted ones grouped by candidate, then each refusal
+    byKey(N.filter(function (n) { return n.granted; }), 'vote', function (n) { return n.c + n.term; }).forEach(function (g) {
+      sentence(out, many('granted', g.items.length), { list: list(g.items.map(function (n) { return n.s; })), c: d(g.first.c), term: g.first.term });
+    });
+    N.filter(function (n) { return n.k === 'vote' && !n.granted; }).forEach(function (n) {
+      var key = n.why === 'voted' ? 'refusedVoted' : n.why === 'log' ? 'refusedLog' : 'refusedTerm';
+      sentence(out, key, { s: d(n.s), c: d(n.c), term: n.term, v: d(n.votedFor) });
+    });
+    var leaders = N.filter(function (n) { return n.k === 'leader'; }).map(function (n) { return n.s; });
+    var tallies = byKey(N, 'tally', function (n) { return n.s; }).filter(function (g) { return leaders.indexOf(g.first.s) < 0; });
+    if (tallies.length) {
+      var tp = [];
+      tallies.forEach(function (g, i) {
+        var last = g.items[g.items.length - 1];
+        if (i) tp.push(', ');
+        tp.push(h('span', null, t.parts('tallyOne', { s: d(last.s), n: last.votes.length })));
+      });
+      sentence(out, 'tally', { list: h('span', null, tp) });
+    }
+    var refusals = byKey(N, 'refused', function (n) { return n.s; }).filter(function (g) { return leaders.indexOf(g.first.s) < 0 && !tallies.some(function (x) { return x.first.s === g.first.s; }); });
+    refusals.forEach(function (g) { sentence(out, 'replyRefused', { s: d(g.first.s) }); });
+    N.filter(function (n) { return n.k === 'leader'; }).forEach(function (n) { sentence(out, 'leader', { s: d(n.s), n: n.votes.length, term: n.term }); });
+    N.filter(function (n) { return n.k === 'stepdown'; }).forEach(function (n) { sentence(out, 'stepdown', { s: d(n.s), term: n.term }); });
+    byKey(N, 'learn', function (n) { return n.leader; }).forEach(function (g) {
+      sentence(out, many('learn', g.items.length), { list: list(g.items.map(function (n) { return n.s; })), l: d(g.first.leader) });
+    });
+    N.filter(function (n) { return n.k === 'stale'; }).forEach(function (n) { sentence(out, 'stale', { s: d(n.s), f: d(n.from), term: n.term }); });
+    N.filter(function (n) { return n.k === 'mismatch'; }).forEach(function (n) { sentence(out, 'mismatch', { s: d(n.s), i: d(n.index) }); });
+    var fixed = [];
+    byKey(N, 'truncate', function (n) { return n.index + JSON.stringify(n.removed); }).forEach(function (g) {
+      var n = g.first, ids = g.items.map(function (x) { return x.s; });
+      var e = [];
+      for (var i = n.index; i <= srv(s, n.s).log.length; i++) e.push(entryText(srv(s, n.s), i));
+      fixed = fixed.concat(ids);
+      sentence(out, many('truncate', ids.length), { list: list(ids), old: d(n.removed.map(function (x, k) { return (n.index + k) + ':' + x.term + ' ' + x.cmd; }).join(', ')),
+        e: d(e.join(', ')) });
+    });
+    byKey(N.filter(function (n) { return fixed.indexOf(n.s) < 0; }), 'append', function (n) { return n.first + '-' + n.last; }).forEach(function (g) {
+      var v = srv(s, g.first.s);
+      var e = [];
+      for (var i = g.first.first; i <= g.first.last; i++) e.push(entryText(v, i));
+      sentence(out, many('append', g.items.length), { list: list(g.items.map(function (n) { return n.s; })), e: d(e.join(', ')) });
+    });
+    N.filter(function (n) { return n.k === 'backoff'; }).forEach(function (n) { sentence(out, 'backoff', { s: d(n.s), p: d(n.peer) }); });
+    var committers = N.filter(function (n) { return n.k === 'commit'; }).map(function (n) { return n.s; });
+    byKey(N, 'stored', function (n) { return n.s; }).filter(function (g) { return committers.indexOf(g.first.s) < 0; }).forEach(function (g) {
+      var n = g.items[g.items.length - 1];
+      var v = srv(s, n.s);
+      sentence(out, n.old ? 'storedOld' : n.cut ? 'storedCut' : 'stored', { s: d(n.s), i: d(n.index), n: n.on.length, e: d(entryText(v, n.index)) });
+    });
+    N.filter(function (n) { return n.k === 'commit'; }).forEach(function (n) {
+      sentence(out, 'commit', { s: d(n.s), e: d(entryText(srv(s, n.s), n.index)), n: n.on.length, list: list(n.on) });
+      if (n.from < n.index) sentence(out, 'commitWith', { from: d(n.from) });
+    });
+    byKey(N, 'learnCommit', function (n) { return n.index; }).forEach(function (g) {
+      sentence(out, many('learnCommit', g.items.length), { list: list(g.items.map(function (n) { return n.s; })), i: d(g.first.index) });
+    });
+    if (out.length === 1) byKey(N, 'acked', function (n) { return n.s; }).forEach(function (g) {
+      var ids = g.items.map(function (n) { return n.from; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+      sentence(out, 'acked', { s: d(g.first.s), list: list(ids), i: d(Math.max.apply(null, g.items.map(function (n) { return n.index; }))) });
+    });
+    N.forEach(function (n) {
+      if (n.k === 'client') sentence(out, 'client', { cmd: d(n.cmd), s: d(n.s), e: d(n.index + ':' + n.term + ' ' + n.cmd) });
+      if (n.k === 'clientRejected') sentence(out, 'clientRejected', { cmd: d(n.cmd) });
+      if (n.k === 'idle') sentence(out, 'idle', {});
+      if (n.k === 'quiet') sentence(out, 'quiet', {});
+    });
+    if (tallies.length || refusals.length) {
+      var cands = s.servers.filter(function (v) { return v.up && v.role === 'candidate'; });
+      if (cands.length) {
+        var w = [];
+        cands.forEach(function (v, i) { if (i) w.push(', '); w.push(h('span', null, t.parts('timerOf', { s: d(v.id), t: d(v.timerAt) }))); });
+        sentence(out, 'waitTimers', { list: h('span', null, w) });
+      }
+    }
+    if (s.folded && s.notes[0] && s.notes[0].k !== 'quiet') out.push(h('span', null, t.parts('folded', { a: d(s.foldFrom), b: d(s.t - 10) })));
+    return out;
+  }
+
+  function act(type) {
+    return function (sim) {
+      sim.set({ acts: L.addAct(sim.params.acts, sim.n + 1, type) });
+      sim.next();
+    };
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { type: 'button', label: t('btnClient'), key: 'k', hint: t('btnHint'), run: act('client') },
+      { type: 'button', label: t('btnCrash'), key: 'x', hint: t('btnHint'), run: act('crash') },
+      { type: 'button', label: t('btnPartition'), key: 'p', hint: t('partitionHint'), run: act('partition') },
+      { type: 'button', label: t('btnHeal'), key: 's', hint: t('btnHint'), run: act('heal') }
+    ],
+
+    presets: [
+      { id: 'first-election', label: t('preset_first-election'), hint: t('hint_first-election'), params: { sc: 'first-election', acts: '' } },
+      { id: 'replicate-commit', label: t('preset_replicate-commit'), hint: t('hint_replicate-commit'), params: { sc: 'replicate-commit', acts: '' } },
+      { id: 'leader-crash', label: t('preset_leader-crash'), hint: t('hint_leader-crash'), params: { sc: 'leader-crash', acts: '' } },
+      { id: 'minority-leader', label: t('preset_minority-leader'), hint: t('hint_minority-leader'), params: { sc: 'minority-leader', acts: '' } },
+      { id: 'split-vote', label: t('preset_split-vote'), hint: t('hint_split-vote'), params: { sc: 'split-vote', acts: '' } }
+    ],
+
+    legend: [
+      { shape: 'rf-f', label: t('legFollower') },
+      { shape: 'rf-c', label: t('legCandidate') },
+      { shape: 'rf-l', label: t('legLeader') },
+      { c: 1, label: t('legCommitted') },
+      { shape: 'rf-p', c: 1, label: t('legPending') },
+      { shape: 'rf-x', label: t('legDown') },
+      { shape: 'line', label: t('legMsg') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var top = h('p', { class: 'rf-top' },
+        h('span', { class: 'rf-time' }, t('time'), ' ', h('b', { translate: 'no' }, s.t + ' ms')),
+        h('span', { class: 'rf-pill' }, t.parts('majority', { k: d(L.MAJORITY), n: d(L.IDS.length) })),
+        s.partition ? h('span', { class: 'rf-pill', dataset: { k: 'split' } }, t('split')) : null);
+      c.stage.replaceChildren(h('div', { class: 'rf' }, h('div', { class: 'rf-draw' }, top, renderTopo(c)), renderLogs(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
