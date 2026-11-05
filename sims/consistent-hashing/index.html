@@ -1,0 +1,516 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- consistent-hashing: the same 1000 keys on n nodes, by hash mod n (left, a bar per node) and on a hash ring (right,
+     each key owned by the first node point clockwise), with the keys moved by the last change from `from` to `nodes`
+     nodes. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="consistent-hashing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dosljedno raspršivanje · simdeck</title>
+<meta name="description" content="Dodaj i ukloni čvorove: koliko se od 1000 ključeva premjesti uz hash mod n, a koliko na prstenu s jednom ili 100 točaka po čvoru.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "consistent-hashing",
+  "title": {
+    "hr": "Dosljedno raspršivanje",
+    "en": "Consistent hashing"
+  },
+  "concept": {
+    "hr": "Novi čvor na prstenu premješta 1/n ključeva, a mod n gotovo sve",
+    "en": "Adding a node moves 1/n of the keys on a ring; mod n moves almost all"
+  },
+  "summary": {
+    "hr": "Dodaj i ukloni čvorove: koliko se od 1000 ključeva premjesti uz hash mod n, a koliko na prstenu s jednom ili 100 točaka po čvoru.",
+    "en": "Add and remove nodes: how many of 1000 keys move with hash mod n, and how many on a ring with one or 100 points per node."
+  },
+  "tags": [
+    "replication"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "ring-add-1vnode"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="consistent-hashing"]; colours only from kit tokens. */
+[data-sim="consistent-hashing"] .ch {
+  display: grid;
+  grid-template-columns: minmax(0, 0.66fr) minmax(0, 1.34fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.6rem 0.9rem;
+  height: 100%;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+}
+[data-sim="consistent-hashing"] .ch-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.35rem 0.6rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="consistent-hashing"] .ch-panel h2 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+[data-sim="consistent-hashing"] .ch-panel h2 code { font-family: var(--mono); }
+
+/* left: a bar per node; the keys that arrived with the last change on top, highlighted and hatched */
+[data-sim="consistent-hashing"] .ch-bars { flex: 1; display: flex; gap: 0.35rem; min-height: 0; }
+[data-sim="consistent-hashing"] .ch-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+[data-sim="consistent-hashing"] .ch-num { font-family: var(--mono); font-weight: 700; }
+[data-sim="consistent-hashing"] .ch-plus { font-family: var(--mono); font-size: var(--fs-sm); padding: 0 0.15rem; white-space: nowrap; }
+[data-sim="consistent-hashing"] .ch-track { flex: 1; width: 100%; display: flex; flex-direction: column; justify-content: flex-end; min-height: 3rem; }
+[data-sim="consistent-hashing"] .ch-bar { display: flex; flex-direction: column; width: 100%; min-height: 2px; border: var(--line-w) solid var(--ink); }
+[data-sim="consistent-hashing"] .ch-stay { background: var(--sw); }
+[data-sim="consistent-hashing"] .ch-arr { background-color: var(--hl); box-shadow: inset 0 0 0 0.18rem var(--ink); }
+[data-sim="consistent-hashing"] .ch-name {
+  display: grid; place-items: center;
+  width: 1.9rem; height: 1.9rem; margin-top: 0.25rem;
+  border-radius: 50%;
+  font-weight: 700;
+  background: var(--sw); color: var(--on-series);
+}
+[data-sim="consistent-hashing"] .ch-gone .ch-bar { border-style: dashed; border-color: var(--muted); background: transparent; }
+[data-sim="consistent-hashing"] .ch-gone .ch-name { background: var(--bg); color: var(--muted); border: var(--line-w) dashed var(--muted); }
+[data-sim="consistent-hashing"] .ch-gone .ch-num { color: var(--muted); font-weight: 400; font-size: var(--fs-sm); }
+
+/* right: the ring and the load per node */
+[data-sim="consistent-hashing"] .ch-ringbox { flex: 1; display: flex; gap: 0.7rem; align-items: center; min-height: 0; }
+[data-sim="consistent-hashing"] .ch-circle { position: relative; flex: none; width: min(42cqw, 70cqh); aspect-ratio: 1; }
+[data-sim="consistent-hashing"] .ch-circle > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="consistent-hashing"] .ch-band { fill: var(--sw); stroke: var(--panel); stroke-width: 1.5; }
+[data-sim="consistent-hashing"] .ch-axis { fill: none; stroke: var(--line); stroke-width: 3; }
+[data-sim="consistent-hashing"] .ch-tick { stroke: var(--muted); stroke-width: 2.5; }
+[data-sim="consistent-hashing"] .ch-mv-under { stroke: var(--ink); stroke-width: 11; }
+[data-sim="consistent-hashing"] .ch-mv { stroke: var(--hl); stroke-width: 5; }
+[data-sim="consistent-hashing"] .ch-zero { stroke: var(--ink); stroke-width: 4; }
+[data-sim="consistent-hashing"] .ch-vp { fill: var(--sw); stroke: var(--ink); stroke-width: 2; }
+[data-sim="consistent-hashing"] .ch-vp-gone { fill: var(--panel); stroke: var(--muted); stroke-width: 3; stroke-dasharray: 5 4; }
+[data-sim="consistent-hashing"] .ch-at { position: absolute; transform: translate(-50%, -50%); line-height: 1; white-space: nowrap; }
+[data-sim="consistent-hashing"] .ch-dot {
+  display: grid; place-items: center;
+  width: 2rem; height: 2rem;
+  border: 0.15rem solid var(--ink); border-radius: 50%;
+  font-weight: 700;
+  background: var(--sw); color: var(--on-series);
+}
+[data-sim="consistent-hashing"] .ch-dot.ch-dot-gone { background: var(--panel); color: var(--muted); border: 0.15rem dashed var(--muted); }
+[data-sim="consistent-hashing"] .ch-vl { font-size: var(--fs-sm); font-weight: 700; color: var(--ink); }
+[data-sim="consistent-hashing"] .ch-arcl { font-size: var(--fs-sm); font-weight: 700; color: var(--on-series); }
+[data-sim="consistent-hashing"] .ch-centre { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; text-align: center; }
+[data-sim="consistent-hashing"] .ch-centre b { font-size: 1.15rem; }
+[data-sim="consistent-hashing"] .ch-centre span, [data-sim="consistent-hashing"] .ch-zl { font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="consistent-hashing"] .ch-loads {
+  flex: 1; min-width: 0;
+  display: grid; grid-template-columns: auto minmax(2rem, 1fr) auto; gap: 0.2rem 0.4rem; align-items: center;
+  font-size: var(--fs-sm);
+}
+[data-sim="consistent-hashing"] .ch-loads h3 { grid-column: 1 / -1; margin: 0; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="consistent-hashing"] .ch-loads .ch-name { width: 1.6rem; height: 1.6rem; margin: 0; }
+[data-sim="consistent-hashing"] .ch-hbar { display: flex; height: 1.1rem; min-width: 2px; border: var(--line-w) solid var(--ink); }
+[data-sim="consistent-hashing"] .ch-hcell { min-width: 0; }
+[data-sim="consistent-hashing"] .ch-hnum { font-family: var(--mono); white-space: nowrap; }
+[data-sim="consistent-hashing"] .ch-hnum b { font-weight: 700; }
+[data-sim="consistent-hashing"] .ch-row-gone .ch-hbar { border-style: dashed; border-color: var(--muted); }
+[data-sim="consistent-hashing"] .ch-row-gone .ch-name { background: var(--bg); color: var(--muted); border: var(--line-w) dashed var(--muted); }
+[data-sim="consistent-hashing"] .ch-row-gone .ch-hnum { color: var(--muted); }
+
+/* under both: keys moved, mod n | ideal | ring */
+[data-sim="consistent-hashing"] .ch-moved { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0.8rem; }
+[data-sim="consistent-hashing"] .ch-box {
+  display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 0 0.6rem;
+  padding: 0.2rem 0.8rem;
+  border: 0.2rem solid var(--ink); border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="consistent-hashing"] .ch-box[data-kind="ideal"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="consistent-hashing"] .ch-box-label { font-weight: 700; }
+[data-sim="consistent-hashing"] .ch-big { font-family: var(--mono); font-size: 2.3rem; font-weight: 700; line-height: 1.1; }
+[data-sim="consistent-hashing"] .ch-box[data-kind="mod"] .ch-big { color: var(--danger); }
+[data-sim="consistent-hashing"] .ch-box[data-kind="ring"] .ch-big { color: var(--ok); }
+[data-sim="consistent-hashing"] .ch-box-of { color: var(--muted); white-space: nowrap; }
+[data-sim="consistent-hashing"] .ch-refused { font-weight: 700; }
+
+/* legend swatches of the page's own marks */
+[data-sim="consistent-hashing"] .sd-swatch[data-shape="ch-vp"] { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--sw); border: 0.12rem solid var(--ink); }
+[data-sim="consistent-hashing"] .sd-swatch[data-shape="ch-arc"] { height: 0.6rem; border-radius: 0.3rem; background: var(--sw); border: 0; }
+[data-sim="consistent-hashing"] .sd-swatch[data-shape="ch-key"] { width: 0.2rem; border: 0; border-radius: 0; background: var(--muted); }
+[data-sim="consistent-hashing"] .sd-swatch[data-shape="ch-gone"] { border-radius: 50%; border-style: dashed; border-color: var(--muted); background: transparent; }
+
+/* the panel: the two node sliders side by side, the two buttons side by side */
+[data-sim="consistent-hashing"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.8rem; }
+[data-sim="consistent-hashing"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="consistent-hashing"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="from"], [data-key="nodes"]),
+[data-sim="consistent-hashing"] [data-sd-controls] .sd-group > .sd-btn:is(:nth-last-child(2), :nth-last-child(3)) { grid-column: auto; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="consistent-hashing"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="consistent-hashing"] .ch { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; padding: 0.4rem; }
+  [data-sim="consistent-hashing"] .ch-bars { height: 14rem; flex: none; }
+  [data-sim="consistent-hashing"] .ch-ringbox { flex-direction: column; align-items: stretch; }
+  [data-sim="consistent-hashing"] .ch-circle { width: min(100%, 80cqw); align-self: center; }
+  [data-sim="consistent-hashing"] .ch-moved { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="consistent-hashing"] .ch-dot { width: 1.6rem; height: 1.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Dosljedno raspršivanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var TAU = 2 * Math.PI;
+  // ring geometry in the SVG's units (viewBox −500 … 500): node points, owned-arc band, key ticks, moved ticks
+  var R_PT = 405, B_IN = 335, B_OUT = 378, K_IN = 285, K_OUT = 318, M_IN = 258, M_OUT = 326, R_VL = 458;
+
+  // ── helpers ──
+
+  function name(i) { return L.nodeName(i); }
+  /** Series colour of node i: c1 … c8, then again (the letter tells I and J from A and B). */
+  function cOf(i) { return String(i % 8 + 1); }
+  function dec(x, d) {
+    var s = x.toFixed(d).replace(/\.?0+$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** n of the 1000 keys as a percentage. */
+  function pct(n) { return t('pct', { n: dec(n / L.KEYS * 100, 1) }); }
+  /** *word* in a caption is an English term in italics. */
+  function emph(text) {
+    return text.split(/\*([^*]+)\*/).map(function (bit, i) { return i % 2 ? h('em', { lang: 'en' }, bit) : bit; });
+  }
+  function list(ids) { return ids.map(name).join(', '); }
+  function gcd(a, b) { return b ? gcd(b, a % b) : a || 1; }
+  function range(a, b) { var out = []; for (var i = a; i < b; i++) out.push(i); return out; }
+  function svg(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, String(attrs[k])); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i]) e.append(arguments[i]);
+    return e;
+  }
+  function ang(hv) { return hv / L.SPACE * TAU; }
+  function xy(a, r) { return [Math.sin(a) * r, -Math.cos(a) * r]; }
+  function f1(x) { return Math.round(x * 10) / 10; }
+  /** An HTML label centred on the ring at angle a, radius r (in SVG units; the box is 1000 units wide). */
+  function at(a, r, node) {
+    var p = xy(a, r);
+    return h('div', { class: 'ch-at', style: { left: f1(50 + p[0] / 10) + '%', top: f1(50 + p[1] / 10) + '%' } }, node);
+  }
+  /** The band from angle a0 to a1 (a0 < a1, clockwise), between radii r0 and r1. */
+  function band(a0, a1, r0, r1) {
+    var big = a1 - a0 > Math.PI ? 1 : 0;
+    var p0 = xy(a0, r1), p1 = xy(a1, r1), p2 = xy(a1, r0), p3 = xy(a0, r0);
+    return 'M' + f1(p0[0]) + ' ' + f1(p0[1]) + 'A' + r1 + ' ' + r1 + ' 0 ' + big + ' 1 ' + f1(p1[0]) + ' ' + f1(p1[1]) +
+      'L' + f1(p2[0]) + ' ' + f1(p2[1]) + 'A' + r0 + ' ' + r0 + ' 0 ' + big + ' 0 ' + f1(p3[0]) + ' ' + f1(p3[1]) + 'Z';
+  }
+  function tick(a, r0, r1) {
+    var p = xy(a, r0), q = xy(a, r1);
+    return 'M' + f1(p[0]) + ' ' + f1(p[1]) + 'L' + f1(q[0]) + ' ' + f1(q[1]);
+  }
+
+  // ── left: hash mod n ──
+
+  function modPanel(s, scale) {
+    var n = s.nodes.length;
+    var cols = s.nodes.map(function (i) {
+      var load = s.load.mod[i], arr = s.arrived.mod[i];
+      return h('div', { class: 'ch-col', role: 'img', 'aria-label': t('barAria', { node: name(i), keys: t.n('keysN', load), arr: arr }) },
+        h('span', { class: 'ch-num', translate: 'no' }, String(load)),
+        h('span', { class: 'ch-plus' + (arr ? ' sd-hl' : ''), translate: 'no' }, arr ? t('plus', { n: arr }) : ' '),
+        h('div', { class: 'ch-track' },
+          h('div', { class: 'ch-bar', dataset: { c: cOf(i) }, style: { height: (load / scale * 100).toFixed(1) + '%' } },
+            arr ? h('div', { class: 'ch-arr sd-hatch', style: { flexGrow: String(arr) } }) : null,
+            h('div', { class: 'ch-stay', style: { flexGrow: String(load - arr) } }))),
+        h('span', { class: 'ch-name', dataset: { c: cOf(i) }, translate: 'no' }, name(i)));
+    });
+    range(n, s.from).forEach(function (i) {
+      var had = s.before.load.mod[i];
+      cols.push(h('div', { class: 'ch-col ch-gone', role: 'img', 'aria-label': t('goneAria', { node: name(i), keys: t.n('keysN', had) }) },
+        h('span', { class: 'ch-num' }, '\u00a0'),
+        h('span', { class: 'ch-plus', translate: 'no' }, ' '),
+        h('div', { class: 'ch-track' }, h('div', { class: 'ch-bar', style: { height: (had / scale * 100).toFixed(1) + '%' } })),
+        h('span', { class: 'ch-name', translate: 'no' }, name(i))));
+    });
+    return h('section', { class: 'ch-panel ch-mod' },
+      h('h2', null, t('modTitle', { n: n })),
+      h('div', { class: 'ch-bars' }, cols));
+  }
+
+  // ── right: the ring ──
+
+  function ringSvg(s) {
+    var pts = s.points, np = pts.length, n = s.nodes.length;
+    var root = svg('svg', { viewBox: '-500 -500 1000 1000', 'aria-hidden': 'true', focusable: 'false' });
+    root.append(svg('circle', { class: 'ch-axis', r: R_PT, cx: 0, cy: 0 }));
+    // arcs owned: from the previous point (exclusive) to this point (inclusive), clockwise (rule 3)
+    var bands = svg('g');
+    for (var i = 0; i < np; i++) {
+      var a1 = ang(pts[i].h), a0 = i === 0 ? ang(pts[np - 1].h) - TAU : ang(pts[i - 1].h);
+      if (a1 - a0 <= 0) continue;
+      if (a1 - a0 >= TAU - 1e-9) a1 = a0 + TAU - 1e-6;
+      bands.append(svg('path', { class: 'ch-band', 'data-c': cOf(pts[i].node), d: band(a0, a1, B_IN, B_OUT) }));
+    }
+    root.append(bands);
+    // keys: a tick each; the moved ones longer, highlighted and outlined
+    var moved = {};
+    s.moved.ring.forEach(function (k) { moved[k] = true; });
+    var dKeys = '', dMoved = '';
+    s.keyHashes.forEach(function (kh, k) {
+      if (moved[k]) dMoved += tick(ang(kh), M_IN, M_OUT); else dKeys += tick(ang(kh), K_IN, K_OUT);
+    });
+    root.append(svg('path', { class: 'ch-tick', d: dKeys }));
+    if (dMoved) root.append(svg('path', { class: 'ch-mv-under', d: dMoved }), svg('path', { class: 'ch-mv', d: dMoved }));
+    root.append(svg('path', { class: 'ch-zero', d: tick(0, 215, 250) }));
+    // points of removed nodes (dashed), then virtual points (small dots); node points are HTML dots on top
+    s.before.points.forEach(function (p) {
+      if (p.node >= n && p.j > 0) { var q = xy(ang(p.h), R_PT); root.append(svg('circle', { class: 'ch-vp-gone', cx: f1(q[0]), cy: f1(q[1]), r: 10 })); }
+    });
+    pts.forEach(function (p) {
+      if (p.j === 0) return;
+      var q = xy(ang(p.h), R_PT);
+      root.append(svg('circle', { class: 'ch-vp', 'data-c': cOf(p.node), cx: f1(q[0]), cy: f1(q[1]), r: s.vnodes > 10 ? 7 : 10 }));
+    });
+    return root;
+  }
+
+  function ringLabels(s) {
+    var pts = s.points, np = pts.length, n = s.nodes.length, out = [];
+    // a letter on every arc long enough to hold one
+    for (var i = 0; i < np; i++) {
+      var a1 = ang(pts[i].h), a0 = i === 0 ? ang(pts[np - 1].h) - TAU : ang(pts[i - 1].h);
+      if (a1 - a0 > 0.33) out.push(at((a0 + a1) / 2, (B_IN + B_OUT) / 2, h('span', { class: 'ch-arcl', translate: 'no' }, name(pts[i].node))));
+    }
+    // letters beside virtual points where there is room (≥ 0.13 rad from the last letter placed)
+    if (s.vnodes > 1) {
+      var last = -1, firstAt = null;
+      pts.forEach(function (p) {
+        var a = ang(p.h);
+        if (firstAt === null) firstAt = a;
+        if (p.j === 0) { last = a; return; }
+        if (last >= 0 && a - last < 0.13) return;
+        if (firstAt + TAU - a < 0.13) return; // too close to the first point, across the top of the ring
+        last = a;
+        out.push(at(a, R_VL, h('span', { class: 'ch-vl', translate: 'no' }, name(p.node))));
+      });
+    }
+    s.before.points.forEach(function (p) {
+      if (p.node >= n && p.j === 0) out.push(at(ang(p.h), R_PT, h('span', { class: 'ch-dot ch-dot-gone', translate: 'no' }, name(p.node))));
+    });
+    pts.forEach(function (p) {
+      if (p.j === 0) out.push(at(ang(p.h), R_PT, h('span', { class: 'ch-dot', dataset: { c: cOf(p.node) }, translate: 'no' }, name(p.node))));
+    });
+    out.push(at(0, 185, h('span', { class: 'ch-zl', translate: 'no' }, t('ringZero'))));
+    out.push(at(0, 0, h('div', { class: 'ch-centre' },
+      h('b', null, t('ringCentre')),
+      h('span', null, t.n('ringNodes', n)),
+      h('span', null, t.n('ringPer', s.vnodes)))));
+    return out;
+  }
+
+  function loads(s, scale) {
+    var n = s.nodes.length;
+    var rows = [h('h3', null, t('loadsTitle'))];
+    s.nodes.forEach(function (i) {
+      var load = s.load.ring[i], arr = s.arrived.ring[i];
+      rows.push(
+        h('span', { class: 'ch-name', dataset: { c: cOf(i) }, translate: 'no' }, name(i)),
+        h('div', { class: 'ch-hcell', role: 'img', 'aria-label': t('barAria', { node: name(i), keys: t.n('keysN', load), arr: arr }) },
+          h('div', { class: 'ch-hbar', dataset: { c: cOf(i) }, style: { width: (load / scale * 100).toFixed(1) + '%' } },
+            h('div', { class: 'ch-stay', style: { flexGrow: String(load - arr) } }),
+            arr ? h('div', { class: 'ch-arr sd-hatch', style: { flexGrow: String(arr) } }) : null)),
+        h('span', { class: 'ch-hnum', translate: 'no' }, h('b', null, String(load)), arr ? ' ' : null,
+          arr ? h('span', { class: 'sd-hl' }, t('plus', { n: arr })) : null));
+    });
+    range(n, s.from).forEach(function (i) {
+      var had = s.before.load.ring[i];
+      rows.push(
+        h('span', { class: 'ch-row-gone' }, h('span', { class: 'ch-name', translate: 'no' }, name(i))),
+        h('div', { class: 'ch-hcell ch-row-gone', role: 'img', 'aria-label': t('goneAria', { node: name(i), keys: t.n('keysN', had) }) },
+          h('div', { class: 'ch-hbar', style: { width: (had / scale * 100).toFixed(1) + '%' } })),
+        h('span', { class: 'ch-hnum ch-row-gone' }, t('gone')));
+    });
+    return h('div', { class: 'ch-loads' }, rows);
+  }
+
+  function ringPanel(s, scale) {
+    var circle = h('div', { class: 'ch-circle', role: 'img',
+      'aria-label': t('ringAria', { nodes: t.n('nodesN', s.nodes.length), pts: t.n('pts', s.vnodes), m: s.movedLast.ring }) }, ringSvg(s), ringLabels(s));
+    return h('section', { class: 'ch-panel ch-ring' },
+      h('h2', null, t('ringTitle')),
+      h('div', { class: 'ch-ringbox' }, circle, loads(s, scale)));
+  }
+
+  // ── under both: keys moved ──
+
+  function box(kind, label, big, of) {
+    return h('div', { class: 'ch-box', dataset: { kind: kind } },
+      h('span', { class: 'ch-box-label' }, label),
+      h('span', { class: 'ch-big', translate: 'no' }, big),
+      h('span', { class: 'ch-box-of' }, of));
+  }
+
+  function movedRow(s) {
+    var none = s.from === s.nodes.length;
+    var m = s.movedLast, n = s.nodes.length;
+    // before any change: the ideal for the next "add node" (or "remove node" at the top of the range)
+    var up = n < L.MAX_NODES;
+    var ideal = none ? L.ideal(n, up ? n + 1 : n - 1) : s.ideal;
+    var g = gcd(ideal.num, ideal.den), frac = { num: ideal.num / g, den: ideal.den / g };
+    var idealLabel = t(none ? (up ? 'boxIdealPlus' : 'boxIdealMinus') : 'boxIdeal', frac);
+    return h('div', { class: 'ch-moved' },
+      box('mod', t('boxMod') + ' · ' + t('boxMoved'), String(m.mod), none ? t('boxNone') : t('boxOf', { pct: pct(m.mod) })),
+      box('ideal', idealLabel, String(ideal.keys), t('boxOf', { pct: pct(ideal.keys) })),
+      box('ring', t('boxRing') + ' · ' + t('boxMoved'), String(m.ring), none ? t('boxNone') : t('boxOf', { pct: pct(m.ring) })));
+  }
+
+  // ── render and caption ──
+
+  var refused = null, refusedFor = null;
+
+  function render(c) {
+    var s = c.state;
+    var all = s.load.mod.concat(s.load.ring, s.before.load.mod, s.before.load.ring);
+    var scale = Math.max.apply(null, all.concat([1]));
+    c.stage.replaceChildren(h('div', { class: 'ch' }, modPanel(s, scale), ringPanel(s, scale), movedRow(s)));
+  }
+
+  /** A caption sentence: node letters (vars wrapped by D) go in translate="no" spans, *word* in italics. */
+  function D(x) { return { data: x }; }
+  function cap(key, vars, n) {
+    var nodes = [], v = {};
+    Object.keys(vars).forEach(function (k) {
+      var x = vars[k];
+      if (x && typeof x === 'object' && 'data' in x) { nodes.push(x.data); v[k] = '\u0001' + (nodes.length - 1) + '\u0002'; } else v[k] = x;
+    });
+    var s = n == null ? t(key, v) : t.n(key, n, v);
+    var out = [];
+    s.split(/\u0001(\d+)\u0002/).forEach(function (bit, i) {
+      if (i % 2) out.push(h('span', { translate: 'no' }, nodes[Number(bit)]));
+      else out = out.concat(emph(bit));
+    });
+    return out;
+  }
+
+  function caption(c) {
+    var s = c.state, n = s.nodes.length, f = s.from, v = s.vnodes;
+    var ext = L.extremes(s.load.ring);
+    var span = { minN: s.load.ring[ext.min], maxN: s.load.ring[ext.max], minK: t.n('keysN', s.load.ring[ext.min]),
+      maxK: t.n('keysN', s.load.ring[ext.max]), min: D(name(ext.min)), max: D(name(ext.max)) };
+    var vars = { mod: s.movedLast.mod, ring: s.movedLast.ring, ringK: t.n('keysN', s.movedLast.ring), modPct: pct(s.movedLast.mod), ringPct: pct(s.movedLast.ring) };
+    var main, note;
+    if (f === n) {
+      main = cap('cNone', { nodes: t.n('nodesN', n), pts: t.n('pts', v) });
+      note = cap(v === 1 ? 'nUneven' : 'nEven', span);
+    } else if (n > f) {
+      var added = range(f, n);
+      vars['new'] = D(list(added));
+      vars.list = D(list(added));
+      main = cap(c.preset === 'mod-n-add' ? 'cModAdd' : added.length === 1 ? 'cAdd' : 'cAddMany', vars);
+      var from = s.gave.ring.filter(function (x) { return x > 0; }).length;
+      note = v === 1 ? cap('nUneven', span) : cap('nManyFrom', Object.assign({ pts: t.n('pts', v), k: from }, span), from);
+    } else {
+      var removed = range(n, f);
+      vars.gone = D(list(removed));
+      vars.list = D(list(removed));
+      main = cap(removed.length === 1 ? 'cRemove' : 'cRemoveMany', vars);
+      var to = s.arrived.ring.filter(function (x) { return x > 0; }).length;
+      note = v === 1 ? cap('nUneven', span) : cap('nManyTo', Object.assign({ pts: t.n('pts', v), k: to }, span), to);
+    }
+    var out = [];
+    if (refused && refusedFor !== JSON.stringify(c.params)) refused = null; // any change of params ends the message
+    if (refused) out.push(h('span', { class: 'ch-refused sd-hl' }, t(refused)), ' ');
+    return out.concat(main, ' ', note);
+  }
+
+  function press(sim, delta) {
+    var patch = L.change(sim.params, delta);
+    if (!patch) {
+      refused = delta > 0 ? 'atMax' : 'atMin';
+      refusedFor = JSON.stringify(sim.params);
+      sim.render();
+      return;
+    }
+    refused = null;
+    sim.set(patch);
+  }
+
+  var labels = { 'mod-n-add': 'pModAdd', 'ring-add-1vnode': 'pRing1', 'ring-add-100vnodes': 'pRing100', 'remove-node': 'pRemove' };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'vnodes', type: 'choice', label: t('vnodes'), hint: t('vnodesHint'), options: [[1, '1'], [10, '10'], [100, '100']] },
+      { key: 'from', type: 'range', label: t('from'), min: L.MIN_NODES, max: L.MAX_NODES, step: 1 },
+      { key: 'nodes', type: 'range', label: t('nodes'), min: L.MIN_NODES, max: L.MAX_NODES, step: 1 },
+      { type: 'button', label: t('add'), key: '+', run: function (sim) { press(sim, 1); } },
+      { type: 'button', label: t('remove'), key: '-', run: function (sim) { press(sim, -1); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'round', c: 1, label: t('legNode') },
+      { shape: 'ch-vp', c: 1, label: t('legVnode') },
+      { shape: 'ch-arc', c: 2, label: t('legArc') },
+      { shape: 'ch-key', label: t('legKey') },
+      { shape: 'hl', label: t('legMoved') },
+      { shape: 'ch-gone', label: t('legGone') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
