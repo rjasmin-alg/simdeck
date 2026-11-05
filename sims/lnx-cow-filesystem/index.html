@@ -3,6 +3,8 @@
 <!-- lnx-cow-filesystem: a pool of physical blocks under a copy-on-write filesystem. The live tree (podaci) and each
      snapshot are rows of pointers over the pool row; a snapshot copies pointers, a write goes to a new block and
      moves only the live pointer, rm and destroy free only what no tree points to. Drawn on kit view K3 (block grid).
+     Preset win-vss (scenes previous-versions, diff-growth, diff-full) runs in copy-on-write mode: one row for the
+     volume (the live data, never moved), one for the diff area, a row per shadow copy; renderCow below.
      Model: sim.js; rules: SPEC.md; words: strings.js. -->
 <html lang="hr" data-sim="lnx-cow-filesystem">
 <head>
@@ -33,7 +35,8 @@
     "en": "Write a file, take a snapshot, write again and watch shared and owned blocks: a snapshot costs nothing until the live tree changes."
   },
   "tags": [
-    "filesystems"
+    "filesystems",
+    "snapshots"
   ],
   "class": "stepper",
   "steps": 3
@@ -79,6 +82,12 @@
 [data-sim="lnx-cow-filesystem"] .cw-table .cw-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
 [data-sim="lnx-cow-filesystem"] .cw-table tr[data-off] { color: var(--muted); }
 
+/* win-vss: the legend items and the explanation of the other mode are hidden (render sets data-mode on <html>) */
+[data-sim="lnx-cow-filesystem"][data-mode="cow"] [data-only="row"],
+[data-sim="lnx-cow-filesystem"]:not([data-mode="cow"]) [data-only="cow"] { display: none; }
+[data-sim="lnx-cow-filesystem"] .cw-foot .sd-bg-meter { flex: 1 1 14rem; align-self: center; }
+[data-sim="lnx-cow-filesystem"][data-mode="cow"] .cw .sd-bg-grid { --bg-row-gap: 0.9rem; }
+
 /* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
   [data-sim="lnx-cow-filesystem"] .sd-stage { height: auto; container-type: inline-size; }
@@ -112,7 +121,8 @@
       <div data-sd-controls></div>
       <details class="sd-explain">
         <summary></summary>
-        <div data-t-html="explain"></div>
+        <div data-t-html="explain" data-only="row"></div>
+        <div data-t-html="explainCow" data-only="cow"></div>
       </details>
     </aside>
   </main>
@@ -130,6 +140,7 @@
   var t = Simdeck.useStrings(window.SimStrings);
   var COLOUR = { podaci: '1', '@s1': '2', '@s2': '3' };   // series colour per tree; rows also differ by label and place
   var SHARED = '8';                                         // a shared pool block: hatched, ×n, in the neutral colour
+  COLOUR.S1 = '2'; COLOUR.S2 = '3'; COLOUR.S3 = '4';        // win-vss: the shadow copies
 
   /** Data (tree names, block ids and labels, the error text) is not language: the word check skips translate="no". */
   function data(text) { return h('span', { translate: 'no' }, String(text)); }
@@ -186,9 +197,40 @@
     return false;
   }
 
+  // The legend of both modes; render hides the other mode's items (data-only, CSS above).
+  var LEGEND = [
+    { shape: 'hl', label: t('legChanged'), only: 'row' },
+    { shape: 'hl', label: t('legChangedCow'), only: 'cow' },
+    { shape: 'under', label: t('legRefs'), only: 'row' },
+    { shape: 'bg-soft', c: Number(SHARED), label: t('legShared'), only: 'row' },
+    { shape: 'bg-soft', c: Number(SHARED), label: t('legSharedCow'), only: 'cow' },
+    { shape: 'bg-fill', c: 1, label: t('legOwned'), only: 'row' },
+    { shape: 'bg-fill', c: 1, label: t('legLive'), only: 'cow' },
+    { shape: 'bg-fill', c: 2, label: t('legCopy'), only: 'cow' },
+    { shape: 'slot', label: t('legFree') },
+    { shape: 'bg-dead', label: t('legFreed') },
+    { shape: 'bg-link', label: t('legMoved'), only: 'row' },
+    { shape: 'bg-link', label: t('legMovedCow'), only: 'cow' }
+  ];
+  function setMode(p) {
+    var cow = L.mode(p) === 'copy-on-write';
+    if (cow) document.documentElement.dataset.mode = 'cow';
+    else delete document.documentElement.dataset.mode;
+    // the host's subtitle says writes go to new blocks: in copy-on-write mode the subtitle says what this mode does
+    var sub = document.querySelector('.sd-subtitle');
+    if (sub) {
+      if (sub.dataset.host === undefined) sub.dataset.host = sub.textContent;
+      sub.textContent = cow ? t('subtitleCow') : sub.dataset.host;
+    }
+    var lis = document.querySelectorAll('[data-sd-legend] > li');
+    LEGEND.forEach(function (it, i) { if (lis[i] && it.only) lis[i].dataset.only = it.only; });
+  }
+
   // ── stage ──
 
   function render(c) {
+    setMode(c.params);
+    if (L.mode(c.params) === 'copy-on-write') { renderCow(c); return; }
     var s = c.state, p = c.params, o = L.norm(p), prev = c.prev;
     var moved = {};
     s.moved.forEach(function (m) { moved[m.k] = m; });
@@ -360,6 +402,202 @@
     return out.concat(sp(used(s)));
   }
 
+  // ── win-vss: copy-on-write mode ──
+
+  /** A block id as the page shows it: a volume block by its number, a diff-area block as Δj. */
+  function bid(s, id) { return id >= s.poolSize ? 'Δ' + (id - s.poolSize) : String(id); }
+  function bids(s, list) {
+    var vol = list.filter(function (id) { return id < s.poolSize; }), dif = list.filter(function (id) { return id >= s.poolSize; });
+    var parts = [];
+    if (vol.length) parts.push(ids(vol).textContent);
+    if (dif.length) parts.push(dif.map(function (id) { return bid(s, id); }).join(', '));
+    return data(parts.join(', '));
+  }
+  function shadowNames(p) { return L.treeNames(p).filter(function (n) { return n !== L.LIVE; }); }
+  function takenAt(p, name) { var o = L.script(p).filter(function (x) { return x.op === 'snapshot' && x.name === name; })[0]; return o ? o.time : ''; }
+
+  function renderCow(c) {
+    var s = c.state, p = c.params, o = L.norm(p), prev = c.prev, D = s.diffSize;
+    var live = tree(s, L.LIVE), f = live.files[L.FILE];
+    var freed = {};
+    s.freed.forEach(function (x) { freed[x.id] = x.ver; });
+    var over = {};
+    s.overwritten.forEach(function (id) { over[id] = true; });
+
+    var vol = [];
+    for (var id = 0; id < o.poolSize; id++) {
+      var b = block(s, id);
+      vol.push(b ? { text: b.ver, sub: p.showRefs ? '×' + b.refs : undefined, kind: b.refs >= 2 ? 'soft' : 'fill',
+        c: b.refs >= 2 ? SHARED : COLOUR[L.LIVE], now: !!over[id] || (s.event === 'create' && s.allocated.indexOf(id) >= 0) } : {});
+    }
+    var volAside = h('span', { class: 'cw-role', dataset: { on: 'true' } }, t('roleVol'));
+    if (s.err) volAside = h('span', null, volAside, ' · ', h('span', { class: 'cw-bad', translate: 'no' }, '✕ ' + s.err));
+
+    var dif = [];
+    for (var j = 0; j < D; j++) {
+      var d = block(s, o.poolSize + j);
+      if (d) {
+        var hs = L.holders(fs(s), d.id);
+        dif.push({ text: d.ver, sub: 'Δ' + j + (p.showRefs ? ' ×' + d.refs : ''), kind: d.refs >= 2 ? 'soft' : 'fill',
+          c: d.refs >= 2 ? SHARED : COLOUR[hs[0]], now: s.allocated.indexOf(d.id) >= 0 });
+      } else if ((o.poolSize + j) in freed) dif.push({ text: freed[o.poolSize + j], sub: 'Δ' + j + (p.showRefs ? ' ×0' : ''), kind: 'dead' });
+      else dif.push({ sub: 'Δ' + j });
+    }
+
+    var movedTo = {};
+    s.moved.forEach(function (m) { movedTo[m.tree + ':' + m.k] = true; });
+    var rows = [
+      { id: 'vol', label: h('span', null, t('volRow')), aside: volAside, cells: vol },
+      { id: 'diff', label: h('span', null, t('diffRow')), aside: h('span', { class: 'cw-role' }, t('roleDiff')), cells: dif }
+    ];
+    shadowNames(p).forEach(function (name) {
+      var x = tree(s, name), gone = s.gone.indexOf(name) >= 0, cells = [];
+      if (!x) {
+        for (var k = 0; k < o.fileBlocks; k++) cells.push(null);
+        rows.push({ id: name, label: h('span', { class: gone ? 'cw-gone' : 'cw-none', translate: 'no' }, name),
+          aside: gone ? h('span', { class: 'cw-role' }, t('roleDropped')) : '', cells: cells });
+        return;
+      }
+      var xf = x.files[L.FILE];
+      for (var i = 0; i < o.fileBlocks; i++) {
+        if (!xf) { cells.push({}); continue; }
+        var xb = block(s, xf[i]);
+        cells.push({ text: xb.ver, sub: '→' + bid(s, xb.id), kind: xb.refs >= 2 ? 'soft' : 'fill', c: COLOUR[name],
+          now: !!movedTo[name + ':' + i] || (s.event === 'snapshot' && s.op.name === name) });
+      }
+      rows.push({ id: name, label: name, aside: h('span', { class: 'cw-role' }, rich('roleShadow', { time: data(x.time) })), cells: cells });
+    });
+
+    var links = s.copied.map(function (m) { return { from: { row: 'vol', cell: m.from }, to: { row: 'diff', cell: m.to - o.poolSize }, now: true }; });
+    if (s.event === 'restore' && s.from) {
+      var src = tree(s, s.from).files[L.FILE];
+      s.overwritten.forEach(function (id) {
+        var k = f.indexOf(id);
+        if (src[k] >= o.poolSize) links.push({ from: { row: 'diff', cell: src[k] - o.poolSize }, to: { row: 'vol', cell: id }, now: true });
+      });
+    }
+
+    var t0 = L.space(fs(s)), t1 = prev ? L.space(fs(prev)) : null;
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitleCow'),
+      meta: [t.n('poolOf', o.poolSize), t.n('fileOf', o.fileBlocks, { f: L.FILE }), t.n('diffOf', D)],
+      count: { text: t('count', { used: t0.used, total: t0.total }), hl: !!(t1 && t1.used !== t0.used) },
+      cols: Math.max(o.poolSize, o.fileBlocks, D),
+      colLabels: vol.map(function (x, i) { return String(i); }),
+      cellHeight: '2.9rem',
+      rows: rows, links: links,
+      foot: [versionsTable(c, t0, t1)]
+    });
+    c.stage.replaceChildren(h('div', { class: 'cw' }, grid));
+  }
+
+  /** The Previous Versions list (each shadow, when it was taken, the diff blocks it reads, available or deleted) and
+      the diff area's meter. */
+  function versionsTable(c, now, before) {
+    var s = c.state, p = c.params, prev = c.prev;
+    var inDiff = function (st, name) {
+      var x = st && tree(st, name);
+      if (!x || !x.files[L.FILE]) return x ? 0 : null;
+      return x.files[L.FILE].filter(function (id, i, a) { return id >= st.poolSize && a.indexOf(id) === i; }).length;
+    };
+    var cell = function (v, was, txt) { return h('td', { class: before && was !== v ? 'cw-now' : null }, txt != null ? txt : v === null ? '–' : String(v)); };
+    var body = shadowNames(p).map(function (name) {
+      var x = tree(s, name), gone = s.gone.indexOf(name) >= 0, wasGone = prev && prev.gone.indexOf(name) >= 0;
+      var st = x ? 'ok' : gone ? 'gone' : null, wasSt = prev ? (tree(prev, name) ? 'ok' : wasGone ? 'gone' : null) : st;
+      return h('tr', { dataset: { off: x ? null : 'true' } }, h('th', { translate: 'no' }, name),
+        h('td', { translate: 'no' }, takenAt(p, name)),
+        cell(inDiff(s, name), inDiff(prev, name)),
+        h('td', { class: before && st !== wasSt ? 'cw-now' : null, style: { fontFamily: 'inherit' } },
+          st === 'ok' ? t('stOk') : st === 'gone' ? t('stDropped') : '–'));
+    });
+    var table = h('table', { class: 'cw-table' },
+      h('thead', null, h('tr', null, h('th', null, t('thVersions')), h('th', null, t('thTaken')), h('th', null, t('thInDiff')), h('th', null, t('thState')))),
+      h('tbody', null, body));
+    var meter = Simdeck.blockGrid.meter({ total: now.diffTotal, parts: [{ n: now.diffUsed, kind: 'soft', c: SHARED }],
+      label: t('meterDiff'), text: t('meterText', { used: now.diffUsed, total: now.diffTotal }) });
+    return h('div', { class: 'cw-foot' }, table, meter);
+  }
+
+  // ── captions (copy-on-write mode) ──
+
+  function shadowBefore(c) {
+    var sc = L.script(c.params);
+    for (var i = 0; i < c.n - 1; i++) if (sc[i].op === 'snapshot') return true;
+    return false;
+  }
+  function namesN(list) { return { names: names(list), n: list.length }; }
+
+  function capDrops(c) {
+    var s = c.state, out = [];
+    if (!s.dropped.length) return out;
+    out = out.concat(sp(rich('capDrop', { names: names(s.dropped) }, s.dropped.length)));
+    var fr = s.freed.map(function (x) { return x.id; });
+    if (fr.length) out = out.concat(sp(rich('capDropFreed', { n: t.n('poolOf', fr.length), list: bids(s, fr) }, fr.length)));
+    return out;
+  }
+  function capDiffNow(s) {
+    var x = L.space(fs(s));
+    return sp(rich('capDiffNow', { used: x.diffUsed, total: x.diffTotal, vol: x.used }));
+  }
+
+  function capCowWrite(c) {
+    var s = c.state, time = data(s.op.time);
+    var ks = s.overwritten.map(function (id) { return tree(s, L.LIVE).files[L.FILE].indexOf(id); });
+    var out = rich('capCowHead', { time: time, list: data(ks.join(', ')), f: data(L.FILE) }, ks.length);
+    out = out.concat(capDrops(c));
+    var copiedKs = s.copied.map(function (m) { return m.k; });
+    if (s.copied.length) {
+      out = out.concat(sp(rich('capCowCopy', { to: bids(s, s.copied.map(function (m) { return m.to; })) }, s.copied.length)));
+      var who = [];
+      s.moved.forEach(function (m) { if (who.indexOf(m.tree) < 0) who.push(m.tree); });
+      out = out.concat(sp(rich('capCowWho', { names: names(who) }, who.length)));
+    }
+    var rest = ks.filter(function (k) { return copiedKs.indexOf(k) < 0; });
+    var kept = rest.filter(function (k) { return s.trees.some(function (x) { return x.readonly && x.files[L.FILE] && x.files[L.FILE][k] >= s.poolSize; }); });
+    var free = rest.filter(function (k) { return kept.indexOf(k) < 0; });
+    if (kept.length) out = out.concat(sp(rich('capCowKept', { list: data(kept.join(', ')) }, kept.length)));
+    if (free.length) out = out.concat(sp(rich('capCowFree', { list: data(free.join(', ')) }, free.length)));
+    return out.concat(capDiffNow(s));
+  }
+
+  function capRestore(c) {
+    var s = c.state, op = s.op;
+    var base = { time: data(op.time), f: data(L.FILE), before: data(op.before) };
+    if (s.event === 'restore-none') {
+      var lost = s.gone.filter(function (n) { return takenAt(c.params, n) < op.before; });
+      var out0 = rich('capRestoreNone', base);
+      if (lost.length) out0 = out0.concat(sp(rich('capRestoreLost', { names: names(lost) }, lost.length)));
+      return out0;
+    }
+    var name = data(s.from);
+    var out = rich('capRestorePick', Object.assign({ name: name }, base));
+    out = out.concat(sp(rich('capRestore', { name: name, taken: data(tree(s, s.from).time) })));
+    if (!s.overwritten.length) return out.concat(sp(rich('capRestoreSame')));
+    out = out.concat(capDrops(c));
+    if (s.copied.length) {
+      var who = [];
+      s.moved.forEach(function (m) { if (who.indexOf(m.tree) < 0) who.push(m.tree); });
+      out = out.concat(sp(rich('capRestoreCopy', { names: names(who) }, who.length)));
+    }
+    var ks = s.overwritten.map(function (id) { return tree(s, L.LIVE).files[L.FILE].indexOf(id); });
+    out = out.concat(sp(rich('capRestoreBlocks', { list: data(ks.join(', ')) }, ks.length)));
+    return out.concat(capDiffNow(s));
+  }
+
+  function captionCow(c) {
+    var s = c.state;
+    if (s.event === 'start') return rich('capStartCow', { pool: t.n('blocksOf', s.poolSize), diff: t.n('blocksOf', s.diffSize) });
+    if (s.event === 'create') return rich('capCreateCow', { time: data(s.op.time), f: data(L.FILE), n: t.n('poolOf', s.allocated.length), list: ids(s.allocated) });
+    if (s.event === 'snapshot') {
+      var n = (tree(s, L.LIVE).files[L.FILE] || []).length;
+      return rich('capShadow', { time: data(s.op.time), shadow: term('termShadow', shadowBefore(c)), name: data(s.op.name), n: t.n('blocksOf', n) });
+    }
+    if (s.event === 'overwrite') return capCowWrite(c);
+    if (s.event === 'restore' || s.event === 'restore-none') return capRestore(c);
+    return capError(c);
+  }
+
   Simdeck.mount({
     steps: L.steps,
     defaults: L.defaults,
@@ -369,10 +607,14 @@
     params: [
       { key: 'scene', type: 'select', label: t('scene'), resets: true,
         options: [['basic', t('presetBasic')], ['delete-doesnt-free', t('presetDelete')], ['middle-snapshot', t('presetMiddle')],
-          ['full-pool', t('presetFull')]],
+          ['full-pool', t('presetFull')], ['previous-versions', t('presetPrev')], ['diff-growth', t('presetGrowth')],
+          ['diff-full', t('presetDiffFull')]],
         visible: function () { return false; } },
       { key: 'fileBlocks', type: 'range', label: t('fileBlocks'), min: 4, max: 8, resets: true },
-      { key: 'poolSize', type: 'range', label: t('poolSize'), min: 10, max: 24, resets: true },
+      { key: 'poolSize', type: 'range', label: t('poolSize'), min: 10, max: 24, resets: true,
+        visible: function (q) { return L.mode(q) !== 'copy-on-write'; } },
+      { key: 'diffLimit', type: 'range', label: t('diffLimit'), min: 2, max: 8, resets: true,
+        visible: function (q) { return L.mode(q) === 'copy-on-write'; } },
       { key: 'showRefs', type: 'toggle', label: t('showRefs') }
     ],
 
@@ -380,23 +622,19 @@
       { id: 'basic', label: t('presetBasic'), params: { scene: 'basic' }, hint: t('presetBasicHint') },
       { id: 'delete-doesnt-free', label: t('presetDelete'), params: { scene: 'delete-doesnt-free' }, hint: t('presetDeleteHint') },
       { id: 'middle-snapshot', label: t('presetMiddle'), params: { scene: 'middle-snapshot' }, hint: t('presetMiddleHint') },
-      { id: 'full-pool', label: t('presetFull'), params: { scene: 'full-pool', poolSize: 10 }, hint: t('presetFullHint') }
+      { id: 'full-pool', label: t('presetFull'), params: { scene: 'full-pool', poolSize: 10 }, hint: t('presetFullHint') },
+      { id: 'previous-versions', label: t('presetPrev'), params: { scene: 'previous-versions', poolSize: 10, diffLimit: 8 }, hint: t('presetPrevHint') },
+      { id: 'diff-growth', label: t('presetGrowth'), params: { scene: 'diff-growth', poolSize: 10, diffLimit: 8 }, hint: t('presetGrowthHint') },
+      { id: 'diff-full', label: t('presetDiffFull'), params: { scene: 'diff-full', poolSize: 10, diffLimit: 4 }, hint: t('presetDiffFullHint') }
     ],
 
-    legend: [
-      { shape: 'hl', label: t('legChanged') },
-      { shape: 'under', label: t('legRefs') },
-      { shape: 'bg-soft', c: Number(SHARED), label: t('legShared') },
-      { shape: 'bg-fill', c: 1, label: t('legOwned') },
-      { shape: 'slot', label: t('legFree') },
-      { shape: 'bg-dead', label: t('legFreed') },
-      { shape: 'bg-link', label: t('legMoved') }
-    ],
+    legend: LEGEND,
 
     render: render,
 
     caption: function (c) {
       var s = c.state;
+      if (L.mode(c.params) === 'copy-on-write') return captionCow(c);
       if (s.event === 'start') return rich('capStart', { pool: t.n('blocksOf', s.poolSize), live: data(L.LIVE) });
       if (s.event === 'create') return capCreate(c);
       if (s.event === 'snapshot') return capSnap(c);

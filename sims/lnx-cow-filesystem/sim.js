@@ -8,7 +8,12 @@
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. The pool operations
    (write, snapshot, rm, destroy, recount, space) are pure functions over { blocks, trees, poolSize, writes } and
-   hold no words, so they can move to models/ unchanged (sto-cow-vs-row, win-vss as later presets, catalogue §5.2). */
+   hold no words, so they can move to models/ unchanged (sto-cow-vs-row, win-vss as later presets, catalogue §5.2).
+   Preset win-vss (Volume Shadow Copy, SPEC.md "Copy-on-write mode") adds the other variant: in mode
+   'copy-on-write' the live file's blocks never move; on the first change of a block a shadow still shares, the old
+   block is first copied into a separate diff area (ids poolSize … poolSize + diffSize − 1), the shadows' pointers move
+   to the copy, and the new data overwrites the original in place (writeInPlace, restore, pickShadow). The host's
+   scenes run in mode 'redirect-on-write' and are unchanged. */
 (function (root) {
   'use strict';
 
@@ -47,9 +52,41 @@
       { op: 'write', file: FILE, idx: [2] },
       { op: 'rm', file: FILE },
       { op: 'destroy', name: '@s1' }
+    ],
+    // win-vss (copy-on-write mode): a shadow copy is a snapshot with a time; restore takes the newest surviving shadow
+    // older than `before` (the time of the change to undo). Every op touches only blocks 0–3 (any fileBlocks 4–8).
+    'previous-versions': [
+      { op: 'write', file: FILE, time: '09:00' },
+      { op: 'snapshot', name: 'S1', time: '10:00' },
+      { op: 'write', file: FILE, idx: [2, 3], time: '10:30' },
+      { op: 'write', file: FILE, idx: [2], time: '10:45' },
+      { op: 'snapshot', name: 'S2', time: '11:00' },
+      { op: 'restore', file: FILE, before: '10:30', time: '11:30' }
+    ],
+    'diff-growth': [
+      { op: 'write', file: FILE, time: '09:00' },
+      { op: 'snapshot', name: 'S1', time: '10:00' },
+      { op: 'write', file: FILE, idx: [0], time: '10:15' },
+      { op: 'write', file: FILE, idx: [1], time: '10:30' },
+      { op: 'write', file: FILE, idx: [0], time: '10:45' },
+      { op: 'write', file: FILE, idx: [2, 3], time: '11:00' },
+      { op: 'write', file: FILE, idx: [0, 1, 2, 3], time: '11:15' }
+    ],
+    'diff-full': [
+      { op: 'write', file: FILE, time: '08:00' },
+      { op: 'snapshot', name: 'S1', time: '09:00' },
+      { op: 'write', file: FILE, idx: [0, 1], time: '09:30' },
+      { op: 'snapshot', name: 'S2', time: '10:00' },
+      { op: 'write', file: FILE, idx: [2, 3], time: '10:30' },
+      { op: 'snapshot', name: 'S3', time: '11:00' },
+      { op: 'write', file: FILE, idx: [0, 1], time: '11:30' },
+      { op: 'restore', file: FILE, before: '09:30', time: '12:00' },
+      { op: 'restore', file: FILE, before: '11:30', time: '12:15' }
     ]
   };
   var SCENE_IDS = Object.keys(SCENES);
+  /** The write policy of each scene: the host's scenes redirect, the win-vss scenes copy the old block first. */
+  var COW_SCENES = ['previous-versions', 'diff-growth', 'diff-full'];
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function findTree(fs, name) { for (var i = 0; i < fs.trees.length; i++) if (fs.trees[i].name === name) return fs.trees[i]; return null; }
@@ -70,6 +107,17 @@
     for (var id = 0; id < fs.poolSize; id++) if (!used[id]) out.push(id);
     return out;
   }
+
+  /** Copy-on-write mode: the free diff-area ids, lowest first (rule V7). */
+  function diffFreeIds(fs) {
+    var used = {}, out = [];
+    fs.blocks.forEach(function (b) { used[b.id] = true; });
+    for (var id = fs.poolSize; id < fs.poolSize + (fs.diffSize || 0); id++) if (!used[id]) out.push(id);
+    return out;
+  }
+  function isDiff(fs, id) { return id >= fs.poolSize; }
+  /** The shadows (read-only trees), oldest first. */
+  function shadows(fs) { return fs.trees.filter(function (t) { return t.readonly; }); }
 
   /** Recount every block's refs from the trees, then free the blocks with refs 0 (rules 3–5).
       Returns { fs, freed: [{ id, ver }], changed: ids whose refs changed (freed ones included) }. */
@@ -165,16 +213,114 @@
         exclusive: ids.filter(function (id) { return own[id] === refs[id]; }).length
       };
     });
-    var used = fs.blocks.length;
-    return {
+    var vol = fs.blocks.filter(function (b) { return b.id < fs.poolSize; });
+    var used = vol.length;
+    var out = {
       trees: trees, used: used, free: fs.poolSize - used, total: fs.poolSize,
-      shared: fs.blocks.filter(function (b) { return b.refs >= 2; }).length
+      shared: vol.filter(function (b) { return b.refs >= 2; }).length
     };
+    if (fs.diffSize) {                              // copy-on-write mode: the diff area beside the volume (rule V3)
+      out.diffUsed = fs.blocks.length - used;
+      out.diffFree = fs.diffSize - out.diffUsed;
+      out.diffTotal = fs.diffSize;
+    }
+    return out;
   }
 
   /** The trees pointing to block id, live first, then snapshots oldest first. */
   function holders(fs, id) {
     return fs.trees.filter(function (t) { return pointers(t).indexOf(id) >= 0; }).map(function (t) { return t.name; });
+  }
+
+  // ── copy-on-write mode (win-vss; SPEC.md "Copy-on-write mode", rules V1–V7) ──
+
+  /** Rules V2, V3, V6, V7: write logical blocks `idx` of `file` in the live tree in place. For each written block a
+      shadow still points to, the old block is first copied to the lowest free diff-area id (in logical order) and
+      every shadow pointer to it moves to the copy; then the new data overwrites the original. A block no shadow
+      shares (already preserved, or no shadow) is overwritten with no copy. If the diff area has too few free blocks,
+      the oldest shadow is dropped (rule V3) and the need is counted again, until it fits; `keep` names a shadow that
+      is never dropped (the source of a restore; rule V6). A restore never runs out: the blocks it writes differ from
+      the source, so every shadow sharing them can be dropped; the ENOSPC branch only guards a `keep` that does share
+      a written block, which no caller passes. `vers` (k → label) writes old contents back (restore) instead of a new version. A new file
+      (no such file yet, idx omitted) is written into the lowest free volume blocks, as in the host. */
+  function writeInPlace(fs, tree, file, idx, n, opts) {
+    opts = opts || {};
+    var t = findTree(fs, tree);
+    if (!t) return result(clone(fs), { err: 'ENOENT' });
+    if (t.readonly) return result(clone(fs), { err: 'EROFS' });
+    if (!Object.prototype.hasOwnProperty.call(t.files, file)) {
+      var c = write(fs, tree, file, idx, n);
+      return Object.assign(c, { copied: [], overwritten: [], dropped: [] });
+    }
+    var len = t.files[file].length, ks = [];
+    for (var k = 0; k < len; k++) if (!idx || idx.indexOf(k) >= 0) ks.push(k);
+    var out = clone(fs), dropped = [], freed = [];
+    var need = function () {
+      var lt = findTree(out, tree);
+      return ks.filter(function (k) {
+        var id = lt.files[file][k];
+        return shadows(out).some(function (sh) { return pointers(sh).indexOf(id) >= 0; });
+      });
+    };
+    var copyKs = need();
+    while (diffFreeIds(out).length < copyKs.length) {
+      var victim = shadows(out).filter(function (sh) { return sh.name !== opts.keep; })[0];
+      if (!victim) return result(clone(fs), { err: 'ENOSPC', want: ks, copied: [], overwritten: [], dropped: [] });
+      var d = destroy(out, victim.name);
+      out = d.fs;
+      dropped.push(victim.name);
+      freed = freed.concat(d.freed);
+      copyKs = need();
+    }
+    var lt = findTree(out, tree), free = diffFreeIds(out), copied = [], moved = [], allocated = [], overwritten = [];
+    if (!out.writes[file]) out.writes[file] = {};
+    copyKs.forEach(function (k, i) {
+      var id = lt.files[file][k], to = free[i];
+      out.blocks.push({ id: to, ver: findBlock(out, id).ver, refs: 0 });
+      copied.push({ k: k, from: id, to: to });
+      allocated.push(to);
+      shadows(out).forEach(function (sh) {
+        var f = sh.files[file];
+        if (f && f[k] === id) { f[k] = to; moved.push({ tree: sh.name, file: file, k: k, from: id, to: to }); }
+      });
+    });
+    ks.forEach(function (k) {
+      var b = findBlock(out, lt.files[file][k]);
+      if (opts.vers && opts.vers[k] !== undefined) b.ver = opts.vers[k];
+      else { var v = out.writes[file][k] || 0; out.writes[file][k] = v + 1; b.ver = label(k, v); }
+      overwritten.push(b.id);
+    });
+    out.blocks.sort(function (a, b) { return a.id - b.id; });
+    var r = recount(out);
+    var changed = r.changed.concat(freed.map(function (f) { return f.id; })).filter(function (id, i, a) { return a.indexOf(id) === i; }).sort(function (a, b) { return a - b; });
+    return result(r.fs, { moved: moved, allocated: allocated, freed: freed.concat(r.freed), changed: changed,
+      copied: copied, overwritten: overwritten, dropped: dropped });
+  }
+
+  /** Rule V4 tie-break: the newest surviving shadow taken before `before` ("HH:MM"); of two with the same time, the
+      one taken later (the larger id: shadows keep creation order). null when there is none. */
+  function pickShadow(fs, before) {
+    var best = null;
+    shadows(fs).forEach(function (sh) {
+      if (!(sh.time < before)) return;
+      if (!best || sh.time >= best.time) best = sh;                // later in the list wins a tie
+    });
+    return best ? best.name : null;
+  }
+
+  /** Rule V4: restore `file` in the live tree from shadow `from`: every block whose contents differ gets the shadow's
+      contents back, written in place like any other write (so a newer shadow that shares the live block keeps its
+      view: the current block is copied first). The source shadow is never dropped by this write. */
+  function restore(fs, file, from) {
+    var sh = findTree(fs, from), live = findTree(fs, LIVE);
+    if (!sh || !sh.readonly || !sh.files[file] || !live.files[file]) return result(clone(fs), { err: 'ENOENT', copied: [], overwritten: [], dropped: [] });
+    var vers = {}, ks = [];
+    sh.files[file].forEach(function (id, k) {
+      var old = findBlock(fs, id).ver, now = findBlock(fs, live.files[file][k]).ver;
+      if (old !== now) { vers[k] = old; ks.push(k); }
+    });
+    if (!ks.length) return result(clone(fs), { copied: [], overwritten: [], dropped: [] });
+    return writeInPlace(fs, LIVE, file, ks, undefined, { vers: vers, keep: from });
   }
 
   function norm(p) {
@@ -186,6 +332,13 @@
     };
   }
 
+  function mode(p) { return COW_SCENES.indexOf(norm(p).scene) >= 0 ? 'copy-on-write' : 'redirect-on-write'; }
+  /** The diff area's size limit in blocks (copy-on-write mode), 2–8. */
+  function diffLimit(p) {
+    var v = Math.round(Number(p.diffLimit));
+    return Number.isFinite(v) ? Math.min(8, Math.max(2, v)) : 8;
+  }
+
   function script(p) { return SCENES[norm(p).scene]; }
   function steps(p) { return script(p).length; }
   /** Every tree the scene ever has, in row order (the page keeps a row for each so the stage does not jump). */
@@ -195,37 +348,55 @@
     return out;
   }
 
-  function fsOf(s) { return { blocks: s.blocks, trees: s.trees, poolSize: s.poolSize, writes: s.writes }; }
+  function fsOf(s) {
+    var fs = { blocks: s.blocks, trees: s.trees, poolSize: s.poolSize, writes: s.writes };
+    if (s.diffSize) fs.diffSize = s.diffSize;
+    return fs;
+  }
 
   var logic = {
     LIVE: LIVE,
     FILE: FILE,
     SCENES: SCENES,
     SCENE_IDS: SCENE_IDS,
+    COW_SCENES: COW_SCENES,
 
-    /** Parameter defaults. scene: the preset script; fileBlocks: blocks in file a; poolSize: physical blocks. */
-    defaults: { scene: 'basic', fileBlocks: 8, poolSize: 24, showRefs: true },
+    /** Parameter defaults. scene: the preset script; fileBlocks: blocks in file a; poolSize: physical blocks;
+        diffLimit: the diff area's limit in blocks (copy-on-write scenes only). */
+    defaults: { scene: 'basic', fileBlocks: 8, poolSize: 24, showRefs: true, diffLimit: 8 },
 
     steps: steps,
     script: script,
     treeNames: treeNames,
+    mode: mode,
+    diffLimit: diffLimit,
 
     /** Step 0: an empty pool and the live tree with no files. */
     initial: function (p) {
       var o = norm(p);
-      return {
+      var s = {
         blocks: [], trees: [{ name: LIVE, readonly: false, files: {} }], poolSize: o.poolSize, writes: {},
         op: null, err: null, event: 'start', moved: [], allocated: [], freed: [], changed: [], gone: []
       };
+      if (mode(p) === 'copy-on-write') {
+        s.diffSize = diffLimit(p);
+        s.copied = []; s.overwritten = []; s.dropped = []; s.from = null;
+      }
+      return s;
     },
 
     /** Step n from step n − 1. */
     step: function (s, n, p) {
-      var o = norm(p), op = script(p)[n - 1];
-      var fs = fsOf(s), r;
-      if (op.op === 'write') r = write(fs, LIVE, op.file, op.idx, o.fileBlocks);
-      else if (op.op === 'snapshot') r = snapshot(fs, op.name);
-      else if (op.op === 'rm') r = rm(fs, LIVE, op.file);
+      var o = norm(p), op = script(p)[n - 1], cow = mode(p) === 'copy-on-write';
+      var fs = fsOf(s), r, from = null;
+      if (op.op === 'write') r = cow ? writeInPlace(fs, LIVE, op.file, op.idx, o.fileBlocks) : write(fs, LIVE, op.file, op.idx, o.fileBlocks);
+      else if (op.op === 'snapshot') {
+        r = snapshot(fs, op.name);
+        if (op.time) findTree(r.fs, op.name).time = op.time;
+      } else if (op.op === 'restore') {
+        from = pickShadow(fs, op.before);
+        r = from ? restore(fs, op.file, from) : result(clone(fs), { copied: [], overwritten: [], dropped: [] });
+      } else if (op.op === 'rm') r = rm(fs, LIVE, op.file);
       else r = destroy(fs, op.name);
       var out = clone(s);
       out.blocks = r.fs.blocks; out.trees = r.fs.trees; out.writes = r.fs.writes;
@@ -233,12 +404,23 @@
       out.err = r.err;
       out.want = r.want || [];
       out.moved = r.moved; out.allocated = r.allocated; out.freed = r.freed; out.changed = r.changed;
-      out.event = r.err ? 'error' : op.op === 'write' ? (op.idx ? 'overwrite' : 'create') : op.op;
+      out.event = r.err ? 'error' : op.op === 'write' ? (op.idx ? 'overwrite' : 'create')
+        : op.op === 'restore' ? (from ? 'restore' : 'restore-none') : op.op;
       if (op.op === 'destroy' && !r.err) out.gone = out.gone.concat([op.name]);
+      if (cow) {
+        out.copied = r.copied || []; out.overwritten = r.overwritten || []; out.dropped = r.dropped || [];
+        out.from = from;
+        if (out.dropped.length) out.gone = out.gone.concat(out.dropped);
+      }
       return out;
     },
 
     write: write,
+    writeInPlace: writeInPlace,
+    restore: restore,
+    pickShadow: pickShadow,
+    diffFreeIds: diffFreeIds,
+    isDiff: isDiff,
     snapshot: snapshot,
     rm: rm,
     destroy: destroy,

@@ -184,15 +184,19 @@ test('labels: letter = logical block, digit = times it was written before', () =
 });
 
 test('step counts per scene; every scene runs with every fileBlocks and poolSize', () => {
-  assert.deepEqual(logic.SCENE_IDS.map((id) => logic.steps(P({ scene: id }))), [3, 4, 7, 7]);
+  assert.deepEqual(logic.SCENE_IDS.map((id) => logic.steps(P({ scene: id }))), [3, 4, 7, 7, 6, 7, 9]);
   for (const scene of logic.SCENE_IDS) {
+    const cow = logic.mode(P({ scene })) === 'copy-on-write';
     for (let fb = 4; fb <= 8; fb++) {
       for (const ps of [10, 12, 24]) {
-        const p = P({ scene, fileBlocks: fb, poolSize: ps });
-        for (let n = 0; n <= logic.steps(p); n++) {
-          const s = kit.stateAt(logic, p, n), t = sp(s);
-          assert.ok(t.used <= ps && t.used + t.free === ps);
-          for (const b of s.blocks) assert.ok(b.refs >= 1 && b.id < ps);
+        for (const dl of cow ? [2, 3, 4, 8] : [8]) {
+          const p = P({ scene, fileBlocks: fb, poolSize: ps, diffLimit: dl });
+          for (let n = 0; n <= logic.steps(p); n++) {
+            const s = kit.stateAt(logic, p, n), t = sp(s);
+            assert.ok(t.used <= ps && t.used + t.free === ps);
+            for (const b of s.blocks) assert.ok(b.refs >= 1 && b.id < ps + (cow ? dl : 0));
+            if (cow) assert.ok(t.diffUsed <= dl && t.diffUsed + t.diffFree === dl);
+          }
         }
       }
     }
@@ -204,11 +208,169 @@ test('norm clamps params to the page ranges', () => {
   assert.deepEqual(logic.norm({ scene: 'nope', fileBlocks: 99, poolSize: 3 }), { scene: 'basic', fileBlocks: 8, poolSize: 10 });
 });
 
+// ── preset win-vss: copy-on-write mode (SPEC.md "Copy-on-write mode", rules V1–V7) ──
+
+const V = (scene, over) => Object.assign({ scene, poolSize: 10, diffLimit: scene === 'diff-full' ? 4 : 8 }, over);
+const view = (s, name) => tree(s, name).files.a.map((id) => s.blocks.find((b) => b.id === id).ver);
+const diffRun = (over) => { const p = P(over); const out = []; for (let n = 1; n <= logic.steps(p); n++) out.push(sp(at(over, n)).diffUsed); return out; };
+/** A copy-on-write fs: file a of 8 blocks in a volume of 10, a diff area of `d`, then the given ops. */
+const cowFs = (d) => Object.assign(pool(10, 8), { diffSize: d });
+const shadowAt = (fs, name, time) => { const r = logic.snapshot(fs, name).fs; r.trees.find((t) => t.name === name).time = time; return r; };
+
+test('tie-break (V7): copies take the lowest free diff-area ids, in logical order', () => {
+  const s = at(V('previous-versions'), 3);
+  assert.deepEqual(s.copied.map((c) => [c.k, c.from, c.to]), [[2, 2, 10], [3, 3, 11]]);
+  let fs = shadowAt(cowFs(8), 'S1', '10:00');
+  const r = logic.writeInPlace(fs, 'podaci', 'a', [5, 1, 5]);   // out of order and repeated: logical order, once each
+  assert.deepEqual(r.copied.map((c) => [c.k, c.to]), [[1, 10], [5, 11]]);
+  assert.deepEqual(logic.diffFreeIds(r.fs), [12, 13, 14, 15, 16, 17]);
+});
+
+test('tie-break (V4): restore takes the newest surviving shadow older than the time; same time → the later one', () => {
+  let fs = cowFs(8);
+  fs = shadowAt(fs, 'S1', '10:00');
+  fs = shadowAt(fs, 'S2', '11:00');
+  fs = shadowAt(fs, 'S3', '11:00');
+  assert.equal(logic.pickShadow(fs, '11:30'), 'S3');            // S2 and S3 share 11:00: the larger id
+  assert.equal(logic.pickShadow(fs, '11:00'), 'S1');            // strictly older than the time
+  assert.equal(logic.pickShadow(fs, '10:59'), 'S1');
+  assert.equal(logic.pickShadow(fs, '10:00'), null);
+  fs = logic.destroy(fs, 'S1').fs;
+  assert.equal(logic.pickShadow(fs, '10:59'), null);            // a dropped shadow is no longer a previous version
+  assert.equal(at(V('previous-versions'), 6).from, 'S1');
+  assert.equal(at(V('diff-full'), 9).from, 'S3');
+});
+
+test('tie-break (V3): a full diff area drops the oldest shadow first, then the next, until the copies fit', () => {
+  const s = at(V('diff-full'), 7);
+  assert.deepEqual(s.dropped, ['S1']);
+  assert.deepEqual(s.trees.map((t) => t.name), ['podaci', 'S2', 'S3']);
+  assert.deepEqual(s.gone, ['S1']);
+  // limit 2: the copies of step 5 (2) do not fit beside step 3's (2): S1 goes, and S2 then holds nothing old
+  const s5 = at(V('diff-full', { diffLimit: 2 }), 5);
+  assert.deepEqual(s5.dropped, ['S1']);
+  assert.deepEqual(sp(s5).diffUsed, 2);
+  // two shadows to drop in one write: three shadows of single-block changes, then a 3-block write with limit 3
+  let fs = cowFs(3);
+  fs = shadowAt(fs, 'S1', '09:00'); fs = logic.writeInPlace(fs, 'podaci', 'a', [0]).fs;
+  fs = shadowAt(fs, 'S2', '10:00'); fs = logic.writeInPlace(fs, 'podaci', 'a', [1]).fs;
+  fs = shadowAt(fs, 'S3', '11:00'); fs = logic.writeInPlace(fs, 'podaci', 'a', [2]).fs;
+  assert.equal(logic.space(fs).diffUsed, 3);
+  const r = logic.writeInPlace(fs, 'podaci', 'a', [3, 4, 5]);
+  assert.deepEqual(r.dropped, ['S1', 'S2', 'S3']);              // all three go: S3 alone still needs 3 copies with 2 free
+  assert.deepEqual(r.copied, []);                               // no shadow left: nothing to preserve
+});
+
+test('rule V1: a shadow keeps the volume\'s contents of the moment it was taken', () => {
+  for (const scene of logic.COW_SCENES) {
+    const p = V(scene), sc = logic.script(P(p));
+    sc.forEach((o, i) => {
+      if (o.op !== 'snapshot') return;
+      const then = view(at(p, i + 1), 'podaci');
+      for (let n = i + 1; n <= sc.length; n++) {
+        const s = at(p, n);
+        if (tree(s, o.name)) assert.deepEqual(view(s, o.name), then, scene + ' ' + o.name + ' at step ' + n);
+      }
+    });
+  }
+  assert.equal(tree(at(V('previous-versions'), 2), 'S1').time, '10:00');
+});
+
+test('rule V2: first change after a shadow copies the old block to the diff area, then overwrites in place', () => {
+  const p = V('previous-versions'), s = at(p, 3);
+  assert.deepEqual(ptr(s, 'podaci'), [0, 1, 2, 3, 4, 5, 6, 7]);   // the live pointers never move
+  assert.deepEqual(view(s, 'podaci'), ['A0', 'B0', 'C1', 'D1', 'E0', 'F0', 'G0', 'H0']);
+  assert.deepEqual(ptr(s, 'S1'), [0, 1, 10, 11, 4, 5, 6, 7]);      // the shadow's pointer moves to the copy
+  assert.deepEqual(s.moved.map((m) => [m.tree, m.k, m.from, m.to]), [['S1', 2, 2, 10], ['S1', 3, 3, 11]]);
+  assert.deepEqual(s.overwritten, [2, 3]);
+  assert.deepEqual(s.allocated, [10, 11]);
+  assert.deepEqual([sp(s).used, sp(s).diffUsed, sp(s).shared], [8, 2, 6]);
+  // the second change of the same block: already preserved, in place only
+  const s4 = at(p, 4);
+  assert.deepEqual([s4.copied, s4.overwritten, sp(s4).diffUsed], [[], [2], 2]);
+  assert.deepEqual(view(s4, 'S1').slice(2, 4), ['C0', 'D0']);
+  // a block shared by two shadows is copied once, and both point to the copy
+  const f5 = at(V('diff-full'), 5);
+  assert.deepEqual(f5.copied.map((c) => c.to), [12, 13]);
+  assert.deepEqual(ptr(f5, 'S1').slice(2, 4), [12, 13]);
+  assert.deepEqual(ptr(f5, 'S2').slice(2, 4), [12, 13]);
+  assert.equal(f5.blocks.find((b) => b.id === 12).refs, 2);
+  // with no shadow nothing is copied
+  const r = logic.writeInPlace(cowFs(8), 'podaci', 'a', [0]);
+  assert.deepEqual([r.copied, r.overwritten, logic.space(r.fs).diffUsed], [[], [0], 0]);
+});
+
+test('rule V3: the diff area grows with the blocks changed since the shadow, not with the volume', () => {
+  assert.deepEqual(diffRun(V('diff-growth')), [0, 0, 1, 2, 2, 4, 4]);
+  assert.deepEqual(diffRun(V('diff-growth', { poolSize: 24 })), [0, 0, 1, 2, 2, 4, 4]);
+  assert.deepEqual(usedRun(V('diff-growth')), [8, 8, 8, 8, 8, 8, 8]);
+  assert.deepEqual(diffRun(V('previous-versions')), [0, 0, 2, 2, 2, 4]);
+  assert.deepEqual(diffRun(V('diff-full')), [0, 0, 2, 2, 4, 4, 4, 4, 4]);
+  // dropping S1 freed exactly the copies only it held (A0, B0); C0, D0 (shared with S2) stay
+  const s7 = at(V('diff-full'), 7);
+  assert.deepEqual(s7.freed, [{ id: 10, ver: 'A0' }, { id: 11, ver: 'B0' }]);
+  assert.deepEqual(s7.blocks.filter((b) => b.id >= 10).map((b) => [b.id, b.ver, b.refs]), [[10, 'A1', 2], [11, 'B1', 2], [12, 'C0', 1], [13, 'D0', 1]]);
+});
+
+test('rule V4: restore puts the shadow\'s contents back in place; a newer shadow keeps its own view', () => {
+  const p = V('previous-versions'), before = at(p, 5), s = at(p, 6);
+  assert.equal(s.event, 'restore');
+  assert.deepEqual(view(s, 'podaci'), view(before, 'S1'));
+  assert.deepEqual(ptr(s, 'podaci'), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(s.overwritten, [2, 3]);                        // only the blocks that differ
+  assert.deepEqual(view(s, 'S2'), view(before, 'S2'));          // C2, D1 copied first: S2 still has them
+  assert.deepEqual(s.copied.map((c) => [c.k, c.to]), [[2, 12], [3, 13]]);
+  assert.deepEqual(view(s, 'S1'), view(before, 'S1'));          // the source is unchanged
+  // restore-none: no surviving shadow older than the time; nothing changes
+  const f = V('diff-full'), f7 = at(f, 7), f8 = at(f, 8);
+  assert.deepEqual([f8.event, f8.from], ['restore-none', null]);
+  assert.deepEqual([f8.blocks, f8.trees], [f7.blocks, f7.trees]);
+  // restoring from a shadow whose contents equal the live ones writes nothing
+  const fs = shadowAt(cowFs(8), 'S1', '10:00');
+  const r = logic.restore(fs, 'a', 'S1');
+  assert.deepEqual([r.overwritten, r.copied, r.fs], [[], [], fs]);
+});
+
+test('rule V6: a restore never drops its own source; the next oldest shadow goes instead', () => {
+  let h = cowFs(1);
+  h = shadowAt(h, 'S1', '09:00');
+  h = logic.writeInPlace(h, 'podaci', 'a', [0]).fs;              // A0 copied for S1: the diff area (1) is full
+  h = shadowAt(h, 'S2', '10:00');                                 // shares A1 in block 0
+  const q = logic.restore(h, 'a', 'S1');                          // A1 needs a copy for S2: S1 is the oldest, but kept
+  assert.equal(q.err, null);
+  assert.deepEqual(q.dropped, ['S2']);
+  assert.deepEqual(q.fs.trees.map((t) => t.name), ['podaci', 'S1']);
+  assert.deepEqual(q.copied, []);                                 // S2 gone: nothing left to preserve
+  assert.equal(q.fs.blocks.find((b) => b.id === 0).ver, 'A0');
+  // a plain write keeps no shadow: the oldest goes first
+  const w = logic.writeInPlace(h, 'podaci', 'a', [0]);
+  assert.deepEqual(w.dropped, ['S1']);
+  assert.deepEqual(w.copied.map((c) => [c.k, c.to]), [[0, 10]]);
+});
+
+test('copy-on-write mode is the win-vss scenes\' only; the host\'s scenes have no diff area', () => {
+  assert.deepEqual(logic.COW_SCENES.map((id) => logic.mode(P({ scene: id }))), Array(3).fill('copy-on-write'));
+  for (const id of ['basic', 'delete-doesnt-free', 'middle-snapshot', 'full-pool']) {
+    assert.equal(logic.mode(P({ scene: id })), 'redirect-on-write');
+    const s = at({ scene: id }, logic.steps(P({ scene: id })));
+    assert.equal(s.diffSize, undefined);
+    assert.equal('copied' in s, false);
+    assert.equal('diffUsed' in sp(s), false);
+  }
+  assert.equal(at(V('diff-full'), 0).diffSize, 4);
+  assert.deepEqual([logic.diffLimit({ diffLimit: 99 }), logic.diffLimit({ diffLimit: 0 }), logic.diffLimit({})], [8, 2, 8]);
+  const ev = (over) => { const p = P(over); const out = []; for (let n = 0; n <= logic.steps(p); n++) out.push(at(over, n).event); return out; };
+  assert.deepEqual(ev(V('previous-versions')), ['start', 'create', 'snapshot', 'overwrite', 'overwrite', 'snapshot', 'restore']);
+  assert.deepEqual(ev(V('diff-full')).slice(7), ['overwrite', 'restore-none', 'restore']);
+  assert.deepEqual(at(V('diff-full'), 8).dropped, []);            // what each step did is this step's only
+  assert.deepEqual(at(V('diff-full'), 8).copied, []);
+});
+
 // ── generic checks every sim keeps ──
 
 test('state is JSON-safe at every step', () => {
   for (const scene of logic.SCENE_IDS) {
-    const p = P({ scene, poolSize: 10 });
+    const p = P({ scene, poolSize: 10, diffLimit: 3 });
     for (let n = 0; n <= logic.steps(p); n++) {
       const s = kit.stateAt(logic, p, n);
       assert.deepEqual(JSON.parse(JSON.stringify(s)), s);

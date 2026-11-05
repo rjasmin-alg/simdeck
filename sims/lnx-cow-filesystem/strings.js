@@ -90,6 +90,88 @@
       enospc: 'No space left on device',
       and: ' i ',
 
+      // ── preset win-vss (copy-on-write mode: shadow copies, the diff area, Previous Versions) ──
+      subtitleCow: 'Sjenovite kopije: stari blok se prvo kopira, a novi podaci idu na isto mjesto',
+      presetPrev: 'Prethodne verzije',
+      presetPrevHint: 'Sjena S1, izmjena, pa vraćanje iz S1: stari blokovi čekaju u diferencijalnom području.',
+      presetGrowth: 'Rast područja',
+      presetGrowthHint: 'Izmjene nakon jedne sjene: područje raste za promijenjene blokove, ne za cijeli svezak.',
+      presetDiffFull: 'Puno područje',
+      presetDiffFullHint: 'Područje od 4 bloka: najstarija sjena se briše i njezina verzija nestaje.',
+      diffLimit: 'Diferencijalno područje (blokova)',
+
+      gridTitleCow: 'Svezak',
+      diffOf: ['diferencijalno područje: najviše {n} blok', 'diferencijalno područje: najviše {n} bloka', 'diferencijalno područje: najviše {n} blokova'],
+      volRow: 'svezak',
+      diffRow: 'dif. područje',
+      roleVol: 'živi podaci',
+      roleDiff: 'stari blokovi',
+      roleShadow: '{time} · samo za čitanje',
+      roleDropped: 'obrisana',
+      thVersions: 'Prethodne verzije',
+      thTaken: 'snimljena',
+      thInDiff: 'u području',
+      thState: 'stanje',
+      stOk: 'dostupna',
+      stDropped: 'obrisana',
+      meterDiff: 'Diferencijalno područje',
+      meterText: '{used} od {total}',
+
+      legChangedCow: 'kopirano, prepisano ili vraćeno',
+      legSharedCow: 'dijeljen (×n)',
+      legLive: 'samo na svesku',
+      legCopy: 'kopija jedne sjene (njezina boja)',
+      legMovedCow: 'kopiranje ili vraćanje',
+
+      termShadow: '*shadow copy* (sjenovita kopija)',
+      termShadowLater: '*shadow copy*',
+
+      capStartCow: 'Svezak od {pool} i prazno diferencijalno područje od najviše {diff}. Pritisni → za prvi korak.',
+      capCreateCow: 'U {time} na svezak se upisuje datoteka {f}: {n} ({list}).',
+      capShadow: 'U {time} uzima se {shadow} {name}. Ne kopira se nijedan blok: {name} pamti svezak u tom trenutku i zasad dijeli svih {n} sa živim podacima.',
+      capCowHead: ['U {time} piše se blok {list} datoteke {f}.', 'U {time} pišu se blokovi {list} datoteke {f}.', 'U {time} pišu se blokovi {list} datoteke {f}.'],
+      capCowCopy: ['Pri prvoj izmjeni nakon sjene stari se blok kopira u diferencijalno područje ({to}), pa se original prepiše.',
+        'Pri prvoj izmjeni nakon sjene stari se blokovi kopiraju u diferencijalno područje ({to}), pa se originali prepišu.',
+        'Pri prvoj izmjeni nakon sjene stari se blokovi kopiraju u diferencijalno područje ({to}), pa se originali prepišu.'],
+      capCowWho: ['Sjena {names} od sad stare podatke čita odande.', 'Sjene {names} od sad stare podatke čitaju odande.', 'Sjene {names} od sad stare podatke čitaju odande.'],
+      capCowKept: ['Blok {list} već je sačuvan u području, pa se samo prepiše na mjestu.', 'Blokovi {list} već su sačuvani u području, pa se samo prepišu na mjestu.',
+        'Blokovi {list} već su sačuvani u području, pa se samo prepišu na mjestu.'],
+      capCowFree: ['Blok {list} ne dijeli nijedna sjena, pa se prepiše na mjestu.', 'Blokove {list} ne dijeli nijedna sjena, pa se prepišu na mjestu.',
+        'Blokove {list} ne dijeli nijedna sjena, pa se prepišu na mjestu.'],
+      capDrop: ['Diferencijalno područje je puno, pa se prvo briše najstarija sjena {names} i njezina prethodna verzija nestaje.',
+        'Diferencijalno područje je puno, pa se prvo brišu najstarije sjene {names} i njihove prethodne verzije nestaju.',
+        'Diferencijalno područje je puno, pa se prvo brišu najstarije sjene {names} i njihove prethodne verzije nestaju.'],
+      capDropFreed: ['Oslobađa se {n} koji nijedna druga sjena ne treba ({list}).', 'Oslobađaju se {n} koje nijedna druga sjena ne treba ({list}).',
+        'Oslobađa se {n} koje nijedna druga sjena ne treba ({list}).'],
+      capDiffNow: 'Diferencijalno područje: {used} od {total}; na svesku je i dalje zauzeto {vol}.',
+      capRestorePick: 'U {time} traži se verzija datoteke {f} od prije {before}: najnovija takva sjena je {name}.',
+      capRestore: 'Vraćanje iz sjene {name}: datoteka se vraća na sadržaj od {taken}.',
+      capRestoreBlocks: ['Blok {list} prepisuje se na mjestu kopijom iz područja.', 'Blokovi {list} prepisuju se na mjestu kopijama iz područja.',
+        'Blokovi {list} prepisuju se na mjestu kopijama iz područja.'],
+      capRestoreCopy: ['Prije toga se trenutni sadržaj kopira za sjenu {names}, pa se i zamijenjena verzija može vratiti.',
+        'Prije toga se trenutni sadržaj kopira za sjene {names}, pa se i zamijenjena verzija može vratiti.',
+        'Prije toga se trenutni sadržaj kopira za sjene {names}, pa se i zamijenjena verzija može vratiti.'],
+      capRestoreSame: 'Datoteka se ne razlikuje od te verzije, pa se ništa ne piše.',
+      capRestoreNone: 'U {time} traži se verzija datoteke {f} od prije {before}, ali nijedna preostala sjena nije toliko stara. Ništa se ne mijenja.',
+      capRestoreLost: ['Imala ju je sjena {names}, obrisana kad se područje napunilo: prethodne verzije nisu sigurnosna kopija.',
+        'Imale su je sjene {names}, obrisane kad se područje napunilo: prethodne verzije nisu sigurnosna kopija.',
+        'Imale su je sjene {names}, obrisane kad se područje napunilo: prethodne verzije nisu sigurnosna kopija.'],
+
+      explainCow: '<p>Windowsov <em lang="en">Volume Shadow Copy</em> radi drugačije od Btrfsa i ZFS-a: živi podaci ' +
+        'ostaju na svom mjestu. <em lang="en">Shadow copy</em> (sjenovita kopija) pamti svezak u jednom trenutku, ali ' +
+        'ne kopira ništa dok se blok ne promijeni. Pri prvoj izmjeni bloka nakon sjene stari se blok prvo kopira u ' +
+        '<b>diferencijalno područje</b>, pa se original prepiše na mjestu (<em lang="en">copy-on-write</em>). Sljedeće ' +
+        'izmjene istog bloka više ne kopiraju ništa.</p>' +
+        '<p>Područje zato raste s brojem promijenjenih blokova, a ne s veličinom sveska. Ima gornju granicu; kad se ' +
+        'napuni, brišu se najstarije sjene. Kartica <em lang="en">Previous Versions</em> (prethodne verzije) nudi ' +
+        'datoteku iz svake preostale sjene; vraćanje prepiše živu datoteku starim sadržajem, a i to je obično pisanje.</p>' +
+        '<p>Tri zablude: sjena je puna druga kopija (čuva samo promijenjene blokove); prethodne verzije su sigurnosna ' +
+        'kopija (sjene su po zadanom na istom svesku, pa ne prežive njegov gubitak ni napadača koji ih obriše); ' +
+        '<em lang="en">copy-on-write</em> i preusmjeravanje pri pisanju su isto (ovdje se kopira stari blok, a u ' +
+        'primjerima s bazenom novi podaci idu u novi blok).</p>' +
+        '<p>Izvan ovog prikaza: pisci i tražitelji (<em lang="en">writers</em>, <em lang="en">requesters</em>) i ' +
+        'umirivanje aplikacija, raspored snimanja i područje na drugom svesku.</p>',
+
       explain: '<p>U datotečnom sustavu s <em lang="en">copy-on-write</em> (kopiranje pri pisanju), kakvi su Btrfs i ZFS, ' +
         'datoteka je popis pokazivača na blokove u bazenu. Stablo <span translate="no">podaci</span> je živi ' +
         '<em lang="en">subvolume</em> (podvolumen) u Btrfsu, odnosno <em lang="en">dataset</em> (skup podataka) u ZFS-u.</p>' +
@@ -185,6 +267,79 @@
       capUsed: 'In use: {used} of {total}.',
       enospc: 'No space left on device',
       and: ' and ',
+
+      // ── preset win-vss ──
+      subtitleCow: 'Shadow copies: the old block is copied first, the new data goes in place',
+      presetPrev: 'Previous Versions',
+      presetPrevHint: 'Shadow S1, a change, then a restore from S1: the old blocks wait in the diff area.',
+      presetGrowth: 'Diff area growth',
+      presetGrowthHint: 'Changes after one shadow: the area grows by the changed blocks, not by the volume.',
+      presetDiffFull: 'Full diff area',
+      presetDiffFullHint: 'A diff area of 4 blocks: the oldest shadow is deleted and its version is gone.',
+      diffLimit: 'Diff area (blocks)',
+
+      gridTitleCow: 'Volume',
+      diffOf: ['diff area: at most {n} block', 'diff area: at most {n} blocks'],
+      volRow: 'volume',
+      diffRow: 'diff area',
+      roleVol: 'live data',
+      roleDiff: 'old blocks',
+      roleShadow: '{time} · read-only',
+      roleDropped: 'deleted',
+      thVersions: 'Previous versions',
+      thTaken: 'taken',
+      thInDiff: 'in diff area',
+      thState: 'state',
+      stOk: 'available',
+      stDropped: 'deleted',
+      meterDiff: 'Diff area',
+      meterText: '{used} of {total}',
+
+      legChangedCow: 'copied, overwritten or restored',
+      legSharedCow: 'shared (×n)',
+      legLive: 'on the volume only',
+      legCopy: 'copy for one shadow (its colour)',
+      legMovedCow: 'copy or restore',
+
+      termShadow: 'shadow copy',
+      termShadowLater: 'shadow copy',
+
+      capStartCow: 'A volume of {pool} and an empty diff area of at most {diff}. Press → for the first step.',
+      capCreateCow: 'At {time}, file {f} is written to the volume: {n} ({list}).',
+      capShadow: 'At {time}, {shadow} {name} is taken. No block is copied: {name} keeps the volume as it is at this moment and for now shares all {n} with the live data.',
+      capCowHead: ['At {time}, block {list} of file {f} is written.', 'At {time}, blocks {list} of file {f} are written.'],
+      capCowCopy: ['On the first change after a shadow, the old block is copied to the diff area ({to}), then the original is overwritten.',
+        'On the first change after a shadow, the old blocks are copied to the diff area ({to}), then the originals are overwritten.'],
+      capCowWho: ['Shadow {names} now reads the old data from there.', 'Shadows {names} now read the old data from there.'],
+      capCowKept: ['Block {list} is already preserved, so it is only overwritten in place.', 'Blocks {list} are already preserved, so they are only overwritten in place.'],
+      capCowFree: ['No shadow shares block {list}, so it is overwritten in place.', 'No shadow shares blocks {list}, so they are overwritten in place.'],
+      capDrop: ['The diff area is full, so the oldest shadow {names} is deleted first, and its previous version is gone.',
+        'The diff area is full, so the oldest shadows {names} are deleted first, and their previous versions are gone.'],
+      capDropFreed: ['That frees {n} no other shadow needs ({list}).', 'That frees {n} no other shadow needs ({list}).'],
+      capDiffNow: 'Diff area: {used} of {total}; the volume still has {vol} in use.',
+      capRestorePick: 'At {time}, the version of file {f} from before {before} is wanted: the newest such shadow is {name}.',
+      capRestore: 'Restore from shadow {name}: the file returns to its {taken} contents.',
+      capRestoreBlocks: ['Block {list} is overwritten in place with the copy from the diff area.', 'Blocks {list} are overwritten in place with the copies from the diff area.'],
+      capRestoreCopy: ['First the current contents are copied for shadow {names}, so the replaced version can be restored too.',
+        'First the current contents are copied for shadows {names}, so the replaced version can be restored too.'],
+      capRestoreSame: 'The file does not differ from that version, so nothing is written.',
+      capRestoreNone: 'At {time}, the version of file {f} from before {before} is wanted, but no remaining shadow is that old. Nothing changes.',
+      capRestoreLost: ['Shadow {names} had it, deleted when the diff area filled up: previous versions are not a backup.',
+        'Shadows {names} had it, deleted when the diff area filled up: previous versions are not a backup.'],
+
+      explainCow: '<p>Windows Volume Shadow Copy works differently from Btrfs and ZFS: the live data stays where it is. A ' +
+        'shadow copy keeps the volume as it was at one moment, but copies nothing until a block changes. On the first ' +
+        'change of a block after a shadow, the old block is first copied to the <b>diff area</b>, then the original is ' +
+        'overwritten in place (copy-on-write). Later changes of the same block copy nothing more.</p>' +
+        '<p>So the diff area grows with the number of changed blocks, not with the size of the volume. It has a limit; ' +
+        'when it is full, the oldest shadows are deleted. The Previous Versions tab offers the file from every remaining ' +
+        'shadow; a restore overwrites the live file with the old contents, and that is an ordinary write too.</p>' +
+        '<p>Three misconceptions: a shadow is a full second copy (it keeps only the changed blocks); previous versions ' +
+        'are a backup (by default the shadows are on the same volume, so they survive neither its loss nor an attacker ' +
+        'who deletes them); copy-on-write and redirect-on-write are the same (here the old block is copied, in the pool ' +
+        'examples the new data goes to a new block).</p>' +
+        '<p>Not shown: writers and requesters and application quiescing, scheduling, and a diff area on another ' +
+        'volume.</p>',
 
       explain: '<p>In a copy-on-write filesystem such as Btrfs or ZFS, a file is a list of pointers to blocks in a pool. ' +
         'The tree <span translate="no">podaci</span> is the live subvolume in Btrfs, or the dataset in ZFS.</p>' +

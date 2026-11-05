@@ -92,3 +92,69 @@ Defaults = preset 1: `sim.json` `steps` 3.
 - `poolSize` range **10–24**, not 12–24: preset 4 (`full-pool`) uses a pool of 10.
 - Overwriting two blocks in one step (preset 1) needs two free blocks (rule 3 applied per block: the old blocks are
   freed only after the whole write).
+
+## Copy-on-write mode: preset `win-vss` (Volume Shadow Copy, "Previous Versions")
+
+Task `docs/tasks/w3/win-vss.md`, catalogue `win-vss` (§4.5.7, overlap §5.2). Scenes `previous-versions`,
+`diff-growth`, `diff-full` run in mode **`copy-on-write`** (`logic.mode(p)`); the four scenes above run in
+`redirect-on-write` and are unchanged (test "copy-on-write mode is the win-vss scenes' only").
+
+**Model, added.** The same `{ blocks, trees, poolSize, writes }`, plus `diffSize` (= `diffLimit`, 2–8): the **diff
+area**, block ids `poolSize … poolSize + diffSize − 1`, shown as Δ0, Δ1, …; the volume keeps ids `0 … poolSize − 1`.
+A **shadow copy** is a read-only tree (the host's snapshot) with a `time` ("HH:MM"). The live tree's pointers never
+move: file `a` stays in volume blocks 0 … fileBlocks − 1. A shadow's pointer goes either to the live block (shared,
+unchanged since the shadow) or to a diff-area copy. Ops: `write` (in place, `writeInPlace`), `snapshot` with `time`,
+`restore` with `before` (the time of the change to undo). Step state adds `copied` ([{ k, from, to }]),
+`overwritten` (volume ids written in place), `dropped` (shadows deleted this step), `from` (the restore's source);
+`gone` also lists dropped shadows. Events add `restore` and `restore-none`.
+
+**Rules** (Microsoft documentation, read from memory, not re-read: every one *(check)*, NOTES.md):
+
+- **V1 Point in time.** A shadow keeps the volume's contents of the moment it was taken, whatever is written later
+  (Microsoft *Volume Shadow Copy Service*). Taking one copies no block.
+- **V2 Copy-on-write.** On the first change of a block that a shadow still shares, the old block is first copied to
+  the lowest free diff-area block, every shadow pointer to it moves to the copy, then the new data overwrites the
+  original **in place**. A block no shadow shares (already preserved, or no shadow) is overwritten with no copy. A
+  block several shadows share is copied once and all of them point to the copy (Microsoft *How Volume Shadow Copy
+  Service works*, copy-on-write; Windows keeps the copy with the newest shadow and older ones read through it: the
+  same space).
+- **V3 Diff area.** It grows by the blocks changed since the shadows, not with the volume's size; it has a limit
+  (`diffLimit`), and when a write needs more copies than there are free diff blocks, the **oldest shadow is deleted**
+  (its copies that no other shadow points to are freed) and the need is counted again, until the copies fit
+  (Microsoft *Shadow copy storage*, the maximum size; "when the limit is reached, older shadow copies are deleted")
+  *(check the exact behaviour)*.
+- **V4 Restore (Previous Versions).** Restoring file `a` from a shadow writes the shadow's contents back into the live
+  blocks that differ, in place, like any other write (V2: a newer shadow that shares a live block gets a copy of the
+  current contents first). The live pointers stay. Reading previous versions needs no admin rights (Microsoft
+  *Previous Versions*) *(check)*; not modelled.
+- **V5 Same volume.** By default the diff area is on the same volume, so shadows are not a backup: they are lost with
+  the volume and can be deleted by anyone who controls the host (link `ransomware-321`). Text only (captions,
+  explanation); the model has no volume loss.
+- **V6 A restore never deletes its own source.** When the diff area is full during a restore, the oldest shadow
+  *other than the source* is deleted. A restore cannot run out: the blocks it writes differ from the source, so every
+  shadow sharing them can be deleted. Derived.
+- **V7 Tie-breaks.** Copies take the lowest free diff ids, given to the written blocks in ascending logical order;
+  shadows are deleted oldest first; a restore takes the **newest surviving shadow taken strictly before** `before`,
+  and of two with the same time the one taken later (the larger id) (task file). None → `restore-none`, nothing
+  changes. Only the blocks whose contents differ are restored (a simplification: a real restore copies the whole
+  file).
+
+**Params added:** `diffLimit` 2–8, default 8, resets (shown in copy-on-write scenes only; `poolSize` is hidden
+there and the presets set 10). `mode` is the scene's, not a param (below).
+
+**Presets and expected numbers** (`fileBlocks` 8, `poolSize` 10; printed by a node script over the model, NOTES.md,
+asserted in `sim.test.js`). Every op touches only blocks 0–3, so every scene runs with every `fileBlocks`.
+
+| # | preset | steps | diff area used after each step | other numbers |
+|---|---|---|---|---|
+| 5 | `previous-versions` (`diffLimit` 8) | **6** | 0 → 0 → 2 → 2 → 2 → 4 | 1 write a 09:00; 2 S1 10:00; 3 write 2, 3 at 10:30: C0, D0 → Δ0, Δ1, live C1, D1 in place; 4 write 2 at 10:45: C2 in place, no copy; 5 S2 11:00; 6 restore from before 10:30 → S1: C2, D1 copied to Δ2, Δ3 for S2, live 2, 3 back to C0, D0. Volume used 8 throughout |
+| 6 | `diff-growth` (`diffLimit` 8) | **7** | 0 → 0 → 1 → 2 → 2 → 4 → 4 | writes 0; 1; 0 again (no copy); 2, 3; 0–3 (all preserved, no copy). Same numbers with `poolSize` 24; volume used 8 throughout |
+| 7 | `diff-full` (`diffLimit` 4) | **9** | 0 → 0 → 2 → 2 → 4 → 4 → 4 → 4 → 4 | S1 09:00, write 0, 1; S2 10:00, write 2, 3 (C0, D0 shared by S1, S2); S3 11:00; 7 write 0, 1 at 11:30: full → S1 deleted, frees Δ0, Δ1 (A0, B0), A1, B1 copied there for S2, S3; 8 restore from before 09:30: none left (`restore-none`); 9 restore from before 11:30 → S3: blocks 0, 1 back to A1, B1, no copy |
+
+## Deviations from the task (win-vss)
+
+- **`mode` is the scene's, not a param.** Each scene is written for one policy (the host's `rm` and `destroy` have no
+  meaning on a VSS volume), so `logic.mode(p)` follows the scene. `sto-cow-vs-row` may add a visible switch.
+- **`action` param (write / take-shadow / restore):** the presets are fixed scripts, one op per step (the host's
+  decision "scripts, not free-form ops"); the ops are those three.
+- **Steps:** 6 / 7 / 9 instead of about 8 / 8 / 10.

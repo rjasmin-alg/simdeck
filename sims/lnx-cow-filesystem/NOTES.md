@@ -149,3 +149,113 @@ freed, the space table): no difference. Of 41 mutants, the survivors that matter
 ## Time
 
 Start 2026-10-23 17:07 CEST, done 17:32 CEST.
+
+---
+
+# Preset win-vss: Volume Shadow Copy and Previous Versions
+
+Task `docs/tasks/w3/win-vss.md` (catalogue `win-vss` §4.5.7, overlap §5.2). Scenes `previous-versions`,
+`diff-growth`, `diff-full` (presets 5–7) in copy-on-write mode; rules V1–V7 and numbers: `SPEC.md`, "Copy-on-write
+mode". Preset entries in `sim.json`: `previous-versions`, `diff-full`.
+
+## Decisions (win-vss)
+
+- **The host model was extended additively, not requested and stopped.** The task says to write the needed change
+  under Shared requests and stop if the host cannot express it; it could not (no in-place write, no diff area, no
+  times, no restore). As the `win-boot`, `win-update-rings` and `win-failover-cluster` preset tasks did with their
+  hosts, and running unattended with the host done, I made the change inside this folder: `writeInPlace`, `restore`,
+  `pickShadow`, `diffFreeIds`, `isDiff`, `mode`, `diffLimit`, an optional `diffSize` in the fs data and in `space()`
+  (`diffUsed`, `diffFree`, `diffTotal`). The host's scenes produce the same states as before: their states carry no
+  new field (tested), and the 20 host tests pass; only two generic ones changed, to cover the new scenes too (the
+  step-count list and its param loops gained `diffLimit`; the JSON-safety test runs with `diffLimit` 3).
+  `space().used` now counts volume blocks only (the same number for the host, which has no diff area).
+- **Same data shape as the host.** A shadow copy is the host's read-only snapshot tree with a `time`; the difference
+  between the two policies is only *whose pointer moves*: redirect-on-write moves the live pointer to a new block,
+  copy-on-write moves the shadows' pointers to a copy and overwrites the live block in place. That keeps
+  `sto-cow-vs-row` (the other §5.2 preset here) a matter of running both on the same ops.
+- **Rows:** volume (the live data; it is its own physical row, since its pointers never move), diff area (Δ0 …, the
+  limit's worth of cells), then one row per shadow (its view of each block: `→2` = still the live block, `→Δ0` = the
+  copy). Shadow rows keep their place before they are taken and after they are deleted (struck, "deleted"), as the
+  host's snapshot rows. Colours: the volume series 1, S1–S3 series 2–4; a diff block held by one shadow is solid in
+  that shadow's colour, one held by several is hatched neutral with ×n.
+- **Arrows:** copy (volume k → its Δ) and restore (Δ → volume k), `now`, between the two adjacent physical rows only.
+- **Foot:** a "Previous versions" table (each shadow, when taken, how many diff blocks it reads, available / deleted;
+  changed values on the highlight) and a meter of the diff area (used of limit).
+- **Legend and explanation per mode.** The kit builds the legend once; the page lists both modes' items and hides the
+  other mode's (`data-only` on the `li`, `data-mode` on `<html>`, CSS). The explanation is two `data-t-html` blocks
+  switched the same way. The **subtitle** ("writes go to new blocks", the host's concept) is replaced in
+  copy-on-write mode by `subtitleCow`: it would otherwise state the opposite of what these presets show, which is one
+  of the task's misconceptions. Language switches reload the page, so the override holds.
+- **Caption terms:** *shadow copy* (sjenovita kopija) by the term rule at its first mention (the first shadow step),
+  then in italics alone. "Diferencijalno područje" and "svezak" are written in Croatian only.
+- **Windows is named** (the concept is Windows': Volume Shadow Copy, the Previous Versions tab) in the explanation and
+  the subtitle; no command line, no backup product.
+- **Times** are data ("HH:MM" strings, `translate="no"`), compared as strings; the task's captions are used ("Pri prvoj
+  izmjeni nakon sjene …", "Vraćanje iz sjene S1: datoteka se vraća na sadržaj od 10:00.").
+- **Restore is a write.** In `previous-versions` S2 is taken before the restore, so the restore first copies C2, D1
+  for S2: the replaced version stays restorable. The task's preset ends at "restore v1 from S1"; this adds one
+  snapshot step to show it.
+- **`diff-full` ends with a failed and a working restore:** step 8 asks for the version from before 09:30, which only
+  the deleted S1 had (`restore-none`, caption "previous versions are not a backup", rule V5); step 9 restores from S3.
+
+## Deviations (win-vss)
+
+See SPEC.md "Deviations from the task (win-vss)": `mode` follows the scene; no `action` param (fixed scripts);
+6 / 7 / 9 steps. Also: `poolSize` is hidden in the copy-on-write scenes (the presets set 10, its label says "pool");
+the restore writes only the blocks that differ.
+
+## Sources (win-vss)
+
+Microsoft documentation *Volume Shadow Copy Service*, *How Volume Shadow Copy Service works* (copy-on-write, the diff
+area), *Previous Versions*, *Shadow copy storage space* (the maximum size; older shadows deleted when it is reached):
+**from memory, not re-read in this session (no network)**: every rule V1–V5 is *(check)*. In particular:
+
+- V3: that the *oldest* shadows are deleted when the diff area reaches its maximum *(check)*; the real limit is in
+  bytes or a percentage of the volume, here in blocks.
+- V2: Windows keeps each copy with the newest shadow and older shadows read through the newer ones' diff areas; the
+  model points every sharing shadow at the copy, which gives the same space and the same deletions *(check)*.
+- V4: restore rights (reading previous versions without admin rights) are not modelled *(check)*.
+- Real volumes skip copying blocks that were free when the shadow was taken; no preset writes a block that was free.
+
+## Term pairs (win-vss; missing from `kit/glossary.js`, written out in both tables)
+
+| en | hr |
+|---|---|
+| shadow copy | sjenovita kopija *(check)* |
+| diff area | diferencijalno područje *(check)* |
+| volume | svezak *(check)* |
+| previous versions | prethodne verzije |
+
+## Shared requests (win-vss)
+
+- **kit.js legend per preset or mode:** a legend item's optional `visible(params)` (like a param's), so a host page
+  with a second mode does not hide `li` elements itself.
+- **kit.js subtitle per preset entry:** when a `sim.json` entry is the active preset, show its `concept` as the
+  subtitle (the host's concept can contradict a preset's).
+- **K3:** a cell pattern for "a copy kept for a snapshot" (the task asked for a distinct pattern for diff-area
+  blocks); the page uses its own row, the Δ ids and the shadow's colour meanwhile.
+- **Model promotion:** `writeInPlace` and `mode` are pure and word-free, as the host's functions; `sto-cow-vs-row`
+  will want I/O counts per write (reads, writes, metadata updates), which neither mode returns yet.
+
+## Checks (win-vss)
+
+- Numbers before the page: `node` script over the model printing, per step, volume used, diff used, copied,
+  overwritten, dropped, freed and each tree's view; they match SPEC.md and are asserted in the tests.
+- `node --test sims/lnx-cow-filesystem/sim.test.js`: 29 tests (9 new). Mutations, each caught: lowest → highest
+  diff id; same-time tie → the earlier shadow; `<` → `<=` on the restore time; oldest instead of newest shadow;
+  drop the newest shadow; no `keep` for the restore source; copy on every write; never copy; only the newest shadow's
+  pointer moves; the copy holds the new data; restore all blocks; restore writes a new version; diff usage counts the
+  volume; a dropped shadow frees nothing; dropped shadows not in `gone`; copy-on-write for the host's scenes; no
+  shadow time; `restore-none` as `restore`; `dropped` carried into the next step (19 of 19).
+- Every step of presets 5–7 in both languages at 1920×1080 (scripted): one screen, no text under 16 px, every word
+  from the tables, no console error. Screenshots looked at: previous-versions 3, 6; diff-growth 6, 7; diff-full 7, 8,
+  9; diff-full 7 at 375×812. The tightest is diff-full 7 in Croatian (five rows, a four-line caption).
+- `npm run gate -- lnx-cow-filesystem`: pass (64/64 browser checks, both entries open).
+
+## Review (win-vss)
+
+No separate fresh reviewer (a preset task); the mutations and the script check stand in for it.
+
+## Time (win-vss)
+
+Start 2026-11-05 02:27 CET, done 02:42 CET (about 15 minutes, one session).
