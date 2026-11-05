@@ -1,0 +1,481 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-ntfs-inheritance: a stepper. Left, the folder tree on D: and E: (each object with its explicit and inherited
+     entry counts, a broken chain where inheritance is off, and the chosen user's access); right, the DACL of the shown
+     object as a rule table (kit view K4, kit/ruletable.js, docs/sim-ui.md §12) with the page's own marks (the first
+     entry that mentions a right decides it), and the effective access under it. One step = one operation of the
+     preset's script. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-ntfs-inheritance">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nasljeđivanje NTFS dozvola · simdeck</title>
+<meta name="description" content="Postavi dozvole na mapi i gledaj kako se prenose niz stablo; isključi nasljeđivanje, kopiraj i premjesti datoteke i vidi što zadržavaju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-ntfs-inheritance",
+  "title": {
+    "hr": "Nasljeđivanje NTFS dozvola",
+    "en": "NTFS inheritance"
+  },
+  "concept": {
+    "hr": "Naslijeđeni i izričiti unosi, isključeno nasljeđivanje, kopija i premještanje",
+    "en": "Inherited vs explicit entries, disabling inheritance, copy vs move"
+  },
+  "summary": {
+    "hr": "Postavi dozvole na mapi i gledaj kako se prenose niz stablo; isključi nasljeđivanje, kopiraj i premjesti datoteke i vidi što zadržavaju.",
+    "en": "Set permissions on a folder and watch them flow down the tree; disable inheritance, copy and move files, and see what they keep."
+  },
+  "tags": [
+    "permissions"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-ntfs-inheritance"]; colours only from kit tokens.
+   Layout: the tree on the left; the shown object's DACL and the effective access on the right. */
+[data-sim="win-ntfs-inheritance"] .ni {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.6fr);
+  gap: 1.4cqh 1.2cqw;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (as in win-ntfs-share-effective; shared request there). */
+[data-sim="win-ntfs-inheritance"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-ntfs-inheritance"] .sd-group { gap: 0.4rem; }
+[data-sim="win-ntfs-inheritance"] .sd-presets { gap: 0.25rem; }
+[data-sim="win-ntfs-inheritance"] .ni-col { display: flex; flex-direction: column; gap: 1.2cqh; min-width: 0; min-height: 0; }
+[data-sim="win-ntfs-inheritance"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-ntfs-inheritance"] h2 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-ntfs-inheritance"] .ni-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.7rem 0.5rem; min-width: 0; }
+[data-sim="win-ntfs-inheritance"] .ni-sub { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="win-ntfs-inheritance"] .ni-ico { width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.15em; }
+
+/* tree */
+[data-sim="win-ntfs-inheritance"] .ni-treehead { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+[data-sim="win-ntfs-inheritance"] .ni-tree { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+[data-sim="win-ntfs-inheritance"] .ni-node {
+  display: flex; align-items: center; gap: 0.4rem; width: 100%; min-height: var(--hit);
+  padding: 0.1rem 0.4rem 0.1rem calc(0.3rem + var(--depth) * 0.75rem);
+  border: var(--line-w) solid transparent; border-left: 0.35rem solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+[data-sim="win-ntfs-inheritance"] .ni-node:hover { border-color: var(--line); }
+[data-sim="win-ntfs-inheritance"] .ni-node:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.05rem; }
+[data-sim="win-ntfs-inheritance"] .ni-node[aria-current="true"] { border-color: var(--accent); border-left-color: var(--accent); background: var(--bg); font-weight: 700; }
+[data-sim="win-ntfs-inheritance"] .ni-node.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ntfs-inheritance"] .ni-name { min-width: 0; white-space: nowrap; margin-right: 0.3rem; }
+[data-sim="win-ntfs-inheritance"] .ni-badges { display: inline-flex; gap: 0.25rem; margin-left: auto; align-items: center; flex: none; }
+[data-sim="win-ntfs-inheritance"] .ni-b { display: inline-flex; align-items: center; gap: 0.1rem; padding: 0 0.2rem; border: 0.12rem solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; line-height: 1.3; }
+[data-sim="win-ntfs-inheritance"] .ni-b-i { border-color: var(--muted); color: var(--muted); border-style: dotted; }
+[data-sim="win-ntfs-inheritance"] .ni-b-k { border-style: dashed; }
+[data-sim="win-ntfs-inheritance"] .ni-b-off { border-color: var(--danger); color: var(--danger); }
+[data-sim="win-ntfs-inheritance"] .ni-acc { flex: none; min-width: 3.4rem; text-align: right; font-size: var(--fs-sm); font-weight: 700; }
+
+/* DACL */
+[data-sim="win-ntfs-inheritance"] .ni-status { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-ntfs-inheritance"] .ni-status b { color: var(--ink); }
+[data-sim="win-ntfs-inheritance"] .ni-off { color: var(--danger); font-weight: 700; }
+[data-sim="win-ntfs-inheritance"] .ni-back {
+  min-height: var(--hit); padding: 0 0.6rem; border: var(--line-w) solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+}
+[data-sim="win-ntfs-inheritance"] .ni-back:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="win-ntfs-inheritance"] .ni .sd-rt { flex: 0 1 auto; }
+[data-sim="win-ntfs-inheritance"] .sd-rt tr.ni-inh td:not(.sd-rt-mark):not(.sd-rt-ptr) { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, var(--panel)); }
+[data-sim="win-ntfs-inheritance"] .sd-rt tr.ni-chg td { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-ntfs-inheritance"] .ni-src { display: inline-flex; gap: 0.25rem; align-items: baseline; }
+[data-sim="win-ntfs-inheritance"] .ni-type { font-weight: 700; font-size: 1.2em; }
+[data-sim="win-ntfs-inheritance"] .ni-removed { padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--hl); color: var(--on-hl); }
+
+/* effective access */
+[data-sim="win-ntfs-inheritance"] .ni-eff { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; }
+[data-sim="win-ntfs-inheritance"] .ni-chips { display: flex; gap: 0.3rem; }
+[data-sim="win-ntfs-inheritance"] .ni-chip {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 2.4rem; padding: 0.05rem 0.2rem;
+  border: 0.15rem solid var(--ink); border-radius: var(--radius-sm); line-height: 1.1;
+}
+[data-sim="win-ntfs-inheritance"] .ni-chip-top { display: inline-flex; gap: 0.25rem; align-items: baseline; }
+[data-sim="win-ntfs-inheritance"] .ni-chip[data-on="true"] { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+[data-sim="win-ntfs-inheritance"] .ni-chip[data-on="false"] { border-style: dashed; color: var(--muted); }
+[data-sim="win-ntfs-inheritance"] .ni-chip[data-on="false"] b { text-decoration: line-through; text-decoration-thickness: 0.12em; }
+[data-sim="win-ntfs-inheritance"] .ni-chip small { font-size: var(--fs-sm); font-family: var(--mono); white-space: nowrap; }
+[data-sim="win-ntfs-inheritance"] .ni-effname { font-size: 1.1em; font-weight: 700; }
+[data-sim="win-ntfs-inheritance"] .ni-key { margin-top: 0.3rem; color: var(--muted); font-size: var(--fs-sm); }
+
+/* legend swatches of the page's own */
+[data-sim="win-ntfs-inheritance"] .sd-swatch[data-shape^="ni-"] { position: relative; display: inline-grid; place-items: center; background: var(--bg); color: var(--ink); }
+[data-sim="win-ntfs-inheritance"] .sd-swatch[data-shape="ni-inh"] { border-color: var(--muted); background: color-mix(in srgb, var(--muted) 25%, var(--bg)); color: var(--muted); }
+[data-sim="win-ntfs-inheritance"] .sd-swatch[data-shape="ni-off"] { border-color: var(--danger); color: var(--danger); }
+[data-sim="win-ntfs-inheritance"] .sd-swatch[data-shape="ni-allow"]::after { content: '✓'; font-weight: 700; font-size: 0.8em; }
+[data-sim="win-ntfs-inheritance"] .sd-swatch[data-shape="ni-deny"]::after { content: '✕'; font-weight: 700; font-size: 0.8em; }
+[data-sim="win-ntfs-inheritance"] .sd-swatch .ni-ico { width: 0.8em; height: 0.8em; }
+
+/* Phone and portrait: one column, the stage grows with its content; the table scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-ntfs-inheritance"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-ntfs-inheritance"] .ni { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="win-ntfs-inheritance"] .ni-col { gap: 0.8rem; }
+  [data-sim="win-ntfs-inheritance"] .ni-node { padding-left: calc(0.3rem + var(--depth) * 0.6rem); flex-wrap: wrap; row-gap: 0.1rem; }
+  [data-sim="win-ntfs-inheritance"] .ni-name { white-space: normal; overflow-wrap: anywhere; }
+  [data-sim="win-ntfs-inheritance"] .ni-acc { min-width: 3.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Nasljeđivanje NTFS dozvola</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var LETTER = { read: 'R', readExecute: 'X', write: 'W', modify: 'M', full: 'F' };
+  var AP_KEY = { 'this': 'ap_this', 'this+sub+files': 'ap_tsf', 'sub+files': 'ap_sf', 'files': 'ap_files' };
+  var PRESET_KEY = {
+    'basic': 'presetBasic', 'explicit-beats-inherited': 'presetExplicit', 'disable-convert': 'presetDisable',
+    'copy-vs-move': 'presetCopyMove', 'cross-volume': 'presetCross'
+  };
+
+  /** Data (names, paths, flags) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(key, vars) { return h('span', null, rich(key, vars)); }
+
+  // ── icons: inline SVG, no text inside ──
+  var NS = 'http://www.w3.org/2000/svg';
+  var PATHS = {
+    folder: 'M2 6.5h7l2 2.2h11V20H2z',
+    file: 'M5 2h10l5 5v15H5z M15 2v5h5',
+    chain: 'M10.5 13.5l-3 3a3.5 3.5 0 0 1-5-5l3-3a3.5 3.5 0 0 1 5 0 M13.5 10.5l3-3a3.5 3.5 0 0 1 5 5l-3 3a3.5 3.5 0 0 1-5 0 M9 15l6-6',
+    broken: 'M8.5 13.5l-2 2a3.2 3.2 0 0 1-4.5-4.5l2.5-2.5a3.2 3.2 0 0 1 4.5 0 M15.5 10.5l2-2a3.2 3.2 0 0 1 4.5 4.5l-2.5 2.5a3.2 3.2 0 0 1-4.5 0 M11 3.5l0.6 3 M13 20.5l-0.6-3 M3.5 21l3-3 M20.5 3l-3 3'
+  };
+  function icon(name) {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'ni-ico');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', PATHS[name]);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 'currentColor');
+    p.setAttribute('stroke-width', '2');
+    p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
+    s.appendChild(p);
+    return s;
+  }
+
+  function levelWords(names) {
+    if (!names.length) return h('span', null, t('noAccess'));
+    return names.map(function (l) { return h('span', null, t('lv_' + l)); })
+      .reduce(function (a, b) { return h('span', null, t.parts('plus', { a: a, b: b })); });
+  }
+  function heldLetters(names) {
+    var on = L.levelsOf([].concat.apply([], names.map(function (l) { return L.NTFS_MASK[l]; })));
+    var held = L.LEVELS.filter(function (l) { return on[l]; }).map(function (l) { return LETTER[l]; });
+    return held.length ? data(held.join('')) : h('span', null, t('noAccessShort'));
+  }
+  function appliesText(r, kind, flags) {
+    if (flags) return data(L.FLAGS[r.appliesTo].join(' ') || '—');
+    return h('span', null, t(kind === 'file' ? 'ap_object' : AP_KEY[r.appliesTo]));
+  }
+  function nodeById(v, id) { return v.nodes.filter(function (n) { return n.id === id; })[0]; }
+  function pathOf(s, id) { return L.pathOf(s.tree, id); }
+  function nameOf(s, id) { var x = s.tree.filter(function (n) { return n.id === id; })[0]; return x ? x.name : id; }
+
+  // ── left: the tree ──
+  function treeBox(s, v, ch) {
+    var items = v.nodes.map(function (n) {
+      var cls = 'ni-node' + (ch.nodes.indexOf(n.id) >= 0 ? ' sd-changed' : '');
+      var badges = [];
+      if (!n.inherit) badges.push(h('span', { class: 'ni-b ni-b-off', title: t('offLong'), 'aria-label': t('offLong') }, icon('broken')));
+      if (n.kept) badges.push(h('span', { class: 'ni-b ni-b-i ni-b-k', title: t('keptLong'), 'aria-label': t('keptLong') }, t('keptTag')));
+      badges.push(h('span', { class: 'ni-b', title: t.n('nExplicit', n.explicit), 'aria-label': t.n('nExplicit', n.explicit) }, data(n.explicit)));
+      badges.push(h('span', { class: 'ni-b ni-b-i', title: t.n('nInherited', n.inherited), 'aria-label': t.n('nInherited', n.inherited) }, icon('chain'), data(n.inherited)));
+      return h('li', null, h('button', {
+        type: 'button', class: cls, style: { '--depth': String(n.depth) }, 'aria-current': n.id === v.shown ? 'true' : 'false',
+        onclick: function () { window.simdeck.set({ pick: n.id === s.selected ? '' : n.id }); }
+      }, icon(n.kind === 'file' ? 'file' : 'folder'), h('span', { class: 'ni-name' }, data(n.name)),
+        h('span', { class: 'ni-badges' }, badges),
+        h('span', { class: 'ni-acc' }, heldLetters(n.access))));
+    });
+    return h('section', { class: 'ni-box' },
+      h('div', { class: 'ni-treehead' }, h('h2', null, t('treeTitle'), ' ', h('span', { class: 'ni-sub' }, t('treeHint'))),
+        h('span', { class: 'ni-sub' }, t.parts('treeAccess', { user: data(v.user) }))),
+      h('ul', { class: 'ni-tree' }, items));
+  }
+
+  // ── right: the DACL as a rule table ──
+  function outcomeOf(type, levels) {
+    var ok = type !== 'deny';
+    return h('span', { class: 'sd-rt-verdict', dataset: { ok: String(ok) } }, (ok ? '✓ ' : '✕ ') + t(ok ? 'outGrants' : 'outDenies'),
+      levels.length ? ' ' : null, levels.length ? data(levels.map(function (l) { return LETTER[l]; }).join(' ')) : null);
+  }
+  function sourceCell(s, r) {
+    if (r.explicit) return h('span', null, t('explicit'));
+    // the folder's name (a top's name is its path); the full path in the tooltip
+    return h('span', { class: 'ni-src', title: pathOf(s, r.from) }, icon('chain'), h('span', null, t.parts(r.kept ? 'keptFrom' : 'inheritedFrom', { from: data(nameOf(s, r.from)) })));
+  }
+  function daclTable(s, v, p, ch) {
+    var a = v.access, kind = v.node.kind;
+    var table = RT({
+      mode: 'deny',
+      title: h('span', null, t.parts('daclTitle', { path: data(v.node.path) })),
+      columns: [{ key: 'who', label: t('colTrustee') }, { key: 'rights', label: t('colRights') },
+        { key: 'applies', label: t('colApplies'), wrap: true }, { key: 'src', label: t('colSource'), wrap: true }],
+      actionLabel: t('colType'),
+      markLabel: data(v.user),
+      rows: v.dacl.map(function (r, i) {
+        return {
+          no: i + 1,
+          cells: { who: r.trustee, rights: h('span', null, t('lv_' + r.rights)), applies: appliesText(r, kind, p.showFlags), src: sourceCell(s, r) },
+          // the symbol alone (the legend names it), the word for screen readers and the tooltip
+          action: h('span', { class: 'ni-type', title: t(r.type === 'deny' ? 'deny' : 'allow'), 'aria-label': t(r.type === 'deny' ? 'deny' : 'allow') }, r.type === 'deny' ? '✕' : '✓'), effect: r.type,
+          hit: a.rows[i].match, mark: a.rows[i].mark
+        };
+      }),
+      implicit: { text: v.dacl.length ? t('implicit') : t('emptyDacl'), action: h('span', { class: 'ni-type', title: t('noAccess'), 'aria-label': t('noAccess') }, '✕'), effect: 'deny' },
+      at: 'all',
+      done: true,
+      outcome: function (i) { return i < v.dacl.length ? outcomeOf(v.dacl[i].type, a.rows[i].levels) : RT.verdict(false, t('noAccess')); },
+      words: { win: t('wordWin'), beaten: t('wordBeaten'), skip: t('wordSkip') },
+      stickyMark: true
+    });
+    var trs = table.querySelectorAll('tbody tr');
+    v.dacl.forEach(function (r, i) {
+      if (!trs[i]) return;
+      if (!r.explicit) trs[i].classList.add('ni-inh');
+      if (ch.rows.indexOf(i) >= 0) trs[i].classList.add('ni-chg');
+    });
+    return table;
+  }
+  function statusLine(s, v, ch) {
+    var n = v.node, x = s.tree.filter(function (o) { return o.id === n.id; })[0];
+    var bits = [];
+    if (!n.inherit) bits.push(h('span', { class: 'ni-off' }, icon('broken'), ' ', t('inheritOff')));
+    else if (!x.parent) bits.push(h('span', null, icon('chain'), ' ', t.parts('sep', { a: t('inheritOn'), b: t('topOfTree') })));
+    else bits.push(h('span', null, icon('chain'), ' ', t('inheritOn')));
+    bits.push(counts(n));
+    if (ch.removed) bits.push(h('b', { class: 'ni-removed' }, t.n('nRemoved', ch.removed)));
+    if (v.picked) {
+      bits.push(h('b', null, t('picked')));
+      bits.push(h('button', { type: 'button', class: 'ni-back', onclick: function () { window.simdeck.set({ pick: '' }); } }, t('backToStep')));
+    }
+    return h('div', { class: 'ni-status' }, bits);
+  }
+  function effCard(v) {
+    var a = v.access;
+    var chips = L.LEVELS.map(function (l) {
+      var on = !!a.levels[l];
+      var d = a.deciders[l];
+      return h('span', { class: 'ni-chip', dataset: { on: on ? 'true' : 'false' }, 'aria-label': t(on ? 'chipOn' : 'chipOff', { chip: t('lv_' + l) }) },
+        h('span', { class: 'ni-chip-top' }, h('b', { translate: 'no' }, LETTER[l]), h('span', { 'aria-hidden': 'true' }, on ? '✓' : '✕')),
+        h('small', null, data(d.length ? d.map(function (i) { return '#' + (i + 1); }).join(' ') : t('noAce'))));
+    });
+    return h('section', { class: 'ni-box' },
+      h('div', { class: 'ni-eff' },
+        h('h2', null, t.parts('effTitle', { user: data(v.user), name: data(v.node.name) })),
+        h('div', { class: 'ni-chips' }, chips),
+        h('span', { class: 'ni-effname' }, levelWords(a.name))),
+      h('div', { class: 'ni-key' }, rich('chipKey')));
+  }
+
+  // ── captions ──
+  function joined(nodes) { return nodes.reduce(function (a, b) { return h('span', null, t.parts('join', { a: a, b: b })); }); }
+  function counts(n) { return h('span', null, t.parts('counts', { e: t.n('nExplicit', n.explicit), i: t.n('nInherited', n.inherited) })); }
+  /** Order clauses on the step's object: the explicit allow before an inherited deny, the nearer folder's allow
+      before a farther deny, an inherited deny that decides Write, an allow that does not travel up. */
+  function orderClauses(s, p, prev) {
+    var v = L.view(s, Object.assign({}, p, { pick: '' }));
+    var out = [];
+    var rows = v.dacl, a = v.access;
+    var w = a.by.w;
+    var denyRow = rows.map(function (r, i) { return i; }).filter(function (i) { return rows[i].type === 'deny' && a.rows[i].match && L.NTFS_MASK[rows[i].rights].indexOf('w') >= 0; })[0];
+    if (denyRow === undefined) return out;
+    var dr = rows[denyRow];
+    if (w >= 0 && w !== denyRow && rows[w].type === 'allow') {
+      var ar = rows[w];
+      if (ar.explicit && !dr.explicit) out.push(sentence('capExplicitBeats', { trustee: data(ar.trustee), user: data(v.user) }));
+      else if (!ar.explicit && !dr.explicit && ar.lvl < dr.lvl) out.push(sentence('capNearer', { near: data(pathOf(s, ar.from)), far: data(pathOf(s, dr.from)), user: data(v.user) }));
+    } else if (w === denyRow && !dr.explicit) {
+      out.push(sentence('capInheritedDeny', { from: data(pathOf(s, dr.from)), user: data(v.user) }));
+      // an explicit allow for Write exists below this object (an earlier step added it): it does not travel up
+      var below = s.tree.filter(function (x) { return x.aces.some(function (e) { return e.type === 'allow' && L.NTFS_MASK[e.rights].indexOf('w') >= 0 && e.trustee === dr.trustee; }); })
+        .filter(function (x) { return L.pathOf(s.tree, x.id).indexOf(v.node.path + '\\') === 0; })[0];
+      if (below) out.push(sentence('capUpward', { name: data(below.name) }));
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    steps: L.steps,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'script', type: 'choice', label: t('pScript'), options: L.SCRIPT_IDS.map(function (id) { return [id, t(PRESET_KEY[id])]; }), visible: function () { return false; }, resets: true },
+      { key: 'user', type: 'choice', label: t('pUser'), options: [['ana', data('ana')], ['marko', data('marko')], ['vanjski', data('vanjski')]] },
+      { key: 'showFlags', type: 'toggle', label: t('pShowFlags'), hint: t('pShowFlagsHint') },
+      { key: 'disable', type: 'choice', label: t('pDisable'), options: [['convert', t('optConvert')], ['remove', t('optRemove')]],
+        disabled: function (p) { return p.script === 'disable-convert' ? false : t('offDisable'); } }
+    ],
+
+    presets: L.SCRIPT_IDS.map(function (id) {
+      return { id: id, label: t(PRESET_KEY[id]), hint: t(PRESET_KEY[id] + 'Hint'), params: { script: id, user: L.SCRIPTS[id].user } };
+    }),
+
+    legend: [
+      { shape: 'ni-exp', label: t('legExplicit') },
+      { shape: 'ni-inh', label: t('legInherited') },
+      { shape: 'ni-allow', label: t('legAllow') },
+      { shape: 'ni-deny', label: t('legDeny') },
+      { shape: 'ni-off', label: t('legOff') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params;
+      var v = L.view(s, p);
+      var ch = L.changes(c.prev, s, v.shown);
+      c.stage.replaceChildren(h('div', { class: 'ni' },
+        h('div', { class: 'ni-col' }, treeBox(s, v, ch)),
+        h('div', { class: 'ni-col' }, statusLine(s, v, ch), daclTable(s, v, p, ch), effCard(v))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, e = s.event;
+      var v = L.view(s, Object.assign({}, p, { pick: '' }));
+      var out = [];
+      function add(node) { if (out.length) out.push(' '); out.push(node); }
+      var path = function (id) { return data(pathOf(s, id)); };
+      var name = function (id) { return data(nameOf(s, id)); };
+      if (!e) {
+        add(sentence('capStart', { path: path(s.selected), counts: counts(v.node) }));
+        return out;
+      }
+      if (!e.ok) { add(sentence('capRejected', { reason: t('rej_' + e.reason) })); return out; }
+      var prev = c.prev;
+      var below = function (id) { return L.order(s.tree).map(function (o) { return o.id; }).filter(function (k) { return k !== id && L.pathOf(s.tree, k).indexOf(L.pathOf(s.tree, id) + '\\') === 0; }); };
+      var blocked = function (id) { return below(id).filter(function (k) { return !nodeById(v, k).inherit; }); };
+      if (e.kind === 'add' || e.kind === 'remove') {
+        if (e.kind === 'add') {
+          add(sentence('capAdd', { path: path(e.target), ace: h('span', null, t.parts('aceText', {
+            trustee: data(e.ace.trustee), type: t(e.ace.type === 'deny' ? 'typeDeny' : 'typeAllow'), rights: t('lv_' + e.ace.rights) })) }));
+          var all = L.dacls(s.tree);
+          var reached = below(e.target).filter(function (k) { return all[k].some(function (r) { return !r.explicit && r.id === e.ace.id; }); }).length;
+          if (reached) add(h('span', null, t.n('capReached', reached)));
+          if (e.ace.type === 'deny' && v.dacl[0] && v.dacl[0].id === e.ace.id && v.dacl.length > 1) add(h('span', null, t('capResorted')));
+        } else {
+          add(sentence('capRemove', { path: path(e.target), trustee: data(e.trustee) }));
+        }
+        blocked(e.target).forEach(function (k) { add(sentence('capBlocked', { name: name(k) })); });
+        // kept sets that this change replaced (rule 7)
+        if (prev) prev.tree.forEach(function (x) {
+          var now = s.tree.filter(function (y) { return y.id === x.id; })[0];
+          if (x.kept && now && !now.kept) add(sentence('capKeptDropped', { name: name(x.id), dest: path(now.parent) }));
+        });
+      } else if (e.kind === 'disable') {
+        add(h('span', null, t(e.mode === 'remove' ? 'capRemoveAll' : 'capConvert')));
+      } else if (e.kind === 'copy') {
+        add(sentence('capCopy', { dest: path(e.dest) }));
+        var orig = prev && prev.tree.filter(function (x) { return x.id === e.target; })[0];
+        if (orig && orig.aces.length) add(sentence('capLostExplicit', { trustee: joined(orig.aces.map(function (a) { return data(a.trustee); })) }));
+      } else if (e.kind === 'move') {
+        if (e.cross) {
+          add(sentence('capMoveCross', { name: name(e.target), dest: path(e.dest) }));
+          var was = prev && prev.tree.filter(function (x) { return x.id === e.target; })[0];
+          if (was && was.aces.length) add(sentence('capLostExplicit', { trustee: joined(was.aces.map(function (a) { return data(a.trustee); })) }));
+        } else {
+          var olds = v.dacl.filter(function (r) { return r.kept; }).map(function (r) { return r.from; });
+          add(sentence('capMoveSame', { name: name(e.target), old: path(olds[0] || e.from), dest: path(e.dest) }));
+        }
+      } else if (e.kind === 'select') {
+        var n = v.node, x = s.tree.filter(function (o) { return o.id === n.id; })[0];
+        var froms = v.dacl.filter(function (r) { return !r.explicit; }).map(function (r) { return r.from; })
+          .filter(function (f, i, arr) { return arr.indexOf(f) === i; });
+        if (!n.inherit) add(sentence(n.explicit ? 'capOff' : 'capOffEmpty', { name: name(n.id) }));
+        else if (x.kept) add(sentence('capKept', { name: name(n.id), old: path(froms[0]), dest: path(x.parent) }));
+        else if (!n.explicit && froms.length === 1) add(sentence('capAllFrom', { name: name(n.id), from: path(froms[0]) }));
+        else if (!n.explicit && froms.length) add(sentence('capAllInherited', { name: name(n.id) }));
+        else add(sentence('capSelect', { path: path(n.id), counts: counts(n) }));
+      }
+      orderClauses(s, p, prev).forEach(add);
+      return out;
+    }
+  });
+
+  // The legend's chain icons (the kit draws plain swatches; the page adds its icons once).
+  var put = function (shape, name) {
+    var sw = document.querySelector('[data-sd-legend] .sd-swatch[data-shape="' + shape + '"]');
+    if (sw && !sw.firstChild) sw.appendChild(icon(name));
+  };
+  put('ni-inh', 'chain');
+  put('ni-off', 'broken');
+})();
+</script>
+</body>
+</html>
