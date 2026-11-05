@@ -1,0 +1,490 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- restore-drill: a backup job runs night after night (or week after week) while the operator watches one check. Left,
+     what should be copied (and, from the restore on, what came back); right, the checks table: one column per archive,
+     one row per check, the watched row outlined; under it the job's log nobody reads. After the run every archive is
+     restored, compared with the source, and every check is revealed. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="restore-drill">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kopija koja laže · simdeck</title>
+<meta name="description" content="Posao javlja uredno, arhiva postoji i ispisuje svoj sadržaj; tek proba oporavka, usporedba vraćenog s izvornikom, pokaže da nešto nikad nije ušlo u kopiju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "restore-drill",
+  "title": {
+    "hr": "Kopija koja laže",
+    "en": "The backup that lies"
+  },
+  "concept": {
+    "hr": "Kopija javlja uredno; tek proba oporavka pokaže što u njoj nema",
+    "en": "Backups report OK; only a test restore shows what is missing"
+  },
+  "summary": {
+    "hr": "Pusti posao da radi noćima ili tjednima uz jednu provjeru na nadzoru, pa vrati: postoji, ispisuje se, status 0, a datoteke nema.",
+    "en": "Let the job run for nights or weeks with one check on the dashboard, then restore: it exists, it lists, status 0, and the file is not there."
+  },
+  "tags": [
+    "backup"
+  ],
+  "class": "stepper",
+  "steps": 4,
+  "entries": [
+    {
+      "preset": "dr-checkpoint"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="restore-drill"]; colours only from kit tokens. */
+[data-sim="restore-drill"] .rd {
+  display: grid;
+  grid-template-columns: minmax(11rem, max-content) minmax(0, 1fr);
+  gap: 0.8rem 1.4rem;
+  align-items: start;
+  align-content: center;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="restore-drill"] .rd[data-many] { grid-template-columns: minmax(0, 12.5rem) minmax(0, 1fr); gap: 0.8rem 0.9rem; }
+[data-sim="restore-drill"] .rd[data-many] .rd-t col.rd-labcol { width: 10rem; }
+[data-sim="restore-drill"] .rd[data-many] .rd-t { border-spacing: 0.18rem 0.22rem; }
+[data-sim="restore-drill"] .rd[data-many] .rd-t th, [data-sim="restore-drill"] .rd[data-many] .rd-t td { padding: 0.16rem 0.28rem; }
+[data-sim="restore-drill"] .rd[data-many] .rd-arch { padding: 0.15rem 0.25rem; }
+[data-sim="restore-drill"] .rd-col { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="restore-drill"] .rd h3 { margin: 0; font-size: var(--fs-md); }
+[data-sim="restore-drill"] .rd-muted { color: var(--muted); }
+[data-sim="restore-drill"] .rd-mono, [data-sim="restore-drill"] .rd code { font-family: var(--mono); }
+
+/* source list */
+[data-sim="restore-drill"] .rd-src { max-width: 27rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); padding: 0.45rem 0.8rem; }
+[data-sim="restore-drill"] .rd-srcdir { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+[data-sim="restore-drill"] .rd-srclist { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.12rem; }
+[data-sim="restore-drill"] .rd-srclist li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.6rem; align-items: center; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="restore-drill"] .rd-path { font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="restore-drill"] .rd-what { display: block; color: var(--muted); max-width: 13rem; }
+[data-sim="restore-drill"] .rd-bytes { font-family: var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
+[data-sim="restore-drill"] .rd-back { min-width: 4.2rem; text-align: center; font-weight: 700; padding: 0 0.3rem; border: var(--line-w) solid transparent; border-radius: var(--radius-sm); }
+[data-sim="restore-drill"] .rd-back[data-b="ok"] { color: var(--ok); }
+[data-sim="restore-drill"] .rd-back[data-b="miss"] { color: var(--danger); border: 0.16rem dashed var(--danger); }
+[data-sim="restore-drill"] .rd-backhead { font-size: var(--fs-sm); color: var(--muted); text-align: right; }
+
+/* dashboard headline */
+[data-sim="restore-drill"] .rd-dashhead { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; font-size: var(--fs-md); font-weight: 700; }
+[data-sim="restore-drill"] .rd-light {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.05rem 0.6rem; border-radius: 999px; border: var(--line-w) solid currentColor; font-weight: 700; white-space: nowrap;
+}
+[data-sim="restore-drill"] .rd-light::before { content: ''; width: 0.75em; height: 0.75em; border-radius: 50%; background: currentColor; }
+[data-sim="restore-drill"] .rd-light[data-d="green"] { color: var(--ok); }
+[data-sim="restore-drill"] .rd-light[data-d="red"] { color: var(--danger); }
+[data-sim="restore-drill"] .rd-light[data-d="red"]::before { border-radius: 0.1em; }
+[data-sim="restore-drill"] .rd-light[data-d="grey"] { color: var(--muted); border-style: dashed; }
+[data-sim="restore-drill"] .rd-light[data-d="grey"]::before { background: transparent; border: 0.12em solid currentColor; }
+[data-sim="restore-drill"] .rd-light[data-d="none"] { color: var(--muted); border-style: dotted; font-weight: 400; }
+[data-sim="restore-drill"] .rd-light[data-d="none"]::before { display: none; }
+
+/* the checks table */
+[data-sim="restore-drill"] .rd-tablewrap { min-width: 0; }
+[data-sim="restore-drill"] .rd-t { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0.25rem 0.22rem; font-size: var(--fs-sm); }
+[data-sim="restore-drill"] .rd-t th, [data-sim="restore-drill"] .rd-t td { padding: 0.16rem 0.45rem; vertical-align: middle; text-align: left; border-radius: var(--radius-sm); }
+[data-sim="restore-drill"] .rd-t col.rd-labcol { width: 11.5rem; }
+[data-sim="restore-drill"] .rd-t[data-wide] { font-size: var(--fs-md); }
+[data-sim="restore-drill"] .rd-t[data-wide] col.rd-labcol { width: 15rem; }
+[data-sim="restore-drill"] .rd-rowlab { font-weight: 700; line-height: 1.2; }
+[data-sim="restore-drill"] .rd-rowlab code { display: block; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="restore-drill"] .rd-relied .rd-rowlab, [data-sim="restore-drill"] .rd-relied td { border-top: 0.25rem solid var(--ink); border-bottom: 0.25rem solid var(--ink); }
+[data-sim="restore-drill"] .rd-relied .rd-rowlab { border-left: 0.25rem solid var(--ink); }
+[data-sim="restore-drill"] .rd-relied td:last-child { border-right: 0.25rem solid var(--ink); }
+[data-sim="restore-drill"] .rd-tag { display: inline-block; margin-left: 0.3rem; padding: 0 0.3rem; font-size: var(--fs-sm); background: var(--ink); color: var(--bg); border-radius: 0.2rem; font-weight: 700; }
+
+/* the archive header: date, file, size bar */
+[data-sim="restore-drill"] .rd-arch { padding: 0.2rem 0.4rem; border: var(--line-w) solid var(--c1); border-radius: var(--radius-sm); background: var(--bg); display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+[data-sim="restore-drill"] .rd-arch[data-ghost] { border-style: dotted; border-color: var(--line); color: var(--muted); }
+[data-sim="restore-drill"] .rd-date { font-family: var(--mono); font-weight: 700; }
+[data-sim="restore-drill"] .rd-file { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-sim="restore-drill"] .rd-bar { height: 0.55rem; border: 1px solid var(--c1); background: var(--bg); border-radius: 0.15rem; }
+[data-sim="restore-drill"] .rd-bar > span { display: block; height: 100%; background: var(--c1); min-width: 2px; }
+[data-sim="restore-drill"] .rd-size { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="restore-drill"] .rd-focus .rd-arch { box-shadow: 0 0.3rem 0 0 var(--c1); }
+
+/* cells: pass soft green, fail hatched red, no verdict dashed, not applicable blank */
+[data-sim="restore-drill"] .rd-cell { line-height: 1.25; overflow-wrap: anywhere; border: var(--line-w) solid var(--line); background: var(--bg); }
+[data-sim="restore-drill"] .rd-cell[data-v="pass"] { background: color-mix(in srgb, var(--ok) 14%, var(--bg)); border-color: var(--ok); }
+[data-sim="restore-drill"] .rd-cell[data-v="fail"] {
+  border-color: var(--danger);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--danger) 20%, var(--bg)) 0 0.3rem, var(--bg) 0.3rem 0.6rem);
+}
+[data-sim="restore-drill"] .rd-cell[data-v="none"] { border-style: dashed; border-color: var(--muted); }
+[data-sim="restore-drill"] .rd-cell[data-v="na"] { border-style: dotted; color: var(--muted); }
+[data-sim="restore-drill"] .rd-cell[data-v="empty"] { border-style: dotted; border-color: var(--line); background: transparent; }
+[data-sim="restore-drill"] .rd-sym { font-weight: 700; margin-right: 0.3rem; }
+[data-sim="restore-drill"] .rd-cell[data-v="pass"] .rd-sym { color: var(--ok); }
+[data-sim="restore-drill"] .rd-cell[data-v="fail"] .rd-sym { color: var(--danger); }
+[data-sim="restore-drill"] .rd-out { font-family: var(--mono); }
+/* new in this step: a thick ink outline and a highlighter band on the left; the verdict's colour stays */
+[data-sim="restore-drill"] .rd .rd-cell.rd-now, [data-sim="restore-drill"] .rd .rd-arch.rd-now { outline: 0.2rem solid var(--ink); outline-offset: 0.05rem; box-shadow: inset 0.5rem 0 0 var(--hl); padding-left: 0.85rem; }
+[data-sim="restore-drill"] .rd-light.rd-now { outline: 0.2rem solid var(--ink); outline-offset: 0.08rem; box-shadow: 0 0 0 0.45rem var(--hl); }
+/* legend swatches for the cell states */
+[data-sim="restore-drill"] .sd-swatch[data-shape='rd-pass'] { background: color-mix(in srgb, var(--ok) 14%, var(--bg)); border-color: var(--ok); }
+[data-sim="restore-drill"] .sd-swatch[data-shape='rd-fail'] { border-color: var(--danger); background: repeating-linear-gradient(135deg, var(--danger) 0 0.15rem, var(--bg) 0.15rem 0.3rem); }
+[data-sim="restore-drill"] .sd-swatch[data-shape='rd-miss'] { background: transparent; border: 0.14rem dashed var(--danger); }
+[data-sim="restore-drill"] .sd-swatch[data-shape='rd-relied'] { background: var(--bg); border: 0.25rem solid var(--ink); }
+[data-sim="restore-drill"] .rd-dashcell { text-align: center; }
+
+/* the log */
+[data-sim="restore-drill"] .rd-log { border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); padding: 0.35rem 0.8rem; }
+[data-sim="restore-drill"] .rd-log h3 { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="restore-drill"] .rd-log pre { margin: 0.15rem 0 0; font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-sim="restore-drill"] .rd-log .rd-err { color: var(--danger); font-weight: 700; }
+
+[data-sim="restore-drill"] .sd-caption code { font-family: var(--mono); }
+
+/* Phone and portrait: one column; the table scrolls sideways inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="restore-drill"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="restore-drill"] .rd, [data-sim="restore-drill"] .rd[data-many] { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; }
+  [data-sim="restore-drill"] .rd-what { max-width: none; }
+  [data-sim="restore-drill"] .rd-src { max-width: none; }
+  [data-sim="restore-drill"] .rd-tablewrap { overflow-x: auto; }
+  [data-sim="restore-drill"] .rd-t { min-width: 34rem; }
+  [data-sim="restore-drill"] .rd[data-many] .rd-t { min-width: 58rem; }
+  [data-sim="restore-drill"] .rd-t col.rd-labcol, [data-sim="restore-drill"] .rd-t[data-wide] col.rd-labcol { width: 9rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kopija koja laže</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var CMD = { exists: 'ls -l', size: 'ls -l', list: 'tar -t', diff: 'tar -d', gzip: 'gzip -t', status: '$?', restore: 'tar -x · diff -r' };
+  var CMD_CP = { exists: 'ls -l', size: 'ls -l', list: '—', diff: '—', gzip: 'gzip -t', status: 'nightly OK', restore: null };
+  var SYM = { pass: '✓', fail: '✗', none: '?', na: '—' };
+
+  /** Data (paths, file names, sizes, tool output) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function dec(x) { return x.toFixed(1).replace('.', t('dec')); }
+  /** Sizes as the sources give them: bytes below 10 000, else decimal MB / GB with one decimal. */
+  function size(b) {
+    if (b === null || b === undefined) return '';
+    if (b < 10000) return b + ' B';
+    if (b < 1e9) return dec(b / 1e6) + ' MB';
+    return dec(b / 1e9) + ' GB';
+  }
+  /** The checkpoint job prints a line, not a status the job captured: its row is the log line (SPEC rule 2). */
+  function checkLabel(c, s) { return t(s && s.kind === 'checkpoint' && c === 'status' ? 'chk_statusLog' : 'chk_' + c); }
+
+  /** Caption parts: {x} may be a node; `text` becomes <code translate="no">. */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/(`[^`]+`)/).forEach(function (bit) {
+      if (!bit) return;
+      if (bit[0] === '`') { out.push(h('code', { translate: 'no' }, bit.slice(1, -1))); return; }
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(piece);
+      });
+    });
+    return out;
+  }
+
+  /** A cell's text: [long parts] for one wide column, [short parts] for several. */
+  function cellText(r, s, wide) {
+    var st = function (x) { return t('statusN', { s: x }); };
+    switch (r.code) {
+      case 'exists':
+        return r.bytes === null ? [t('exists')] : wide ? [data(r.file), ' · ', data(size(r.bytes))] : [];
+      case 'first': return [wide ? t('first') : t('firstShort')];
+      case 'unknown': return [t('unknown')];
+      case 'size': return wide ? [data(size(r.bytes)), ' · ', t('lastTime', { size: size(r.prev) })] : r.v === 'fail' ? [data(size(r.bytes))] : [];
+      case 'list':
+        if (!wide) return [data(r.n + ' · ' + r.status)];
+        return [r.n ? t.n('members', r.n) : t('noLines'), ' · ', st(r.status)];
+      case 'nolines': return wide ? [t('noLines'), ' · ', st(r.status)] : [data('∅ · ' + r.status)];
+      case 'ok': return wide ? [st(r.status)] : [data(String(r.status))];
+      case 'status': return wide ? [st(r.status)] : [data(String(r.status))];
+      case 'logline': return wide ? [data('"nightly OK"')] : [data('OK')];
+      case 'eof':
+        if (r.n !== undefined && wide) return [t.n('membersThen', r.n), ' ', data('Unexpected EOF'), ' · ', st(r.status)];
+        if (!wide) return [data('EOF · ' + r.status)];
+        return [data(r.status === 1 ? 'unexpected end of file' : 'Unexpected EOF'), ' · ', st(r.status)];
+      case 'same': return wide ? [t('same'), ' · ', st(r.status)] : [];
+      case 'missing':
+        if (!wide) return [t.n('missingN', r.missing.length)];
+        if (s.srcDir) return r.missing.map(function (m) { return data('Only in ' + s.srcDir + ': ' + m); }).concat([' · ', st(r.status)]);
+        return [t('missing'), ': '].concat(r.missing.map(function (m, i) { return [i ? ', ' : '', data(m)]; }), [' · ', st(r.status)]);
+      case 'short':
+        return wide ? [t('shortRestore', { size: size(r.bytes), want: size(r.want) })] : [data(size(r.bytes))];
+      case 'na': return wide ? [t('na')] : [];
+    }
+    return [];
+  }
+
+  /** A log line that reports a problem (the log shows them in red; the caption counts them). */
+  function isErr(l) { return /error|denied|Cannot|exceeded|EOF|Exiting|Only in/i.test(l); }
+
+  function isFresh(s, c, j) { return s.fresh.some(function (f) { return f[0] === c && f[1] === j; }); }
+
+  // ── stage ──
+
+  function sourceBox(c) {
+    var s = c.state, f = s.focus;
+    var back = f !== null ? s.restored[f] : null;
+    var compared = f !== null && s.cells.restore[f];
+    var rows = s.source.map(function (x) {
+      var mark = null;
+      if (back) {
+        var ok = back.paths.indexOf(x.path) >= 0;
+        if (ok && compared && compared.code === 'short') mark = h('span', { class: 'rd-back', dataset: { b: 'miss' } }, t('srcPartial'));
+        else if (ok) mark = h('span', { class: 'rd-back', dataset: { b: 'ok' } }, '✓');
+        else if (compared) mark = h('span', { class: 'rd-back', dataset: { b: 'miss' } }, t('srcMissing'));
+        else mark = h('span', { class: 'rd-back' }, ' ');
+      }
+      var bytes = x.bytes !== null ? data(size(x.bytes), 'rd-bytes') : s.kind === 'tar' && s.fault === 'named' ? h('span', { class: 'rd-bytes' }, t('srcAbsent')) : h('span');
+      var name = s.kind === 'checkpoint' ? [data(x.path, 'rd-path'), h('span', { class: 'rd-what' }, t('srcDb'))] : [data(x.path, 'rd-path')];
+      return h('li', null, h('span', null, name), bytes, mark || h('span'));
+    });
+    var head = [h('h3', null, t('srcTitle'))];
+    if (s.srcDir) head.push(h('div', { class: 'rd-srcdir', translate: 'no' }, s.srcDir));
+    var list = h('ul', { class: 'rd-srclist' }, rows);
+    if (back) {
+      head.push(h('div', { class: 'rd-backhead' }, t('srcBack'), ': ', data(s.jobs[f].date)));
+    }
+    return h('div', { class: 'rd-src' }, head, list);
+  }
+
+  function dashHead(c) {
+    var s = c.state, last = s.cursor ? s.dash[s.cursor - 1] : null;
+    var check = s.reliedOn.map(function (k) { return checkLabel(k, s); }).join(', ');
+    return h('div', { class: 'rd-dashhead' },
+      h('span', null, t('dashHead', { check: check })),
+      last ? h('span', { class: 'rd-light', dataset: { d: last } }, t('dash_' + last)) : h('span', { class: 'rd-light', dataset: { d: 'none' } }, t('dashNone')));
+  }
+
+  function table(c) {
+    var s = c.state, J = s.jobs.length, wide = J === 1;
+    var max = 0;
+    s.jobs.forEach(function (j) { if (j.bytes > max) max = j.bytes; });
+    var cols = [h('col', { class: 'rd-labcol' })];
+    for (var k = 0; k < J; k++) cols.push(h('col'));
+
+    var headCells = [h('th', { class: 'rd-muted' }, wide ? null : t('year', { y: s.jobs[0].date.slice(0, 4) }))];
+    s.jobs.forEach(function (job, j) {
+      var made = j < s.cursor;
+      var now = c.n === j + 1;
+      var kids = [h('span', { class: 'rd-date', translate: 'no' }, wide ? job.date : job.date.slice(5))];
+      if (made) {
+        if (wide) kids.push(h('span', { class: 'rd-file', translate: 'no', title: job.file }, job.file));
+        if (job.bytes !== null) kids.push(h('div', { class: 'rd-bar' }, h('span', { style: { width: (100 * job.bytes / max) + '%' } })));
+        if (job.bytes !== null) kids.push(h('span', { class: 'rd-size', translate: 'no' }, size(job.bytes)));
+        else kids.push(h('span', { class: 'rd-size' }, t.n('members', job.members.length)));
+      }
+      headCells.push(h('th', { class: s.focus === j && s.phase !== 'job' ? 'rd-focus' : null },
+        h('div', { class: 'rd-arch' + (now ? ' rd-now' : ''), dataset: made ? null : { ghost: 'true' } }, kids)));
+    });
+
+    var rows = [h('tr', null, headCells)];
+    var dashCells = [h('th', { class: 'rd-rowlab', scope: 'row' }, t('dashRow'))];
+    s.jobs.forEach(function (job, j) {
+      var d = s.dash[j];
+      dashCells.push(h('td', { class: 'rd-dashcell' }, d ? h('span', { class: 'rd-light' + (c.n === j + 1 ? ' rd-now' : ''), dataset: { d: d } }, wide ? t('dash_' + d) : '') : null));
+    });
+    rows.push(h('tr', null, dashCells));
+
+    L.CHECKS.forEach(function (ck) {
+      var relied = s.reliedOn.indexOf(ck) >= 0;
+      var cmd = (s.kind === 'checkpoint' ? CMD_CP : CMD)[ck];
+      var lab = h('th', { class: 'rd-rowlab', scope: 'row' }, checkLabel(ck, s),
+        relied ? h('span', { class: 'rd-tag' }, t('reliedTag')) : null, cmd ? h('code', { translate: 'no' }, cmd) : null);
+      var tds = [lab];
+      for (var j = 0; j < J; j++) {
+        var r = s.cells[ck][j];
+        if (!r) { tds.push(h('td', { class: 'rd-cell', dataset: { v: 'empty' } })); continue; }
+        tds.push(h('td', { class: 'rd-cell' + (isFresh(s, ck, j) ? ' rd-now' : ''), dataset: { v: r.v } },
+          h('span', { class: 'rd-sym', 'aria-hidden': 'true' }, SYM[r.v]), h('span', { class: 'rd-out' }, cellText(r, s, wide))));
+      }
+      rows.push(h('tr', { class: relied ? 'rd-relied' : null }, tds));
+    });
+    return h('div', { class: 'rd-tablewrap' }, h('table', { class: 'rd-t', dataset: wide ? { wide: 'true' } : null }, h('colgroup', null, cols), h('tbody', null, rows)));
+  }
+
+  function logLines(lines) {
+    if (!lines.length) return [h('span', null, t('logEmpty'))];
+    var out = [];
+    lines.forEach(function (l, i) {
+      if (i) out.push('\n');
+      if (typeof l === 'string') out.push(data(l, isErr(l) ? 'rd-err' : null));
+      else out.push(h('span', null, l));
+    });
+    return out;
+  }
+
+  function logBox(c) {
+    var s = c.state;
+    if (s.phase === 'start') return h('div', { class: 'rd-log' }, h('h3', null, t('logStart')));
+    var j = s.focus, job = s.jobs[j], title, lines;
+    if (s.phase === 'job') {
+      title = rich('logJob', { date: data(job.date) });
+      lines = job.log.slice();
+    } else if (s.phase === 'restore') {
+      title = rich('logRestore', { file: data(job.file) });
+      var r = s.restored[j];
+      if (s.kind === 'checkpoint') lines = [[t('logRestoreCp'), ': ', t('statusN', { s: r.status })]];
+      else {
+        lines = ['tar -xzf ' + job.file + ' -C …/vrati'];
+        if (r.status) lines.push('tar: Unexpected EOF in archive');
+        lines.push([t('statusN', { s: r.status })]);
+      }
+    } else if (s.phase === 'compare') {
+      title = rich('logCompare', { file: data(job.file) });
+      lines = [cellText(s.cells.restore[j], s, true)];
+    } else {
+      title = rich('logReveal', { file: data(job.file) });
+      lines = job.log.slice();
+    }
+    return h('div', { class: 'rd-log' }, h('h3', null, title), h('pre', null, logLines(lines)));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'rd', dataset: c.state.jobs.length > 4 ? { many: 'true' } : null },
+      h('div', { class: 'rd-col' }, sourceBox(c)),
+      h('div', { class: 'rd-col' }, dashHead(c), table(c), logBox(c))));
+  }
+
+  // ── caption ──
+
+  function caption(c) {
+    var s = c.state, check = h('b', null, s.reliedOn.map(function (k) { return checkLabel(k, s); }).join(', '));
+    if (s.phase === 'start') {
+      if (s.kind === 'checkpoint') return rich('capStartCp', { weeks: t.n('weeksN', s.jobs.length), check: check });
+      return rich('capStart', { items: t.n('nItems', s.source.length), check: check });
+    }
+    var j = s.focus, job = s.jobs[j], parts;
+    if (s.phase === 'job') {
+      var d = s.dash[j];
+      var light = h('span', { class: 'rd-light', dataset: { d: d } }, t('dash_' + d));
+      var vars = { date: data(job.date), file: data(job.file), size: data(size(job.bytes)), check: check, light: light };
+      parts = rich(job.bytes === null ? 'capJobNoSize' : 'capJob', vars);
+      var errs = job.log.filter(isErr).length;
+      if (errs && d === 'green') parts.push(' ', t.n('capLog', errs));
+      return parts;
+    }
+    if (s.phase === 'restore') {
+      var r = s.restored[j];
+      if (s.kind === 'checkpoint') return rich('capRestoreCp', { file: data(job.file), size: data(size(job.bytes)) });
+      var got = s.source.filter(function (x) { return r.paths.indexOf(x.path) >= 0; }).length;
+      parts = rich('capRestore', { file: data(job.file), got: got }, s.source.length);
+      if (r.status) parts.push(t('capRestoreCut'));
+      return parts;
+    }
+    var res = s.cells.restore[j];
+    if (s.phase === 'compare') {
+      parts = rich('capCompare_' + s.fault, {
+        path: data((res.missing || [''])[0]), date: data(job.date), size: data(size(job.bytes)), want: data(size(job.want))
+      });
+      if (s.jobs.length > 1 && s.kind === 'tar' && s.dash.every(function (x) { return x === 'green'; })) parts.push(t('capNights', { n: s.jobs.length }));
+      return parts;
+    }
+    parts = rich('capReveal_' + s.fault, { date: data(job.date), size: data(size(job.bytes)), want: data(size(job.want)) });
+    if (s.reliedOn.indexOf('restore') >= 0) parts.push(t('capRelyRestore'));
+    return parts;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'fault', type: 'select', label: t('fault'), resets: true,
+        options: L.FAULTS.map(function (f) { return [f, t('f_' + f)]; }) },
+      { key: 'reliedOn', type: 'select', label: t('reliedOn'), hint: t('reliedOnHint'), resets: true,
+        options: L.RELY.map(function (k) { return [k, t(k === 'status' ? 'chk_statusOpt' : 'chk_' + k)]; }) },
+      { key: 'weeks', type: 'range', label: t('weeks'), min: 4, max: 8, resets: true,
+        disabled: function (p) { return p.fault === 'checkpoint' ? false : t('weeksOnly'); } },
+      { key: 'repeat', type: 'toggle', label: t('repeat'), hint: t('repeatHint'), resets: true,
+        disabled: function (p) { return p.fault === 'checkpoint' ? t('repeatOnly') : false; } }
+    ],
+
+    presets: [
+      { id: 'ul-named', label: t('p_named'), params: { fault: 'named', reliedOn: 'diff' }, hint: t('p_namedHint') },
+      { id: 'ul-dotfile', label: t('p_dotfile'), params: { fault: 'dotfile' } },
+      { id: 'ul-truncated', label: t('p_truncated'), params: { fault: 'truncated' } },
+      { id: 'ul-empty', label: t('p_empty'), params: { fault: 'empty' } },
+      { id: 'dr-checkpoint', label: t('p_checkpoint'), params: { fault: 'checkpoint', reliedOn: 'status', weeks: 8 }, hint: t('p_checkpointHint') },
+      { id: 'ul-dotfile-nights', label: t('p_nights'), params: { fault: 'dotfile', repeat: true } }
+    ],
+
+    legend: [
+      { c: 1, label: t('lgArchive') },
+      { shape: 'rd-pass', label: '✓ ' + t('lgPass') },
+      { shape: 'rd-fail', label: '✗ ' + t('lgFail') },
+      { shape: 'rd-miss', label: t('lgMissing') },
+      { shape: 'rd-relied', label: t('lgRelied') },
+      { shape: 'hl', label: t('lgChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
