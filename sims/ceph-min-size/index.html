@@ -1,0 +1,472 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ceph-min-size: one replicated pool under size / min_size. Fail an OSD or a host, then a client writes one object:
+     acknowledged or blocked. Left: the OSDs by host and every PG of the pool (K3 block grids, kit/blockgrid.js),
+     coloured by state. Right: the copies of the twelve hardest-hit PGs with the client's write arrow, and the writes
+     (the comparison of settings in the last step). Model: sim.js (placement: placement.js); rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="ceph-min-size">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>size i min_size: kada bazen stane · simdeck</title>
+<meta name="description" content="Obori OSD ili domaćina uz razne size i min_size pa piši: degradirani PG radi, onaj ispod min_size čeka, a min_size 1 drži pisanje na jednom disku.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ceph-min-size",
+  "title": {
+    "hr": "size i min_size: kada bazen stane",
+    "en": "size and min_size: when a pool stops"
+  },
+  "concept": {
+    "hr": "size 2, min_size 2 staje na jednom kvaru; 3/2 ne staje",
+    "en": "size 2, min_size 2 stops on one failure; 3/2 does not"
+  },
+  "summary": {
+    "hr": "Obori OSD ili domaćina uz razne size i min_size pa piši: degradirani PG radi, onaj ispod min_size čeka, a min_size 1 drži pisanje na jednom disku.",
+    "en": "Fail OSDs or a host under different size and min_size, then write: a degraded PG serves, one below min_size waits, min_size 1 keeps a write on one disk."
+  },
+  "tags": [
+    "storage-cluster"
+  ],
+  "class": "stepper",
+  "steps": 3,
+  "entries": [
+    {
+      "preset": "dr-s2"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ceph-min-size"]; colours only from kit tokens.
+   Layout: left, the pool line, the OSDs by host and every PG; right, the zoom on twelve PGs and the writes card. */
+[data-sim="ceph-min-size"] .cm {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  gap: 0.9rem 1.1rem;
+  align-items: start;
+  align-content: center;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="ceph-min-size"] .cm-col { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="ceph-min-size"] .cm-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.9rem; font-size: var(--fs-md); }
+[data-sim="ceph-min-size"] .cm-head b { font-family: var(--mono); }
+[data-sim="ceph-min-size"] .cm-badge {
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 0 0.45rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="ceph-min-size"] .cm-clock { margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="ceph-min-size"] .cm-now { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="ceph-min-size"] .cm-counts { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; font-size: var(--fs-sm); }
+[data-sim="ceph-min-size"] .cm-counts span { white-space: nowrap; padding: 0 0.25rem; }
+
+[data-sim="ceph-min-size"] .cm .sd-bg-label { font-size: var(--fs-sm); }
+[data-sim="ceph-min-size"] .cm .sd-bg-aside { font-size: var(--fs-sm); }
+[data-sim="ceph-min-size"] .cm .sd-bg-grid { row-gap: 0; --bg-row-gap: 0.3rem; }
+[data-sim="ceph-min-size"] .cm-pool .sd-bg-grid { --bg-row-gap: 0.14rem; }
+[data-sim="ceph-min-size"] .cm-pool .sd-bg-cell { font-size: var(--fs-sm); }
+[data-sim="ceph-min-size"] .cm-zoom .sd-bg-grid { --bg-row-gap: 0.32rem; }
+[data-sim="ceph-min-size"] .cm-st { font-weight: 700; color: var(--ink); }
+[data-sim="ceph-min-size"] .cm-st-inactive, [data-sim="ceph-min-size"] .cm-st-stale { color: var(--danger); }
+[data-sim="ceph-min-size"] .cm-st-degraded { color: var(--warn); }
+[data-sim="ceph-min-size"] .cm-st-clean { color: var(--ok); }
+
+/* the writes card / the comparison */
+[data-sim="ceph-min-size"] .cm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.5rem 0.9rem;
+  font-size: var(--fs-sm);
+}
+[data-sim="ceph-min-size"] .cm-card h3 { margin: 0; font-size: var(--fs-md); }
+[data-sim="ceph-min-size"] .cm-w { display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; }
+[data-sim="ceph-min-size"] .cm-w b { font-family: var(--mono); }
+[data-sim="ceph-min-size"] .cm-w-ack { color: var(--ok); font-weight: 700; }
+[data-sim="ceph-min-size"] .cm-w-blocked, [data-sim="ceph-min-size"] .cm-w-lost { color: var(--danger); font-weight: 700; }
+[data-sim="ceph-min-size"] .cm-muted { color: var(--muted); }
+[data-sim="ceph-min-size"] .cm-cmp { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+[data-sim="ceph-min-size"] .cm-cmp th, [data-sim="ceph-min-size"] .cm-cmp td { padding: 0.1rem 0.4rem; text-align: right; white-space: nowrap; }
+[data-sim="ceph-min-size"] .cm-cmp th:first-child, [data-sim="ceph-min-size"] .cm-cmp td:first-child { text-align: left; }
+[data-sim="ceph-min-size"] .cm-cmp thead th { color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--line); }
+[data-sim="ceph-min-size"] .cm-cmp tr.cm-cur td { font-weight: 700; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+[data-sim="ceph-min-size"] .cm-cmp td.cm-bad { color: var(--danger); }
+
+/* the state marks drawn in CSS: degraded, a half disc; inactive, a pause sign */
+[data-sim="ceph-min-size"] .cm-ic { display: inline-block; font-weight: 700; }
+[data-sim="ceph-min-size"] .cm-ic-degraded, [data-sim="ceph-min-size"] .cm-ic-inactive { width: 0.8em; height: 0.8em; vertical-align: -0.05em; }
+[data-sim="ceph-min-size"] .cm-ic-degraded { border: 0.12em solid currentColor; border-radius: 50%; background: linear-gradient(90deg, currentColor 50%, var(--bg) 50%); }
+[data-sim="ceph-min-size"] .cm-ic-inactive { border-left: 0.25em solid currentColor; border-right: 0.25em solid currentColor; width: 0.75em; }
+
+/* panel: presets and controls in two columns; the failure choices across both */
+[data-sim="ceph-min-size"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ceph-min-size"] [data-sd-controls] > .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 0.8rem; align-items: end; }
+[data-sim="ceph-min-size"] [data-sd-controls] > .sd-group > :not(.sd-ctl),
+[data-sim="ceph-min-size"] [data-sd-controls] .sd-ctl[data-key="cluster"],
+[data-sim="ceph-min-size"] [data-sd-controls] .sd-ctl[data-key="fail1"],
+[data-sim="ceph-min-size"] [data-sd-controls] .sd-ctl[data-key="fail2"],
+[data-sim="ceph-min-size"] [data-sd-controls] .sd-ctl[data-key="drFail"] { grid-column: 1 / -1; }
+[data-sim="ceph-min-size"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* legend: stale (dead with ∅) */
+[data-sim="ceph-min-size"] .sd-swatch[data-shape="stale"] { position: relative; background: var(--bg); border: 1px solid var(--muted); }
+[data-sim="ceph-min-size"] .sd-swatch[data-shape="stale"]::after { content: '\2205'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.85em; font-weight: 700; color: var(--muted); }
+
+/* Phone and portrait: one column; the stage grows with its content; the grids scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ceph-min-size"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ceph-min-size"] .cm { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="ceph-min-size"] .cm-clock { margin-left: 0; }
+  [data-sim="ceph-min-size"] [data-sd-controls] > .sd-group { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">size i min_size: kada bazen stane</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="placement.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C_UP = 1, C_CLEAN = 3, C_DEG = 7, C_CLIENT = 2;      // series colours: OSD / copy up, clean PG, degraded PG, client
+  /** State marks next to the words: ✓ and ∅ as text; degraded (a half disc) and inactive (a pause sign) drawn in CSS,
+      since the page font has no such glyphs. */
+  function icon(g) {
+    if (g === 'clean') return h('span', { class: 'cm-ic', translate: 'no' }, '✓');
+    if (g === 'stale') return h('span', { class: 'cm-ic', translate: 'no' }, '∅');
+    if (g === 'lost') return h('span', { class: 'cm-ic', translate: 'no' }, '✕');
+    return h('span', { class: 'cm-ic cm-ic-' + g, 'aria-hidden': 'true' });
+  }
+
+  /** Data (OSD, host, pool and PG names, numbers) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+  function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, t('thsep')); }
+  function osd(x) { return 'osd.' + x; }
+  function osdList(list) { return list.map(osd).join(', '); }
+  function clock(m) { return Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); }
+  function pgId(s, pg) { return L.pgId(s.pool.id, pg); }
+  function hostName(s, i) { return L.CLUSTERS[s.cluster].hosts[i].name; }
+  /** A failure as words: osd.N (data) or "host ceph-01" ("Host ceph-01" at the start of a sentence). */
+  function target(s, f, start) {
+    if (f.indexOf('host:') === 0) return h('span', null, rich(start ? 'hostNamedStart' : 'hostNamed', { h: data(hostName(s, Number(f.slice(5)))) }));
+    return data(f);
+  }
+  function firstFail(c) { return L.norm(c.params).fails[0]; }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned), and
+      *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary lacks). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+
+  function changedSet(s) { var m = {}; ((s.ev && s.ev.changed) || []).forEach(function (pg) { m[pg] = true; }); return m; }
+  function newlyDown(s) { return s.ev && s.ev.kind === 'fail' ? s.ev.newly : []; }
+
+  // ── stage ──
+
+  function head(c) {
+    var s = c.state, prev = c.prev;
+    var counts = L.GROUPS.map(function (g) {
+      var moved = !!prev && prev.counts[g] !== s.counts[g];
+      return h('span', { class: 'cm-st cm-st-' + g + (moved ? ' cm-now' : '') },
+        icon(g), ' ', t.n('cnt_' + g, s.counts[g]));
+    });
+    return h('div', { class: 'cm-col' },
+      h('div', { class: 'cm-head' },
+        h('span', null, t('poolWord'), ' ', h('b', { translate: 'no' }, s.pool.name)),
+        h('span', { class: 'cm-badge', translate: 'no' }, 'size ' + s.size),
+        h('span', { class: 'cm-badge', translate: 'no' }, 'min_size ' + s.minSize),
+        s.clock !== null ? h('span', { class: 'cm-clock' + (prev && prev.clock !== s.clock ? ' cm-now' : ''), translate: 'no' }, clock(s.clock)) : null),
+      h('div', { class: 'cm-counts' }, counts));
+  }
+
+  function osdMap(c) {
+    var s = c.state, newly = newlyDown(s);
+    var hosts = L.CLUSTERS[s.cluster].hosts;
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('osdTitle'),
+      meta: [t('osdMeta')],
+      cellHeight: s.cluster === 'dr' ? '1.1rem' : '1.75rem',
+      rows: hosts.map(function (hst, i) {
+        var outHere = s.out.filter(function (x) { return hst.osds.indexOf(x) >= 0; });
+        return {
+          id: 'h' + i,
+          label: data(hst.name),
+          aside: outHere.length ? h('span', null, t('outAside', { x: outHere.join(', ') })) : '',
+          cells: hst.osds.map(function (x) {
+            if (s.out.indexOf(x) >= 0) return { text: String(x), kind: 'ghost' };
+            var down = s.down.indexOf(x) >= 0;
+            return { text: String(x), kind: down ? 'dead' : 'fill', c: C_UP, now: newly.indexOf(x) >= 0 };
+          })
+        };
+      })
+    });
+  }
+
+  function poolGrid(c) {
+    var s = c.state;
+    var perRow = s.pgNum > 128 ? 32 : 16;
+    var cells = s.pgs.map(function (g, pg) {
+      var cell = g === 'clean' ? { kind: 'fill', c: C_CLEAN } : g === 'degraded' ? { kind: 'soft', c: C_DEG }
+        : g === 'inactive' ? { kind: 'bad' } : { kind: 'dead', text: '∅' };
+      return cell;                                               // no changed mark: it would hide the state's pattern
+    });
+    var row = { id: 'pg', cells: cells, spans: [{ from: s.watched, len: 1, label: 'W', now: !!(s.ev && s.ev.kind === 'write') }] };
+    var rows = Simdeck.blockGrid.split(row, perRow).map(function (r, k) {
+      r.label = data(pgId(s, k * perRow) + '…');
+      if (r.spans && !r.spans.length) delete r.spans;            // no band under rows without the watched PG
+      return r;
+    });
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'cm-pool',
+      title: t('poolTitle'),
+      meta: [h('span', null, data(s.pool.name), ' · ', t.n('pgCount', s.pgNum))],
+      count: { text: h('span', null, icon('inactive'), ' ', t.n('cnt_down', s.counts.inactive + s.counts.stale)), hl: !!c.prev && (c.prev.counts.inactive + c.prev.counts.stale) !== (s.counts.inactive + s.counts.stale) },
+      cellHeight: s.pgNum > 128 ? '0.85rem' : '1.55rem',
+      rows: rows
+    });
+  }
+
+  function zoom(c) {
+    var s = c.state, ch = changedSet(s), ev = s.ev;
+    var writing = ev && ev.kind === 'write' ? s.writes[ev.write - 1] : null;
+    var last = s.writes.length ? s.writes[s.writes.length - 1] : null;
+    var clientCells = [{ text: last ? 'W' + last.id : '', kind: last ? 'fill' : 'ghost', c: C_CLIENT, now: !!writing }];
+    for (var k = 1; k < s.size; k++) clientCells.push(null);
+    var rows = [{ id: 'cl', label: h('span', null, t('client')), cells: clientCells, aside: '' }];
+    s.zoom.forEach(function (pg) {
+      var g = s.pgs[pg];
+      rows.push({
+        id: 'pg' + pg,
+        label: data(pgId(s, pg)),
+        cells: L.copiesOf(s.cluster, s.size, pg).map(function (x) {
+          var down = s.down.indexOf(x) >= 0;
+          return { text: String(x), kind: down ? 'dead' : 'fill', c: C_UP };
+        }),
+        spans: pg === s.watched ? [{ from: 0, len: s.size, now: !!writing }] : [],
+        aside: h('span', { class: 'cm-st cm-st-' + g + (ch[pg] ? ' cm-now' : '') }, icon(g), ' ', t('g_' + g))
+      });
+    });
+    var links = writing ? [{ from: { row: 'cl', cell: 0 }, to: { row: 'pg' + s.watched, cell: 0 }, now: writing.status === 'ack', broken: writing.status !== 'ack' }] : [];
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'cm-zoom',
+      title: t('zoomTitle', { n: s.zoom.length }),
+      meta: [t('zoomMeta')],
+      cols: s.size,
+      cellHeight: '1.42rem',
+      rows: rows,
+      links: links
+    });
+  }
+
+  function writeLine(s, w) {
+    var st = w.status === 'ack' ? h('span', { class: 'cm-w-ack' }, t('wAck', { osds: osdList(w.on) }))
+      : w.status === 'lost' ? h('span', { class: 'cm-w-lost' }, t('wLost', { osds: osdList(w.on) }))
+      : h('span', { class: 'cm-w-blocked' }, icon('inactive'), ' ', t('wBlocked'));
+    return h('div', { class: 'cm-w' }, h('b', { translate: 'no' }, t('wLine', { w: w.id, pg: pgId(s, w.pg) })), st);
+  }
+
+  function card(c) {
+    var s = c.state;
+    if (s.ev && s.ev.kind === 'summary') {
+      var rows = s.ev.compare.map(function (r) {
+        var bad = r.counts.inactive + r.counts.stale;
+        return h('tr', { class: r.current ? 'cm-cur' : null },
+          h('td', null, data(r.size + '/' + r.minSize), r.current ? h('span', { class: 'cm-muted' }, ' · ' + t('cmpNow')) : null),
+          h('td', { class: r.counts.inactive ? 'cm-bad' : null, translate: 'no' }, String(r.counts.inactive)),
+          h('td', { translate: 'no' }, String(r.counts.degraded)),
+          h('td', { class: r.counts.stale ? 'cm-bad' : null, translate: 'no' }, String(r.counts.stale)),
+          h('td', { class: bad || r.writes.lost ? 'cm-bad' : null, translate: 'no' },
+            String(r.writes.ack), ' ', icon('clean'), ' · ', String(r.writes.blocked), ' ', icon('inactive'), ' · ', String(r.writes.lost), ' ', icon('lost')));
+      });
+      return h('div', { class: 'cm-card' },
+        h('h3', null, t('cmpTitle')),
+        h('table', { class: 'cm-cmp' },
+          h('thead', null, h('tr', null, h('th', null, t('cmpSet')), h('th', null, t('cmpInactive')), h('th', null, t('cmpDegraded')),
+            h('th', null, t('cmpStale')), h('th', null, t('cmpWrites')))),
+          h('tbody', null, rows)));
+    }
+    var g = s.pgs[s.watched];
+    var kids = [h('h3', null, t('writesTitle'))];
+    if (!s.writes.length) kids.push(h('div', { class: 'cm-muted' }, t('wNone')));
+    s.writes.forEach(function (w) { kids.push(writeLine(s, w)); });
+    kids.push(h('div', { class: 'cm-w' }, h('span', { class: 'cm-muted' }, rich('pgNow', { pg: data(pgId(s, s.watched)) })),
+      h('b', { translate: 'no' }, L.cephState(g))));
+    return h('div', { class: 'cm-card' }, kids);
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'cm' },
+      h('div', { class: 'cm-col' }, head(c), osdMap(c), poolGrid(c)),
+      h('div', { class: 'cm-col' }, zoom(c), card(c))));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, o = L.norm(c.params);
+    var MIN = data(s.minSize), SIZE = data(s.size), N = data(s.pgNum);
+    var pre = s.clock !== null && !(ev && ev.kind === 'later') ? rich('capClock', { clock: data(clock(s.clock)) }).concat([' ']) : [];
+    if (!ev) {
+      return pre.concat(rich('capStart', { pool: data(s.pool.name), pgs: N, size: SIZE, target: target(s, firstFail(c)) }, s.minSize));
+    }
+    var out = pre;
+    var add = function (parts) { out = out.concat(out.length ? sp(parts) : parts); };
+    if (ev.kind === 'fail') {
+      if (!ev.newly.length) { add(rich('capFailNothing', { target: target(s, ev.target, true) })); return out; }
+      add(rich('capFail', { target: target(s, ev.target, true) }, ev.hit.length));
+      var to = { inactive: 0, degraded: 0, stale: 0 };
+      ev.changed.forEach(function (pg) { if (to[s.pgs[pg]] !== undefined) to[s.pgs[pg]] += 1; });
+      if (to.inactive) add(rich('capToInactive', { min: MIN }, to.inactive));
+      if (to.degraded) add(rich('capToDegraded', { size: SIZE, min: MIN }, to.degraded));
+      var still = ev.hit.filter(function (pg) { return s.pgs[pg] === 'degraded' && ev.changed.indexOf(pg) < 0; }).length;
+      if (still) add(rich('capStillDegraded', {}, still));
+      if (to.stale) add(rich('capToStale', {}, to.stale));
+      ev.lost.forEach(function (id) {
+        var w = s.writes[id - 1];
+        add(rich('capLost', { w: data('W' + id), osds: data(osdList(w.on)) }));
+      });
+      return out;
+    }
+    if (ev.kind === 'later') {
+      if (!s.counts.inactive) { add(rich('capLaterNone', { clock: data(clock(s.clock)) })); return out; }
+      add(rich('capLater', { clock: data(clock(s.clock)), gib: data(ev.gib), obj: data(num(ev.objects)),
+        mib: data(ev.mib), pgs: N, stuck: data(num(ev.stuck)) }, s.counts.inactive));
+      return out;
+    }
+    if (ev.kind === 'write') {
+      var w = s.writes[ev.write - 1], g = s.pgs[w.pg], live = L.liveOf(s.cluster, s.size, w.pg, s.down);
+      var W = data('W' + w.id), PG = data(pgId(s, w.pg));
+      if (w.status === 'ack') {
+        add(rich('capWriteAck', { w: W, pg: PG, osds: data(osdList(w.on)) }, w.on.length));
+        if (w.on.length === 1 && s.size > 1) add(rich('capWriteOne'));
+        else if (g === 'degraded') add(rich('capWriteDegraded'));
+      } else if (g === 'stale') add(rich('capWriteStale', { w: W, pg: PG }));
+      else add(rich('capWriteBlocked', { w: W, pg: PG, min: MIN }, live.length));
+      return out;
+    }
+    add(rich('capSum', { size: SIZE, min: MIN, i: data(s.counts.inactive), d: data(s.counts.degraded), s: data(s.counts.stale), n: N }));
+    add(rich(o.minSize === 1 ? 'capSum1' : o.size === 2 ? 'capSum22' : 'capSum32'));
+    return out;
+  }
+
+  var FAIL_LABEL = function (f) { return f === 'none' ? t('failNone') : f.indexOf('host:') === 0 ? L.CLUSTERS.hc.hosts[Number(f.slice(5))].name : f; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'size', type: 'choice', label: t('size'), options: [[2, '2'], [3, '3']], resets: true },
+      { key: 'minSize', type: 'choice', label: t('minSize'), options: [[1, '1'], [2, '2']], resets: true },
+      { key: 'cluster', type: 'choice', label: t('cluster'), options: [['hc', t('clusterHc')], ['dr', t('clusterDr')]], resets: true },
+      { key: 'fail1', type: 'choice', label: t('fail1'), options: L.FAIL1.map(function (f) { return [f, FAIL_LABEL(f)]; }), resets: true,
+        visible: function (p) { return p.cluster !== 'dr'; } },
+      { key: 'fail2', type: 'choice', label: t('fail2'), options: L.FAIL2.map(function (f) { return [f, FAIL_LABEL(f)]; }), resets: true,
+        visible: function (p) { return p.cluster !== 'dr'; } },
+      { key: 'drFail', type: 'choice', label: t('drFail'), options: [['osd.15', 'osd.15'], ['host:2', 'hq-pve-03']], resets: true,
+        visible: function (p) { return p.cluster === 'dr'; } }
+    ],
+
+    presets: [
+      { id: 'size2-min2', label: t('p22'), params: { size: 2 }, hint: t('p22Hint') },
+      { id: 'size3-min2', label: t('p32'), params: {}, hint: t('p32Hint') },
+      { id: 'size3-two-down', label: t('p32two'), params: { fail2: 'osd.4' }, hint: t('p32twoHint') },
+      { id: 'size2-min1', label: t('p21'), params: { size: 2, minSize: 1, fail2: 'osd.4' }, hint: t('p21Hint') },
+      { id: 'dr-s2', label: t('pDr'), params: { cluster: 'dr', size: 2 }, hint: t('pDrHint') },
+      { id: 'host-down', label: t('pHost'), params: { fail1: 'host:0' }, hint: t('pHostHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: C_CLEAN, label: t('legClean') },
+      { shape: 'bg-soft', c: C_DEG, label: t('legDegraded') },
+      { shape: 'bg-bad', label: t('legInactive') },
+      { shape: 'stale', label: t('legStale') },
+      { shape: 'bg-fill', c: C_UP, label: t('legUp') },
+      { shape: 'bg-dead', label: t('legDown') },
+      { shape: 'bg-span', label: t('legWatched') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
