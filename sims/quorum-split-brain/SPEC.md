@@ -4,7 +4,7 @@
 Task `docs/tasks/w2/quorum-split-brain.md`, catalogue `ha-quorum-split-brain` (§4.7, overlap §5.7). One concept:
 **a majority of the configured votes keeps one side alive; an even split leaves none; a witness breaks the tie;
 without quorum both halves run the service (split-brain)**. Fencing is named where it matters (a takeover) and left
-to the preset task `fencing`.
+to the preset task `fencing` (section "Fencing" below).
 
 ## Scene
 
@@ -173,8 +173,91 @@ Other checked numbers: 4 nodes, no witness, dynamic: D has no vote from the star
 `!D,!C,!B` no witness: dynamic runs to A 1 of 1; static stops at C (2 of 4). 5 nodes `AB|CD|E` dynamic: no quorum, no
 vote changes. Never two quorums, never more than one running copy.
 
+## Fencing (preset task `fencing`)
+
+Task `docs/tasks/w3/fencing.md` (catalogue `ha-fencing`, §4.7 and §5.7: "fencing is its second step"). One concept: **why
+a node must be killed before its resources move**. An opt-in third flow: param `fence` (`false` by default, set only by
+the four fencing presets) replaces the steps with fault, count, fence, takeover, wake, result. With `fence` off nothing
+above changes (test `F-off`). Rule 7 above ("not modelled here") is what this flow models.
+
+### Scene and params (fencing flow)
+
+The same ring of 2–5 nodes, no witness. The service runs on `A` and writes to a **shared disk** whose log records every
+write as `{ node, value, t }` (`t` = the step that wrote it; `A: x = 0` at step 0). Every node has a **power switch** outside
+the cluster network (out-of-band power control: a switched power outlet or the node's management controller).
+
+| Param | Values | Default |
+|---|---|---|
+| `nodes` | 2–5 (shared); 2 nodes run in **two-node mode** | 3 |
+| `fault` | `hang` (A hangs) / `cut` (A is cut off from the rest, all nodes alive) | `hang` |
+| `fencing` | on / off | on |
+| `fenceDev` | A's power switch `ok` / `unreachable` (the others are always reachable) | `ok` |
+| `delayA` | `0` / `5`: fencing **node A** waits that many seconds (shown only for 2 nodes) | `0` |
+
+State added: `fault`, `fencing`, `twoNode`, `fenceDevice: { node: 'ok' | 'unreachable' }`, `delayMs: { node: ms }`,
+`fenced: [ids]`, `fences: [{ by, side, target, at, result: 'ok' | 'failed' | 'moot' }]`, `blocked: [side]`,
+`disk: [{ node, value, t }]`, `late` (`written` / `never`), `writers`, `verdict` (`corrupt` / `one` / `down`); per node
+`hung`, `fenced`; per side `hung`, `fenced`, `act` (`keep`, `start`, `stop`, `off`, `blocked`, `frozen`, `fenced`, `late`).
+
+### Rules (fencing)
+
+- **F1. Silence is not death.** A hung node is on, holds the service and has a write in flight, but sends no heartbeats; it
+  counts nothing and does nothing until it wakes (NLA T53 „zašto grozd bez njega nije grozd"). When it wakes, unless it was
+  fenced, it finishes that write before it notices anything, then finds it is out of the cluster and stops (too late).
+- **F2. Fence first, move second.** With fencing, every live side with quorum fences each node outside it through that
+  node's power switch, and starts the service only after the fence is confirmed (ClusterLabs *Pacemaker Explained*,
+  fencing chapter; "STONITH") *(check)*.
+- **F3. A failed fence blocks.** If the switch cannot be reached, the fence fails and that side starts the service nowhere:
+  down is better than two writers. It stays down until an operator confirms the node is off (Pacemaker's default: the
+  resources of an unclean node are not recovered until it is fenced) *(check)*.
+- **F4. Without fencing** the quorum side takes the silence for death and starts the service at once. A hung owner that
+  wakes up writes too: two nodes write the shared disk and the log interleaves them → corruption.
+- **F5. Two-node mode** (votequorum(5) `two_node` *(check)*): with 2 nodes, 1 of 2 is quorum, so after a cut both sides
+  have it and both fence the other (a **fence race**). Fencing node X waits `delayMs[X]` (Pacemaker's fencing delay is set
+  on the device that fences a node: `pcmk_delay_base` *(check)*), so a delay on fencing A lets A shoot first and survive.
+  With no delay both fire at the same moment and **both** are off *(derived, check)*.
+- **F6. Only a side with quorum fences** (host rule 1). A live side without quorum (A cut off from 2+ others) fences
+  nobody and stops its own copy (host rule 2): when the node is alive and hears the decision, quorum alone suffices; the
+  hung node is the case it cannot handle.
+
+### Tie-breaks (fencing)
+
+- **T8.** A side fences from its lowest-id live node; a start goes to its lowest-id live node (host T1).
+- **T9.** Fence actions run in order of time (the target's delay), then by shooter id. Actions at the same moment all fire;
+  an action whose shooter or target is already off is **moot** (never fires).
+- **T10.** Each node's client writes its own value: `A` x = 1, `B` x = 2, … (A's start value x = 0 is on the disk). In one
+  step the writes follow side order. A's late write comes in the wake step, after B's.
+
+### Steps
+
+0. Start: one side, the service on A, the disk `A: x = 0`, the switches on.
+1. **Fault**: A hangs (links quiet) or is cut off (links cut).
+2. **Count**: each live side counts (the hung node does not).
+3. **Fence**: with fencing, the fences fire (ok / failed / moot) with their times; without, nothing (the caption says the
+   side takes silence for death).
+4. **Takeover**: each side keeps, starts, stops, is blocked or is off; a node that runs the service takes one write.
+5. **Wake** (only after a hang): A wakes and writes x = 1, or stays off.
+6. **Result**: who wrote after the fault; `corrupt` (two or more writers), `one` (one writer, the service runs) or `down`.
+
+`steps` = 6 after a hang, 5 after a cut, whatever the outcome (all 64 combinations checked in `F-all`).
+
+### Presets (numbers checked by a script before the tests, asserted in `F-presets`)
+
+| # | id | Params | Fence | Takeover | Disk | Verdict | Steps |
+|---|---|---|---|---|---|---|---|
+| 12 | `no-fencing` | 3 nodes, hang, fencing off | — | B starts (x = 2), A holds its frozen copy | A 0, B 2, A 1 | corrupt: two writers | 6 |
+| 13 | `fence-then-move` | 3 nodes, hang, fencing on | B → A at 0 s: ok | B starts (x = 2) | A 0, B 2 | one writer (B) | 6 |
+| 14 | `fence-fails` | 3 nodes, hang, A's switch unreachable | B → A: failed | BC blocked | A 0, A 1 | down, one writer (A) | 6 |
+| 15 | `two-node-race` | 2 nodes, cut, fencing A waits 5 s | A → B at 0 s: ok; B → A at 5 s: moot | A keeps (x = 1) | A 0, A 1 | one writer (A) | 5 |
+
+Other checked numbers: `two-node-race` with no delay → both off, nothing runs, verdict down. 2 nodes cut without fencing →
+A keeps and B starts: two writers. 3–5 nodes cut without fencing → A stops (no quorum), B starts: one writer. 3–5 nodes cut
+with A's switch unreachable → A stops, the rest is blocked, nobody writes. A hang with `delayA` 5 → B fences A at 5 s,
+otherwise the same. With fencing on, no combination ever has two writers.
+
 ## Out of scope
 
-Consensus internals (`raft`), fencing mechanics (`fencing`), resource constraints and placement, timing. Dynamic quorum
-and vote adjustment exist only in the Windows failover sequence above; two-node special modes of other stacks, node
+Consensus internals (`raft`), fence device protocols and configuration, storage-based fencing (SCSI reservations:
+`nas-vs-san`), watchdog self-fencing (named in the explanation only), resource constraints and placement, timing. Dynamic quorum
+and vote adjustment exist only in the Windows failover sequence above; two-node mode outside the fencing flow, node
 weights set by hand, Cluster Shared Volumes, stretched clusters and forcing quorum are out of scope.

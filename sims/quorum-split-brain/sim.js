@@ -6,6 +6,9 @@
    A second, opt-in flow (param `failover`, set only by the Windows presets of task win-failover-cluster) plays a
    sequence of events (a node fails, the network splits, the witness goes away), recounts after each, and can adjust
    the votes (dynamic quorum and dynamic witness). SPEC.md "Windows failover sequence".
+   A third, opt-in flow (param `fence`, set only by the presets of task fencing) hangs the owner A or cuts it off, lets
+   the quorum side fence it through its power switch (or not), moves the service, wakes A up and shows who wrote on the
+   shared disk. SPEC.md "Fencing".
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. */
 (function (root) {
@@ -305,6 +308,185 @@
     return out;
   }
 
+  // ── Fencing (task fencing; SPEC.md "Fencing") ──
+
+  /** Steps of the fencing flow: fault, count, fence, takeover, wake (only when a node hangs), result (F-steps). */
+  var FPHASES = ['fault', 'count', 'fence', 'takeover', 'wake', 'result'];
+  /** The value each node's client writes: A writes x = 1, B x = 2, … (A's start value x = 0 is on the disk). */
+  function valueOf(id) { return IDS.indexOf(id) + 1; }
+
+  /** The params the fencing flow acts on. */
+  function fEff(p) {
+    var n = clamp(p.nodes);
+    return { n: n, fault: p.fault === 'cut' ? 'cut' : 'hang', fencing: p.fencing !== false,
+      dev: p.fenceDev === 'unreachable' ? 'unreachable' : 'ok', delayA: String(p.delayA) === '5' ? 5 : 0, twoNode: n === 2 };
+  }
+
+  function fPhases(p) { return FPHASES.filter(function (ph) { return ph !== 'wake' || fEff(p).fault === 'hang'; }); }
+
+  function fNode(s, id) { return s.nodes.filter(function (x) { return x.id === id; })[0]; }
+  /** Alive: powered on and not hung (a hung node is on, but does nothing). */
+  function fLive(s, id) { var x = fNode(s, id); return !x.fenced && !x.hung; }
+
+  /** Quorum in the fencing flow: more than half of the configured votes, or 1 of 2 in two-node mode (F5). */
+  function fCount(s, side) {
+    var votes = side.members.filter(function (id) { return fLive(s, id); }).length;
+    var needed = s.twoNode ? 1 : neededOf(s.n);
+    return { votes: votes, total: s.n, needed: needed, quorum: votes >= needed };
+  }
+
+  function fSnap(sd) { return JSON.stringify([sd.members, sd.hung, sd.fenced, sd.counted, sd.counted && sd.quorum, sd.act, sd.running, sd.node]); }
+
+  function fChanged(prev, next) {
+    var before = {};
+    prev.sides.forEach(function (sd) { before[sd.members.join('')] = fSnap(sd); });
+    next.changed = next.sides.map(function (sd, i) { return before[sd.members.join('')] === fSnap(sd) ? -1 : i; })
+      .filter(function (i) { return i >= 0; });
+    return next;
+  }
+
+  function fInitial(p) {
+    var e = fEff(p);
+    var ids = IDS.slice(0, e.n);
+    var dev = {}, delay = {};
+    ids.forEach(function (id) { dev[id] = id === OWNER ? e.dev : 'ok'; delay[id] = id === OWNER ? e.delayA * 1000 : 0; });
+    var s = {
+      mode: 'fence', phase: 'start', n: e.n, fault: e.fault, fencing: e.fencing, twoNode: e.twoNode, policy: 'stop',
+      split: ids.join(''), witness: null, total: e.n,
+      nodes: ids.map(function (id) { return { id: id, up: true, votes: 1, hung: false, fenced: false }; }),
+      fenceDevice: dev, delayMs: delay, fenced: [], fences: [], blocked: [],
+      disk: [{ node: OWNER, value: 0, t: 0 }],
+      links: ringOf(e.n), cut: [], groups: [ids],
+      resource: { owner: OWNER, runningOn: [OWNER] }, writes: [], changed: [], diverged: false,
+      writers: [], verdict: null, late: null
+    };
+    var all = { members: ids, hung: false, fenced: false };
+    s.sides = [Object.assign(all, fCount(s, all), { counted: true, act: 'keep', node: OWNER, running: true })];
+    return s;
+  }
+
+  /** Phase `ph` applied to a copy of `prev` (SPEC.md "Fencing", F1–F6, T8–T10). */
+  function fApply(prev, ph, n) {
+    var s = clone(prev);
+    s.changed = [];
+    s.phase = ph;
+    var runIn = function (sd) { return s.resource.runningOn.filter(function (id) { return sd.members.indexOf(id) >= 0; })[0] || null; };
+
+    if (ph === 'fault') {
+      // F1: a hang leaves A on, holding the service, silent; a cut leaves every node alive and splits the ring
+      var rest = s.nodes.map(function (x) { return x.id; }).filter(function (id) { return id !== OWNER; });
+      s.groups = [[OWNER], rest];
+      if (s.fault === 'hang') {
+        fNode(s, OWNER).hung = true;
+        s.links.forEach(function (l) { l.up = l.a !== OWNER && l.b !== OWNER; });
+        s.cut = [];
+      } else {
+        s.links.forEach(function (l) { l.up = (l.a === OWNER) === (l.b === OWNER); });
+        s.cut = s.links.filter(function (l) { return !l.up; }).map(function (l) { return l.a + l.b; });
+      }
+      s.split = s.groups.map(function (g) { return g.join(''); }).join('|');
+      s.sides = s.groups.map(function (g) {
+        var sd = { members: g, hung: s.fault === 'hang' && g[0] === OWNER, fenced: false, counted: false, act: null };
+        sd.node = runIn(sd);
+        sd.running = !!sd.node;
+        return sd;
+      });
+      return fChanged(prev, s);
+    }
+
+    if (ph === 'count') {
+      // a hung node counts nothing: it is silent, not a side that decides (F1)
+      s.sides.forEach(function (sd) { if (!sd.hung) Object.assign(sd, fCount(s, sd), { counted: true }); });
+      return fChanged(prev, s);
+    }
+
+    if (ph === 'fence') {
+      // F2, F6: only a live side with quorum fences, every node outside it; T8: the shooter is its lowest id;
+      // T9: fencing node X waits delayMs[X]; actions at the same moment all fire (both may go off)
+      s.fences = [];
+      s.blocked = [];
+      if (!s.fencing) return fChanged(prev, s);
+      var acts = [];
+      s.sides.forEach(function (sd) {
+        if (sd.hung || !sd.quorum) return;
+        var by = sd.members.filter(function (id) { return fLive(s, id); }).sort()[0];
+        s.nodes.forEach(function (x) { if (sd.members.indexOf(x.id) < 0) acts.push({ by: by, side: sd.members.join(''), target: x.id, at: s.delayMs[x.id] }); });
+      });
+      acts.sort(function (a, b) { return a.at - b.at || (a.by < b.by ? -1 : a.by > b.by ? 1 : 0); });
+      var i = 0;
+      while (i < acts.length) {
+        var batch = acts.filter(function (a) { return a.at === acts[i].at; });
+        var off = [];
+        batch.forEach(function (a) {
+          if (fNode(s, a.by).fenced || fNode(s, a.target).fenced) a.result = 'moot';
+          else if (s.fenceDevice[a.target] !== 'ok') a.result = 'failed';
+          else { a.result = 'ok'; off.push(a.target); }
+        });
+        off.forEach(function (id) { var x = fNode(s, id); x.fenced = true; x.up = false; x.hung = false; });
+        i += batch.length;
+      }
+      s.fences = acts;
+      s.fenced = s.nodes.filter(function (x) { return x.fenced; }).map(function (x) { return x.id; });
+      // F3: a side whose fence failed may not start the service anywhere
+      s.blocked = acts.filter(function (a) { return a.result === 'failed' && !fNode(s, a.by).fenced; })
+        .map(function (a) { return a.side; }).filter(function (v, k, arr) { return arr.indexOf(v) === k; });
+      s.resource.runningOn = s.resource.runningOn.filter(function (id) { return !fNode(s, id).fenced; });
+      s.links.forEach(function (l) { if (fNode(s, l.a).fenced || fNode(s, l.b).fenced) l.up = false; });
+      s.cut = s.links.filter(function (l) { return !l.up && !fNode(s, l.a).fenced && !fNode(s, l.b).fenced && s.fault === 'cut'; }).map(function (l) { return l.a + l.b; });
+      s.sides.forEach(function (sd) {
+        sd.fenced = sd.members.every(function (id) { return fNode(s, id).fenced; });
+        if (sd.fenced) { sd.act = 'fenced'; sd.running = false; sd.hung = false; }
+      });
+      return fChanged(prev, s);
+    }
+
+    if (ph === 'takeover') {
+      // F2 (move only after the fence), F3 (blocked), F4 (no fencing: start at once), host rule 2 (no quorum: stop);
+      // T1: a start goes to the lowest live id; every side that runs the service takes one client write
+      s.sides.forEach(function (sd) {
+        var here = runIn(sd);
+        if (sd.fenced) { sd.act = 'fenced'; sd.running = false; sd.node = null; return; }
+        if (sd.hung) { sd.act = 'frozen'; sd.running = !!here; sd.node = here; return; }
+        var live = sd.members.filter(function (id) { return fLive(s, id); }).sort();
+        if (!live.length) { sd.act = 'off'; sd.running = false; sd.node = null; return; }
+        if (!sd.quorum) { sd.act = here ? 'stop' : 'off'; sd.running = false; sd.node = here; return; }
+        if (here) { sd.act = 'keep'; sd.running = true; sd.node = here; return; }
+        if (s.blocked.indexOf(sd.members.join('')) >= 0) { sd.act = 'blocked'; sd.running = false; sd.node = null; return; }
+        sd.act = 'start'; sd.running = true; sd.node = live[0];
+      });
+      var frozen = s.sides.filter(function (sd) { return sd.hung && sd.running; }).map(function (sd) { return sd.node; });
+      s.resource.runningOn = frozen.concat(s.sides.filter(function (sd) { return !sd.hung && sd.running; }).map(function (sd) { return sd.node; }));
+      s.sides.forEach(function (sd) {
+        if (!sd.hung && sd.running) s.disk.push({ node: sd.node, value: valueOf(sd.node), t: n });
+      });
+      return fChanged(prev, s);
+    }
+
+    if (ph === 'wake') {
+      // F1, F4: the hung owner wakes; unless it was fenced, it finishes its write in flight before it notices
+      // anything, then finds it has lost the cluster and stops (too late)
+      var a = fNode(s, OWNER);
+      s.late = null;
+      if (a.fenced) { s.late = 'never'; return fChanged(prev, s); }
+      a.hung = false;
+      s.disk.push({ node: OWNER, value: valueOf(OWNER), t: n });
+      s.late = 'written';
+      s.resource.runningOn = s.resource.runningOn.filter(function (id) { return id !== OWNER; });
+      s.sides.forEach(function (sd) {
+        if (sd.members.indexOf(OWNER) < 0) return;
+        sd.hung = false; sd.act = 'late'; sd.running = false; sd.node = OWNER;
+      });
+      return fChanged(prev, s);
+    }
+
+    // result: who wrote after the fault (F4: two writers corrupt the disk)
+    var after = s.disk.filter(function (w) { return w.t > 0; });
+    s.writers = after.map(function (w) { return w.node; }).filter(function (v, k, arr) { return arr.indexOf(v) === k; });
+    s.splitBrain = s.writers.length >= 2;
+    s.verdict = s.writers.length >= 2 ? 'corrupt' : s.resource.runningOn.length ? 'one' : 'down';
+    return fChanged(prev, s);
+  }
+
   var logic = {
     IDS: IDS,
     SPLITS: SPLITS,
@@ -312,16 +494,20 @@
     defaults: { scene: 'ha', nodes: 3, split2: 'A|B', split3: 'AB|C', split4: 'AB|CD', split5: 'AB|CD|E',
       witness: false, witnessAt: 'first', policy: 'stop',
       // the Windows failover sequence (off unless a preset sets it): SPEC.md "Windows failover sequence"
-      failover: false, ev2: '!B', ev3: '!C', ev4: 'AB|CD', ev5: 'AB|CDE', wkind: 'fileshare', votes: 'static' },
+      failover: false, ev2: '!B', ev3: '!C', ev4: 'AB|CD', ev5: 'AB|CDE', wkind: 'fileshare', votes: 'static',
+      // fencing (off unless a preset sets it): SPEC.md "Fencing"
+      fence: false, fault: 'hang', fencing: true, fenceDev: 'ok', delayA: '0' },
 
     /** 4 steps (partition, count, act, heal), plus one write per running side when two or more run (rule 6). */
     steps: function (p) {
+      if (p.fence) return fPhases(p).length;
       if (p.failover) return seqRun(p).length;
       var w = writersOf(planOf(p)).length;
       return w >= 2 ? 4 + w : 4;
     },
 
     initial: function (p) {
+      if (p.fence) return fInitial(p);
       if (p.failover) return seqInitial(p);
       var e = eff(p);
       var nodes = IDS.slice(0, e.n).map(function (id) { return { id: id, up: true, votes: 1 }; });
@@ -345,6 +531,7 @@
     },
 
     step: function (prev, n, p) {
+      if (p.fence) return fApply(prev, fPhases(p)[n - 1], n);
       if (p.failover) return seqApply(prev, seqRun(p)[n - 1], seqEff(p));
       var s = clone(prev);
       s.changed = [];
@@ -444,7 +631,10 @@
     VOTES: VOTES,
     seqEff: seqEff,
     seqRun: seqRun,
-    totalOf: totalOf
+    totalOf: totalOf,
+    fEff: fEff,
+    fPhases: fPhases,
+    valueOf: valueOf
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;

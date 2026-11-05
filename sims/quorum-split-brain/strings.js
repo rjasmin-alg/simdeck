@@ -198,6 +198,76 @@
       rcNone: 'Glasovi: {list}. Kvorum traži {needed} od {total} i nitko ga nema: uloge grozda staju.',
       rcStill: 'I dalje nitko nema kvoruma: grozd stoji.',
       rcStatic: 'Glasovi su statični: pali članovi i dalje se broje u {total}.',
+      // fencing (task fencing)
+      pFault: 'Kvar',
+      fault_hang: 'A zaglavi',
+      fault_cut: 'A odsječen',
+      pFencing: 'Ograđivanje',
+      pFenceDev: 'Sklopka čvora A',
+      dev_ok: 'dostupna',
+      dev_unreachable: 'nedostupna',
+      pDelayA: 'Ograđivanje A čeka',
+      delay_0: '0 s',
+      delay_5: '5 s',
+      prNoFence: 'Bez ograđivanja',
+      prNoFenceHint: 'Uključi ograđivanje i usporedi.',
+      prFenceMove: 'Ogradi, pa preseli',
+      prFenceFail: 'Sklopka ne radi',
+      prRace: 'Dva čvora: utrka',
+      prRaceHint: 'Postavi čekanje na 0 s: oba se čvora gase.',
+      lgHung: 'zaglavljen',
+      lgPlug: 'sklopka',
+      lgFenced: 'ograđen',
+      lgDisk: 'zapis na disku',
+      bHung: 'zaglavljen',
+      bFenced: 'ugašen',
+      stHung: 'šuti',
+      stFenced: 'ograđen',
+      stLate: 'probudio se',
+      hSwitches: 'Strujne sklopke (izvan mreže grozda)',
+      hDisk: 'Zajednički disk',
+      swOn: 'uključen',
+      swOff: 'ugašen',
+      swUnreach: 'nedostupna',
+      swOk: '{by} ga gasi · {at} s ✓',
+      swFail: '{by}: nije uspjelo',
+      swMoot: '{by}: prekasno ({at} s)',
+      dkTwo: 'dva pisca: podaci su pokvareni',
+      dkOne: 'jedan pisac',
+      actFrozen: 'drži zamrznutu {ra} na {node}',
+      actBlocked: 'ne smije pokrenuti {ra}: ograđivanje nije potvrđeno',
+      actFenced: 'ugašen preko sklopke',
+      actLate: 'zakašnjelo pisanje, pa staje',
+      actSilent: 'ne broji ništa',
+      capFStart: 'Grozd od {nodes}; usluga radi na {a} i piše na zajednički disk. Kvorum je {needed} od {total}.',
+      capFTwoNode: 'Način za dva čvora: jedan glas od dva dovoljan je za kvorum.',
+      capFOn: 'Svaki čvor ima strujnu sklopku izvan mreže grozda.',
+      capFOff: 'Ograđivanje je isključeno.',
+      capHang: 'Čvor A zaglavi: i dalje je upaljen, drži uslugu i ima nedovršeno pisanje, ali više ne šalje otkucaje.',
+      capFCountHang: 'Strana {m} više ne čuje A: ima {v} od {total}, kvorum. A šuti, ali tišina nije smrt: možda još radi.',
+      capFTwoNodeQ: 'U načinu za dva čvora to je dovoljno.',
+      bothHave: 'Ima ga svaka strana: u načinu za dva čvora dovoljan je 1 od 2.',
+      fNoFence: 'Bez ograđivanja: strana {m} uzima tišinu čvora {t} kao njegovu smrt i ne čeka.',
+      fNoQuorum: 'Strana {m} nema kvoruma i ne smije nikoga ograditi.',
+      fOk: 'U {at} s {by} gasi čvor {t} preko njegove strujne sklopke: potvrđeno je ugašen.',
+      fRace: 'Utrka ograđivanja: pucali su u istom trenutku i oba su čvora ugašena.',
+      fFail: '{by} ne doseže sklopku čvora {t}: ograđivanje nije uspjelo, pa se usluga ne smije pokrenuti nigdje dok operater ne potvrdi da je {t2} ugašen.',
+      fMoot: '{by} bi ogradio {t} u {at} s, ali tada je već i sam ugašen.',
+      tkMove: 'Prvo ograđivanje, zatim preseljenje: {t} je ugašen i to je potvrđeno, a tek onda {node} pokreće uslugu i piše {x}.',
+      tkStart: '{node} odmah pokreće uslugu i piše {x} na zajednički disk.',
+      tkHolds: 'A je i dalje upaljen i drži svoju kopiju.',
+      tkStop: '{node} nema kvoruma i sam zaustavlja uslugu.',
+      tkKeep: '{node} zadržava uslugu i piše {x}.',
+      tkBlocked: 'Strana {m} ne pokreće uslugu: bolje da ne radi nego da dva čvora pišu na isti disk.',
+      tkNobody: 'Nijedan čvor nije ostao upaljen: usluga ne radi nigdje.',
+      wkNever: 'A se ne budi: ugašen je. Njegovo zakašnjelo pisanje nikad se ne dogodi.',
+      wkLate: 'A se budi i ne zna da je izgubio uslugu: dovršava pisanje {x}. Tek tada vidi da više nije u grozdu i staje — prekasno.',
+      rsCorruptHang: 'Čvor {a} ne odgovara, ali nije mrtav. Bez ograđivanja {b} preuzima uslugu, {a2} se budi i nastavlja pisati: dva pisca na istom disku.',
+      rsCorrupt: 'Dva pisca na istom disku: {list}. Njihova se pisanja isprepliću i podaci su pokvareni.',
+      rsOne: 'Jedan pisac: nakon kvara na disk je pisao samo {node}. Podaci su ispravni, a usluga radi na {run}.',
+      rsDownFail: 'Usluga ne radi, ali podaci su sigurni: nakon kvara pisao je samo {list}. Usluga se smije pokrenuti tek kad operater potvrdi da je A ugašen.',
+      rsDownFail0: 'Usluga ne radi, ali podaci su sigurni: nakon kvara nitko nije pisao. Usluga se smije pokrenuti tek kad operater potvrdi da je A ugašen.',
+      rsDownAll: 'Oba čvora su ugašena: usluga ne radi dok netko ne upali jedan od njih, ali nitko nije pisao dvaput.',
       explain: '<p><i lang="en">Cluster</i> (grozd) mora odlučiti tko smije pokrenuti uslugu kad se mreža razdvoji. Svaki čvor ' +
         'ima jedan glas; <i lang="en">quorum</i> (kvorum) je više od pola <b>konfiguriranih</b> glasova, ⌊n/2⌋ + 1. Strana s ' +
         'kvorumom zadržava ili preuzima uslugu, ostale je zaustavljaju. Dvije strane nikad ne mogu obje imati više od pola.</p>' +
@@ -212,7 +282,15 @@
         '<i lang="en">Dynamic quorum</i> (dinamički kvorum) uklanja glas čvora koji padne dok grozd ima kvorum, pa grozd koji ' +
         'gubi čvor po čvor radi sve do zadnjega. <i lang="en">Dynamic witness</i> (dinamički svjedok) glasa samo kad čvorovi ' +
         'imaju paran broj glasova; ostane li ukupan broj paran, jedan čvor unaprijed gubi glas, pa podjela napola uvijek ima ' +
-        'pobjednika.</p>'
+        'pobjednika.</p>' +
+        '<p>Čvor koji ne odgovara nije nužno mrtav: <i lang="en">hung node</i> (zaglavljeni čvor) i dalje drži uslugu i može ' +
+        'se probuditi usred pisanja. Zato ga strana s kvorumom prvo ograđuje: <i lang="en">STONITH</i> („pucaj drugom čvoru u ' +
+        'glavu“) ga gasi strujnom sklopkom ili kroz <i lang="en">management controller</i> (upravljački kontroler), izvan mreže ' +
+        'grozda, i tek nakon potvrde seli uslugu. Ne uspije li ograđivanje, usluga ne radi nigdje: bolje stati nego imati dva ' +
+        'pisca. Sam kvorum to ne sprječava: kaže tko smije raditi, ali ne zaustavlja čvor koji ništa ne čuje. Grozd od dva ' +
+        'čvora, u kojem 1 od 2 glasa daje kvorum, može ugasiti oba čvora odjednom; zakašnjenje ograđivanja jednoga čvora ' +
+        'odlučuje tko puca prvi. Čvor se može ograditi i sam, nadzornim brojačem (<i lang="en">watchdog</i>); to ovdje nije ' +
+        'prikazano.</p>'
     },
     en: {
       stage: 'A cluster of nodes in a ring of links, a witness, the sides after a partition and what each does with the service',
@@ -399,6 +477,76 @@
       rcNone: 'Votes: {list}. Quorum needs {needed} of {total} and nobody has it: the clustered roles stop.',
       rcStill: 'Still nobody has quorum: the cluster stays down.',
       rcStatic: 'The votes are static: the failed members still count in the {total}.',
+      // fencing (task fencing)
+      pFault: 'Fault',
+      fault_hang: 'A hangs',
+      fault_cut: 'A cut off',
+      pFencing: 'Fencing',
+      pFenceDev: 'A\'s power switch',
+      dev_ok: 'reachable',
+      dev_unreachable: 'unreachable',
+      pDelayA: 'Fencing A waits',
+      delay_0: '0 s',
+      delay_5: '5 s',
+      prNoFence: 'No fencing',
+      prNoFenceHint: 'Switch fencing on and compare.',
+      prFenceMove: 'Fence, then move',
+      prFenceFail: 'Fence fails',
+      prRace: 'Two-node race',
+      prRaceHint: 'Set the wait to 0 s: both nodes go off.',
+      lgHung: 'hung',
+      lgPlug: 'power switch',
+      lgFenced: 'fenced',
+      lgDisk: 'disk log entry',
+      bHung: 'hung',
+      bFenced: 'off',
+      stHung: 'silent',
+      stFenced: 'fenced',
+      stLate: 'awake',
+      hSwitches: 'Power switches (outside the cluster network)',
+      hDisk: 'Shared disk',
+      swOn: 'on',
+      swOff: 'off',
+      swUnreach: 'unreachable',
+      swOk: '{by} switches it off · {at} s ✓',
+      swFail: '{by}: failed',
+      swMoot: '{by}: too late ({at} s)',
+      dkTwo: 'two writers: the data is corrupt',
+      dkOne: 'one writer',
+      actFrozen: 'holds the frozen {ra} on {node}',
+      actBlocked: 'may not start the {ra}: no fence confirmed',
+      actFenced: 'powered off through its switch',
+      actLate: 'late write, then it stops',
+      actSilent: 'counts nothing',
+      capFStart: 'A cluster of {nodes}; the service runs on {a} and writes to a shared disk. Quorum is {needed} of {total}.',
+      capFTwoNode: 'Two-node mode: one vote of two is enough for quorum.',
+      capFOn: 'Every node has a power switch outside the cluster network.',
+      capFOff: 'Fencing is off.',
+      capHang: 'Node A hangs: it is still on, holds the service and has a write in flight, but sends no more heartbeats.',
+      capFCountHang: 'Side {m} no longer hears A: it has {v} of {total}, quorum. A is silent, but silence is not death: it may still be running.',
+      capFTwoNodeQ: 'In two-node mode that is enough.',
+      bothHave: 'Every side has it: in two-node mode 1 of 2 is enough.',
+      fNoFence: 'No fencing: side {m} takes the silence of {t} for its death and does not wait.',
+      fNoQuorum: 'Side {m} has no quorum and may not fence anyone.',
+      fOk: 'At {at} s {by} powers {t} off through its power switch: confirmed off.',
+      fRace: 'A fence race: they shot at the same moment, and both nodes are off.',
+      fFail: '{by} cannot reach the power switch of {t}: the fence failed, so the service may not start anywhere until an operator confirms that {t2} is off.',
+      fMoot: '{by} would fence {t} at {at} s, but by then it is off itself.',
+      tkMove: 'Fence first, move second: {t} is powered off and confirmed off before {node} starts the service and writes {x}.',
+      tkStart: '{node} starts the service at once and writes {x} to the shared disk.',
+      tkHolds: 'A is still on and holds its own copy.',
+      tkStop: '{node} has no quorum and stops the service itself.',
+      tkKeep: '{node} keeps the service and writes {x}.',
+      tkBlocked: 'Side {m} does not start the service: better down than two nodes writing to one disk.',
+      tkNobody: 'No node is left on: the service runs nowhere.',
+      wkNever: 'A does not wake up: it is off. Its late write never happens.',
+      wkLate: 'A wakes up, not knowing it has lost the service, and finishes its write {x}. Only then does it see it is out of the cluster, and it stops: too late.',
+      rsCorruptHang: 'Node {a} does not answer, but it is not dead. Without fencing {b} takes over the service, {a2} wakes up and goes on writing: two writers on one disk.',
+      rsCorrupt: 'Two writers on one disk: {list}. Their writes interleave, and the data is corrupt.',
+      rsOne: 'One writer: after the fault only {node} wrote to the disk. The data is sound, and the service runs on {run}.',
+      rsDownFail: 'The service is down, but the data is safe: after the fault only {list} wrote. The service may start only once an operator confirms that A is off.',
+      rsDownFail0: 'The service is down, but the data is safe: nobody wrote after the fault. The service may start only once an operator confirms that A is off.',
+      rsDownAll: 'Both nodes are off: the service is down until someone powers one on, but nobody wrote twice.',
       explain: '<p>A <i>cluster</i> must decide who may run the service when the network splits. Every node has one vote; ' +
         '<i>quorum</i> is more than half of the <b>configured</b> votes, ⌊n/2⌋ + 1. The side with quorum keeps or takes over ' +
         'the service, the others stop it. Two sides can never both have more than half.</p>' +
@@ -413,7 +561,14 @@
         'cluster data. <i>Dynamic quorum</i> removes the vote of a node that fails while the cluster has quorum, so a ' +
         'cluster losing one node at a time runs down to the last one. <i>Dynamic witness</i> votes only when the node ' +
         'votes are even; if the total is still even, one node gives up its vote in advance, so a split in half always ' +
-        'has a winner.</p>'
+        'has a winner.</p>' +
+        '<p>A node that does not answer is not necessarily dead: a <i>hung node</i> still holds the service and may wake up in ' +
+        'the middle of a write. So the side with quorum fences it first: <i>STONITH</i> (shoot the other node in the head) ' +
+        'powers it off through its power switch or <i>management controller</i>, outside the cluster network, and moves the ' +
+        'service only once that is confirmed. If the fence fails, the service runs nowhere: better down than two writers. ' +
+        'Quorum alone does not prevent this: it says who may run, but it cannot stop a node that hears nothing. A two-node ' +
+        'cluster, where 1 vote of 2 gives quorum, can power off both nodes at once; a delay on fencing one node decides who ' +
+        'shoots first. A node can also fence itself with a <i>watchdog</i> timer; that is not shown here.</p>'
     }
   };
 

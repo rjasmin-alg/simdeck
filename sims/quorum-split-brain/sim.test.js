@@ -378,13 +378,169 @@ test('W-off: the failover flow is off by default and the classic flow ignores it
   assert.equal(at(a, 0).mode, undefined);
 });
 
+// ── fencing (task fencing; SPEC.md "Fencing") ──
+
+const F = (nodes, over) => P(Object.assign({ fence: true, nodes }, over));
+/** Fence actions after the fence step as "by>target@s:result". */
+const fences = (p) => at(p, 3).fences.map((a) => `${a.by}>${a.target}@${a.at / 1000}:${a.result}`);
+/** Sides after the takeover as "members:act@node". */
+const takeover = (p) => at(p, 4).sides.map((s) => `${s.members.join('')}:${s.act}${s.node ? '@' + s.node : ''}`);
+const disk = (p) => end(p).disk.map((w) => `${w.node}=${w.value}`);
+
+test('F-T8: the quorum side fences from its lowest live id and starts the service on its lowest live id', () => {
+  assert.deepEqual(fences(F(4, { fault: 'hang' })), ['B>A@0:ok']);
+  assert.deepEqual(takeover(F(4, { fault: 'hang' })), ['A:fenced', 'BCD:start@B']);
+  assert.deepEqual(fences(F(5, { fault: 'cut' })), ['B>A@0:ok']);
+});
+
+test('F-T9: fencing node X waits X\'s delay; actions at the same moment all fire; a dead shooter shoots nobody', () => {
+  // two-node race, no delay: both shoot at 0 s and both go off
+  assert.deepEqual(fences(F(2, { fault: 'cut', delayA: '0' })), ['A>B@0:ok', 'B>A@0:ok']);
+  assert.deepEqual(at(F(2, { fault: 'cut', delayA: '0' }), 3).fenced, ['A', 'B']);
+  // a delay on fencing A: B must wait 5 s, A shoots first, B is off before its own shot
+  assert.deepEqual(fences(F(2, { fault: 'cut', delayA: '5' })), ['A>B@0:ok', 'B>A@5:moot']);
+  assert.deepEqual(at(F(2, { fault: 'cut', delayA: '5' }), 3).fenced, ['B']);
+  // the delay only postpones a fence nobody races: B still fences a hung A, 5 s later
+  assert.deepEqual(fences(F(3, { fault: 'hang', delayA: '5' })), ['B>A@5:ok']);
+  // time comes before shooter id: with the delay on fencing B instead, B shoots first and survives
+  const p = F(2, { fault: 'cut' });
+  const s2 = structuredClone(at(p, 2));
+  s2.delayMs = { A: 0, B: 5000 };
+  const s3 = logic.step(s2, 3, p);
+  assert.deepEqual(s3.fences.map((a) => `${a.by}>${a.target}@${a.at / 1000}:${a.result}`), ['B>A@0:ok', 'A>B@5:moot']);
+  assert.deepEqual(s3.fenced, ['A']);
+});
+
+test('F-T10: each node writes its own value (A x = 1, B x = 2); A\'s late write lands after B\'s', () => {
+  assert.equal(logic.valueOf('A'), 1);
+  assert.equal(logic.valueOf('B'), 2);
+  assert.deepEqual(disk(F(3, { fault: 'hang', fencing: false })), ['A=0', 'B=2', 'A=1']);
+  assert.deepEqual(disk(F(2, { fault: 'cut', fencing: false })), ['A=0', 'A=1', 'B=2']);
+});
+
+test('F1: a hung node is not dead: it holds the service, counts nothing, and wakes up to finish its write', () => {
+  const p = F(3, { fault: 'hang', fencing: false });
+  const s1 = at(p, 1);
+  assert.equal(s1.nodes[0].hung, true);
+  assert.equal(s1.nodes[0].fenced, false);
+  assert.deepEqual(s1.resource.runningOn, ['A']);
+  const s2 = at(p, 2);
+  assert.equal(s2.sides[0].counted, false);
+  assert.equal(s2.sides[1].quorum, true);
+  // it still holds its (frozen) copy while B starts one
+  assert.deepEqual(at(p, 4).resource.runningOn, ['A', 'B']);
+  const w = at(p, 5);
+  assert.equal(w.phase, 'wake');
+  assert.equal(w.late, 'written');
+  assert.deepEqual(w.disk[w.disk.length - 1], { node: 'A', value: 1, t: 5 });
+  // a hang cuts no link; a cut does
+  assert.deepEqual(s1.cut, []);
+  assert.deepEqual(at(F(3, { fault: 'cut' }), 1).cut, ['AB', 'CA']);
+  // a cut node is alive, not hung: there is no wake step
+  assert.deepEqual(logic.fPhases(F(3, { fault: 'cut' })), ['fault', 'count', 'fence', 'takeover', 'result']);
+});
+
+test('F2: with fencing the quorum side powers the silent node off, and moves the service only after that', () => {
+  const p = F(3, { fault: 'hang', fencing: true });
+  const s3 = at(p, 3);
+  assert.deepEqual(s3.fenced, ['A']);
+  assert.deepEqual(s3.resource.runningOn, [], 'nothing runs between the fence and the start');
+  assert.equal(s3.sides[1].act, null, 'the start waits for the takeover step');
+  assert.deepEqual(at(p, 4).resource.runningOn, ['B']);
+  assert.equal(at(p, 5).late, 'never');
+  assert.deepEqual(end(p).writers, ['B']);
+  assert.equal(end(p).verdict, 'one');
+});
+
+test('F3: a failed fence blocks the start everywhere: the service is down, the disk has one writer', () => {
+  for (const nodes of [2, 3, 4, 5]) {
+    const p = F(nodes, { fault: 'hang', fenceDev: 'unreachable' });
+    assert.equal(fences(p)[0].endsWith(':failed'), true);
+    assert.equal(at(p, 4).sides[1].act, 'blocked');
+    assert.deepEqual(at(p, 4).resource.runningOn, ['A'], 'only the frozen copy on A');
+    assert.deepEqual(end(p).writers, ['A']);
+    assert.equal(end(p).verdict, 'down');
+    assert.deepEqual(end(p).resource.runningOn, []);
+  }
+  // cut off but alive: A stops itself (no quorum), and the quorum side still may not start
+  assert.deepEqual(takeover(F(3, { fault: 'cut', fenceDev: 'unreachable' })), ['A:stop@A', 'BC:blocked']);
+});
+
+test('F4: without fencing a hung owner that wakes up writes beside the new owner: two writers', () => {
+  for (const nodes of [2, 3, 4, 5]) {
+    const p = F(nodes, { fault: 'hang', fencing: false });
+    assert.deepEqual(fences(p), []);
+    assert.deepEqual(end(p).writers, ['B', 'A']);
+    assert.equal(end(p).verdict, 'corrupt');
+    assert.equal(end(p).splitBrain, true);
+  }
+});
+
+test('F5: two-node mode: 1 of 2 is quorum, so after a cut both sides fence each other (or both run without it)', () => {
+  const c = at(F(2, { fault: 'cut' }), 2);
+  assert.deepEqual(c.sides.map((s) => `${s.votes}/${s.total} ${s.quorum ? 'Q' : '-'}`), ['1/2 Q', '1/2 Q']);
+  assert.equal(end(F(2, { fault: 'cut', delayA: '0' })).verdict, 'down');
+  assert.deepEqual(takeover(F(2, { fault: 'cut', delayA: '5' })), ['A:keep@A', 'B:fenced']);
+  assert.equal(end(F(2, { fault: 'cut', delayA: '5' })).verdict, 'one');
+  assert.equal(end(F(2, { fault: 'cut', fencing: false })).verdict, 'corrupt');
+  // only A's switch is unreachable: A still powers B off, B cannot fence A
+  assert.deepEqual(fences(F(2, { fault: 'cut', fenceDev: 'unreachable' })), ['A>B@0:ok', 'B>A@0:failed']);
+  assert.equal(end(F(2, { fault: 'cut', fenceDev: 'unreachable' })).verdict, 'one');
+  // three nodes are not in two-node mode: one of three is no quorum
+  assert.equal(at(F(3, { fault: 'cut' }), 2).sides[0].quorum, false);
+});
+
+test('F6: only a side with quorum fences; a live side without quorum stops its own copy', () => {
+  for (const nodes of [3, 4, 5]) {
+    const p = F(nodes, { fault: 'cut' });
+    assert.ok(fences(p).every((f) => !f.startsWith('A>')), 'A has no quorum and shoots nobody');
+    assert.deepEqual(takeover(F(nodes, { fault: 'cut', fencing: false })).slice(0, 1), ['A:stop@A']);
+    assert.equal(end(F(nodes, { fault: 'cut', fencing: false })).verdict, 'one');
+  }
+});
+
+test('F-presets: the numbers in SPEC.md', () => {
+  const pr = {
+    'no-fencing': F(3, { fault: 'hang', fencing: false }),
+    'fence-then-move': F(3, { fault: 'hang', fencing: true }),
+    'fence-fails': F(3, { fault: 'hang', fencing: true, fenceDev: 'unreachable' }),
+    'two-node-race': F(2, { fault: 'cut', fencing: true, delayA: '5' })
+  };
+  const want = { 'no-fencing': 6, 'fence-then-move': 6, 'fence-fails': 6, 'two-node-race': 5 };
+  for (const id of Object.keys(want)) assert.equal(steps(pr[id]), want[id], id);
+  assert.deepEqual(disk(pr['no-fencing']), ['A=0', 'B=2', 'A=1']);
+  assert.deepEqual(disk(pr['fence-then-move']), ['A=0', 'B=2']);
+  assert.deepEqual(disk(pr['fence-fails']), ['A=0', 'A=1']);
+  assert.deepEqual(disk(pr['two-node-race']), ['A=0', 'A=1']);
+  assert.deepEqual(['no-fencing', 'fence-then-move', 'fence-fails', 'two-node-race'].map((id) => end(pr[id]).verdict),
+    ['corrupt', 'one', 'down', 'one']);
+});
+
+test('F-all: never more than 6 steps; with fencing on, never two writers', () => {
+  for (const nodes of [2, 3, 4, 5]) for (const fault of ['hang', 'cut']) for (const fencing of [false, true])
+    for (const fenceDev of ['ok', 'unreachable']) for (const delayA of ['0', '5']) {
+      const p = F(nodes, { fault, fencing, fenceDev, delayA });
+      assert.ok(steps(p) <= 6);
+      if (fencing) assert.ok(end(p).writers.length <= 1, JSON.stringify({ nodes, fault, fenceDev, delayA }));
+    }
+});
+
+test('F-off: the fencing flow is off by default and the other flows ignore its params', () => {
+  assert.equal(logic.defaults.fence, false);
+  const base = cfg(3, 'AB|C');
+  assert.deepEqual(at(base, 3), at(Object.assign({}, base, { fault: 'cut', fencing: false, fenceDev: 'unreachable', delayA: '5' }), 3));
+  const w = W(3, '!C,!B', { wkind: 'fileshare', votes: 'dynamic' });
+  assert.deepEqual(end(w), end(Object.assign({}, w, { fault: 'cut', fencing: false })));
+});
+
 // ── presets (SPEC.md table) ──
 
 test('presets: the numbers in SPEC.md', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const ids = [...html.matchAll(/\{ id: '([a-z0-9-]+)',/g)].map((m) => m[1]);
   assert.deepEqual(ids, ['three-nodes', 'four-nodes', 'two-plus-witness', 'five-three-way', 'split-brain', 'ceph-mons',
-    'win-2node-fsw', 'win-2node-none', 'win-4node-split', 'win-dynamic', 'win-witness-lost']);
+    'win-2node-fsw', 'win-2node-none', 'win-4node-split', 'win-dynamic', 'win-witness-lost',
+    'no-fencing', 'fence-then-move', 'fence-fails', 'two-node-race']);
   const pr = {
     'three-nodes': P({ nodes: 3, split3: 'AB|C' }),
     'four-nodes': P({ nodes: 4, split4: 'AB|CD' }),
@@ -420,7 +576,9 @@ test('no combination of params exceeds 20 steps; the most is 7', () => {
 // ── generic checks every sim keeps ──
 
 const SAMPLES = [P({}), cfg(2, 'A|B', { policy: 'ignore' }), cfg(5, 'AB|CD|E', { policy: 'ignore', witness: true }), cfg(2, '!A|B', { witness: true }),
-  W(3, '!C,!B', { wkind: 'fileshare', votes: 'dynamic' }), W(4, 'W,AB|CD', { wkind: 'disk', votes: 'dynamicA' })];
+  W(3, '!C,!B', { wkind: 'fileshare', votes: 'dynamic' }), W(4, 'W,AB|CD', { wkind: 'disk', votes: 'dynamicA' }),
+  P({ fence: true, nodes: 3, fencing: false }), P({ fence: true, nodes: 2, fault: 'cut', delayA: '5' }),
+  P({ fence: true, nodes: 4, fault: 'hang', fenceDev: 'unreachable' })];
 
 test('state is JSON-safe at every step', () => {
   for (const p of SAMPLES) for (let n = 0; n <= steps(p); n++) {

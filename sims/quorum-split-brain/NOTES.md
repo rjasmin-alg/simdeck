@@ -231,3 +231,109 @@ Written out by hand in the explanation; for the coordinator to add with `"src": 
 
 Start 2026-11-04 20:27, done 20:50 (CET): about 25 minutes, one session (no separate fresh review: a preset task; the
 mutations and the script check stand in for it).
+
+## Preset task `fencing` (Fencing, STONITH)
+
+Task `docs/tasks/w3/fencing.md`, thread t-0276. Four presets (`no-fencing`, `fence-then-move`, `fence-fails`,
+`two-node-race`), rules and numbers in `SPEC.md` "Fencing".
+
+### Decisions
+
+- **The host model could not express it, so it was extended additively**, as the Windows preset task did: the task says
+  "write the change under Shared requests and stop", but running unattended, with the change contained in this folder,
+  I made it instead. What was missing is everything the task lists under "What the host model must support": a hung
+  node, a shared disk with a write log, a `fence(node)` action with ok / failed, and the rule "start only after the fence
+  is confirmed". The new flow is opt-in (`fence`, off by default) like `failover`; every classic and Windows result is
+  unchanged (test `F-off`; all the host's tests still pass).
+- **Steps are fixed by the fault**: fault, count, fence, takeover, wake (after a hang only), result: 6 after a hang, 5
+  after a cut, whatever the outcome. The fence step stays without fencing (its caption says the side takes silence for
+  death and does not wait): that is the moment the two variants differ.
+- **A's late write is the write it had in flight when it froze**: it lands before A can notice anything, then A finds it
+  is out of the cluster and stops. So `fence-fails` keeps one writer (A, the only one) and ends down but safe.
+- **`fault` (hang / cut) is a param the task did not list**: the race preset needs a cut, the others a hang, and the
+  cut with 3+ nodes shows rule 6 and the contrast "quorum alone is enough when the node is alive and hears the decision".
+- **Two-node mode** is automatic with 2 nodes in this flow (quorum 1 of 2); the classic flow keeps its 1 of 2 = no quorum.
+- **Power switches and the shared disk** are boxes under the side cards, not cards in the K2 drawing: the ring leaves no
+  room for a switch beside each node without crossing links. The switch box shows its state (on / off / unreachable)
+  and every fence aimed at it (who, when, ok / failed / too late). The drawing marks a hung node (dashed outline mark,
+  clock badge, its links quiet) and a fenced node (the kit's down card, a crossed power badge).
+- **The examples follow the flow on the stage**: fifteen presets in two columns overflowed the panel by 73 px (hr) and
+  95 px (en) at 1920×1080. The panel now shows the current flow's presets plus the first preset of each other flow as the
+  way there (as `win-wsus-groups` does with its rings): 8, 7 or 6 buttons. Keys 1–9 keep the list order, so the
+  fencing presets (12–15) have no key, as before for 10–11.
+- **The legend follows the flow too**: the fencing entries (hung, power switch, fenced, disk log entry) only in the
+  fencing flow, where the witness and "two copies" entries are hidden.
+- **Entry**: `no-fencing` (title "Fencing (STONITH)"): the student hangs a node without fencing, then switches it on.
+- **Concepts, not tools**: the scene line names Pacemaker and Corosync (NLA T52) as the host does; no fence agents,
+  commands or properties on the page. STONITH is named as the concept's own word.
+
+### Deviations from the task
+
+- Host model extended (Decisions) instead of stopping with a shared request.
+- **`delayA` means "fencing node A waits 5 s"**, so with it A shoots first and **survives** (B is off). The task's preset
+  says "with delayA 5 s, B fences first and A is off", which reads the delay as A waiting before it shoots. Pacemaker's
+  fencing delay (`pcmk_delay_base`, and `priority-fencing-delay`) is set on the device that fences a node and delays
+  fencing *that* node, so the delayed node is the one that survives *(check: from memory, no offline copy)*. The label on
+  the page says what it does („Ograđivanje A čeka" / "Fencing A waits"), and A keeping the service it already runs is
+  the sensible use of the delay.
+- `fence-fails` has **6 steps**, not 5: it keeps the takeover step (the side is blocked: the "start it anyway"
+  misconception is answered there) and the wake step (A's write is the only one).
+- **No "A wakes up" button**: waking is step 5 of every hang, so the button would only duplicate the step (and a user
+  action would make the step count depend on a click).
+- Write values follow the node (A x = 1, B x = 2) rather than the order of writes, so the task's "A writes x = 1 while B
+  writes x = 2" holds and A's stale value lands after B's newer one.
+- `t` in the disk log is the step that wrote the entry; the page shows the order, not times. Fence times (0 s / 5 s)
+  are shown.
+
+### Sources and unchecked items
+
+- NLA `meta/toc.md` T53 „Ograđivanje (`fencing`) — zašto grozd bez njega nije grozd" (chapter not written). Read.
+- ClusterLabs *Pacemaker Explained*, fencing chapter: STONITH, fence before recovery, a failed fence blocks recovery,
+  `pcmk_delay_base` / `priority-fencing-delay` and two-node clusters *(check: from memory, not available offline)*.
+- Corosync `votequorum(5)` `two_node` (1 of 2 is quorum; implies `wait_for_all`, out of scope) *(check: from memory)*.
+- Both nodes powered off in a race without a delay *(derived, check)*.
+- Term pairs below marked *(check)*.
+
+### Checks
+
+- Numbers printed by a script over all 64 combinations before the tests; asserted in `sim.test.js` (`F-*` tests, 12).
+- **Mutations** of the new code, one at a time (26): hang not setting `hung`, a hung side counting, two-node quorum off,
+  a no-quorum side fencing, the shooter the highest id, the delay on the shooter instead of the target, time ignored in
+  the order, simultaneous fences one by one, a dead shooter firing, an unreachable switch working, a failed fence not
+  blocking, a fenced node still running, starting on the highest id, a no-quorum side keeping its copy, no write on
+  start, one value for every node, a fenced A waking, the late write not written, corrupt only at three writers, the
+  start value counted as a writer, a wake step after a cut, fencing off by default, every switch unreachable, every node
+  delayed, a cut keeping its links, the fence step inverted: **26 caught** (three needed tests added: the order by time
+  through a state with the delay on B, the race with A's switch unreachable, the cut links).
+- `npm run gate -- quorum-split-brain`: pass (manifest, tests, build, 65 browser checks, tokens, scope). Gate screenshots
+  (1920×1080 light, dark, grayscale, 375×812, hr and en) reviewed, plus fencing states in dark, grayscale and 375×812
+  (no sideways scroll). Every step of the four presets shot at 1920×1080 in hr,
+  plus key steps in en, with a local Playwright script: stage, panel and page fit, console clean. Fixed from them: the
+  panel overflow (examples follow the flow), a node id used twice in one caption (moved to the second slot), A's links
+  drawn as cut after it woke, the woken side shown as "not counted yet" (now "awake"), "na A , zamrznuto".
+
+### Term pairs (fencing)
+
+| en | hr | source |
+|---|---|---|
+| fencing | ograđivanje | NLA T53 (already listed above) |
+| STONITH | STONITH („pucaj drugom čvoru u glavu“) | task |
+| hung node | zaglavljeni čvor | task *(check)* |
+| management controller | upravljački kontroler | task *(check)* |
+| shared storage | zajedničko spremište (the page says "zajednički disk") | task |
+| two-node cluster | grozd od dva čvora | task |
+| power switch | strujna sklopka | this task *(check)* |
+| heartbeat | otkucaj | this task *(check)* |
+| fence race | utrka ograđivanja | this task *(check)* |
+| watchdog | nadzorni brojač | this task *(check)* |
+
+### Shared requests (fencing)
+
+- K2 (`topology.js`): a `hung` node state (outline mark, dashed) beside `down`; the page styles `[data-state="hung"]` itself.
+- Kit: an `id` (or `data-preset`) on preset buttons, so a page can show a subset of its presets without `:nth-child`.
+- None blocking.
+
+### Time
+
+Start 2026-11-05 09:23, done 09:50 (CET): about 27 minutes, one session (no separate fresh review: a preset task; the
+64-combination script and the 26 mutations stand in for it).
