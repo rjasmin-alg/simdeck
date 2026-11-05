@@ -1,0 +1,561 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- write-cache: an application, a controller with a DRAM cache (battery module, power switch) and a disk, left to
+     right; under them a timeline per write (issued, acknowledged, on disk, lost); on the right the tally after power
+     returns. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="write-cache">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odgođeno i izravno upisivanje · simdeck</title>
+<meta name="description" content="Piši kroz upravljač s predmemorijom i isključi struju: write-back potvrđuje odmah i gubi prljave blokove, osim s baterijom.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "write-cache",
+  "title": {
+    "hr": "Odgođeno i izravno upisivanje",
+    "en": "Write-back vs write-through"
+  },
+  "concept": {
+    "hr": "Write-back je brz dok ne nestane struje; predmemorija s baterijom",
+    "en": "Write-back is fast until the power fails; battery-backed cache"
+  },
+  "summary": {
+    "hr": "Piši kroz upravljač s predmemorijom i isključi struju: write-back potvrđuje odmah i gubi prljave blokove, osim s baterijom.",
+    "en": "Write through a controller cache and cut the power: write-back acknowledges at once and loses dirty blocks, unless it has a battery."
+  },
+  "tags": [
+    "storage-basics"
+  ],
+  "class": "stepper",
+  "steps": 11
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="write-cache"]; colours only from kit tokens.
+   Patterns carry the state with the colour: dirty = hatched tint, on disk = solid, lost = crossed in a danger frame,
+   never sent = dashed outline. */
+[data-sim="write-cache"] .wc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  gap: 1rem;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="write-cache"] .wc-left { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 0.8rem; min-width: 0; }
+[data-sim="write-cache"] .wc-path { display: grid; grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1.3fr) auto minmax(0, 0.85fr); align-items: stretch; gap: 0.4rem; }
+[data-sim="write-cache"] .wc-arrow { align-self: center; font-size: 1.6rem; color: var(--muted); }
+[data-sim="write-cache"] .wc-box,
+[data-sim="write-cache"] .wc-card,
+[data-sim="write-cache"] .wc-time {
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 0.4rem 0.6rem; min-width: 0;
+}
+[data-sim="write-cache"] h2 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+[data-sim="write-cache"] .wc-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+[data-sim="write-cache"] .wc-row { display: flex; align-items: center; gap: 0.4rem; min-height: 1.85rem; white-space: nowrap; }
+[data-sim="write-cache"] .wc-row .wc-st { margin-left: auto; font-family: var(--mono); }
+[data-sim="write-cache"] .wc-muted { color: var(--muted); }
+[data-sim="write-cache"] .wc-name { color: var(--muted); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; }
+
+/* a block: label chip */
+[data-sim="write-cache"] .wc-blk {
+  display: inline-grid; place-items: center; min-width: 2.4rem; height: 1.75rem; padding: 0 0.3rem;
+  border: 0.15rem solid var(--c1); border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700;
+  color: var(--ink); background: var(--bg);
+}
+[data-sim="write-cache"] .wc-blk[data-k="dirty"] {
+  background-color: color-mix(in srgb, var(--c1) 18%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--c1) 55%, transparent) 0.3em 0.45em);
+}
+[data-sim="write-cache"] .wc-blk[data-k="clean"] { background: var(--c1); color: var(--on-series); }
+[data-sim="write-cache"] .wc-blk[data-k="old"] { border-color: var(--line); border-style: dotted; color: var(--muted); font-weight: 400; }
+[data-sim="write-cache"] .wc-blk[data-k="never"] { border-color: var(--line); border-style: dashed; color: var(--muted); }
+[data-sim="write-cache"] .wc-blk[data-k="noack"] { border-color: var(--c1); border-style: dotted; color: var(--muted); }
+[data-sim="write-cache"] .wc-blk[data-k="lost"] {
+  border-color: var(--danger); color: var(--danger); text-decoration: line-through;
+  background-image: linear-gradient(to top right, transparent calc(50% - 0.07rem), var(--danger) calc(50% - 0.07rem) calc(50% + 0.07rem), transparent calc(50% + 0.07rem));
+}
+[data-sim="write-cache"] .wc-blk[data-k="flush"] { border-color: var(--ink); border-style: double; border-width: 0.25rem; font-weight: 400; }
+[data-sim="write-cache"] .wc-blk[data-writing] { outline: 0.15rem dashed var(--ink); outline-offset: 0.15rem; }
+[data-sim="write-cache"] .sd-changed.wc-blk,
+[data-sim="write-cache"] .wc-st.sd-changed { outline: 2px solid var(--ink); outline-offset: 1px; }
+[data-sim="write-cache"] .wc-st.sd-changed { background: var(--hl); color: var(--on-hl); padding: 0 0.2rem; }
+[data-sim="write-cache"] .wc-ack { color: var(--ok); font-weight: 700; }
+[data-sim="write-cache"] .wc-lost { color: var(--danger); font-weight: 700; }
+
+/* cache slots */
+[data-sim="write-cache"] .wc-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem 0.5rem; }
+[data-sim="write-cache"] .wc-slot { display: flex; align-items: center; gap: 0.35rem; min-height: 1.9rem; white-space: nowrap; }
+[data-sim="write-cache"] .wc-slot .wc-blk:empty { border-color: var(--line); border-style: dotted; }
+[data-sim="write-cache"] .wc-emptied { margin: 0.2rem 0; padding: 0.3rem; border: 0.15rem dashed var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-weight: 700; text-align: center; }
+[data-sim="write-cache"] .wc-mods { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
+[data-sim="write-cache"] .wc-mod { display: inline-flex; align-items: center; gap: 0.35rem; }
+[data-sim="write-cache"] .wc-mod[data-bad] { color: var(--danger); font-weight: 700; }
+[data-sim="write-cache"] .wc-mod[data-off] { padding: 0 0.3rem; background: var(--danger); color: var(--bg); font-weight: 700; border-radius: var(--radius-sm); }
+
+/* the battery icon: a box with a nub, full / empty / crossed */
+[data-sim="write-cache"] .wc-bat,
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-bat"] {
+  position: relative; display: inline-block; width: 1.5rem; height: 0.85rem; border: 0.15rem solid currentColor; border-radius: 0.15rem;
+  background: linear-gradient(90deg, var(--ok) 0 100%) 0.1rem 0.1rem / calc(100% - 0.2rem) calc(100% - 0.2rem) no-repeat;
+}
+[data-sim="write-cache"] .wc-bat::after,
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-bat"]::after {
+  content: ''; position: absolute; right: -0.35rem; top: 0.12rem; width: 0.15rem; height: 0.35rem; background: currentColor;
+}
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-bat"] { color: var(--ink); }
+[data-sim="write-cache"] .wc-bat[data-s="off"] { background: none; border-style: dashed; }
+[data-sim="write-cache"] .wc-bat[data-s="failed"] {
+  background-image: linear-gradient(to top right, transparent calc(50% - 0.06rem), var(--danger) calc(50% - 0.06rem) calc(50% + 0.06rem), transparent calc(50% + 0.06rem));
+  background-size: 100% 100%; background-position: 0 0;
+}
+
+/* disk rows */
+[data-sim="write-cache"] .wc-lba { font-family: var(--mono); min-width: 2.6rem; color: var(--muted); }
+[data-sim="write-cache"] .wc-head { font-family: var(--mono); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-dirty"] {
+  background-color: color-mix(in srgb, var(--c1) 18%, var(--bg)); border: 0.15rem solid var(--c1);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--c1) 55%, transparent) 0.2em 0.32em);
+}
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-clean"] { background: var(--c1); border: 0.15rem solid var(--c1); }
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-ack"],
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-lost"] { position: relative; border: 0; background: none; }
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-ack"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--ok); font-weight: 700; }
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-lost"] { border: 0.15rem solid var(--danger); }
+[data-sim="write-cache"] .sd-swatch[data-shape="wc-lost"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; font-size: 0.8em; }
+
+/* timeline */
+[data-sim="write-cache"] .wc-time { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+[data-sim="write-cache"] .wc-tl { position: relative; display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.6rem; align-content: start; height: 100%; min-height: 0; }
+[data-sim="write-cache"] .wc-tl-lbl { display: flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+[data-sim="write-cache"] .wc-track { position: relative; border-bottom: 1px dotted var(--line); }
+[data-sim="write-cache"] .wc-axis { position: relative; border-top: 1px solid var(--ink); }
+[data-sim="write-cache"] .wc-tl > .wc-muted { align-items: start; }
+[data-sim="write-cache"] .wc-tick { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="write-cache"] .wc-tick::before { content: ''; position: absolute; left: 50%; top: 0; width: 1px; height: 0.3rem; background: var(--ink); }
+[data-sim="write-cache"] .wc-mk { position: absolute; top: 50%; transform: translate(-50%, -50%); line-height: 1; }
+[data-sim="write-cache"] .wc-mk[data-m="issue"] { width: 0.6rem; height: 0.6rem; border: 0.15rem solid var(--ink); border-radius: 50%; background: var(--bg); }
+[data-sim="write-cache"] .wc-mk[data-m="ack"] { color: var(--ok); font-weight: 700; font-size: 1.3rem; }
+[data-sim="write-cache"] .wc-mk[data-m="disk"] { width: 0.85rem; height: 0.85rem; background: var(--c1); border: 0.12rem solid var(--ink); }
+[data-sim="write-cache"] .wc-mk[data-m="lost"] { color: var(--danger); font-weight: 700; font-size: 1.3rem; }
+[data-sim="write-cache"] .wc-mk.sd-changed { background-color: var(--hl); outline: 2px solid var(--ink); }
+[data-sim="write-cache"] .wc-bar { position: absolute; top: 50%; height: 0.25rem; transform: translateY(-50%); background: var(--muted); }
+[data-sim="write-cache"] .wc-bar[data-b="risk"] {
+  height: 0.75rem; background-color: color-mix(in srgb, var(--c1) 18%, var(--bg));
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, color-mix(in srgb, var(--c1) 55%, transparent) 0.25em 0.38em);
+  border: 1px solid var(--c1);
+}
+[data-sim="write-cache"] .wc-bar[data-b="wait"] { background: repeating-linear-gradient(90deg, var(--muted) 0 0.4rem, transparent 0.4rem 0.6rem); }
+[data-sim="write-cache"] .wc-vline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 0.2rem solid var(--danger); pointer-events: none; }
+[data-sim="write-cache"] .wc-vline[data-v="now"] { border-left: 1px dashed var(--ink); }
+[data-sim="write-cache"] .wc-vlbl { position: absolute; top: 0.1rem; left: 0.3rem; padding: 0 0.2rem; background: var(--danger); color: var(--bg); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="write-cache"] .wc-vlbl[data-left] { left: auto; right: 0.3rem; }
+
+/* card */
+[data-sim="write-cache"] .wc-card { display: grid; gap: 0.5rem; align-content: start; }
+[data-sim="write-cache"] .wc-table { border-collapse: collapse; width: 100%; }
+[data-sim="write-cache"] .wc-table th,
+[data-sim="write-cache"] .wc-table td { padding: 0.15rem 0.3rem; border-bottom: 1px solid var(--line); }
+[data-sim="write-cache"] .wc-table th { text-align: left; font-weight: 400; }
+[data-sim="write-cache"] .wc-table td { text-align: right; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="write-cache"] .wc-table tr[data-bad] th,
+[data-sim="write-cache"] .wc-table tr[data-bad] td { color: var(--danger); }
+[data-sim="write-cache"] .wc-table td.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="write-cache"] .wc-j { margin: 0; padding: 0.3rem 0.4rem; border-radius: var(--radius-sm); border: 0.15rem solid var(--line); }
+[data-sim="write-cache"] .wc-j[data-j="corrupt"] { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+[data-sim="write-cache"] .wc-j[data-j="old"],
+[data-sim="write-cache"] .wc-j[data-j="new"] { border-color: var(--ok); }
+
+[data-sim="write-cache"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: one column; the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="write-cache"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="write-cache"] .wc { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; }
+  [data-sim="write-cache"] .wc-path { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="write-cache"] .wc-arrow { justify-self: center; transform: rotate(90deg); }
+  [data-sim="write-cache"] .wc-tl { height: auto; }
+  [data-sim="write-cache"] .wc-time { min-height: 0; }
+  [data-sim="write-cache"] .wc-tl .wc-name { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Odgođeno i izravno upisivanje</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (labels, LBAs, times) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { class: 'sd-mono', translate: 'no' }, String(text)); }
+  /** A time in ms with the language's decimal mark, at most one decimal: 8, 0,1, 25,5. */
+  function num(v) { var x = (Math.round(v * 10) / 10).toFixed(1); if (x.slice(-2) === '.0') x = x.slice(0, -2); return x.replace('.', t('dec')); }
+  function ms(v) { return h('span', { translate: 'no' }, t('ms', { v: num(v) })); }
+  function opOf(s, id) { for (var i = 0; i < s.ops.length; i++) if (s.ops[i].id === id) return s.ops[i]; return null; }
+  function wName(o) { return h('b', { translate: 'no' }, o.label + ' (LBA ' + o.lba + ')'); }
+  var JNAME = { X: 'wX', D: 'wD', C: 'wC' };
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary
+      lacks). From sims/ssd-internals/index.html (originally sims/lnx-cow-filesystem/index.html). */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+  function span(parts) { return h('span', null, parts); }
+
+  /** The kind of a write's chip: lost, on disk, dirty (in cache, not on disk), never sent. */
+  function kindOf(s, o) {
+    if (s.lost.indexOf(o.id) >= 0) return 'lost';
+    if (o.durableAt !== null) return 'clean';
+    if (o.supersededBy !== null) return 'old';
+    if (o.issuedAt === null) return 'never';
+    var inCache = s.cache.some(function (c) { return c.id === o.id; });
+    return inCache ? 'dirty' : 'noack'; // issued, gone at the cut, never acknowledged: the application knows
+  }
+  function evIds(s, type) { return s.ev.filter(function (e) { return e.type === type; }).map(function (e) { return e.id; }); }
+
+  var LEGEND = [
+    { shape: 'wc-dirty', label: t('legDirty') },
+    { shape: 'wc-clean', label: t('legClean') },
+    { shape: 'wc-ack', label: t('legAck') },
+    { shape: 'wc-lost', label: t('legLost') },
+    { shape: 'wc-bat', label: t('legBattery') },
+    { shape: 'hl', label: t('legChanged') }
+  ];
+
+  // ── stage ──
+
+  function appBox(c) {
+    var s = c.state;
+    var acked = evIds(s, 'ack');
+    return h('section', { class: 'wc-box' }, h('h2', null, t('appTitle')),
+      h('ol', { class: 'wc-list' }, s.ops.map(function (o) {
+        if (o.kind === 'flush') {
+          var st = o.doneAt !== null ? t('flushDone') : o.issuedAt !== null ? t('flushWaits') : t('notYet');
+          var now = s.ev.some(function (e) { return (e.type === 'flush' || e.type === 'flushDone') && e.id === o.id; });
+          return h('li', { class: 'wc-row' }, h('span', { class: 'wc-blk', dataset: { k: 'flush' } }, t('flushOp')),
+            h('span', { class: 'wc-st wc-muted' + (now ? ' sd-changed' : '') }, st));
+        }
+        var k = kindOf(s, o), status;
+        if (k === 'lost') status = h('span', { class: 'wc-lost' }, '✕ ', t('legLost'));
+        else if (o.ackAt !== null) status = h('span', { class: 'wc-ack', translate: 'no' }, '✓ ', t('ms', { v: num(o.ackAt) }));
+        else if (o.issuedAt === null) status = h('span', { class: 'wc-muted' }, s.power === 'on' ? (o.dep === 'flush' ? t('waitFlush') : t('notYet')) : t('neverSent'));
+        else status = h('span', { class: 'wc-muted' }, s.power === 'on' ? t('wait') : t('unackedShort'));
+        var nowAck = acked.indexOf(o.id) >= 0 || (s.ev.some(function (e) { return e.type === 'cut'; }) && k === 'lost');
+        return h('li', { class: 'wc-row' },
+          h('span', { class: 'wc-blk', dataset: { k: k } }, data(o.label)),
+          h('span', { class: 'wc-lba', translate: 'no' }, String(o.lba)),
+          h('span', { class: 'wc-st' + (nowAck ? ' sd-changed' : '') }, status));
+      })));
+  }
+
+  function cacheBox(c) {
+    var s = c.state, p = c.params;
+    var issued = evIds(s, 'issue').concat(evIds(s, 'supersede'));
+    var body;
+    if (s.power !== 'on' && !s.cache.length && p.bbu !== 'on') {
+      body = h('p', { class: 'wc-emptied' }, t('cacheEmptied'));
+    } else {
+      var slots = s.cache.map(function (e) {
+        var writing = s.busy && s.busy.id === e.id;
+        return h('div', { class: 'wc-slot' },
+          h('span', { class: 'wc-blk' + (issued.indexOf(e.id) >= 0 ? ' sd-changed' : ''), dataset: Object.assign({ k: e.dirty ? 'dirty' : 'clean' }, writing ? { writing: 'true' } : {}) }, data(e.label)),
+          h('span', { class: 'wc-lba', translate: 'no' }, String(e.lba)),
+          writing ? h('span', { class: 'wc-muted', title: t('writing'), 'aria-label': t('writing') }, '→') : null);
+      });
+      while (slots.length < Math.max(3, L.lbasOf(p).length)) slots.push(h('div', { class: 'wc-slot' }, h('span', { class: 'wc-blk' })));
+      body = h('div', { class: 'wc-slots' }, slots);
+    }
+    var batS = p.bbu === 'on' ? 'on' : p.bbu === 'failed' ? 'failed' : 'off';
+    var bat = h('span', { class: 'wc-mod', dataset: batS === 'failed' ? { bad: 'true' } : {} },
+      h('span', { class: 'wc-bat', dataset: { s: batS }, 'aria-hidden': 'true' }),
+      t(batS === 'on' ? 'bbuOk' : batS === 'failed' ? 'bbuBad' : 'bbuNone'),
+      batS === 'failed' && p.policy === 'wb' ? h('span', null, ': ', t('runsWT')) : null);
+    var pw = h('span', { class: 'wc-mod', dataset: s.power === 'off' ? { off: 'true' } : {} }, '⏻ ',
+      t(s.power === 'on' ? 'powerOn' : s.power === 'off' ? 'powerOff' : 'powerBack'));
+    return h('section', { class: 'wc-box' }, h('h2', null, t('cacheTitle')), body, h('div', { class: 'wc-mods' }, bat, pw));
+  }
+
+  function diskBox(c) {
+    var s = c.state, p = c.params;
+    var done = evIds(s, 'durable').map(function (id) { return opOf(s, id).lba; });
+    return h('section', { class: 'wc-box' }, h('h2', null, t('diskTitle')),
+      h('ol', { class: 'wc-list' }, L.lbasOf(p).map(function (lba) {
+        var lab = s.disk[String(lba)];
+        var writing = s.busy && s.busy.lba === lba;
+        return h('li', { class: 'wc-row' },
+          h('span', { class: 'wc-lba', translate: 'no' }, String(lba)),
+          h('span', { class: 'wc-blk' + (done.indexOf(lba) >= 0 ? ' sd-changed' : ''), dataset: { k: lab ? 'clean' : 'old' } }, lab ? data(lab) : t('old')),
+          writing ? h('span', { class: 'wc-muted' }, '← ', data(opOf(s, s.busy.id).label)) : null,
+          s.head === lba ? h('span', { class: 'wc-head' }, '◀ ', t('head')) : null);
+      })));
+  }
+
+  /** The end of the full run, for the timeline's scale: the last event time, rounded up to 10 ms. */
+  function scaleOf(c) {
+    var end = Simdeck.stateAt(L, c.params, c.steps);
+    var last = Math.max(end.t, c.params.cutAt <= end.t ? c.params.cutAt : 0);
+    return Math.max(20, Math.ceil((last + 2) / 10) * 10);
+  }
+
+  function timeline(c) {
+    var s = c.state, p = c.params;
+    var T = scaleOf(c);
+    var pos = function (x) { return (Math.min(x, T) / T * 100) + '%'; };
+    var now = s.t < 0 ? 0 : s.t;
+    var stop = s.cutAt !== null ? s.cutAt : now;
+    var acked = evIds(s, 'ack'), durable = evIds(s, 'durable');
+    var cutNow = s.ev.some(function (e) { return e.type === 'cut'; });
+    /** The cut (a red line, labelled in the first row) or the clock (a dashed line), drawn in every row. */
+    var vline = function (first) {
+      if (s.cutAt !== null) return h('span', { class: 'wc-vline', style: { left: pos(s.cutAt) } },
+        first ? h('span', { class: 'wc-vlbl', dataset: s.cutAt > T * 0.7 ? { left: 'true' } : {} }, '⚡ ', t('cutMark')) : null);
+      return s.t >= 0 ? h('span', { class: 'wc-vline', dataset: { v: 'now' }, style: { left: pos(now) } }) : null;
+    };
+    var cells = [];
+    s.ops.forEach(function (o) {
+      if (o.kind !== 'write') return;
+      var marks = [];
+      if (o.issuedAt !== null) {
+        // the application waits until the ack, or until the cut (nobody waits after it)
+        var ackEnd = o.ackAt !== null ? o.ackAt : (s.cutAt !== null ? s.cutAt : (o.durableAt !== null ? o.durableAt : stop));
+        if (ackEnd > o.issuedAt) marks.push(h('span', { class: 'wc-bar', dataset: { b: o.ackAt !== null ? 'done' : 'wait' }, style: { left: pos(o.issuedAt), width: 'calc(' + pos(ackEnd) + ' - ' + pos(o.issuedAt) + ')' } }));
+        if (o.ackAt !== null) {
+          var riskEnd = o.durableAt !== null ? o.durableAt : (o.supersededBy !== null ? null : stop);
+          if (riskEnd !== null && riskEnd > o.ackAt) marks.push(h('span', { class: 'wc-bar', dataset: { b: 'risk' }, style: { left: pos(o.ackAt), width: 'calc(' + pos(riskEnd) + ' - ' + pos(o.ackAt) + ')' } }));
+        }
+        marks.push(h('span', { class: 'wc-mk', dataset: { m: 'issue' }, style: { left: pos(o.issuedAt) } }));
+        if (o.ackAt !== null) marks.push(h('span', { class: 'wc-mk' + (acked.indexOf(o.id) >= 0 ? ' sd-changed' : ''), dataset: { m: 'ack' }, style: { left: pos(o.ackAt) }, 'aria-hidden': 'true' }, '✓'));
+        if (o.durableAt !== null) marks.push(h('span', { class: 'wc-mk' + (durable.indexOf(o.id) >= 0 ? ' sd-changed' : ''), dataset: { m: 'disk' }, style: { left: pos(o.durableAt) } }));
+        if (s.lost.indexOf(o.id) >= 0) marks.push(h('span', { class: 'wc-mk' + (cutNow ? ' sd-changed' : ''), dataset: { m: 'lost' }, style: { left: pos(s.cutAt) }, 'aria-hidden': 'true' }, '✕'));
+      }
+      marks.push(vline(!cells.length));
+      cells.push(h('div', { class: 'wc-tl-lbl' }, h('span', { class: 'wc-blk', dataset: { k: kindOf(s, o) } }, data(o.label)),
+        JNAME[o.label] && p.pattern === 'journal' ? h('span', { class: 'wc-name' }, t(JNAME[o.label])) : null));
+      cells.push(h('div', { class: 'wc-track' }, marks));
+    });
+    var ticks = [];
+    var stepT = T > 60 ? 20 : 10;
+    for (var x = 0; x <= T; x += stepT) ticks.push(h('span', { class: 'wc-tick', translate: 'no', style: { left: pos(x) } }, String(x)));
+    cells.push(h('div', { class: 'wc-tl-lbl wc-muted' }, t('axis')));
+    cells.push(h('div', { class: 'wc-axis' }, ticks));
+    var nRows = cells.length / 2 - 1;
+    return h('section', { class: 'wc-time' }, h('h2', null, t('timeTitle')),
+      h('div', { class: 'wc-tl', style: { gridTemplateRows: 'repeat(' + nRows + ', minmax(2.1rem, 3rem)) 1.7rem' } }, cells));
+  }
+
+  function card(c) {
+    var s = c.state, pr = c.prev;
+    var k = L.tally(s), was = pr ? L.tally(pr) : null;
+    var row = function (key, v, wv, opt) {
+      opt = opt || {};
+      if (opt.hideZero && !v && !(wv)) return null;
+      return h('tr', { dataset: opt.bad && v ? { bad: 'true' } : {} }, h('th', null, t(key)),
+        h('td', { class: was && wv !== v ? 'sd-changed' : null }, opt.text !== undefined ? opt.text : String(v)));
+    };
+    var mean = L.meanAck(s), wmean = pr ? L.meanAck(pr) : null;
+    var meanTxt = mean === null ? '–' : t('ms', { v: num(mean) });
+    var rows = [
+      row('rAck', k.ack, was && was.ack),
+      row('rDisk', k.disk, was && was.disk),
+      row('rDiskNoAck', k.diskNoAck, was && was.diskNoAck, { hideZero: true }),
+      row('rLost', k.lost, was && was.lost, { bad: true }),
+      s.power !== 'on' ? row('rUnacked', k.unacked, was && was.unacked, { hideZero: true }) : null,
+      row('rWaiting', k.waiting, was && was.waiting, { hideZero: true }),
+      row('rReplaced', k.replaced, was && was.replaced, { hideZero: true }),
+      s.power !== 'on' ? row('rNever', k.never, was && was.never, { hideZero: true }) : null,
+      h('tr', null, h('th', null, t('rMean')), h('td', { class: was && wmean !== mean ? 'sd-changed' : null, translate: 'no' }, meanTxt))
+    ];
+    var out = [h('h2', null, t(s.power === 'on' ? 'cardSoFar' : s.power === 'off' ? 'cardCut' : 'cardAfter')), h('table', { class: 'wc-table' }, h('tbody', null, rows))];
+    if (c.params.pattern === 'journal') {
+      var j = L.journalOf(s), fin = s.power !== 'on' || c.last;
+      out.push(h('h2', null, t('jTitle')),
+        h('p', { class: 'wc-j', dataset: { j: fin ? j : 'pending' } }, t(fin ? (j === 'corrupt' ? 'jCorrupt' : j === 'new' ? 'jNew' : 'jOld') : 'jPending')));
+    }
+    return h('aside', { class: 'wc-card' }, out);
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'wc' },
+      h('div', { class: 'wc-left' },
+        h('div', { class: 'wc-path' }, appBox(c), h('span', { class: 'wc-arrow', 'aria-hidden': 'true' }, '→'), cacheBox(c),
+          h('span', { class: 'wc-arrow', 'aria-hidden': 'true' }, '→'), diskBox(c)),
+        timeline(c)),
+      card(c)));
+  }
+
+  // ── captions ──
+
+  function capEvents(c) {
+    var s = c.state, out = [];
+    var add = function (parts) { if (parts && parts.length) { if (out.length) out.push(' '); out = out.concat(parts); } };
+    var acked = evIds(s, 'ack');
+    s.ev.forEach(function (e) {
+      var o = e.id ? opOf(s, e.id) : null;
+      if (e.type === 'issue') {
+        if (o.fua) add(rich('capFua', { w: wName(o) }));
+        else if (o.ackAt !== null) add(rich('capAckWB', { w: wName(o) }));
+        else add(rich('capFwd', { w: wName(o) }));
+      } else if (e.type === 'supersede') {
+        add(rich('capSupersede', { w: wName(o), old: wName(opOf(s, e.old)) }));
+      } else if (e.type === 'flush') {
+        add(rich('capFlush'));
+      } else if (e.type === 'flushDone') {
+        if (!s.ev.some(function (x) { return x.type === 'flush' && x.id === e.id; })) add(rich('capFlushDone'));
+      } else if (e.type === 'durable') {
+        if (acked.indexOf(o.id) >= 0 && s.ev.every(function (x) { return !(x.type === 'issue' && x.id === o.id); }))
+          add(rich('capDurableAck', { w: wName(o), lat: ms(o.ackAt - o.issuedAt) }));
+        else add(rich('capDurable', { w: wName(o) }));
+      } else if (e.type === 'start' && e.of > 1) {
+        add(rich(e.wrap ? 'capStartWrap' : 'capStart', { w: wName(o) }));
+      }
+    });
+    return out;
+  }
+
+  function capCut(c) {
+    var s = c.state, k = L.tally(s);
+    var tt = ms(s.cutAt);
+    if (k.lost) return rich('capCutWB', { t: tt, n: span(t.n('nAcked', k.ack)), d: span(k.disk ? t.n('nOnDisk', k.disk) : t('nOnDisk0')), lost: span(t.n('nLost', k.lost)) });
+    if (k.waiting) return rich('capCutBBU', { t: tt, k: span(t.n('nBlocks', k.waiting)) });
+    if (k.unacked) return rich('capCutWT', { t: tt }, k.unacked);
+    return rich('capCutClean', { t: tt });
+  }
+
+  function capJournal(s) {
+    var j = L.journalOf(s);
+    if (j === null) return [];
+    return rich(j === 'corrupt' ? 'capJCorrupt' : j === 'new' ? 'capJNew' : 'capJOld');
+  }
+
+  function caption(c) {
+    var s = c.state, p = c.params;
+    if (c.first) {
+      var nw = span(t.n('nWrites', s.ops.filter(function (o) { return o.kind === 'write'; }).length));
+      if (p.policy === 'wb' && s.eff === 'wt') return rich('cap0Fallback', { n: nw });
+      return rich(s.eff === 'wb' ? 'cap0WB' : 'cap0WT', { n: nw });
+    }
+    var types = s.ev.map(function (e) { return e.type; });
+    var out = [];
+    if (types.indexOf('restore') >= 0) {
+      var k = L.tally(s);
+      if (k.lost) out = rich('capRestore', { lost: data(s.lost.map(function (id) { return opOf(s, id).label; }).join(', ')) });
+      else if (k.waiting) out = rich('capRestoreBBUn', {}, k.waiting);
+      else out = rich('capRestoreNone');
+      var j = capJournal(s);
+      if (j.length) out = out.concat(' ', j);
+      return out;
+    }
+    var ev = capEvents(c);
+    if (ev.length) out = rich('capT', { t: ms(s.t) }).concat(' ', ev);
+    if (types.indexOf('cut') >= 0) out = out.concat(out.length ? ' ' : [], capCut(c));
+    if (c.last && s.power === 'restored') {
+      out = out.concat(out.length ? ' ' : [], rich(L.tally(s).never ? 'capDoneSent' : 'capDone'));
+      var jj = capJournal(s);
+      if (jj.length) out = out.concat(' ', jj);
+    }
+    return out;
+  }
+
+  // ── controls ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'policy', type: 'choice', label: t('policy'), options: [['wt', t('polWT')], ['wb', t('polWB')]] },
+      { key: 'bbu', type: 'choice', label: t('bbu'), options: [['off', t('bbuOff')], ['on', t('bbuOn')], ['failed', t('bbuFailed')]] },
+      // `pattern` is set by the presets; its choice is hidden to keep the panel on one screen (NOTES.md, Decisions).
+      { key: 'pattern', type: 'choice', label: t('pattern'), resets: true, visible: function () { return false; }, options: [['six', t('patSix')], ['journal', t('patJournal')], ['rewrite', t('patRewrite')]] },
+      { key: 'flush', type: 'toggle', label: t('flush'), visible: function (p) { return p.pattern === 'journal'; } },
+      // `diskMs` is hidden too (one screen); it stays in the model and the URL (NOTES.md, Deviations).
+      { key: 'diskMs', type: 'choice', label: t('diskMs'), visible: function () { return false; }, options: [4, 8, 12].map(function (v) { return [v, t('ms', { v: v })]; }) },
+      { key: 'cutAt', type: 'range', label: t('cutAt'), min: 0, max: 80, step: 1, format: function (v) { return t('ms', { v: v }); } },
+      // the cut takes effect in the next step: at the end of the next millisecond (step 0: at the end of ms 0)
+      { type: 'button', label: t('cutNow'), key: 'x', run: function (sim) {
+        var s = sim.state;
+        if (s.power !== 'on') return;
+        sim.set({ cutAt: s.t < 0 ? 0 : s.t + 1 });
+      } }
+    ],
+
+    presets: [
+      { id: 'write-through', label: t('presetWT'), params: { policy: 'wt', cutAt: 30 }, hint: t('presetWTHint') },
+      { id: 'write-back-cut', label: t('presetWB'), params: { policy: 'wb', cutAt: 25 }, hint: t('presetWBHint') },
+      { id: 'write-back-bbu', label: t('presetBBU'), params: { policy: 'wb', bbu: 'on', cutAt: 25 }, hint: t('presetBBUHint') },
+      { id: 'reorder', label: t('presetReorder'), params: { policy: 'wb', pattern: 'journal', cutAt: 20 }, hint: t('presetReorderHint') },
+      { id: 'battery-failed', label: t('presetFailed'), params: { policy: 'wb', bbu: 'failed', cutAt: 30 }, hint: t('presetFailedHint') }
+    ],
+
+    legend: LEGEND,
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
