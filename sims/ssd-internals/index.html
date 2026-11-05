@@ -1,0 +1,431 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ssd-internals: a tiny SSD. Top row: the host's 10 logical blocks with their FTL mapping (block.page); under it
+     the NAND, 4 erase blocks × 4 pages, with the active block's bracket, the reserve's "R" and each block's erase
+     count. Arrows: the write of this step and its stale mapping, or the pages GC copies. Card: counters and GC log.
+     Drawn on kit view K3 (block grid). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ssd-internals">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unutrašnjost SSD-a · simdeck</title>
+<meta name="description" content="Piši i prepisuj logičke blokove: FTL ih stavlja na nove stranice, skupljanje smeća kopira valjane i briše blokove, a TRIM štedi kopiranje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ssd-internals",
+  "title": {
+    "hr": "Unutrašnjost SSD-a",
+    "en": "Inside an SSD"
+  },
+  "concept": {
+    "hr": "FTL, blokovi za brisanje, pojačanje pisanja, TRIM i trošenje",
+    "en": "FTL, erase blocks, write amplification, TRIM and wear"
+  },
+  "summary": {
+    "hr": "Piši i prepisuj logičke blokove: FTL ih stavlja na nove stranice, skupljanje smeća kopira valjane i briše blokove, a TRIM štedi kopiranje.",
+    "en": "Write and overwrite logical blocks: the FTL puts them on new pages, garbage collection copies valid pages and erases blocks, and TRIM saves copies."
+  },
+  "tags": [
+    "storage-basics"
+  ],
+  "class": "stepper",
+  "steps": 12
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ssd-internals"]; colours only from kit tokens.
+   Layout: one kit block grid (host row over four erase-block rows) and a card beside it. */
+[data-sim="ssd-internals"] .si {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.2cqw;
+  align-items: center;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="ssd-internals"] .si .sd-bg-grid { --bg-row-gap: 1.1rem; }
+[data-sim="ssd-internals"] .si-lbl { display: inline-flex; align-items: center; gap: 0.35rem; }
+[data-sim="ssd-internals"] .si-badge {
+  display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem; padding: 0 0.2rem;
+  border: 0.15rem solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700;
+  background: var(--bg); color: var(--ink);
+}
+[data-sim="ssd-internals"] .si-aside { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--mono); }
+[data-sim="ssd-internals"] .si-aside[data-now] { color: var(--ink); font-weight: 700; }
+[data-sim="ssd-internals"] .si-plus { padding: 0 0.25rem; background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
+/* the erase mark: a lightning bolt drawn with clip-path (no image, no icon font) */
+[data-sim="ssd-internals"] .si-flash,
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-flash"] {
+  display: inline-block; width: 0.8rem; height: 1.1rem; border: 0; border-radius: 0; background: var(--ink);
+  clip-path: polygon(55% 0, 5% 58%, 45% 58%, 30% 100%, 95% 38%, 55% 38%, 80% 0);
+}
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-free"] { background: var(--bg); border: 1px solid var(--line); }
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-r"] { position: relative; background: var(--bg); border: 0.15rem solid var(--ink); }
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-r"]::after {
+  content: 'R'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--ink);
+}
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-stale"] {
+  position: relative; border: 0; background: linear-gradient(var(--muted), var(--muted)) center / 100% 0.15rem no-repeat;
+}
+[data-sim="ssd-internals"] .sd-swatch[data-shape="si-stale"]::after {
+  content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--danger);
+}
+
+/* an invalid page changed in this step keeps its cross on the highlight (kit.css .sd-changed resets the background,
+   which drops .sd-bg-dead's crossing; NOTES.md, Shared requests) */
+[data-sim="ssd-internals"] .sd-bg .sd-bg-cell.sd-bg-dead.sd-changed {
+  background-color: var(--hl);
+  background-image: linear-gradient(to top right, transparent calc(50% - 0.08rem), var(--on-hl) calc(50% - 0.08rem) calc(50% + 0.08rem), transparent calc(50% + 0.08rem)),
+    linear-gradient(to bottom right, transparent calc(50% - 0.08rem), var(--on-hl) calc(50% - 0.08rem) calc(50% + 0.08rem), transparent calc(50% + 0.08rem));
+}
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="ssd-internals"] .sd-ctl[hidden] { display: none; }
+
+/* the card: counters and the GC log */
+[data-sim="ssd-internals"] .si-card {
+  display: grid; gap: 0.5rem; align-content: start; align-self: stretch;
+  padding: 0.6rem 0.9rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="ssd-internals"] .si-card h2 { margin: 0; font-size: var(--fs-md); }
+[data-sim="ssd-internals"] .si-table { border-collapse: collapse; font-size: var(--fs-md); width: 100%; }
+[data-sim="ssd-internals"] .si-table th,
+[data-sim="ssd-internals"] .si-table td { padding: 0.1rem 0.3rem; border-bottom: 1px solid var(--line); }
+[data-sim="ssd-internals"] .si-table th { text-align: left; font-weight: 400; }
+[data-sim="ssd-internals"] .si-table td { text-align: right; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="ssd-internals"] .si-table tr[data-sub] th { padding-left: 1rem; color: var(--muted); }
+[data-sim="ssd-internals"] .si-table tr[data-sub] td { font-weight: 400; }
+[data-sim="ssd-internals"] .si-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
+[data-sim="ssd-internals"] .si-note { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="ssd-internals"] .si-log { margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: var(--fs-sm); display: grid; gap: 0.15rem; }
+[data-sim="ssd-internals"] .si-log li[data-now] { font-weight: 700; }
+[data-sim="ssd-internals"] .si-log li[data-now] > span { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; padding: 0 0.2rem; }
+[data-sim="ssd-internals"] .si-none { color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content; the grid scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ssd-internals"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ssd-internals"] .si { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="ssd-internals"] .si .sd-bg-grid { --bg-row-gap: 0.9rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Unutrašnjost SSD-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (block names, LBAs, block.page) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { class: 'sd-mono', translate: 'no' }, String(text)); }
+  function word(text) { return h('span', { translate: 'no' }, String(text)); }
+  function eb(b) { return data('EB' + b); }
+  function bp(x) { return data(x[0] + '.' + x[1]); }
+  function lbaList(ls) {
+    var a = ls.slice().sort(function (x, y) { return x - y; });
+    var run = a.length > 2 && a[a.length - 1] - a[0] === a.length - 1;
+    return word('LBA ' + (run ? a[0] + '–' + a[a.length - 1] : a.join(', ')));
+  }
+  /** Write amplification with the language's decimal mark: 1.75, 3.25, 1.63, 1.0; "–" before the first host write. */
+  function waText(s) {
+    var v = L.wa(s);
+    if (v === null) return '–';
+    var x = v.toFixed(2);
+    if (x.charAt(x.length - 1) === '0') x = x.slice(0, -1);
+    return x.replace('.', t('dec'));
+  }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned, so a
+      node may appear twice), and *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary
+      lacks). From sims/lnx-cow-filesystem/index.html. */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+  function span(parts) { return h('span', null, parts); }
+  function sp(parts) { return [' '].concat(parts); }
+
+  var LEGEND = [
+    { shape: 'si-free', label: t('legFree') },
+    { shape: 'bg-fill', c: 1, label: t('legValid') },
+    { shape: 'bg-dead', label: t('legInvalid') },
+    { shape: 'bg-bracket', label: t('legActive') },
+    { shape: 'si-r', label: t('legReserve') },
+    { shape: 'bg-link', label: t('legLink') },
+    { shape: 'si-stale', label: t('legStale') },
+    { shape: 'si-flash', label: t('legErase') },
+    { shape: 'hl', label: t('legChanged') }
+  ];
+
+  // ── stage ──
+
+  /** Pages changed in this step, as "b.p" keys: programmed, invalidated, or erased (the whole block). */
+  function changedPages(s) {
+    var ev = s.ev, out = {};
+    if (!ev) return out;
+    var mark = function (x) { out[x[0] + '.' + x[1]] = true; };
+    if (ev.kind === 'fill') ev.pages.forEach(mark);
+    if (ev.kind === 'write') { mark(ev.to); if (ev.from) mark(ev.from); }
+    if (ev.kind === 'trim') ev.hits.forEach(function (x) { mark(x.at); });
+    if (ev.kind === 'gc') {
+      ev.moves.forEach(function (m) { mark(m.to); });
+      for (var p = 0; p < L.PAGES; p++) mark([ev.victim, p]);
+    }
+    return out;
+  }
+  function changedLbas(s) {
+    var ev = s.ev;
+    if (!ev) return [];
+    if (ev.kind === 'fill') return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    if (ev.kind === 'write') return [ev.lba];
+    if (ev.kind === 'trim') return ev.hits.map(function (x) { return x.lba; });
+    if (ev.kind === 'gc') return ev.moves.map(function (m) { return m.lba; });   // their mapping moved (SPEC.md Scene)
+    return [];
+  }
+
+  function render(c) {
+    var s = c.state, p = c.params, ev = s.ev;
+    var now = changedPages(s), nowL = changedLbas(s);
+    var reserve = L.reserveOf(s);
+    var host = [];
+    for (var l = 0; l < L.LBAS; l++) {
+      var m = s.map[String(l)];
+      host.push({ text: String(l), sub: p.showMap ? (m ? m[0] + '.' + m[1] : '–') : undefined,
+        kind: m ? 'fill' : undefined, c: m ? 1 : undefined, now: nowL.indexOf(l) >= 0 });
+    }
+    var rows = [{ id: 'host', label: span(t('rowHost')), cells: host }];
+    for (var b = 0; b < L.BLOCKS; b++) {
+      var cells = s.pages[b].map(function (v, pg) {
+        var hl = !!now[b + '.' + pg];
+        if (v === null) return { now: hl };
+        if (v === 'X') return { kind: 'dead', now: hl };
+        return { text: String(v), kind: 'fill', c: 1, now: hl };
+      });
+      var erasedNow = ev && ev.kind === 'gc' && ev.victim === b;
+      var label = h('span', { class: 'si-lbl' }, data('EB' + b),
+        b === reserve ? h('span', { class: 'si-badge', title: t('reserveTitle'), 'aria-label': t('reserveTitle') }, t('reserveBadge')) : null);
+      var aside = h('span', { class: 'si-aside', dataset: erasedNow ? { now: 'true' } : {} },
+        erasedNow ? h('span', { class: 'si-flash', 'aria-hidden': 'true' }) : null,
+        h('span', null, t('erased', { n: s.erase[b] })),
+        erasedNow ? h('span', { class: 'si-plus', translate: 'no' }, '+1') : null);
+      rows.push({ id: 'eb' + b, label: label, aside: aside, offset: 3, cells: cells,
+        brackets: b === s.active ? [{ from: 0, len: L.PAGES, label: span(t('active')) }] : [] });
+    }
+
+    var links = [];
+    if (ev && p.showMap && ev.kind === 'gc') {
+      ev.moves.forEach(function (mv) {
+        links.push({ from: { row: 'eb' + mv.from[0], cell: mv.from[1] }, to: { row: 'eb' + mv.to[0], cell: mv.to[1] }, now: true, style: 'dashed' });
+      });
+    } else if (ev && p.showMap) {
+      if (ev.kind === 'write') {
+        if (ev.from) links.push({ from: { row: 'host', cell: ev.lba }, to: { row: 'eb' + ev.from[0], cell: ev.from[1] }, broken: true, head: false });
+        links.push({ from: { row: 'host', cell: ev.lba }, to: { row: 'eb' + ev.to[0], cell: ev.to[1] }, now: true });
+      }
+      if (ev.kind === 'trim') ev.hits.forEach(function (x) {
+        links.push({ from: { row: 'host', cell: x.lba }, to: { row: 'eb' + x.at[0], cell: x.at[1] }, broken: true, head: false });
+      });
+    }
+
+    var grid = Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [t('gridMeta')],
+      count: { text: t('countWa', { wa: waText(s) }), hl: c.last && c.n > 0 },
+      cellHeight: '3rem', cellWidthPhone: '2.6rem',
+      rows: rows, links: links
+    });
+    c.stage.replaceChildren(h('div', { class: 'si' }, grid, card(c)));
+  }
+
+  function card(c) {
+    var s = c.state, pr = c.prev;
+    var row = function (label, v, was, sub) {
+      return h('tr', { dataset: sub ? { sub: 'true' } : {} }, h('th', null, label),
+        h('td', { class: pr && was !== v ? 'si-now' : null }, String(v)));
+    };
+    var gcCopies = function (x) { return x.gc.reduce(function (a, g) { return a + g.moved; }, 0); };
+    var table = h('table', { class: 'si-table' }, h('tbody', null,
+      row(t('cHost'), s.host, pr && pr.host),
+      row(t('cNand'), s.nand, pr && pr.nand),
+      row(t('cCopies'), gcCopies(s), pr && gcCopies(pr), true),
+      row(t('cWa'), waText(s), pr && waText(pr)),
+      row(t('cGc'), s.gc.length, pr && pr.gc.length)));
+    var note = h('p', { class: 'si-note' }, t(c.params.pattern === 'fill' ? 'cFromEmpty' : 'cFromFill'));
+    var log = s.gc.length ? h('ol', { class: 'si-log' }, s.gc.map(function (g, i) {
+      var isNow = s.ev && s.ev.kind === 'gc' && i === s.gc.length - 1;
+      return h('li', { dataset: isNow ? { now: 'true' } : {} },
+        h('span', { translate: 'no' }, t.n('gcEntry', g.moved, { i: i + 1, v: 'EB' + g.victim, to: 'EB' + g.to, k: g.moved })));
+    })) : h('p', { class: 'si-note si-none' }, t('gcNone'));
+    return h('div', { class: 'si-card' }, h('h2', null, t('cardCounters')), table, note, h('h2', null, t('gcLog')), log);
+  }
+
+  // ── captions ──
+
+  function capWrite(c) {
+    var s = c.state, ev = s.ev, out = [];
+    if (ev.opened !== null) out = rich('capOpened', { prev: eb(c.prev.active), b: eb(ev.opened) }).concat(' ');
+    var l = word('LBA ' + ev.lba);
+    out = out.concat(ev.from ? rich('capWriteOver', { l: l, at: bp(ev.to), old: bp(ev.from) }) : rich('capWriteNew', { l: l, at: bp(ev.to) }));
+    if (!c.last && L.needsGc(s)) out = out.concat(sp(rich('capNextGc', { r: eb(L.reserveOf(s)) })));
+    return out;
+  }
+  function capGc(c) {
+    var ev = c.state.ev;
+    var names = function (bs) { return data(bs.map(function (x) { return 'EB' + x; }).join(', ')); };
+    var tie = [];
+    if (ev.tiedErase.length) tie = tie.concat(rich('tieErase', { o: names(ev.tiedErase) }));
+    if (ev.tiedNumber.length) tie = tie.concat(rich('tieNumber', { o: names(ev.tiedNumber) }));
+    tie = span(tie);
+    return rich('capGc', { v: eb(ev.victim), i: ev.invalid, tie: tie, moved: span(t.n('copied', ev.moves.length)), r: eb(ev.to), e: ev.erase });
+  }
+  function capTrim(c) {
+    var ev = c.state.ev;
+    var out = [];
+    if (ev.hits.length) out = rich('capTrim', { ls: lbaList(ev.hits.map(function (x) { return x.lba; })) });
+    if (ev.misses.length) out = out.concat(out.length ? ' ' : [], rich('capTrimMiss', { ls: lbaList(ev.misses) }));
+    return out;
+  }
+  function capEnd(c) {
+    var s = c.state, p = c.params;
+    var hw = span(t.n('hostWrites', s.host)), nw = span(t.n('nandWrites', s.nand));
+    if (!String(p.extra || '').trim()) {
+      if (p.pattern === 'fill') return rich('capEndFill', { h: hw, n: nw, wa: waText(s) });
+      if (p.pattern === 'trim') {
+        var q = Object.assign({}, p, { pattern: 'spread' });
+        var other = Simdeck.stateAt(L, q, L.steps(q));
+        return rich('capEndTrim', { n: nw, m: data(other.nand) });
+      }
+    }
+    return rich('capEnd', { h: hw, n: nw, wa: waText(s) });
+  }
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.ev;
+    if (c.first) return t(p.pattern === 'fill' ? 'cap0Fill' : 'cap0');
+    var out;
+    if (ev.kind === 'fill') out = rich('capFill', { r: eb(L.reserveOf(s)) });
+    else if (ev.kind === 'write') out = capWrite(c);
+    else if (ev.kind === 'gc') out = capGc(c);
+    else if (ev.kind === 'trim') out = capTrim(c);
+    else out = [];
+    if (c.last) {
+      out = out.concat(sp(capEnd(c)));
+      if (refused !== null && refused === String(p.extra || '')) out = out.concat(sp(rich('capFull', { max: L.MAX_STEPS })));
+    }
+    return out;
+  }
+
+  // ── controls ──
+
+  /** A button appends an op to `extra` and shows its first step (a GC step when the write needs one). An op that would
+      take the run past MAX_STEPS is not added: the last step's caption says why (the kit's action buttons have no
+      disabled state; NOTES.md, Shared requests). */
+  var refused = null;   // `extra` at the moment a press was refused; the caption shows the reason while it holds
+  function addOp(sim, tok) {
+    var p = sim.params;
+    if (!L.canAdd(p, tok)) { refused = String(p.extra || ''); sim.go(sim.steps); sim.render(); return; }
+    refused = null;
+    var before = sim.steps;
+    sim.set({ extra: L.addOp(p, tok) });
+    sim.go(before + 1);
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // `extra` (the ops the buttons add) is a model param without a control, as ssh-tunnels' `extra`.
+      // `pattern` is set by the presets; its choice is hidden to keep the panel on one screen (NOTES.md, Decisions).
+      { key: 'pattern', type: 'choice', label: t('pattern'), resets: true, visible: function () { return false; },
+        options: [['hot', t('patHot')], ['spread', t('patSpread')], ['trim', t('patTrim')], ['fill', t('patFill')]] },
+      { key: 'lba', type: 'select', label: t('lba'),
+        options: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (l) { return [l, t('rowHost') + ' ' + l]; }) },
+      { type: 'button', label: t('btnWrite'), key: 'w', run: function (sim) { addOp(sim, 'w' + sim.params.lba); } },
+      { type: 'button', label: t('btnTrim'), key: 't', run: function (sim) { addOp(sim, 't' + sim.params.lba); } },
+      { type: 'button', label: t('btnUndo'), key: 'u', run: function (sim) {
+        var at = sim.n;
+        refused = null;
+        sim.set({ extra: '' });
+        sim.go(Math.min(at, sim.steps));
+      } },
+      { key: 'showMap', type: 'toggle', label: t('showMap'), hint: t('showMapHint') }
+    ],
+
+    presets: [
+      { id: 'hot-data', label: t('presetHot'), params: { pattern: 'hot' }, hint: t('presetHotHint') },
+      { id: 'spread', label: t('presetSpread'), params: { pattern: 'spread' }, hint: t('presetSpreadHint') },
+      { id: 'trim', label: t('presetTrim'), params: { pattern: 'trim' }, hint: t('presetTrimHint') },
+      { id: 'first-fill', label: t('presetFill'), params: { pattern: 'fill' }, hint: t('presetFillHint') }
+    ],
+
+    legend: LEGEND,
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
