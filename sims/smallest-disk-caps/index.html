@@ -1,0 +1,444 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- smallest-disk-caps: the fullest OSD sets MAX AVAIL; uneven hosts fill first. Top, a `ceph df`-style box (raw
+     capacity, raw used, raw free ÷ size, MAX AVAIL, what really fits) and the health line; below, hosts as columns and
+     OSDs as fill bars (outline height ∝ size, fill ∝ used) with dashed 85/90/95 % lines, the deciding OSD outlined.
+     Model: sim.js (placement: crush.js, the cephsim engine's CRUSH); rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="smallest-disk-caps">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Najmanji disk određuje kapacitet · simdeck</title>
+<meta name="description" content="Dodaj diskove poslužiteljima i puni bazen: svaki poslužitelj nosi cijelu kopiju, pa se onaj s najmanje diskova napuni prvi dok je grozd tek trećinom pun.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "smallest-disk-caps",
+  "title": {
+    "hr": "Najmanji disk određuje kapacitet",
+    "en": "The smallest disk caps the pool"
+  },
+  "concept": {
+    "hr": "Najpuniji OSD određuje MAX AVAIL; neravnomjerni poslužitelji pune se prvi",
+    "en": "The fullest OSD sets MAX AVAIL; uneven hosts fill first"
+  },
+  "summary": {
+    "hr": "Dodaj diskove poslužiteljima i puni bazen: svaki poslužitelj nosi cijelu kopiju, pa se onaj s najmanje diskova napuni prvi dok je grozd tek trećinom pun.",
+    "en": "Add mismatched disks and fill the pool: every host carries a full copy, so the one with the fewest disks fills first while the cluster is a third full."
+  },
+  "tags": [
+    "storage-cluster"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dr-38-percent"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="smallest-disk-caps"]; colours only from kit tokens. */
+[data-sim="smallest-disk-caps"] .sc {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.7rem 0.4rem;
+  font-size: 1rem;
+}
+
+/* the ceph df box */
+[data-sim="smallest-disk-caps"] .sc-df {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+[data-sim="smallest-disk-caps"] .sc-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+  padding: 0.3rem 0.55rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="smallest-disk-caps"] .sc-tile-label { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="smallest-disk-caps"] .sc-tile-value { font-size: 1.55rem; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+[data-sim="smallest-disk-caps"] .sc-tile-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="smallest-disk-caps"] .sc-tile[data-role="naive"] .sc-tile-value { text-decoration: line-through; text-decoration-thickness: 0.12rem; color: var(--muted); }
+[data-sim="smallest-disk-caps"] .sc-tile[data-role="max"] { border-color: var(--ink); }
+[data-sim="smallest-disk-caps"] .sc-tile[data-role="fits"] { border: 0.25rem solid var(--ink); }
+[data-sim="smallest-disk-caps"] .sc-tile[data-role="fits"][data-full] .sc-tile-value { color: var(--danger); }
+
+/* the health line */
+[data-sim="smallest-disk-caps"] .sc-health { display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; align-items: baseline; }
+[data-sim="smallest-disk-caps"] .sc-hstate {
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid currentColor;
+  border-radius: var(--radius-sm);
+}
+[data-sim="smallest-disk-caps"] .sc-hstate[data-h="ok"] { color: var(--ok); }
+[data-sim="smallest-disk-caps"] .sc-hstate[data-h="warn"] { color: var(--warn); border-style: dashed; }
+[data-sim="smallest-disk-caps"] .sc-hstate[data-h="err"] { color: var(--danger); border-width: 0.2rem; }
+
+/* hosts and bars */
+[data-sim="smallest-disk-caps"] .sc-hosts { display: flex; gap: 0.5rem; min-height: 0; }
+[data-sim="smallest-disk-caps"] .sc-host {
+  flex: var(--disks) 1 0;
+  min-width: 10.5rem;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.25rem;
+  padding: 0.3rem 0.45rem 0.25rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius);
+}
+[data-sim="smallest-disk-caps"] .sc-hhead { font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="smallest-disk-caps"] .sc-hname { font-family: var(--mono); font-weight: 700; font-size: 1rem; }
+[data-sim="smallest-disk-caps"] .sc-hdecides { font-weight: 700; }
+[data-sim="smallest-disk-caps"] .sc-bars { display: flex; gap: 0.2rem; min-height: 0; }
+[data-sim="smallest-disk-caps"] .sc-col { flex: 1 1 0; min-width: 0; max-width: 3.6rem; display: flex; flex-direction: column; align-items: stretch; }
+[data-sim="smallest-disk-caps"] .sc-col[data-axis] { flex: 0 0 2.7rem; }
+[data-sim="smallest-disk-caps"] .sc-slot { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; padding-top: 0.9rem; }
+[data-sim="smallest-disk-caps"] .sc-id { font-family: var(--mono); font-size: var(--fs-sm); text-align: center; line-height: 1.3; white-space: nowrap; overflow: hidden; }
+[data-sim="smallest-disk-caps"] .sc-bar {
+  position: relative;
+  width: 100%;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg);
+}
+[data-sim="smallest-disk-caps"] .sc-fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--c1); }
+[data-sim="smallest-disk-caps"] .sc-bar[data-level="nearfull"] .sc-fill,
+[data-sim="smallest-disk-caps"] .sc-bar[data-level="backfillfull"] .sc-fill {
+  background-color: var(--warn);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3rem, var(--bg) 0.3rem 0.45rem);
+}
+[data-sim="smallest-disk-caps"] .sc-bar[data-level="full"] .sc-fill {
+  background-color: var(--danger);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3rem, var(--bg) 0.3rem 0.42rem),
+    repeating-linear-gradient(-45deg, transparent 0 0.3rem, var(--bg) 0.3rem 0.42rem);
+}
+[data-sim="smallest-disk-caps"] .sc-bar[data-level="out"] { border-style: dashed; border-color: var(--line); }
+[data-sim="smallest-disk-caps"] .sc-out { position: absolute; inset: auto 0 0.2rem; text-align: center; font-size: var(--fs-sm); color: var(--muted); writing-mode: vertical-rl; transform: rotate(180deg); margin: auto; }
+[data-sim="smallest-disk-caps"] .sc-line { position: absolute; left: -0.1rem; right: -0.1rem; border-top: 0.14rem dashed var(--ink); }
+[data-sim="smallest-disk-caps"] .sc-bar[data-decide] { border-width: 0.3rem; }
+[data-sim="smallest-disk-caps"] .sc-bar[data-decide]::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -0.95rem;
+  transform: translateX(-50%);
+  border-left: 0.5rem solid transparent;
+  border-right: 0.5rem solid transparent;
+  border-bottom: 0.65rem solid var(--ink);
+}
+[data-sim="smallest-disk-caps"] .sc-axis { position: relative; }
+[data-sim="smallest-disk-caps"] .sc-tick { position: absolute; right: 0.15rem; transform: translateY(50%); font-size: var(--fs-sm); line-height: 1; white-space: nowrap; color: var(--muted); }
+[data-sim="smallest-disk-caps"] .sc-tick[data-n="90"] { right: 0.15rem; }
+
+/* legend swatches of the page's own marks */
+[data-sim="smallest-disk-caps"] .sd-swatch[data-shape="sc-bar"] { background: linear-gradient(to top, var(--c1) 0 55%, var(--bg) 55%); border: var(--line-w) solid var(--ink); }
+[data-sim="smallest-disk-caps"] .sd-swatch[data-shape="sc-over"] { background-color: var(--warn); background-image: repeating-linear-gradient(45deg, transparent 0 0.2rem, var(--bg) 0.2rem 0.3rem); }
+[data-sim="smallest-disk-caps"] .sd-swatch[data-shape="sc-full"] {
+  background-color: var(--danger);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2rem, var(--bg) 0.2rem 0.28rem), repeating-linear-gradient(-45deg, transparent 0 0.2rem, var(--bg) 0.2rem 0.28rem);
+}
+[data-sim="smallest-disk-caps"] .sd-swatch[data-shape="sc-decide"] { background: var(--bg); border: 0.25rem solid var(--ink); }
+[data-sim="smallest-disk-caps"] .sd-swatch[data-shape="sc-host"] { background: transparent; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+
+/* the panel: hidden lab controls on the HQ cluster; presets and controls in two columns so everything fits 1920×1080 */
+[data-sim="smallest-disk-caps"] .sd-ctl[hidden] { display: none; }
+[data-sim="smallest-disk-caps"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="smallest-disk-caps"] .sd-group { gap: 0.2rem; }
+[data-sim="smallest-disk-caps"] .sd-ctl { gap: 0; }
+[data-sim="smallest-disk-caps"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 0.9rem; }
+[data-sim="smallest-disk-caps"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="smallest-disk-caps"] [data-sd-controls] .sd-group > .sd-ctl:is([data-key="smallHostDisks"], [data-key="bigHostDisks"]) { grid-column: auto; }
+
+/* Phone and portrait: the stage grows with its content; tiles and hosts wrap. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="smallest-disk-caps"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="smallest-disk-caps"] .sc { height: auto; padding: 0.4rem; grid-template-rows: auto; }
+  [data-sim="smallest-disk-caps"] .sc-df { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-sim="smallest-disk-caps"] .sc-tile-value { font-size: 1.25rem; }
+  [data-sim="smallest-disk-caps"] .sc-hosts { flex-wrap: wrap; }
+  [data-sim="smallest-disk-caps"] .sc-host { flex-basis: 100%; min-width: 0; }
+  [data-sim="smallest-disk-caps"] .sc-bars { height: 12rem; }
+  [data-sim="smallest-disk-caps"] .sc-tick[data-n="90"] { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Najmanji disk određuje kapacitet</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="crush.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  // ── numbers in the page's language ──
+
+  /** x with d decimals in the page's language. */
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** TiB, or GiB below 1 TiB. */
+  function cap(tib) {
+    if (tib < 1 - 1e-9) return t('gib', { n: dec(tib * 1024, 0) });
+    return t('tib', { n: dec(tib, 1) });
+  }
+  function pct(r, d) { return t('pct', { n: dec(100 * r, d == null ? 1 : d) }); }
+  function pctInt(r) { return t('pct', { n: String(Math.round(100 * r)) }); }
+  function osdName(id) { return 'osd.' + id; }
+  function data(x) { return h('span', { translate: 'no' }, String(x)); }
+  /** *word* is an English term in italics. */
+  function emph(text) {
+    return text.split(/\*([^*]+)\*/).map(function (bit, i) { return i % 2 ? h('em', { lang: 'en' }, bit) : bit; });
+  }
+  function diskLabel(g) { return g < 1024 ? t('gib', { n: String(g) }) : t('tib', { n: String(g / 1024) }); }
+
+  // ── the ceph df box and the health line ──
+
+  function tile(role, label, value, sub, attrs) {
+    return h('div', Object.assign({ class: 'sc-tile', dataset: { role: role } }, attrs || {}),
+      h('span', { class: 'sc-tile-label' }, label),
+      h('span', { class: 'sc-tile-value' }, value),
+      h('span', { class: 'sc-tile-sub' }, sub));
+  }
+
+  function dfBox(s) {
+    var lab = s.cluster === 'lab';
+    var inCount = s.osds.filter(function (o) { return o.in; }).length;
+    var tiles = [
+      tile('raw', t('dfRaw'), cap(s.rawTiB), t.n('dfRawSub', inCount)),
+      tile('used', t('dfUsed'), h('span', null, pct(s.rawRatio)),
+        lab ? t('dfUsedSub', { stored: cap(s.storedTiB), size: s.pool.size }) : t('dfUsedSubHq')),
+      tile('naive', t('dfNaive', { size: s.pool.size }), cap(s.naiveTiB), t('dfNaiveSub', { pct: pct(s.rawRatio, 0) })),
+      tile('max', h('span', { translate: 'no' }, t('dfMax', { pool: s.pool.name })), cap(s.maxAvailTiB),
+        t('dfMaxSub', { id: s.maxAvailOsd }))
+    ];
+    if (lab) {
+      tiles.push(s.full
+        ? tile('fits', t('dfFits', { id: s.fullest }), cap(0), t('dfFitsFull'), { 'data-full': 'true' })
+        : tile('fits', t('dfFits', { id: s.fullest }), cap(s.headroomTiB), t('dfFitsSub')));
+    }
+    return h('div', { class: 'sc-df', style: { gridTemplateColumns: lab ? null : 'repeat(4, minmax(0, 1fr))' } }, tiles);
+  }
+
+  function health(s) {
+    var c = s.counts;
+    var hstate = c.full ? 'err' : (c.nearfull || c.backfillfull) ? 'warn' : 'ok';
+    var parts = [];
+    if (c.full) parts.push(t.n('hFull', c.full));
+    if (c.backfillfull) parts.push(t.n('hBackfill', c.backfillfull));
+    if (c.nearfull) parts.push(t.n('hNear', c.nearfull));
+    if (s.full) parts.push(t('hPoolFull', { refused: cap(s.refusedTiB) }));
+    if (!parts.length) parts.push(t('healthOk'));
+    return h('div', { class: 'sc-health' },
+      h('span', { class: 'sc-hstate', dataset: { h: hstate }, translate: 'no' }, t({ ok: 'hsOk', warn: 'hsWarn', err: 'hsErr' }[hstate])),
+      h('span', null, parts.join(' · ')));
+  }
+
+  // ── hosts and bars ──
+
+  function bar(s, o, maxSize, changed) {
+    var heightPct = 100 * o.sizeTiB / maxSize;
+    var fillPct = Math.min(100, 100 * o.ratio);
+    var lines = o.in ? [85, 90, 95].map(function (n) { return h('div', { class: 'sc-line', style: { bottom: n + '%' } }); }) : [];
+    var aria = t('osdAria', { id: o.id, used: cap(o.usedTiB), size: cap(o.sizeTiB), pct: pct(o.ratio, 0), level: t('lvl_' + o.level) });
+    return h('div', { class: 'sc-col' },
+      h('div', { class: 'sc-slot' },
+        h('div', {
+          class: 'sc-bar' + (changed ? ' sd-changed' : ''), role: 'img', 'aria-label': aria,
+          dataset: Object.assign({ level: o.level }, o.id === s.fullest ? { decide: 'true' } : {}),
+          style: { height: heightPct + '%' }
+        },
+          h('div', { class: 'sc-fill', style: { height: fillPct + '%' } }),
+          lines,
+          o.in ? null : h('span', { class: 'sc-out' }, t('osdOut')))),
+      h('div', { class: 'sc-id', translate: 'no' }, String(o.id)));
+  }
+
+  function axis(maxHere, maxSize) {
+    var hgt = 100 * maxHere / maxSize;
+    return h('div', { class: 'sc-col', dataset: { axis: 'true' }, 'aria-hidden': 'true' },
+      h('div', { class: 'sc-slot' },
+        h('div', { class: 'sc-axis', style: { height: hgt + '%' } }, (hgt >= 90 ? [95, 90, 85] : [95, 85]).map(function (n) {   // 90 only where the labels have room
+          return h('span', { class: 'sc-tick', dataset: { n: String(n) }, style: { bottom: n + '%' } }, t('line', { n: n }));
+        }))),
+      h('div', { class: 'sc-id' }, ' '));
+  }
+
+  function hostBox(s, x, hi, maxSize, chg) {
+    var mine = s.osds.filter(function (o) { return o.host === hi; });
+    var maxHere = Math.max.apply(null, mine.map(function (o) { return o.sizeTiB; }));
+    var sizes = mine.filter(function (o) { return o.in; }).map(function (o) { return o.sizeTiB; });
+    var uniform = sizes.every(function (z) { return Math.abs(z - sizes[0]) < 1e-9; });
+    var diskLine = uniform ? t.n('hostDisks', x.disks, { size: cap(sizes[0]) }) : null;
+    var holds = null;
+    if (s.cluster === 'lab' && s.storedTiB > 1e-9) {
+      holds = x.fullCopy ? t('hostCopy', { data: cap(x.usedTiB) }) : t('hostHolds', { data: cap(x.usedTiB) });
+    } else if (s.cluster === 'hq') holds = t('hostHolds', { data: cap(x.usedTiB) });
+    var fill = Math.round(100 * x.minRatio) === Math.round(100 * x.maxRatio)
+      ? t('hostFillOne', { pct: pctInt(x.maxRatio) })
+      : t('hostFill', { lo: String(Math.round(100 * x.minRatio)), hi: pctInt(x.maxRatio) });
+    var f = L.osdOf(s, s.fullest);
+    // every host header has the same lines (the decides line is blank elsewhere), so equal disks draw equal bars
+    var decides = h('div', { class: 'sc-hdecides' }, f && f.host === hi ? t('decides', { id: f.id, pct: pctInt(f.ratio) }) : '\u00a0');
+    return h('section', { class: 'sc-host', style: { '--disks': String(Math.max(2, x.disks + 1)) } },
+      h('div', { class: 'sc-hhead' },
+        h('div', { class: 'sc-hname', translate: 'no' }, x.name),
+        h('div', null, diskLine || '\u00a0'),
+        h('div', null, holds || '\u00a0'),
+        h('div', null, fill),
+        decides),
+      h('div', { class: 'sc-bars' }, axis(maxHere, maxSize), mine.map(function (o) {
+        return bar(s, o, maxSize, chg.indexOf(o.id) >= 0);
+      })));
+  }
+
+  // ── render; the changed marks and the "disks added" note follow the last change ──
+
+  var lastKey = null, lastState = null, prevState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key === lastKey) return;
+    prevState = lastState;
+    chg = L.changed(lastState, c.state);
+    lastKey = key;
+    lastState = c.state;
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    var maxSize = Math.max.apply(null, s.osds.map(function (o) { return o.sizeTiB; }));
+    c.stage.replaceChildren(h('div', { class: 'sc' },
+      dfBox(s),
+      health(s),
+      h('div', { class: 'sc-hosts' }, s.hosts.map(function (x, hi) { return hostBox(s, x, hi, maxSize, chg); }))));
+  }
+
+  /** A string with {placeholders} filled by text or nodes, *terms* in italics. */
+  function parts(key, vars, raw) {
+    var text = raw != null ? raw : t(key, {});
+    var out = [];
+    emph(text).forEach(function (bit) {
+      if (typeof bit !== 'string') { out.push(bit); return; }
+      bit.split(/\{(\w+)\}/).forEach(function (x, i) {
+        if (i % 2 === 0) { if (x) out.push(x); }
+        else out.push(vars[x] == null ? '' : vars[x].nodeType ? vars[x].cloneNode(true) : vars[x]);   // a node may appear twice
+      });
+    });
+    return out;
+  }
+
+  function caption(c) {
+    track(c);
+    var s = c.state;
+    var k = L.captionKey(s);
+    var f = L.osdOf(s, s.fullest);
+    var host = s.hosts[f.host];
+    var vars = {
+      raw: pct(s.rawRatio, 0), osd: data(osdName(f.id)), pct: pctInt(f.ratio), host: data(host.name),
+      disks: t.n('diskOn', host.disks), max: cap(s.maxAvailTiB), naive: cap(s.naiveTiB), size: s.pool.size,
+      fits: s.headroomTiB == null ? '' : cap(s.headroomTiB), stored: s.storedTiB == null ? '' : cap(s.storedTiB),
+      refused: s.refusedTiB == null ? '' : cap(s.refusedTiB), pool: data(s.pool.name), big: data(s.hosts[0].name),
+      level: t('lvl_' + f.level)
+    };
+    if (k.key === 'cEven') vars.disks = t.n('diskPo', host.disks);
+    var out = parts(k.key, vars);
+    // "four more disks on the big host": right after the big host grew, all else equal; it replaces the other note
+    var q = prevState;
+    if (q && q.cluster === 'lab' && s.cluster === 'lab' && !s.full && !q.full && s.hosts[0].disks > q.hosts[0].disks &&
+        q.hosts[1].disks === s.hosts[1].disks && q.pool.size === s.pool.size && q.storedTiB === s.storedTiB &&
+        Math.abs(q.osds[0].sizeTiB - s.osds[0].sizeTiB) < 1e-9) {
+      var n = s.hosts[0].disks - q.hosts[0].disks;
+      out.push(' ');
+      return out.concat(parts(null, Object.assign({}, vars, { n: n, rawFrom: cap(q.rawTiB), rawTo: cap(s.rawTiB),
+        capFrom: cap(q.fullAtTiB), capTo: cap(s.fullAtTiB) }), t.n('nAdded', n)));
+    }
+    k.notes.forEach(function (key) { out.push(' '); out = out.concat(parts(key, vars)); });
+    return out;
+  }
+
+  var labels = { 'unbalanced': 'pUnbalanced', 'add-to-big-host': 'pAddBig', 'fill-it': 'pFill', 'one-small-disk': 'pOneSmall', 'dr-38-percent': 'pHq' };
+  function isLab(p) { return p.cluster !== 'hq'; }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'cluster', type: 'choice', label: t('cluster'), options: [['lab', t('clusterLab')], ['hq', t('clusterHq')]] },
+      { key: 'smallHostDisks', type: 'range', label: t('smallHostDisks'), min: L.RANGE.smallHostDisks[0], max: L.RANGE.smallHostDisks[1], step: 1, visible: isLab },
+      { key: 'bigHostDisks', type: 'range', label: t('bigHostDisks'), min: L.RANGE.bigHostDisks[0], max: L.RANGE.bigHostDisks[1], step: 1, visible: isLab },
+      { key: 'diskGiB', type: 'choice', label: t('diskGiB'), options: L.DISKS.map(function (g) { return [g, diskLabel(g)]; }), visible: isLab },
+      { key: 'storedTiB', type: 'range', label: t('storedTiB'), min: 0, max: L.storedMax, step: L.RANGE.storedStep,
+        format: function (v) { return cap(v); }, visible: isLab },
+      { key: 'size', type: 'choice', label: t('size'), options: [[2, '2'], [3, '3']], visible: isLab }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'sc-bar', label: t('legBar') },
+      { shape: 'sc-over', label: t('legOver') },
+      { shape: 'sc-full', label: t('legFull') },
+      { shape: 'dash', label: t('legLine') },
+      { shape: 'sc-decide', label: t('legDecide') },
+      { shape: 'sc-host', label: t('legHost') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
