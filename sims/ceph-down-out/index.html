@@ -1,0 +1,493 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ceph-down-out: osd.0 of a 3/2 pool stops and time passes. Left: the clock and osd.0's two flags, the OSDs by host
+     (K3 block grid, kit/blockgrid.js), the two timers and the data-movement bar. Right: every PG of the pool by state,
+     and six of osd.0's PGs with their copies and where CRUSH puts osd.0's copy once it is out. Model: sim.js
+     (placement: placement.js); rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ceph-down-out">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>down i out: kada Ceph kopira · simdeck</title>
+<meta name="description" content="Zaustavi OSD i pusti da vrijeme teče: pao je, ali unutra, pa se ništa ne miče; izbačen nakon 600 s, pa oporavak. noout, povratak i pražnjenje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ceph-down-out",
+  "title": {
+    "hr": "down i out: kada Ceph kopira",
+    "en": "down vs out: when Ceph copies"
+  },
+  "concept": {
+    "hr": "down: degradirano, ništa se ne miče; out nakon intervala: preraspodjela",
+    "en": "down: degraded, nothing moves; out after a timer: rebalancing"
+  },
+  "summary": {
+    "hr": "Zaustavi OSD i pusti da vrijeme teče: pao je, ali unutra, pa se ništa ne miče; izbačen nakon 600 s, pa oporavak. noout, povratak i pražnjenje.",
+    "en": "Stop an OSD and let time pass: down but in, nothing moves; out after 600 s, then recovery. With noout, a return in time, a late return and a drain."
+  },
+  "tags": [
+    "storage-cluster"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ceph-down-out"]; colours only from kit tokens.
+   Layout: left, the clock line, the OSDs, the timers and the movement bar; right, every PG and the zoom. */
+[data-sim="ceph-down-out"] .cd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.8rem 1.1rem;
+  align-items: start;
+  align-content: center;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="ceph-down-out"] .cd-col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+[data-sim="ceph-down-out"] .cd-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; font-size: var(--fs-md); }
+[data-sim="ceph-down-out"] .cd-clock { font-family: var(--mono); font-weight: 700; font-size: var(--fs-xl); padding: 0 0.3rem; }
+[data-sim="ceph-down-out"] .cd-badge {
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 0 0.45rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="ceph-down-out"] .cd-badge-bad { border-color: var(--danger); color: var(--danger); border-style: dashed; }
+[data-sim="ceph-down-out"] .cd-badge-off { border-style: dotted; color: var(--muted); border-color: var(--muted); text-decoration: line-through; }
+[data-sim="ceph-down-out"] .cd-proc { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="ceph-down-out"] .cd-now { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); box-shadow: 0 0 0 2px var(--ink); }
+[data-sim="ceph-down-out"] .cd-counts { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; font-size: var(--fs-sm); }
+[data-sim="ceph-down-out"] .cd-counts span { white-space: nowrap; padding: 0 0.25rem; }
+[data-sim="ceph-down-out"] .cd-st { font-weight: 700; color: var(--ink); }
+[data-sim="ceph-down-out"] .cd-st-degraded { color: var(--warn); }
+[data-sim="ceph-down-out"] .cd-st-clean { color: var(--ok); }
+[data-sim="ceph-down-out"] .cd-st-misplaced { color: var(--ink); }
+[data-sim="ceph-down-out"] .cd-st.cd-now, [data-sim="ceph-down-out"] .cd-bad.cd-now { color: var(--on-hl); }
+
+[data-sim="ceph-down-out"] .cd .sd-bg-label { font-size: var(--fs-sm); }
+[data-sim="ceph-down-out"] .cd .sd-bg-aside { font-size: var(--fs-sm); }
+[data-sim="ceph-down-out"] .cd .sd-bg-grid { row-gap: 0; --bg-row-gap: 0.3rem; }
+[data-sim="ceph-down-out"] .cd-pool .sd-bg-grid { --bg-row-gap: 0.14rem; }
+[data-sim="ceph-down-out"] .cd-zoom .sd-bg-grid { --bg-row-gap: 0.22rem; }
+
+/* the cards: timers and data movement */
+[data-sim="ceph-down-out"] .cd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.45rem 0.9rem;
+  font-size: var(--fs-sm);
+}
+[data-sim="ceph-down-out"] .cd-card h3 { margin: 0; font-size: var(--fs-md); }
+[data-sim="ceph-down-out"] .cd-card .sd-bg-meter { font-size: var(--fs-sm); }
+[data-sim="ceph-down-out"] .cd-card .sd-bg-meter-label { min-width: 7.5rem; }
+[data-sim="ceph-down-out"] .cd-line { display: flex; flex-wrap: wrap; gap: 0 0.8rem; }
+[data-sim="ceph-down-out"] .cd-muted { color: var(--muted); }
+[data-sim="ceph-down-out"] .cd-bad { color: var(--danger); font-weight: 700; }
+/* the timer mark: a small clock drawn in CSS (the page font has no such glyph) */
+[data-sim="ceph-down-out"] .cd-tm {
+  display: inline-block; position: relative; width: 0.85em; height: 0.85em; vertical-align: -0.08em; margin-right: 0.25em;
+  border: 0.12em solid currentColor; border-radius: 50%;
+}
+[data-sim="ceph-down-out"] .cd-tm::after {
+  content: ''; position: absolute; left: 50%; top: 12%; width: 0.1em; height: 40%; background: currentColor; transform: translateX(-50%);
+}
+
+/* panel: presets and controls in two columns */
+[data-sim="ceph-down-out"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ceph-down-out"] [data-sd-controls] > .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 0.8rem; align-items: end; }
+[data-sim="ceph-down-out"] [data-sd-controls] > .sd-group > :not(.sd-ctl[data-key="rateMBs"], .sd-ctl[data-key="dataTiB"]) { grid-column: 1 / -1; }
+[data-sim="ceph-down-out"] [data-sd-controls] .sd-ctl[data-key="rateMBs"] .sd-seg { flex-wrap: nowrap; }
+[data-sim="ceph-down-out"] [data-sd-controls] .sd-ctl[data-key="rateMBs"] .sd-seg button { padding: 0 0.3rem; min-width: 0; }
+[data-sim="ceph-down-out"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: one column; the stage grows with its content; the grids scroll inside their boxes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ceph-down-out"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ceph-down-out"] .cd { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="ceph-down-out"] .cd-card .sd-bg-meter-label { min-width: 0; }
+  [data-sim="ceph-down-out"] [data-sd-controls] > .sd-group { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">down i out: kada Ceph kopira</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="placement.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C_OSD = 1, C_CLEAN = 3, C_DEG = 7, C_MOVE = 2;    // series colours: OSD, clean PG, degraded PG, data moving
+  var S = L.SUBJECT;
+
+  /** Data (OSD, host, pool and PG names, numbers, times, sizes) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  function sp(parts) { return [' '].concat(parts); }
+  function dec(x, d) { return x.toFixed(d).replace('.', t('dec')); }
+  /** Sizes in binary units (TiB, GiB), as the cluster reports them; rates in MB/s (SPEC.md rule 8). */
+  function size(b) {
+    if (b >= L.TIB * 0.995) return t('uTiB', { x: dec(b / L.TIB, 2) });
+    var g = b / Math.pow(2, 30);
+    return t('uGiB', { x: dec(g, g >= 100 ? 0 : g >= 10 ? 1 : 2) });
+  }
+  /** A duration: "20 s", "5 min", "1 h 12 min". */
+  function dur(sec) {
+    var x = Math.round(sec);
+    if (x < 60) return x + ' s';
+    if (x < 3600) return (x % 60 ? Math.floor(x / 60) + ' min ' + (x % 60) + ' s' : x / 60 + ' min');
+    var m = Math.round(x / 60);                              // round the minutes first: never "10 h 60 min"
+    return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+  }
+  function clock(s) { return L.fmtTime(s); }
+  function pgId(pg) { return L.pgId(pg); }
+
+  /** Caption parts from t(key) or, with n, t.n(key, n): node placeholders are put back where they land (cloned), and
+      *English term* becomes <em lang="en"> (the Croatian term rule, for terms the glossary lacks). From ceph-min-size. */
+  var MARK = '\u0001';
+  function rich(key, vars, n) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); } else flat[k] = v;
+    });
+    var text = n === undefined ? t(key, flat) : t.n(key, n, flat);
+    var out = [];
+    text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+      if (!bit) return;
+      bit.split(MARK).forEach(function (piece, j) {
+        if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+        else if (piece) out.push(i % 2 ? h('em', { lang: 'en' }, piece) : piece);
+      });
+    });
+    return out;
+  }
+
+  /** An OSD's flags as a cell: up/in solid; stopped but still marked up, a red frame; down/in hatched "↓ in";
+      down/out crossed "↓ out"; up/out a dashed outline "↑ out". */
+  function osdCell(o, id, now) {
+    var flags = (o.up ? '↑ ' : '↓ ') + (o.in ? 'in' : 'out');
+    var kind = !o.run && o.up ? 'bad' : o.up ? (o.in ? 'fill' : 'ghost') : (o.in ? 'soft' : 'dead');
+    return { text: String(id), sub: flags, kind: kind, c: C_OSD, now: !!now };
+  }
+  var UP = { run: true, up: true, in: true };
+
+  // ── stage ──
+
+  function head(c) {
+    var s = c.state, prev = c.prev, o = s.osd[S], po = prev ? prev.osd[S] : o;
+    var counts = L.GROUPS.map(function (g) {
+      var moved = !!prev && prev.counts[g] !== s.counts[g];
+      return h('span', { class: 'cd-st cd-st-' + g + (moved ? ' cd-now' : '') }, t.n('cnt_' + g, s.counts[g]));
+    });
+    return h('div', { class: 'cd-col' },
+      h('div', { class: 'cd-head' },
+        h('span', { class: 'cd-clock' + (prev && prev.t !== s.t ? ' cd-now' : ''), translate: 'no' }, 't = ' + clock(s.t)),
+        h('b', { translate: 'no' }, 'osd.' + S),
+        h('span', { class: 'cd-badge' + (o.up ? '' : ' cd-badge-bad') + (prev && po.up !== o.up ? ' cd-now' : ''), translate: 'no' }, o.up ? 'up' : 'down'),
+        h('span', { class: 'cd-badge' + (o.in ? '' : ' cd-badge-bad') + (prev && po.in !== o.in ? ' cd-now' : ''), translate: 'no' }, o.in ? 'in' : 'out'),
+        h('span', { class: 'cd-proc' + (prev && po.run !== o.run ? ' cd-now' : '') }, t(o.run ? 'procRun' : 'procStop')),
+        h('span', { class: 'cd-badge' + (s.flags.noout ? '' : ' cd-badge-off'), translate: 'no' }, 'noout')),
+      h('div', { class: 'cd-counts' }, counts));
+  }
+
+  function osdMap(c) {
+    var s = c.state;
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('osdTitle'),
+      meta: [t.n('osdMeta', L.subjectPgs().length, { data: size(s.dataBytes) })],
+      cellHeight: '2.6rem',
+      rows: L.HOSTS.map(function (hst, i) {
+        return {
+          id: 'h' + i,
+          label: data(hst.name),
+          cells: hst.osds.map(function (x) {
+            return x === S ? osdCell(s.osd[S], x, s.ev && s.ev.osdChanged) : osdCell(UP, x, false);
+          })
+        };
+      })
+    });
+  }
+
+  function timerLine(s, key, tm, drain) {
+    var elapsed = tm.start === null ? 0 : Math.min(tm.len, Math.max(0, s.t - tm.start));
+    var text;
+    if (tm.state === 'idle') text = t(key === 'downOut' && drain ? 'tNone' : 'tIdle');
+    else if (tm.state === 'running') text = t('tRunning', { left: dur(tm.len - elapsed) });
+    else if (tm.state === 'expired') text = t('tExpired', { t: clock(tm.start + tm.len) });
+    else if (tm.state === 'held') text = t('tHeld');
+    else text = t('tCancelled');
+    var kind = tm.state === 'held' ? 'soft' : tm.state === 'cancelled' ? 'dead' : 'fill';
+    return Simdeck.blockGrid.meter({
+      total: tm.len, parts: [{ n: tm.state === 'held' && elapsed >= tm.len ? tm.len : elapsed, kind: kind, c: C_OSD }],
+      label: h('span', null, h('span', { class: 'cd-tm', 'aria-hidden': 'true' }), rich(key === 'grace' ? 'tGrace' : 'tDownOut'), ' ', data(dur(tm.len))),
+      text: text
+    });
+  }
+
+  function timers(c) {
+    var s = c.state, drain = L.norm(c.params).action === 'drain';
+    return h('div', { class: 'cd-card' },
+      h('h3', null, t('timersTitle')),
+      timerLine(s, 'grace', s.timers.grace, drain),
+      timerLine(s, 'downOut', s.timers.downOut, drain));
+  }
+
+  function movement(c) {
+    var s = c.state, pl = s.plan;
+    var kids = [h('h3', null, t('moveTitle'))];
+    if (!pl) {
+      kids.push(Simdeck.blockGrid.meter({ total: 1, parts: [], label: t('kRecovery'), text: t('moveNone') }));
+    } else {
+      // the bar: what has moved, by kind (recovery solid, backfill striped), in queue order
+      var parts = [], left = pl.moved;
+      pl.items.forEach(function (it) {
+        var n = Math.max(0, Math.min(it.bytes, left));
+        left -= n;
+        var kind = it.kind === 'recovery' ? 'fill' : 'soft';
+        if (parts.length && parts[parts.length - 1].kind === kind) parts[parts.length - 1].n += n;
+        else parts.push({ n: n, kind: kind, c: C_MOVE });
+      });
+      var rec = pl.items.some(function (it) { return it.kind === 'recovery'; }), bf = pl.items.some(function (it) { return it.kind === 'backfill'; });
+      var log = pl.items.some(function (it) { return it.log; });
+      var label = [rec ? t(log ? 'kCatchup' : 'kRecovery') : null, bf ? t('kBackfill') : null].filter(Boolean).join(' + ');
+      var done = pl.moved >= pl.total - 1;
+      kids.push(Simdeck.blockGrid.meter({
+        total: pl.total, parts: parts, label: label,
+        text: done ? t('moveDone', { total: size(pl.total) })
+          : t('moveText', { moved: size(pl.moved), total: size(pl.total), eta: dur((pl.total - pl.moved) / s.rate), rate: s.rate / L.MB })
+      }));
+    }
+    kids.push(h('div', { class: 'cd-line' },
+      h('span', { class: prev(c, 'moved') ? 'cd-now' : null }, t('totMoved', { x: size(s.totals.moved) })),
+      s.totals.wasted ? h('span', { class: 'cd-bad' + (prev(c, 'wasted') ? ' cd-now' : '') }, t('totWasted', { x: size(s.totals.wasted) })) : null));
+    return h('div', { class: 'cd-card' }, kids);
+  }
+  function prev(c, k) { return !!c.prev && c.prev.totals[k] !== c.state.totals[k]; }
+
+  function poolGrid(c) {
+    var s = c.state;
+    var cells = s.pgs.map(function (g) {
+      return g === 'clean' ? { kind: 'fill', c: C_CLEAN } : g === 'degraded' ? { kind: 'soft', c: C_DEG } : { kind: 'ghost' };
+    });                                                         // no changed mark: it would hide the state's pattern
+    var rows = Simdeck.blockGrid.split({ id: 'pg', cells: cells }, 16).map(function (r, k) {
+      r.label = data(pgId(k * 16) + '…');
+      return r;
+    });
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'cd-pool',
+      title: t('pgTitle'),
+      meta: [h('span', null, data(L.POOL.name), ' · ', t.n('pgCount', L.PG_NUM), ' · ', t('pgMeta'))],
+      cellHeight: '1.1rem',
+      rows: rows
+    });
+  }
+
+  /** One of osd.0's PGs: its three copies in CRUSH order (osd.0's as osd.0 is now), then the new place of osd.0's
+      copy while it is out (or the temporary copy while it is copied back), and the PG's status. */
+  function zoom(c) {
+    var s = c.state, pl = s.plan, prog = L.progressOf(pl), o = s.osd[S];
+    var changed = {};
+    ((s.ev && s.ev.changed) || []).forEach(function (pg) { changed[pg] = true; });
+    var rows = s.zoom.map(function (pg) {
+      var k = L.itemFor(pl, pg), it = k >= 0 ? pl.items[k] : null, pr = k >= 0 ? prog[k] : null;
+      var copies = L.inSet(pg).map(function (x) {
+        if (x !== S) return { text: String(x), kind: 'fill', c: C_OSD };
+        var cell = osdCell(o, x, false);
+        delete cell.sub;                                       // the flags are in the OSD grid; here the pattern says it
+        return cell;
+      });
+      var extra = null, word;
+      var pct = pr ? Math.floor(pr.f * 100) : 0;
+      if (it && it.to !== S) {                                 // out: osd.0's copy goes to a new OSD
+        extra = { text: String(it.to), kind: pr.st === 'done' ? 'fill' : pr.st === 'moving' ? 'soft' : 'ghost', c: C_MOVE };
+        word = pr.st === 'done' ? t('z_clean') : t(pr.st === 'moving' ? 'z_moving' : 'z_queued', { k: t(it.kind === 'recovery' ? 'kRecovery' : 'kBackfill'), x: it.to, p: pct });
+      } else if (it && it.from !== null) {                     // back: the rebuilt copy goes back to osd.0
+        if (pr.st !== 'done') extra = { text: String(it.from), kind: 'fill', c: C_MOVE };
+        word = pr.st === 'done' ? t('z_clean') : t(pr.st === 'moving' ? 'z_backMoving' : 'z_back', { p: pct });
+      } else if (it) {                                         // back in time: catch up from the log
+        word = pr.st === 'done' ? t('z_clean') : t(pr.st === 'moving' ? 'z_catchMoving' : 'z_catch', { p: pct });
+      } else {
+        word = s.pgs[pg] === 'degraded' ? t('z_wait') : t('z_clean');
+      }
+      var g = s.pgs[pg];
+      return {
+        id: 'pg' + pg,
+        label: data(pgId(pg)),
+        cells: copies.concat([extra]),
+        aside: h('span', { class: 'cd-st cd-st-' + g + (changed[pg] ? ' cd-now' : '') }, word)
+      };
+    });
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      className: 'cd-zoom',
+      title: t('zoomTitle', { n: s.zoom.length, of: L.subjectPgs().length }),
+      meta: [t('zoomMeta')],
+      cols: 4,
+      cellHeight: '1.6rem',
+      rows: rows
+    });
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'cd' },
+      h('div', { class: 'cd-col' }, head(c), osdMap(c), timers(c), movement(c)),
+      h('div', { class: 'cd-col' }, poolGrid(c), zoom(c))));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, o = L.norm(c.params);
+    var T = data(clock(s.t)), N = L.subjectPgs().length;
+    var D = data(o.downOut), DATA = data(size(s.dataBytes)), RATE = data(o.rateMBs);
+    var out = [];
+    var add = function (parts) { out = out.concat(out.length ? sp(parts) : parts); };
+    if (!ev) {
+      add(rich(o.action === 'drain' ? 'capStartDrain' : 'capStart', { pool: data(L.POOL.name), pgs: data(L.PG_NUM), data: DATA }, N));
+      if (o.noout && o.action !== 'drain') add(rich('capStartNoout'));
+      return out;
+    }
+    var pl = s.plan;
+    if (ev.kind === 'stop') { add(rich('capStop', { t: T, grace: data(L.GRACE) })); return out; }
+    if (ev.kind === 'down') {
+      add([data(clock(s.t) + ': ')].concat(rich(o.noout ? 'capDownNoout' : 'capDown', { d: D })));
+      add(rich('capDownMore', {}, s.counts.degraded));
+      return out;
+    }
+    if (ev.kind === 'wait') { add(rich('capWait', { t: T })); return out; }
+    if (ev.kind === 'timer') { add(rich('capTimer', { t: T, d: D })); return out; }
+    if (ev.kind === 'later') { add(rich('capLater', { t: T })); return out; }
+    if (ev.kind === 'out') {
+      var eta = data(dur(pl.total / s.rate));
+      if (o.action === 'drain') add(rich('capDrain', { t: T, data: DATA, rate: RATE, eta: eta }));
+      else add(rich('capOut', { t: T, d: D, data: DATA, rate: RATE, eta: eta }, N));
+      add(rich('capOutHost'));
+      return out;
+    }
+    if (ev.kind === 'moving') { add(rich('capMoving', { t: T, moved: data(size(pl.moved)) })); return out; }
+    if (ev.kind === 'progress') {
+      var prog = L.progressOf(pl), doneN = prog.filter(function (p) { return p.st === 'done'; }).length;
+      if (ev.f < 1) {
+        add(rich('capProgress', { t: T, p: data(Math.round(ev.f * 100)), moved: data(size(pl.moved)), total: data(size(pl.total)) }, doneN));
+        add(rich('capProgressLeft', {}, N - doneN));
+      } else if (o.action === 'drain') add(rich('capDoneDrain', { t: T }));
+      else add(rich('capDone', { t: T, data: DATA, dur: data(dur(pl.total / s.rate)), since: data(dur(s.t)) }));
+      return out;
+    }
+    if (ev.kind === 'stopEmpty') { add(rich('capStopEmpty', { t: T, grace: data(L.GRACE) })); return out; }
+    if (ev.kind === 'return') {
+      var away = data(dur(s.t));
+      var catchBytes = pl.items.filter(function (it) { return it.log; }).reduce(function (n, it) { return n + it.bytes; }, 0);
+      var CATCH = data(size(catchBytes));
+      if (!ev.hadPlan) {
+        add([data(clock(s.t) + ': ')].concat(rich(o.noout && s.t > L.GRACE + o.downOut ? 'capReturnNoout' : 'capReturn', { away: away, d: D, catch: CATCH })));
+        return out;
+      }
+      add(rich(!ev.doneBefore ? 'capReturnOutAll' : ev.wasted < 1 ? 'capReturnOutNone' : 'capReturnOut', { t: T, away: away, out: data(clock(L.GRACE + o.downOut)), moved: data(size(ev.movedBefore)), wasted: data(size(ev.wasted)) }));
+      var back = pl.items.filter(function (it) { return it.kind === 'backfill'; }).length;
+      if (back) add(rich('capReturnBack', {}, back));
+      if (catchBytes) add(rich(back ? 'capReturnCatch' : 'capReturnCatchAll', { catch: CATCH }));
+      return out;
+    }
+    add(rich('capClean', { t: T, total: data(size(s.totals.moved)) }));
+    if (s.totals.wasted) add(rich('capCleanWasted', { wasted: data(size(s.totals.wasted)) }));
+    return out;
+  }
+
+  var stopOnly = function (p) { return p.action !== 'drain'; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'action', type: 'choice', label: t('action'), options: [['stop', t('actStop')], ['drain', t('actDrain')]], resets: true },
+      { key: 'noout', type: 'toggle', label: t('noout'), resets: true, visible: stopOnly },
+      { key: 'downOut', type: 'choice', label: t('downOut'), options: L.DOWN_OUT.map(function (d) { return [d, dur(d)]; }), resets: true, visible: stopOnly },
+      { key: 'returnAt', type: 'choice', label: t('returnAt'), options: L.RETURN_AT.map(function (r) { return [r, r === 'never' ? t('retNever') : dur(r)]; }), resets: true, visible: stopOnly },
+      { key: 'rateMBs', type: 'choice', label: t('rate'), options: L.RATES.map(function (r) { return [r, String(r)]; }), resets: true },
+      { key: 'dataTiB', type: 'range', label: t('data'), min: L.DATA_MIN, max: L.DATA_MAX, step: 0.1, resets: true,
+        format: function (v) { return t('uTiB', { x: dec(Number(v), 1) }); } }
+    ],
+
+    presets: [
+      { id: 'dead-disk', label: t('pDead'), params: {}, hint: t('pDeadHint') },
+      { id: 'reboot', label: t('pReboot'), params: { returnAt: 300 }, hint: t('pRebootHint') },
+      { id: 'slow-reboot', label: t('pSlow'), params: { returnAt: 900 }, hint: t('pSlowHint') },
+      { id: 'maintenance-noout', label: t('pNoout'), params: { noout: true, returnAt: 1800 }, hint: t('pNooutHint') },
+      { id: 'drain', label: t('pDrain'), params: { action: 'drain' }, hint: t('pDrainHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'bg-fill', c: C_OSD, label: t('legUpIn') },
+      { shape: 'bg-bad', label: t('legStopped') },
+      { shape: 'bg-soft', c: C_OSD, label: t('legDownIn') },
+      { shape: 'bg-dead', label: t('legDownOut') },
+      { shape: 'bg-ghost', label: t('legGhost') },
+      { shape: 'bg-fill', c: C_CLEAN, label: t('legClean') },
+      { shape: 'bg-soft', c: C_DEG, label: t('legDegraded') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
