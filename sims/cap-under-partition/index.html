@@ -1,0 +1,574 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cap-under-partition: three replicas A, B, C of one key x, client K1 beside A and B, client K2 beside C. Partition
+     the network and send reads and writes: in CP mode (W = 2, R = 2 of 3) the minority side answers with a timeout; in
+     AP mode (W = R = 1) every replica answers alone, the minority's reads go stale, the sides diverge and the heal
+     resolves the conflict by last-write-wins. A stepper, one action per step and a summary; the buttons add an action
+     at the next step. Kit view K2 draws the clients and replicas with the requests on the wire and the partition as a
+     wall; kit view K3 draws every replica's versions of x (the same pair of views as db-replication). Model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cap-under-partition">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAP pri razdvajanju mreže · simdeck</title>
+<meta name="description" content="Razdvoji mrežu između tri replike i šalji čitanja i upise: CP odbija manjinsku stranu, AP odgovara svima, ali zastarjelo, a pri spajanju gubi upis.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+<script src="../../kit/blockgrid.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cap-under-partition",
+  "title": {
+    "hr": "CAP pri razdvajanju mreže",
+    "en": "CAP under partition"
+  },
+  "concept": {
+    "hr": "Razdvojen sustav bira: dosljednost ili dostupnost",
+    "en": "A partitioned system picks consistency or availability"
+  },
+  "summary": {
+    "hr": "Razdvoji mrežu između tri replike i šalji čitanja i upise. CP odbija manjinsku stranu; AP odgovara svima, ali zastarjelo, a pri spajanju gubi upis.",
+    "en": "Partition three replicas and send reads and writes. CP refuses the minority side; AP answers everyone, sometimes stale, and loses a write at the heal."
+  },
+  "tags": [
+    "consensus"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cap-under-partition"]; colours only from kit tokens.
+   Layout: the K2 drawing (clients, replicas, the wall) on top, the K3 version strips under it. */
+[data-sim="cap-under-partition"] .cp {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.5cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="cap-under-partition"] .cp-draw { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+[data-sim="cap-under-partition"] .cp-draw .sd-topo { flex: 1; min-height: 0; align-content: stretch; }
+[data-sim="cap-under-partition"] .sd-topo-card { min-width: 0; }
+[data-sim="cap-under-partition"] .cp-extra { grid-column: 1 / -1; }
+[data-sim="cap-under-partition"] .cp-log .sd-bg-grid { --bg-row-gap: 0.35rem; }
+
+/* the partition wall: a grid item in the empty middle column, under the links (their red crosses sit on it) */
+[data-sim="cap-under-partition"] .cp-wall {
+  grid-row: 1 / -1; justify-self: center; position: relative; width: 1.1rem; min-height: 6rem;
+  border-left: var(--line-w) solid var(--ink); border-right: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(45deg, var(--ink) 0 0.14rem, var(--bg) 0.14rem 0.42rem);
+}
+[data-sim="cap-under-partition"] .cp-wall > span {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%); padding: 0 0.4rem; white-space: nowrap;
+  background: var(--bg); border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700;
+}
+
+/* the client's answer bubble: solid ✓, hatched frame when stale, crossed ✗ on a timeout */
+[data-sim="cap-under-partition"] .cp-bubble { margin-top: 0.35rem; padding: 0.3rem; border: var(--line-w) solid var(--ink); border-radius: 0.9rem; }
+[data-sim="cap-under-partition"] .cp-bubble > div { padding: 0.1rem 0.5rem; border-radius: 0.65rem; background-color: var(--bg); }
+[data-sim="cap-under-partition"] .cp-bubble b { font-family: var(--mono); font-size: var(--fs-lg); }
+[data-sim="cap-under-partition"] .cp-bubble .cp-word { font-weight: 700; }
+[data-sim="cap-under-partition"] .cp-bubble[data-k="stale"] { border-color: var(--danger); }
+[data-sim="cap-under-partition"] .cp-bubble[data-k="stale"] .cp-word { color: var(--danger); }
+[data-sim="cap-under-partition"] .cp-bubble[data-k="err"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="cap-under-partition"] .cp-bubble[data-k="err"] .cp-word { color: var(--danger); }
+
+/* the conflict at the heal: the two versions stacked, the loser struck, "!" beside them */
+[data-sim="cap-under-partition"] .cp-conflict { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.35rem; justify-content: center; }
+[data-sim="cap-under-partition"] .cp-conflict > i { font-style: normal; font-weight: 700; font-size: var(--fs-lg); color: var(--danger); }
+[data-sim="cap-under-partition"] .cp-stack { display: grid; gap: 0.1rem; border: var(--line-w) solid var(--danger); border-radius: var(--radius-sm); padding: 0.1rem 0.4rem; }
+[data-sim="cap-under-partition"] .cp-stack > span { font-family: var(--mono); white-space: nowrap; }
+[data-sim="cap-under-partition"] .cp-stack > s { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+
+/* legend swatches the kit lacks: replica, wall, stale answer, timeout, conflict */
+[data-sim="cap-under-partition"] .sd-swatch[data-shape^="cp-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-replica"] { border-radius: 50% / 22%; width: 0.8em; height: 1.1em; }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-wall"] { width: 0.7em; background: repeating-linear-gradient(45deg, var(--ink) 0 0.1em, var(--bg) 0.1em 0.3em); }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-stale"] { border-color: var(--danger); border-radius: 0.5em; }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-err"],
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-conflict"] { border: 0; background: transparent; }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-err"]::after,
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-conflict"]::after { position: absolute; inset: 0; display: grid; place-items: center;
+  font-weight: 700; line-height: 1; color: var(--danger); }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-err"]::after { content: '✗'; }
+[data-sim="cap-under-partition"] .sd-swatch[data-shape="cp-conflict"]::after { content: '!'; }
+/* legend items that cannot appear in the current mode are hidden (setMode sets data-off) */
+[data-sim="cap-under-partition"] [data-sd-legend] > li[data-off] { display: none; }
+
+[data-sim="cap-under-partition"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.2rem; }
+[data-sim="cap-under-partition"] [data-sd-controls] .sd-ctl[hidden],
+[data-sim="cap-under-partition"] [data-sd-controls] button[hidden] { display: none; }
+
+/* Phone and portrait: the drawing becomes the kit's card list (no wall: the badges say who is cut off), the strips
+   follow; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cap-under-partition"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cap-under-partition"] .cp { grid-template-rows: auto auto; height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="cap-under-partition"] .cp-draw .sd-topo { height: auto; }
+  [data-sim="cap-under-partition"] .cp-wall { display: none; }
+  [data-sim="cap-under-partition"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">CAP pri razdvajanju mreže</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour per party: the replicas share one, each client and its writes have their own. */
+  var COLOUR = { A: '1', B: '1', C: '1', K1: '3', K2: '2', start: '8' };
+  /** Grid places [col, row] in a 14-column grid, cards span 2: K1 left of A and B, the wall in column 7, C and K2 right. */
+  var POS = { K1: [0, 1], A: [4, 0], B: [4, 2], C: [9, 1], K2: [12, 1] };
+  var WALL_COL = 7;
+
+  var cur = null;   // the state on screen: the buttons ask it whether the network is partitioned
+  var note = null;  // a word from a button that could not act (the run is full), shown once in the caption
+
+  /** Data (ids, values, step numbers) is not language: the word check skips translate="no". */
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** "A i B" / "A and B", "A, B i C". */
+  function listAnd(list) {
+    if (list.length === 1) return String(list[0]);
+    return list.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + list[list.length - 1];
+  }
+  function xv(v) { return 'x = ' + v; }
+  function writeOf(s, seq) { return s.writes.filter(function (w) { return w.seq === seq; })[0] || null; }
+  function newest(s) {
+    var best = null;
+    L.IDS.forEach(function (id) { var v = s.servers[id]; if (!best || L.compare(v, best) > 0) best = v; });
+    return best;
+  }
+  function stepReqs(s) { return s.changed.requests.map(function (i) { return s.requests[i]; }); }
+  function otherSide(id) { return L.IDS.filter(function (x) { return L.sideOf(x) !== L.sideOf(id); }); }
+
+  // ── the drawing (kit view K2) ──
+
+  function bubble(r) {
+    if (!r) return null;
+    var k = r.result, kids;
+    if (k === 'err') kids = [h('span', { class: 'cp-word' }, '✗ ' + t('bubbleTimeout'))];
+    else if (r.op === 'write') kids = ['✓ ', data(xv(r.value)), ' ', h('span', { class: 'cp-word' }, t('bubbleWritten'))];
+    else if (k === 'stale') kids = [data(xv(r.value)), ' ', h('span', { class: 'cp-word' }, t('bubbleStale'))];
+    else kids = ['✓ ', data(xv(r.value))];
+    return h('div', { class: 'cp-bubble' + (k === 'stale' ? ' sd-hatch' : ''), dataset: { k: k } }, h('div', null, kids));
+  }
+
+  function clientNode(s, id, c) {
+    var mine = stepReqs(s).filter(function (r) { return r.client === id; })[0];
+    var badges = [];
+    if (s.phase === 'summary') {
+      var tl = s.tally[id];
+      if (tl.n) badges.push({ text: h('span', { translate: 'no' }, '✓ ' + (tl.ok + tl.stale) + '  ✗ ' + tl.err), k: tl.err ? 'dashed' : 'solid' });
+    }
+    var b = bubble(mine);
+    return { id: id, kind: 'host', mark: id, col: POS[id][0], row: POS[id][1], span: 2, c: COLOUR[id], name: t('nClient'),
+      lines: [{ text: t('sendsTo', { id: L.HOME[id] }), kind: 'role' }], badges: badges,
+      extra: b ? h('div', { class: 'cp-extra' }, b) : null, state: mine ? 'active' : null,
+      changed: c.n > 0 && !!mine, align: 'center' };
+  }
+
+  function stampText(sv) {
+    return sv.seq === 0 ? t('stampStart') : t('stampLine', { c: sv.client, n: sv.at });
+  }
+
+  function conflictBox(s) {
+    var lost = s.heal.lost;
+    return h('div', { class: 'cp-conflict cp-extra' }, h('div', { class: 'cp-stack', translate: 'no' }, s.heal.versions.map(function (v) {
+      return lost.indexOf(v.seq) >= 0 ? h('s', null, xv(v.value)) : h('span', null, xv(v.value) + ' ✓');
+    })), h('i', null, '!'));
+  }
+
+  function replicaNode(s, id, c) {
+    var sv = s.servers[id], badges = [];
+    var nw = newest(s);
+    var alone = s.partition && s.quorum.w > 1 && L.reachable(s, id).length < s.quorum.w;
+    if (alone) badges.push({ text: t('bAlone'), k: 'muted' });
+    if (s.divergence) badges.push({ text: t('bDiverged'), k: 'dashed' });
+    else if (L.compare(sv, nw) < 0) badges.push({ text: t('bBehind'), k: 'dashed' });
+    if (s.heal && s.heal.caughtUp.indexOf(id) >= 0) badges.push({ text: t(s.heal.kind === 'conflict' ? 'bResolved' : 'bCaught'), k: 'fill' });
+    var coordOf = stepReqs(s).filter(function (r) { return r.server === id; });
+    return { id: id, kind: 'server', mark: id, col: POS[id][0], row: POS[id][1], span: 2, c: COLOUR[id], name: t('nReplica'),
+      lines: [{ text: xv(sv.value), kind: 'addr' }, { text: stampText(sv), kind: 'role' }], badges: badges,
+      extra: s.heal && s.heal.kind === 'conflict' ? conflictBox(s) : null,
+      state: coordOf.length ? 'active' : null, changed: c.n > 0 && s.changed.servers.indexOf(id) >= 0, align: 'center' };
+  }
+
+  /** The request's packets: to the coordinator, to and from the other replicas, and the answer back. */
+  function requestPackets(s, r) {
+    var out = [], co = r.server, cc = COLOUR[r.client];
+    out.push({ from: r.client, to: co, label: r.op === 'write' ? xv(r.value) : 'x?', c: cc, at: 0.3 });
+    var peers = L.IDS.filter(function (id) { return id !== co; });
+    var reach = L.reachable(s, co);
+    peers.forEach(function (o) {
+      var ok = reach.indexOf(o) >= 0;
+      if (r.op === 'read' && s.quorum.r === 1) return;   // AP: the coordinator answers alone
+      var label = r.op === 'write' ? xv(r.value) : 'x?';
+      if (!ok) { out.push({ from: co, to: o, label: label, c: COLOUR[co], mid: true, drop: true, at: 0.5 }); return; }
+      out.push({ from: co, to: o, label: label, c: COLOUR[co], at: 0.3 });
+      if (s.quorum.w === 1 && r.op === 'write') return;  // AP: sent on, no acknowledgement awaited
+      if (r.op === 'write') out.push({ from: o, to: co, label: '✓', c: COLOUR[o], at: 0.3 });
+      else out.push({ from: o, to: co, label: xv(s.servers[o].value), c: COLOUR[o], at: 0.3 });
+    });
+    var ans = r.result === 'err' ? '✗' : r.op === 'write' ? '✓' : '✓ ' + xv(r.value);
+    out.push({ from: co, to: r.client, label: ans, c: COLOUR[co], drop: r.result === 'err', at: 0.3 });
+    return out;
+  }
+
+  function healPackets(s) {
+    var out = [], hl = s.heal;
+    if (hl.kind === 'conflict') {
+      // the two versions meet across the healed links, then the winner goes to every replica that lacked it
+      out.push({ from: 'A', to: 'C', label: xv(hl.versions[0].value), c: COLOUR.A, at: 0.3 });
+      out.push({ from: 'C', to: 'A', label: xv(hl.versions[1].value), c: COLOUR.C, at: 0.3 });
+      hl.caughtUp.filter(function (id) { return id === 'B'; }).forEach(function (id) {
+        var src = otherSide(id)[0];
+        out.push({ from: src, to: id, label: xv(s.servers[id].value), c: COLOUR[src], at: 0.3 });
+      });
+      return out;
+    }
+    hl.caughtUp.forEach(function (id) {
+      var src = otherSide(id).filter(function (x) { return s.servers[x].seq === s.servers[id].seq; })[0];
+      if (src) out.push({ from: src, to: id, label: xv(s.servers[id].value), c: COLOUR[src], at: 0.3 });
+    });
+    return out;
+  }
+
+  function renderTopo(c) {
+    var s = c.state;
+    var nodes = [clientNode(s, 'K1', c)].concat(L.IDS.map(function (id) { return replicaNode(s, id, c); }), [clientNode(s, 'K2', c)]);
+    var used = {};
+    stepReqs(s).forEach(function (r) { used[r.client] = true; });
+    var cut = !!s.partition;
+    var links = [
+      { id: 'K1A', a: 'K1', b: 'A', state: 'up', active: !!used.K1 },
+      { id: 'AB', a: 'A', b: 'B', state: 'up' },
+      { id: 'AC', a: 'A', b: 'C', state: cut ? 'down' : 'up' },
+      { id: 'BC', a: 'B', b: 'C', state: cut ? 'down' : 'up' },
+      { id: 'K2C', a: 'K2', b: 'C', state: 'up', active: !!used.K2 }
+    ];
+    var packets = [];
+    stepReqs(s).forEach(function (r) { packets = packets.concat(requestPackets(s, r)); });
+    if (s.heal) packets = packets.concat(healPackets(s));
+    var el = Simdeck.topology({ cols: 14, rows: ['auto', 'minmax(1.5rem, 1fr)', 'auto'], dir: c.dir, nodes: nodes, links: links,
+      packets: packets, gap: '1cqw' });
+    if (cut) {
+      var wall = h('div', { class: 'cp-wall', 'aria-hidden': 'true', style: { gridColumn: String(WALL_COL + 1) } }, h('span', null, t('wallLabel')));
+      el.insertBefore(wall, el.firstChild);
+    }
+    return el;
+  }
+
+  // ── the version strips (kit view K3) ──
+
+  /** Every write of the whole run, so the strip keeps its width while stepping. */
+  function plannedWrites(p) {
+    return L.actionsOf(p).reduce(function (n, a) {
+      return n + (typeof a === 'string' ? 0 : a.filter(function (r) { return r.op === 'write'; }).length);
+    }, 0);
+  }
+
+  function cellOf(s, id, k) {
+    var sv = s.servers[id];
+    if (k === 0) return { text: '1', kind: 'fill', c: COLOUR.start, now: false };
+    var w = writeOf(s, k);
+    if (!w) return null;
+    var now = s.changed.servers.indexOf(id) >= 0 && sv.seq === k;
+    if (w.result === 'err') return w.server === id ? { text: String(w.value), kind: 'dead', now: s.n === w.at } : {};
+    var has = sv.got.indexOf(k) >= 0;
+    if (w.lost) return has ? { text: String(w.value), kind: 'bad', now: !!s.heal } : {};
+    if (has) return { text: String(w.value), kind: 'fill', c: COLOUR[w.client], now: now };
+    return { text: String(w.value), kind: 'ghost' };
+  }
+
+  function renderLog(c) {
+    var s = c.state;
+    var n = plannedWrites(c.params);
+    var labels = [t('colStart')];
+    var final = Simdeck.stateAt(L, c.params, Simdeck.stepsOf(L, c.params));
+    final.writes.forEach(function (w) { labels.push(w.client); });
+    var rows = L.IDS.map(function (id) {
+      var cells = [];
+      for (var k = 0; k <= n; k++) cells.push(cellOf(s, id, k));
+      return { id: id, label: data(id), aside: data(xv(s.servers[id].value)), cells: cells };
+    });
+    var q = s.quorum;
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t('gridTitle'),
+      meta: [t('gridMeta')],
+      count: { text: h('span', { translate: 'no' }, s.mode.toUpperCase() + ': W = ' + q.w + ', R = ' + q.r + ', N = ' + q.n), hl: false },
+      cols: n + 1,
+      colLabels: labels,
+      rows: rows,
+      className: 'cp-log'
+    });
+  }
+
+  // ── captions ──
+
+  function capStart(s) {
+    var out = [rich(s.mode === 'cp' ? 'capStartCp' : 'capStartAp'), t('capStartClients')];
+    if (!L.actionsOf(Simdeck_params()).length) out.push(t('capStartEmpty'));
+    return join(out);
+  }
+
+  function capPartition(s) {
+    return join([rich('capPartition'), t(s.mode === 'cp' ? 'capPartitionCp' : 'capPartitionAp')]);
+  }
+
+  function capRequest(s, r) {
+    var vars = { c: data(r.client), s: data(r.server), v: data(xv(r.value)), list: data(listAnd(r.consulted)),
+      k: data(r.consulted.length), newest: data(xv(r.newest)), other: data(listAnd(otherSide(r.server))) };
+    if (r.op === 'write') {
+      if (r.result === 'err') return rich('capWriteRefused', vars);
+      if (!s.partition) return rich(s.quorum.w > 1 ? 'capWriteAll' : 'capWriteAllAp', vars);
+      if (s.quorum.w > 1) return rich('capWriteMajority', vars);
+      return rich('capWriteAp', vars);
+    }
+    if (r.result === 'err') return rich('capReadRefused', vars);
+    if (r.result === 'stale') return rich('capReadStale', vars);
+    if (s.quorum.r > 1) return rich('capReadQuorum', vars);
+    return rich('capReadAp', vars);
+  }
+
+  /** This step's requests in order, then once: the modes agree without a partition, or the sides have just diverged. */
+  function capStep(s, prev) {
+    var reqs = stepReqs(s), out = reqs.map(function (r) { return capRequest(s, r); });
+    if (!s.partition && reqs.some(function (r) { return r.op === 'write' && r.result !== 'err'; })) out.push(t('capSame'));
+    if (s.divergence && !(prev && prev.divergence)) {
+      out.push(rich('capDiverged', { a: data(xv(s.divergence[0].value)), b: data(xv(s.divergence[1].value)) }));
+    }
+    return join(out);
+  }
+
+  function capHeal(s) {
+    var hl = s.heal;
+    if (hl.kind === 'catchup') {
+      if (!hl.caughtUp.length) return rich('capHealNothing', { v: data(xv(s.servers.A.value)) });
+      return rich('capHealCatchup', { list: data(listAnd(hl.caughtUp)), v: data(xv(s.servers.A.value)) });
+    }
+    var a = hl.versions[0], b = hl.versions[1];
+    var win = writeOf(s, hl.winner);
+    var lost = hl.lost.map(function (k) { return writeOf(s, k); });
+    var out = [rich('capHealConflict', { a: data(xv(a.value)), ca: data(a.client), sa: data(a.at), b: data(xv(b.value)), cb: data(b.client), sb: data(b.at) }),
+      rich('capLww', { w: data(xv(win.value)) })];
+    if (a.at === b.at) out.push(rich('capLwwTie', { c: data(win.client) }));
+    out.push(rich(lost.length === 1 ? 'capLostOne' : 'capLostMany', { v: data(listAnd(lost.map(function (w) { return xv(w.value); }))),
+      c: data(lost[0].client) }));
+    return join(out);
+  }
+
+  function capSummary(s) {
+    var tl = s.tally, out = [];
+    var asked = L.CLIENTS.filter(function (id) { return tl[id].n; });
+    if (!asked.length) return t('capSumEmpty');
+    out.push(rich('capSumHead', { mode: data(s.mode.toUpperCase()) }));
+    asked.forEach(function (id) {
+      var x = tl[id];
+      out.push(rich(x.stale ? 'capSumClient' : 'capSumClientFresh', { c: data(id), n: t.n('requestsN', x.n), ans: data(x.ok + x.stale), stale: data(x.stale), err: data(x.err) }));
+    });
+    var errs = asked.filter(function (id) { return tl[id].err; });
+    var stale = tl.K1.stale + tl.K2.stale;
+    if (s.mode === 'cp') {
+      if (errs.length) out.push(rich('capSumCpErr', { list: data(listAnd(errs)) }));
+      else out.push(t('capSumCpOk'));
+      out.push(t('capSumCpMyth'));
+    } else {
+      if (stale || tl.lost) out.push(rich('capSumAp', { stale: t.n('staleN', stale), lost: t.n('lostN', tl.lost) }));
+      else out.push(t('capSumApClean'));
+      if (s.divergence) out.push(t('capSumApPending'));
+      out.push(t('capSumApMyth'));
+    }
+    return join(out);
+  }
+
+  var params = null;
+  function Simdeck_params() { return params; }
+
+  /** Legend items that cannot appear in this mode are hidden: CP never answers stale nor loses a write, AP never times out. */
+  function setMode(p) {
+    var mode = p.mode === 'ap' ? 'ap' : 'cp';
+    var lis = document.querySelectorAll('[data-sd-legend] > li');
+    LEGEND.forEach(function (it, i) {
+      if (!lis[i]) return;
+      if (!it.mode || it.mode === mode) delete lis[i].dataset.off;
+      else lis[i].dataset.off = '';
+    });
+  }
+
+  var LEGEND = [
+    { shape: 'cp-replica', label: t('lgReplica') },
+    { shape: 'cp-wall', label: t('lgWall') },
+    { shape: 'line', label: t('lgOk') },
+    { shape: 'cp-err', label: t('lgErr'), mode: 'cp' },
+    { shape: 'cp-stale', label: t('lgStale'), mode: 'ap' },
+    { shape: 'cp-conflict', label: t('lgConflict'), mode: 'ap' },
+    { shape: 'bg-bad', label: t('lgLost'), mode: 'ap' },
+    { shape: 'bg-ghost', label: t('lgMissing') },
+    { shape: 'hl', label: t('lgChanged') }
+  ];
+
+  // ── buttons: an action at the next step; the steps after it are dropped ──
+
+  function addAction(sim, act) {
+    var acts = L.actionsOf(sim.params);
+    var kept = acts.slice(0, Math.min(sim.n, acts.length));
+    if (kept.length >= L.MAX_ACTIONS) { note = 'noteFull'; sim.render(); return; }
+    kept.push(act);
+    sim.set({ ops: L.encode(kept) });
+    sim.go(kept.length);
+  }
+  function reqButton(key, client, op) {
+    return { type: 'button', label: t(key), run: function (sim) { addAction(sim, [{ client: client, op: op }]); } };
+  }
+  /** Partition or Heal, whichever applies at the step on screen (the task's partition toggle). */
+  var pairBtns = null;
+  function syncButtons() {
+    if (!pairBtns) return;
+    var on = !!(cur && cur.partition);
+    pairBtns.p.hidden = on;
+    pairBtns.h.hidden = !on;
+  }
+  function findPair() {
+    var all = Array.prototype.slice.call(document.querySelectorAll('[data-sd-controls] button'));
+    var by = function (key) { return all.filter(function (b) { return b.textContent.trim() === t(key); })[0]; };
+    var p = by('btnPartition'), hb = by('btnHeal');
+    if (p && hb) pairBtns = { p: p, h: hb };
+    syncButtons();
+  }
+
+  /** The hidden run: the kit reads a URL value only when it is one of the options, so the options are the presets' runs,
+      the defaults' and the (cleaned) run in this page's URL. Any other value is set by the buttons. */
+  var PRESETS = [
+    { id: 'no-partition', label: t('prNone'), hint: t('prNoneHint'), params: { mode: 'cp', ops: 'w1.r2' } },
+    { id: 'cp-majority', label: t('prCp'), hint: t('prCpHint'), params: { mode: 'cp', ops: 'p.w1.r2.w2.h' } },
+    { id: 'ap-both', label: t('prAp'), hint: t('prApHint'), params: { mode: 'ap', ops: 'p.w1.r2.w2.h' } },
+    { id: 'cp-client-view', label: t('prView'), hint: t('prViewHint'), params: { mode: 'cp', ops: 'p.r2.w2' } }
+  ];
+  function opsOptions() {
+    var list = PRESETS.map(function (x) { return x.params.ops; });
+    var raw = new URLSearchParams(window.location.search).get('ops');
+    if (raw !== null) {
+      var clean = L.encode(L.actionsOf({ ops: raw }));
+      if (clean === raw && list.indexOf(raw) < 0) list.push(raw);
+    }
+    return list.filter(function (x, i) { return list.indexOf(x) === i; }).map(function (x) { return [x, x]; });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('pMode'), hint: t('pModeHint'), options: [['cp', 'CP'], ['ap', 'AP']] },
+      // the run (set by presets and the buttons): hidden, but kept in the URL so a link, a reload or L keeps it
+      { key: 'ops', type: 'choice', label: t('pOps'), visible: function () { return false; }, options: opsOptions() },
+      reqButton('btnW1', 'K1', 'write'),
+      reqButton('btnR1', 'K1', 'read'),
+      reqButton('btnW2', 'K2', 'write'),
+      reqButton('btnR2', 'K2', 'read'),
+      // one of the pair shows at a time (syncButtons): the kit has no `visible` for buttons (NOTES.md, Shared requests)
+      { type: 'button', label: t('btnPartition'), run: function (sim) { addAction(sim, 'p'); } },
+      { type: 'button', label: t('btnHeal'), run: function (sim) { addAction(sim, 'h'); } }
+    ],
+
+    presets: PRESETS,
+
+    legend: LEGEND,
+
+    render: function (c) {
+      cur = c.state;
+      params = c.params;
+      setMode(c.params);
+      c.stage.replaceChildren(h('div', { class: 'cp' }, h('div', { class: 'cp-draw' }, renderTopo(c)), renderLog(c)));
+      syncButtons();
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      params = c.params;
+      var out;
+      switch (s.phase) {
+        case 'start': out = capStart(s); break;
+        case 'partition': out = capPartition(s); break;
+        case 'heal': out = capHeal(s); break;
+        case 'request': out = capStep(s, c.prev); break;
+        case 'noop': out = t(s.noop === 'already' ? 'capNoopAlready' : 'capNoopWhole'); break;
+        default: out = capSummary(s);
+      }
+      if (note) { out = join([out, t(note)]); note = null; }
+      return out;
+    }
+  });
+  findPair();
+})();
+</script>
+</body>
+</html>
