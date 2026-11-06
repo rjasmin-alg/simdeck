@@ -101,7 +101,15 @@ test('the real repository builds every page, and only finished ones', () => {
       assert.doesNotMatch(page, /(src|href)="\//, `${name}: no root-absolute links, the folder can move`);
       assert.doesNotMatch(page, /courses\//, `${name}: names no courses (owner, 2026-10-03)`);
     }
-    for (const e of r.entries) assert.match(tree, new RegExp(`href="sims/${e.id}/index\\.html`), `${e.id} is in the tree`);
+    // Every sim learn.json places is on the tree. A newly finished sim may be in no leaf yet (a warning, not an error:
+    // a task may change only its own folder, so the coordinator places it), and then it is in the finder only.
+    const leaves = (n) => (n.children ? n.children.flatMap(leaves) : [n]);
+    const placed = new Set(JSON.parse(readFileSync(join(ROOT, 'learn.json'), 'utf8')).nodes.flatMap(leaves)
+      .flatMap((l) => l.sims.map((s) => s.split('#')[0])));
+    for (const e of r.entries.filter((x) => placed.has(x.id))) {
+      assert.match(tree, new RegExp(`href="sims/${e.id}/index\\.html`), `${e.id} is in the tree`);
+    }
+    assert.ok(placed.size > 200, 'the tree places most sims');
     assert.equal((tree.match(/<section class="node root"/g) ?? []).length, 1, 'one root: the areas');
     assert.match(tree, /<section class="node leaf" id="[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+"/, 'a leaf\'s id is its path, the deep link');
     assert.match(tree, /<form class="search" action="find\/index\.html"/, 'the tree\'s search goes to the finder');
