@@ -1,0 +1,464 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-npv-discounting: a euro next year is worth less than a euro today; NPV sums the discounted cash flows.
+     On top, three numbers (the sum on paper, the NPV with its verdict, what 1 € at the horizon is worth today); below,
+     one column per year with the nominal flow (an outlined bar) and its value today (a filled bar inside it), dragged
+     up or down with the pointer or ↑/↓, and under each column the flow, the discount factor and the value today.
+     Discounting: discount.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-npv-discounting">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vremenska vrijednost novca i neto sadašnja vrijednost · simdeck</title>
+<meta name="description" content="Povlači novčane tokove po godinama i mijenjaj diskontnu stopu: nominalni i diskontirani stupci, zbroj na papiru i NSV koji mijenja predznak.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-npv-discounting",
+  "title": {
+    "hr": "Vremenska vrijednost novca i neto sadašnja vrijednost",
+    "en": "Time value of money and NPV"
+  },
+  "concept": {
+    "hr": "Euro sljedeće godine vrijedi manje; NSV zbraja diskontirane novčane tokove",
+    "en": "A euro next year is worth less; NPV sums the discounted cash flows"
+  },
+  "summary": {
+    "hr": "Povlači novčane tokove po godinama i mijenjaj diskontnu stopu: nominalni i diskontirani stupci, zbroj na papiru i NSV koji mijenja predznak.",
+    "en": "Drag cash flows year by year and move the discount rate: nominal and discounted bars, the sum on paper, and the NPV changing sign."
+  },
+  "tags": [
+    "investment"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dear-money"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-npv-discounting"]; colours only from kit tokens. */
+[data-sim="fin-npv-discounting"] .npv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.55rem 0.8rem 0.4rem;
+  font-size: 1rem;
+}
+
+/* the three numbers */
+[data-sim="fin-npv-discounting"] .npv-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; flex: none; }
+[data-sim="fin-npv-discounting"] .npv-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.3rem 0.7rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-left-width: 0.45rem;
+  border-left-color: var(--sw, var(--line));
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="fin-npv-discounting"] .npv-tile[data-k="nominal"] { border-left-style: dashed; }
+[data-sim="fin-npv-discounting"] .npv-tile-label { color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="fin-npv-discounting"] .npv-big { font-size: 2rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+[data-sim="fin-npv-discounting"] .npv-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-npv-discounting"] .npv-verdict { font-weight: 700; }
+[data-sim="fin-npv-discounting"] .npv-verdict[data-s="1"] { color: var(--ok); }
+[data-sim="fin-npv-discounting"] .npv-verdict[data-s="-1"] { color: var(--danger); }
+[data-sim="fin-npv-discounting"] .npv-tile.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-npv-discounting"] .npv-tile.sd-changed :is(.npv-tile-label, .npv-sub, .npv-verdict) { color: var(--on-hl); }
+
+/* the chart: an axis column, then one column per year; rows: the plot, then the year and its three numbers */
+[data-sim="fin-npv-discounting"] .npv-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+[data-sim="fin-npv-discounting"] .npv-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 8.2rem repeat(var(--cols), minmax(0, 1fr));
+  grid-template-rows: minmax(6rem, 1fr) auto auto auto auto;
+  column-gap: 0.35rem;
+}
+[data-sim="fin-npv-discounting"] .npv-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-npv-discounting"] .npv-tick {
+  position: absolute;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-npv-discounting"] .npv-grid {
+  position: relative;
+  grid-column: 2 / -1;
+  grid-row: 1;
+  border-left: var(--line-w) solid var(--line);
+}
+[data-sim="fin-npv-discounting"] .npv-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.6; }
+[data-sim="fin-npv-discounting"] .npv-zero { position: absolute; left: 0; right: 0; border-top: 0.2rem solid var(--ink); }
+[data-sim="fin-npv-discounting"] .npv-dir {
+  position: absolute;
+  right: 0.3rem;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+[data-sim="fin-npv-discounting"] .npv-col {
+  position: relative;
+  grid-row: 1;
+  z-index: 1;
+  cursor: ns-resize;
+  touch-action: pan-x; /* vertical drags set the flow; sideways ones still scroll the chart on a phone */
+  border-radius: var(--radius-sm);
+}
+[data-sim="fin-npv-discounting"] .npv-col:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+[data-sim="fin-npv-discounting"] .npv-col:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="fin-npv-discounting"] .npv-col[data-drag] { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+[data-sim="fin-npv-discounting"] .npv-nom {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  border: 0.2rem dashed var(--sw);
+  border-radius: 0.2rem;
+  background: color-mix(in srgb, var(--sw) 10%, var(--bg));
+}
+[data-sim="fin-npv-discounting"] .npv-pv {
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  min-height: 1px;
+  background: var(--sw);
+  border: 0.12rem solid var(--ink);
+}
+[data-sim="fin-npv-discounting"] .npv-grip {
+  position: absolute;
+  left: 50%;
+  width: 2.2rem;
+  height: 0.7rem;
+  transform: translate(-50%, -50%);
+  border: 0.15rem solid var(--ink);
+  border-radius: 0.35rem;
+  background: var(--bg);
+}
+
+[data-sim="fin-npv-discounting"] .npv-cell {
+  padding: 0 0.1rem;
+  text-align: center;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-npv-discounting"] .npv-year { padding-top: 0.15rem; font-weight: 700; }
+[data-sim="fin-npv-discounting"] .npv-cell[data-k="nominal"] { color: var(--c1); font-weight: 700; }
+[data-sim="fin-npv-discounting"] .npv-cell[data-k="factor"] { color: var(--muted); }
+[data-sim="fin-npv-discounting"] .npv-cell[data-k="today"] { color: var(--c2); font-weight: 700; }
+[data-sim="fin-npv-discounting"] .npv-rowlabel {
+  grid-column: 1;
+  text-align: right;
+  padding-right: 0.3rem;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-sim="fin-npv-discounting"] .npv-foot { flex: none; font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="fin-npv-discounting"] :is(.npv-sub, .sd-explain) sup { font-size: var(--fs-sm); line-height: 0; }
+[data-sim="fin-npv-discounting"] .npv-tile[data-k="euro"] .npv-sub { font-size: 1rem; }
+[data-sim="fin-npv-discounting"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-npv-discounting"] .sd-swatch[data-shape="npv-nominal"] { border: 0.15rem dashed var(--sw); background: color-mix(in srgb, var(--sw) 10%, var(--bg)); }
+
+/* Phone and portrait: the stage grows with its content; the chart scrolls sideways inside its own box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-npv-discounting"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-npv-discounting"] .npv { height: auto; padding: 0.4rem; }
+  [data-sim="fin-npv-discounting"] .npv-tiles { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-npv-discounting"] .npv-big { font-size: 1.4rem; }
+  [data-sim="fin-npv-discounting"] .npv-scroll { overflow-x: auto; }
+  [data-sim="fin-npv-discounting"] .npv-chart {
+    grid-template-columns: 6.5rem repeat(var(--cols), minmax(5.6rem, 1fr));
+    grid-template-rows: 15rem auto auto auto auto;
+    padding-top: 0.7rem;
+  }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Vremenska vrijednost novca i neto sadašnja vrijednost</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="discount.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var D = window.SimdeckModels.discount;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** A whole number with thousands grouped (120 000 / 120,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 5); plus adds "+" to positive amounts. Minus is U+2212. */
+  function money(x, plus) {
+    var r = D.roundMoney(x);
+    var s = t('eur', { n: group(Math.abs(r)) });
+    return (r < 0 ? '−' : plus && r > 0 ? '+' : '') + s;
+  }
+  function pct(rate) { return t('pct', { n: dec(rate, rate % 1 ? 1 : 0) }); }
+  function data(text, tag) { return h(tag || 'span', { translate: 'no' }, String(text)); }
+  function yearName(k) { return k === 0 ? t('today') : t('yearN', { n: k }); }
+
+  // ── tiles ──
+
+  function tiles(s, chg) {
+    var p = s.p;
+    var lost = D.roundMoney(s.lost);
+    var base = (1 + p.rate / 100).toFixed(3).replace(/\.?0+$/, '');
+    if (Simdeck.lang === 'hr') base = base.replace('.', ',');
+    return h('div', { class: 'npv-tiles' },
+      h('div', { class: 'npv-tile', dataset: { c: '1', k: 'nominal' } },
+        h('span', { class: 'npv-tile-label' }, t('tileNominal')),
+        h('span', { class: 'npv-big', translate: 'no' }, money(s.nominal, true)),
+        h('span', { class: 'npv-sub' }, t('nominalSub'))),
+      h('div', { class: 'npv-tile' + (chg.indexOf('sign') >= 0 ? ' sd-changed' : ''), dataset: { c: '2', k: 'npv' } },
+        h('span', { class: 'npv-tile-label' }, t.parts('tileNpv', { rate: data(pct(p.rate)) })),
+        h('span', { class: 'npv-big', translate: 'no' }, money(s.npv, true)),
+        h('span', { class: 'npv-verdict', dataset: { s: String(s.sign) } },
+          (s.sign > 0 ? '✓ ' : s.sign < 0 ? '✗ ' : '= ') + t(s.sign > 0 ? 'verdictPos' : s.sign < 0 ? 'verdictNeg' : 'verdictZero')),
+        lost !== 0 ? h('span', { class: 'npv-sub' }, t.parts(lost > 0 ? 'npvLost' : 'npvAdded', { x: data(money(Math.abs(lost))) })) : null),
+      h('div', { class: 'npv-tile', dataset: { c: '8', k: 'euro' } },
+        h('span', { class: 'npv-tile-label' }, t.parts('tileEuro', { n: data(p.years) })),
+        h('span', { class: 'npv-big' }, t.parts('euroBig', { x: data(t('eur', { n: dec(s.euroLater, 2) })) })),
+        h('span', { class: 'npv-sub' }, t('euroSub'), ' ',
+          h('span', { translate: 'no' }, '1 / ', base, h('sup', null, String(p.years)), ' = ', dec(s.euroLater, 3)))));
+  }
+
+  // ── the chart ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step that keeps a side to about four grid lines. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+  /** The vertical range: top and bottom on whole grid steps, at least one step each side, so a bar can cross zero. */
+  function domainOf(rows) {
+    var pos = 0, neg = 0;
+    rows.forEach(function (r) { pos = Math.max(pos, r.cf); neg = Math.max(neg, -r.cf); });
+    var S = Math.max(pos, neg, 10000);
+    var step = niceStep(S / 4);
+    return { top: Math.max(step, Math.ceil(pos / step) * step), bot: Math.max(step, Math.ceil(neg / step) * step), step: step };
+  }
+
+  var drag = null;      // { k, rect, dom } while a column is dragged; the range stays frozen meanwhile
+  var refocus = null;   // the column to give focus back to after a render (keyboard changes)
+
+  function setFlow(k, v) {
+    var x = Math.round(v / L.CF_STEP) * L.CF_STEP;
+    x = Math.max(L.CF_MIN, Math.min(L.CF_MAX, x));
+    var patch = {};
+    patch['cf' + k] = x;
+    sim.set(patch);
+  }
+  function valueAt(clientY) {
+    var span = drag.dom.top + drag.dom.bot;
+    return drag.dom.top - (clientY - drag.rect.top) / drag.rect.height * span;
+  }
+  function onMove(e) { if (drag) setFlow(drag.k, valueAt(e.clientY)); }
+  function onUp() {
+    if (!drag) return;
+    drag = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    sim.render();
+  }
+  function startDrag(e, k, dom) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { k: k, rect: e.currentTarget.getBoundingClientRect(), dom: dom };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    setFlow(k, valueAt(e.clientY));
+  }
+  function onKey(e, k, cf) {
+    var by = e.shiftKey ? 10 * L.CF_STEP : L.CF_STEP;
+    var to = null;
+    if (e.key === 'ArrowUp') to = cf + by;
+    else if (e.key === 'ArrowDown') to = cf - by;
+    if (to === null) return;
+    e.preventDefault();
+    refocus = k;
+    setFlow(k, to);
+  }
+
+  function chart(s) {
+    var dom = drag ? drag.dom : domainOf(s.rows);
+    var span = dom.top + dom.bot;
+    var y = function (v) { return (100 * (dom.top - v) / span) + '%'; };
+    var hgt = function (v) { return (100 * Math.abs(v) / span) + '%'; };
+    var n = s.rows.length;
+
+    var ticks = [], lines = [];
+    for (var v = -dom.bot; v <= dom.top + 1e-6; v += dom.step) {
+      ticks.push(h('span', { class: 'npv-tick', translate: 'no', style: { top: y(v) } }, money(v)));
+      if (v !== 0) lines.push(h('div', { class: 'npv-gl', style: { top: y(v) } }));
+    }
+    var cells = [
+      h('div', { class: 'npv-axis' }, ticks),
+      h('div', { class: 'npv-grid' }, lines,
+        h('div', { class: 'npv-zero', style: { top: y(0) } }),
+        h('span', { class: 'npv-dir', style: { top: '0.1rem' } }, t('inflow')),
+        h('span', { class: 'npv-dir', style: { bottom: '0.1rem' } }, t('outflow')))
+    ];
+
+    s.rows.forEach(function (r) {
+      var k = r.t, col = { gridColumn: String(k + 2) };
+      var valueText = t('barValue', { cf: money(r.cf), pv: money(r.pv) });
+      cells.push(h('div', {
+        class: 'npv-col', role: 'slider', tabindex: '0', style: { gridColumn: String(k + 2) },
+        dataset: drag && drag.k === k ? { drag: 'true', year: String(k) } : { year: String(k) },
+        'aria-label': t('barLabel', { year: yearName(k) }), 'aria-orientation': 'vertical',
+        'aria-valuemin': String(L.CF_MIN), 'aria-valuemax': String(L.CF_MAX), 'aria-valuenow': String(r.cf),
+        'aria-valuetext': valueText, title: valueText,
+        onpointerdown: function (e) { startDrag(e, k, dom); },
+        onkeydown: function (e) { onKey(e, k, r.cf); }
+      },
+        r.cf !== 0 ? h('div', { class: 'npv-nom', dataset: { c: '1' }, style: { top: y(Math.max(r.cf, 0)), height: hgt(r.cf) } }) : null,
+        r.cf !== 0 ? h('div', { class: 'npv-pv', dataset: { c: '2' }, style: { top: y(Math.max(r.pv, 0)), height: hgt(r.pv) } }) : null,
+        h('span', { class: 'npv-grip', style: { top: y(r.cf) } })));
+      cells.push(
+        h('span', { class: 'npv-cell npv-year', style: Object.assign({ gridRow: '2' }, col) }, yearName(k)),
+        h('span', { class: 'npv-cell', translate: 'no', dataset: { k: 'nominal' }, style: Object.assign({ gridRow: '3' }, col) }, money(r.cf)),
+        h('span', { class: 'npv-cell', translate: 'no', dataset: { k: 'factor' }, style: Object.assign({ gridRow: '4' }, col) }, '× ' + dec(r.df, 3)),
+        h('span', { class: 'npv-cell', translate: 'no', dataset: { k: 'today' }, style: Object.assign({ gridRow: '5' }, col) }, money(r.pv)));
+    });
+    cells.push(
+      h('span', { class: 'npv-rowlabel', style: { gridRow: '3' } }, t('rowNominal')),
+      h('span', { class: 'npv-rowlabel', style: { gridRow: '4' } }, t('rowFactor')),
+      h('span', { class: 'npv-rowlabel', style: { gridRow: '5' } }, t('rowToday')));
+    return h('div', { class: 'npv-scroll' }, h('div', { class: 'npv-chart', style: { '--cols': String(n) } }, cells));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'npv' }, tiles(s, chg), chart(s),
+      h('p', { class: 'npv-foot' }, t('dragHint'), ' ', t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('.npv-col[data-year="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    if (k.key === 'capEmpty') return t(k.key);
+    var b = function (x) { return h('b', { translate: 'no' }, x); };
+    var out = t.parts(k.key, {
+      rate: b(pct(p.rate)), n: b(String(p.years)), euro: b(t('eur', { n: dec(s.euroLater, 2) })),
+      nominal: b(money(s.nominal, true)), npv: b(money(s.npv, true))
+    });
+    k.notes.forEach(function (key) { out.push(' ', t(key)); });
+    return out;
+  }
+
+  var labels = {
+    'euro-later': 'pEuroLater', 'upgrade': 'pUpgrade', 'dear-money': 'pDearMoney', 'just-the-rate': 'pJustTheRate',
+    'late-payoff': 'pLatePayoff', 'early-payoff': 'pEarlyPayoff'
+  };
+  var never = function () { return false; };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'rate', type: 'range', label: t('rate'), hint: t('rateHint'), min: 0, max: L.RATE_MAX, step: L.RATE_STEP, format: pct },
+      { key: 'years', type: 'range', label: t('years'), min: 1, max: L.MAX_YEARS, step: 1 },
+      { type: 'button', label: t('mirror'), key: 'm', run: function (api) { api.set(L.mirror(api.params)); } }
+    ].concat(L.CF_KEYS.map(function (key, k) {
+      // The flows are dragged on the stage; these hidden ranges keep them in the URL and clamp them.
+      return { key: key, type: 'range', label: yearName(k), min: L.CF_MIN, max: L.CF_MAX, step: L.CF_STEP, visible: never };
+    })),
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'npv-nominal', c: 1, label: t('legNominal') },
+      { c: 2, label: t('legToday') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
