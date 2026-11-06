@@ -324,7 +324,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-06** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **255 of 409 entries are live**, 105 w3, 19 w3 · queued, 18 w3 · next, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building, 1 wip.
+**Status, 2026-11-06** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **256 of 409 entries are live**, 97 w3, 44 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -333,8 +333,8 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.3 ossimulator → import the built pages (16 pages and the map) | 17 | 17 | – |
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
-| §4.1 Networking basics and LAN protocols | 52 | 35 | 4 w3, 3 w3 · held, 10 w3 · next |
-| §4.2 Internet and application protocols | 30 | 19 | 11 w3 |
+| §4.1 Networking basics and LAN protocols | 52 | 35 | 3 w3 · held, 14 w3 · queued |
+| §4.2 Internet and application protocols | 30 | 19 | 7 w3, 4 w3 · queued |
 | §4.3 Security and cryptography | 17 | 11 | 6 w3 |
 | §4.4 Linux | 55 | 40 | 14 w3, 1 wip |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 |
@@ -345,12 +345,12 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
 | §4.6 Storage, backup and disaster recovery | 22 | 16 | 6 w3 |
-| §4.7 High availability and distributed systems | 11 | 7 | 3 w3, 1 w3 · next |
-| §4.8 Performance and capacity | 10 | 1 | 4 w3, 5 w3 · next |
-| §4.9 Computer architecture, OS gaps and automata | 8 | 0 | 6 w3, 2 w3 · next |
+| §4.7 High availability and distributed systems | 11 | 7 | 3 w3, 1 w3 · queued |
+| §4.8 Performance and capacity | 10 | 1 | 4 w3, 5 w3 · queued |
+| §4.9 Computer architecture, OS gaps and automata | 8 | 0 | 6 w3, 2 w3 · queued |
 | §4.10 Radio and crisis communications | 17 | 0 | 17 w3 |
 | §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 |
-| §4.12 Finance basics for IT managers | 20 | 0 | 1 w3 · building, 19 w3 · queued |
+| §4.12 Finance basics for IT managers | 20 | 1 | 1 w3 · building, 18 w3 · queued |
 
 <!-- status:end -->
 
@@ -428,11 +428,11 @@ decides the final grouping axes (§7.1).
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `net-encapsulation` | live | Encapsulation and decapsulation | each layer adds its header going down and strips it coming up | step a message down the sender's stack and up the receiver's | step | S | P1 | URM | URM card ch04-enkapsulacija-dekapsulacija → §5.9 |  |
-| `net-osi-tcpip-map` | w3 · next | OSI vs TCP/IP, and which device lives where | layer models and the layer each device works at | drag protocols and devices onto layers | expl | S | P3 | URM | URM ch04 |  |
-| `net-line-coding` | w3 · next | Line coding: NRZ vs Manchester | how bits become a signal and why the clock must be recoverable | type bits, compare waveforms, cut the clock | expl | S | P3 | URM, HAM | URM card ch06 (Manchester) |  |
+| `net-osi-tcpip-map` | w3 · queued | OSI vs TCP/IP, and which device lives where | layer models and the layer each device works at | drag protocols and devices onto layers | expl | S | P3 | URM | URM ch04 |  |
+| `net-line-coding` | w3 · queued | Line coding: NRZ vs Manchester | how bits become a signal and why the clock must be recoverable | type bits, compare waveforms, cut the clock | expl | S | P3 | URM, HAM | URM card ch06 (Manchester) |  |
 | `net-delay-components` | live | Four kinds of delay | propagation vs transmission vs queuing vs processing delay | sliders for distance, bandwidth, packet size, load | expl | S | P2 | URM | URM card ch06 |  |
-| `net-nominal-vs-actual` | w3 · next | Nominal vs actual throughput | overhead, half duplex and retries eat the link rate | toggle overheads, watch goodput | expl | S | P3 | URM | URM card ch06 |  |
-| `net-ethernet-frame` | w3 · next | Anatomy of an Ethernet frame | fields, minimum size, padding, FCS | edit the payload, see padding and FCS | expl | S | P3 | URM | URM ch07 |  |
+| `net-nominal-vs-actual` | w3 · queued | Nominal vs actual throughput | overhead, half duplex and retries eat the link rate | toggle overheads, watch goodput | expl | S | P3 | URM | URM card ch06 |  |
+| `net-ethernet-frame` | w3 · queued | Anatomy of an Ethernet frame | fields, minimum size, padding, FCS | edit the payload, see padding and FCS | expl | S | P3 | URM | URM ch07 |  |
 | `net-csma-cd` | live | CSMA/CD and binary exponential backoff | collisions on a shared bus and how backoff resolves them | step stations transmitting at once | step | M | P2 | URM | URM card ch07 |  |
 | `net-domains` | live | Collision and broadcast domains | hubs, switches and routers split different domains | place devices, see the domains coloured | expl | S | P2 | URM | URM card ch07 |  |
 | `net-stp` | live | Spanning tree | root bridge election, port roles, which port blocks the loop | step BPDUs; break a link and watch reconvergence | step | M | P1 | URM, NLA | URM ch07 → §5.10 |  |
@@ -443,7 +443,7 @@ decides the final grouping axes (§7.1).
 | `net-link-aggregation` | live | Link aggregation and flow hashing | why one flow never exceeds one member link | add flows, change the hash, fail a link | expl | S | P2 | URM, NLA | NLA T06 |  |
 | `net-arp-local-remote` | live | Local or remote, then ARP | the host ANDs the mask, picks the target or the gateway, resolves its MAC | step a ping to a local and a remote host | step | S | P1 | URM | URM cards ch08-lokalno-udaljeno-odrediste, ch08-arp-zahtjev-odgovor → §5.9 |  |
 | `net-arp-spoofing` | w3 · held | ARP spoofing, man in the middle | a forged reply rewrites the victim's ARP cache | step the attack, then turn on dynamic ARP inspection | step | S | P2 | URM, SEC | URM ch18 |  |
-| `net-ipv4-header` | w3 · next | IPv4 header fields | what each field does and which change in transit | click fields, see their role | expl | S | P3 | URM | URM card ch08 (IPv4 header) |  |
+| `net-ipv4-header` | w3 · queued | IPv4 header fields | what each field does and which change in transit | click fields, see their role | expl | S | P3 | URM | URM card ch08 (IPv4 header) |  |
 | `net-hop-rewrite` | live | What changes at each hop | MACs change per hop, IPs stay, TTL drops, checksum recomputed | step a packet across two routers | step | S | P1 | URM | URM card ch11-skok-sto-se-mijenja → §5.9 |  |
 | `net-traceroute` | live | Traceroute and TTL | TTL-exceeded replies map the path, and stars are not failures | step increasing TTLs; drop ICMP on one router | step | S | P2 | URM | URM card ch11-tracert-ttl |  |
 | `net-icmp-messages` | live | What ping answers mean | echo reply, unreachable codes, timeout, and what silence means | ping through scenarios (down host, ACL, no route) | step | S | P2 | URM | URM ch11 |  |
@@ -454,31 +454,31 @@ decides the final grouping axes (§7.1).
 | `net-link-state-spf` | live | Link state and Dijkstra | LSA flooding builds one map; SPF picks paths | step Dijkstra on a weighted graph; change a cost | step | M | P2 | URM, NLA | URM ch11 → §5.11 |  |
 | `net-ipv6-slaac` | live | IPv6 SLAAC | RS/RA, prefix + interface ID, DAD | step a host joining a link | step | M | P2 | URM | URM ch10 |  |
 | `net-ipv6-ndp` | live | NDP instead of ARP | neighbour solicitation to the solicited-node multicast | step an IPv6 neighbour lookup next to ARP | step | S | P2 | URM | URM ch10; pairs with `net-arp-local-remote` |  |
-| `net-ipv6-address-types` | w3 · next | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | expl | S | P3 | URM | URM ch10 |  |
+| `net-ipv6-address-types` | w3 · queued | IPv6 address types and scopes | link-local, GUA, ULA, multicast and their reach | classify addresses, see where they travel | expl | S | P3 | URM | URM ch10 |  |
 | `net-dhcp-dora` | live | DHCP DORA and the lease | discover/offer/request/ack, T1/T2 renewal, expiry | step a client, let time run, unplug the server | step | S | P1 | URM, UL, WIN1 | URM card ch14 (DORA), UL ch18 |  |
 | `net-dhcp-relay` | live | DHCP relay and giaddr | a relay forwards broadcasts as unicast and tags the subnet | step a client on a remote subnet | step | S | P2 | URM, WIN1 | URM card ch14 (relay) |  |
 | `net-dhcp-rogue` | w3 · held | Rogue DHCP and snooping | the first offer wins, so a rogue server takes over | add a rogue server, then trust ports | step | S | P3 | URM, SEC, WIN1 | URM ch18 |  |
 | `net-rule-first-match` | live | First match wins | rule lists are evaluated top down, the first match decides, implicit deny | send packets/requests through presets: router ACL, stateless firewall, `pg_hba.conf` | step | S | P1 | URM, UL, NLA | UL ch22 (pg_hba first match) → §5.1 |  |
 | `net-port-forwarding` | live | Port forwarding (DNAT) | inbound connections to a NAT'd server | add a forward, open from outside | step | S | P2 | URM | extends `urm-pat` → §5.12 |  |
-| `net-cgnat` | w3 · next | Carrier-grade NAT | double NAT, shared address space, why port forwarding fails | step a connection through two NATs | step | S | P3 | URM | URM ch11 |  |
+| `net-cgnat` | w3 · queued | Carrier-grade NAT | double NAT, shared address space, why port forwarding fails | step a connection through two NATs | step | S | P3 | URM | URM ch11 |  |
 | `net-tcp-teardown` | live in `tcp-handshake` | TCP connection teardown | FIN/ACK in both directions, half close, TIME_WAIT | step a close from either side | step | S | P2 | URM | extends `urm-tcp-handshake` → §5.8 |  |
-| `net-tcp-states` | w3 | TCP state machine | the states a socket passes through, live | drive both ends, watch states | step | M | P3 | URM | URM ch13 |  |
+| `net-tcp-states` | w3 · queued | TCP state machine | the states a socket passes through, live | drive both ends, watch states | step | M | P3 | URM | URM ch13 |  |
 | `net-tcp-retransmit` | live | Loss and retransmission | RTO, duplicate ACKs, fast retransmit | drop chosen segments, step the exchange | step | M | P2 | URM | URM ch13 → §5.8 |  |
 | `net-tcp-congestion` | live | TCP congestion control | slow start, congestion avoidance, AIMD sawtooth, Reno vs CUBIC | set loss and RTT, watch cwnd over time | expl | M | P1 | URM, NLA | URM ch13 |  |
 | `net-tcp-vs-udp-loss` | live | TCP vs UDP under loss | the same stream: TCP retransmits and stalls, UDP drops and continues | slider for loss, play both side by side | expl | S | P2 | URM | URM card ch13-tcp-naspram-udp-gubitak |  |
 | `net-port-multiplexing` | live | Ports and sockets | the 5-tuple keeps many connections apart on one port 443 | open connections from several clients | step | S | P2 | URM | URM card ch13 (multiplexing) |  |
 | `net-syn-outcomes` | live | Open, closed, filtered | SYN gets SYN/ACK, RST or nothing, and what each means (port scanning) | probe ports on a host behind a firewall | step | S | P1 | URM, SEC | URM card ch15 (three SYN outcomes) |  |
-| `net-asymmetric-path` | w3 · next | Asymmetric path through NAT and firewall | replies taking another path break stateful devices | toggle the return path, watch the connection die | step | S | P3 | URM | URM card ch15 |  |
+| `net-asymmetric-path` | w3 · queued | Asymmetric path through NAT and firewall | replies taking another path break stateful devices | toggle the return path, watch the connection die | step | S | P3 | URM | URM card ch15 |  |
 | `net-crc` | live | Error detection with CRC | how a CRC catches burst errors where parity fails | flip bits, compute parity and CRC | step | S | P2 | URM, HAM | → §5.13 |  |
 | `net-wifi-channels` | live | Wi-Fi channels and overlap | 2.4 GHz 1/6/11, 5 GHz channel widths, co-channel interference | place APs, assign channels | expl | S | P2 | URM | URM ch17 |  |
 | `net-wifi-association` | live | 802.11 association step by step | scan, authenticate, associate, then the 4-way handshake | step a station joining an AP | step | S | P2 | URM | URM card ch17-pridruzivanje-koraci; feeds `net-wpa-handshake` |  |
 | `net-wpa-handshake` | live | WPA2/WPA3 handshake and what an attacker sees | PMK origin, 4-way handshake, why WPA2-PSK can be cracked offline and SAE can't | step the handshake; toggle the attacker's capture view | step | M | B1 | URM, SEC | proposal first batch; URM card ch17-pmk-porijeklo-rukovanje |  |
-| `net-csma-ca-rts-cts` | w3 · next | CSMA/CA and RTS/CTS | Wi-Fi avoids collisions it can't detect; RTS/CTS fixes the hidden node | step stations with and without RTS/CTS | step | S | P3 | URM | extends `urm-hidden-node` |  |
-| `net-wifi-roaming` | w3 | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 |  |
-| `net-qos-queues` | w3 | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
-| `net-multicast-igmp` | w3 · next | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
+| `net-csma-ca-rts-cts` | w3 · queued | CSMA/CA and RTS/CTS | Wi-Fi avoids collisions it can't detect; RTS/CTS fixes the hidden node | step stations with and without RTS/CTS | step | S | P3 | URM | extends `urm-hidden-node` |  |
+| `net-wifi-roaming` | w3 · queued | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 |  |
+| `net-qos-queues` | w3 · queued | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
+| `net-multicast-igmp` | w3 · queued | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
 | `net-packet-journey` | live | The whole journey: from URL to page | DNS, ARP, TCP, TLS, HTTP in order, across the real path | step the capstone, open each part's own simulator | step | L | P2 | URM | URM card ch16-put-podataka-detaljno → §5.9 |  |
-| `net-poe-budget` | w3 | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
+| `net-poe-budget` | w3 · queued | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
 
 ### 4.2 Internet and application protocols
 
@@ -488,19 +488,19 @@ decides the final grouping axes (§7.1).
 | `inet-dns-ttl-cache` | live | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2 → §5.4 |  |
 | `inet-dns-records` | live | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM, WIN1 | UL ch19 |  |
 | `inet-dns-secondary-expiry` | live | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR S6 (student timeline); DR caveat CV-02 → §5.4 |  |
-| `inet-dns-split-brain` | w3 | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 |  |
+| `inet-dns-split-brain` | w3 · queued | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 |  |
 | `inet-dnssec-chain` | w3 | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC |  |  |
 | `inet-dns-poisoning` | w3 | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC |  |  |
 | `inet-http-exchange` | live | One HTTP exchange | request line, headers, status codes, body | send requests, read responses | step | S | P2 | URM, UL | URM ch14 |  |
 | `inet-http-versions` | live | HTTP/1.1 vs HTTP/2 vs HTTP/3 | multiplexing, and head-of-line blocking at TCP vs QUIC | load a page with loss on each version | expl | M | P2 | URM |  |  |
 | `inet-http-caching` | live | HTTP caching | Cache-Control, ETag, 304, what a CDN edge keeps | request repeatedly, change headers | step | S | P2 | URM, UL |  |  |
-| `inet-cookies-sessions` | w3 | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC |  |  |
-| `inet-cors` | w3 | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC |  |  |
+| `inet-cookies-sessions` | w3 · queued | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC |  |  |
+| `inet-cors` | w3 · queued | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC |  |  |
 | `inet-reverse-proxy-lb` | live | Reverse proxy and load balancing | round robin vs least connections vs hash vs sticky; health checks | add servers, fail one, change the algorithm | expl | M | P2 | UL, NLA | UL ch21, NLA T54 |  |
 | `inet-cdn-anycast` | live | Anycast and CDN edges | one address, many places; BGP picks the nearest | move clients, withdraw a site | expl | S | P2 | URM |  |  |
 | `inet-tls-handshake` | live | TLS 1.2 vs 1.3 | key exchange, certificate, round trips; 1-RTT vs 2-RTT | step both handshakes side by side | step | M | P1 | UL, URM, SEC | UL ch21 → §5.5 |  |
 | `inet-cert-chain` | live | Chain of trust and expiry | leaf, intermediate, root store; a missing intermediate; expiry clocks | build a chain, remove links, advance time | step | S | P1 | UL, DR | UL ch21, DR S4 → §5.5 |  |
-| `inet-acme-renewal` | w3 | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL |  |  |
+| `inet-acme-renewal` | w3 · queued | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL |  |  |
 | `inet-email-path` | live | The path of an e-mail | MUA → MSA → MTA → MDA → IMAP; envelope vs header | send a mail across two domains | step | M | P2 | UL, URM | UL ch20, URM card ch14 (mail send vs fetch) |  |
 | `inet-email-auth` | live | SPF, DKIM and DMARC | three checks, alignment, and the DMARC verdict | send legitimate, forwarded and spoofed mails | step | M | P1 | UL, SEC | UL ch20 |  |
 | `inet-smtp-dialogue` | w3 | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL |  |  |
@@ -749,7 +749,7 @@ instead of repeating them.
 | `ha-multimaster-conflict` | live | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN2 | proposal first batch; NLA T55 → §5.7 |  |
 | `ha-quorum-split-brain` | live | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN2 | NLA T52–53; cephsim MON quorum → §5.7 |  |
 | `ha-fencing` | live in `quorum-split-brain` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 |  |
-| `ha-vrrp-failover` | w3 · next | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 |  |
+| `ha-vrrp-failover` | w3 · queued | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 |  |
 | `ha-db-replication` | live | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 |  |
 | `ha-cap` | live | CAP under partition | a partitioned system picks consistency or availability | partition, issue reads and writes in CP and AP modes | step | S | P2 | NLA, DR |  |  |
 | `ha-raft` | live | Raft leader election and log replication | terms, votes, majority commit | kill leaders, partition, step messages | step | M | P2 | NLA | → §5.7 |  |
@@ -763,14 +763,14 @@ instead of repeating them.
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `perf-utilisation-latency` | live | Latency near full utilisation | waiting time explodes as ρ → 1 | slider for load, watch the queue and latency | expl | S | P2 | DR, NLA, OS | dc-sim `three_tier_chain` |  |
-| `perf-littles-law` | w3 · next | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim |  |
-| `perf-tail-latency` | w3 · next | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` |  |
-| `perf-retry-storm` | w3 · next | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` |  |
-| `perf-rate-limiting` | w3 · next | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
+| `perf-littles-law` | w3 · queued | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim |  |
+| `perf-tail-latency` | w3 · queued | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` |  |
+| `perf-retry-storm` | w3 · queued | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` |  |
+| `perf-rate-limiting` | w3 · queued | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
 | `perf-cache-hit-ratio` | w3 | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH |  |  |
 | `perf-goodhart-teams` | w3 | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` |  |
 | `perf-autoscaling-lag` | w3 | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
-| `perf-slo-error-budget` | w3 · next | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
+| `perf-slo-error-budget` | w3 · queued | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
 | `perf-game-tick-server` | w3 | Authoritative tick server | a fixed tick, server-side line of sight, why clients lag | step ticks, move players, add latency | step | M | P3 | URM | agentvsagent |  |
 
 ### 4.9 Computer architecture, OS gaps and automata
@@ -779,8 +779,8 @@ ossimulator covers the OS course; these fill small gaps or extend the imported a
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `arh-cache-mapping` | w3 · next | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS |  |  |
-| `arh-pipeline-hazards` | w3 · next | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` |  |
+| `arh-cache-mapping` | w3 · queued | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS |  |  |
+| `arh-pipeline-hazards` | w3 · queued | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` |  |
 | `arh-mesi` | w3 | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` |  |
 | `arh-twos-complement` | w3 | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH |  |  |
 | `arh-floating-point` | w3 | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH |  |  |
@@ -832,13 +832,13 @@ no tax law, no products; money is in euros and the fiscal year's first month is 
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `fin-capex-opex` | w3 · queued | CapEx vs OpEx: one purchase, three views | buying puts the cash out on day one but the expense is spread over the useful life as depreciation, and the asset sits on the balance sheet meanwhile; a service is paid and expensed month by month; which budget each draws on, why operating profit before depreciation (EBITDA) looks better with CapEx, and the capitalisation threshold below which a purchase is simply expensed | spend the same amount as a bought server or a five-year service, scrub through the months and watch cash, expense and book value side by side; move the threshold and the price | expl | S | P1 | FIN, DR | DR `student/handbook/constraints.md` (capex remaining vs opex headroom, approval thresholds); hub of the shared ledger model → §5.23 |  |
+| `fin-capex-opex` | w3 · building | CapEx vs OpEx: one purchase, three views | buying puts the cash out on day one but the expense is spread over the useful life as depreciation, and the asset sits on the balance sheet meanwhile; a service is paid and expensed month by month; which budget each draws on, why operating profit before depreciation (EBITDA) looks better with CapEx, and the capitalisation threshold below which a purchase is simply expensed | spend the same amount as a bought server or a five-year service, scrub through the months and watch cash, expense and book value side by side; move the threshold and the price | expl | S | P1 | FIN, DR | DR `student/handbook/constraints.md` (capex remaining vs opex headroom, approval thresholds); hub of the shared ledger model → §5.23 |  |
 | `fin-depreciation` | w3 · queued | Depreciation and book value | straight-line vs declining-balance depreciation over a useful life, with a residual value; software (a perpetual licence) amortises the same way; retiring or selling early books the remaining book value as a loss or a gain | set cost, life, residual value and method; retire the asset in year *n* and see the write-off | expl | S | P2 | FIN | shares the asset model with `fin-refresh-cycle` → §5.23 |  |
 | `fin-refresh-cycle` | w3 · queued | Refresh cycles and economic life | capital cost per year falls as the cycle lengthens while support, failures and lost staff time rise with age; the sum has a minimum (the economic life); refreshing a whole fleet at once makes a spending wall every *n* years | for a fleet of devices choose the cycle length and how many staggered cohorts, run ten years, read yearly cash, depreciation and age-related cost | expl | M | P2 | FIN, DR | asset model with `fin-depreciation` → §5.23 |  |
 | `fin-accruals-cash` | w3 · queued | Accruals vs cash: a year of invoices | an expense belongs to the month the service is used, not the month it is paid: a prepaid annual support contract is spread over twelve months, December's service invoiced in January is accrued in December | step through a year of IT invoices (prepaid support, colocation billed quarterly in arrears, a late invoice), post each one, watch the cash line and the expense line part and meet again at year end | step | M | P1 | FIN | the ledger model → §5.23 |  |
 | `fin-budget-variance` | w3 · queued | Budget vs actuals: reading a variance | a budget phased by month against actuals; a variance splits into volume (more used), price (dearer per unit) and timing (an invoice late or early); "under budget in October" is often a missing invoice; the run-rate forecast to year end; use-it-or-lose-it phasing as a preset | step the months of a cloud and licence budget, inject more usage, a price rise and a late invoice, read each part of the variance and the year-end forecast | step | M | P2 | FIN | builds on `fin-accruals-cash` (timing variance is an accrual) → §5.23 |  |
 | `fin-tco` | w3 · queued | Total cost of ownership | the purchase price is a small part of five years of power, space, support, staff time, training, migration and the exit at the end; the cheaper purchase can be the dearer option; build-vs-buy (staff time as a cost) as a preset | build two options line by line, switch cost categories on and off, move the horizon, watch the ranking flip | expl | S | P1 | FIN, DR | DR handbook price list (colocation per kW-month, remote hands, MSP onboarding, cloud egress) |  |
-| `fin-npv-discounting` | w3 · building | Time value of money and NPV | a euro next year is worth less than a euro today; the discount rate is the cost of capital (what the money would earn or cost elsewhere); NPV sums the discounted cash flows | drag cash flows on a timeline, move the discount rate, watch nominal and discounted bars and the NPV change sign | expl | S | P1 | FIN | the discounting every investment page reuses → §5.23 |  |
+| `fin-npv-discounting` | live | Time value of money and NPV | a euro next year is worth less than a euro today; the discount rate is the cost of capital (what the money would earn or cost elsewhere); NPV sums the discounted cash flows | drag cash flows on a timeline, move the discount rate, watch nominal and discounted bars and the NPV change sign | expl | S | P1 | FIN | the discounting every investment page reuses → §5.23 |  |
 | `fin-roi-payback-npv` | w3 · queued | ROI, payback and NPV disagree | three yardsticks rank the same projects differently: simple ROI ignores timing, payback ignores everything after the payback date, NPV depends on the rate; IRR is the rate at which NPV is zero | shape two projects' cash flows (a quick win and a slow large return), read the three rankings, find the rate at which they swap | expl | S | P2 | FIN | needs `fin-npv-discounting` |  |
 | `fin-fixed-variable` | w3 · queued | Fixed, variable and step costs; break-even | a platform's fixed cost spread over more users lowers the average cost; capacity comes in steps; the next user's marginal cost is not the average; the break-even volume between running it yourself and paying per user | move the user count and utilisation, compare an in-house platform with a per-user service, watch average and marginal cost and the break-even point | expl | S | P2 | FIN, DR | idle headroom costs money, too little costs latency: link `utilisation-latency` → §5.23 |  |
 | `fin-chargeback` | w3 · queued | Showback and chargeback | shared IT cost allocated to departments by a key (users, VMs, storage, tickets): the key decides who pays; charging a fixed cost per unit means a department that leaves raises everyone else's price, and the next one leaves (the spiral) | pick allocation keys, move each department's usage, switch from showback to chargeback, let a department leave | expl | M | P2 | FIN | unit cost from `fin-fixed-variable` |  |
