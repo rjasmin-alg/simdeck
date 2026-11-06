@@ -8,6 +8,7 @@
 The catalogue stays the source of truth for titles, concepts, sizes and priorities. This script adds the
 wave, the sim folder id, topic and tags, dependencies, sources and the adoption steps.
 """
+import json
 import glob
 import os
 import re
@@ -145,6 +146,12 @@ BUILDS_ON = {
     "arh-mesi": "spl-multicore-mesi", "aut-regex-to-nfa": "spl-automata", "ham-qam-ofdm": "50ohm-qpsk",
     "ham-ionosphere-muf": "50ohm-skip-distance", "kk-priority-traffic": "kk-directed-net",
     "kk-backup-ncs": "kk-directed-net", "kk-gateway-tiers": "kk-directed-net",
+    # finance (§4.12): the discounting and the ledger (cash, expense, book value by month) are shared, §5.23
+    "fin-roi-payback-npv": "fin-npv-discounting", "fin-lease-vs-buy": "fin-npv-discounting",
+    "fin-prepay-discount": "fin-npv-discounting", "fin-accruals-cash": "fin-capex-opex",
+    "fin-depreciation": "fin-capex-opex", "fin-licence-models": "fin-capex-opex",
+    "fin-budget-variance": "fin-accruals-cash", "fin-refresh-cycle": "fin-depreciation",
+    "fin-sunk-cost": "fin-depreciation", "fin-chargeback": "fin-fixed-variable",
 }
 
 # ---------------------------------------------------------------- sim folder ids
@@ -193,7 +200,7 @@ def topic_of(cid, area):
         "net": "networks", "urm": "networks", "inet": "internet", "sec": "security", "lnx": "linux-admin",
         "win": "windows-admin", "sto": "storage", "dr": "storage", "ha": "distributed", "perf": "distributed",
         "arh": "architecture", "os": "os", "ossim": "os", "aut": "theory", "ham": "radio", "kk": "radio",
-        "50ohm": "radio", "tool": "classroom", "app": "distributed",
+        "50ohm": "radio", "tool": "classroom", "app": "distributed", "fin": "finance",
     }.get(pre, "networks")
 
 
@@ -277,7 +284,16 @@ TAG_RULES = [
 ]
 
 
-TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"], "ham-multiple-access": ["modulation"]}
+TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"], "ham-multiple-access": ["modulation"],
+    "fin-capex-opex": ["accounting", "budgeting"], "fin-depreciation": ["accounting"],
+    "fin-refresh-cycle": ["costs", "accounting"], "fin-accruals-cash": ["accounting"],
+    "fin-budget-variance": ["budgeting"], "fin-tco": ["costs"], "fin-npv-discounting": ["investment"],
+    "fin-roi-payback-npv": ["investment"], "fin-fixed-variable": ["costs"],
+    "fin-chargeback": ["costs", "budgeting"], "fin-cloud-commitment": ["costs", "contracts"],
+    "fin-lease-vs-buy": ["investment", "contracts"], "fin-licence-models": ["contracts", "costs"],
+    "fin-prepay-discount": ["contracts", "investment"], "fin-indexation-fx": ["contracts"],
+    "fin-contingency-reserve": ["budgeting", "risk"], "fin-downtime-cost": ["risk", "costs"],
+    "fin-ale-risk": ["risk"], "fin-sunk-cost": ["investment"], "fin-cost-of-delay": ["investment"]}
 
 
 def tags_of(cid):
@@ -306,6 +322,8 @@ ADOPT_COURSES = {
 
 def level_of(courses):
     """sim.json level from the courses: intro courses first, then advanced ones (owner may override)."""
+    if re.search(r"\bFIN\b", courses):
+        return "intro"
     if re.search(r"\b(URM|UL|WIN1|AUT)\b", courses):
         return "intro"
     if re.search(r"\b(NLA|WIN2|DR)\b", courses):
@@ -521,6 +539,29 @@ def keep_filled(old, new):
     return new
 
 
+FIN_NOTES = ["## Finance notes (all `fin-` tasks)", "",
+    "- **Who it is for:** IT managers who meet these terms in budgets and with finance; they know IT, not accounting. "
+    "Each page shows one purchase or decision seen two ways (cash vs expense, nominal vs discounted, price vs "
+    "lifetime cost); make that contrast the stage.",
+    "- **Generic principles only.** No product, vendor or software names; no country's tax law or VAT. Name the "
+    "principle (straight-line depreciation over the useful life, NPV as the sum of discounted cash flows). Naming an "
+    "accounting standard (IAS 16, IFRS 16) is fine in the explanation, not in the stage.",
+    "- **Numbers are illustrative.** Prices, rates and costs are made-up but plausible, in euros, and the page says "
+    "so once; formulas and rules must be standard and are checked in SPEC.md with a small script.",
+    "- **Croatian practice:** the notes in catalogue §4.12 (\"Where Croatian practice commonly differs\") are not "
+    "verified yet. Do not put them on the page; copy the one that applies into `NOTES.md` under \"For the owner\".",
+    "- **Croatian terms:** standard Croatian accounting terms (amortizacija, kapitalni izdaci, operativni troškovi, "
+    "novčani tok, neto sadašnja vrijednost, točka pokrića, vremenska razgraničenja); list your choices in "
+    "`NOTES.md` so the owner can check them in one place.",
+    "- **Balance sheet:** only where the entry asks for it (`fin-capex-opex`, `fin-lease-vs-buy`), as one or two "
+    "lines (asset, liability), not a full statement.",
+    "- **Shared models (catalogue §5.23):** keep the ledger (cash, expense, book value by month) or the discounting "
+    "in its own module file inside your sim folder, pure and tested, so the coordinator can promote it to "
+    "`models/` later. When the entry builds on another `fin-` sim, copy its module (COMMON.md §6).",
+    "- **Learn tree:** the `npm run check` warning \"in no leaf yet\" is expected; suggest a leaf in your report "
+    "(catalogue §4.12 has the proposed `money` area).", ""]
+
+
 def render(cid, r, wave, group, by_id, sids, clusters):
     sid = sids[cid]
     kind = "adopt" if wave == "1" else "build"
@@ -606,6 +647,8 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         lines.append(f"- Catalogue seed: {seed}")
     lines.append("")
 
+    if cid.startswith("fin-"):
+        lines += FIN_NOTES
     if clusters.get(cid):
         lines += ["## Overlaps (catalogue §5)", ""]
         for num, name, rec in clusters[cid]:
@@ -752,18 +795,23 @@ def write_index(tasks, by_id, sids):
               "- The 50ohm maps (`maidenhead`, `aprs_map`, `hamnet_map`): they need live map tiles or external "
               "services, which the build refuses. Revisit if the owner wants online-only pages.", "",
               "## Catalogue id → sim folder", "",
-              "Area prefixes are dropped from folder names except `win-` and `lnx-`; a few names are overridden for "
+              "Area prefixes are dropped from folder names except `win-`, `lnx-` and `fin-`; a few names are overridden for "
               "clarity (`tasks.py` `SIM_ID_OVERRIDE`).", "",
               "| Catalogue id | Sim folder |", "|---|---|"]
     for cid, r, w, g in sorted(tasks, key=lambda t: t[0]):
         if sids[cid] != cid:
             lines.append(f"| `{cid}` | `{sids[cid]}` |")
     lines += ["", "## Tags used by the tasks", "",
-              "Wave 0 task `vocabulary` adds these to `tags.json` (with Croatian and English labels):", ""]
+              "Wave 0 task `vocabulary` added these to `tags.json`, with Croatian and English labels and search aliases",
+              "(`tests/vocabulary.test.mjs` keeps this list, the task files and `tags.json` in step):", ""]
     used = sorted({t for cid, r, w, g in tasks for t in tags_of(cid)})
     lines.append(", ".join(f"`{t}`" for t in used))
     topics = sorted({topic_of(cid, r["_title"]) for cid, r, w, g in tasks})
     lines += ["", "Topics: " + ", ".join(f"`{t}`" for t in topics) + ".", ""]
+    vocab = json.loads((REPO / "tags.json").read_text())
+    unused = sorted(set(vocab["tags"]) - set(used))
+    if unused:
+        lines += ["Also in `tags.json`, used by no task yet: " + ", ".join(f"`{t}`" for t in unused) + ".", ""]
     (OUT / "README.md").write_text("\n".join(lines))
 
 
@@ -774,7 +822,7 @@ W0_TASKS = [
     ("vocabulary", "topics and tags every task needs, in both languages"),
     ("licence", "AGPL-3.0-or-later: LICENSE, package.json, source link on every page"),
     ("licence-source-repos", "AGPL-3.0-or-later in the repos simdeck copies from (owner: AGPL everything)"),
-    ("shared-models", "where model code shared by several sims lives"),
+    ("shared-models", "where model code shared by several sims lives (`models/` done; first promotion waits on `dhcp-dora`)"),
     ("presets-in-index", "index and course entries that open a sim at a preset"),
     ("ossimulator-english", "English UI for ossimulator (in its own repo)"),
     ("freeze-originals", "notes in the original projects pointing to the simdeck copies"),

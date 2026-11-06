@@ -21,7 +21,7 @@ published).
   sections (lectures or weeks) and a short address only when the page is published.
 - Order the sims below by the syllabus; leave out what the owner drops; tools never go on course pages.
 
-## Candidate sims (47, from the catalogue's course column)
+## Candidate sims (55, from the catalogue's course column)
 
 | Sim | Title | Wave | Catalogue § |
 |---|---|---|---|
@@ -36,6 +36,14 @@ published).
 | `multimaster-conflict` | Multi-master replication with a conflict | 2b | 4.7 |
 | `quorum-split-brain` | Quorum and split-brain | 2b | 4.7 |
 | `utilisation-latency` | Latency near full utilisation | 2b | 4.8 |
+| `fin-ale-risk` | Expected annual loss and the price of a control | 3 | 4.12 |
+| `fin-capex-opex` | CapEx vs OpEx: one purchase, three views | 3 | 4.12 |
+| `fin-cloud-commitment` | Cloud commitment vs on-demand | 3 | 4.12 |
+| `fin-contingency-reserve` | Contingency reserve: P50 vs P80 | 3 | 4.12 |
+| `fin-downtime-cost` | What an hour down costs, and what a nine is worth | 3 | 4.12 |
+| `fin-fixed-variable` | Fixed, variable and step costs; break-even | 3 | 4.12 |
+| `fin-refresh-cycle` | Refresh cycles and economic life | 3 | 4.12 |
+| `fin-tco` | Total cost of ownership | 3 | 4.12 |
 | `dns-secondary-expiry` | A secondary is a cache with a timer | 3 | 4.2 |
 | `dns-split-brain` | Two primaries are two zones | 3 | 4.2 |
 | `dns-ttl-cache` | TTL caching and the cutover | 3 | 4.2 |

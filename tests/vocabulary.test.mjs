@@ -15,7 +15,7 @@ const section = readme.slice(readme.indexOf('## Tags used by the tasks'));
 const codes = (line) => [...(line ?? '').matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]).sort();
 const lineAfter = (re) => section.split('\n').find((l) => re.test(l));
 
-const readmeTags = codes(lineAfter(/^`active-directory`/));
+const readmeTags = codes(lineAfter(/^`[a-z0-9-]+`, `/));
 const readmeTopics = codes(lineAfter(/^Topics:/));
 const unusedTags = codes(lineAfter(/^Also in `tags.json`/)?.replace('`tags.json`', ''));
 

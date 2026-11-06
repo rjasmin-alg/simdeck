@@ -42,6 +42,10 @@ The student: inject incidents, watch the budget.
   Objectives"; *The Site Reliability Workbook*, ch. 5 "Alerting on SLOs" (burn rates 14.4 / 6 / 1 with
   1 h + 5 min, 6 h + 30 min, 3 d + 6 h windows) *(check chapter numbers)*
 
+## Overlaps (catalogue §5)
+
+- **§5.23 Money: one ledger, and costs on top of existing models:** One shared ledger model (a month-by-month timeline with three lines: cash, expense, book value) under the capex, accruals, variance, lease and licence pages, like §5.21's shared domain; depreciation and refresh share one asset model; fin-npv-discounting holds the discounting the investment pages reuse, so build it first. The money pages do not repeat the technical ones: fin-downtime-cost takes the hours down from rpo-rto's timeline (link, or an "in money" preset on rpo-rto) and turns an error budget's minutes into euros; fin-ale-risk links ransomware-321 as a priced control; fin-fixed-variable links utilisation-latency (headroom costs money, too little costs latency) and could take ec-vs-replication's overhead as a cost per usable TB preset.
+
 ## Model and presets
 
 - **Scene:** a 30-day timeline of the error rate (bars per hour) with incidents drawn on it; above it the
