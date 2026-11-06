@@ -1,0 +1,413 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-capex-opex: buying puts the cash out on day one but spreads the expense over the useful life as depreciation,
+     with the asset on the balance sheet meanwhile; a service is paid and expensed month by month.
+     Two panels on one scale, buy (left) and service (right): each with its class and budget on top, three lines over
+     the months (cash paid, expensed, book value) with a cursor at the chosen month, and the numbers at the cursor
+     beneath (plus EBITDA so far). Ledger: ledger.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-capex-opex">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CapEx ili OpEx: jedna kupnja, tri pogleda · simdeck</title>
+<meta name="description" content="Ista svota kao kupljeni poslužitelj ili petogodišnja usluga: pomiči mjesece i gledaj novac, trošak i knjigovodstvenu vrijednost; pomakni prag i cijenu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-capex-opex",
+  "title": {
+    "hr": "CapEx ili OpEx: jedna kupnja, tri pogleda",
+    "en": "CapEx vs OpEx: one purchase, three views"
+  },
+  "concept": {
+    "hr": "Kupnja se plaća odmah, a u trošak ide amortizacijom; usluga ide mjesečno",
+    "en": "Buying pays on day one but spreads the expense; a service is expensed monthly"
+  },
+  "summary": {
+    "hr": "Ista svota kao kupljeni poslužitelj ili petogodišnja usluga: pomiči mjesece i gledaj novac, trošak i knjigovodstvenu vrijednost; pomakni prag i cijenu.",
+    "en": "The same amount as a bought server or a five-year service: scrub the months and watch cash, expense and book value; move the threshold and price."
+  },
+  "tags": [
+    "accounting",
+    "budgeting"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "small-purchase"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-capex-opex"]; colours only from kit tokens. */
+[data-sim="fin-capex-opex"] .cx {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-capex-opex"] .cx-panels { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+[data-sim="fin-capex-opex"] .cx-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 0;
+  padding: 0.4rem 0.6rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+/* header: title and kind, the class line, the budget line */
+[data-sim="fin-capex-opex"] .cx-head { flex: none; padding: 0.15rem 0.35rem; border-radius: var(--radius-sm); }
+[data-sim="fin-capex-opex"] .cx-head.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-capex-opex"] .cx-head.sd-changed :is(.cx-kind, .cx-line) { color: var(--on-hl); }
+[data-sim="fin-capex-opex"] .cx-title { margin: 0; font-size: var(--fs-lg); line-height: 1.2; }
+[data-sim="fin-capex-opex"] .cx-kind { font-weight: 400; color: var(--muted); }
+[data-sim="fin-capex-opex"] .cx-line { margin: 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="fin-capex-opex"] .cx-line b { color: var(--ink); }
+[data-sim="fin-capex-opex"] .cx-head.sd-changed .cx-line b { color: var(--on-hl); }
+[data-sim="fin-capex-opex"] .cx-budget { font-weight: 700; }
+[data-sim="fin-capex-opex"] .cx-budget::before { content: '▣ '; }
+[data-sim="fin-capex-opex"] .cx-budget[data-b="operating"]::before { content: '↻ '; }
+
+/* the chart: an axis column and the plot; the year labels under the plot */
+[data-sim="fin-capex-opex"] .cx-chart {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  display: grid;
+  grid-template-columns: 6.6rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  column-gap: 0.3rem;
+  padding-top: 1.6rem; /* room for the cursor label */
+}
+[data-sim="fin-capex-opex"] .cx-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-capex-opex"] .cx-tick {
+  position: absolute;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-capex-opex"] .cx-plot {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: var(--line-w) solid var(--ink);
+  background: var(--bg);
+}
+[data-sim="fin-capex-opex"] .cx-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.55; }
+[data-sim="fin-capex-opex"] .cx-yl { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); opacity: 0.55; }
+[data-sim="fin-capex-opex"] .cx-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-capex-opex"] .cx-svg path { fill: none; stroke: var(--sw); vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-capex-opex"] .cx-svg .cx-area { fill: color-mix(in srgb, var(--c3) 16%, transparent); stroke: none; }
+[data-sim="fin-capex-opex"] .cx-svg .cx-l[data-k="cash"] { stroke-width: 6; }
+[data-sim="fin-capex-opex"] .cx-svg .cx-l[data-k="expense"] { stroke-width: 4; stroke-dasharray: 14 8; }
+[data-sim="fin-capex-opex"] .cx-svg .cx-l[data-k="book"] { stroke-width: 4; stroke-dasharray: 2 7; stroke-linecap: round; }
+[data-sim="fin-capex-opex"] .cx-svg .cx-future { opacity: 0.28; }
+[data-sim="fin-capex-opex"] .cx-cursor { position: absolute; top: -0.3rem; bottom: 0; border-left: 0.2rem solid var(--ink); transform: translateX(-50%); }
+[data-sim="fin-capex-opex"] .cx-curlabel {
+  position: absolute;
+  top: -1.65rem;
+  transform: translateX(-50%);
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="fin-capex-opex"] .cx-dot {
+  position: absolute;
+  width: 0.95rem;
+  height: 0.95rem;
+  transform: translate(-50%, -50%);
+  background: var(--sw);
+  border: 0.15rem solid var(--ink);
+}
+[data-sim="fin-capex-opex"] .cx-dot[data-k="expense"] { transform: translate(-50%, -50%) rotate(45deg); }
+[data-sim="fin-capex-opex"] .cx-dot[data-k="book"] { border-radius: 50%; }
+[data-sim="fin-capex-opex"] .cx-yshort { display: none; }
+[data-sim="fin-capex-opex"] .cx-years { position: relative; grid-column: 2; grid-row: 2; height: 1.5rem; }
+[data-sim="fin-capex-opex"] .cx-year {
+  position: absolute;
+  top: 0.1rem;
+  transform: translateX(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* the numbers at the cursor */
+[data-sim="fin-capex-opex"] .cx-rows { flex: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 0.5rem; row-gap: 0.1rem; margin: 0; align-items: center; }
+[data-sim="fin-capex-opex"] .cx-rows dt { display: contents; }
+[data-sim="fin-capex-opex"] .cx-rows dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+[data-sim="fin-capex-opex"] .cx-rowlabel { line-height: 1.25; }
+[data-sim="fin-capex-opex"] .cx-mark { width: 1.9rem; height: 0; border-top: 0.3rem solid var(--sw); }
+[data-sim="fin-capex-opex"] .cx-mark[data-k="expense"] { border-top-style: dashed; }
+[data-sim="fin-capex-opex"] .cx-mark[data-k="book"] { border-top-style: dotted; }
+[data-sim="fin-capex-opex"] .cx-mark[data-k="ebitda"] { border-top-color: transparent; }
+[data-sim="fin-capex-opex"] .cx-rows dd[data-k="ebitda"], [data-sim="fin-capex-opex"] .cx-rows .cx-rowlabel[data-k="ebitda"] { padding-top: 0.15rem; border-top: 1px solid var(--line); }
+
+[data-sim="fin-capex-opex"] .cx-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-capex-opex"] .sd-swatch[data-shape^="cx-"] { height: 0; border: 0; border-radius: 0; border-top: 0.3rem solid var(--sw); background: transparent; }
+[data-sim="fin-capex-opex"] .sd-swatch[data-shape="cx-expense"] { border-top-style: dashed; }
+[data-sim="fin-capex-opex"] .sd-swatch[data-shape="cx-book"] { border-top-style: dotted; }
+[data-sim="fin-capex-opex"] .sd-swatch[data-shape="cx-cursor"] { width: 0; height: 1.1em; border-top: 0; border-left: 0.2rem solid var(--ink); }
+
+/* Phone and portrait: the panels stack, the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-capex-opex"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-capex-opex"] .cx { height: auto; padding: 0.4rem; }
+  [data-sim="fin-capex-opex"] .cx-panels { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-capex-opex"] .cx-chart { flex: none; height: 15rem; grid-template-columns: 5.4rem minmax(0, 1fr); }
+  [data-sim="fin-capex-opex"] .cx-ylong { display: none; }
+  [data-sim="fin-capex-opex"] .cx-yshort { display: inline; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">CapEx ili OpEx: jedna kupnja, tri pogleda</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="ledger.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var Lg = window.SimdeckModels.ledger;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (30 000 / 30,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 8). Minus is U+2212. */
+  function money(x) {
+    var r = Lg.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  function data(text, tag) { return h(tag || 'span', { translate: 'no' }, String(text)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function monthLabel(m) { return m === 0 ? t('cursorDay') : t('cursorMonth', { m: m }); }
+
+  // ── the chart ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step at or above x. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  var KEYS = [['cash', '1'], ['expense', '2'], ['book', '3']];
+
+  function chart(s, side, dom) {
+    var N = s.N, m = s.p.month, lines = s.lines[side];
+    var X = function (k) { return 1000 * k / N; };
+    var Y = function (v) { return 1000 * (1 - v / dom.top); };
+    var pct = function (v) { return (100 * (1 - v / dom.top)) + '%'; };
+    var pts = function (arr, from, to) {
+      var d = '';
+      for (var k = from; k <= to; k++) d += (k === from ? 'M' : 'L') + X(k).toFixed(2) + ' ' + Y(arr[k]).toFixed(2);
+      return d;
+    };
+
+    var ticks = [], grid = [];
+    for (var v = 0; v <= dom.top + 1e-6; v += dom.step) {
+      ticks.push(h('span', { class: 'cx-tick', translate: 'no', style: { top: pct(v) } }, money(v)));
+      if (v > 0) grid.push(h('div', { class: 'cx-gl', style: { top: pct(v) } }));
+    }
+    var years = [];
+    for (var y = 1; y <= s.p.life; y++) {
+      if (y < s.p.life) grid.push(h('div', { class: 'cx-yl', style: { left: (100 * y * 12 / N) + '%' } }));
+      years.push(h('span', { class: 'cx-year', style: { left: (100 * (y - 0.5) * 12 / N) + '%' } },
+        h('span', { class: 'cx-ylong' }, t('yearN', { n: y })), h('span', { class: 'cx-yshort', translate: 'no' }, String(y))));
+    }
+
+    var g = svg('svg', { class: 'cx-svg', viewBox: '0 0 1000 1000', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    // the book value's area, then each line: faint over the whole life, strong up to the cursor
+    var area = pts(lines.book, 0, N) + 'L1000 1000L0 1000Z';
+    g.appendChild(svg('path', { class: 'cx-area', d: area }));
+    KEYS.forEach(function (kc) {
+      var k = kc[0], arr = lines[k];
+      g.appendChild(svg('path', { class: 'cx-l cx-future', 'data-k': k, 'data-c': kc[1], d: pts(arr, 0, N) }));
+      if (m > 0) g.appendChild(svg('path', { class: 'cx-l', 'data-k': k, 'data-c': kc[1], d: pts(arr, 0, m) }));
+    });
+
+    var left = (100 * m / N) + '%';
+    var dots = KEYS.map(function (kc) {
+      return h('span', { class: 'cx-dot', dataset: { k: kc[0], c: kc[1] }, style: { left: left, top: pct(lines[kc[0]][m]) } });
+    });
+
+    return h('div', { class: 'cx-chart' },
+      h('div', { class: 'cx-axis' }, ticks),
+      h('div', { class: 'cx-plot' }, grid, g,
+        h('div', { class: 'cx-cursor', style: { left: left } }),
+        h('span', { class: 'cx-curlabel', style: { left: left } }, monthLabel(m)),
+        dots),
+      h('div', { class: 'cx-years' }, years));
+  }
+
+  // ── one panel ──
+
+  function rows(a) {
+    var row = function (k, c, label, value) {
+      return [
+        h('dt', null,
+          h('span', { class: 'cx-mark', dataset: { k: k, c: c } }),
+          h('span', { class: 'cx-rowlabel', dataset: { k: k } }, label)),
+        h('dd', { translate: 'no', dataset: { k: k } }, value)
+      ];
+    };
+    return h('dl', { class: 'cx-rows' },
+      row('cash', '1', t('rowCash'), money(a.cash)),
+      row('expense', '2', t('rowExpense'), money(a.expense)),
+      row('book', '3', t('rowBook'), money(a.book)),
+      row('ebitda', '8', t('rowEbitda'), money(a.ebitda)));
+  }
+
+  function panel(s, side, dom, chg) {
+    var p = s.p, head;
+    if (side === 'buy') {
+      head = h('div', { class: 'cx-head' + (chg.indexOf('class') >= 0 ? ' sd-changed' : '') },
+        h('h2', { class: 'cx-title' }, t('buyTitle'), ' ', h('span', { class: 'cx-kind' }, '· ', t(s.cap ? 'kindCapex' : 'kindOpex'))),
+        h('p', { class: 'cx-line' }, s.cap
+          ? t.parts('classCap', { price: b(money(p.price)), thr: b(money(p.threshold)), dep: b(money(s.perMonth)) })
+          : t.parts('classExp', { price: b(money(p.price)), thr: b(money(p.threshold)) })),
+        h('p', { class: 'cx-line cx-budget', dataset: { b: s.budget.buy } },
+          t.parts(s.cap ? 'budgetCapital' : 'budgetOpOnce', { x: data(money(p.price)) })));
+    } else {
+      head = h('div', { class: 'cx-head' },
+        h('h2', { class: 'cx-title' }, t('svcTitle'), ' ', h('span', { class: 'cx-kind' }, '· ', t('kindOpex'))),
+        h('p', { class: 'cx-line' }, t.parts('svcSub', { fee: b(money(s.perMonth)), months: data(t.n('nMonths', s.N)) })),
+        h('p', { class: 'cx-line cx-budget', dataset: { b: s.budget.svc } },
+          t.parts('budgetOpYear', { x: data(money(s.perYear)) })));
+    }
+    return h('section', { class: 'cx-panel', dataset: { side: side } }, head, chart(s, side, dom), rows(s.at[side]));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    var step = niceStep(s.p.price / 4);
+    var dom = { step: step, top: Math.max(step, Math.ceil(s.p.price / step) * step) };   // one scale for both panels
+    c.stage.replaceChildren(h('div', { class: 'cx' },
+      h('div', { class: 'cx-panels' }, panel(s, 'buy', dom, chg), panel(s, 'svc', dom, chg)),
+      h('p', { class: 'cx-foot' }, t('illustrative'))));
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var when = p.month === 0 ? t('dayOne') : t('monthOf', { m: p.month, n: s.N });
+    var out = t.parts(k.buy, {
+      when: data(when, 'b'), price: b(money(p.price)), thr: b(money(p.threshold)),
+      exp: b(money(s.at.buy.expense)), book: b(money(s.at.buy.book))
+    });
+    out.push(' ');
+    out = out.concat(t.parts(k.svc, { svc: b(money(s.at.svc.cash)) }));
+    if (k.note) out.push(' ', t.parts(k.note, { x: b(money(Math.abs(s.ebitdaGap))) }));
+    return out;
+  }
+
+  var labels = {
+    'server': 'pServer', 'day-one': 'pDayOne', 'end-of-life': 'pEndOfLife', 'small-purchase': 'pSmallPurchase',
+    'at-threshold': 'pAtThreshold'
+  };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'month', type: 'range', label: t('month'), min: 0,
+        max: function (p) { return L.monthsOf(p.life); }, step: 1, format: monthLabel },
+      { key: 'price', type: 'range', label: t('price'), hint: t('priceHint'), min: L.PRICE_MIN, max: L.PRICE_MAX, step: L.PRICE_STEP, format: money },
+      { key: 'threshold', type: 'range', label: t('threshold'), hint: t('thresholdHint'), min: 0, max: L.THR_MAX, step: L.THR_STEP, format: money },
+      { key: 'life', type: 'range', label: t('life'), min: L.LIFE_MIN, max: L.LIFE_MAX, step: 1, format: function (v) { return t.n('nYears', v); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cx-cash', c: 1, label: t('legCash') },
+      { shape: 'cx-expense', c: 2, label: t('legExpense') },
+      { shape: 'cx-book', c: 3, label: t('legBook') },
+      { shape: 'cx-cursor', label: t('legCursor') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
