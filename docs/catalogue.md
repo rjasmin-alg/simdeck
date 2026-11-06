@@ -67,6 +67,7 @@ live parameters), `ref` (reference poster, no controls), `tool` (lecturer only, 
 | `AUT` | Automata and computability | `single-page-labs/` index group |
 | `HAM` | Ham radio licence course (classes A and P) | `50ohm-contents-hr/` |
 | `KK` | Crisis communications KK1/KK2 | `KAKA/` |
+| `FIN` | Finance basics for IT managers | owner, 2026-11-06: three requests |
 
 **Seed** names where an entry comes from: a book chapter (`UL ch19`), a planned URM card
 (`URM card ch08-arp`), an NLA topic (`NLA T20`), a DR scenario (`DR S6`) or an existing simulator
@@ -776,6 +777,115 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | `tool-countdown` | Exercise countdown | a projector-sized timer for in-class exercises | set and start | tool | S | P3 | all | | |
 | `tool-quick-poll` | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today | |
 
+### 4.12 Finance basics for IT managers
+
+The money vocabulary an IT manager meets in budgets, purchases and talks with finance, each term as a mechanism
+to move, not a glossary card. Most entries show **one purchase seen two ways** (cash vs expense, nominal vs
+discounted, list price vs five-year cost), which is the contrast IT managers usually miss. Generic principles only:
+no tax law, no products; money is in euros and the fiscal year's first month is a parameter.
+
+| ID | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|
+| `fin-capex-opex` | CapEx vs OpEx: one purchase, three views | buying puts the cash out on day one but the expense is spread over the useful life as depreciation, and the asset sits on the balance sheet meanwhile; a service is paid and expensed month by month; which budget each draws on, why operating profit before depreciation (EBITDA) looks better with CapEx, and the capitalisation threshold below which a purchase is simply expensed | spend the same amount as a bought server or a five-year service, scrub through the months and watch cash, expense and book value side by side; move the threshold and the price | expl | S | P1 | FIN, DR | DR `student/handbook/constraints.md` (capex remaining vs opex headroom, approval thresholds); hub of the shared ledger model → §5.23 | |
+| `fin-depreciation` | Depreciation and book value | straight-line vs declining-balance depreciation over a useful life, with a residual value; software (a perpetual licence) amortises the same way; retiring or selling early books the remaining book value as a loss or a gain | set cost, life, residual value and method; retire the asset in year *n* and see the write-off | expl | S | P2 | FIN | shares the asset model with `fin-refresh-cycle` → §5.23 | |
+| `fin-refresh-cycle` | Refresh cycles and economic life | capital cost per year falls as the cycle lengthens while support, failures and lost staff time rise with age; the sum has a minimum (the economic life); refreshing a whole fleet at once makes a spending wall every *n* years | for a fleet of devices choose the cycle length and how many staggered cohorts, run ten years, read yearly cash, depreciation and age-related cost | expl | M | P2 | FIN, DR | asset model with `fin-depreciation` → §5.23 | |
+| `fin-accruals-cash` | Accruals vs cash: a year of invoices | an expense belongs to the month the service is used, not the month it is paid: a prepaid annual support contract is spread over twelve months, December's service invoiced in January is accrued in December | step through a year of IT invoices (prepaid support, colocation billed quarterly in arrears, a late invoice), post each one, watch the cash line and the expense line part and meet again at year end | step | M | P1 | FIN | the ledger model → §5.23 | |
+| `fin-budget-variance` | Budget vs actuals: reading a variance | a budget phased by month against actuals; a variance splits into volume (more used), price (dearer per unit) and timing (an invoice late or early); "under budget in October" is often a missing invoice; the run-rate forecast to year end; use-it-or-lose-it phasing as a preset | step the months of a cloud and licence budget, inject more usage, a price rise and a late invoice, read each part of the variance and the year-end forecast | step | M | P2 | FIN | builds on `fin-accruals-cash` (timing variance is an accrual) → §5.23 | |
+| `fin-tco` | Total cost of ownership | the purchase price is a small part of five years of power, space, support, staff time, training, migration and the exit at the end; the cheaper purchase can be the dearer option; build-vs-buy (staff time as a cost) as a preset | build two options line by line, switch cost categories on and off, move the horizon, watch the ranking flip | expl | S | P1 | FIN, DR | DR handbook price list (colocation per kW-month, remote hands, MSP onboarding, cloud egress) | |
+| `fin-npv-discounting` | Time value of money and NPV | a euro next year is worth less than a euro today; the discount rate is the cost of capital (what the money would earn or cost elsewhere); NPV sums the discounted cash flows | drag cash flows on a timeline, move the discount rate, watch nominal and discounted bars and the NPV change sign | expl | S | P1 | FIN | the discounting every investment page reuses → §5.23 | |
+| `fin-roi-payback-npv` | ROI, payback and NPV disagree | three yardsticks rank the same projects differently: simple ROI ignores timing, payback ignores everything after the payback date, NPV depends on the rate; IRR is the rate at which NPV is zero | shape two projects' cash flows (a quick win and a slow large return), read the three rankings, find the rate at which they swap | expl | S | P2 | FIN | needs `fin-npv-discounting` | |
+| `fin-fixed-variable` | Fixed, variable and step costs; break-even | a platform's fixed cost spread over more users lowers the average cost; capacity comes in steps; the next user's marginal cost is not the average; the break-even volume between running it yourself and paying per user | move the user count and utilisation, compare an in-house platform with a per-user service, watch average and marginal cost and the break-even point | expl | S | P2 | FIN, DR | idle headroom costs money, too little costs latency: link `utilisation-latency` → §5.23 | |
+| `fin-chargeback` | Showback and chargeback | shared IT cost allocated to departments by a key (users, VMs, storage, tickets): the key decides who pays; charging a fixed cost per unit means a department that leaves raises everyone else's price, and the next one leaves (the spiral) | pick allocation keys, move each department's usage, switch from showback to chargeback, let a department leave | expl | M | P2 | FIN | unit cost from `fin-fixed-variable` | |
+| `fin-cloud-commitment` | Cloud commitment vs on-demand | a commitment buys a discount on usage paid for whether used or not; break-even utilisation is committed price ÷ on-demand price; cover the base load, leave the peaks on demand; a longer term deepens the discount and the risk | draw a year of usage, set the commitment level and term, watch unused commitment against on-demand spend and the total | expl | S | P1 | FIN, DR | DR handbook cloud prices; `perf-autoscaling-lag` (§4.8) | |
+| `fin-lease-vs-buy` | Lease vs buy | the same hardware bought for cash, bought on a loan or leased: cash, expense and balance sheet differ, and the comparison is fair only when discounted at the cost of capital; at the end of the term buy out the residual, return or extend | choose the financing, lease rate, term and residual; compare the cash timeline, the yearly expense and each option's NPV | expl | M | P2 | FIN | needs `fin-npv-discounting`; ledger model → §5.23 | |
+| `fin-licence-models` | Perpetual licence or subscription | a perpetual licence is a large upfront purchase (capitalised, amortised) plus yearly maintenance at a share of the list price; a subscription is a recurring expense; letting maintenance lapse and coming back costs back-fees; per-user and per-core metrics grow differently as the hardware grows | set user growth, maintenance share, yearly price rises and the horizon; find the crossing year; let maintenance lapse in year 3; switch the metric | expl | S | P2 | FIN | ledger model → §5.23 | |
+| `fin-prepay-discount` | Pay upfront for a discount? | a discount for paying early is an interest rate in disguise, to compare with the cost of capital; payment terms (30, 60, 90 days) move cash, not cost; three years prepaid ties up working capital and the cash buffer | set the discount, years prepaid and payment terms; read the implied annual rate against the cost of capital and watch the cash balance | expl | S | P2 | FIN | needs `fin-npv-discounting` | |
+| `fin-indexation-fx` | Inflation, indexation and currency in a multi-year contract | a fixed price loses real value to inflation; an indexation clause passes inflation on (with a cap or a floor); a price in a foreign currency adds exchange-rate risk; nominal vs real euros | run a five-year contract along inflation and exchange-rate paths, choose fixed, indexed or capped, and the currency | expl | S | P3 | FIN | | |
+| `fin-contingency-reserve` | Contingency reserve: P50 vs P80 | each line of a project estimate is a range skewed towards overruns, so the total's median is above the sum of the most likely values; the reserve buys a level of confidence | set ranges for the line items, run many trials, choose the confidence level, read the reserve it needs | expl | M | P2 | FIN, DR | DR P07 brief (one-off spend cap, approval threshold) | |
+| `fin-downtime-cost` | What an hour down costs, and what a nine is worth | cost of downtime = lost revenue + idle staff + recovery work + penalties, varying with the hour and the day; each extra nine removes less downtime and costs more redundancy | set the cost components and the availability target; compare the expected yearly downtime cost with the yearly cost of the HA option | expl | S | P1 | FIN, DR | `rpo-rto` gives the hours down; `perf-slo-error-budget` (§4.8) → §5.23 | |
+| `fin-ale-risk` | Expected annual loss and the price of a control | ALE = single loss expectancy × annual rate of occurrence; a control is worth its yearly cost when it removes more ALE than that; accept, reduce, transfer (insurance) or avoid; a rare large loss hides behind a small average | add risks with a loss and a frequency, buy controls and insurance, watch ALE, control cost and the worst simulated year | expl | S | P2 | FIN, DR, SEC | `ransomware-321` (an immutable copy as a control), `faultline` → §5.23 | |
+| `fin-sunk-cost` | Sunk cost: decide looking forward | money already spent, and an old system's remaining book value, is the same whichever way you choose, so only the cost still to come and the benefit still to come count; the opportunity cost of the people tied up | step a project that overruns; at each gate continue, stop or switch, and compare deciding by "already spent" with deciding by "still to spend" | step | S | P2 | FIN | the write-off from `fin-depreciation` | |
+| `fin-cost-of-delay` | Cost of delay: which project first | each project loses value for every week it waits; ordering by value lost per week ÷ duration beats ordering by size or by who asks loudest | reorder three to five projects in a queue and watch the total value lost | expl | S | P3 | FIN | | |
+
+**Croatian titles.**
+
+- `fin-capex-opex` — Kapitalni izdaci ili operativni troškovi: jedna kupnja, tri pogleda
+- `fin-depreciation` — Amortizacija i knjigovodstvena vrijednost
+- `fin-refresh-cycle` — Ciklus zamjene opreme i ekonomski vijek trajanja
+- `fin-accruals-cash` — Trošak ili plaćanje: vremenska razgraničenja kroz godinu računa
+- `fin-budget-variance` — Plan i ostvarenje: čitanje odstupanja
+- `fin-tco` — Ukupni trošak vlasništva (TCO)
+- `fin-npv-discounting` — Vremenska vrijednost novca i neto sadašnja vrijednost (NSV)
+- `fin-roi-payback-npv` — Povrat ulaganja, razdoblje povrata i NSV ne slažu se
+- `fin-fixed-variable` — Fiksni, varijabilni i stepenasti troškovi; točka pokrića
+- `fin-chargeback` — Raspodjela troškova IT-a: prikaz ili interna naplata
+- `fin-cloud-commitment` — Ugovorena potrošnja u oblaku ili plaćanje po potrošnji
+- `fin-lease-vs-buy` — Leasing ili kupnja
+- `fin-licence-models` — Trajna licenca ili pretplata
+- `fin-prepay-discount` — Popust za plaćanje unaprijed i rokovi plaćanja
+- `fin-indexation-fx` — Inflacija, indeksacija i tečaj u višegodišnjem ugovoru
+- `fin-contingency-reserve` — Pričuva za nepredviđene troškove: P50 ili P80
+- `fin-downtime-cost` — Koliko košta sat zastoja i koliko vrijedi jedna devetka
+- `fin-ale-risk` — Očekivani godišnji gubitak (ALE) i cijena zaštite
+- `fin-sunk-cost` — Nepovratni trošak: odlučuje se gledajući naprijed
+- `fin-cost-of-delay` — Trošak kašnjenja: koji projekt prvi
+
+**Where Croatian practice commonly differs** (one line each, for the page's notes, not the model):
+
+- `fin-capex-opex`, `fin-depreciation`: firms often book depreciation at the maximum rates the profit-tax rules allow, so
+  computer equipment is commonly written off over two years, shorter than its useful life; low-value items (sitni
+  inventar) are often expensed when put into use.
+- `fin-lease-vs-buy`: firms reporting under the Croatian standards (HSFI) usually still expense operating-lease
+  instalments, where the international standard puts a right-of-use asset and a liability on the lessee's balance sheet.
+- `fin-indexation-fx`: Croatia has used the euro since 2023, so the currency risk lies in contracts priced in another
+  currency (often US dollars).
+- `fin-budget-variance`, `fin-accruals-cash`: the fiscal year is usually the calendar year (the DR estate uses April to
+  March, hence the parameter).
+
+**Suggested order for a course playlist** (`courses/fin-it-managers.json`, "Osnove financija za IT menadžere /
+Finance basics for IT managers", `lang: hr`; text only, no file yet):
+
+1. *Jedna kupnja, dva pogleda / One purchase, two views*: `fin-capex-opex`, `fin-depreciation`, `fin-accruals-cash`,
+   `fin-budget-variance`
+2. *Novac kroz vrijeme / Money over time*: `fin-npv-discounting`, `fin-roi-payback-npv`, `fin-cost-of-delay`,
+   `fin-sunk-cost`, `fin-indexation-fx`
+3. *Koliko stvarno košta / What it really costs*: `fin-tco`, `fin-fixed-variable`, `fin-chargeback`, `fin-refresh-cycle`
+4. *Kupiti, unajmiti ili se pretplatiti / Buy, lease or subscribe*: `fin-lease-vs-buy`, `fin-licence-models`,
+   `fin-cloud-commitment`, `fin-prepay-discount`
+5. *Rizik izražen u novcu / Risk in money*: `fin-downtime-cost`, `fin-ale-risk`, `fin-contingency-reserve`, then the
+   existing `rpo-rto` and `ransomware-321` as the technical side of the same losses
+
+**Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area between
+`performance` and `linux`, since none of the existing areas is about money:
+
+- **`money`**: "Novac: koliko IT stvarno košta" / "Money: what IT really costs"; blurb "Proračun, ulaganja i rizik
+  riječima financija: kapitalni izdaci, amortizacija, TCO, NSV." / "Budgets, investments and risk in the words
+  finance uses: CapEx, depreciation, TCO, NPV." (88 / 87 chars)
+  - `books` "Kako financije knjiže kupnju" / "How finance books a purchase"
+    - `capex-opex`: `fin-capex-opex`, `fin-lease-vs-buy`
+    - `depreciation`: `fin-depreciation`, `fin-refresh-cycle`
+    - `accruals`: `fin-accruals-cash`
+    - `variance`: `fin-budget-variance`, `fin-accruals-cash`
+  - `worth-it` "Isplati li se?" / "Is it worth it?"
+    - `time-value`: `fin-npv-discounting`, `fin-indexation-fx`
+    - `yardsticks`: `fin-roi-payback-npv`, `fin-cost-of-delay`
+    - `looking-forward`: `fin-sunk-cost`
+  - `real-cost` "Koliko stvarno košta" / "What it really costs"
+    - `tco`: `fin-tco`
+    - `per-user`: `fin-fixed-variable`, `fin-chargeback`
+    - `refresh`: `fin-refresh-cycle`
+  - `buying` "Kupiti, unajmiti ili se pretplatiti" / "Buy, lease or subscribe"
+    - `lease`: `fin-lease-vs-buy`
+    - `licences`: `fin-licence-models`
+    - `cloud`: `fin-cloud-commitment`
+    - `paying`: `fin-prepay-discount`
+  - `risk` "Rizik izražen u novcu" / "Risk in money"
+    - `downtime`: `fin-downtime-cost`, `rpo-rto`
+    - `expected-loss`: `fin-ale-risk`, `ransomware-321`
+    - `reserve`: `fin-contingency-reserve`
+- Also in existing leaves: `fin-downtime-cost` in `resilience › disaster › rpo-rto`; `fin-ale-risk` in
+  `security › attacks › ransomware`.
+
 ---
 
 ## 5. Duplicates, overlaps and shared simulators
@@ -807,6 +917,7 @@ preset is a scenario, like ossimulator's `?scenario=`), or a clear home with lin
 | 5.20 | **Planned twice** | URM's ~40 planned interactive cards (`meta/plan-interaktivne-stranice.md` §6) and §4.1 here | The same concepts are planned in two places. Recommend simdeck builds them and the book embeds or links the simdeck page (→ report). |
 | 5.21 | **Windows infrastructure: AD, DNS and DHCP together** | `win-dc-promotion`, `win-dns-srv-records`, `win-domain-logon`, `win-dns-dynamic-update`, `win-dhcp-dns-update`, `win-dns-scavenging`, `win-sysvol-dfsr`, `win-time-hierarchy`, `win-ad-backup-restore`, `win-ou-vs-group`, `win-ipam-address-plan` | One shared model of a small domain (DCs, DNS zones, DHCP server, clients over time) under all of these, like ossimulator's shared engine. Dynamic update, DHCP-registered records and scavenging are three pages on one record-lifecycle model. SRV records and domain logon are one page in two steps. The time hierarchy links to `inet-ntp-sync` for the protocol. USN rollback is a preset next to `sto-backing-chains` (the same "revert a snapshot" act, a different victim). The address plan reuses `urm-vlsm`'s arithmetic. |
 | 5.22 | **Update approval** | `win-wsus-groups`, `win-update-rings`, `lnx-deploy-strategies` (canary) | Groups with approvals and rings with deferrals are the same staged-rollout idea; one page with two presets. The canary deploy in Linux links to it. |
+| 5.23 | **Money: one ledger, and costs on top of existing models** | `fin-capex-opex`, `fin-accruals-cash`, `fin-budget-variance`, `fin-lease-vs-buy`, `fin-licence-models`, `fin-depreciation`, `fin-refresh-cycle`, `fin-npv-discounting`; and `fin-downtime-cost` ↔ `rpo-rto`, `perf-slo-error-budget`; `fin-ale-risk` ↔ `ransomware-321`, `faultline`; `fin-fixed-variable` ↔ `utilisation-latency`, `ec-vs-replication` | One shared ledger model (a month-by-month timeline with three lines: cash, expense, book value) under the capex, accruals, variance, lease and licence pages, like §5.21's shared domain; depreciation and refresh share one asset model; `fin-npv-discounting` holds the discounting the investment pages reuse, so build it first. The money pages do not repeat the technical ones: `fin-downtime-cost` takes the hours down from `rpo-rto`'s timeline (link, or an "in money" preset on `rpo-rto`) and turns an error budget's minutes into euros; `fin-ale-risk` links `ransomware-321` as a priced control; `fin-fixed-variable` links `utilisation-latency` (headroom costs money, too little costs latency) and could take `ec-vs-replication`'s overhead as a cost per usable TB preset. |
 
 ---
 
