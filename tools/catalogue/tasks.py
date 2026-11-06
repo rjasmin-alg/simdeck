@@ -445,15 +445,16 @@ ADOPT_STEPS = {
    Set `origin` to `ossimulator/{page}`.
 2. Do not adapt it to the kit: it has its own shared runtime and a full test suite. Add `data-sim="{sid}"` to
    its `<html>`, a `#simdeck-meta` placeholder and a `#simdeck-exceptions` block declaring `kit`, `text-size`
-   (ossimulator's floor is 14 px), `one-screen` (its six-section layout scrolls) and `languages` (until it has
-   English). These are the only edits to the built file.
+   (ossimulator's floor is 14 px) and `one-screen` (its six-section layout scrolls). These are the only edits to
+   the built file.
 3. Write `sim.json`: title, concept and summary from the page's `meta.ts`
    (`{P}/ossimulator/src/modules/{page}/meta.ts`), class `explorer`, topic `os`.
 4. List the scenario deep links that index entries should use: {extra}. Each opens paused with
    `?scenario=<id>` (put them in `NOTES.md`; the frame does not have per-preset entries yet: see the
    foundation task about presets in the index).
-5. **English** cannot be added to a built bundle. It belongs in ossimulator's source (foundation task
-   `ossimulator-english`); this task only imports the Croatian build.
+5. **English** cannot be added to a built bundle: it is written in ossimulator's source (foundation task
+   `ossimulator-english`, done in `93da8f8`). The build carries both languages (`?lang=`, else `simdeck.lang`), so
+   `sim.json` has no `languages` field (t-0118).
 6. Check that the single file runs from `file://` with the network blocked (ossimulator's own e2e does this).
 7. **ossimulator is the source of truth** (owner, 2026-10-02): never fix this copy. A defect found here goes into
    ossimulator, and the build is re-imported.""",
@@ -600,7 +601,7 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         ("Courses", courses),
         ("Topic / tags / level", f"`{topic_of(cid, r['_title'])}` / " + ", ".join(f"`{t}`" for t in tags_of(cid))
          + f" / `{level_of(courses)}`"),
-        ("Languages", "Croatian now; English comes from ossimulator's source (task `ossimulator-english`)"
+        ("Languages", "Croatian and English in one build since ossimulator `93da8f8` (task `ossimulator-english`), re-imported in t-0118"
          if cid.startswith("ossim-") else "Croatian and English (COMMON.md §4)"),
         ("Licence", "AGPL-3.0-or-later" + ("; source material CC BY 4.0, attribution required" if cid.startswith("50ohm") else "")),
     ]
