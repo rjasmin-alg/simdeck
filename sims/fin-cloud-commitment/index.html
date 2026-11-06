@@ -1,0 +1,561 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-cloud-commitment: a commitment buys a discount on usage that is paid whether used or not; a committed server
+     pays off above break-even (committed price ÷ on-demand price), so commit the base load and leave the peaks on
+     demand; a longer term deepens the discount and the risk. The stage: year 1 month by month (drag the columns),
+     years 2–3 for the 3-year term, each server level's share of the time against break-even (the ladder sets the
+     level), the term's cost all on demand and with the commitment, and both terms' saving.
+     Sums: commitment.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-cloud-commitment">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugovorena potrošnja u oblaku ili plaćanje po potrošnji · simdeck</title>
+<meta name="description" content="Nacrtaj godinu potrošnje, postavi ugovorenu razinu i razdoblje; gledaj neiskorištenu obvezu, plaćanje po potrošnji i ukupni iznos.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-cloud-commitment",
+  "title": {
+    "hr": "Ugovorena potrošnja u oblaku ili plaćanje po potrošnji",
+    "en": "Cloud commitment vs on-demand"
+  },
+  "concept": {
+    "hr": "Plaća se i neiskorištena: ugovori osnovno opterećenje, a vrhove po potrošnji",
+    "en": "A commitment is paid used or not: commit the base load, run the peaks on demand"
+  },
+  "summary": {
+    "hr": "Nacrtaj godinu potrošnje, postavi ugovorenu razinu i razdoblje; gledaj neiskorištenu obvezu, plaćanje po potrošnji i ukupni iznos.",
+    "en": "Draw a year of usage, set the commitment level and the term; watch the unused commitment, the on-demand spend and the total."
+  },
+  "tags": [
+    "costs",
+    "contracts"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-cloud-commitment"]; colours only from kit tokens. */
+[data-sim="fin-cloud-commitment"] .cc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+
+/* the chart: axis | year 1 | years 2–3 (3-year term) | ladder */
+[data-sim="fin-cloud-commitment"] .cc-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 5fr) minmax(0, 2.6fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 0.9rem;
+}
+[data-sim="fin-cloud-commitment"] .cc-chart[data-term="3"] { grid-template-columns: 3.2rem minmax(0, 5fr) minmax(0, 2fr) minmax(0, 2.6fr); }
+/* columns: year 1 is 2; years 2–3 are 3 (3-year term); the ladder is last */
+[data-sim="fin-cloud-commitment"] .cc-chart > [data-r="y"] { grid-column: 2; }
+[data-sim="fin-cloud-commitment"] .cc-chart > [data-r="l"] { grid-column: 3; }
+[data-sim="fin-cloud-commitment"] .cc-chart > [data-r="d"] { grid-column: 3; }
+[data-sim="fin-cloud-commitment"] .cc-chart[data-term="3"] > [data-r="d"] { grid-column: 4; }
+[data-sim="fin-cloud-commitment"] .cc-head { grid-row: 1; margin: 0 0 0.3rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.2; align-self: end; }
+[data-sim="fin-cloud-commitment"] .cc-axis { grid-column: 1; grid-row: 2; position: relative; }
+[data-sim="fin-cloud-commitment"] .cc-tick {
+  position: absolute;
+  right: 0.3rem;
+  transform: translateY(50%);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-cloud-commitment"] .cc-ctag {
+  position: absolute;
+  right: -0.9rem;
+  transform: translateY(50%);
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  z-index: 2;
+}
+[data-sim="fin-cloud-commitment"] .cc-plot {
+  grid-row: 2;
+  position: relative;
+  min-height: 0;
+  border-left: var(--line-w) solid var(--ink);
+  border-bottom: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(to top, var(--line) 0 0.0625rem, transparent 0.0625rem 25%);
+}
+[data-sim="fin-cloud-commitment"] .cc-plot[data-r="l"] { overflow: hidden; }   /* years 2–3 at 150 % can pass the top */
+[data-sim="fin-cloud-commitment"] .cc-cols { position: absolute; inset: 0; display: flex; gap: 0.25rem; padding: 0 0.15rem; }
+[data-sim="fin-cloud-commitment"] .cc-y1 .cc-cols { cursor: crosshair; touch-action: none; }
+[data-sim="fin-cloud-commitment"] .cc-col { position: relative; flex: 1 1 0; min-width: 0; }
+[data-sim="fin-cloud-commitment"] .cc-col:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="fin-cloud-commitment"] .cc-seg { position: absolute; left: 0; right: 0; }
+[data-sim="fin-cloud-commitment"] .cc-seg[data-k="used"] { background: var(--c1); }
+[data-sim="fin-cloud-commitment"] .cc-seg[data-k="unused"] {
+  border: 0.15rem dashed var(--c2);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c2) 55%, var(--bg)) 0 0.3rem, var(--bg) 0.3rem 0.6rem);
+}
+[data-sim="fin-cloud-commitment"] .cc-seg[data-k="od"] {
+  border: 0.15rem solid var(--c3);
+  background: repeating-linear-gradient(180deg, var(--c3) 0 0.3rem, color-mix(in srgb, var(--c3) 30%, var(--bg)) 0.3rem 0.5rem);
+}
+[data-sim="fin-cloud-commitment"] .cc-num {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(-0.1rem);
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-cloud-commitment"] .cc-line {
+  position: absolute;
+  left: -0.15rem;
+  right: 0;
+  height: 0.3rem;
+  transform: translateY(50%);
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 1;
+}
+[data-sim="fin-cloud-commitment"] .cc-months { grid-row: 3; display: flex; gap: 0.25rem; padding: 0.15rem 0.15rem 0; }
+[data-sim="fin-cloud-commitment"] .cc-months > span { flex: 1 1 0; min-width: 0; text-align: center; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+
+/* the ladder: one row per server level, its share of the time against break-even */
+[data-sim="fin-cloud-commitment"] .cc-ladder { cursor: ns-resize; touch-action: none; }
+[data-sim="fin-cloud-commitment"] .cc-ladder:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="fin-cloud-commitment"] .cc-row { position: absolute; left: 0; right: 0; height: calc(100% / 16); display: flex; align-items: center; }
+[data-sim="fin-cloud-commitment"] .cc-row[data-in] { background: color-mix(in srgb, var(--c1) 14%, transparent); }
+[data-sim="fin-cloud-commitment"] .cc-track { position: relative; flex: 0 0 74%; height: 76%; }
+[data-sim="fin-cloud-commitment"] .cc-bar { position: absolute; left: 0; top: 0; bottom: 0; border: 0.12rem solid var(--ink); border-left: 0; }
+[data-sim="fin-cloud-commitment"] .cc-bar[data-v="pays"] { background: var(--c4); border-color: var(--c4); }
+[data-sim="fin-cloud-commitment"] .cc-bar[data-v="even"] { border-style: dashed; background: var(--panel); }
+[data-sim="fin-cloud-commitment"] .cc-bar[data-v="loses"] { border-color: var(--muted); background: transparent; }
+[data-sim="fin-cloud-commitment"] .cc-share {
+  flex: 1 1 auto;
+  padding-left: 0.3rem;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-cloud-commitment"] .cc-share[data-v="pays"]::before { content: '✓ '; font-weight: 700; }
+[data-sim="fin-cloud-commitment"] .cc-share[data-v="even"]::before { content: '= '; font-weight: 700; }
+[data-sim="fin-cloud-commitment"] .cc-share[data-v="loses"] { color: var(--muted); }
+[data-sim="fin-cloud-commitment"] .cc-be {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 0.2rem dashed var(--ink);
+  pointer-events: none;
+  z-index: 1;
+}
+[data-sim="fin-cloud-commitment"] .cc-betag { grid-row: 3; padding-top: 0.15rem; font-size: var(--fs-sm); line-height: 1.2; }
+
+/* the money: all on demand against the commitment, over the term */
+[data-sim="fin-cloud-commitment"] .cc-money {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) 9.5rem;
+  column-gap: 0.9rem;
+  row-gap: 0.25rem;
+  align-items: center;
+}
+[data-sim="fin-cloud-commitment"] .cc-mlabel { font-weight: 700; line-height: 1.2; }
+[data-sim="fin-cloud-commitment"] .cc-stack { display: flex; height: 1.8rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="fin-cloud-commitment"] .cc-stack .cc-seg { position: static; height: 100%; }
+[data-sim="fin-cloud-commitment"] .cc-sum { text-align: right; font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="fin-cloud-commitment"] .cc-parts { grid-column: 2 / -1; margin-top: -0.15rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-cloud-commitment"] .cc-result {
+  grid-column: 2 / -1;
+  justify-self: start;
+  padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="fin-cloud-commitment"] .cc-result[data-o="save"] { background: var(--ink); color: var(--bg); }
+[data-sim="fin-cloud-commitment"] .cc-result[data-o="save"]::before { content: '★ '; }
+[data-sim="fin-cloud-commitment"] .cc-result[data-o="loss"]::before { content: '✗ '; }
+[data-sim="fin-cloud-commitment"] .cc-result[data-o="even"] { border-style: dashed; }
+[data-sim="fin-cloud-commitment"] .cc-result[data-o="even"]::before { content: '= '; }
+[data-sim="fin-cloud-commitment"] .cc-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+/* the two terms at the same level */
+[data-sim="fin-cloud-commitment"] .cc-terms { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; margin: 0; }
+[data-sim="fin-cloud-commitment"] .cc-chip {
+  min-height: var(--hit);
+  padding: 0 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+[data-sim="fin-cloud-commitment"] .cc-chip[aria-pressed="true"] { border-color: var(--ink); border-width: 0.2rem; font-weight: 700; }
+
+[data-sim="fin-cloud-commitment"] .cc-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the hidden params (the months) keep the URL; the kit marks them [hidden] */
+[data-sim="fin-cloud-commitment"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape^="cc-"] { border-radius: 0; }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-used"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-unused"] { border-style: dashed; border-color: var(--c2); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c2) 55%, var(--bg)) 0 0.2em, var(--bg) 0.2em 0.4em); }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-od"] { border-color: var(--c3); background: repeating-linear-gradient(180deg, var(--c3) 0 0.18em, color-mix(in srgb, var(--c3) 30%, var(--bg)) 0.18em 0.3em); }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-commit"] { height: 0.3em; margin-block: 0.35em; background: var(--ink); border-color: var(--ink); }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-be"] { width: 0; border-width: 0 0 0 0.2em; border-style: dashed; border-color: var(--ink); background: transparent; }
+[data-sim="fin-cloud-commitment"] .sd-swatch[data-shape="cc-pays"] { position: relative; background: var(--c4); border-color: var(--c4); }
+
+/* Phone and portrait: the stage grows with its content; year 1, years 2–3 and the ladder stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-cloud-commitment"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-cloud-commitment"] .cc { height: auto; padding: 0.4rem 0.4rem; }
+  [data-sim="fin-cloud-commitment"] .cc-chart,
+  [data-sim="fin-cloud-commitment"] .cc-chart[data-term="3"] {
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+    grid-template-rows: repeat(8, auto);
+    column-gap: 0.7rem;
+  }
+  [data-sim="fin-cloud-commitment"] .cc-chart > [data-r],
+  [data-sim="fin-cloud-commitment"] .cc-chart[data-term="3"] > [data-r="d"] { grid-column: 2; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-axis { grid-column: 1; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > [data-r="l"] { grid-row: 4; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-plot[data-r="l"] { grid-row: 5; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > [data-r="d"] { grid-row: 6; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-plot[data-r="d"] { grid-row: 7; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-betag { grid-row: 8; }
+  [data-sim="fin-cloud-commitment"] .cc-head { margin-top: 0.4rem; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-plot { height: 15rem; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-plot[data-r="l"] { height: 9rem; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-plot[data-r="d"] { height: 21rem; }
+  [data-sim="fin-cloud-commitment"] .cc-chart > .cc-axis { height: 15rem; }
+  [data-sim="fin-cloud-commitment"] .cc-cols, [data-sim="fin-cloud-commitment"] .cc-months { gap: 0.1rem; }
+  [data-sim="fin-cloud-commitment"] .cc-months > span:nth-child(even) { visibility: hidden; }
+  [data-sim="fin-cloud-commitment"] .cc-money { grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row dense; }
+  [data-sim="fin-cloud-commitment"] .cc-mlabel { grid-column: 1; }
+  [data-sim="fin-cloud-commitment"] .cc-sum { grid-column: 2; }
+  [data-sim="fin-cloud-commitment"] .cc-stack { grid-column: 1 / -1; }
+  [data-sim="fin-cloud-commitment"] .cc-parts, [data-sim="fin-cloud-commitment"] .cc-result { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Ugovorena potrošnja u oblaku ili plaćanje po potrošnji</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="commitment.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+  var N = L.N_MAX;
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (30 000 / 30,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Whole euros (every amount here is whole). */
+  function money(x) { return t('eur', { n: group(Math.abs(Math.round(x))) }); }
+  function pct(n) { return t('pct', { n: String(n) }); }
+  /** A saving or loss as a percent, never "0 %" for one that is not zero (it rounds to 0 below 0.5 %). */
+  function pctOf(v, outcome) { return v === 0 && outcome !== 'even' ? t('pctLt1') : pct(Math.abs(v)); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function at(v) { return (100 * v / N) + '%'; }                // a server count as a height on the plot
+  /** A whole-percent share for the ladder (exact comparison is the model's; this is only the label). */
+  function shareText(x) { return pct(Math.round(x)); }
+
+  // ── editing: drag across the months (or arrow keys); drag the ladder (or arrow keys) for the level ──
+
+  var drag = null;      // { kind: 'month' | 'level', rect } while dragging
+  var refocus = null;   // the element to give focus back to after a render (keyboard changes)
+
+  function clampN(v) { return Math.max(0, Math.min(N, Math.round(v))); }
+  function levelAt(y) { return clampN((drag.rect.bottom - y) / drag.rect.height * N); }
+  function onMove(e) {
+    if (!drag) return;
+    var patch = {};
+    if (drag.kind === 'level') patch.commit = levelAt(e.clientY);
+    else {
+      var m = Math.floor((e.clientX - drag.rect.left) / drag.rect.width * 12);
+      if (m < 0 || m > 11) return;
+      patch['u' + (m + 1)] = levelAt(e.clientY);
+    }
+    sim.set(patch);
+  }
+  function onUp() {
+    if (!drag) return;
+    drag = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+  }
+  function startDrag(e, kind) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { kind: kind, rect: e.currentTarget.getBoundingClientRect() };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    onMove(e);
+  }
+  /** Arrow keys on a month or the ladder: ±1, Shift or PageUp/PageDown ±5, Home 0, End the top. */
+  function onKey(e, key, v, focusKey) {
+    var by = e.shiftKey ? 5 : 1, to = null;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') to = v + by;
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') to = v - by;
+    else if (e.key === 'PageUp') to = v + 5;
+    else if (e.key === 'PageDown') to = v - 5;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = N;
+    if (to === null) return;
+    e.preventDefault();
+    refocus = focusKey;
+    var patch = {};
+    patch[key] = clampN(to);
+    sim.set(patch);
+  }
+  function noFocus(e) { e.preventDefault(); }   // buttons do not take focus on click (docs/sim-ui.md §3)
+
+  // ── the stage ──
+
+  /** One month's column: used (solid), unused (hatched), on demand (striped), from the bottom. */
+  function segs(u, c) {
+    var used = Math.min(u, c), unused = Math.max(0, c - u), od = Math.max(0, u - c);
+    return [
+      used > 0 ? h('div', { class: 'cc-seg', dataset: { k: 'used' }, style: { bottom: '0', height: at(used) } }) : null,
+      unused > 0 ? h('div', { class: 'cc-seg', dataset: { k: 'unused' }, style: { bottom: at(u), height: at(unused) } }) : null,
+      od > 0 ? h('div', { class: 'cc-seg', dataset: { k: 'od' }, style: { bottom: at(c), height: at(od) } }) : null
+    ];
+  }
+  function line(c) { return h('div', { class: 'cc-line', style: { bottom: at(c) } }); }
+
+  function chart(s) {
+    var p = s.p, c = p.commit, term = p.term;
+    var kids = [];
+    // axis: ticks and the commitment tag
+    var ticks = [0, 4, 8, 12, 16].map(function (v) {
+      return h('span', { class: 'cc-tick', translate: 'no', style: { bottom: at(v) } }, String(v));
+    });
+    ticks.push(h('span', { class: 'cc-ctag', translate: 'no', style: { bottom: at(c) } }, String(c)));
+    kids.push(h('div', { class: 'cc-axis', 'aria-hidden': 'true' }, ticks));
+
+    // year 1
+    kids.push(h('p', { class: 'cc-head', dataset: { r: 'y' } }, t('headYear1')));
+    var cols = s.months.map(function (m, i) {
+      var key = 'u' + (i + 1), name = t('m' + (i + 1));
+      var label = t('monthLabel', { m: name, servers: t.n('nServers', m.u) });
+      return h('div', {
+        class: 'cc-col', role: 'slider', tabindex: '0', dataset: { k: key },
+        'aria-label': name, 'aria-valuemin': '0', 'aria-valuemax': String(N), 'aria-valuenow': String(m.u),
+        'aria-valuetext': label, title: label,
+        onkeydown: function (e) { onKey(e, key, m.u, key); }
+      }, segs(m.u, c), h('span', { class: 'cc-num', translate: 'no', style: { bottom: 'min(' + at(Math.max(m.u, c)) + ', calc(100% - 1.2rem))' } }, m.u > 0 ? String(m.u) : ''));
+    });
+    kids.push(h('div', { class: 'cc-plot cc-y1', dataset: { r: 'y' } },
+      h('div', { class: 'cc-cols', onpointerdown: function (e) { startDrag(e, 'month'); } }, cols), line(c)));
+    kids.push(h('div', { class: 'cc-months', dataset: { r: 'y' }, 'aria-hidden': 'true' },
+      s.months.map(function (m, i) { return h('span', null, t('m' + (i + 1))); })));
+
+    // years 2 and 3 (the 3-year term): year 1 scaled by later; drawn, not edited
+    if (term === 3) {
+      kids.push(h('p', { class: 'cc-head', dataset: { r: 'l' } }, t.parts('headLater', { p: b(pct(p.later)) })));
+      kids.push(h('div', { class: 'cc-plot', dataset: { r: 'l' }, 'aria-hidden': 'true' },
+        h('div', { class: 'cc-cols' }, s.later.map(function (u) { return h('div', { class: 'cc-col' }, segs(u, c)); })),
+        line(c)));
+    }
+
+    // the ladder: each level's share of the time, break-even, the committed levels
+    kids.push(h('p', { class: 'cc-head', dataset: { r: 'd' } }, t('headLadder')));
+    var rows = s.levels.map(function (l) {
+      return h('div', { class: 'cc-row', dataset: l.k <= c ? { in: '' } : {}, style: { bottom: at(l.k - 1) } },
+        h('div', { class: 'cc-track' }, l.share > 0 ? h('div', { class: 'cc-bar', dataset: { v: l.verdict }, style: { width: l.share + '%' } }) : null),
+        l.share > 0 ? h('span', { class: 'cc-share', translate: 'no', dataset: { v: l.verdict } }, shareText(l.share)) : null);
+    });
+    var lv = t('ladderLabel', { servers: t.n('nServers', c) });
+    kids.push(h('div', {
+      class: 'cc-plot cc-ladder', dataset: { r: 'd', k: 'commit' }, role: 'slider', tabindex: '0',
+      'aria-label': t('commit'), 'aria-valuemin': '0', 'aria-valuemax': String(N), 'aria-valuenow': String(c),
+      'aria-valuetext': lv, title: lv,
+      onpointerdown: function (e) { startDrag(e, 'level'); },
+      onkeydown: function (e) { onKey(e, 'commit', c, 'commit'); }
+    }, rows, h('div', { class: 'cc-be', style: { left: (0.74 * s.breakEven) + '%' } }), line(c)));
+    kids.push(h('p', { class: 'cc-betag', dataset: { r: 'd' } }, t.parts('breakEvenTag', { p: b(pct(s.breakEven)) })));
+
+    return h('div', { class: 'cc-chart', dataset: { term: String(term) } }, kids);
+  }
+
+  function money3(s, chg) {
+    var x = s.cost, top = Math.max(x.all, x.with, 1);
+    var seg = function (k, v) { return v > 0 ? h('div', { class: 'cc-seg', dataset: { k: k }, style: { width: (100 * v / top) + '%' } }) : null; };
+    var res;
+    if (s.outcome === 'save') res = t('resultSave', { d: money(x.save), p: pctOf(s.pct, s.outcome) });
+    else if (s.outcome === 'loss') res = s.pct === null ? t('resultLossNoUse', { d: money(x.save) }) : t('resultLoss', { d: money(x.save), p: pctOf(s.pct, s.outcome) });
+    else res = t('resultEven');
+    var over = t.n('overYears', s.p.term);
+    return h('div', { class: 'cc-money' },
+      h('span', { class: 'cc-mlabel' }, t('rowAll'), ' ', h('span', { class: 'cc-parts' }, over)),
+      h('div', { class: 'cc-stack' }, seg('od', x.all)),
+      h('span', { class: 'cc-sum', translate: 'no' }, money(x.all)),
+      h('span', { class: 'cc-mlabel' }, t('rowWith')),
+      h('div', { class: 'cc-stack' }, seg('used', x.used), seg('unused', x.unused), seg('od', x.od)),
+      h('span', { class: 'cc-sum', translate: 'no' }, money(x.with)),
+      h('span', { class: 'cc-parts' }, t('parts', { used: money(x.used), unused: money(x.unused), od: money(x.od) })),
+      h('span', { class: 'cc-result' + (chg.indexOf('outcome') >= 0 ? ' sd-changed' : ''), dataset: { o: s.outcome } }, res));
+  }
+
+  function terms(s) {
+    var chips = L.TERMS.map(function (term) {
+      var v = s.chips[term];
+      var res = v.pct === null ? t('chipNoUse') : v.outcome === 'save' ? t('chipSave', { p: pctOf(v.pct, v.outcome) })
+        : v.outcome === 'loss' ? t('chipLoss', { p: pctOf(v.pct, v.outcome) }) : t('chipEven');
+      return h('button', {
+        type: 'button', class: 'cc-chip', 'aria-pressed': String(term === s.p.term), onmousedown: noFocus,
+        onclick: function () { sim.set({ term: term }); }
+      }, t('termChip', { term: t('term' + term), off: pct(L.DISCOUNT[term]), res: res }));
+    });
+    return h('p', { class: 'cc-terms' }, h('span', null, t('termsLabel')), chips);
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'cc' },
+      chart(s),
+      money3(s, chg),
+      terms(s),
+      h('p', { class: 'cc-foot' }, t('dragHint'), ' ',
+        t('priceNote', { p: money(L.P), c1: money(L.committedPrice(1)), c3: money(L.committedPrice(3)) }), ' ',
+        t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-k="' + refocus + '"][tabindex]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  // ── the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, x = s.cost, term = s.p.term;
+    var k = L.captionKey(s);
+    var over = t.n('overYears', term);
+    var out = t.parts(k.key, {
+      servers: t.n('ofServers', s.p.commit), term: over, paid: b(money(x.paid)), unused: b(money(x.unused)),
+      od: b(money(x.od)), with: b(money(x.with)), all: b(money(x.all)), d: b(money(x.save)),
+      pct: s.pct === null || s.outcome === 'even' ? '' : t('pctParen', { p: pctOf(s.pct, s.outcome) })
+    });
+    if (k.key === 'capNone') out = t.parts('capNone', { all: b(money(x.all)), term: over });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, { be: b(pct(s.breakEven)), k: b(s.best), later: b(pct(s.p.later)) }));
+    });
+    return out;
+  }
+
+  var labels = {
+    steady: 'pSteady', 'base-load': 'pBaseLoad', 'cover-peak': 'pCoverPeak', 'three-years': 'pThreeYears',
+    'usage-falls': 'pUsageFalls'
+  };
+  var never = function () { return false; };
+
+  // The months are set on the stage; these hidden params keep them in the URL and clamp them.
+  var hidden = [];
+  for (var m = 1; m <= L.MONTHS; m++) {
+    hidden.push({ key: 'u' + m, type: 'range', label: t('m' + m), min: 0, max: N, step: 1, visible: never });
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'commit', type: 'range', label: t('commit'), min: 0, max: N, step: 1,
+        format: function (v) { return t.n('nServers', v); } },
+      { key: 'term', type: 'choice', label: t('term'), options: [[1, t('term1')], [3, t('term3')]] },
+      { key: 'later', type: 'range', label: t('later'), min: 0, max: L.LATER_MAX, step: L.LATER_STEP,
+        format: function (v) { return pct(v); } },
+      { type: 'button', label: t('best'), key: 'o', run: function (api) { api.set({ commit: api.state.best }); } }
+    ].concat(hidden),
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cc-used', label: t('legUsed') },
+      { shape: 'cc-unused', label: t('legUnused') },
+      { shape: 'cc-od', label: t('legOd') },
+      { shape: 'cc-commit', label: t('legCommit') },
+      { shape: 'cc-be', label: t('legBreakEven') },
+      { shape: 'cc-pays', label: t('legPays') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
