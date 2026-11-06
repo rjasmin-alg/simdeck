@@ -486,6 +486,20 @@ def esc(s):
     return s.replace("\\|", "|")
 
 
+NOT_ADOPTED = ("app-dc-sim", "app-dr-estate", "50ohm-maidenhead", "50ohm-aprs-map", "50ohm-hamnet-map")
+
+
+def wave_of(cid, r):
+    """The task wave of a catalogue entry: 1 adopt (§2), 2a/2b the core, 3 the rest; None when it gets no task."""
+    if cid in NOT_ADOPTED:
+        return None
+    if r["_sec"].startswith("2"):
+        return "1"
+    if cid in CORE_GROUP:
+        return "2a" if cid in PILOTS else "2b"
+    return "3"
+
+
 def main(force=False):
     rows, clusters = load()
     by_id = {ranker.plain(r["ID"]): r for r in rows}
@@ -497,18 +511,17 @@ def main(force=False):
 
     tasks = []
     for cid, r in by_id.items():
+        wave = wave_of(cid, r)
+        if not wave:
+            continue
         sec = r["_sec"]
-        if sec.startswith("2.4") and cid in ("app-dc-sim", "app-dr-estate"):
-            continue
-        if sec.startswith("2.5") and cid in ("50ohm-maidenhead", "50ohm-aprs-map", "50ohm-hamnet-map"):
-            continue
-        if sec.startswith("2"):
-            wave, group = "1", {"2.1": "single-page-labs", "2.2": "URM book pages", "2.3": "ossimulator",
-                                "2.4": "larger apps", "2.5": "50ohm applets"}[sec]
-        elif cid in CORE_GROUP:
-            wave, group = ("2a" if cid in PILOTS else "2b"), CORE_GROUP[cid]
+        if wave == "1":
+            group = {"2.1": "single-page-labs", "2.2": "URM book pages", "2.3": "ossimulator",
+                     "2.4": "larger apps", "2.5": "50ohm applets"}[sec]
+        elif wave in ("2a", "2b"):
+            group = CORE_GROUP[cid]
         else:
-            wave, group = "3", r["_title"]
+            group = r["_title"]
         tasks.append((cid, r, wave, group))
 
     OUT.mkdir(parents=True, exist_ok=True)
