@@ -1,0 +1,502 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-depreciation: straight-line vs declining-balance depreciation down to a residual value; a licence amortises
+     the same way; selling or retiring early books the remaining book value against the proceeds as a loss or a gain.
+     Two panels on one scale, straight-line (left) and declining balance (right): each with the yearly depreciation as
+     bars, the book value at each year end as a line, the residual as a dashed level and the sale as a vertical line
+     with the proceeds (◆) and a bracket from the book value to them (loss ▼ or gain ▲); the numbers at the sale
+     beneath. Asset model: asset.js (promotable); ledger: ledger.js (copied from fin-capex-opex); page model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-depreciation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amortizacija i knjigovodstvena vrijednost · simdeck</title>
+<meta name="description" content="Linearna ili degresivna amortizacija do ostatka vrijednosti, za opremu i trajnu licencu; prodaj ili rashoduj imovinu u godini n i vidi gubitak ili dobitak.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-depreciation",
+  "title": {
+    "hr": "Amortizacija i knjigovodstvena vrijednost",
+    "en": "Depreciation and book value"
+  },
+  "concept": {
+    "hr": "Linearna ili degresivna amortizacija; rana prodaja knjiži gubitak ili dobitak",
+    "en": "Straight-line or declining balance; selling early books a loss or a gain"
+  },
+  "summary": {
+    "hr": "Postavi nabavnu vrijednost, vijek i ostatak vrijednosti, usporedi dvije metode i prodaj ili rashoduj imovinu u godini n: ostatak ide u gubitak ili dobitak.",
+    "en": "Set the cost, life and residual value, compare two methods, then sell or retire the asset in year n: the book value left becomes a loss or a gain."
+  },
+  "tags": [
+    "accounting"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "sold-early"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-depreciation"]; colours only from kit tokens. */
+[data-sim="fin-depreciation"] .dp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-depreciation"] .dp-panels { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+[data-sim="fin-depreciation"] .dp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 0;
+  padding: 0.4rem 0.6rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="fin-depreciation"] .dp-head { flex: none; padding: 0 0.35rem; }
+[data-sim="fin-depreciation"] .dp-title { margin: 0; font-size: var(--fs-lg); line-height: 1.2; }
+[data-sim="fin-depreciation"] .dp-kind { font-weight: 400; color: var(--muted); }
+[data-sim="fin-depreciation"] .dp-line { margin: 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.3; }
+[data-sim="fin-depreciation"] .dp-line b { color: var(--ink); }
+
+/* the chart: an axis column and the plot; the year labels under the plot */
+[data-sim="fin-depreciation"] .dp-chart {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  display: grid;
+  grid-template-columns: 6.6rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  column-gap: 0.3rem;
+  padding-top: 2.2rem; /* room for the sale label */
+}
+[data-sim="fin-depreciation"] .dp-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-depreciation"] .dp-tick {
+  position: absolute;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-depreciation"] .dp-plot {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: var(--line-w) solid var(--ink);
+  background: var(--bg);
+}
+[data-sim="fin-depreciation"] .dp-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.45; }
+[data-sim="fin-depreciation"] .dp-res { position: absolute; left: 0; right: 0; border-top: 0.2rem dashed var(--muted); }
+[data-sim="fin-depreciation"] .dp-bar {
+  position: absolute;
+  bottom: 0;
+  background: var(--sw);
+  border: 0.12rem solid var(--ink);
+  border-bottom: 0;
+}
+[data-sim="fin-depreciation"] .dp-bar.dp-plan { opacity: 0.25; border-style: dashed; }
+[data-sim="fin-depreciation"] .dp-barval {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  padding-bottom: 0.1rem;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+[data-sim="fin-depreciation"] .dp-barval.dp-plan { opacity: 0.45; }
+[data-sim="fin-depreciation"] .dp-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-depreciation"] .dp-svg path { fill: none; stroke: var(--sw); stroke-width: 5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-depreciation"] .dp-svg .dp-plan { stroke-width: 3; stroke-dasharray: 6 6; opacity: 0.45; }
+[data-sim="fin-depreciation"] .dp-pt {
+  position: absolute;
+  width: 0.85rem;
+  height: 0.85rem;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--sw);
+  border: 0.15rem solid var(--ink);
+}
+[data-sim="fin-depreciation"] .dp-pt.dp-plan { opacity: 0.4; }
+[data-sim="fin-depreciation"] .dp-sale { position: absolute; top: -0.3rem; bottom: 0; border-left: 0.2rem solid var(--ink); transform: translateX(-50%); }
+/* above the sale line: "sold" and the outcome, side by side (centred on the line; right-aligned at the last year) */
+[data-sim="fin-depreciation"] .dp-saletag {
+  position: absolute;
+  top: -2.05rem;
+  display: flex;
+  gap: 0.25rem;
+  transform: translateX(-50%);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+[data-sim="fin-depreciation"] .dp-saletag[data-end] { transform: translateX(calc(-100% + 0.1rem)); }
+[data-sim="fin-depreciation"] .dp-salelabel { padding: 0 0.35rem; border-radius: var(--radius-sm); background: var(--ink); color: var(--bg); }
+[data-sim="fin-depreciation"] .dp-proceeds {
+  position: absolute;
+  width: 1.1rem;
+  height: 1.1rem;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--bg);
+  border: 0.22rem solid var(--ink);
+}
+/* the bracket from the book value to the proceeds: loss hatched, gain outlined dotted */
+[data-sim="fin-depreciation"] .dp-gap { position: absolute; width: 1.3rem; transform: translateX(0.5rem); }
+[data-sim="fin-depreciation"] .dp-gap[data-side="left"] { transform: translateX(calc(-100% - 0.5rem)); }
+[data-sim="fin-depreciation"] .dp-gap[data-o="loss"] {
+  border: 0.18rem solid var(--danger);
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--danger) 55%, transparent) 0 0.25rem, transparent 0.25rem 0.5rem);
+}
+[data-sim="fin-depreciation"] .dp-gap[data-o="gain"] { border: 0.18rem dotted var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+[data-sim="fin-depreciation"] .dp-gaplabel {
+  padding: 0 0.3rem;
+  border: 0.12rem solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="fin-depreciation"] .dp-gaplabel[data-o="loss"] { border-color: var(--danger); }
+[data-sim="fin-depreciation"] .dp-gaplabel[data-o="gain"] { border-color: var(--ok); }
+[data-sim="fin-depreciation"] .dp-gaplabel[data-o="loss"] { color: var(--danger); }
+[data-sim="fin-depreciation"] .dp-gaplabel[data-o="gain"] { color: var(--ok); }
+[data-sim="fin-depreciation"] .dp-years { position: relative; grid-column: 2; grid-row: 2; height: 1.5rem; }
+[data-sim="fin-depreciation"] .dp-year {
+  position: absolute;
+  top: 0.1rem;
+  transform: translateX(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-sim="fin-depreciation"] .dp-yshort { display: none; }
+
+/* the numbers at the sale */
+[data-sim="fin-depreciation"] .dp-rows { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.5rem; row-gap: 0.3rem; margin: 0; align-items: center; }
+[data-sim="fin-depreciation"] .dp-rows dt, [data-sim="fin-depreciation"] .dp-rows dd { padding: 0 0.3rem; border-radius: var(--radius-sm); line-height: 1.25; }
+[data-sim="fin-depreciation"] .dp-rows dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+[data-sim="fin-depreciation"] .dp-rows .sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-depreciation"] .dp-rows [data-k="total"] { padding-top: 0.15rem; border-top: 1px solid var(--line); border-radius: 0; }
+
+[data-sim="fin-depreciation"] .dp-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.8rem; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-depreciation"] .dp-foot p { flex: 1 1 20rem; margin: 0; }
+/* the kind switch on the stage: equipment or licence (words only, SPEC.md rule 7); its hidden panel control stays
+   hidden (kit.css's .sd-ctl display wins over [hidden]; fin-tco does the same) */
+[data-sim="fin-depreciation"] .sd-ctl[hidden] { display: none; }
+[data-sim="fin-depreciation"] .dp-kindsw { flex: none; display: flex; align-items: center; gap: 0.3rem; color: var(--ink); }
+[data-sim="fin-depreciation"] .dp-kindsw button {
+  min-height: var(--hit);
+  padding: 0 0.7rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+[data-sim="fin-depreciation"] .dp-kindsw button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+[data-sim="fin-depreciation"] .dp-kindsw button[aria-pressed="true"]::before { content: '✓ '; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-bar"] { background: var(--sw); border: 0.12rem solid var(--ink); }
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-book"] { height: 0; border: 0; border-radius: 0; border-top: 0.3rem solid var(--sw); background: transparent; }
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-res"] { height: 0; border: 0; border-radius: 0; border-top: 0.2rem dashed var(--muted); background: transparent; }
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-sale"] { width: 0; height: 1.1em; border: 0; border-radius: 0; border-left: 0.2rem solid var(--ink); background: transparent; }
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-loss"] {
+  border: 0.18rem solid var(--danger);
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--danger) 55%, transparent) 0 0.25rem, transparent 0.25rem 0.5rem);
+}
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-gain"] { border: 0.18rem dotted var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+[data-sim="fin-depreciation"] .sd-swatch[data-shape="dp-plan"] { background: var(--sw); border: 0.12rem dashed var(--ink); opacity: 0.35; }
+
+/* Phone and portrait: the panels stack, the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-depreciation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-depreciation"] .dp { height: auto; padding: 0.4rem; }
+  [data-sim="fin-depreciation"] .dp-panels { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-depreciation"] .dp-chart { flex: none; height: 15rem; grid-template-columns: 5.4rem minmax(0, 1fr); }
+  [data-sim="fin-depreciation"] .dp-barval { display: none; }
+  [data-sim="fin-depreciation"] .dp-ylong { display: none; }
+  [data-sim="fin-depreciation"] .dp-yshort { display: inline; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Amortizacija i knjigovodstvena vrijednost</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="asset.js"></script>
+<script src="ledger.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var As = window.SimdeckModels.asset;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ── numbers and words in the page's language ──
+
+  /** A whole number with thousands grouped (30 000 / 30,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '\u00a0' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 6). Minus is U+2212. */
+  function money(x) {
+    var r = As.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  function pct(x) {
+    var v = Math.round(x * 1000) / 10;
+    var s = String(v);
+    return (Simdeck.lang === 'hr' ? s.replace('.', ',') + '\u00a0%' : s + '%');
+  }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** depreciation (equipment) or amortisation (licence), lower case and capitalised. */
+  function words(p) {
+    var lic = p.kind === 'licence';
+    return { dep: t(lic ? 'wAmort' : 'wDep'), Dep: t(lic ? 'wAmortCap' : 'wDepCap') };
+  }
+
+  // ── the chart ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step at or above x. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  function chart(s, m, dom) {
+    var p = s.p, n = p.sell, Lf = p.life, d = s[m];
+    var pctY = function (v) { return (100 * (1 - v / dom.top)) + '%'; };
+    var pctX = function (k) { return (100 * k / Lf) + '%'; };
+    var X = function (k) { return 1000 * k / Lf; };
+    var Y = function (v) { return 1000 * (1 - v / dom.top); };
+
+    var ticks = [], grid = [];
+    for (var v = 0; v <= dom.top + 1e-6; v += dom.step) {
+      ticks.push(h('span', { class: 'dp-tick', translate: 'no', style: { top: pctY(v) } }, money(v)));
+      if (v > 0) grid.push(h('div', { class: 'dp-gl', style: { top: pctY(v) } }));
+    }
+
+    // the yearly bars, their amounts, and the year labels
+    var bars = [], years = [];
+    for (var k = 1; k <= Lf; k++) {
+      var plan = k > n ? ' dp-plan' : '';
+      var hgt = (100 * d.dep[k] / dom.top) + '%';
+      bars.push(h('div', { class: 'dp-bar' + plan, dataset: { c: '1' }, style: { left: (100 * (k - 0.78) / Lf) + '%', width: (100 * 0.56 / Lf) + '%', height: hgt } }));
+      bars.push(h('span', { class: 'dp-barval' + plan, translate: 'no', style: { left: pctX(k - 0.5), top: pctY(d.dep[k]) } }, group(d.dep[k])));   // € is on the axis
+      years.push(h('span', { class: 'dp-year', style: { left: pctX(k - 0.5) } },
+        h('span', { class: 'dp-ylong' }, t('yearN', { n: k })), h('span', { class: 'dp-yshort', translate: 'no' }, String(k))));
+    }
+
+    // the book value: strong up to the sale, faded (the plan) after
+    var pts = function (from, to) {
+      var s2 = '';
+      for (var k2 = from; k2 <= to; k2++) s2 += (k2 === from ? 'M' : 'L') + X(k2).toFixed(2) + ' ' + Y(d.book[k2]).toFixed(2);
+      return s2;
+    };
+    var g = svg('svg', { class: 'dp-svg', viewBox: '0 0 1000 1000', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    if (n < Lf) g.appendChild(svg('path', { class: 'dp-plan', 'data-c': '3', d: pts(n, Lf) }));
+    g.appendChild(svg('path', { 'data-c': '3', d: pts(0, n) }));
+    var dots = [];
+    for (var j = 0; j <= Lf; j++) {
+      dots.push(h('span', { class: 'dp-pt' + (j > n ? ' dp-plan' : ''), dataset: { c: '3' }, style: { left: pctX(j), top: pctY(d.book[j]) } }));
+    }
+
+    // the sale: line, label, proceeds, and the bracket from the book value to the proceeds
+    var sale = d.sale, x = pctX(n);
+    var leftSide = n > Lf / 2;
+    var labelKey = sale.outcome === 'loss' ? 'chLoss' : sale.outcome === 'gain' ? 'chGain' : 'chNone';
+    var marks = [
+      h('div', { class: 'dp-sale', style: { left: x } }),
+      h('div', { class: 'dp-saletag', 'data-end': n === Lf ? '' : null, style: { left: x } },
+        h('span', { class: 'dp-salelabel' }, t(p.proceeds > 0 ? 'chSold' : 'chScrapped')),
+        h('span', { class: 'dp-gaplabel', dataset: { o: sale.outcome } }, t(labelKey, { x: money(Math.abs(sale.gain)) }))),
+      h('span', { class: 'dp-proceeds', style: { left: x, top: pctY(sale.proceeds) } })
+    ];
+    var hi = Math.max(sale.book, sale.proceeds), lo = Math.min(sale.book, sale.proceeds);
+    if (sale.outcome !== 'none') {
+      marks.push(h('div', { class: 'dp-gap', dataset: { o: sale.outcome, side: leftSide ? 'left' : 'right' }, style: { left: x, top: pctY(hi), height: (100 * (hi - lo) / dom.top) + '%' } }));
+    }
+
+    return h('div', { class: 'dp-chart' },
+      h('div', { class: 'dp-axis' }, ticks),
+      h('div', { class: 'dp-plot' }, grid,
+        h('div', { class: 'dp-res', style: { top: pctY(p.residual) } }),
+        bars, g, dots, marks),
+      h('div', { class: 'dp-years' }, years));
+  }
+
+  // ── one panel ──
+
+  function rows(s, m, chg) {
+    var p = s.p, sale = s[m].sale, w = words(p);
+    var row = function (k, label, value, changed) {
+      var cls = changed ? 'sd-changed' : null;
+      return [h('dt', { class: cls, dataset: { k: k } }, label), h('dd', { class: cls, translate: 'no', dataset: { k: k } }, value)];
+    };
+    var glKey = sale.outcome === 'gain' ? 'rowGain' : sale.outcome === 'none' ? 'rowNone' : p.proceeds > 0 ? 'rowLoss' : 'rowWriteOff';
+    var glVal = (sale.outcome === 'gain' ? '▲ ' : sale.outcome === 'loss' ? '▼ ' : '') + money(Math.abs(sale.gain));
+    return h('dl', { class: 'dp-rows' },
+      row('dep', p.sell === 1 ? t('rowDep1', w) : t('rowDepN', Object.assign({ n: p.sell }, w)), money(sale.depSoFar)),
+      row('book', t('rowBook', { n: p.sell }), money(sale.book)),
+      row('proceeds', t('rowProceeds'), money(sale.proceeds)),
+      row('gl', t(glKey), glVal, chg.indexOf(m) >= 0),
+      row('total', t('rowTotal'), money(sale.total)));
+  }
+
+  function panel(s, m, dom, chg) {
+    var p = s.p, head;
+    var kind = h('span', { class: 'dp-kind' }, '· ', words(p).dep);
+    if (m === 'sl') {
+      head = h('div', { class: 'dp-head' },
+        h('h2', { class: 'dp-title' }, t('slTitle'), ' ', kind),
+        h('p', { class: 'dp-line' }, t.parts('slLine', {
+          x: b((Number.isInteger(s.perYearSl) ? '' : '≈\u00a0') + money(s.perYearSl)), cost: data(money(p.cost)), res: data(money(p.residual)), life: data(p.life)
+        })));
+    } else {
+      var sw = s.db.switchYear;
+      head = h('div', { class: 'dp-head' },
+        h('h2', { class: 'dp-title' }, t('dbTitle'), ' ', kind),
+        h('p', { class: 'dp-line' }, sw ? t.parts('dbLineSw', { pct: b(pct(Math.min(1, s.rate))), k: data(sw) })
+          : t.parts('dbLine', { pct: b(pct(Math.min(1, s.rate))) })));
+    }
+    return h('section', { class: 'dp-panel', dataset: { m: m } }, head, chart(s, m, dom), rows(s, m, chg));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    var step = niceStep(s.p.cost / 4);
+    var dom = { step: step, top: Math.max(step, Math.ceil(s.p.cost / step) * step) };   // one scale for both panels
+    var kindBtn = function (k, key) {
+      return h('button', { type: 'button', 'aria-pressed': String(s.p.kind === k), onclick: function () { sim.set({ kind: k }); } }, t(key));
+    };
+    c.stage.replaceChildren(h('div', { class: 'dp' },
+      h('div', { class: 'dp-panels' }, panel(s, 'sl', dom, chg), panel(s, 'db', dom, chg)),
+      h('div', { class: 'dp-foot' },
+        h('div', { class: 'dp-kindsw', role: 'group', 'aria-label': t('kind') },
+          h('span', null, t('kind')), kindBtn('equipment', 'kindEquipment'), kindBtn('licence', 'kindLicence')),
+        h('p', null, t('illustrative'), s.p.kind === 'licence' ? ' ' + t('footLicence') : ''))));
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var out = t.parts(k.lead, { n: data(p.sell), life: data(t.n('nYears', p.life)), p: b(money(p.proceeds)) });
+    k.out.forEach(function (key) {
+      var sale = key.indexOf('db') === 0 ? s.db.sale : s.sl.sale;
+      out.push(' ');
+      out = out.concat(t.parts(key, { b: b(money(sale.book)), x: b(money(Math.abs(sale.gain))) }));
+    });
+    out.push(' ');
+    out = out.concat(t.parts(k.note, { t: b(money(s.sl.sale.total)), a: b(money(s.db.dep[1])), b: b(money(s.sl.dep[1])) }));
+    return out;
+  }
+
+  var labels = {
+    'server': 'pServer', 'sold-early': 'pSoldEarly', 'scrapped': 'pScrapped', 'licence': 'pLicence'
+  };
+
+  var never = function () { return false; };
+  // The kind is switched on the stage (the panel has no room); this hidden param keeps it in the URL and the presets.
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'sell', type: 'range', label: t('sell'), min: 1, max: function (p) { return p.life; }, step: 1,
+        format: function (v) { return t('sellFmt', { n: v }); } },
+      { key: 'proceeds', type: 'range', label: t('proceeds'), hint: t('proceedsHint'), min: 0, max: function (p) { return p.cost; }, step: L.STEP, format: money },
+      { key: 'cost', type: 'range', label: t('cost'), min: L.COST_MIN, max: L.COST_MAX, step: L.STEP, format: money },
+      { key: 'life', type: 'range', label: t('life'), min: L.LIFE_MIN, max: L.LIFE_MAX, step: 1, format: function (v) { return t.n('nYears', v); } },
+      { key: 'residual', type: 'range', label: t('residual'), min: 0, max: function (p) { return L.residualMax(p.cost); }, step: L.STEP, format: money },
+      { key: 'kind', type: 'choice', label: t('kind'), options: [['equipment', t('kindEquipment')], ['licence', t('kindLicence')]], visible: never }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'dp-bar', c: 1, label: t('legDep') },
+      { shape: 'dp-book', c: 3, label: t('legBook') },
+      { shape: 'dp-res', label: t('legResidual') },
+      { shape: 'dp-sale', label: t('legSale') },
+      { shape: 'dp-loss', label: t('legLoss') },
+      { shape: 'dp-gain', label: t('legGain') },
+      { shape: 'dp-plan', c: 1, label: t('legPlan') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
