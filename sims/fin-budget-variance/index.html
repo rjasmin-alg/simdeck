@@ -1,0 +1,502 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-budget-variance: a budget phased by month against the actuals booked; the variance splits into volume, price
+     and timing, and the run-rate forecast carries the latest month to year end. Each month is seen two ways, what the
+     budget said and what the report booked: twelve month columns with a stacked bar of the booked actuals (cloud,
+     licences), the budget mark across each column, a dashed box where service was used but not yet invoiced, and
+     hatched run-rate bars for the months still to come. Beneath: the variance to date by part, and the year-end
+     forecast against the year's budget. Each step books one month. Ledger: ledger.js (promotable); model: sim.js;
+     rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-budget-variance">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan i ostvarenje: čitanje odstupanja · simdeck</title>
+<meta name="description" content="Godina troškova oblaka i licenci prema mjesečnom planu: veća potrošnja, viša cijena i račun koji kasni, svaki dio odstupanja i prognoza za kraj godine.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-budget-variance",
+  "title": {
+    "hr": "Plan i ostvarenje: čitanje odstupanja",
+    "en": "Budget vs actuals: reading a variance"
+  },
+  "concept": {
+    "hr": "Odstupanje čine količina, cijena i vrijeme; račun koji kasni nije ušteda",
+    "en": "A variance is volume, price and timing; a late invoice is not a saving"
+  },
+  "summary": {
+    "hr": "Godina troškova oblaka i licenci prema mjesečnom planu: veća potrošnja, viša cijena i račun koji kasni, svaki dio odstupanja i prognoza za kraj godine.",
+    "en": "A year of cloud and licence costs against a monthly budget: more use, a price rise and a late invoice, each part of the variance and the year-end forecast."
+  },
+  "tags": [
+    "budgeting"
+  ],
+  "class": "stepper",
+  "steps": 12,
+  "entries": [
+    {
+      "preset": "use-it"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-budget-variance"]; colours only from kit tokens. */
+[data-sim="fin-budget-variance"] .bv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-budget-variance"] .bv-h { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+
+/* ── the month chart: axis column, twelve months; rows: plot, month name, the month's variance ── */
+[data-sim="fin-budget-variance"] .bv-chart {
+  flex: 1 1 auto;
+  min-height: 9rem;
+  display: grid;
+  grid-template-columns: 5.5rem repeat(12, minmax(0, 1fr));
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+[data-sim="fin-budget-variance"] .bv-chart > .bv-h { grid-column: 1 / -1; grid-row: 1; margin-bottom: 0.8rem; }
+[data-sim="fin-budget-variance"] .bv-axis { grid-column: 1; grid-row: 2; position: relative; }
+[data-sim="fin-budget-variance"] .bv-tick {
+  position: absolute;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-budget-variance"] .bv-plot {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  position: relative;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: var(--line-w) solid var(--ink);
+}
+[data-sim="fin-budget-variance"] .bv-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.55; }
+[data-sim="fin-budget-variance"] .bv-col { grid-row: 2; position: relative; margin: 0 12%; }
+[data-sim="fin-budget-variance"] .bv-colbg { grid-row: 2 / span 3; }
+[data-sim="fin-budget-variance"] .bv-colbg[data-when="now"] { background: color-mix(in srgb, var(--hl) 45%, transparent); }
+[data-sim="fin-budget-variance"] .bv-seg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--sw);
+  border-top: 0.15rem solid var(--bg);
+}
+[data-sim="fin-budget-variance"] .bv-seg[data-k="lic"] {
+  background: repeating-linear-gradient(0deg, var(--sw) 0 0.35rem, color-mix(in srgb, var(--sw) 70%, var(--bg)) 0.35rem 0.5rem);
+}
+[data-sim="fin-budget-variance"] .bv-acc {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 0.2rem dashed var(--ink);
+  background: repeating-linear-gradient(135deg, var(--sw) 0 0.25rem, var(--bg) 0.25rem 0.55rem);
+}
+[data-sim="fin-budget-variance"] .bv-miss {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  border: 0.2rem dashed var(--ink);
+  color: var(--ink);
+  font-weight: 700;
+}
+[data-sim="fin-budget-variance"] .bv-fc {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 0.15rem solid var(--line);
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--line) 55%, transparent) 0 0.15rem, transparent 0.15rem 0.6rem);
+}
+[data-sim="fin-budget-variance"] .bv-bud {
+  position: absolute;
+  left: -12%;
+  right: -12%;
+  height: 0;
+  border-top: 0.3rem solid var(--ink);
+  transform: translateY(50%);
+}
+[data-sim="fin-budget-variance"] .bv-bud::before, [data-sim="fin-budget-variance"] .bv-bud::after {
+  content: '';
+  position: absolute;
+  top: -0.65rem;
+  height: 1rem;
+  border-left: 0.2rem solid var(--ink);
+}
+[data-sim="fin-budget-variance"] .bv-bud::before { left: 0; }
+[data-sim="fin-budget-variance"] .bv-bud::after { right: 0; }
+[data-sim="fin-budget-variance"] .bv-mname, [data-sim="fin-budget-variance"] .bv-mvar {
+  position: relative;
+  text-align: center;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-budget-variance"] .bv-mname { grid-row: 3; font-weight: 700; padding-top: 0.15rem; }
+[data-sim="fin-budget-variance"] .bv-mvar { grid-row: 4; color: var(--muted); }
+[data-sim="fin-budget-variance"] .bv-mvar[data-s="over"], [data-sim="fin-budget-variance"] .bv-mvar[data-s="under"] { color: var(--ink); font-weight: 700; }
+[data-sim="fin-budget-variance"] .bv-mnum { display: none; }
+[data-sim="fin-budget-variance"] .bv-rowlab { grid-column: 1; text-align: right; padding-right: 0.4rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+
+/* ── beneath: the variance to date and the forecast ── */
+[data-sim="fin-budget-variance"] .bv-low {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1.6rem;
+}
+[data-sim="fin-budget-variance"] .bv-box { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+[data-sim="fin-budget-variance"] .bv-from { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-budget-variance"] .bv-from b { color: var(--ink); font-variant-numeric: tabular-nums; }
+[data-sim="fin-budget-variance"] .bv-parts {
+  display: grid;
+  grid-template-columns: max-content minmax(6rem, 1fr) 7.5rem;
+  column-gap: 0.8rem;
+  row-gap: 0.15rem;
+  align-items: center;
+}
+[data-sim="fin-budget-variance"] .bv-pname { line-height: 1.15; }
+[data-sim="fin-budget-variance"] .bv-pname b { display: inline; }
+[data-sim="fin-budget-variance"] .bv-pname span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-budget-variance"] .bv-track { position: relative; height: 1.4rem; }
+[data-sim="fin-budget-variance"] .bv-track::before { content: ''; position: absolute; left: 50%; top: -0.2rem; bottom: -0.2rem; border-left: 0.15rem solid var(--ink); }
+[data-sim="fin-budget-variance"] .bv-pbar { position: absolute; top: 0.15rem; bottom: 0.15rem; background: var(--sw); border: 0.12rem solid var(--ink); }
+[data-sim="fin-budget-variance"] .bv-pbar[data-s="under"] { background: repeating-linear-gradient(135deg, var(--sw) 0 0.25rem, var(--bg) 0.25rem 0.5rem); }
+[data-sim="fin-budget-variance"] .bv-pval { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="fin-budget-variance"] .bv-total { border-top: var(--line-w) solid var(--line); padding-top: 0.15rem; }
+[data-sim="fin-budget-variance"] .bv-ends { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="fin-budget-variance"] .bv-fcrows {
+  display: grid;
+  grid-template-columns: max-content minmax(4rem, 1fr) max-content;
+  column-gap: 0.8rem;
+  row-gap: 0.3rem;
+  align-items: center;
+}
+[data-sim="fin-budget-variance"] .bv-ftrack { position: relative; height: 1.6rem; }
+[data-sim="fin-budget-variance"] .bv-fseg { position: absolute; top: 0; bottom: 0; left: 0; border: 0.12rem solid var(--ink); }
+[data-sim="fin-budget-variance"] .bv-fseg[data-k="budget"] { background: transparent; border: 0.25rem solid var(--ink); }
+[data-sim="fin-budget-variance"] .bv-fseg[data-k="done"] { background: var(--c8); }
+[data-sim="fin-budget-variance"] .bv-fseg[data-k="rest"] {
+  border-color: var(--line);
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--line) 55%, transparent) 0 0.15rem, transparent 0.15rem 0.6rem);
+}
+[data-sim="fin-budget-variance"] .bv-fline { position: absolute; top: -0.3rem; bottom: -0.3rem; border-left: 0.2rem dashed var(--ink); }
+[data-sim="fin-budget-variance"] .bv-fval { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="fin-budget-variance"] .bv-rule { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+[data-sim="fin-budget-variance"] .bv-verdict { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+[data-sim="fin-budget-variance"] .bv-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-budget-variance"] .sd-swatch[data-shape="bv-lic"] { background: repeating-linear-gradient(0deg, var(--sw) 0 0.3em, color-mix(in srgb, var(--sw) 70%, var(--bg)) 0.3em 0.45em); }
+[data-sim="fin-budget-variance"] .sd-swatch[data-shape="bv-bud"] { width: 1.6em; height: 0; border: 0; border-radius: 0; border-top: 0.3rem solid var(--ink); background: transparent; }
+[data-sim="fin-budget-variance"] .sd-swatch[data-shape="bv-miss"] { background: transparent; border: 0.15rem dashed var(--ink); border-radius: 0; }
+[data-sim="fin-budget-variance"] .sd-swatch[data-shape="bv-acc"] { border: 0.15rem dashed var(--ink); border-radius: 0; background: repeating-linear-gradient(135deg, var(--sw) 0 0.2em, var(--bg) 0.2em 0.45em); }
+[data-sim="fin-budget-variance"] .sd-swatch[data-shape="bv-fc"] { border: 0.15rem solid var(--line); border-radius: 0; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--line) 55%, transparent) 0 0.12em, transparent 0.12em 0.45em); }
+
+/* Phone and portrait: months by number, no axis or month variances; the two boxes stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-budget-variance"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-budget-variance"] .bv { height: auto; padding: 0.4rem; }
+  [data-sim="fin-budget-variance"] .bv-chart { grid-template-columns: 0 repeat(12, minmax(0, 1fr)); grid-template-rows: auto 12rem auto; }
+  [data-sim="fin-budget-variance"] :is(.bv-axis, .bv-mvar, .bv-rowlab, .bv-mshort) { display: none; }
+  [data-sim="fin-budget-variance"] .bv-mnum { display: inline; }
+  [data-sim="fin-budget-variance"] .bv-low { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
+  [data-sim="fin-budget-variance"] .bv-parts { grid-template-columns: max-content minmax(3rem, 1fr) max-content; }
+  [data-sim="fin-budget-variance"] .bv-pname span { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Plan i ostvarenje: čitanje odstupanja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="ledger.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var Lg = window.SimdeckModels.ledger;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var Y = L.YEAR;
+
+  // ── numbers and months in the page's language ──
+
+  /** A whole number with thousands grouped (12 000 / 12,000), the Croatian space non-breaking. */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '\u00a0' : ',');
+  }
+  /** Euros, rounded to the euro. Minus is U+2212. */
+  function money(x) {
+    var r = Lg.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  /** A variance with its sign: +€1,500, −€11,500, €0. */
+  function signed(x) {
+    var r = Lg.roundMoney(x);
+    return (r > 0 ? '+' : r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  function short(x) {
+    var r = Lg.roundMoney(x);
+    return (r > 0 ? '+' : r < 0 ? '−' : '') + group(Math.abs(r));
+  }
+  function sideOf(x) { return x > 0 ? 'over' : x < 0 ? 'under' : 'on'; }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  var SHORT = t('monthsShort').split('|'), LONG = t('monthsLong').split('|'), LOC = t('monthsLoc').split('|');
+  function cal(m, fy) { return L.calMonth(m, fy) - 1; }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step at or above x. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+
+  /** Scales that stay put while stepping: from the whole year under these params. */
+  var scaleKey = null, scale = null;
+  function scales(params) {
+    var key = JSON.stringify(L.normalise(params));
+    if (key === scaleKey) return scale;
+    var all = [];
+    for (var n = 0; n <= Y; n++) all.push(L.compute(n, params));
+    var s12 = all[Y];
+    var monthMax = 0;
+    for (var m = 1; m <= Y; m++) monthMax = Math.max(monthMax, s12.month.booked[m], s12.month.expense[m], s12.month.budget[m]);
+    var step = niceStep(monthMax / 4);
+    var partMax = 1000, fcMax = s12.budgetYear;
+    all.forEach(function (s) {
+      partMax = Math.max(partMax, Math.abs(s.ytd.vol), Math.abs(s.ytd.price), Math.abs(s.ytd.timing), Math.abs(s.ytd.variance));
+      fcMax = Math.max(fcMax, s.forecast);
+    });
+    scaleKey = key;
+    scale = { top: Math.max(step, Math.ceil(monthMax / step) * step), step: step, part: partMax, fc: fcMax * 1.04 };
+    return scale;
+  }
+
+  function pct(v, top) { return (100 * v / top) + '%'; }
+  function when(m, n) { return m < n ? 'past' : m === n ? 'now' : 'future'; }
+  function place(el, c, r) { el.style.gridColumn = String(c); if (r) el.style.gridRow = String(r); return el; }
+
+  // ── the month chart ──
+
+  function chart(s, sc) {
+    var top = sc.top, n = s.n;
+    var ticks = [], grid = [];
+    for (var v = 0; v <= top + 1e-6; v += sc.step) {
+      ticks.push(h('span', { class: 'bv-tick', translate: 'no', style: { top: (100 - 100 * v / top) + '%' } }, money(v)));
+      if (v > 0) grid.push(h('div', { class: 'bv-gl', style: { bottom: pct(v, top) } }));
+    }
+    var out = [
+      h('p', { class: 'bv-h' }, t('chartTitle')),
+      h('div', { class: 'bv-axis', 'aria-hidden': 'true' }, ticks),
+      h('div', { class: 'bv-plot' }, grid)
+    ];
+    var cloud = s.lines[0], lic = s.lines[1];
+    for (var m = 1; m <= Y; m++) {
+      var w = when(m, n), c = m + 1, kids = [];
+      out.push(place(h('div', { class: 'bv-colbg', dataset: { when: w } }), c));
+      if (m <= n) {
+        var cb = cloud.booked[m], acc = Math.max(0, cloud.accrual[m]);
+        kids.push(h('div', { class: 'bv-seg', dataset: { k: 'cloud', c: '1' }, style: { bottom: '0', height: pct(cb, top) } }));
+        if (acc > 0) kids.push(h('div', { class: 'bv-acc', dataset: { c: '1' }, style: { bottom: pct(cb - acc, top), height: pct(acc, top) } }));
+        kids.push(h('div', { class: 'bv-seg', dataset: { k: 'lic', c: '2' }, style: { bottom: pct(cb, top), height: pct(lic.booked[m], top) } }));
+        var booked = s.month.booked[m], used = s.month.expense[m];
+        if (used > booked) kids.push(h('div', { class: 'bv-miss', style: { bottom: pct(booked, top), height: pct(used - booked, top) } }, '?'));
+      } else if (n > 0) {
+        kids.push(h('div', { class: 'bv-fc', style: { height: pct(s.runRate, top) } }));
+      }
+      kids.push(h('div', { class: 'bv-bud', style: { bottom: pct(s.month.budget[m], top) } }));
+      out.push(place(h('div', { class: 'bv-col' }, kids), c));
+      out.push(place(h('div', { class: 'bv-mname' },
+        h('span', { class: 'bv-mshort' }, SHORT[cal(m, s.fy)]), h('span', { class: 'bv-mnum', translate: 'no' }, String(m))), c));
+      var mv = m <= n ? s.month.booked[m] - s.month.budget[m] : null;
+      out.push(place(h('div', { class: 'bv-mvar', translate: 'no', dataset: { s: mv === null ? 'none' : sideOf(mv) } },
+        mv === null ? '' : short(mv)), c));
+    }
+    return h('div', { class: 'bv-chart' }, out);
+  }
+
+  // ── the variance to date ──
+
+  function partRow(name, sub, value, c, max, extra) {
+    var w = 50 * Math.min(1, Math.abs(value) / max);
+    var side = sideOf(value);
+    var bar = value === 0 ? null : h('span', { class: 'bv-pbar', dataset: { c: c, s: side },
+      style: side === 'over' ? { left: '50%', width: w + '%' } : { right: '50%', width: w + '%' } });
+    var cls = extra ? ' ' + extra : '';
+    return [
+      h('div', { class: 'bv-pname' + cls }, h('b', null, name), sub ? [' ', h('span', null, sub)] : null),
+      h('div', { class: 'bv-track' + cls, 'aria-hidden': 'true' }, bar),
+      h('div', { class: 'bv-pval' + cls, translate: 'no' }, signed(value))
+    ];
+  }
+
+  function bridge(s, sc) {
+    var d = s.ytd;
+    return h('section', { class: 'bv-box' },
+      h('p', { class: 'bv-h' }, t('bridgeTitle')),
+      h('p', { class: 'bv-from' }, t.parts('fromTo', { bud: b(money(d.budget)), act: b(money(d.booked)) })),
+      h('div', { class: 'bv-parts' },
+        partRow(t('bVol'), t('bVolSub'), d.vol, '3', sc.part),
+        partRow(t('bPrice'), t('bPriceSub'), d.price, '4', sc.part),
+        partRow(t('bTiming'), t('bTimingSub'), d.timing, '6', sc.part),
+        partRow(t('bTotal'), null, d.variance, '8', sc.part, 'bv-total'),
+        h('span'), h('div', { class: 'bv-ends' }, h('span', null, '◀ ' + t('wUnder')), h('span', null, t('wOver') + ' ▶')), h('span')));
+  }
+
+  // ── the forecast ──
+
+  function forecast(s, sc) {
+    var max = sc.fc, n = s.n;
+    var budgetLine = h('span', { class: 'bv-fline', style: { left: pct(s.budgetYear, max) } });
+    var fcKids = [];
+    if (n === 0) fcKids.push(h('span', { class: 'bv-fseg', dataset: { k: 'rest' }, style: { width: pct(s.forecast, max) } }));
+    else {
+      fcKids.push(h('span', { class: 'bv-fseg', dataset: { k: 'rest' }, style: { width: pct(s.forecast, max) } }));
+      fcKids.push(h('span', { class: 'bv-fseg', dataset: { k: 'done' }, style: { width: pct(s.ytd.booked, max) } }));
+    }
+    fcKids.push(budgetLine);
+    var rule = n === 0 ? t('fcNone') : n === Y ? t('fcFinal')
+      : t.parts('fcRule', { done: money(s.ytd.booked), rate: money(s.runRate), k: t.n('nMonths', s.left) });
+    var side = sideOf(s.fcVariance);
+    return h('section', { class: 'bv-box' },
+      h('p', { class: 'bv-h' }, t('fcTitle')),
+      h('div', { class: 'bv-fcrows' },
+        h('span', null, t('fcBudget')),
+        h('div', { class: 'bv-ftrack', 'aria-hidden': 'true' }, h('span', { class: 'bv-fseg', dataset: { k: 'budget' }, style: { width: pct(s.budgetYear, max) } })),
+        h('span', { class: 'bv-fval', translate: 'no' }, money(s.budgetYear)),
+        h('span', null, t('fcForecast')),
+        h('div', { class: 'bv-ftrack', 'aria-hidden': 'true' }, fcKids),
+        h('span', { class: 'bv-fval', translate: 'no' }, money(s.forecast))),
+      h('p', { class: 'bv-rule' }, rule),
+      h('p', { class: 'bv-verdict' }, side === 'on' ? t('wOn') : [signed(s.fcVariance), ' ', t(side === 'over' ? 'wOver' : 'wUnder')]));
+  }
+
+  function render(c) {
+    var s = c.state, sc = scales(c.params);
+    c.stage.replaceChildren(h('div', { class: 'bv' },
+      chart(s, sc),
+      h('div', { class: 'bv-low' }, bridge(s, sc), forecast(s, sc)),
+      h('p', { class: 'bv-foot' }, t('illustrative'))));
+  }
+
+  // ── caption ──
+
+  function caption(c) {
+    var s = c.state, k = L.captionKey(s);
+    var cloud = s.lines[0], lic = s.lines[1], n = s.n;
+    var x = 0;
+    if (k.lead === 'cVolume') x = L.VOLUME.add * cloud.budgetPrice;
+    else if (k.lead === 'cPrice') x = (L.PRICE.to - lic.budgetPrice) * lic.qty[L.PRICE.from];
+    else if (n === Y) x = Math.abs(s.ytd.variance);
+    else x = Math.abs(s.now.variance);
+    var vars = {
+      month: h('b', null, n > 0 ? cap(LONG[cal(n, s.fy)]) : ''),
+      x: b(money(x)),
+      d: b(money(Math.abs(s.ytd.variance))),
+      qty: b(group(cloud.qty[L.VOLUME.from])),
+      price: b(money(L.PRICE.to)),
+      bp: b(money(lic.budgetPrice)),
+      fc: b(money(s.forecast)),
+      miss: b(money(cloud.expense[L.LATE.month])),
+      rate: b(money(s.runRate)),
+      s: b(money(s.spent)),
+      m10: LOC[cal(L.SPEND.looked, s.fy)],
+      act: b(money(s.ytd.booked)),
+      bud: b(money(s.ytd.budget)),
+      vol: b(signed(s.ytd.vol)),
+      prc: b(signed(s.ytd.price)),
+      tim: b(signed(s.ytd.timing)),
+      mb: b(money(s.month.budget[1])),
+      yb: b(money(s.budgetYear))
+    };
+    var out = t.parts(k.lead, vars);
+    if (k.gap) out.push(' ', t.parts(k.gap, vars));
+    return out;
+  }
+
+  var labels = { all: 'prAll', real: 'prReal', late: 'prLate', 'use-it': 'prUseIt', accrued: 'prAccrued' };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: [
+      { key: 'volume', type: 'toggle', label: t('pVolume') },
+      { key: 'price', type: 'toggle', label: t('pPrice') },
+      { key: 'late', type: 'toggle', label: t('pLate') },
+      { key: 'accrue', type: 'toggle', label: t('pAccrue') },
+      { key: 'spend', type: 'toggle', label: t('pSpend') },
+      { key: 'fy', type: 'select', label: t('fy'),
+        options: LONG.map(function (name, i) { return [i + 1, cap(name)]; }) }
+    ],
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params, step: x.step };
+    }),
+    legend: [
+      { c: 1, label: t('legCloud') },
+      { shape: 'bv-lic', c: 2, label: t('legLic') },
+      { shape: 'bv-bud', label: t('legBudget') },
+      { shape: 'bv-miss', label: t('legMissing') },
+      { shape: 'bv-acc', c: 1, label: t('legAccrual') },
+      { shape: 'bv-fc', label: t('legForecast') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
