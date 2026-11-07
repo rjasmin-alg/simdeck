@@ -81,6 +81,7 @@ live parameters), `ref` (reference poster, no controls), `tool` (lecturer only, 
 | `HAM` | Ham radio licence course (classes A and P) | `50ohm-contents-hr/` |
 | `KK` | Crisis communications KK1/KK2 | `KAKA/` |
 | `FIN` | Finance basics for IT managers | owner, 2026-11-06: three requests |
+| `CMP` | Compliance and procedures for IT managers | owner, 2026-11-07: same audience as `FIN` |
 
 **Seed** names where an entry comes from: a book chapter (`UL ch19`), a planned URM card
 (`URM card ch08-arp`), an NLA topic (`NLA T20`), a DR scenario (`DR S6`) or an existing simulator
@@ -401,10 +402,11 @@ reuses one of the kit's shared views (§7.2). 26 entries:
 
 ### 3.3 Backlog
 
-Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have). §4 holds 321 new ideas:
-5 B1, 32 P1, 164 P2 and 120 P3. By area: Windows 73, Linux 55, networking basics 52, internet 30,
-storage/DR 22, finance 20, security 17, radio 17, HA 11, performance 10, architecture 8, reference/tools 6.
-The six finance P1 entries (§4.12, added 2026-11-06) came after the batch list in §3.2 was written and are not in it.
+Everything else in §4 marked P2 (must-have this semester) or P3 (nice to have). §4 holds 344 new ideas:
+5 B1, 38 P1, 177 P2 and 124 P3. By area: Windows 73, Linux 55, networking basics 52, internet 30,
+compliance 23, storage/DR 22, finance 20, security 17, radio 17, HA 11, performance 10, architecture 8,
+reference/tools 6. The six finance P1 entries (§4.12, added 2026-11-06) and the six compliance P1 entries (§4.13,
+added 2026-11-07) came after the batch list in §3.2 was written and are not in it.
 
 Adoption (§2) holds 88 entries, 83 of them adopted: 20 single-page-labs imports, 14 URM ports, 17
 ossimulator imports (about 60 index entries through scenarios), 3 larger apps ported and 29 50ohm applets
@@ -932,6 +934,143 @@ Finance basics for IT managers", `lang: hr`; text only, no file yet):
 - Also in existing leaves: `fin-downtime-cost` in `resilience › disaster › rpo-rto`; `fin-ale-risk` in
   `security › attacks › ransomware`.
 
+### 4.13 Compliance and procedures for IT managers
+
+What an IT manager is asked to show an auditor, a supervisory authority or the board: risks known and treated, access
+under control, changes managed, personal data handled lawfully, incidents reported on time and recovery proven. Each
+entry puts a procedure or a control in motion and shows the contrast people miss (with and without the control,
+written vs operating, the average vs the tail, the clock started at awareness vs at the attack), never the rule text
+as a card. Frameworks are the subject here, so GDPR (Opća uredba o zaštiti podataka), NIS2 and its Croatian
+implementation (Zakon o kibernetičkoj sigurnosti, 2024), ISO/IEC 27001 and, for the financial sector, DORA are named
+where a concept comes from them. General principles only: no legal advice, no products or tools, one fictional
+organisation; Croatian details not yet verified are marked *(check)* and stay off the pages until the owner confirms them.
+
+| ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `cmp-policy-to-record` | w3 | Policy, standard, procedure, record: the trail an auditor walks | a policy states intent ("backups are tested"), a standard makes it measurable (every critical system each quarter), a procedure says how, a record proves it happened; the auditor walks down from a clause to the records for the whole period; a missing layer breaks the trail: a policy without records is paper compliance (designed, not operating), records without a policy have no mandate, a procedure nobody follows shows as gaps in the dates | build the chain for three requirements, delete or weaken one layer, leave some months without records, then run the audit walk-through and see where it stops and whether the finding is about design or operation | step | M | P1 | CMP | DR S9 (pass the client audit), DR `student/handbook/constraints.md` (the audit date and what failing it costs); hub of the evidence model → §5.24 |  |
+| `cmp-audit-sampling` | w3 | Audit sampling: how many tickets to check | an auditor tests a sample of a control's occurrences; the chance of finding at least one failure is 1 − (1 − rate)ⁿ, so a sample of 25 misses a 2% failure rate more often than not (about 60% of the time); how often a control runs sets the usual sample size; one exception found means a larger sample or a finding; "no exceptions found" is not "no failures" | set the population (250 change tickets), the true failure rate and the sample size, draw samples many times, read the detection rate; compare what the auditor concludes with what is true | expl | S | P1 | CMP | the evidence model from `cmp-policy-to-record` → §5.24 |  |
+| `cmp-risk-register` | w3 | Risk register: likelihood × impact, treatment and residual risk | a risk is scored likelihood × impact on a 5 × 5 matrix; a treatment (reduce, transfer, avoid, accept) moves it from inherent to residual risk at a cost; the risk appetite line decides what must be treated and who signs an acceptance; multiplying ordinal scores misleads (5 × 1 and 1 × 5 tie, 3 × 3 outranks both), which a view in money exposes; ISO/IEC 27001 asks for this loop (assess, treat, accept the residual, review) | place a dozen IT risks on the matrix, choose a treatment and its cost for each, watch the arrows from inherent to residual, move the appetite line, then switch to the money view and watch the ranking change | expl | S | P1 | CMP, SEC | the money view is `fin-ale-risk` (§4.12); hub of the risk-scoring model → §5.24 |  |
+| `cmp-change-risk-class` | w3 | Change management: risk classes or one board for everything | sending every change to a weekly change advisory board adds days of lead time and makes teams batch changes, so each release is bigger and fails more often; classes by risk (standard: pre-approved and repeatable; normal: peer-reviewed, the board only for high risk; emergency: approved fast, reviewed afterwards) cut lead time without raising the failure rate; changes nobody recorded show up only as incidents | run a quarter of changes under three regimes (no process, everything to the weekly board, risk classes), tune what counts as standard and how often the board meets, read lead time, batch size, change failure rate and unrecorded changes | expl | M | P1 | CMP | staged rollout in `lnx-deploy-strategies` and update rings (§5.22) → §5.24 |  |
+| `cmp-jml-drift` | w3 | Joiner, mover, leaver: how access piles up | access granted on request and never removed grows with every move (privilege creep), and leavers' accounts stay active when HR and IT are not connected; roles instead of one-off grants and removal on move keep people near least privilege; a periodic access review cleans up, but a reviewer shown 500 lines approves them all | run two years of a department with hires, moves and departures; switch on HR-driven provisioning, roles, removal on move and a quarterly review of a chosen size; watch excess rights per person, orphaned accounts and how much the review really removes | expl | M | P1 | CMP, SEC | DR `student/handbook/it-wiki.md` (leavers disabled on their last day); groups in `win-group-scopes`, the logon token in `win-access-token`; hub of the people × roles × rights model → §5.24 |  |
+| `cmp-sod-toxic` | w3 | Segregation of duties: toxic combinations | some pairs of rights in one person let them make an error or a fraud and hide it: request and approve, write code and deploy it to production, administer backups and delete their logs, create a supplier and pay it; a conflict matrix checked against role assignments finds them; a small team cannot always separate, so a compensating control (an independent review of a log the person cannot edit) takes the place of separation | assign roles in a team of three to twelve people, watch conflicts light up on the matrix, resolve each by splitting the duty, adding a compensating control or accepting it with a signature; shrink the team until separation becomes impossible | expl | S | P2 | CMP, SEC | the people × roles × rights model from `cmp-jml-drift` → §5.24 |  |
+| `cmp-four-eyes` | w3 | Four eyes: when the second approver is a rubber stamp | a second approval catches a bad request only when the approver is independent and actually looks; as the queue grows the time per item falls and approval becomes automatic, so the catch rate drops while the record still shows two signatures; reviewing the risky few in depth beats reviewing everything thinly | send a stream of requests with a few bad ones, set the approver's workload, independence and the share reviewed in depth, watch the catch rate and the time per approval; compare reviewing everything with reviewing by risk | expl | S | P3 | CMP |  |  |
+| `cmp-privileged-access` | w3 | Standing admin rights or just in time; the break-glass account | standing administrator rights are exposed every hour of the year; just-in-time elevation (requested, approved, limited in time, logged) shrinks the window in which a stolen credential is an admin one; a break-glass account for when the identity system itself is down stays sealed, alerts when used and is reviewed afterwards | give a team standing or just-in-time admin rights, steal a credential at a random hour many times and count how often it carried admin rights; open the break-glass account and follow the alert and the review | expl | S | P2 | CMP, SEC | DR `student/handbook/it-wiki.md` (Domain Admins and the break-glass account); credential theft in `lateral-movement`, `win-laps` → §5.24 |  |
+| `cmp-log-evidence` | w3 | Logs as evidence: complete, in time, out of reach | logs answer "who did what, when" only if they are complete, their clocks agree, they are kept out of reach of the administrators they record (sent off the host, append-only) and long enough to cover how late incidents are found; a log holding personal data needs its own retention and access rules | replay an incident in which an admin account misbehaves, with local logs or a central append-only store, clocks in sync or drifting, 30 or 180 days kept; see which of the investigation's questions can still be answered | step | M | P2 | CMP, SEC | `lnx-log-path`, `win-ipam-audit` (correlating logs), `ntp-sync` → §5.24 |  |
+| `cmp-patch-sla` | w3 | Vulnerability fix deadlines: the average and the tail | a remediation policy sets deadlines by severity; compliance is reported as the share fixed in time, but exposure is open vulnerabilities × days, and the average hides the long tail on systems nobody owns; fixing the known-exploited ones first lowers real risk more than fixing by score; an exception needs an owner and an end date | set deadlines per severity and the team's capacity, feed a stream of vulnerabilities over owned and orphaned systems, order the queue by score or by known exploitation, read the in-time percentage, the exposure and the oldest open item | expl | S | P2 | CMP, SEC | delivery in `win-wsus-flow` and update rings (§5.22); exceptions in `cmp-exceptions` → §5.24 |  |
+| `cmp-dpia-triage` | w3 | Does this project need a data protection impact assessment? | processing likely to result in a high risk to people needs an assessment before it starts (GDPR art. 35); screening criteria add up (systematic monitoring, sensitive data, large scale, combined datasets, people in a weak position such as employees, new technology), and meeting two usually means an assessment; measures (minimisation, pseudonymisation, shorter retention, narrower access) lower the risk that remains | describe a planned IT project by toggling what it does (badge access logs, location tracking of company cars, a camera over the desks, monitoring staff computers), watch the criteria light up and the recommendation change; apply measures and read the remaining risk | expl | S | P2 | CMP | risk scoring from `cmp-risk-register` → §5.24 |  |
+| `cmp-retention-hold` | w3 | Retention periods and the legal hold | each record class is kept for a period counted from a trigger (end of contract, end of employment), and deleting it afterwards is an obligation too (GDPR's storage limitation); a legal hold suspends deletion for the records a dispute or an investigation touches; deleted data lives on in backups until they age out | set retention for a few record classes on a timeline, run the years, place a dispute that starts a hold and later lifts it; see records kept too long, deleted on time, deleted under a hold, and erased data still inside the backup set | expl | S | P2 | CMP | DR S8 (a retention plan); backup ageing from `retention-gfs` → §5.24 |  |
+| `cmp-data-subject-request` | w3 | A data subject's request: find every copy within a month | a person may ask for a copy of their data or for its erasure, and the answer is due within one month (two more for complex requests, GDPR art. 12); personal data sits in more places than the main system (exports, mailboxes, shared folders, test copies, backups), so the record of processing activities decides how much is found; erasure reaches backups only as they age out | follow a request through a small organisation's systems with a good, a partial or no data map, watch the clock and what is found or missed; switch to an erasure request and see what stays in the backups and how that is recorded | step | M | P2 | CMP | the backup ageing from `cmp-retention-hold` → §5.24 |  |
+| `cmp-breach-triage` | w3 | Personal-data breach: record, notify, inform | a breach of the confidentiality, integrity or availability of personal data is notified to the supervisory authority unless it is unlikely to result in a risk to people (GDPR art. 33), and the people are told when the risk is high (art. 34); strong encryption with a key that was not lost turns a lost laptop into a breach that is only recorded; every breach goes into the internal register whatever the outcome | step through cases (a lost laptop, an e-mail to the wrong recipient, ransomware that also took data, a restore that lost two days) and toggle the factors (encrypted, which data, how many people, recovered in time); watch the decision move between record, notify and inform | step | S | P2 | CMP, SEC | the clocks from `cmp-incident-clocks` → §5.24 |  |
+| `cmp-nis2-scope` | w3 | In scope? Essential and important entities | NIS2 applies by sector and size: medium and large organisations in the listed sectors are in, large ones in the high-criticality sectors are essential and the rest important, and some are in whatever their size (for example DNS service providers, top-level-domain registries, public administration); the class decides how supervision works (before or after an incident) and the fine ceiling; the national law and the authorities' lists have the final word | toggle sector, headcount, turnover, balance sheet and special roles for a few example organisations, watch the class change at each threshold, compare what follows for each class | expl | S | P2 | CMP | size thresholds from the EU definition of small and medium enterprises; the Croatian law categorises through the competent authorities *(check)* |  |
+| `cmp-incident-clocks` | w3 | Incident reporting clocks: 24 hours, 72 hours, one month | under NIS2 a significant incident starts the clocks at awareness: an early warning within 24 hours, an incident notification within 72 hours, a final report within a month of the notification (art. 23); a personal-data breach goes to the supervisory authority within 72 hours of awareness (GDPR art. 33); the clocks start when the organisation becomes aware, not when the attack began, and run through weekends; one incident can start both sets | place an incident on a timeline (start, detection, triage, classified as significant, personal data involved?), watch which clocks start and when each runs out; detect later, let it happen on a Friday evening, slow the triage down and see a deadline missed | step | M | P1 | CMP, DR, SEC | an outage found late (`rpo-rto` preset "found on Monday"); hub of the incident-timeline model → §5.24 |  |
+| `cmp-bia` | w3 | Business impact analysis: what must come back first | the analysis sets each business process's maximum tolerable downtime; a supporting system inherits the shortest one of every process that depends on it (identity, name resolution and the network end up most urgent); its recovery time objective must be below that, and the gap between required and achievable recovery is the work list | set tolerable downtime for a handful of processes, draw what they depend on, watch required RTOs propagate down the graph, enter what recovery can achieve today and read the gaps and the recovery order | expl | M | P2 | CMP, DR | `rpo-rto`; the hidden dependencies of `faultline` and `ha-never-zero-spof`; the price of the hours in `fin-downtime-cost` → §5.24 |  |
+| `cmp-restore-evidence` | w3 | Restore tests as evidence: covering the estate in a year | a backup policy is proven by restore tests, not by job reports; with a few test slots a quarter, the order decides which systems are never tested; each test record (date, scope, time taken against the promised RTO, result, sign-off) is the evidence, and a restore slower than the RTO is a finding even when it succeeds | schedule restore tests for a dozen systems over four quarters with limited slots, ordered by criticality or not, run the year; read the coverage, the systems never tested, the measured times against the RTOs and the evidence an auditor receives | expl | S | P2 | CMP, DR | the failure itself is `restore-drill` ("the backup that lies"); RTOs from `cmp-bia` and `rpo-rto` → §5.24 |  |
+| `cmp-vendor-tiers` | w3 | Supplier risk: tiers and how deep to check | suppliers are tiered by what they reach (personal data, production access, a critical service) and how hard they are to replace; the depth of checking follows the tier (a short questionnaire, certification evidence, contract clauses with audit rights); assessment time is limited, so checking everyone the same way spreads it thin; a supplier's own subcontractors and many services on one provider (concentration) are risks too; NIS2 lists supply-chain security among the required measures (art. 21) | tier thirty suppliers with a rule, set the assessment budget, compare one questionnaire for all with tiered checking (risk covered per hour spent), then reveal a critical subcontractor and a shared provider | expl | M | P2 | CMP | risk scoring from `cmp-risk-register` → §5.24 |  |
+| `cmp-shared-responsibility` | w3 | Shared responsibility: who runs which control in the cloud | moving a workload from own servers to rented infrastructure, a platform or a finished application hands controls to the provider layer by layer (building, hardware, operating system, application); the customer always keeps the data, the identities and who has access, and the backups of data held in someone else's application; a gap opens where each side assumes the other does it; the provider's assurance report is evidence only for its own part | move a workload across the four models and watch each control change owner; mark the controls you believe the provider covers and see the gaps; open the provider's report and see which of your controls it does not prove | expl | S | P2 | CMP | the cost side of the same move is `fin-cloud-commitment` (§4.12) → §5.24 |  |
+| `cmp-exceptions` | w3 | Exceptions to policy: an accepted risk with an end date | an exception to a standard is a risk acceptance: it needs an owner, a compensating control and an expiry date; without expiry, exceptions pile up until they are the real policy; a review at expiry renews, fixes or escalates | grant exceptions over two years with and without expiry dates and reviews, and watch the share of the estate that really meets the standard and the age of the oldest exception | expl | S | P3 | CMP | acceptance from `cmp-risk-register` → §5.24 |  |
+| `cmp-maturity-levels` | w3 | Maturity levels: the average hides the weakest area | each control area is rated on a scale from ad hoc to measured and improving; one average looks fine while one area stays at the bottom, and the weakest area is where incidents and findings come from; each level up costs more than the last, so a target per area beats raising everything | rate the current and target levels of eight areas on a radar, spend a budget to raise them, compare the average with the weakest area and with the findings a simulated audit raises | expl | S | P3 | CMP |  |  |
+| `cmp-cost-of-noncompliance` | w3 | The price of non-compliance and the price of controls | the fine ceiling is the higher of a fixed sum and a share of worldwide yearly turnover (GDPR up to €20 million or 4%; NIS2 at least €10 million or 2% for essential entities and €7 million or 1.4% for important ones), so for a large firm the percentage decides and for a small one the fixed sum; the expected yearly cost is incident likelihood × (incident cost + chance of a fine × fine), to compare with what the controls cost each year; under NIS2 the management body is answerable for the measures | set turnover, entity class, incident likelihood and control spend, watch the ceiling switch from the fixed sum to the percentage, compare the expected yearly cost with the control budget | expl | S | P3 | CMP, FIN | the expected-loss model from `fin-ale-risk` (§4.12) → §5.24 |  |
+
+**Croatian titles.**
+
+- `cmp-policy-to-record` — Politika, standard, procedura, zapis: trag kojim ide revizor
+- `cmp-audit-sampling` — Uzorkovanje u reviziji: koliko zahtjeva treba provjeriti
+- `cmp-risk-register` — Registar rizika: vjerojatnost × učinak, postupanje i preostali rizik
+- `cmp-change-risk-class` — Upravljanje promjenama: razredi rizika ili jedan odbor za sve
+- `cmp-jml-drift` — Dolazak, premještaj, odlazak: kako se ovlasti gomilaju
+- `cmp-sod-toxic` — Razdvajanje dužnosti: nespojive kombinacije ovlasti
+- `cmp-four-eyes` — Načelo četiri oka: kad drugi potpis postane formalnost
+- `cmp-privileged-access` — Stalna ili privremena administratorska prava; račun za hitne slučajeve
+- `cmp-log-evidence` — Zapisi kao dokaz: potpuni, točnog vremena, izvan dosega administratora
+- `cmp-patch-sla` — Rokovi za otklanjanje ranjivosti: prosjek i rep
+- `cmp-dpia-triage` — Treba li projektu procjena učinka na zaštitu podataka?
+- `cmp-retention-hold` — Rokovi čuvanja i obustava brisanja zbog spora *(check the term for "legal hold")*
+- `cmp-data-subject-request` — Zahtjev ispitanika: pronaći svaku kopiju u roku od mjesec dana
+- `cmp-breach-triage` — Povreda osobnih podataka: evidentirati, prijaviti, obavijestiti
+- `cmp-nis2-scope` — Jesmo li obveznici? Ključni i važni subjekti
+- `cmp-incident-clocks` — Rokovi za prijavu incidenta: 24 sata, 72 sata, mjesec dana
+- `cmp-bia` — Analiza utjecaja na poslovanje: što se mora prvo vratiti
+- `cmp-restore-evidence` — Testovi obnove kao dokaz: cijelo okruženje u godini dana
+- `cmp-vendor-tiers` — Rizik dobavljača: razine i dubina provjere
+- `cmp-shared-responsibility` — Podijeljena odgovornost u oblaku: tko provodi koju kontrolu
+- `cmp-exceptions` — Iznimke od politike: prihvaćeni rizik s rokom isteka
+- `cmp-maturity-levels` — Razine zrelosti: prosjek skriva najslabije područje
+- `cmp-cost-of-noncompliance` — Cijena neusklađenosti i cijena kontrola
+
+**Where Croatian and EU practice matters** (one line each, for the page's notes, not the model; everything marked
+*(check)* is unverified and goes into the sim's `NOTES.md` for the owner, not onto the page):
+
+- `cmp-nis2-scope`, `cmp-incident-clocks`, `cmp-cost-of-noncompliance`: NIS2 is implemented by the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) and a government regulation under it *(check the regulation's name and number)*; the law speaks
+  of ključni i važni subjekti, and the competent authorities categorise entities and notify them rather than entities
+  deciding for themselves *(check)*; which body receives incident reports for which sector *(check)*; the national fine
+  amounts *(check)*.
+- `cmp-breach-triage`, `cmp-incident-clocks`, `cmp-data-subject-request`, `cmp-dpia-triage`: the supervisory authority is
+  the Agencija za zaštitu osobnih podataka (AZOP); the Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) adds
+  national rules, for example on video surveillance and on fines for public bodies *(check)*; AZOP's list of processing
+  that always needs an impact assessment *(check)*.
+- `cmp-dpia-triage`: monitoring employees also involves the workers' council under the Zakon o radu *(check)*.
+- `cmp-retention-hold`: statutory retention periods for accounting, payroll and personnel records come from several
+  Croatian laws (Zakon o računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima); the page uses illustrative
+  periods *(check every period before one is quoted anywhere)*.
+- `cmp-incident-clocks`, `cmp-vendor-tiers`: financial entities follow DORA (applying since 17 January 2025) for ICT
+  incidents and ICT third-party risk, with their own reporting timings and a register of ICT third-party arrangements;
+  the supervisors are the Hrvatska narodna banka and HANFA *(check the timings and the split)*. A DORA preset is optional.
+- `cmp-risk-register`, `cmp-policy-to-record`, `cmp-maturity-levels`: ISO/IEC 27001 (2022 edition) certification is
+  voluntary; the measures the cybersecurity law requires cover similar ground *(check how the regulation refers to it)*.
+
+**Suggested order for a course playlist** (`courses/cmp-it-managers.json`, "Usklađenost i procedure za IT menadžere /
+Compliance and procedures for IT managers", `lang: hr`; text only, no file yet):
+
+1. *Pravila i dokazi / Rules and evidence*: `cmp-policy-to-record`, `cmp-audit-sampling`, `cmp-maturity-levels`,
+   `cmp-exceptions`
+2. *Rizik / Risk*: `cmp-risk-register`, `cmp-vendor-tiers`, `cmp-shared-responsibility`, `cmp-cost-of-noncompliance`,
+   then `fin-ale-risk` for the same risks in money
+3. *Tko smije što / Who may do what*: `cmp-jml-drift`, `cmp-sod-toxic`, `cmp-four-eyes`, `cmp-privileged-access`,
+   `cmp-log-evidence`
+4. *Promjene i ranjivosti / Changes and vulnerabilities*: `cmp-change-risk-class`, `cmp-patch-sla`
+5. *Osobni podaci / Personal data*: `cmp-dpia-triage`, `cmp-retention-hold`, `cmp-data-subject-request`,
+   `cmp-breach-triage`
+6. *Kad nešto pođe po zlu / When something goes wrong*: `cmp-nis2-scope`, `cmp-incident-clocks`, `cmp-bia`,
+   `cmp-restore-evidence`, then the existing `rpo-rto` and `restore-drill` as the technical side
+
+**Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area between `money`
+and `linux`, since none of the existing areas is about rules and proof:
+
+- **`compliance`**: "Pravila i dokazi: usklađenost i procedure" / "Rules and proof: compliance and procedures"; blurb
+  "Rizik, pristupi, promjene, osobni podaci i incidenti onako kako ih traže GDPR, NIS2 i revizor." / "Risk, access,
+  changes, personal data and incidents the way GDPR, NIS2 and the auditor ask for them." (94 / 99 chars)
+  - `evidence` "Pravila i dokazi" / "Rules and evidence"
+    - `trail`: `cmp-policy-to-record`
+    - `sampling`: `cmp-audit-sampling`
+    - `maturity`: `cmp-maturity-levels`, `cmp-exceptions`
+  - `risk` "Upravljanje rizikom" / "Managing risk"
+    - `register`: `cmp-risk-register`, `fin-ale-risk`
+    - `suppliers`: `cmp-vendor-tiers`, `cmp-shared-responsibility`
+    - `price`: `cmp-cost-of-noncompliance`
+  - `access` "Tko smije što" / "Who may do what"
+    - `lifecycle`: `cmp-jml-drift`
+    - `separation`: `cmp-sod-toxic`, `cmp-four-eyes`
+    - `privileged`: `cmp-privileged-access`, `lateral-movement`
+    - `logs`: `cmp-log-evidence`
+  - `change` "Promjene i zakrpe" / "Changes and patches"
+    - `changes`: `cmp-change-risk-class`, `lnx-deploy-strategies`
+    - `vulnerabilities`: `cmp-patch-sla`
+  - `personal-data` "Osobni podaci" / "Personal data"
+    - `dpia`: `cmp-dpia-triage`
+    - `retention`: `cmp-retention-hold`
+    - `requests`: `cmp-data-subject-request`
+    - `breach`: `cmp-breach-triage`
+  - `incidents` "Kad nešto pođe po zlu" / "When something goes wrong"
+    - `scope`: `cmp-nis2-scope`
+    - `reporting`: `cmp-incident-clocks`
+    - `continuity`: `cmp-bia`, `rpo-rto`
+    - `restore-tests`: `cmp-restore-evidence`, `restore-drill`
+- Also in existing leaves: `cmp-restore-evidence` in `resilience › backups › verify`; `cmp-bia` in
+  `resilience › disaster › rpo-rto`; `cmp-change-risk-class` in `resilience › disaster › rollback`;
+  `cmp-privileged-access` in `security › attacks › domain`; `cmp-cost-of-noncompliance` in `money › risk`, next to
+  `fin-ale-risk` once that is placed.
+
 ---
 
 ## 5. Duplicates, overlaps and shared simulators
@@ -964,6 +1103,7 @@ preset is a scenario, like ossimulator's `?scenario=`), or a clear home with lin
 | 5.21 | **Windows infrastructure: AD, DNS and DHCP together** | `win-dc-promotion`, `win-dns-srv-records`, `win-domain-logon`, `win-dns-dynamic-update`, `win-dhcp-dns-update`, `win-dns-scavenging`, `win-sysvol-dfsr`, `win-time-hierarchy`, `win-ad-backup-restore`, `win-ou-vs-group`, `win-ipam-address-plan` | One shared model of a small domain (DCs, DNS zones, DHCP server, clients over time) under all of these, like ossimulator's shared engine. Dynamic update, DHCP-registered records and scavenging are three pages on one record-lifecycle model. SRV records and domain logon are one page in two steps. The time hierarchy links to `inet-ntp-sync` for the protocol. USN rollback is a preset next to `sto-backing-chains` (the same "revert a snapshot" act, a different victim). The address plan reuses `urm-vlsm`'s arithmetic. |
 | 5.22 | **Update approval** | `win-wsus-groups`, `win-update-rings`, `lnx-deploy-strategies` (canary) | Groups with approvals and rings with deferrals are the same staged-rollout idea; one page with two presets. The canary deploy in Linux links to it. |
 | 5.23 | **Money: one ledger, and costs on top of existing models** | `fin-capex-opex`, `fin-accruals-cash`, `fin-budget-variance`, `fin-lease-vs-buy`, `fin-licence-models`, `fin-depreciation`, `fin-refresh-cycle`, `fin-npv-discounting`; and `fin-downtime-cost` ↔ `rpo-rto`, `perf-slo-error-budget`; `fin-ale-risk` ↔ `ransomware-321`, `faultline`; `fin-fixed-variable` ↔ `utilisation-latency`, `ec-vs-replication` | One shared ledger model (a month-by-month timeline with three lines: cash, expense, book value) under the capex, accruals, variance, lease and licence pages, like §5.21's shared domain; depreciation and refresh share one asset model; `fin-npv-discounting` holds the discounting the investment pages reuse, so build it first. The money pages do not repeat the technical ones: `fin-downtime-cost` takes the hours down from `rpo-rto`'s timeline (link, or an "in money" preset on `rpo-rto`) and turns an error budget's minutes into euros; `fin-ale-risk` links `ransomware-321` as a priced control; `fin-fixed-variable` links `utilisation-latency` (headroom costs money, too little costs latency) and could take `ec-vs-replication`'s overhead as a cost per usable TB preset. |
+| 5.24 | **Compliance: four shared models, and evidence on top of existing sims** | `cmp-jml-drift`, `cmp-sod-toxic`, `cmp-privileged-access`, `cmp-four-eyes`; `cmp-risk-register`, `cmp-dpia-triage`, `cmp-vendor-tiers`, `cmp-exceptions`, `cmp-cost-of-noncompliance`; `cmp-incident-clocks`, `cmp-breach-triage`; `cmp-policy-to-record`, `cmp-audit-sampling`, `cmp-restore-evidence`, `cmp-log-evidence`; and `cmp-bia`, `cmp-retention-hold`, `cmp-data-subject-request`, `cmp-change-risk-class`, `cmp-patch-sla`, `cmp-shared-responsibility` | Four shared models, each built first in its hub sim and copied by the others, like §5.23's ledger: people × roles × rights over time (`cmp-jml-drift`; `cmp-sod-toxic` and `cmp-privileged-access` read the same assignments, `cmp-four-eyes` adds an approval queue); risk scoring (`cmp-risk-register`; the impact assessment, supplier tiers and exceptions score the same way, and its money view is `fin-ale-risk`'s expected loss, which `cmp-cost-of-noncompliance` reuses too); the incident timeline with clocks (`cmp-incident-clocks`; `cmp-breach-triage` adds the decision); the evidence trail, a requirement and its records over a period (`cmp-policy-to-record`; `cmp-audit-sampling` draws from it, `cmp-restore-evidence` and `cmp-log-evidence` fill it). The compliance pages link the technical ones instead of repeating them: `cmp-restore-evidence` ↔ `restore-drill` (the restore that lies) and `rpo-rto`; `cmp-bia` ↔ `rpo-rto`, `faultline`, `ha-never-zero-spof`, `fin-downtime-cost`; `cmp-retention-hold` and `cmp-data-subject-request` ↔ `retention-gfs` (erased data ageing out of backups); `cmp-privileged-access` ↔ `lateral-movement`, `win-laps`; `cmp-jml-drift` ↔ `win-group-scopes`, `win-access-token`; `cmp-change-risk-class` ↔ `lnx-deploy-strategies` and §5.22's rings; `cmp-patch-sla` ↔ `win-wsus-flow`; `cmp-log-evidence` ↔ `lnx-log-path`, `win-ipam-audit`, `ntp-sync`; `cmp-shared-responsibility` ↔ `fin-cloud-commitment`. |
 
 ---
 
