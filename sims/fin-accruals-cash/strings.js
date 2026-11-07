@@ -45,9 +45,9 @@
       cursorStart: 'početak',
       vCash: 'Plaćeno dosad',
       vExpense: 'U trošku dosad',
-      vPrepaid: 'Plaćeno unaprijed',
+      vPrepaid: 'Unaprijed plaćeni trošak',
       vAccrued: 'Obračunato, neplaćeno',
-      bPrepaid: 'plaćeno unaprijed',
+      bPrepaid: 'unaprijed plaćeno',
       bAccrued: 'obračunato',
       bSettled: 'podmireno',
       bWaiting: 'još ništa',
@@ -64,18 +64,18 @@
       // captions
       cStart: 'Prije početka godine ništa nije plaćeno ni korišteno. Svaki korak knjiži jedan mjesec: račune plaćene tog mjeseca (novac) i usluge korištene tog mjeseca (trošak).',
       cNone: 'Nijedan ugovor nije uključen: uključi barem jedan u postavkama.',
-      cPrepay: '{month}: račun „{item}” od {x} plaća se odjednom, ali pokriva {k}. Trošak ovog mjeseca je samo {now}; {rest} čeka svoje mjesece kao plaćeni trošak budućeg razdoblja.',
+      cPrepay: '{month}: račun „{item}” od {x} plaća se odjednom, ali pokriva {k}. Trošak ovog mjeseca je samo {now}; {rest} čeka svoje mjesece kao unaprijed plaćeni trošak.',
       cSettle: '{month}: stiže račun „{item}” za {q}. tromjesečje, {x}, i plaća se. Taj je trošak već knjižen u mjesecima uporabe, pa plaćanje samo zatvara obračunati trošak.',
       cAccrue: '{month}: iskorišteno je {now} usluge „{item}”, a računa još nema. Trošak ipak pripada ovom mjesecu, pa se obračunava.',
-      cRelease: '{month}: za „{item}” ništa se ne plaća, ali {now} unaprijed plaćenog iznosa postaje trošak ovog mjeseca.',
+      cRelease: '{month}: za „{item}” ništa se ne plaća, ali {now} unaprijed plaćenog troška prelazi u trošak ovog mjeseca.',
       cSame: '{month}: račun „{item}” plaća se za mjesec u kojem je usluga korištena, pa novac i trošak idu zajedno.',
       cQuiet: '{month}: ovaj se mjesec ništa ne knjiži.',
       cYearEnd: '{month}, kraj godine: trošak ove godine je {exp}, a tijekom godine plaćeno je {cash}. Razlika od {acc} obračunava se: to su usluge korištene ove godine čiji računi stižu iduće godine.',
       cYearEndEven: '{month}, kraj godine: plaćeno je jednako trošku godine, {exp}; ništa ne ostaje unaprijed plaćeno ni obračunato.',
       cNext: '{month} iduće godine: za prošlu godinu plaća se još {x}. To nije trošak nove godine, nego zatvara obračunati trošak, pa se linije susreću na {exp}.',
       cNextQuiet: '{month} iduće godine: za prošlu godinu nema više računa; linije su se susrele na {exp}.',
-      gBoth: 'Dosad plaćeno {cash}, u trošku {exp}. Razlika skriva dvije stvari: {pre} plaćeno unaprijed i {acc} obračunato.',
-      gPrepaid: 'Dosad plaćeno {cash}, u trošku {exp}: novac je ispred troška za {pre}: toliko je plaćeno unaprijed.',
+      gBoth: 'Dosad plaćeno {cash}, u trošku {exp}. Razlika skriva dvije stvari: {pre} unaprijed plaćenog troška i {acc} obračunatog troška.',
+      gPrepaid: 'Dosad plaćeno {cash}, u trošku {exp}: novac je ispred troška za {pre}, a to je unaprijed plaćeni trošak.',
       gAccrued: 'Dosad plaćeno {cash}, u trošku {exp}: trošak je ispred novca za {acc}: toliko je obračunato, a još nije plaćeno.',
       gMeet: 'Dosad je plaćeno točno onoliko koliko je u trošku: {exp}.',
       explain: '<p><b>Trošak pripada mjesecu u kojem se usluga koristi, a ne mjesecu u kojem je plaćena.</b> To je ' +
@@ -84,8 +84,9 @@
         '(engl. IAS 1; od 2027. MRS 8) traži da se financijski izvještaji, osim izvještaja o novčanim tokovima, sastavljaju po načelu ' +
         'nastanka događaja.</p>' +
         '<p><b>Plaćeno unaprijed.</b> Godišnja podrška plaćena u prvom mjesecu nije trošak prvog mjeseca: svaki mjesec ' +
-        'u trošak ide dvanaestina, a ostatak je dotad <i>plaćeni trošak budućeg razdoblja</i> (aktivno vremensko ' +
-        'razgraničenje, engl. <i lang="en">prepaid expense</i>), dakle imovina.</p>' +
+        'u trošak ide dvanaestina, a ostatak je dotad <i>unaprijed plaćeni trošak</i> (engl. <i lang="en">prepaid ' +
+        'expense</i>; u knjigovodstvu: plaćeni troškovi budućeg razdoblja, aktivna vremenska razgraničenja), dakle ' +
+        'imovina.</p>' +
         '<p><b>Obračunato.</b> Kolokacija se plaća tromjesečno unatrag, a izvođačev rad iz posljednjeg mjeseca godine ' +
         'naplaćuje se tek iduće godine. Usluga je ipak korištena, pa se trošak <i>obračunava</i> u mjesecu uporabe ' +
         '(pasivno vremensko razgraničenje, engl. <i lang="en">accrued expense</i>), dakle obveza. Kad račun stigne i ' +
@@ -93,7 +94,7 @@
         '<p><b>Kraj godine.</b> Trošak godine je zbroj usluga korištenih u njoj, pa račun koji stigne nakon kraja godine ' +
         'treba obračunati u njezinu posljednjem mjesecu (u praksi procjenom, prije nego što račun stigne). Bez toga bi ' +
         'ova godina izgledala jeftinije, a iduća skuplje. Ukupno se novac i trošak uvijek susretnu: razlikuje se samo ' +
-        'mjesec. Zato mjesec bez računa nije mjesec bez troška, a „ispod plana” u ožujku često znači samo da račun ' +
+        'mjesec. Zato mjesec bez računa nije mjesec bez troška, a „ispod proračuna” u ožujku često znači samo da račun ' +
         'još nije stigao.</p>' +
         '<p>Ovdje se svaki račun plaća u mjesecu u kojem stigne; rokovi plaćanja i obveze prema dobavljačima su ' +
         'izostavljeni. Iznosi su izmišljeni, ali uvjerljivi.</p>'

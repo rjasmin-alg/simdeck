@@ -62,7 +62,8 @@ shared ledger model). Rules and expected numbers: `SPEC.md`.
   consumed) and accrued expenses (a liability for service received but not yet invoiced or paid), and of the
   year-end cut-off; e.g. any introductory text's chapter on adjusting entries.
 - Croatian terms: the Croatian chart of accounts groups prepaid expenses as *plaćeni troškovi budućeg razdoblja*
-  (aktivna vremenska razgraničenja, class 1) and accrued expenses under *pasivna vremenska razgraničenja* (class 2)
+  (aktivna vremenska razgraničenja, class 1; named once on the page as "u knjigovodstvu: …", the page's term is
+  *unaprijed plaćeni trošak*, owner 2026-11-07) and accrued expenses under *pasivna vremenska razgraničenja* (class 2)
   *(check)*; *načelo nastanka događaja* is the usual translation of "accrual basis" in MRS 1 *(check)*.
 - Numbers: made up but plausible, whole euros; checked by the script at the end of `SPEC.md` and by the preset test.
 
@@ -83,13 +84,14 @@ shared ledger model). Rules and expected numbers: `SPEC.md`.
 | accrual basis | načelo nastanka događaja |
 | cash basis | novčano načelo |
 | accruals and deferrals | vremenska razgraničenja |
-| prepaid expense | plaćeni trošak budućeg razdoblja (aktivno vremensko razgraničenje) |
+| prepaid expense | unaprijed plaćeni trošak (u knjigovodstvu: plaćeni troškovi budućeg razdoblja, aktivna vremenska razgraničenja) |
 | accrued expense | obračunati trošak (pasivno vremensko razgraničenje) |
 | paid in advance | plaćeno unaprijed |
 | billed in arrears | naplaćeno unatrag (račun unatrag) |
 | fiscal year | poslovna godina |
 | year end | kraj godine |
 | colocation | kolokacija |
+| budget | proračun |
 
 ## For the owner
 

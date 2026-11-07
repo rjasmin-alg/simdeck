@@ -56,9 +56,9 @@ New explorer (task `docs/tasks/w3/fin-prepay-discount.md`, catalogue `fin-prepay
 - **The budget inflow model** (the list price spread evenly as the buffer's monthly inflow) is a teaching device, not
   a finance rule; the explanation calls it the budget *(check the framing with the owner)*.
 - **ch. 30 in Brealey-Myers** is the chapter number in recent editions; older editions number it differently *(check)*.
-- **Croatian terms** below, especially "rok plaćanja" (also "valuta plaćanja" in practice), "obrtni kapital",
-  "novčana rezerva" and "unaprijed plaćeni trošak" (the balance-sheet line is "plaćeni troškovi budućeg razdoblja")
-  *(check)*.
+- **Croatian terms** below, especially "rok plaćanja" (also "valuta plaćanja" in practice), "obrtni kapital"
+  and "novčana rezerva" *(check)*. ("Unaprijed plaćeni trošak" for prepaid expense and "proračun" for budget are the
+  owner's choice, 2026-11-07; the balance-sheet line is "plaćeni troškovi budućeg razdoblja".)
 
 ## Term pairs (not in `kit/glossary.js`; for the coordinator, `"src": "simdeck"`)
 
@@ -73,7 +73,8 @@ New explorer (task `docs/tasks/w3/fin-prepay-discount.md`, catalogue `fin-prepay
 | working capital | obrtni kapital |
 | cash buffer | novčana rezerva |
 | minimum buffer | najmanja rezerva |
-| prepaid expense | unaprijed plaćeni trošak (plaćeni troškovi budućeg razdoblja) *(check)* |
+| prepaid expense | unaprijed plaćeni trošak (u knjigovodstvu: plaćeni troškovi budućeg razdoblja) |
+| budget | proračun |
 | expense | trošak (rashod) |
 | present value | sadašnja vrijednost |
 

@@ -43,6 +43,14 @@ shared ledger model). Rules and expected numbers: `SPEC.md`.
 - **No glossary terms:** none of the terms are in `kit/glossary.js`; the strings write the pairs out and the page does
   not link `glossary.js` (as the other `fin-` sims).
 - **Concepts, not tools:** no product, vendor or tax rule on the page; no accounting standard is named on the stage.
+- **Croatian "budget" is *proračun*** (owner, 2026-11-07; it replaced *plan*): the stage, legend, captions and
+  explanation call the budget itself *proračun* ("iznad / ispod proračuna", "proračun za mjesec", "proračun za
+  godinu"). *Plan i ostvarenje*, the usual Croatian name of a budget-vs-actuals report and its two columns, stays in
+  the title, in two search aliases and once in the explanation, which names the report ("izvještaj *plan i
+  ostvarenje* uspoređuje proračun s knjiženim ostvarenjem"). The verb forms stay where they read as "budgeted"
+  ("po planiranoj cijeni", "nego što je planirano"): *proračunati* means "to calculate", so "proračunska cijena" or
+  "proračunato" would mislead. The preset entry's concept became "„Ispod proračuna” u listopadu bio je kasni račun;
+  potrošen, završi iznad njega" to stay within 80 characters.
 
 ## Deviations from the task
 
@@ -73,8 +81,8 @@ shared ledger model). Rules and expected numbers: `SPEC.md`.
 
 - The source references above (edition, chapter).
 - The Croatian terms below, in particular *odstupanje količine / cijene* and *vremensko odstupanje* for volume, price
-  and timing variance, *tempo zadnjeg mjeseca* for run rate, and *plan* (not *proračun*, which suggests public budgets) for a
-  company's budget.
+  and timing variance, and *tempo zadnjeg mjeseca* for run rate. (*Proračun* for budget is the owner's choice,
+  2026-11-07, see Decisions.)
 - That per-seat licence subscriptions are commonly invoiced monthly (many are annual; monthly keeps the price variance
   visible month by month).
 
@@ -82,16 +90,17 @@ shared ledger model). Rules and expected numbers: `SPEC.md`.
 
 | en | hr |
 |---|---|
-| budget | plan (financijski plan) |
+| budget | proračun |
+| budget vs actuals (the report) | plan i ostvarenje |
 | actuals | ostvarenje (knjiženo ostvarenje) |
 | variance | odstupanje |
-| over budget / under budget | iznad plana / ispod plana |
+| over budget / under budget | iznad proračuna / ispod proračuna |
 | volume variance | odstupanje količine |
 | price variance | odstupanje cijene |
 | timing variance | vremensko odstupanje |
 | run rate | tempo zadnjeg mjeseca (prognoza prema zadnjem mjesecu) |
 | forecast | prognoza |
-| phasing | raspored plana po mjesecima |
+| phasing | raspored proračuna po mjesecima |
 | use it or lose it | iskoristi ili izgubi |
 | accrued expense | obračunati trošak (pasivno vremensko razgraničenje) |
 | fiscal year | poslovna godina |

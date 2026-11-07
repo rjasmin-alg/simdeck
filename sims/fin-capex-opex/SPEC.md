@@ -126,7 +126,7 @@ fiscal years that do not start with the purchase.
 kapitalni izdaci / capital expenditure (CapEx); operativni troškovi / operating expenses (OpEx); amortizacija /
 depreciation; linearna amortizacija / straight-line depreciation; vijek uporabe / useful life; knjigovodstvena
 vrijednost / book value; imovina / asset; bilanca / balance sheet; prag kapitalizacije / capitalisation threshold;
-odmah u trošak / expensed at once; investicijski budžet / capital budget; operativni budžet / operating budget;
+odmah u trošak / expensed at once; investicijski proračun / capital budget; operativni proračun / operating budget;
 EBITDA (dobit prije kamata, poreza i amortizacije); operativna dobit / operating profit.
 
 ## Check script

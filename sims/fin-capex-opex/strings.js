@@ -37,9 +37,9 @@
       classCap: '{price} ≥ prag {thr}: kapitalizira se, amortizacija {dep} mjesečno',
       classExp: '{price} < prag {thr}: odmah u trošak',
       svcSub: '{fee} mjesečno, {months}: plaća se i ide u trošak svaki mjesec',
-      budgetCapital: 'Investicijski budžet: {x} jednokratno, u 1. godini',
-      budgetOpOnce: 'Operativni budžet: {x} jednokratno, u 1. godini',
-      budgetOpYear: 'Operativni budžet: {x} godišnje',
+      budgetCapital: 'Investicijski proračun: {x} jednokratno, u 1. godini',
+      budgetOpOnce: 'Operativni proračun: {x} jednokratno, u 1. godini',
+      budgetOpYear: 'Operativni proračun: {x} godišnje',
       rowCash: 'Plaćeno dosad',
       rowExpense: 'Trošak dosad',
       rowBook: 'Knjigovodstvena vrijednost u bilanci',
@@ -61,15 +61,15 @@
       nEndSame: 'Kraj vijeka uporabe: isti novac, isti trošak i ista EBITDA.',
       illustrative: 'Iznosi su izmišljeni, ali uvjerljivi. Usluga ovdje ukupno košta jednako kao kupnja, da se usporedi isto s istim.',
       explain: '<p><b>Ista svota, dva načina knjiženja.</b> Kod kupnje (<i>kapitalni izdatak</i>, engl. <i lang="en">capital ' +
-        'expenditure</i>, CapEx) novac izlazi prvog dana, ali se trošak raspoređuje kroz <i>korisni vijek uporabe</i> kao ' +
+        'expenditure</i>, CapEx) novac izlazi prvog dana, ali se trošak raspoređuje kroz <i>vijek uporabe</i> kao ' +
         '<i>amortizacija</i> (engl. <i lang="en">depreciation</i>): kod linearne amortizacije svaki mjesec cijena / broj ' +
         'mjeseci. Ostatak je dotad <i>imovina</i> u <i>bilanci</i>, po <i>knjigovodstvenoj vrijednosti</i> (engl. ' +
         '<i lang="en">book value</i>). Ovdje uvijek vrijedi: plaćeno = trošak + knjigovodstvena vrijednost. Pravila za opremu ' +
         'daje MRS 16 (engl. IAS 16).</p>' +
         '<p>Usluga (<i>operativni trošak</i>, engl. <i lang="en">operating expense</i>, OpEx) plaća se i ide u trošak ' +
         'mjesec po mjesec; u bilanci nema ničega.</p>' +
-        '<p><b>Dva budžeta.</b> Kupnja troši <i>investicijski budžet</i>, cijelu cijenu u godini kupnje; usluga troši ' +
-        '<i>operativni budžet</i> svaki mjesec. Tim kojem je ostalo investicijskog budžeta, a nema prostora u ' +
+        '<p><b>Dva proračuna.</b> Kupnja troši <i>investicijski proračun</i>, cijelu cijenu u godini kupnje; usluga ' +
+        'troši <i>operativni proračun</i> svaki mjesec. Tim kojem je ostalo investicijskog proračuna, a nema prostora u ' +
         'operativnom, zato kupuje; u obrnutom slučaju se pretplaćuje.</p>' +
         '<p><b>Zašto EBITDA voli kupnju.</b> EBITDA (dobit prije kamata, poreza i amortizacije) ne vidi amortizaciju, ' +
         'pa je kupnja ne dira, a usluga je smanjuje svaki mjesec. <i>Operativna dobit</i> (nakon amortizacije) ovdje ' +
@@ -77,7 +77,7 @@
         'novac je samo otišao ranije.</p>' +
         '<p><b>Prag kapitalizacije.</b> Računovodstvena politika poduzeća određuje iznos ispod kojeg kupnja odmah ide ' +
         'u trošak, jer se ne isplati godinama pratiti sitnu imovinu. Tada cijela cijena odjednom ' +
-        'ulazi u trošak i u EBITDA i troši operativni budžet. Ovdje se cijena jednaka pragu kapitalizira; politike to ' +
+        'ulazi u trošak i u EBITDA i troši operativni proračun. Ovdje se cijena jednaka pragu kapitalizira; politike to ' +
         'pišu različito.</p>' +
         '<p>U stvarnosti usluga ukupno obično stoji više (marža pružatelja), ali ne veže novac unaprijed.</p>'
     },

@@ -86,8 +86,9 @@ the shared ledger model). Rules and expected numbers: `SPEC.md`.
 - Whether depreciation should also appear against the operating budget (company practice varies).
 - Monthly convention (full month from the month after purchase); some companies start depreciating in the month of
   purchase or use a half-month convention.
-- The Croatian terms below, in particular "investicijski budžet" / "operativni budžet" (vs "proračun", "plan
-  kapitalnih ulaganja") and "prag kapitalizacije".
+- The Croatian terms below, in particular "prag kapitalizacije". ("Investicijski proračun" / "operativni proračun"
+  for capital / operating budget and "vijek uporabe" for useful life are the owner's choice, 2026-11-07; they
+  replaced "investicijski budžet" / "operativni budžet" and, in the explanation, "korisni vijek uporabe".)
 
 ## Term pairs (not in `kit/glossary.js`; for the coordinator, `"src": "simdeck"`)
 
@@ -104,8 +105,9 @@ the shared ledger model). Rules and expected numbers: `SPEC.md`.
 | profit and loss (statement) | račun dobiti i gubitka |
 | capitalisation threshold | prag kapitalizacije |
 | expensed at once | odmah u trošak |
-| capital budget | investicijski budžet |
-| operating budget | operativni budžet |
+| budget | proračun |
+| capital budget | investicijski proračun |
+| operating budget | operativni proračun |
 | operating profit | operativna dobit |
 | EBITDA | EBITDA (dobit prije kamata, poreza i amortizacije) |
 
@@ -141,7 +143,7 @@ at month 1, a threshold change that keeps the class, the defaults and ranges), t
 cases that need `tidy`, and the reviewer's runner then caught all 42. The reviewer also fixed wording: "it always
 holds" → "here it always holds" (the identity fails with prepayments or a residual value), the EBITDA row is the
 *effect* on EBITDA, "the purchase paid" / "the service has paid" (the company pays), the at-threshold hint ("under"
-→ "with"), and several Croatian phrasings (*korisni vijek uporabe* as in MRS 16 in the explanation; the slider label keeps "vijek uporabe", the long one
+→ "with"), and several Croatian phrasings (*korisni vijek uporabe* as in MRS 16 in the explanation, since 2026-11-07 *vijek uporabe* there too, the owner's choice; the slider label keeps "vijek uporabe", the long one
 overflows the panel; "jednokratno", "dosad", "košta",
 the month caption). All applied.
 

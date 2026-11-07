@@ -128,7 +128,7 @@ back-fees; staying lapsed for good (no updates, a security risk); resale of lice
 ## Terms (hr / en)
 
 trajna licenca / perpetual licence; pretplata / subscription; održavanje / maintenance; kataloška cijena / list
-price; nematerijalna imovina / intangible asset; amortizacija / amortisation; korisni vijek uporabe / useful life;
+price; nematerijalna imovina / intangible asset; amortizacija / amortisation; vijek uporabe / useful life;
 bilanca / balance sheet; račun dobiti i gubitka / profit and loss; godina prijelaza / crossing year; prekid
 održavanja / maintenance lapse; zaostalo održavanje i naknada za ponovnu aktivaciju / back-fees, reinstatement fee;
 po korisniku / per user; po jezgri / per core; zamjena poslužitelja / hardware refresh.

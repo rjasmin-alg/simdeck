@@ -129,10 +129,10 @@ year's Q4 invoice paid in this year's month 1); the journal entries (debits and 
 ## Terms (hr / en)
 
 načelo nastanka događaja / accrual basis; novčano načelo / cash basis; vremenska razgraničenja / accruals and
-deferrals; plaćeni troškovi budućeg razdoblja (aktivna vremenska razgraničenja) / prepaid expenses; obračunati
-troškovi (pasivna vremenska razgraničenja) / accrued expenses; plaćeno unaprijed / paid in advance; račun
-tromjesečno unatrag / billed quarterly in arrears; poslovna godina / fiscal year; kolokacija / colocation. List and
-open questions: `NOTES.md`.
+deferrals; unaprijed plaćeni troškovi (u knjigovodstvu: plaćeni troškovi budućeg razdoblja, aktivna vremenska
+razgraničenja) / prepaid expenses; obračunati troškovi (pasivna vremenska razgraničenja) / accrued expenses; plaćeno
+unaprijed / paid in advance; račun tromjesečno unatrag / billed quarterly in arrears; poslovna godina / fiscal year;
+kolokacija / colocation. List and open questions: `NOTES.md`.
 
 ## Check script
 

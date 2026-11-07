@@ -87,7 +87,7 @@ soft dependency `fin-capex-opex`). Rules and expected numbers: `SPEC.md`.
 | list price | kataloška cijena |
 | intangible asset | nematerijalna imovina |
 | amortisation | amortizacija |
-| useful life | korisni vijek uporabe |
+| useful life | vijek uporabe |
 | balance sheet | bilanca |
 | profit and loss | račun dobiti i gubitka |
 | crossing year | godina prijelaza |

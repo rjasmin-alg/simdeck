@@ -8,7 +8,7 @@
 
   var strings = {
     hr: {
-      stage: 'Plan i knjiženo ostvarenje po mjesecima, odstupanje od početka godine po dijelovima i prognoza za kraj godine',
+      stage: 'Proračun i knjiženo ostvarenje po mjesecima, odstupanje od početka godine po dijelovima i prognoza za kraj godine',
       monthsShort: 'sij.|velj.|ožu.|tra.|svi.|lip.|srp.|kol.|ruj.|lis.|stu.|pro.',
       monthsLong: 'siječanj|veljača|ožujak|travanj|svibanj|lipanj|srpanj|kolovoz|rujan|listopad|studeni|prosinac',
       monthsLoc: 'siječnju|veljači|ožujku|travnju|svibnju|lipnju|srpnju|kolovozu|rujnu|listopadu|studenom|prosincu',
@@ -27,7 +27,7 @@
       prReal: 'Količina i cijena',
       prRealHint: 'Veća potrošnja i skuplje licence, bez računa koji kasni: stvarno prekoračenje koje tempo zadnjeg mjeseca dobro predviđa.',
       prLate: 'Račun kasni',
-      prLateHint: '„Ispod plana u listopadu”: račun koji još nije stigao.',
+      prLateHint: '„Ispod proračuna u listopadu”: račun koji još nije stigao.',
       prUseIt: 'Iskoristi ili izgubi',
       prUseItHint: 'Prividna ušteda iz listopada potroši se u studenom, a onda stigne račun.',
       prAccrued: 'Obračunato',
@@ -35,16 +35,16 @@
       // legend
       legCloud: 'oblak (knjiženo)',
       legLic: 'licence (knjiženo)',
-      legBudget: 'plan za mjesec',
+      legBudget: 'proračun mjeseca',
       legMissing: 'korišteno, bez računa',
       legAccrual: 'obračunato (procjena)',
       legForecast: 'prognoza (tempo zadnjeg mjeseca)',
       // stage
-      chartTitle: 'Po mjesecima: plan i knjiženo',
+      chartTitle: 'Po mjesecima: proračun i knjiženo',
       lCloud: 'Oblak',
       lLic: 'Licence',
       bridgeTitle: 'Odstupanje od početka godine',
-      fromTo: 'Od početka godine: plan {bud} → knjiženo {act}',
+      fromTo: 'Od početka godine: proračun {bud} → knjiženo {act}',
       bVol: 'Količina',
       bVolSub: 'više potrošeno',
       bPrice: 'Cijena',
@@ -53,54 +53,54 @@
       bTimingSub: 'račun u drugom mjesecu',
       bTotal: 'Ukupno',
       fcTitle: 'Prognoza za kraj godine',
-      fcBudget: 'Plan za godinu',
+      fcBudget: 'Proračun za godinu',
       fcForecast: 'Prognoza',
       fcRule: '{done} dosad + {rate} × {k}',
-      fcNone: 'Prije prvog mjeseca prognoza je sam plan.',
+      fcNone: 'Prije prvog mjeseca prognoza je sam proračun.',
       fcFinal: 'Godina je zaključena: prognoza je ostvarenje.',
-      wOver: 'iznad plana',
-      wUnder: 'ispod plana',
-      wOn: 'točno po planu',
+      wOver: 'iznad proračuna',
+      wUnder: 'ispod proračuna',
+      wOn: 'točno prema proračunu',
       illustrative: 'Iznosi su izmišljeni, ali uvjerljivi. Izvještaj knjiži račune, a ne plaćanja.',
       // captions
-      cStart: 'Plan za godinu je postavljen: {mb} mjesečno, {yb} za godinu. Svaki korak knjiži jedan mjesec: račune koji su stigli, nasuprot planu za taj mjesec.',
-      cOnPlan: '{month}: svaki račun odgovara planu; mjesec je točno po planu.',
-      cOver: '{month}: mjesec je {x} iznad plana.',
-      cUnder: '{month}: mjesec je {x} ispod plana.',
+      cStart: 'Proračun za godinu je postavljen: {mb} mjesečno, {yb} za godinu. Svaki korak knjiži jedan mjesec: račune koji su stigli, nasuprot proračunu za taj mjesec.',
+      cOnPlan: '{month}: svi su računi točno kako je planirano; mjesec je točno prema proračunu.',
+      cOver: '{month}: mjesec je {x} iznad proračuna.',
+      cUnder: '{month}: mjesec je {x} ispod proračuna.',
       cVolume: '{month}: potrošnja oblaka raste na {qty} jedinica mjesečno. Po planiranoj cijeni to je {x} više svaki mjesec: odstupanje količine. Tempo zadnjeg mjeseca nosi to do kraja godine: prognoza {fc}.',
       cPrice: '{month}: licence se obnavljaju po cijeni od {price} po korisniku umjesto {bp}. Isti korisnici koštaju {x} više mjesečno: odstupanje cijene. Prognoza {fc}.',
-      cMissing: '{month}: račun za oblak nije stigao. Mjesec izgleda {x} ispod plana, a iskorišteno je {miss} usluge bez računa: to je vremensko odstupanje, ne ušteda. Tempo ovog mjeseca predviđa samo {fc}.',
+      cMissing: '{month}: račun za oblak nije stigao. Mjesec izgleda {x} ispod proračuna, a iskorišteno je {miss} usluge bez računa: to je vremensko odstupanje, ne ušteda. Tempo ovog mjeseca predviđa samo {fc}.',
       cAccrual: '{month}: račun za oblak nije stigao, pa se njegova procjena, {miss}, obračunava. Mjesec pokazuje ono što je korišteno; vremenskog odstupanja nema, a prognoza ostaje {fc}.',
       cArrives: '{month}: zakašnjeli račun stiže s ovomjesečnim, dva računa za oblak u istom mjesecu. Vremensko odstupanje vraća se na 0, ali tempo od {rate} mjesečno sada predviđa {fc}.',
       cReplace: '{month}: zakašnjeli račun stiže i zamjenjuje obračunatu procjenu; mjesec knjiži samo vlastitu potrošnju.',
-      cSpend: '{month}: u {m10} je godina od početka izgledala {s} ispod plana, pa se prije kraja godine kupi još {s} kapaciteta u oblaku: iskoristi ili izgubi. Stiže i zakašnjeli račun.',
-      cNoSpend: '{month}: u {m10} godina od početka nije bila ispod plana, pa nema što potrošiti; ništa se dodatno ne kupuje.',
-      cYearOver: 'Kraj godine: knjiženo {act} uz plan od {bud}, {x} iznad plana. Količina {vol}, cijena {prc}, vrijeme {tim}.',
-      cYearUnder: 'Kraj godine: knjiženo {act} uz plan od {bud}, {x} ispod plana. Količina {vol}, cijena {prc}, vrijeme {tim}.',
-      cYearOn: 'Kraj godine: knjiženo {act}, točno koliko je planirano.',
+      cSpend: '{month}: u {m10} je godina od početka izgledala {s} ispod proračuna, pa se prije kraja godine kupi još {s} kapaciteta u oblaku: iskoristi ili izgubi. Stiže i zakašnjeli račun.',
+      cNoSpend: '{month}: u {m10} godina od početka nije bila ispod proračuna, pa nema što potrošiti; ništa se dodatno ne kupuje.',
+      cYearOver: 'Kraj godine: knjiženo {act} uz proračun od {bud}, {x} iznad proračuna. Količina {vol}, cijena {prc}, vrijeme {tim}.',
+      cYearUnder: 'Kraj godine: knjiženo {act} uz proračun od {bud}, {x} ispod proračuna. Količina {vol}, cijena {prc}, vrijeme {tim}.',
+      cYearOn: 'Kraj godine: knjiženo {act}, točno onoliko koliko iznosi proračun.',
       gYearLate: 'Zakašnjeli račun samo je premjestio trošak iz jednog mjeseca u drugi: preko godine vremensko je odstupanje 0.',
-      gOver: 'Od početka godine {d} iznad plana: količina {vol}, cijena {prc}, vrijeme {tim}.',
-      gUnder: 'Od početka godine {d} ispod plana: količina {vol}, cijena {prc}, vrijeme {tim}.',
-      gOn: 'Od početka godine točno po planu.',
-      gEven: 'Od početka godine po planu samo zato što se dijelovi poništavaju: količina {vol}, cijena {prc}, vrijeme {tim}.',
-      explain: '<p><b>Plan (engl. <i lang="en">budget</i>) je raspoređen po mjesecima, a svaki mjesec izvještaj ' +
-        'uspoređuje plan s knjiženim ostvarenjem (engl. <i lang="en">actuals</i>).</b> Razlika je ' +
-        '<i>odstupanje</i> (engl. <i lang="en">variance</i>): iznad plana ili ispod plana. Samo po sebi odstupanje ne ' +
+      gOver: 'Od početka godine {d} iznad proračuna: količina {vol}, cijena {prc}, vrijeme {tim}.',
+      gUnder: 'Od početka godine {d} ispod proračuna: količina {vol}, cijena {prc}, vrijeme {tim}.',
+      gOn: 'Od početka godine točno prema proračunu.',
+      gEven: 'Od početka godine prema proračunu samo zato što se dijelovi poništavaju: količina {vol}, cijena {prc}, vrijeme {tim}.',
+      explain: '<p><b>Proračun (engl. <i lang="en">budget</i>) je raspoređen po mjesecima, a svaki mjesec izvještaj ' +
+        '<i>plan i ostvarenje</i> uspoređuje proračun s knjiženim ostvarenjem (engl. <i lang="en">actuals</i>).</b> ' +
+        'Razlika je <i>odstupanje</i> (engl. <i lang="en">variance</i>): iznad proračuna ili ispod proračuna. Samo po sebi odstupanje ne ' +
         'kaže zašto; zato se rastavlja na dijelove.</p>' +
         '<p><b>Količina</b> (engl. <i lang="en">volume variance</i>): potrošeno više ili manje nego što je planirano, ' +
         'vrednovano po planiranoj cijeni. <b>Cijena</b> (engl. <i lang="en">price variance</i>): svaka jedinica ' +
-        'skuplja ili jeftinija od plana, na stvarnoj količini. Ta dva dijela zajedno daju razliku između troška ' +
-        'mjeseca i plana. <b>Vrijeme</b> (engl. <i lang="en">timing variance</i>): račun knjižen u drugom mjesecu od ' +
-        'usluge koju plaća. Kasni račun čini mjesec „ispod plana”, a idući „iznad”; preko godine se poništi.</p>' +
-        '<p><b>„Ispod plana u listopadu” često je samo račun koji nije stigao.</b> Ako se na kraju mjeseca ' +
+        'skuplja ili jeftinija nego što je planirano, na stvarnoj količini. Ta dva dijela zajedno daju razliku između ' +
+        'troška mjeseca i njegova proračuna. <b>Vrijeme</b> (engl. <i lang="en">timing variance</i>): račun knjižen u drugom mjesecu od ' +
+        'usluge koju plaća. Kasni račun čini mjesec „ispod proračuna”, a idući „iznad”; preko godine se poništi.</p>' +
+        '<p><b>„Ispod proračuna u listopadu” često je samo račun koji nije stigao.</b> Ako se na kraju mjeseca ' +
         '<i>obračuna</i> procjena za korištenu uslugu bez računa (obračunati trošak, pasivno vremensko razgraničenje), ' +
         'izvještaj pokazuje potrošnju, a ne datum dolaska računa. To je isto načelo kao u simulatoru o vremenskim razgraničenjima.</p>' +
         '<p><b>Prognoza prema tempu zadnjeg mjeseca</b> (engl. <i lang="en">run rate</i>): knjiženo dosad plus posljednji ' +
         'mjesec pomnožen s brojem preostalih mjeseci. Jednostavna je i brzo hvata trajnu promjenu količine ili cijene, ' +
         'ali nosi i pogrešku tog jednog mjeseca: mjesec bez računa ili s dva računa daje prenisku ili previsoku prognozu.</p>' +
-        '<p><b>Iskoristi ili izgubi.</b> Kad neiskorišteni plan na kraju godine propada, prividna ušteda potiče kupnju u ' +
-        'zadnjim mjesecima. Ako je „ušteda” bila samo račun koji kasni, godina završi iznad plana.</p>' +
-        '<p>Plan je ovdje jednak svaki mjesec; stvarni planovi često prate sezonu ili projekte. Iznosi su izmišljeni, ' +
+        '<p><b>Iskoristi ili izgubi.</b> Kad neiskorišteni dio proračuna na kraju godine propada, prividna ušteda potiče kupnju u ' +
+        'zadnjim mjesecima. Ako je „ušteda” bila samo račun koji kasni, godina završi iznad proračuna.</p>' +
+        '<p>Proračun je ovdje jednak svaki mjesec; stvarni proračuni često prate sezonu ili projekte. Iznosi su izmišljeni, ' +
         'ali uvjerljivi.</p>'
     },
     en: {

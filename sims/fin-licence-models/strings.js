@@ -89,7 +89,7 @@
         '(engl. <i lang="en">subscription</i>) je godišnja naknada po licenci: kad se prestane plaćati, prestaje i ' +
         'pravo korištenja.</p>' +
         '<p><b>Novac i trošak nisu isto.</b> Kupljena trajna licenca je <i>nematerijalna imovina</i> (MRS 38): ' +
-        'novac odlazi odjednom, a u trošak ide <i>amortizacijom</i> kroz korisni vijek (ovdje pet godina), pa dio ' +
+        'novac odlazi odjednom, a u trošak ide <i>amortizacijom</i> kroz vijek uporabe (ovdje pet godina), pa dio ' +
         'cijene ostaje u bilanci. Održavanje je trošak svoje godine. Pretplata je sva trošak godine u kojoj se ' +
         'plaća i ništa ne ostavlja u bilanci.</p>' +
         '<p><b>Godina prijelaza.</b> Trajna licenca plaća puno na početku i malo kasnije, pretplata ravnomjerno; ' +
