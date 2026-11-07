@@ -1,0 +1,590 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-lease-vs-buy: the same server bought for cash, bought on a loan or leased. On top, the scoreboard: per way what
+     it pays, the cash paid in total (nominal), what it still owns at the end, the NPV at the cost of capital, and the
+     balance sheet (asset, liability) at the end of the chosen year; the cheapest in each comparison is ticked. Below
+     left, the cash paid so far month by month; below right, each year's expense split into depreciation, interest and
+     rent. Ledger: financing.js (promotable); discounting: discount.js (copied from fin-npv-discounting); model:
+     sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-lease-vs-buy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leasing ili kupnja · simdeck</title>
+<meta name="description" content="Isti poslužitelj za gotovinu, na kredit ili u leasing: biraj najamninu, trajanje, ostatak vrijednosti i kraj, usporedi novac, trošak i NSV.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-lease-vs-buy",
+  "title": {
+    "hr": "Leasing ili kupnja",
+    "en": "Lease vs buy"
+  },
+  "concept": {
+    "hr": "Gotovina, kredit ili leasing: novac, trošak i bilanca se razlikuju; usporedi NSV",
+    "en": "Cash, loan or lease: cash, expense and balance sheet differ; compare by NPV"
+  },
+  "summary": {
+    "hr": "Isti poslužitelj za gotovinu, na kredit ili u leasing: biraj najamninu, trajanje, ostatak vrijednosti i kraj, usporedi novac, trošak i NSV.",
+    "en": "The same server for cash, on a loan or leased: set the rental, term, residual and end of term; compare cash paid, yearly expense and NPV."
+  },
+  "tags": [
+    "investment",
+    "contracts"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dear-money"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-lease-vs-buy"]; colours only from kit tokens.
+   Each way has a colour, a shape and a line style: cash ● solid --c1, loan ■ dashed --c2, lease ▲ dotted --c3.
+   Expense parts by pattern: depreciation solid, interest hatched, rent dotted (colour is never the only carrier). */
+[data-sim="fin-lease-vs-buy"] .lb {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+
+/* the ways' marks */
+[data-sim="fin-lease-vs-buy"] .lb-g {
+  display: inline-block;
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--sw);
+  border: 0.14rem solid var(--ink);
+}
+[data-sim="fin-lease-vs-buy"] .lb-g[data-w="cash"] { border-radius: 50%; }
+[data-sim="fin-lease-vs-buy"] .lb-g[data-w="lease"] { border: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); background: var(--ink); position: relative; }
+[data-sim="fin-lease-vs-buy"] .lb-g[data-w="lease"]::after { content: ''; position: absolute; inset: 0.3rem 0.2rem 0.14rem; clip-path: polygon(50% 0, 100% 100%, 0 100%); background: var(--sw); }
+
+/* the scoreboard */
+[data-sim="fin-lease-vs-buy"] .lb-boardwrap { flex: none; }
+[data-sim="fin-lease-vs-buy"] .lb-board {
+  display: grid;
+  grid-template-columns: minmax(0, 2.3fr) repeat(5, minmax(0, 1fr));
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="fin-lease-vs-buy"] .lb-board > * {
+  padding: 0.2rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+[data-sim="fin-lease-vs-buy"] .lb-th {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0;
+  line-height: 1.15;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+}
+[data-sim="fin-lease-vs-buy"] .lb-th span { font-weight: 400; }
+[data-sim="fin-lease-vs-buy"] .lb-th[data-k="way"] { align-items: flex-start; text-align: left; }
+[data-sim="fin-lease-vs-buy"] .lb-th[data-k="sheet"] { align-items: center; text-align: center; border-left: var(--line-w) solid var(--line); }
+[data-sim="fin-lease-vs-buy"] .lb-board > .lb-top { border-top: 0; }
+[data-sim="fin-lease-vs-buy"] .lb-board > [data-sheet] { border-left: var(--line-w) solid var(--line); }
+[data-sim="fin-lease-vs-buy"] .lb-name { gap: 0.6rem; }
+[data-sim="fin-lease-vs-buy"] .lb-name div { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+[data-sim="fin-lease-vs-buy"] .lb-name b { font-size: 1rem; }
+[data-sim="fin-lease-vs-buy"] .lb-name span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-lease-vs-buy"] .lb-val {
+  justify-content: flex-end;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+[data-sim="fin-lease-vs-buy"] .lb-val[data-soft] { font-weight: 400; }
+[data-sim="fin-lease-vs-buy"] .lb-val.lb-win { background: color-mix(in srgb, var(--ok) 16%, var(--panel)); }
+[data-sim="fin-lease-vs-buy"] .lb-val.lb-win::before { content: '✓'; color: var(--ok); }
+[data-sim="fin-lease-vs-buy"] .lb-val.sd-changed { outline-offset: -0.25rem; box-shadow: none; background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-lease-vs-buy"] .lb-val.sd-changed::before { color: var(--on-hl); }
+
+/* the two charts */
+[data-sim="fin-lease-vs-buy"] .lb-charts {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.2rem;
+}
+[data-sim="fin-lease-vs-buy"] .lb-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+[data-sim="fin-lease-vs-buy"] .lb-title {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.8rem;
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+}
+[data-sim="fin-lease-vs-buy"] .lb-key { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; }
+[data-sim="fin-lease-vs-buy"] .lb-key i { display: inline-block; width: 1rem; height: 1rem; border: 0.12rem solid var(--ink); --sw: var(--muted); }
+[data-sim="fin-lease-vs-buy"] .lb-plotgrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 6.4rem minmax(0, 1fr);
+  grid-template-rows: minmax(5rem, 1fr) 1.7rem;
+  padding: 0.7rem 1.2rem 0 0;
+}
+[data-sim="fin-lease-vs-buy"] .lb-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-lease-vs-buy"] .lb-tick {
+  position: absolute;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-lease-vs-buy"] .lb-plot {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: 0.2rem solid var(--ink);
+}
+[data-sim="fin-lease-vs-buy"] .lb-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.6; }
+[data-sim="fin-lease-vs-buy"] .lb-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-lease-vs-buy"] .lb-line { fill: none; stroke: var(--sw); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-lease-vs-buy"] .lb-line[data-w="loan"] { stroke-dasharray: 12 7; }
+[data-sim="fin-lease-vs-buy"] .lb-line[data-w="lease"] { stroke-dasharray: 2 7; stroke-linecap: round; stroke-width: 5; }
+[data-sim="fin-lease-vs-buy"] .lb-endmark { position: absolute; transform: translate(-50%, -50%); z-index: 2; }
+[data-sim="fin-lease-vs-buy"] .lb-xaxis { position: relative; grid-column: 2; grid-row: 2; }
+[data-sim="fin-lease-vs-buy"] .lb-xtick { position: absolute; top: 0.15rem; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-lease-vs-buy"] .lb-now { position: absolute; top: 0; bottom: 0; border-left: 0.2rem solid var(--accent); z-index: 1; }
+[data-sim="fin-lease-vs-buy"] .lb-now-label {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="fin-lease-vs-buy"] .lb-now[data-end] .lb-now-label { left: auto; right: 0.3rem; }
+
+/* the expense bars */
+[data-sim="fin-lease-vs-buy"] .lb-years { position: absolute; inset: 0; display: flex; }
+[data-sim="fin-lease-vs-buy"] .lb-year { flex: 1 1 0; display: flex; gap: 0.25rem; padding: 0 0.5rem; min-width: 0; }
+[data-sim="fin-lease-vs-buy"] .lb-year[data-now] { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 0.15rem solid var(--accent); outline-offset: -0.15rem; }
+[data-sim="fin-lease-vs-buy"] .lb-barcol { position: relative; flex: 1 1 0; min-width: 0; }
+[data-sim="fin-lease-vs-buy"] .lb-stack {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  border: 0.12rem solid var(--ink);
+  border-bottom: 0;
+}
+[data-sim="fin-lease-vs-buy"] .lb-seg { flex: none; }
+[data-sim="fin-lease-vs-buy"] [data-k="dep"] { background: var(--sw); }
+[data-sim="fin-lease-vs-buy"] [data-k="interest"] {
+  background: repeating-linear-gradient(45deg, var(--sw) 0 0.25rem, color-mix(in srgb, var(--sw) 25%, var(--bg)) 0.25rem 0.5rem);
+}
+[data-sim="fin-lease-vs-buy"] [data-k="rent"] {
+  background: radial-gradient(circle, var(--sw) 0.15rem, color-mix(in srgb, var(--sw) 22%, var(--bg)) 0.17rem) 0 0 / 0.55rem 0.55rem;
+}
+[data-sim="fin-lease-vs-buy"] .lb-stack .lb-g { position: absolute; left: 50%; top: -0.75rem; transform: translate(-50%, -50%); width: 0.95rem; height: 0.95rem; }
+[data-sim="fin-lease-vs-buy"] .lb-xlabels { position: absolute; inset: 0; display: flex; }
+[data-sim="fin-lease-vs-buy"] .lb-xlabels span { flex: 1 1 0; text-align: center; padding-top: 0.15rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-lease-vs-buy"] .lb-xlabels span[data-now] { color: var(--ink); font-weight: 700; }
+
+/* the stage's button groups */
+[data-sim="fin-lease-vs-buy"] .lb-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.4rem; }
+[data-sim="fin-lease-vs-buy"] .lb-tool { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="fin-lease-vs-buy"] .lb-tool-l { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-lease-vs-buy"] .lb-tool .sd-seg { flex-wrap: nowrap; }
+[data-sim="fin-lease-vs-buy"] .lb-tool button { min-height: 2.2rem; padding: 0 0.7rem; white-space: nowrap; }
+[data-sim="fin-lease-vs-buy"] .lb-tool button[aria-pressed="true"] { font-weight: 700; }
+
+[data-sim="fin-lease-vs-buy"] .sd-ctl[hidden] { display: none; }
+
+[data-sim="fin-lease-vs-buy"] .lb-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-lease-vs-buy"] .sd-swatch[data-shape="lb-cash"] { border-radius: 50%; }
+[data-sim="fin-lease-vs-buy"] .sd-swatch[data-shape="lb-lease"] { clip-path: polygon(50% 0, 100% 100%, 0 100%); border: 0; }
+[data-sim="fin-lease-vs-buy"] .sd-swatch[data-shape="lb-best"] { position: relative; background: color-mix(in srgb, var(--ok) 16%, var(--panel)); border-color: var(--ok); }
+[data-sim="fin-lease-vs-buy"] .sd-swatch[data-shape="lb-best"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; color: var(--ok); line-height: 1; }
+
+/* Phone and portrait: the stage grows with its content; the charts stack; the scoreboard scrolls sideways in its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-lease-vs-buy"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-lease-vs-buy"] .lb { height: auto; padding: 0.4rem; }
+  /* a phone shows the two comparisons (cash paid, NPV); what is owned and the balance sheet need the wide screen */
+  [data-sim="fin-lease-vs-buy"] .lb-board { grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)); }
+  [data-sim="fin-lease-vs-buy"] .lb-board > [data-col] { display: none; }
+  [data-sim="fin-lease-vs-buy"] .lb-name { gap: 0.4rem; }
+  [data-sim="fin-lease-vs-buy"] .lb-val { padding: 0.2rem 0.3rem; }
+  [data-sim="fin-lease-vs-buy"] .lb-val { font-size: 1.05rem; }
+  [data-sim="fin-lease-vs-buy"] .lb-charts { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-lease-vs-buy"] .lb-plotgrid { grid-template-columns: 5.2rem minmax(0, 1fr); grid-template-rows: 14rem 1.7rem; padding-right: 0.6rem; }
+  [data-sim="fin-lease-vs-buy"] .lb-year { padding: 0 0.15rem; gap: 0.1rem; }
+  [data-sim="fin-lease-vs-buy"] .lb-tool { flex-wrap: wrap; }
+  [data-sim="fin-lease-vs-buy"] .lb-tool .sd-seg { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Leasing ili kupnja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="discount.js"></script>
+<script src="financing.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var D = window.SimdeckModels.discount;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { cash: '1', loan: '2', lease: '3' };
+  var NAME = { cash: 'wayCash', loan: 'wayLoan', lease: 'wayLease' };
+  var LOWER = { cash: 'nameCash', loan: 'nameLoan', lease: 'nameLease' };
+  var sim = null;
+  var refocus = null;   // the stage button to give focus back to after a render
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 11); minus is U+2212. */
+  function money(x) {
+    var r = D.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  /** A percentage with d decimals, or with as many as it needs (0 or 1) when d is left out. */
+  function pct(v, d) { return t('pct', { n: dec(v, d == null ? (v % 1 ? 1 : 0) : d) }); }
+  function data(text, tag) { return h(tag || 'span', { translate: 'no' }, String(text)); }
+  function glyph(w) { return h('span', { class: 'lb-g', dataset: { w: w, c: COLOUR[w] } }); }
+
+  // ── the scoreboard ──
+
+  function subOf(s, w) {
+    var p = s.p;
+    if (w === 'cash') return t('subCash', { price: money(p.price) });
+    if (w === 'loan') return t('subLoan', { n: s.n, a: money(s.instalment), rate: pct(p.loanRate) });
+    var key = p.end === 'buyout' ? 'subLeaseBuyout' : p.end === 'extend' ? 'subLeaseExtend' : 'subLeaseReturn';
+    return t(key, { n: s.nL, q: money(s.rental), r: money(s.residual) });
+  }
+
+  function board(s, chg) {
+    var y = s.p.year;
+    var th = function (k, title, sub, extra) {
+      return h('div', Object.assign({ class: 'lb-th', dataset: { k: k } }, extra || {}), title, sub ? h('span', null, sub) : null);
+    };
+    var cells = [
+      th('way', t('thWay'), null, { class: 'lb-th lb-top', style: { gridRow: 'span 2' } }),
+      th('paid', t('thPaid'), t('thPaidSub'), { class: 'lb-th lb-top', style: { gridRow: 'span 2' } }),
+      th('owns', t('thOwns'), t('thOwnsSub'), { class: 'lb-th lb-top', style: { gridRow: 'span 2' }, dataset: { k: 'owns', col: 'owns' } }),
+      th('npv', t('thNpv', { rate: pct(s.p.coc) }), t('thNpvSub'), { class: 'lb-th lb-top', style: { gridRow: 'span 2' } }),
+      th('sheet', y === 0 ? t('thSheetDay') : t('thSheet', { y: y }), null, { class: 'lb-th lb-top', style: { gridColumn: 'span 2' }, dataset: { k: 'sheet', col: 'sheet' } }),
+      th('asset', t('thAsset'), null, { dataset: { k: 'asset', sheet: 'true', col: 'sheet' } }),
+      th('liab', t('thLiab'), null, { dataset: { k: 'liab', col: 'sheet' } })
+    ];
+    s.ways.forEach(function (w) {
+      var nom = s.picks.nominal.indexOf(w.id) >= 0, val = s.picks.value.indexOf(w.id) >= 0;
+      var cell = function (text, win, changed, extra) {
+        return h('div', Object.assign({
+          class: 'lb-val' + (win ? ' lb-win' : '') + (win && changed ? ' sd-changed' : ''), translate: 'no'
+        }, extra || {}), text);
+      };
+      cells.push(h('div', { class: 'lb-name' }, glyph(w.id),
+        h('div', null, h('b', null, t(NAME[w.id])), h('span', null, subOf(s, w.id)))));
+      cells.push(cell(money(w.paid), nom, chg.indexOf('nominal') >= 0));
+      cells.push(w.owns > 0 ? cell(money(w.owns), false, false, { dataset: { col: 'owns' } }) : h('div', { class: 'lb-val', dataset: { soft: 'true', col: 'owns' } }, t('nothing')));
+      cells.push(cell(money(w.npv), val, chg.indexOf('value') >= 0));
+      cells.push(cell(money(w.asset), false, false, { dataset: { soft: 'true', sheet: 'true', col: 'sheet' } }));
+      cells.push(cell(money(w.liability), false, false, { dataset: { soft: 'true', col: 'sheet' } }));
+    });
+    return h('div', { class: 'lb-boardwrap' }, h('div', { class: 'lb-board' }, cells));
+  }
+
+  // ── scales ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step that keeps the axis to about four grid lines. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+  function domainOf(max) {
+    var step = niceStep(Math.max(max, 1000) / 4);
+    return { top: Math.max(step, Math.ceil(max / step) * step), step: step };
+  }
+  function yOf(dom) { return function (v) { return (100 * (dom.top - v) / dom.top) + '%'; }; }
+  function axis(dom, y) {
+    var ticks = [], lines = [];
+    for (var v = 0; v <= dom.top + 1e-6; v += dom.step) {
+      ticks.push(h('span', { class: 'lb-tick', translate: 'no', style: { top: y(v) } }, money(v)));
+      if (v > 0) lines.push(h('div', { class: 'lb-gl', style: { top: y(v) } }));
+    }
+    return { ticks: h('div', { class: 'lb-axis' }, ticks), lines: lines };
+  }
+
+  // ── cash paid so far, month by month ──
+
+  function cashChart(s) {
+    var M = s.months;
+    var dom = domainOf(Math.max.apply(null, s.ways.map(function (w) { return w.paid; })));
+    var y = yOf(dom);
+    var ax = axis(dom, y);
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    var yNum = function (v) { return (1000 * (dom.top - v) / dom.top).toFixed(1); };
+    var marks = [];
+    s.ways.forEach(function (w) {
+      var pts = ['0,' + yNum(0)].concat(w.series.map(function (v, m) { return (1000 * m / M).toFixed(1) + ',' + yNum(v); }));
+      var pl = document.createElementNS(NS, 'polyline');
+      pl.setAttribute('class', 'lb-line');
+      pl.setAttribute('data-w', w.id);
+      pl.setAttribute('data-c', COLOUR[w.id]);
+      pl.setAttribute('points', pts.join(' '));
+      svg.appendChild(pl);
+      marks.push(h('span', { class: 'lb-endmark', style: { left: '100%', top: y(w.paid) } }, glyph(w.id)));
+    });
+    var xt = [];
+    for (var k = 1; k <= s.H; k++) {
+      xt.push(h('span', { class: 'lb-xtick', style: { left: (100 * (k - 0.5) / s.H) + '%' } }, t('yearN', { n: k })));
+    }
+    var yr = s.p.year;
+    var now = h('div', Object.assign({ class: 'lb-now', style: { left: (100 * yr / s.H) + '%' } }, yr > s.H / 2 ? { dataset: { end: 'true' } } : {}),
+      h('span', { class: 'lb-now-label' }, yr === 0 ? t('dayOne') : t('endOfYear', { n: yr })));
+    return h('div', { class: 'lb-panel' },
+      h('p', { class: 'lb-title' }, t('cashTitle')),
+      h('div', { class: 'lb-plotgrid' }, ax.ticks,
+        h('div', { class: 'lb-plot' }, ax.lines, svg, now, marks),
+        h('div', { class: 'lb-xaxis' }, xt)));
+  }
+
+  // ── expense in each year ──
+
+  var KINDS = [['dep', 'kDep'], ['interest', 'kInt'], ['rent', 'kRent']];
+
+  function expenseChart(s) {
+    var max = 0;
+    s.ways.forEach(function (w) { w.yearly.forEach(function (e) { max = Math.max(max, e.total); }); });
+    var dom = domainOf(max);
+    var y = yOf(dom);
+    var ax = axis(dom, y);
+    var years = [], labels = [];
+    for (var k = 0; k < s.H; k++) {
+      var now = s.p.year === k + 1 ? { now: 'true' } : {};
+      years.push(h('div', { class: 'lb-year', dataset: now }, s.ways.map(function (w) {
+        var e = w.yearly[k];
+        var segs = KINDS.filter(function (kd) { return e[kd[0]] > 0.5; }).map(function (kd) {
+          return h('div', { class: 'lb-seg', dataset: { k: kd[0] }, style: { height: (100 * e[kd[0]] / e.total) + '%' } });
+        });
+        var title = t(NAME[w.id]) + ', ' + t('yearN', { n: k + 1 }) + ': ' + money(e.total);
+        return h('div', { class: 'lb-barcol', title: title },
+          e.total > 0.5 ? h('div', { class: 'lb-stack', dataset: { c: COLOUR[w.id] }, style: { height: (100 * e.total / dom.top) + '%' } }, segs, glyph(w.id)) : null);
+      })));
+      labels.push(h('span', { dataset: now }, t('yearN', { n: k + 1 })));
+    }
+    var key = KINDS.map(function (kd) { return h('span', { class: 'lb-key' }, h('i', { dataset: { k: kd[0] } }), t(kd[1])); });
+    return h('div', { class: 'lb-panel' },
+      h('p', { class: 'lb-title' }, h('span', null, t('expTitle')), key),
+      h('div', { class: 'lb-plotgrid' }, ax.ticks,
+        h('div', { class: 'lb-plot' }, ax.lines, h('div', { class: 'lb-years' }, years)),
+        h('div', { class: 'lb-xaxis' }, h('div', { class: 'lb-xlabels' }, labels))));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  // ── the stage's own controls: end of the term, the lease in the books, the balance-sheet date ──
+
+  function buttons(label, key, options, current) {
+    return h('div', { class: 'lb-tool', role: 'group', 'aria-label': label },
+      h('span', { class: 'lb-tool-l' }, label),
+      h('div', { class: 'sd-seg' }, options.map(function (o) {
+        return h('button', {
+          type: 'button', 'aria-pressed': String(o[0] === current), dataset: { key: key + ':' + o[0] },
+          onclick: function () {
+            var patch = {};
+            patch[key] = o[0];
+            refocus = key + ':' + o[0];
+            sim.set(patch);
+          }
+        }, o[1]);
+      })));
+  }
+
+  function tools(s) {
+    var years = [[0, t('dayOne')]], terms = [];
+    for (var y = 1; y <= s.H; y++) years.push([y, String(y)]);
+    for (var k = L.LIM.term.min; k <= L.LIM.term.max; k++) terms.push([k, t.n('termN', k)]);
+    return h('div', { class: 'lb-tools' },
+      buttons(t('term'), 'term', terms, s.p.term),
+      buttons(t('end'), 'end', ENDS, s.p.end),
+      buttons(t('books'), 'books', BOOKS, s.p.books),
+      buttons(t('year'), 'year', years, s.p.year));
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'lb' }, board(s, chg), tools(s),
+      h('div', { class: 'lb-charts' }, cashChart(s), expenseChart(s)),
+      h('p', { class: 'lb-foot' }, t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-key="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function names(ids) {
+    if (ids.length === 3) return t('all3');
+    var n = ids.map(function (id) { return t(LOWER[id]); });
+    return n.length === 2 ? t('and2', { a: n[0], b: n[1] }) : n[0];
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var b = function (x) { return h('b', { translate: 'no' }, x); };
+    var bw = function (x) { return h('b', null, x); };
+    var by = {};
+    s.ways.forEach(function (w) { by[w.id] = w; });
+    var out = k.key === 'capSame'
+      ? t.parts('capSame', { who: bw(names(s.picks.value)), rate: b(pct(p.coc)) })
+      : t.parts('capDiffer', { nom: bw(names(s.picks.nominal)), val: bw(names(s.picks.value)), rate: b(pct(p.coc)) });
+    var yearRent = 12 * s.rental;
+    k.notes.forEach(function (key) {
+      var vars = {
+        nBuyout: { r: b(money(s.residual)), v: b(money(s.residual)) },
+        nExtend: { x: b(money(yearRent)), v: b(money(s.endValue)) },
+        nLoanCoc: { loan: b(pct(p.loanRate)) },
+        nLoanCheap: { loan: b(pct(p.loanRate)), coc: b(pct(p.coc)), i: b(money(by.loan.interest)) },
+        nRou: { y: b(s.leaseYearN), x: b(money(s.leaseYear.total)), r: b(money(yearRent)) },
+        nRouDay: { l: b(money(s.rightOfUse)) },
+        nRent: { r: b(money(yearRent)) }
+      }[key];
+      out.push(' ');
+      out = out.concat(t.parts(key, vars));
+    });
+    return out;
+  }
+
+  var labels = {
+    'three-ways': 'pThreeWays', 'loan-at-coc': 'pLoanAtCoc', 'dear-money': 'pDearMoney',
+    'buy-out': 'pBuyOut', 'extend': 'pExtend', 'as-rent': 'pAsRent'
+  };
+  var R = L.LIM;
+  var never = function () { return false; };
+  var ENDS = [['return', t('endReturn')], ['buyout', t('endBuyout')], ['extend', t('endExtend')]];
+  var BOOKS = [['rou', t('booksRou')], ['rent', t('booksRent')]];
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'lease', type: 'range', label: t('lease'), min: R.lease.min, max: R.lease.max, step: R.lease.step, format: function (v) { return pct(v, 2); } },
+      { key: 'residual', type: 'range', label: t('residual'), min: R.residual.min, max: R.residual.max, step: R.residual.step, format: function (v) { return pct(v); } },
+      { key: 'loanRate', type: 'range', label: t('loanRate'), min: R.loanRate.min, max: R.loanRate.max, step: R.loanRate.step, format: function (v) { return pct(v); } },
+      { key: 'coc', type: 'range', label: t('coc'), min: R.coc.min, max: R.coc.max, step: R.coc.step, format: function (v) { return pct(v); } },
+      // set on the stage (the four button groups) or fixed (the price); hidden here, kept in the URL and clamped
+      { key: 'term', type: 'range', label: t('term'), min: R.term.min, max: R.term.max, step: R.term.step, visible: never },
+      { key: 'price', type: 'range', label: t('price'), min: R.price.min, max: R.price.max, step: R.price.step, visible: never },
+      { key: 'end', type: 'choice', label: t('end'), options: ENDS, visible: never },
+      { key: 'books', type: 'choice', label: t('books'), options: BOOKS, visible: never },
+      { key: 'year', type: 'range', label: t('year'), min: 0, max: function (p) { return L.horizon(L.normalise(p)); }, step: 1, visible: never }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'lb-cash', c: 1, label: t('legCash') },
+      { shape: 'lb-loan', c: 2, label: t('legLoan') },
+      { shape: 'lb-lease', c: 3, label: t('legLease') },
+      { shape: 'lb-best', label: t('legBest') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
