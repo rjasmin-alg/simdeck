@@ -185,7 +185,7 @@ Then the kit tasks: [`kit-sequence-chart`](w0/kit-sequence-chart.md), [`kit-topo
 | 60 | [`db-replication`](w2/db-replication.md) | Replication lag and failover | Replication and HA | S | P2 |  |
 | 61 | [`utilisation-latency`](w2/utilisation-latency.md) | Latency near full utilisation | Performance | S | P2 |  |
 
-## Wave 3: derivatives (256 tasks)
+## Wave 3: derivatives (279 tasks)
 
 | # | Task | Title | Group | Size | Pri | Depends on |
 |---|---|---|---|---|---|---|
@@ -272,179 +272,202 @@ Then the kit tasks: [`kit-sequence-chart`](w0/kit-sequence-chart.md), [`kit-topo
 | 81 | [`fin-sunk-cost`](w3/fin-sunk-cost.md) | Sunk cost: decide looking forward | Finance basics for IT managers | S | P2 | after `fin-depreciation` |
 | 82 | [`fin-cost-of-delay`](w3/fin-cost-of-delay.md) | Cost of delay: which project first | Finance basics for IT managers | S | P3 |  |
 | 83 | [`fin-indexation-fx`](w3/fin-indexation-fx.md) | Inflation, indexation and currency in a multi-year contract | Finance basics for IT managers | S | P3 |  |
-| 84 | [`dns-ttl-cache`](w3/dns-ttl-cache.md) | TTL caching and the cutover | Internet and application protocols | S | P1 | after `dns-resolution` |
-| 85 | [`email-auth`](w3/email-auth.md) | SPF, DKIM and DMARC | Internet and application protocols | M | P1 | after `email-path` |
-| 86 | [`bgp-hijack`](w3/bgp-hijack.md) | BGP hijack and RPKI | Internet and application protocols | M | P2 | after `bgp-path-selection` |
-| 87 | [`cdn-anycast`](w3/cdn-anycast.md) | Anycast and CDN edges | Internet and application protocols | S | P2 | after `bgp-path-selection` |
-| 88 | [`ddos-amplification`](w3/ddos-amplification.md) | DRDoS amplification | Internet and application protocols | S | P2 |  |
-| 89 | [`dns-secondary-expiry`](w3/dns-secondary-expiry.md) | A secondary is a cache with a timer | Internet and application protocols | S | P2 | after `dns-records` |
-| 90 | [`http-caching`](w3/http-caching.md) | HTTP caching | Internet and application protocols | S | P2 | after `http-exchange` |
-| 91 | [`http-versions`](w3/http-versions.md) | HTTP/1.1 vs HTTP/2 vs HTTP/3 | Internet and application protocols | M | P2 | after `http-exchange` |
-| 92 | [`reverse-proxy-lb`](w3/reverse-proxy-lb.md) | Reverse proxy and load balancing | Internet and application protocols | M | P2 | after `http-exchange` |
-| 93 | [`ssh-tunnels`](w3/ssh-tunnels.md) | SSH port forwarding | Internet and application protocols | S | P2 | after `ssh-key-auth` |
-| 94 | [`acme-renewal`](w3/acme-renewal.md) | ACME certificate renewal | Internet and application protocols | S | P3 | preset on `cert-chain` |
-| 95 | [`cookies-sessions`](w3/cookies-sessions.md) | Cookies and sessions | Internet and application protocols | S | P3 | after `http-exchange` |
-| 96 | [`cors`](w3/cors.md) | Same origin and CORS | Internet and application protocols | S | P3 | after `http-exchange` |
-| 97 | [`dns-poisoning`](w3/dns-poisoning.md) | DNS cache poisoning | Internet and application protocols | M | P3 | after `dns-resolution` |
-| 98 | [`dns-split-brain`](w3/dns-split-brain.md) | Two primaries are two zones | Internet and application protocols | S | P3 | preset on `dns-secondary-expiry` |
-| 99 | [`dnssec-chain`](w3/dnssec-chain.md) | DNSSEC chain of trust | Internet and application protocols | M | P3 | after `dns-resolution` |
-| 100 | [`ftp-active-passive`](w3/ftp-active-passive.md) | Active vs passive FTP | Internet and application protocols | S | P3 | after `nat` |
-| 101 | [`oauth-flow`](w3/oauth-flow.md) | OAuth 2.0 / OIDC authorization code flow | Internet and application protocols | M | P3 | after `http-exchange` |
-| 102 | [`peering-transit`](w3/peering-transit.md) | Transit vs peering | Internet and application protocols | S | P3 | after `bgp-path-selection` |
-| 103 | [`smtp-dialogue`](w3/smtp-dialogue.md) | An SMTP session | Internet and application protocols | S | P3 | after `email-path` |
-| 104 | [`websocket`](w3/websocket.md) | WebSocket upgrade | Internet and application protocols | S | P3 | after `http-exchange` |
-| 105 | [`aaa-8021x`](w3/aaa-8021x.md) | AAA and 802.1X | Security and cryptography | M | P2 |  |
-| 106 | [`dmz-matrix`](w3/dmz-matrix.md) | DMZ rule matrix | Security and cryptography | S | P2 | after `stateful-firewall` |
-| 107 | [`lateral-movement`](w3/lateral-movement.md) | Lateral movement and tiering | Security and cryptography | M | P2 | after `win-ntlm-vs-kerberos` |
-| 108 | [`password-storage`](w3/password-storage.md) | Storing passwords | Security and cryptography | S | P2 | after `hash-properties` |
-| 109 | [`ransomware-321`](w3/ransomware-321.md) | 3-2-1 and immutable copies vs ransomware | Security and cryptography | S | P2 | after `backup-diff-incr` |
-| 110 | [`sql-injection`](w3/sql-injection.md) | SQL injection | Security and cryptography | S | P2 |  |
-| 111 | [`wireguard`](w3/wireguard.md) | WireGuard | Security and cryptography | M | P2 | after `diffie-hellman` |
-| 112 | [`buffer-overflow`](w3/buffer-overflow.md) | Stack buffer overflow | Security and cryptography | M | P3 |  |
-| 113 | [`classic-ciphers`](w3/classic-ciphers.md) | Caesar and Vigenère | Security and cryptography | S | P3 |  |
-| 114 | [`ipsec-ike`](w3/ipsec-ike.md) | IPsec and IKE | Security and cryptography | M | P3 | after `diffie-hellman` |
-| 115 | [`mfa-phishing`](w3/mfa-phishing.md) | MFA fatigue and adversary-in-the-middle | Security and cryptography | S | P3 |  |
-| 116 | [`pki-revocation`](w3/pki-revocation.md) | Revocation: CRL vs OCSP | Security and cryptography | S | P3 | preset on `cert-chain` |
-| 117 | [`xss`](w3/xss.md) | Cross-site scripting | Security and cryptography | S | P3 | after `http-exchange` |
-| 118 | [`lnx-access-decision`](w3/lnx-access-decision.md) | The access decision | Linux | S | P2 | after `lnx-permissions-rwx` |
-| 119 | [`lnx-alert-states`](w3/lnx-alert-states.md) | Alert states: pending and firing | Linux | S | P2 |  |
-| 120 | [`lnx-ansible-idempotence`](w3/lnx-ansible-idempotence.md) | Idempotence | Linux | S | P2 |  |
-| 121 | [`lnx-cgroups`](w3/lnx-cgroups.md) | cgroups limits | Linux | S | P2 | after `lnx-namespaces` |
-| 122 | [`lnx-container-ports`](w3/lnx-container-ports.md) | Publishing a container port | Linux | S | P2 | preset on `port-forwarding` |
-| 123 | [`lnx-container-volumes`](w3/lnx-container-volumes.md) | Where container data is lost | Linux | S | P2 | after `lnx-overlayfs-layers` |
-| 124 | [`lnx-deploy-strategies`](w3/lnx-deploy-strategies.md) | Blue-green, canary, rolling | Linux | M | P2 |  |
-| 125 | [`lnx-disk-full-mysteries`](w3/lnx-disk-full-mysteries.md) | "Disk full" with free space | Linux | S | P2 | after `lnx-links-inodes` |
-| 126 | [`lnx-exit-status`](w3/lnx-exit-status.md) | Exit status and &&, ||, set -e, pipefail | Linux | S | P2 | after `lnx-pipes-redirection` |
-| 127 | [`lnx-firewalld-zones`](w3/lnx-firewalld-zones.md) | firewalld zones | Linux | S | P2 | after `lnx-netfilter-path` |
-| 128 | [`lnx-live-migration`](w3/lnx-live-migration.md) | Live migration | Linux | M | P2 |  |
-| 129 | [`lnx-load-average`](w3/lnx-load-average.md) | Load average | Linux | S | P2 |  |
-| 130 | [`lnx-lvm-snapshot`](w3/lnx-lvm-snapshot.md) | LVM snapshot filling up | Linux | S | P2 | after `lnx-lvm-extend` |
-| 131 | [`lnx-memory-swap-oom`](w3/lnx-memory-swap-oom.md) | Memory, swap and the OOM killer | Linux | S | P2 |  |
-| 132 | [`lnx-mirror-not-backup`](w3/lnx-mirror-not-backup.md) | A mirror is not a backup | Linux | S | P2 |  |
-| 133 | [`lnx-netns-veth-bridge`](w3/lnx-netns-veth-bridge.md) | Namespaces, veth and a bridge | Linux | M | P2 | after `lnx-namespaces` |
-| 134 | [`lnx-page-cache`](w3/lnx-page-cache.md) | free vs available | Linux | S | P2 |  |
-| 135 | [`lnx-pam-stack`](w3/lnx-pam-stack.md) | The PAM stack | Linux | S | P2 |  |
-| 136 | [`lnx-raid-rebuild`](w3/lnx-raid-rebuild.md) | Rebuild under load and the second failure | Linux | S | P2 |  |
-| 137 | [`lnx-regex-match`](w3/lnx-regex-match.md) | How a regex matches | Linux | M | P2 |  |
-| 138 | [`lnx-rsync-delete`](w3/lnx-rsync-delete.md) | rsync, trailing slashes and --delete | Linux | S | P2 |  |
-| 139 | [`lnx-signals`](w3/lnx-signals.md) | Signals | Linux | S | P2 |  |
-| 140 | [`lnx-terraform-drift`](w3/lnx-terraform-drift.md) | Infrastructure as code: state and drift | Linux | S | P2 |  |
-| 141 | [`lnx-thin-overcommit`](w3/lnx-thin-overcommit.md) | Thin provisioning and overcommit | Linux | S | P2 | after `lnx-lvm-extend` |
-| 142 | [`lnx-zfs-self-heal`](w3/lnx-zfs-self-heal.md) | Checksums and self-healing | Linux | S | P2 | after `lnx-cow-filesystem` |
-| 143 | [`lnx-bonding-modes`](w3/lnx-bonding-modes.md) | Bonding modes | Linux | S | P3 | after `link-aggregation` |
-| 144 | [`lnx-hypervisor-types`](w3/lnx-hypervisor-types.md) | Type 1 vs type 2, containers vs VMs | Linux | S | P3 |  |
-| 145 | [`lnx-job-control`](w3/lnx-job-control.md) | Job control | Linux | S | P3 | after `lnx-signals` |
-| 146 | [`lnx-logrotate`](w3/lnx-logrotate.md) | logrotate | Linux | S | P3 | after `lnx-log-path` |
-| 147 | [`lnx-multipath`](w3/lnx-multipath.md) | Multipath I/O | Linux | S | P3 |  |
-| 148 | [`lnx-nfs-root-squash`](w3/lnx-nfs-root-squash.md) | NFS and root squash | Linux | S | P3 | after `lnx-permissions-rwx` |
-| 149 | [`lnx-package-deps`](w3/lnx-package-deps.md) | Package dependency resolution | Linux | S | P3 |  |
-| 150 | [`disk-partitioning`](w3/disk-partitioning.md) | MBR vs GPT | Linux | S | P3 | after `lnx-mount-layers` |
-| 151 | [`lnx-policy-routing`](w3/lnx-policy-routing.md) | Policy routing | Linux | S | P3 | after `lnx-routing-decision` |
-| 152 | [`lnx-quotas`](w3/lnx-quotas.md) | Disk quotas | Linux | S | P3 |  |
-| 153 | [`lnx-send-receive`](w3/lnx-send-receive.md) | Btrfs/ZFS send and receive | Linux | S | P3 | preset on `backup-diff-incr` |
-| 154 | [`lnx-special-bits`](w3/lnx-special-bits.md) | setuid, setgid and sticky | Linux | S | P3 | after `lnx-permissions-rwx` |
-| 155 | [`lnx-subshell-trap`](w3/lnx-subshell-trap.md) | Subshells and traps | Linux | S | P3 | after `lnx-shell-quoting` |
-| 156 | [`lnx-timers-cron`](w3/lnx-timers-cron.md) | cron vs systemd timers | Linux | S | P3 | after `lnx-systemd-ordering` |
-| 157 | [`lnx-userns-mapping`](w3/lnx-userns-mapping.md) | Rootless containers | Linux | S | P3 | after `lnx-namespaces` |
-| 158 | [`win-ad-backup-restore`](w3/win-ad-backup-restore.md) | Restoring a DC, and USN rollback | Active Directory | M | P2 | after `win-ad-replication` |
-| 159 | [`win-ad-recycle-bin`](w3/win-ad-recycle-bin.md) | Deleted objects: tombstone and recycle bin | Active Directory | S | P2 | after `win-ad-replication` |
-| 160 | [`win-ad-sites`](w3/win-ad-sites.md) | Sites, site links and the KCC | Active Directory | M | P2 | after `win-ad-replication` |
-| 161 | [`win-fgpp`](w3/win-fgpp.md) | Password policy and fine-grained policies | Active Directory | S | P2 | after `win-gpo-precedence` |
-| 162 | [`win-fsmo-roles`](w3/win-fsmo-roles.md) | FSMO roles | Active Directory | S | P2 | after `win-ad-structure` |
-| 163 | [`win-ntlm-vs-kerberos`](w3/win-ntlm-vs-kerberos.md) | NTLM vs Kerberos | Active Directory | S | P2 | after `win-kerberos` |
-| 164 | [`win-ou-vs-group`](w3/win-ou-vs-group.md) | OU or group? | Active Directory | S | P2 | after `win-ad-structure` |
-| 165 | [`win-sysvol-dfsr`](w3/win-sysvol-dfsr.md) | SYSVOL replication | Active Directory | S | P2 | after `win-ad-replication` |
-| 166 | [`win-time-hierarchy`](w3/win-time-hierarchy.md) | Time in a domain | Active Directory | S | P2 | after `win-kerberos` |
-| 167 | [`win-account-lockout`](w3/win-account-lockout.md) | Account lockout | Active Directory | S | P3 | after `win-domain-logon` |
-| 168 | [`win-delegation`](w3/win-delegation.md) | Delegation of control | Active Directory | S | P3 | after `win-ad-structure` |
-| 169 | [`win-functional-levels`](w3/win-functional-levels.md) | Functional levels | Active Directory | S | P3 | after `win-ad-structure` |
-| 170 | [`win-rodc`](w3/win-rodc.md) | Read-only DC at a branch | Active Directory | S | P3 | after `win-ad-sites` |
-| 171 | [`win-trusts`](w3/win-trusts.md) | Trusts | Active Directory | M | P3 | after `win-kerberos` |
-| 172 | [`win-gpo-security-filtering`](w3/win-gpo-security-filtering.md) | Security and WMI filtering | Group Policy | S | P2 | after `win-gpo-precedence` |
-| 173 | [`win-gpo-tattooing`](w3/win-gpo-tattooing.md) | Policies vs preferences | Group Policy | S | P2 | after `win-gpo-processing` |
-| 174 | [`win-admx-store`](w3/win-admx-store.md) | ADMX and the central store | Group Policy | S | P3 | after `win-gpo-precedence` |
-| 175 | [`win-gpo-loopback`](w3/win-gpo-loopback.md) | Loopback processing | Group Policy | S | P3 | after `win-gpo-precedence` |
-| 176 | [`win-gpo-slow-link`](w3/win-gpo-slow-link.md) | Slow links | Group Policy | S | P3 | after `win-gpo-processing` |
-| 177 | [`win-gpo-software-install`](w3/win-gpo-software-install.md) | Software installation | Group Policy | S | P3 | after `win-gpo-processing` |
-| 178 | [`win-gpo-targeting`](w3/win-gpo-targeting.md) | Item-level targeting | Group Policy | S | P3 | after `win-gpo-tattooing` |
-| 179 | [`win-dns-scavenging`](w3/win-dns-scavenging.md) | Aging and scavenging | DNS on Windows Server | S | P1 | after `win-dns-dynamic-update` |
-| 180 | [`win-dns-client-order`](w3/win-dns-client-order.md) | How a Windows client resolves a name | DNS on Windows Server | S | P2 | after `dns-resolution` |
-| 181 | [`win-dns-forwarders`](w3/win-dns-forwarders.md) | Forwarders, conditional forwarders, root hints | DNS on Windows Server | S | P2 | after `dns-resolution` |
-| 182 | [`win-dns-policies`](w3/win-dns-policies.md) | DNS policies and zone scopes | DNS on Windows Server | S | P3 | after `win-dns-zone-types` |
-| 183 | [`win-dhcp-dns-update`](w3/win-dhcp-dns-update.md) | DHCP updating DNS for clients | DHCP on Windows Server | S | P2 | after `win-dns-dynamic-update` |
-| 184 | [`win-dhcp-failover`](w3/win-dhcp-failover.md) | DHCP failover | DHCP on Windows Server | S | P2 | after `win-dhcp-scope-options` |
-| 185 | [`win-dhcp-authorization`](w3/win-dhcp-authorization.md) | Authorizing a DHCP server | DHCP on Windows Server | S | P3 | after `dhcp-dora` |
-| 186 | [`win-dhcp-policies`](w3/win-dhcp-policies.md) | Policy-based assignment | DHCP on Windows Server | S | P3 | after `win-dhcp-scope-options` |
-| 187 | [`win-dhcp-superscope`](w3/win-dhcp-superscope.md) | Superscopes | DHCP on Windows Server | S | P3 | after `win-dhcp-scope-options` |
-| 188 | [`win-ipam-audit`](w3/win-ipam-audit.md) | Who had this IP at 14:32? | IPAM | S | P2 | after `win-ipam-address-plan` |
-| 189 | [`win-ipam-utilisation`](w3/win-ipam-utilisation.md) | Utilisation and thresholds | IPAM | S | P2 | after `win-ipam-address-plan` |
-| 190 | [`win-ipam-discovery`](w3/win-ipam-discovery.md) | IPAM discovery and provisioning | IPAM | S | P3 | after `win-ipam-address-plan` |
-| 191 | [`win-ipam-reconcile`](w3/win-ipam-reconcile.md) | IPAM vs reality | IPAM | S | P3 | after `win-ipam-address-plan` |
-| 192 | [`win-update-rings`](w3/win-update-rings.md) | Update rings | WSUS and updates | S | P2 | preset on `win-wsus-groups` |
-| 193 | [`win-wsus-client-cycle`](w3/win-wsus-client-cycle.md) | The client update cycle | WSUS and updates | S | P2 | after `win-wsus-flow` |
-| 194 | [`win-wsus-cloned-id`](w3/win-wsus-cloned-id.md) | Clients that never report | WSUS and updates | S | P2 | after `win-wsus-flow` |
-| 195 | [`win-wsus-groups`](w3/win-wsus-groups.md) | Computer groups and approvals | WSUS and updates | S | P2 | after `win-wsus-flow` |
-| 196 | [`win-wsus-delivery`](w3/win-wsus-delivery.md) | Delivering updates over a WAN | WSUS and updates | S | P3 | after `win-wsus-flow` |
-| 197 | [`win-wsus-supersedence`](w3/win-wsus-supersedence.md) | Superseded updates and cleanup | WSUS and updates | S | P3 | after `win-wsus-flow` |
-| 198 | [`win-boot`](w3/win-boot.md) | Windows boot chain | Files, identity and the rest | S | P2 | preset on `lnx-boot-chain` |
-| 199 | [`win-failover-cluster`](w3/win-failover-cluster.md) | Failover cluster quorum | Files, identity and the rest | S | P2 | preset on `quorum-split-brain` |
-| 200 | [`win-ntfs-inheritance`](w3/win-ntfs-inheritance.md) | NTFS inheritance | Files, identity and the rest | S | P2 | after `win-ntfs-share-effective` |
-| 201 | [`win-powershell-objects`](w3/win-powershell-objects.md) | PowerShell pipes objects, bash pipes text | Files, identity and the rest | S | P2 | after `lnx-pipes-redirection` |
-| 202 | [`win-uac`](w3/win-uac.md) | UAC and the split token | Files, identity and the rest | S | P2 | after `win-access-token` |
-| 203 | [`win-vss`](w3/win-vss.md) | Volume Shadow Copy | Files, identity and the rest | S | P2 | preset on `lnx-cow-filesystem` |
-| 204 | [`win-bitlocker-tpm`](w3/win-bitlocker-tpm.md) | BitLocker and the TPM | Files, identity and the rest | S | P3 | after `lnx-boot-chain` |
-| 205 | [`win-dfs`](w3/win-dfs.md) | DFS namespace and replication | Files, identity and the rest | M | P3 | after `dns-resolution` |
-| 206 | [`win-firewall-profiles`](w3/win-firewall-profiles.md) | Windows Firewall profiles | Files, identity and the rest | S | P3 | preset on `lnx-firewalld-zones` |
-| 207 | [`win-hyperv-checkpoints`](w3/win-hyperv-checkpoints.md) | Hyper-V checkpoints | Files, identity and the rest | S | P3 | preset on `backing-chains` |
-| 208 | [`win-laps`](w3/win-laps.md) | LAPS | Files, identity and the rest | S | P3 | after `lateral-movement` |
-| 209 | [`win-ntfs-mft`](w3/win-ntfs-mft.md) | NTFS MFT | Files, identity and the rest | S | P3 |  |
-| 210 | [`win-registry`](w3/win-registry.md) | The registry | Files, identity and the rest | S | P3 |  |
-| 211 | [`win-services`](w3/win-services.md) | Services and dependencies | Files, identity and the rest | S | P3 | preset on `lnx-systemd-ordering` |
-| 212 | [`win-smb-session`](w3/win-smb-session.md) | An SMB session | Files, identity and the rest | S | P3 | after `win-kerberos` |
-| 213 | [`win-storage-spaces`](w3/win-storage-spaces.md) | Storage Spaces | Files, identity and the rest | S | P3 |  |
-| 214 | [`backup-window`](w3/backup-window.md) | Backup window and offsite seeding | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
-| 215 | [`ceph-down-out`](w3/ceph-down-out.md) | down vs out | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
-| 216 | [`ceph-min-size`](w3/ceph-min-size.md) | size and min_size | Storage, backup and disaster recovery | S | P2 | after `quorum-split-brain` |
-| 217 | [`crush-failure-domain`](w3/crush-failure-domain.md) | Failure domain in a placement rule | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
-| 218 | [`ec-vs-replication`](w3/ec-vs-replication.md) | Erasure coding vs replication | Storage, backup and disaster recovery | S | P2 |  |
-| 219 | [`iops-latency`](w3/iops-latency.md) | IOPS, throughput and latency | Storage, backup and disaster recovery | S | P2 | after `utilisation-latency` |
-| 220 | [`restore-drill`](w3/restore-drill.md) | The backup that lies | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
-| 221 | [`retention-gfs`](w3/retention-gfs.md) | Retention: grandfather-father-son | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
-| 222 | [`smallest-disk-caps`](w3/smallest-disk-caps.md) | One small or full disk caps the pool | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
-| 223 | [`ssd-internals`](w3/ssd-internals.md) | Inside an SSD | Storage, backup and disaster recovery | M | P2 |  |
-| 224 | [`sync-async-replication`](w3/sync-async-replication.md) | Synchronous vs asynchronous replication | Storage, backup and disaster recovery | S | P2 | preset on `db-replication` |
-| 225 | [`write-cache`](w3/write-cache.md) | Write-back vs write-through | Storage, backup and disaster recovery | S | P2 |  |
-| 226 | [`alert-to-nobody`](w3/alert-to-nobody.md) | The alert that reaches nobody | Storage, backup and disaster recovery | S | P3 |  |
-| 227 | [`correlated-failure`](w3/correlated-failure.md) | One power strip under three replicas | Storage, backup and disaster recovery | S | P3 | preset on `faultline` |
-| 228 | [`site-failover`](w3/site-failover.md) | Site failover | Storage, backup and disaster recovery | M | P3 | after `rpo-rto` |
-| 229 | [`cow-vs-row`](w3/cow-vs-row.md) | Copy-on-write vs redirect-on-write | Storage, backup and disaster recovery | S | P3 | preset on `lnx-cow-filesystem` |
-| 230 | [`dedup-file-funnel`](w3/dedup-file-funnel.md) | Finding duplicate files | Storage, backup and disaster recovery | S | P3 | after `dedup-chunking` |
-| 231 | [`nas-vs-san`](w3/nas-vs-san.md) | File vs block storage | Storage, backup and disaster recovery | S | P3 |  |
-| 232 | [`cap-under-partition`](w3/cap-under-partition.md) | CAP under partition | High availability and distributed systems | S | P2 | after `db-replication` |
-| 233 | [`consistent-hashing`](w3/consistent-hashing.md) | Consistent hashing | High availability and distributed systems | S | P2 |  |
-| 234 | [`fencing`](w3/fencing.md) | Fencing (STONITH) | High availability and distributed systems | S | P2 | preset on `quorum-split-brain` |
-| 235 | [`raft`](w3/raft.md) | Raft leader election and log replication | High availability and distributed systems | M | P2 | after `quorum-split-brain` |
-| 236 | [`vrrp-failover`](w3/vrrp-failover.md) | VRRP failover | High availability and distributed systems | S | P2 | after `arp-local-remote` |
-| 237 | [`lamport-clocks`](w3/lamport-clocks.md) | Logical clocks | High availability and distributed systems | M | P3 |  |
-| 238 | [`never-zero-spof`](w3/never-zero-spof.md) | No system has zero SPOFs | High availability and distributed systems | S | P3 | preset on `faultline` |
-| 239 | [`two-phase-commit`](w3/two-phase-commit.md) | Two-phase commit | High availability and distributed systems | S | P3 |  |
-| 240 | [`littles-law`](w3/littles-law.md) | Little's law | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 241 | [`rate-limiting`](w3/rate-limiting.md) | Token bucket vs leaky bucket | Performance and capacity | S | P2 |  |
-| 242 | [`retry-storm`](w3/retry-storm.md) | Retry storms and metastable collapse | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 243 | [`slo-error-budget`](w3/slo-error-budget.md) | SLOs and error budgets | Performance and capacity | S | P2 |  |
-| 244 | [`tail-latency`](w3/tail-latency.md) | Tail latency and fan-out | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 245 | [`autoscaling-lag`](w3/autoscaling-lag.md) | Autoscaling lag | Performance and capacity | S | P3 | after `utilisation-latency` |
-| 246 | [`cache-hit-ratio`](w3/cache-hit-ratio.md) | Cache hit ratio and latency | Performance and capacity | S | P3 |  |
-| 247 | [`game-tick-server`](w3/game-tick-server.md) | Authoritative tick server | Performance and capacity | M | P3 |  |
-| 248 | [`goodhart-teams`](w3/goodhart-teams.md) | Local optimisation, global degradation | Performance and capacity | M | P3 | after `utilisation-latency` |
-| 249 | [`cache-mapping`](w3/cache-mapping.md) | Cache mapping | Computer architecture, OS gaps and automata | M | P2 |  |
-| 250 | [`pipeline-hazards`](w3/pipeline-hazards.md) | Pipeline hazards | Computer architecture, OS gaps and automata | M | P2 |  |
-| 251 | [`endianness`](w3/endianness.md) | Endianness | Computer architecture, OS gaps and automata | S | P3 |  |
-| 252 | [`floating-point`](w3/floating-point.md) | IEEE 754 | Computer architecture, OS gaps and automata | S | P3 |  |
-| 253 | [`mesi-coherence`](w3/mesi-coherence.md) | MESI coherence on its own | Computer architecture, OS gaps and automata | S | P3 | after `multicore-mesi` |
-| 254 | [`twos-complement`](w3/twos-complement.md) | Two's complement and overflow | Computer architecture, OS gaps and automata | S | P3 |  |
-| 255 | [`regex-to-nfa`](w3/regex-to-nfa.md) | Regex to NFA to DFA | Computer architecture, OS gaps and automata | M | P3 | after `automata` |
-| 256 | [`os-context-switch-cost`](w3/os-context-switch-cost.md) | What a context switch costs | Computer architecture, OS gaps and automata | S | P3 |  |
+| 84 | [`cmp-audit-sampling`](w3/cmp-audit-sampling.md) | Audit sampling: how many tickets to check | Compliance and procedures for IT managers | S | P1 | after `cmp-policy-to-record` |
+| 85 | [`cmp-change-risk-class`](w3/cmp-change-risk-class.md) | Change management: risk classes or one board for everything | Compliance and procedures for IT managers | M | P1 |  |
+| 86 | [`cmp-incident-clocks`](w3/cmp-incident-clocks.md) | Incident reporting clocks: 24 hours, 72 hours, one month | Compliance and procedures for IT managers | M | P1 |  |
+| 87 | [`cmp-jml-drift`](w3/cmp-jml-drift.md) | Joiner, mover, leaver: how access piles up | Compliance and procedures for IT managers | M | P1 |  |
+| 88 | [`cmp-policy-to-record`](w3/cmp-policy-to-record.md) | Policy, standard, procedure, record: the trail an auditor walks | Compliance and procedures for IT managers | M | P1 |  |
+| 89 | [`cmp-risk-register`](w3/cmp-risk-register.md) | Risk register: likelihood × impact, treatment and residual risk | Compliance and procedures for IT managers | S | P1 |  |
+| 90 | [`cmp-bia`](w3/cmp-bia.md) | Business impact analysis: what must come back first | Compliance and procedures for IT managers | M | P2 |  |
+| 91 | [`cmp-breach-triage`](w3/cmp-breach-triage.md) | Personal-data breach: record, notify, inform | Compliance and procedures for IT managers | S | P2 | after `cmp-incident-clocks` |
+| 92 | [`cmp-data-subject-request`](w3/cmp-data-subject-request.md) | A data subject's request: find every copy within a month | Compliance and procedures for IT managers | M | P2 | after `cmp-retention-hold` |
+| 93 | [`cmp-dpia-triage`](w3/cmp-dpia-triage.md) | Does this project need a data protection impact assessment? | Compliance and procedures for IT managers | S | P2 | after `cmp-risk-register` |
+| 94 | [`cmp-log-evidence`](w3/cmp-log-evidence.md) | Logs as evidence: complete, in time, out of reach | Compliance and procedures for IT managers | M | P2 |  |
+| 95 | [`cmp-nis2-scope`](w3/cmp-nis2-scope.md) | In scope? Essential and important entities | Compliance and procedures for IT managers | S | P2 |  |
+| 96 | [`cmp-patch-sla`](w3/cmp-patch-sla.md) | Vulnerability fix deadlines: the average and the tail | Compliance and procedures for IT managers | S | P2 |  |
+| 97 | [`cmp-privileged-access`](w3/cmp-privileged-access.md) | Standing admin rights or just in time; the break-glass account | Compliance and procedures for IT managers | S | P2 | after `cmp-jml-drift` |
+| 98 | [`cmp-restore-evidence`](w3/cmp-restore-evidence.md) | Restore tests as evidence: covering the estate in a year | Compliance and procedures for IT managers | S | P2 | after `cmp-policy-to-record` |
+| 99 | [`cmp-retention-hold`](w3/cmp-retention-hold.md) | Retention periods and the legal hold | Compliance and procedures for IT managers | S | P2 |  |
+| 100 | [`cmp-shared-responsibility`](w3/cmp-shared-responsibility.md) | Shared responsibility: who runs which control in the cloud | Compliance and procedures for IT managers | S | P2 |  |
+| 101 | [`cmp-sod-toxic`](w3/cmp-sod-toxic.md) | Segregation of duties: toxic combinations | Compliance and procedures for IT managers | S | P2 | after `cmp-jml-drift` |
+| 102 | [`cmp-vendor-tiers`](w3/cmp-vendor-tiers.md) | Supplier risk: tiers and how deep to check | Compliance and procedures for IT managers | M | P2 | after `cmp-risk-register` |
+| 103 | [`cmp-cost-of-noncompliance`](w3/cmp-cost-of-noncompliance.md) | The price of non-compliance and the price of controls | Compliance and procedures for IT managers | S | P3 | after `fin-ale-risk` |
+| 104 | [`cmp-exceptions`](w3/cmp-exceptions.md) | Exceptions to policy: an accepted risk with an end date | Compliance and procedures for IT managers | S | P3 | after `cmp-risk-register` |
+| 105 | [`cmp-four-eyes`](w3/cmp-four-eyes.md) | Four eyes: when the second approver is a rubber stamp | Compliance and procedures for IT managers | S | P3 |  |
+| 106 | [`cmp-maturity-levels`](w3/cmp-maturity-levels.md) | Maturity levels: the average hides the weakest area | Compliance and procedures for IT managers | S | P3 |  |
+| 107 | [`dns-ttl-cache`](w3/dns-ttl-cache.md) | TTL caching and the cutover | Internet and application protocols | S | P1 | after `dns-resolution` |
+| 108 | [`email-auth`](w3/email-auth.md) | SPF, DKIM and DMARC | Internet and application protocols | M | P1 | after `email-path` |
+| 109 | [`bgp-hijack`](w3/bgp-hijack.md) | BGP hijack and RPKI | Internet and application protocols | M | P2 | after `bgp-path-selection` |
+| 110 | [`cdn-anycast`](w3/cdn-anycast.md) | Anycast and CDN edges | Internet and application protocols | S | P2 | after `bgp-path-selection` |
+| 111 | [`ddos-amplification`](w3/ddos-amplification.md) | DRDoS amplification | Internet and application protocols | S | P2 |  |
+| 112 | [`dns-secondary-expiry`](w3/dns-secondary-expiry.md) | A secondary is a cache with a timer | Internet and application protocols | S | P2 | after `dns-records` |
+| 113 | [`http-caching`](w3/http-caching.md) | HTTP caching | Internet and application protocols | S | P2 | after `http-exchange` |
+| 114 | [`http-versions`](w3/http-versions.md) | HTTP/1.1 vs HTTP/2 vs HTTP/3 | Internet and application protocols | M | P2 | after `http-exchange` |
+| 115 | [`reverse-proxy-lb`](w3/reverse-proxy-lb.md) | Reverse proxy and load balancing | Internet and application protocols | M | P2 | after `http-exchange` |
+| 116 | [`ssh-tunnels`](w3/ssh-tunnels.md) | SSH port forwarding | Internet and application protocols | S | P2 | after `ssh-key-auth` |
+| 117 | [`acme-renewal`](w3/acme-renewal.md) | ACME certificate renewal | Internet and application protocols | S | P3 | preset on `cert-chain` |
+| 118 | [`cookies-sessions`](w3/cookies-sessions.md) | Cookies and sessions | Internet and application protocols | S | P3 | after `http-exchange` |
+| 119 | [`cors`](w3/cors.md) | Same origin and CORS | Internet and application protocols | S | P3 | after `http-exchange` |
+| 120 | [`dns-poisoning`](w3/dns-poisoning.md) | DNS cache poisoning | Internet and application protocols | M | P3 | after `dns-resolution` |
+| 121 | [`dns-split-brain`](w3/dns-split-brain.md) | Two primaries are two zones | Internet and application protocols | S | P3 | preset on `dns-secondary-expiry` |
+| 122 | [`dnssec-chain`](w3/dnssec-chain.md) | DNSSEC chain of trust | Internet and application protocols | M | P3 | after `dns-resolution` |
+| 123 | [`ftp-active-passive`](w3/ftp-active-passive.md) | Active vs passive FTP | Internet and application protocols | S | P3 | after `nat` |
+| 124 | [`oauth-flow`](w3/oauth-flow.md) | OAuth 2.0 / OIDC authorization code flow | Internet and application protocols | M | P3 | after `http-exchange` |
+| 125 | [`peering-transit`](w3/peering-transit.md) | Transit vs peering | Internet and application protocols | S | P3 | after `bgp-path-selection` |
+| 126 | [`smtp-dialogue`](w3/smtp-dialogue.md) | An SMTP session | Internet and application protocols | S | P3 | after `email-path` |
+| 127 | [`websocket`](w3/websocket.md) | WebSocket upgrade | Internet and application protocols | S | P3 | after `http-exchange` |
+| 128 | [`aaa-8021x`](w3/aaa-8021x.md) | AAA and 802.1X | Security and cryptography | M | P2 |  |
+| 129 | [`dmz-matrix`](w3/dmz-matrix.md) | DMZ rule matrix | Security and cryptography | S | P2 | after `stateful-firewall` |
+| 130 | [`lateral-movement`](w3/lateral-movement.md) | Lateral movement and tiering | Security and cryptography | M | P2 | after `win-ntlm-vs-kerberos` |
+| 131 | [`password-storage`](w3/password-storage.md) | Storing passwords | Security and cryptography | S | P2 | after `hash-properties` |
+| 132 | [`ransomware-321`](w3/ransomware-321.md) | 3-2-1 and immutable copies vs ransomware | Security and cryptography | S | P2 | after `backup-diff-incr` |
+| 133 | [`sql-injection`](w3/sql-injection.md) | SQL injection | Security and cryptography | S | P2 |  |
+| 134 | [`wireguard`](w3/wireguard.md) | WireGuard | Security and cryptography | M | P2 | after `diffie-hellman` |
+| 135 | [`buffer-overflow`](w3/buffer-overflow.md) | Stack buffer overflow | Security and cryptography | M | P3 |  |
+| 136 | [`classic-ciphers`](w3/classic-ciphers.md) | Caesar and Vigenère | Security and cryptography | S | P3 |  |
+| 137 | [`ipsec-ike`](w3/ipsec-ike.md) | IPsec and IKE | Security and cryptography | M | P3 | after `diffie-hellman` |
+| 138 | [`mfa-phishing`](w3/mfa-phishing.md) | MFA fatigue and adversary-in-the-middle | Security and cryptography | S | P3 |  |
+| 139 | [`pki-revocation`](w3/pki-revocation.md) | Revocation: CRL vs OCSP | Security and cryptography | S | P3 | preset on `cert-chain` |
+| 140 | [`xss`](w3/xss.md) | Cross-site scripting | Security and cryptography | S | P3 | after `http-exchange` |
+| 141 | [`lnx-access-decision`](w3/lnx-access-decision.md) | The access decision | Linux | S | P2 | after `lnx-permissions-rwx` |
+| 142 | [`lnx-alert-states`](w3/lnx-alert-states.md) | Alert states: pending and firing | Linux | S | P2 |  |
+| 143 | [`lnx-ansible-idempotence`](w3/lnx-ansible-idempotence.md) | Idempotence | Linux | S | P2 |  |
+| 144 | [`lnx-cgroups`](w3/lnx-cgroups.md) | cgroups limits | Linux | S | P2 | after `lnx-namespaces` |
+| 145 | [`lnx-container-ports`](w3/lnx-container-ports.md) | Publishing a container port | Linux | S | P2 | preset on `port-forwarding` |
+| 146 | [`lnx-container-volumes`](w3/lnx-container-volumes.md) | Where container data is lost | Linux | S | P2 | after `lnx-overlayfs-layers` |
+| 147 | [`lnx-deploy-strategies`](w3/lnx-deploy-strategies.md) | Blue-green, canary, rolling | Linux | M | P2 |  |
+| 148 | [`lnx-disk-full-mysteries`](w3/lnx-disk-full-mysteries.md) | "Disk full" with free space | Linux | S | P2 | after `lnx-links-inodes` |
+| 149 | [`lnx-exit-status`](w3/lnx-exit-status.md) | Exit status and &&, ||, set -e, pipefail | Linux | S | P2 | after `lnx-pipes-redirection` |
+| 150 | [`lnx-firewalld-zones`](w3/lnx-firewalld-zones.md) | firewalld zones | Linux | S | P2 | after `lnx-netfilter-path` |
+| 151 | [`lnx-live-migration`](w3/lnx-live-migration.md) | Live migration | Linux | M | P2 |  |
+| 152 | [`lnx-load-average`](w3/lnx-load-average.md) | Load average | Linux | S | P2 |  |
+| 153 | [`lnx-lvm-snapshot`](w3/lnx-lvm-snapshot.md) | LVM snapshot filling up | Linux | S | P2 | after `lnx-lvm-extend` |
+| 154 | [`lnx-memory-swap-oom`](w3/lnx-memory-swap-oom.md) | Memory, swap and the OOM killer | Linux | S | P2 |  |
+| 155 | [`lnx-mirror-not-backup`](w3/lnx-mirror-not-backup.md) | A mirror is not a backup | Linux | S | P2 |  |
+| 156 | [`lnx-netns-veth-bridge`](w3/lnx-netns-veth-bridge.md) | Namespaces, veth and a bridge | Linux | M | P2 | after `lnx-namespaces` |
+| 157 | [`lnx-page-cache`](w3/lnx-page-cache.md) | free vs available | Linux | S | P2 |  |
+| 158 | [`lnx-pam-stack`](w3/lnx-pam-stack.md) | The PAM stack | Linux | S | P2 |  |
+| 159 | [`lnx-raid-rebuild`](w3/lnx-raid-rebuild.md) | Rebuild under load and the second failure | Linux | S | P2 |  |
+| 160 | [`lnx-regex-match`](w3/lnx-regex-match.md) | How a regex matches | Linux | M | P2 |  |
+| 161 | [`lnx-rsync-delete`](w3/lnx-rsync-delete.md) | rsync, trailing slashes and --delete | Linux | S | P2 |  |
+| 162 | [`lnx-signals`](w3/lnx-signals.md) | Signals | Linux | S | P2 |  |
+| 163 | [`lnx-terraform-drift`](w3/lnx-terraform-drift.md) | Infrastructure as code: state and drift | Linux | S | P2 |  |
+| 164 | [`lnx-thin-overcommit`](w3/lnx-thin-overcommit.md) | Thin provisioning and overcommit | Linux | S | P2 | after `lnx-lvm-extend` |
+| 165 | [`lnx-zfs-self-heal`](w3/lnx-zfs-self-heal.md) | Checksums and self-healing | Linux | S | P2 | after `lnx-cow-filesystem` |
+| 166 | [`lnx-bonding-modes`](w3/lnx-bonding-modes.md) | Bonding modes | Linux | S | P3 | after `link-aggregation` |
+| 167 | [`lnx-hypervisor-types`](w3/lnx-hypervisor-types.md) | Type 1 vs type 2, containers vs VMs | Linux | S | P3 |  |
+| 168 | [`lnx-job-control`](w3/lnx-job-control.md) | Job control | Linux | S | P3 | after `lnx-signals` |
+| 169 | [`lnx-logrotate`](w3/lnx-logrotate.md) | logrotate | Linux | S | P3 | after `lnx-log-path` |
+| 170 | [`lnx-multipath`](w3/lnx-multipath.md) | Multipath I/O | Linux | S | P3 |  |
+| 171 | [`lnx-nfs-root-squash`](w3/lnx-nfs-root-squash.md) | NFS and root squash | Linux | S | P3 | after `lnx-permissions-rwx` |
+| 172 | [`lnx-package-deps`](w3/lnx-package-deps.md) | Package dependency resolution | Linux | S | P3 |  |
+| 173 | [`disk-partitioning`](w3/disk-partitioning.md) | MBR vs GPT | Linux | S | P3 | after `lnx-mount-layers` |
+| 174 | [`lnx-policy-routing`](w3/lnx-policy-routing.md) | Policy routing | Linux | S | P3 | after `lnx-routing-decision` |
+| 175 | [`lnx-quotas`](w3/lnx-quotas.md) | Disk quotas | Linux | S | P3 |  |
+| 176 | [`lnx-send-receive`](w3/lnx-send-receive.md) | Btrfs/ZFS send and receive | Linux | S | P3 | preset on `backup-diff-incr` |
+| 177 | [`lnx-special-bits`](w3/lnx-special-bits.md) | setuid, setgid and sticky | Linux | S | P3 | after `lnx-permissions-rwx` |
+| 178 | [`lnx-subshell-trap`](w3/lnx-subshell-trap.md) | Subshells and traps | Linux | S | P3 | after `lnx-shell-quoting` |
+| 179 | [`lnx-timers-cron`](w3/lnx-timers-cron.md) | cron vs systemd timers | Linux | S | P3 | after `lnx-systemd-ordering` |
+| 180 | [`lnx-userns-mapping`](w3/lnx-userns-mapping.md) | Rootless containers | Linux | S | P3 | after `lnx-namespaces` |
+| 181 | [`win-ad-backup-restore`](w3/win-ad-backup-restore.md) | Restoring a DC, and USN rollback | Active Directory | M | P2 | after `win-ad-replication` |
+| 182 | [`win-ad-recycle-bin`](w3/win-ad-recycle-bin.md) | Deleted objects: tombstone and recycle bin | Active Directory | S | P2 | after `win-ad-replication` |
+| 183 | [`win-ad-sites`](w3/win-ad-sites.md) | Sites, site links and the KCC | Active Directory | M | P2 | after `win-ad-replication` |
+| 184 | [`win-fgpp`](w3/win-fgpp.md) | Password policy and fine-grained policies | Active Directory | S | P2 | after `win-gpo-precedence` |
+| 185 | [`win-fsmo-roles`](w3/win-fsmo-roles.md) | FSMO roles | Active Directory | S | P2 | after `win-ad-structure` |
+| 186 | [`win-ntlm-vs-kerberos`](w3/win-ntlm-vs-kerberos.md) | NTLM vs Kerberos | Active Directory | S | P2 | after `win-kerberos` |
+| 187 | [`win-ou-vs-group`](w3/win-ou-vs-group.md) | OU or group? | Active Directory | S | P2 | after `win-ad-structure` |
+| 188 | [`win-sysvol-dfsr`](w3/win-sysvol-dfsr.md) | SYSVOL replication | Active Directory | S | P2 | after `win-ad-replication` |
+| 189 | [`win-time-hierarchy`](w3/win-time-hierarchy.md) | Time in a domain | Active Directory | S | P2 | after `win-kerberos` |
+| 190 | [`win-account-lockout`](w3/win-account-lockout.md) | Account lockout | Active Directory | S | P3 | after `win-domain-logon` |
+| 191 | [`win-delegation`](w3/win-delegation.md) | Delegation of control | Active Directory | S | P3 | after `win-ad-structure` |
+| 192 | [`win-functional-levels`](w3/win-functional-levels.md) | Functional levels | Active Directory | S | P3 | after `win-ad-structure` |
+| 193 | [`win-rodc`](w3/win-rodc.md) | Read-only DC at a branch | Active Directory | S | P3 | after `win-ad-sites` |
+| 194 | [`win-trusts`](w3/win-trusts.md) | Trusts | Active Directory | M | P3 | after `win-kerberos` |
+| 195 | [`win-gpo-security-filtering`](w3/win-gpo-security-filtering.md) | Security and WMI filtering | Group Policy | S | P2 | after `win-gpo-precedence` |
+| 196 | [`win-gpo-tattooing`](w3/win-gpo-tattooing.md) | Policies vs preferences | Group Policy | S | P2 | after `win-gpo-processing` |
+| 197 | [`win-admx-store`](w3/win-admx-store.md) | ADMX and the central store | Group Policy | S | P3 | after `win-gpo-precedence` |
+| 198 | [`win-gpo-loopback`](w3/win-gpo-loopback.md) | Loopback processing | Group Policy | S | P3 | after `win-gpo-precedence` |
+| 199 | [`win-gpo-slow-link`](w3/win-gpo-slow-link.md) | Slow links | Group Policy | S | P3 | after `win-gpo-processing` |
+| 200 | [`win-gpo-software-install`](w3/win-gpo-software-install.md) | Software installation | Group Policy | S | P3 | after `win-gpo-processing` |
+| 201 | [`win-gpo-targeting`](w3/win-gpo-targeting.md) | Item-level targeting | Group Policy | S | P3 | after `win-gpo-tattooing` |
+| 202 | [`win-dns-scavenging`](w3/win-dns-scavenging.md) | Aging and scavenging | DNS on Windows Server | S | P1 | after `win-dns-dynamic-update` |
+| 203 | [`win-dns-client-order`](w3/win-dns-client-order.md) | How a Windows client resolves a name | DNS on Windows Server | S | P2 | after `dns-resolution` |
+| 204 | [`win-dns-forwarders`](w3/win-dns-forwarders.md) | Forwarders, conditional forwarders, root hints | DNS on Windows Server | S | P2 | after `dns-resolution` |
+| 205 | [`win-dns-policies`](w3/win-dns-policies.md) | DNS policies and zone scopes | DNS on Windows Server | S | P3 | after `win-dns-zone-types` |
+| 206 | [`win-dhcp-dns-update`](w3/win-dhcp-dns-update.md) | DHCP updating DNS for clients | DHCP on Windows Server | S | P2 | after `win-dns-dynamic-update` |
+| 207 | [`win-dhcp-failover`](w3/win-dhcp-failover.md) | DHCP failover | DHCP on Windows Server | S | P2 | after `win-dhcp-scope-options` |
+| 208 | [`win-dhcp-authorization`](w3/win-dhcp-authorization.md) | Authorizing a DHCP server | DHCP on Windows Server | S | P3 | after `dhcp-dora` |
+| 209 | [`win-dhcp-policies`](w3/win-dhcp-policies.md) | Policy-based assignment | DHCP on Windows Server | S | P3 | after `win-dhcp-scope-options` |
+| 210 | [`win-dhcp-superscope`](w3/win-dhcp-superscope.md) | Superscopes | DHCP on Windows Server | S | P3 | after `win-dhcp-scope-options` |
+| 211 | [`win-ipam-audit`](w3/win-ipam-audit.md) | Who had this IP at 14:32? | IPAM | S | P2 | after `win-ipam-address-plan` |
+| 212 | [`win-ipam-utilisation`](w3/win-ipam-utilisation.md) | Utilisation and thresholds | IPAM | S | P2 | after `win-ipam-address-plan` |
+| 213 | [`win-ipam-discovery`](w3/win-ipam-discovery.md) | IPAM discovery and provisioning | IPAM | S | P3 | after `win-ipam-address-plan` |
+| 214 | [`win-ipam-reconcile`](w3/win-ipam-reconcile.md) | IPAM vs reality | IPAM | S | P3 | after `win-ipam-address-plan` |
+| 215 | [`win-update-rings`](w3/win-update-rings.md) | Update rings | WSUS and updates | S | P2 | preset on `win-wsus-groups` |
+| 216 | [`win-wsus-client-cycle`](w3/win-wsus-client-cycle.md) | The client update cycle | WSUS and updates | S | P2 | after `win-wsus-flow` |
+| 217 | [`win-wsus-cloned-id`](w3/win-wsus-cloned-id.md) | Clients that never report | WSUS and updates | S | P2 | after `win-wsus-flow` |
+| 218 | [`win-wsus-groups`](w3/win-wsus-groups.md) | Computer groups and approvals | WSUS and updates | S | P2 | after `win-wsus-flow` |
+| 219 | [`win-wsus-delivery`](w3/win-wsus-delivery.md) | Delivering updates over a WAN | WSUS and updates | S | P3 | after `win-wsus-flow` |
+| 220 | [`win-wsus-supersedence`](w3/win-wsus-supersedence.md) | Superseded updates and cleanup | WSUS and updates | S | P3 | after `win-wsus-flow` |
+| 221 | [`win-boot`](w3/win-boot.md) | Windows boot chain | Files, identity and the rest | S | P2 | preset on `lnx-boot-chain` |
+| 222 | [`win-failover-cluster`](w3/win-failover-cluster.md) | Failover cluster quorum | Files, identity and the rest | S | P2 | preset on `quorum-split-brain` |
+| 223 | [`win-ntfs-inheritance`](w3/win-ntfs-inheritance.md) | NTFS inheritance | Files, identity and the rest | S | P2 | after `win-ntfs-share-effective` |
+| 224 | [`win-powershell-objects`](w3/win-powershell-objects.md) | PowerShell pipes objects, bash pipes text | Files, identity and the rest | S | P2 | after `lnx-pipes-redirection` |
+| 225 | [`win-uac`](w3/win-uac.md) | UAC and the split token | Files, identity and the rest | S | P2 | after `win-access-token` |
+| 226 | [`win-vss`](w3/win-vss.md) | Volume Shadow Copy | Files, identity and the rest | S | P2 | preset on `lnx-cow-filesystem` |
+| 227 | [`win-bitlocker-tpm`](w3/win-bitlocker-tpm.md) | BitLocker and the TPM | Files, identity and the rest | S | P3 | after `lnx-boot-chain` |
+| 228 | [`win-dfs`](w3/win-dfs.md) | DFS namespace and replication | Files, identity and the rest | M | P3 | after `dns-resolution` |
+| 229 | [`win-firewall-profiles`](w3/win-firewall-profiles.md) | Windows Firewall profiles | Files, identity and the rest | S | P3 | preset on `lnx-firewalld-zones` |
+| 230 | [`win-hyperv-checkpoints`](w3/win-hyperv-checkpoints.md) | Hyper-V checkpoints | Files, identity and the rest | S | P3 | preset on `backing-chains` |
+| 231 | [`win-laps`](w3/win-laps.md) | LAPS | Files, identity and the rest | S | P3 | after `lateral-movement` |
+| 232 | [`win-ntfs-mft`](w3/win-ntfs-mft.md) | NTFS MFT | Files, identity and the rest | S | P3 |  |
+| 233 | [`win-registry`](w3/win-registry.md) | The registry | Files, identity and the rest | S | P3 |  |
+| 234 | [`win-services`](w3/win-services.md) | Services and dependencies | Files, identity and the rest | S | P3 | preset on `lnx-systemd-ordering` |
+| 235 | [`win-smb-session`](w3/win-smb-session.md) | An SMB session | Files, identity and the rest | S | P3 | after `win-kerberos` |
+| 236 | [`win-storage-spaces`](w3/win-storage-spaces.md) | Storage Spaces | Files, identity and the rest | S | P3 |  |
+| 237 | [`backup-window`](w3/backup-window.md) | Backup window and offsite seeding | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
+| 238 | [`ceph-down-out`](w3/ceph-down-out.md) | down vs out | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
+| 239 | [`ceph-min-size`](w3/ceph-min-size.md) | size and min_size | Storage, backup and disaster recovery | S | P2 | after `quorum-split-brain` |
+| 240 | [`crush-failure-domain`](w3/crush-failure-domain.md) | Failure domain in a placement rule | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
+| 241 | [`ec-vs-replication`](w3/ec-vs-replication.md) | Erasure coding vs replication | Storage, backup and disaster recovery | S | P2 |  |
+| 242 | [`iops-latency`](w3/iops-latency.md) | IOPS, throughput and latency | Storage, backup and disaster recovery | S | P2 | after `utilisation-latency` |
+| 243 | [`restore-drill`](w3/restore-drill.md) | The backup that lies | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
+| 244 | [`retention-gfs`](w3/retention-gfs.md) | Retention: grandfather-father-son | Storage, backup and disaster recovery | S | P2 | after `backup-diff-incr` |
+| 245 | [`smallest-disk-caps`](w3/smallest-disk-caps.md) | One small or full disk caps the pool | Storage, backup and disaster recovery | S | P2 | after `ceph-min-size` |
+| 246 | [`ssd-internals`](w3/ssd-internals.md) | Inside an SSD | Storage, backup and disaster recovery | M | P2 |  |
+| 247 | [`sync-async-replication`](w3/sync-async-replication.md) | Synchronous vs asynchronous replication | Storage, backup and disaster recovery | S | P2 | preset on `db-replication` |
+| 248 | [`write-cache`](w3/write-cache.md) | Write-back vs write-through | Storage, backup and disaster recovery | S | P2 |  |
+| 249 | [`alert-to-nobody`](w3/alert-to-nobody.md) | The alert that reaches nobody | Storage, backup and disaster recovery | S | P3 |  |
+| 250 | [`correlated-failure`](w3/correlated-failure.md) | One power strip under three replicas | Storage, backup and disaster recovery | S | P3 | preset on `faultline` |
+| 251 | [`site-failover`](w3/site-failover.md) | Site failover | Storage, backup and disaster recovery | M | P3 | after `rpo-rto` |
+| 252 | [`cow-vs-row`](w3/cow-vs-row.md) | Copy-on-write vs redirect-on-write | Storage, backup and disaster recovery | S | P3 | preset on `lnx-cow-filesystem` |
+| 253 | [`dedup-file-funnel`](w3/dedup-file-funnel.md) | Finding duplicate files | Storage, backup and disaster recovery | S | P3 | after `dedup-chunking` |
+| 254 | [`nas-vs-san`](w3/nas-vs-san.md) | File vs block storage | Storage, backup and disaster recovery | S | P3 |  |
+| 255 | [`cap-under-partition`](w3/cap-under-partition.md) | CAP under partition | High availability and distributed systems | S | P2 | after `db-replication` |
+| 256 | [`consistent-hashing`](w3/consistent-hashing.md) | Consistent hashing | High availability and distributed systems | S | P2 |  |
+| 257 | [`fencing`](w3/fencing.md) | Fencing (STONITH) | High availability and distributed systems | S | P2 | preset on `quorum-split-brain` |
+| 258 | [`raft`](w3/raft.md) | Raft leader election and log replication | High availability and distributed systems | M | P2 | after `quorum-split-brain` |
+| 259 | [`vrrp-failover`](w3/vrrp-failover.md) | VRRP failover | High availability and distributed systems | S | P2 | after `arp-local-remote` |
+| 260 | [`lamport-clocks`](w3/lamport-clocks.md) | Logical clocks | High availability and distributed systems | M | P3 |  |
+| 261 | [`never-zero-spof`](w3/never-zero-spof.md) | No system has zero SPOFs | High availability and distributed systems | S | P3 | preset on `faultline` |
+| 262 | [`two-phase-commit`](w3/two-phase-commit.md) | Two-phase commit | High availability and distributed systems | S | P3 |  |
+| 263 | [`littles-law`](w3/littles-law.md) | Little's law | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 264 | [`rate-limiting`](w3/rate-limiting.md) | Token bucket vs leaky bucket | Performance and capacity | S | P2 |  |
+| 265 | [`retry-storm`](w3/retry-storm.md) | Retry storms and metastable collapse | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 266 | [`slo-error-budget`](w3/slo-error-budget.md) | SLOs and error budgets | Performance and capacity | S | P2 |  |
+| 267 | [`tail-latency`](w3/tail-latency.md) | Tail latency and fan-out | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 268 | [`autoscaling-lag`](w3/autoscaling-lag.md) | Autoscaling lag | Performance and capacity | S | P3 | after `utilisation-latency` |
+| 269 | [`cache-hit-ratio`](w3/cache-hit-ratio.md) | Cache hit ratio and latency | Performance and capacity | S | P3 |  |
+| 270 | [`game-tick-server`](w3/game-tick-server.md) | Authoritative tick server | Performance and capacity | M | P3 |  |
+| 271 | [`goodhart-teams`](w3/goodhart-teams.md) | Local optimisation, global degradation | Performance and capacity | M | P3 | after `utilisation-latency` |
+| 272 | [`cache-mapping`](w3/cache-mapping.md) | Cache mapping | Computer architecture, OS gaps and automata | M | P2 |  |
+| 273 | [`pipeline-hazards`](w3/pipeline-hazards.md) | Pipeline hazards | Computer architecture, OS gaps and automata | M | P2 |  |
+| 274 | [`endianness`](w3/endianness.md) | Endianness | Computer architecture, OS gaps and automata | S | P3 |  |
+| 275 | [`floating-point`](w3/floating-point.md) | IEEE 754 | Computer architecture, OS gaps and automata | S | P3 |  |
+| 276 | [`mesi-coherence`](w3/mesi-coherence.md) | MESI coherence on its own | Computer architecture, OS gaps and automata | S | P3 | after `multicore-mesi` |
+| 277 | [`twos-complement`](w3/twos-complement.md) | Two's complement and overflow | Computer architecture, OS gaps and automata | S | P3 |  |
+| 278 | [`regex-to-nfa`](w3/regex-to-nfa.md) | Regex to NFA to DFA | Computer architecture, OS gaps and automata | M | P3 | after `automata` |
+| 279 | [`os-context-switch-cost`](w3/os-context-switch-cost.md) | What a context switch costs | Computer architecture, OS gaps and automata | S | P3 |  |
 
 ## Wave 4: course pages
 
@@ -458,7 +481,7 @@ One task per course: [`w4/`](w4/). Each lists the sims the catalogue assigns to 
 
 ## Catalogue id → sim folder
 
-Area prefixes are dropped from folder names except `win-`, `lnx-` and `fin-`; a few names are overridden for clarity (`tasks.py` `SIM_ID_OVERRIDE`).
+Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-` and `cmp-`; a few names are overridden for clarity (`tasks.py` `SIM_ID_OVERRIDE`).
 
 | Catalogue id | Sim folder |
 |---|---|
@@ -724,8 +747,8 @@ Area prefixes are dropped from folder names except `win-`, `lnx-` and `fin-`; a 
 Wave 0 task `vocabulary` added these to `tags.json`, with Croatian and English labels and search aliases
 (`tests/vocabulary.test.mjs` keeps this list, the task files and `tags.json` in step):
 
-`accounting`, `active-directory`, `antennas`, `arp`, `attacks`, `authentication`, `automata`, `automation`, `backup`, `bgp`, `boot`, `budgeting`, `caches`, `circuits`, `classroom-tool`, `consensus`, `containers`, `contracts`, `costs`, `cpu`, `cryptography`, `deduplication`, `dhcp`, `disaster-recovery`, `dns`, `email`, `emergency-comms`, `encapsulation`, `error-detection`, `ethernet`, `fault-tolerance`, `file-sharing`, `filesystems`, `firewall`, `group-policy`, `http`, `icmp`, `investment`, `ip`, `ip-addressing`, `ipv6`, `kerberos`, `link-aggregation`, `logging`, `lvm`, `memory`, `modulation`, `monitoring`, `multicast`, `nat`, `number-representation`, `operating-systems`, `packages`, `parallelism`, `partitioning`, `performance`, `permissions`, `physical-layer`, `processes`, `propagation`, `qos`, `radio-networks`, `raid`, `receivers`, `replication`, `risk`, `routing`, `selinux`, `services`, `shell`, `signals`, `snapshots`, `spectrum`, `ssh`, `storage-basics`, `storage-cluster`, `switching`, `tcp`, `time-sync`, `tls`, `topology`, `troubleshooting`, `udp`, `updates`, `virtualization`, `vlan`, `vpn`, `wifi`, `windows-internals`
+`accounting`, `active-directory`, `antennas`, `arp`, `attacks`, `audit`, `authentication`, `automata`, `automation`, `backup`, `bgp`, `boot`, `budgeting`, `caches`, `change-management`, `circuits`, `classroom-tool`, `consensus`, `containers`, `contracts`, `costs`, `cpu`, `cryptography`, `data-protection`, `deduplication`, `dhcp`, `disaster-recovery`, `dns`, `email`, `emergency-comms`, `encapsulation`, `error-detection`, `ethernet`, `fault-tolerance`, `file-sharing`, `filesystems`, `firewall`, `governance`, `group-policy`, `http`, `icmp`, `identity-governance`, `incident-response`, `investment`, `ip`, `ip-addressing`, `ipv6`, `kerberos`, `link-aggregation`, `logging`, `lvm`, `memory`, `modulation`, `monitoring`, `multicast`, `nat`, `number-representation`, `operating-systems`, `packages`, `parallelism`, `partitioning`, `performance`, `permissions`, `physical-layer`, `processes`, `propagation`, `qos`, `radio-networks`, `raid`, `receivers`, `replication`, `risk`, `routing`, `selinux`, `services`, `shell`, `signals`, `snapshots`, `spectrum`, `ssh`, `storage-basics`, `storage-cluster`, `switching`, `tcp`, `time-sync`, `tls`, `topology`, `troubleshooting`, `udp`, `updates`, `virtualization`, `vlan`, `vpn`, `wifi`, `windows-internals`
 
-Topics: `architecture`, `classroom`, `distributed`, `finance`, `internet`, `linux-admin`, `networks`, `os`, `radio`, `security`, `storage`, `theory`, `windows-admin`.
+Topics: `architecture`, `classroom`, `compliance`, `distributed`, `finance`, `internet`, `linux-admin`, `networks`, `os`, `radio`, `security`, `storage`, `theory`, `windows-admin`.
 
 Also in `tags.json`, used by no task yet: `scheduling`.
