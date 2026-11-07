@@ -1,0 +1,464 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cmp-bia: a business impact analysis sets each business process's maximum tolerable downtime (MTD); a supporting
+     system inherits the shortest MTD of every process that depends on it, so the infrastructure ends up most urgent;
+     its RTO must be below that, and the gap between required and achieved recovery is the work list.
+     The stage: two numbers (processes within MTD, the work list) and the recovery order; the dependency graph in three
+     rows (processes with their MTD stepper and when they are back; applications and infrastructure with the required
+     RTO, the process it comes from, today's recovery stepper and the gap), lines for "depends on", dashed where the
+     analysis ignores them; ⇣ on a card edits what it depends on. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cmp-bia">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analiza utjecaja na poslovanje: što se mora prvo vratiti · simdeck</title>
+<meta name="description" content="Zadaj koliko procesi smiju stajati, nacrtaj o čemu ovise, unesi koliko obnova traje danas; čitaj potrebne RTO-ove, jazove i redoslijed obnove.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cmp-bia",
+  "title": {
+    "hr": "Analiza utjecaja na poslovanje: što se mora prvo vratiti",
+    "en": "Business impact analysis: what must come back first"
+  },
+  "concept": {
+    "hr": "Sustav nasljeđuje najkraći podnošljivi prekid svih procesa iznad sebe",
+    "en": "A system inherits the shortest tolerable downtime of every process above it"
+  },
+  "summary": {
+    "hr": "Zadaj koliko procesi smiju stajati, nacrtaj o čemu ovise, unesi koliko obnova traje danas; čitaj potrebne RTO-ove, jazove i redoslijed obnove.",
+    "en": "Set how long processes may stop, draw what they depend on, enter today's recovery times; read the required RTOs, the gaps and the recovery order."
+  },
+  "tags": [
+    "disaster-recovery",
+    "risk"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cmp-bia"]; colours only from kit tokens. */
+[data-sim="cmp-bia"] .sd-ctl[hidden] { display: none; }
+[data-sim="cmp-bia"] .bi {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.45rem 0.8rem 0.35rem;
+  font-size: var(--fs-md);
+}
+[data-sim="cmp-bia"] .bi-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="cmp-bia"] .bi-foot { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-bia"] .bi-foot[data-sel="true"] { color: var(--ink); font-weight: 700; }
+
+/* the numbers and the order */
+[data-sim="cmp-bia"] .bi-top { display: grid; grid-template-columns: minmax(11rem, auto) minmax(13rem, auto) minmax(0, 1fr); gap: 0.6rem; }
+[data-sim="cmp-bia"] .bi-k {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  padding: 0.2rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); line-height: 1.15;
+}
+[data-sim="cmp-bia"] .bi-k > span:first-child { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="cmp-bia"] .bi-k b { font-size: var(--fs-lg); }
+[data-sim="cmp-bia"] .bi-k small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-bia"] .bi-k[data-kind="good"] { border: 0.2rem solid var(--ok); }
+[data-sim="cmp-bia"] .bi-k[data-kind="good"] b::before { content: '✓\00a0'; color: var(--ok); }
+[data-sim="cmp-bia"] .bi-k[data-kind="bad"] { border: 0.2rem dashed var(--danger); }
+[data-sim="cmp-bia"] .bi-k[data-kind="bad"] b { color: var(--danger); }
+[data-sim="cmp-bia"] .bi-ord { display: flex; flex-wrap: wrap; gap: 0.25rem 0.4rem; margin: 0.15rem 0 0; padding: 0; list-style: none; }
+[data-sim="cmp-bia"] .bi-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.4rem; border: 0.15rem solid var(--line);
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); line-height: 1.5; white-space: nowrap;
+}
+[data-sim="cmp-bia"] .bi-chip[data-st="gap"] { border: 0.15rem dashed var(--danger); }
+[data-sim="cmp-bia"] .bi-chip[data-st="none"] { border: 0.15rem dotted var(--muted); color: var(--muted); }
+
+/* the graph: a label column and five equal columns without gaps, so column k's centre is at (2k + 1) × 10 % */
+[data-sim="cmp-bia"] .bi-g {
+  display: grid; grid-template-columns: 2rem repeat(5, minmax(0, 1fr));
+  grid-template-rows: auto minmax(1rem, 1fr) auto minmax(1rem, 1fr) auto; min-height: 0;
+}
+[data-sim="cmp-bia"] .bi-row {
+  grid-column: 1; display: flex; align-items: center; justify-content: center; min-height: 0;
+  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap;
+  font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.15;
+}
+[data-sim="cmp-bia"] .bi-cell { position: relative; display: flex; min-width: 0; padding: 0 0.35rem; }
+[data-sim="cmp-bia"] .bi-cell[data-layer="infra"] { padding: 0 1.1rem; }
+[data-sim="cmp-bia"] .bi-cell[data-arrow="true"]::after {
+  content: '→'; position: absolute; right: -0.55rem; top: 50%; transform: translateY(-50%);
+  font-size: var(--fs-lg); font-weight: 700; line-height: 1;
+}
+[data-sim="cmp-bia"] .bi-edges { grid-column: 2 / -1; position: relative; min-height: 0; }
+[data-sim="cmp-bia"] .bi-edges svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="cmp-bia"] .bi-edges line { stroke: var(--ink); stroke-width: 2; }
+[data-sim="cmp-bia"] .bi-edges line[data-k="ignored"] { stroke: var(--muted); stroke-dasharray: 6 5; }
+[data-sim="cmp-bia"] .bi-edges line[data-k="sel"] { stroke: var(--accent); stroke-width: 5; }
+
+[data-sim="cmp-bia"] .bi-card {
+  display: flex; flex-direction: column; gap: 0.15rem; width: 100%; min-width: 0; padding: 0.25rem 0.4rem;
+  border: 0.15rem solid var(--line); border-radius: var(--radius-sm); background: var(--bg); line-height: 1.2;
+}
+[data-sim="cmp-bia"] .bi-card[data-st="ok"] { border: 0.2rem solid var(--ok); }
+[data-sim="cmp-bia"] .bi-card[data-st="gap"], [data-sim="cmp-bia"] .bi-card[data-st="late"] { border: 0.2rem dashed var(--danger); }
+[data-sim="cmp-bia"] .bi-card[data-st="none"] { border: 0.2rem dotted var(--muted); }
+[data-sim="cmp-bia"] .bi-card[data-sel="true"] { outline: 0.25rem solid var(--accent); outline-offset: 0.1rem; }
+[data-sim="cmp-bia"] .bi-name { display: flex; align-items: center; gap: 0.3rem; min-width: 0; min-height: var(--hit); }
+[data-sim="cmp-bia"] .bi-name b { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); overflow-wrap: break-word; }
+[data-sim="cmp-bia"] .bi-pos {
+  display: grid; place-items: center; flex: none; min-width: 1.6rem; height: 1.6rem; padding: 0 0.2rem;
+  border-radius: 50%; background: var(--ink); color: var(--bg); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="cmp-bia"] .bi-card[data-st="none"] .bi-pos { background: transparent; color: var(--muted); border: 0.15rem dotted var(--muted); }
+[data-sim="cmp-bia"] .bi-req { display: flex; align-items: baseline; gap: 0 0.4rem; font-size: var(--fs-sm); }
+[data-sim="cmp-bia"] .bi-from { font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-sim="cmp-bia"] .bi-req b { font-size: var(--fs-md); }
+[data-sim="cmp-bia"] .bi-card[data-st="none"] .bi-req b { color: var(--muted); font-weight: 400; }
+[data-sim="cmp-bia"] .bi-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.35rem; font-size: var(--fs-sm); }
+[data-sim="cmp-bia"] .bi-mark { margin-left: auto; font-weight: 700; white-space: nowrap; }
+[data-sim="cmp-bia"] .bi-mark[data-k="gap"], [data-sim="cmp-bia"] .bi-mark[data-k="late"] { color: var(--danger); }
+[data-sim="cmp-bia"] .bi-mark[data-k="ok"] { color: var(--ok); }
+[data-sim="cmp-bia"] .bi-needs { display: none; font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="cmp-bia"] .bi-step { display: inline-flex; align-items: center; gap: 0.2rem; }
+[data-sim="cmp-bia"] .bi-sv { white-space: nowrap; min-width: 3.6rem; text-align: center; font-weight: 700; font-size: var(--fs-md); }
+[data-sim="cmp-bia"] .bi-b {
+  min-width: var(--hit); min-height: var(--hit); padding: 0 0.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer;
+}
+[data-sim="cmp-bia"] .bi-b[aria-disabled="true"] { color: var(--muted); border-style: dashed; cursor: default; }
+[data-sim="cmp-bia"] .bi-b[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+[data-sim="cmp-bia"] .bi-b:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="cmp-bia"] .bi-b[data-k="dep"] { flex: none; }
+
+/* legend swatches */
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-line"] { height: 0.2rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-ignored"] {
+  height: 0.2rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--muted) 0 0.35em, transparent 0.35em 0.6em);
+}
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-ok"] { background: var(--bg); border: 0.2rem solid var(--ok); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-gap"], [data-sim="cmp-bia"] .sd-swatch[data-shape="bi-late"] { background: var(--bg); border: 0.2rem dashed var(--danger); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-none"] { background: var(--bg); border: 0.2rem dotted var(--muted); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-pos"] { border-radius: 50%; background: var(--ink); border-color: var(--ink); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-ok"],
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-gap"],
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-late"] { position: relative; }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-ok"]::after,
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-gap"]::after,
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-late"]::after {
+  position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.7em; font-weight: 700; line-height: 1;
+}
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-ok"]::after { content: '✓'; color: var(--ok); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-gap"]::after { content: '+'; color: var(--danger); }
+[data-sim="cmp-bia"] .sd-swatch[data-shape="bi-late"]::after { content: '✕'; color: var(--danger); }
+
+/* below 1920×1080 (not a target, docs/sim-ui.md): the "from" line and the tiles' second lines go (the caption and
+   the cards' labels still say them), and what is still too tall scrolls inside the stage instead of over the caption */
+@media (max-height: 1000px) and (min-width: 901px) and (min-aspect-ratio: 1/1) {
+  [data-sim="cmp-bia"] .sd-stage { overflow-y: auto; }
+  [data-sim="cmp-bia"] .bi { height: auto; min-height: 100%; }
+  [data-sim="cmp-bia"] .bi-from { display: none; }
+  [data-sim="cmp-bia"] .bi-top small { display: none; }
+}
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cmp-bia"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cmp-bia"] .bi { height: auto; grid-template-rows: auto auto auto; padding: 0.4rem; }
+  [data-sim="cmp-bia"] .bi-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="cmp-bia"] .bi-top > :last-child { grid-column: 1 / -1; }
+  [data-sim="cmp-bia"] .bi-g { display: flex; flex-direction: column; gap: 0.4rem; }
+  [data-sim="cmp-bia"] .bi-edges { display: none; }
+  [data-sim="cmp-bia"] .bi-row { padding-top: 0.3rem; writing-mode: horizontal-tb; transform: none; justify-content: flex-start; }
+  [data-sim="cmp-bia"] .bi-cell, [data-sim="cmp-bia"] .bi-cell[data-layer="infra"] { padding: 0; }
+  [data-sim="cmp-bia"] .bi-cell[data-arrow="true"]::after { display: none; }
+  [data-sim="cmp-bia"] .bi-needs { display: block; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Analiza utjecaja na poslovanje: što se mora prvo vratiti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  function b(text) { return h('b', null, text); }
+  /** Hours: under two days, or not whole days, as hours; else days. */
+  function dur(n) { return n >= 48 && n % 24 === 0 ? t.n('days', n / 24, { n: n / 24 }) : t('hours', { n: n }); }
+  function nameOf(id) { return L.SYSTEMS.indexOf(id) >= 0 ? t('sys_' + id) : t('proc_' + id); }
+  function shortOf(id) { return t('short_' + id); }
+  function list(ids, f) { return ids.map(f || nameOf).join(', '); }
+
+  var sim = null;
+  var sel = null;                                     // the card whose dependencies are being drawn (page state only)
+  function noFocus(e) { e.preventDefault(); }         // buttons do not take focus on click (docs/sim-ui.md §3)
+  var refocus = null;                                 // after a keyboard press, focus goes back to the same button
+  function btn(key, attrs, run, kids) {
+    return h('button', Object.assign({ type: 'button', class: 'bi-b', onmousedown: noFocus, dataset: { sel: key },
+      onclick: function (e) {
+        if (this.getAttribute('aria-disabled') === 'true') return;
+        refocus = e.detail === 0 ? key : null; run();
+      } }, attrs), kids);
+  }
+  /** A − value + stepper over a list of values. */
+  function stepper(key, values, value, down, up) {
+    function move(dir) { return function () { var o = {}; o[key] = L.stepList(values, sim.params[key], dir); sim.set(o); }; }
+    return h('span', { class: 'bi-step' },
+      btn(key + '-', { 'aria-label': down, 'aria-disabled': String(value <= values[0]) }, move(-1), '−'),
+      h('span', { class: 'bi-sv bi-num' }, dur(value)),
+      btn(key + '+', { 'aria-label': up, 'aria-disabled': String(value >= values[values.length - 1]) }, move(1), '+'));
+  }
+
+  // ── the numbers and the order ──
+
+  function top(s) {
+    var m = s.m, by = byId(s);
+    var late = s.procs.filter(function (x) { return !x.within; }).map(function (x) { return x.id; });
+    var chips = s.order.map(function (id) {
+      var x = by[id];
+      return h('li', { class: 'bi-chip', dataset: { st: x.req === null ? 'none' : x.gap > 0 ? 'gap' : 'ok' } },
+        h('b', { class: 'bi-num' }, String(x.pos)), shortOf(id));
+    });
+    return h('div', { class: 'bi-top' },
+      h('div', { class: 'bi-k', dataset: { kind: late.length ? 'bad' : 'good' } }, h('span', null, t('kWithin')),
+        h('b', { class: 'bi-num', translate: 'no' }, m.within + ' / ' + s.procs.length),
+        h('small', null, late.length ? t.n('kWithinLate', late.length, { n: late.length }) : t('kWithinAll'))),
+      h('div', { class: 'bi-k', dataset: { kind: m.work.length ? 'bad' : 'plain' } }, h('span', null, t('kWork')),
+        h('b', { class: 'bi-num' }, t.n('workItems', m.work.length, { n: m.work.length })),
+        h('small', null, m.worst ? t('kWorkSub', { name: shortOf(m.worst), gap: t('gap', { t: dur(by[m.worst].gap) }) }) : t('kWorkNone'))),
+      h('div', { class: 'bi-k' }, h('span', null, t('kOrder')), h('ol', { class: 'bi-ord' }, chips)));
+  }
+
+  // ── the graph ──
+
+  function byId(s) { var o = {}; s.sys.forEach(function (x) { o[x.id] = x; }); return o; }
+  function layerOf(id) {
+    if (L.PROCS.some(function (x) { return x.id === id; })) return 'proc';
+    return L.APPS.some(function (x) { return x.id === id; }) ? 'app' : 'infra';
+  }
+  var below = { proc: 'app', app: 'infra' };
+
+  /** ⇣ on a process or application card: start or stop drawing its dependencies. */
+  function linkBtn(id) {
+    return btn('link-' + id, { 'aria-label': t('linkBtn', { name: nameOf(id) }), 'aria-pressed': String(sel === id) },
+      function () { sel = sel === id ? null : id; sim.render(); }, '⇣');
+  }
+  /** On a card in the row below the one being drawn: does the selected card depend on this one? */
+  function depBtn(id) {
+    var on = L.hasEdge(sim.params, sel, id);
+    return btn('dep-' + id, {
+      'aria-pressed': String(on), 'aria-label': t(on ? 'depOn' : 'depOff', { from: nameOf(sel), to: nameOf(id) }),
+      dataset: { sel: 'dep-' + id, k: 'dep' }
+    }, function () { sim.set(L.toggle(sim.params, sel, id)); }, on ? '✓' : '+');
+  }
+  function nameRow(id, pos) {
+    var layer = layerOf(id);
+    var kids = [pos !== undefined ? h('span', { class: 'bi-pos bi-num', 'aria-hidden': 'true' }, String(pos)) : null, b(nameOf(id))];
+    if (sel && below[layerOf(sel)] === layer) kids.push(depBtn(id));
+    else if (below[layer]) kids.push(linkBtn(id));
+    return h('div', { class: 'bi-name' }, kids);
+  }
+  function needs(s, id) {
+    var d = s.adj[id];
+    return h('div', { class: 'bi-needs' }, d.length ? t('needs', { list: list(d, shortOf) }) : t('needsNone'));
+  }
+
+  function procCard(s, x) {
+    var p = s.p, key = L.procKey(x.id);
+    return h('div', { class: 'bi-card', role: 'group', dataset: { st: x.within ? 'ok' : 'late', sel: String(sel === x.id) },
+      'aria-label': t('cardProc', { name: nameOf(x.id), mtd: dur(x.mtd), back: dur(x.back), ok: t(x.within ? 'okWithin' : 'okLate') }) },
+      nameRow(x.id),
+      h('div', { class: 'bi-line' }, h('span', null, t('mtd')),
+        stepper(key, L.MTD_STEPS, p[key], t('mtdDown', { name: nameOf(x.id) }), t('mtdUp', { name: nameOf(x.id) }))),
+      h('div', { class: 'bi-line' }, h('span', null, t('back', { t: dur(x.back) })),
+        h('span', { class: 'bi-mark', dataset: { k: x.within ? 'ok' : 'late' } }, x.within ? '✓' : '✕')),
+      needs(s, x.id));
+  }
+
+  function sysCard(s, x) {
+    var p = s.p, key = L.sysKey(x.id), st = x.req === null ? 'none' : x.gap > 0 ? 'gap' : 'ok';
+    var req = x.req === null ? b(t('reqNone')) : b(t('req', { t: dur(x.req) }));
+    var from = h('div', { class: 'bi-from' }, x.req === null ? (x.users.length ? t('reqNoneWhy') : t('reqUnused'))
+      : t('reqFrom', { proc: nameOf(x.from) }));
+    var mark = st === 'gap' ? h('span', { class: 'bi-mark bi-num', dataset: { k: 'gap' } }, t('gap', { t: dur(x.gap) }))
+      : st === 'ok' ? h('span', { class: 'bi-mark', dataset: { k: 'ok' } }, '✓') : null;
+    return h('div', { class: 'bi-card', role: 'group', dataset: { st: st, sel: String(sel === x.id) },
+      'aria-label': t('cardSys', { name: nameOf(x.id), req: x.req === null ? t('reqNone') : t('req', { t: dur(x.req) }),
+        ach: dur(x.ach), ok: st === 'gap' ? t('okGap', { t: dur(x.gap) }) : st === 'ok' ? t('okWithin') : t('okNone'), pos: x.pos }) },
+      nameRow(x.id, x.pos),
+      h('div', { class: 'bi-req' }, req, mark),
+      from,
+      h('div', { class: 'bi-line' }, h('span', null, t('today')),
+        stepper(key, L.ACH_STEPS, p[key], t('achDown', { name: nameOf(x.id) }), t('achUp', { name: nameOf(x.id) }))),
+      needs(s, x.id));
+  }
+
+  /** Column centres in the edge band: process and application k at (2k + 1) × 10 %, infrastructure at 30, 50, 70 %. */
+  function cx(id) {
+    var i = L.PROCS.findIndex(function (x) { return x.id === id; });
+    if (i < 0) i = L.APPS.findIndex(function (x) { return x.id === id; });
+    if (i < 0) i = 1 + L.INFRA.findIndex(function (x) { return x.id === id; });
+    return (2 * i + 1) * 10;
+  }
+  var SVG = 'http://www.w3.org/2000/svg';
+  function edges(s, upper, lower, row, ignored) {
+    var svg = document.createElementNS(SVG, 'svg'), top = [];
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    upper.forEach(function (u) {
+      lower.forEach(function (d) {
+        if (!L.hasEdge(s.p, u.id, d.id)) return;
+        var l = document.createElementNS(SVG, 'line');
+        [['x1', cx(u.id)], ['y1', 0], ['x2', cx(d.id)], ['y2', 100], ['vector-effect', 'non-scaling-stroke'],
+          ['data-k', sel === u.id ? 'sel' : ignored ? 'ignored' : 'dep']].forEach(function (a) { l.setAttribute(a[0], String(a[1])); });
+        if (sel === u.id) top.push(l); else svg.appendChild(l);
+      });
+    });
+    top.forEach(function (l) { svg.appendChild(l); });   // the selected card's lines on top
+    return h('div', { class: 'bi-edges', 'aria-hidden': 'true', style: { gridRow: String(row) } }, svg);
+  }
+
+  function graph(s) {
+    var by = byId(s), kids = [];
+    kids.push(h('div', { class: 'bi-row', style: { gridRow: '1' } }, t('rowProcs')));
+    s.procs.forEach(function (x, i) {
+      kids.push(h('div', { class: 'bi-cell', style: { gridRow: '1', gridColumn: String(i + 2) } }, procCard(s, x)));
+    });
+    kids.push(edges(s, L.PROCS, L.APPS, 2, false));
+    kids.push(h('div', { class: 'bi-row', style: { gridRow: '3' } }, t('rowApps')));
+    L.APPS.forEach(function (a, i) {
+      kids.push(h('div', { class: 'bi-cell', style: { gridRow: '3', gridColumn: String(i + 2) } }, sysCard(s, by[a.id])));
+    });
+    kids.push(edges(s, L.APPS, L.INFRA, 4, s.p.mode === 'direct'));
+    kids.push(h('div', { class: 'bi-row', style: { gridRow: '5' } }, t('rowInfra')));
+    L.INFRA.forEach(function (a, i) {
+      var arrow = L.FIXED.some(function (e) { return e[0] === a.id; });
+      kids.push(h('div', { class: 'bi-cell', dataset: { layer: 'infra', arrow: String(arrow) }, style: { gridRow: '5', gridColumn: String(i + 3) } },
+        sysCard(s, by[a.id])));
+    });
+    return h('div', { class: 'bi-g' }, kids);
+  }
+
+  function render(c) {
+    var s = c.state;
+    var had = document.activeElement && c.stage.contains(document.activeElement) && document.activeElement.dataset
+      ? document.activeElement.dataset.sel : null;
+    if (refocus === null && had) refocus = had;
+    var foot = sel ? h('p', { class: 'bi-foot', dataset: { sel: 'true' } }, t('selHint', { name: nameOf(sel) }))
+      : h('p', { class: 'bi-foot' }, t('foot'));
+    c.stage.replaceChildren(h('div', { class: 'bi' }, top(s), graph(s), foot));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-sel="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, m = s.m, k = L.captionKey(s), by = byId(s);
+    var work = m.work.map(function (id) { return t('workItem', { name: shortOf(id), gap: t('gap', { t: dur(by[id].gap) }) }); }).join(', ');
+    var out = t.parts(k.key, { ok: b(String(m.within)), n: b(String(s.procs.length)), work: b(work) });
+    var late = s.procs.filter(function (x) { return !x.within; })[0];
+    k.notes.forEach(function (key) {
+      var v = {};
+      if (key === 'nUnrated') {
+        var u = L.unratedLate(s), pr = s.procs.filter(function (x) { return x.id === u.proc; })[0];
+        v = { sys: b(nameOf(u.sys)), proc: b(nameOf(u.proc)), back: b(dur(pr.back)), mtd: b(dur(pr.mtd)) };
+      } else if (key === 'nUnratedAny') {
+        var y = by[m.unrated[0]];
+        v = { sys: b(nameOf(y.id)), procs: b(list(y.users)) };
+      } else if (key === 'nWaits') {
+        var a = by[m.broken[0]], w = by[a.waits[a.waits.length - 1]];
+        v = { a: b(nameOf(a.id)), pa: b(String(a.pos)), b: b(nameOf(w.id)), pb: b(String(w.pos)) };
+      } else if (key === 'nMiss') {
+        v = { proc: b(nameOf(late.id)), back: b(dur(late.back)), mtd: b(dur(late.mtd)), sys: b(nameOf(late.slow)), ach: b(dur(by[late.slow].ach)) };
+      } else if (key === 'nMargin') {
+        var g = by[L.marginGap(s)];
+        v = { sys: b(nameOf(g.id)), m: b(dur(s.p.margin)), ach: b(dur(g.ach)), mtd: b(dur(g.req + s.p.margin)), req: b(dur(g.req)) };
+      } else if (key === 'nInherit') {
+        var x = by[L.inherited(s)];
+        v = { sys: b(nameOf(x.id)), req: b(dur(x.req)), proc: b(nameOf(x.from)), mtd: b(dur(x.req + s.p.margin)), m: b(dur(s.p.margin)) };
+      }
+      out.push(' ');
+      out = out.concat(t.parts(key, v));
+    });
+    return out;
+  }
+
+  var hidden = function () { return false; };
+  var labels = { direct: 'pDirect', chain: 'pChain', hidden: 'pHidden', fixed: 'pFixed', late: 'pLate' };
+  var params = [
+    { key: 'mode', type: 'choice', label: t('mode'), hint: t('modeHint'), options: [['direct', t('modeDirect')], ['chain', t('modeChain')]] },
+    { key: 'margin', type: 'choice', label: t('margin'), hint: t('marginHint'),
+      options: L.MARGINS.map(function (x) { return [x, dur(x)]; }) },
+    { key: 'pa', type: 'range', label: t('rowProcs'), min: 0, max: L.PA_MAX, step: 1, visible: hidden },
+    { key: 'ai', type: 'range', label: t('rowApps'), min: 0, max: L.AI_MAX, step: 1, visible: hidden }
+  ];
+  L.PROCS.forEach(function (x) {
+    params.push({ key: x.key, type: 'range', label: nameOf(x.id), min: L.MTD_STEPS[0], max: L.MTD_STEPS[L.MTD_STEPS.length - 1], step: 1, visible: hidden });
+  });
+  L.SYSTEMS.forEach(function (id) {
+    params.push({ key: L.sysKey(id), type: 'range', label: nameOf(id), min: L.ACH_STEPS[0], max: L.ACH_STEPS[L.ACH_STEPS.length - 1], step: 1, visible: hidden });
+  });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: params,
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'bi-line', label: t('legLine') },
+      { shape: 'bi-ignored', label: t('legIgnored') },
+      { shape: 'bi-ok', label: t('legOk') },
+      { shape: 'bi-gap', label: t('legGap') },
+      { shape: 'bi-none', label: t('legNone') },
+      { shape: 'bi-pos', label: t('legPos') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
