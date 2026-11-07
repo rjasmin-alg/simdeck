@@ -1,0 +1,435 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cmp-patch-sla: a remediation policy sets deadlines by severity; compliance is reported as the share fixed in time,
+     but exposure is open vulnerabilities × days, and the average hides the long tail on systems nobody owns; fixing
+     the known-exploited ones first lowers real risk more than fixing by score; an exception needs an owner and an end
+     date.
+     The stage: four numbers (the report's share in time, the average time to fix, the oldest open item, open at year
+     end); where the exposure is (items and exposure split by owned and unowned systems); the known-exploited exposure
+     under both queue orders on the same stream; the open items at year end by age, one tile each, in two lanes, with
+     the deadline of each severity as a line.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cmp-patch-sla">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rokovi za otklanjanje ranjivosti: prosjek i rep · simdeck</title>
+<meta name="description" content="Postavi rokove po ozbiljnosti i kapacitet tima, pusti godinu ranjivosti, složi red po ocjeni ili iskorištavanju; čitaj postotak, izloženost i najstariju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cmp-patch-sla",
+  "title": {
+    "hr": "Rokovi za otklanjanje ranjivosti: prosjek i rep",
+    "en": "Vulnerability fix deadlines: the average and the tail"
+  },
+  "concept": {
+    "hr": "Postotak u roku izgleda dobro, a rep na sustavima bez vlasnika nosi rizik",
+    "en": "The share fixed in time looks fine; the tail on unowned systems holds the risk"
+  },
+  "summary": {
+    "hr": "Postavi rokove po ozbiljnosti i kapacitet tima, pusti godinu ranjivosti, složi red po ocjeni ili iskorištavanju; čitaj postotak, izloženost i najstariju.",
+    "en": "Set deadlines by severity and the team's capacity, run a year of vulnerabilities, queue by score or exploitation; read the share, exposure and oldest."
+  },
+  "tags": [
+    "updates",
+    "risk"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cmp-patch-sla"]; colours only from kit tokens. */
+[data-sim="cmp-patch-sla"] .sd-ctl[hidden] { display: none; }
+[data-sim="cmp-patch-sla"] .ps {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  height: 100%;
+  padding: 0.45rem 0.8rem 0.35rem;
+  font-size: var(--fs-md);
+}
+[data-sim="cmp-patch-sla"] .ps-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="cmp-patch-sla"] .ps-head { margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.2; color: var(--muted); }
+[data-sim="cmp-patch-sla"] .ps-foot { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the four numbers */
+[data-sim="cmp-patch-sla"] .ps-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
+[data-sim="cmp-patch-sla"] .ps-k {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  padding: 0.2rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); line-height: 1.15;
+}
+[data-sim="cmp-patch-sla"] .ps-k > span:first-child { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="cmp-patch-sla"] .ps-k b { font-size: var(--fs-lg); }
+[data-sim="cmp-patch-sla"] .ps-k small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-patch-sla"] .ps-k[data-kind="report"] { border: 0.2rem solid var(--ok); }
+[data-sim="cmp-patch-sla"] .ps-k[data-kind="report"] b::before { content: '✓\00a0'; color: var(--ok); }
+[data-sim="cmp-patch-sla"] .ps-k[data-kind="tail"] { border: 0.2rem dashed var(--danger); }
+[data-sim="cmp-patch-sla"] .ps-k[data-kind="tail"] b { color: var(--danger); }
+
+/* where the exposure is; the exploited exposure by order */
+[data-sim="cmp-patch-sla"] .ps-mid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0.8rem; }
+[data-sim="cmp-patch-sla"] .ps-box { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+[data-sim="cmp-patch-sla"] .ps-bar {
+  display: grid; grid-template-columns: 9rem minmax(4rem, 1fr) minmax(0, auto); gap: 0.5rem; align-items: center;
+  padding: 0.1rem 0.4rem; border: var(--line-w) dashed transparent; border-radius: var(--radius-sm);
+}
+[data-sim="cmp-patch-sla"] .ps-kev .ps-bar { border-color: var(--line); }
+[data-sim="cmp-patch-sla"] .ps-kev .ps-bar[data-on="true"] { border: 0.2rem solid var(--ink); }
+[data-sim="cmp-patch-sla"] .ps-kev .ps-bar[data-on="true"] .ps-blabel { font-weight: 700; }
+[data-sim="cmp-patch-sla"] .ps-blabel { font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="cmp-patch-sla"] .ps-track {
+  position: relative; display: flex; height: 1.3rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); overflow: hidden;
+}
+[data-sim="cmp-patch-sla"] .ps-seg { height: 100%; }
+[data-sim="cmp-patch-sla"] .ps-seg[data-k="owned"] { background: var(--c6); }
+[data-sim="cmp-patch-sla"] .ps-seg[data-k="unowned"] { background-color: var(--c2); }
+[data-sim="cmp-patch-sla"] .ps-seg[data-k="kev"] { background: var(--danger); }
+[data-sim="cmp-patch-sla"] .ps-btext { font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="cmp-patch-sla"] .ps-btext b { font-size: var(--fs-md); }
+[data-sim="cmp-patch-sla"] .ps-btext small { display: block; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the age chart */
+[data-sim="cmp-patch-sla"] .ps-age {
+  display: grid; grid-template-columns: 10.5rem minmax(0, 1fr);
+  grid-template-rows: auto auto 5.4rem minmax(0, 1fr) minmax(0, 1fr) auto; column-gap: 0.6rem; min-height: 0;
+}
+[data-sim="cmp-patch-sla"] .ps-ahead { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.8rem; }
+[data-sim="cmp-patch-sla"] .ps-ahead .ps-head { margin-right: auto; }
+[data-sim="cmp-patch-sla"] .ps-name { grid-column: 1; display: flex; flex-direction: column; justify-content: center; font-weight: 700; line-height: 1.15; }
+[data-sim="cmp-patch-sla"] .ps-name small { font-weight: 400; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-patch-sla"] .ps-lane {
+  grid-column: 2; position: relative; margin: 0.12rem 0; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="cmp-patch-sla"] .ps-lane[data-empty="true"] { display: grid; place-items: center; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="cmp-patch-sla"] .ps-col {
+  position: absolute; top: 0.15rem; bottom: 0.15rem; display: flex; flex-direction: column-reverse; gap: 2px; padding: 0 2px;
+}
+[data-sim="cmp-patch-sla"] .ps-t { flex: none; height: calc((100% - (var(--cap) - 1) * 2px) / var(--cap)); border-radius: 1px; }
+[data-sim="cmp-patch-sla"] .ps-t[data-sev="0"], [data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-0"] { background: var(--danger); }
+[data-sim="cmp-patch-sla"] .ps-t[data-sev="1"], [data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-1"] {
+  background-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 60%, transparent) 0.3em 0.45em);
+}
+[data-sim="cmp-patch-sla"] .ps-t[data-sev="2"], [data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-2"] { background: color-mix(in srgb, var(--c1) 40%, var(--bg)); }
+[data-sim="cmp-patch-sla"] .ps-t[data-sev="3"], [data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-3"] { background: var(--bg); box-shadow: inset 0 0 0 2px var(--line); }
+[data-sim="cmp-patch-sla"] .ps-t[data-kev="true"], [data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-kev"] {
+  border-radius: 999px; outline: 2px solid var(--ink); outline-offset: -1px;
+}
+[data-sim="cmp-patch-sla"] .ps-t[data-exc="true"] { opacity: 0.45; }
+[data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-kev"] { background: var(--panel); }
+[data-sim="cmp-patch-sla"] .sd-swatch[data-shape="ps-exc"] { background: var(--danger); opacity: 0.45; border-style: dashed; }
+
+/* deadline lines and their labels, over the lanes */
+[data-sim="cmp-patch-sla"] .ps-over { grid-column: 2; grid-row: 3 / 6; position: relative; pointer-events: none; z-index: 1; }
+[data-sim="cmp-patch-sla"] .ps-dl { position: absolute; bottom: 0; width: 0; border-left: 0.2rem dashed var(--ink); }
+[data-sim="cmp-patch-sla"] .ps-dl[data-sev="0"] { border-left-color: var(--danger); }
+[data-sim="cmp-patch-sla"] .ps-dl[data-sev="1"] { border-left-color: var(--c2); border-left-style: dotted; }
+[data-sim="cmp-patch-sla"] .ps-dl[data-sev="2"] { border-left-color: var(--c1); }
+[data-sim="cmp-patch-sla"] .ps-dl[data-sev="3"] { border-left-color: var(--ink); border-left-style: dotted; }
+[data-sim="cmp-patch-sla"] .ps-dl span {
+  position: absolute; top: 0; left: 0.3rem; padding: 0 0.3rem; white-space: nowrap; font-size: var(--fs-sm); font-weight: 700;
+  line-height: 1.25; background: var(--bg); border-radius: var(--radius-sm);
+}
+[data-sim="cmp-patch-sla"] .ps-dl[data-flip="true"] span { left: auto; right: 0.3rem; }
+[data-sim="cmp-patch-sla"] .ps-axis { grid-column: 2; position: relative; height: 1.5rem; }
+[data-sim="cmp-patch-sla"] .ps-tick { position: absolute; top: 0; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-patch-sla"] .ps-axname { grid-column: 1; font-size: var(--fs-sm); color: var(--muted); align-self: center; }
+[data-sim="cmp-patch-sla"] .ps-b {
+  min-height: var(--hit); padding: 0 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+}
+[data-sim="cmp-patch-sla"] .ps-b[aria-disabled="true"] { color: var(--muted); border-style: dashed; cursor: default; }
+[data-sim="cmp-patch-sla"] .ps-dlctl { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.1rem; padding: 0.15rem 0; }
+[data-sim="cmp-patch-sla"] .ps-step { display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--fs-sm); }
+[data-sim="cmp-patch-sla"] .ps-step .ps-b { min-width: var(--hit); padding: 0; font-size: var(--fs-md); }
+[data-sim="cmp-patch-sla"] .ps-sv { white-space: nowrap; min-width: 7.5rem; text-align: center; }
+[data-sim="cmp-patch-sla"] .ps-sv::before { content: ''; display: inline-block; width: 0.9em; height: 0.9em; margin-right: 0.3em; vertical-align: -0.1em; border: 1px solid var(--line); }
+[data-sim="cmp-patch-sla"] .ps-step[data-sev="0"] .ps-sv::before { background: var(--danger); }
+[data-sim="cmp-patch-sla"] .ps-step[data-sev="1"] .ps-sv::before { background: var(--c2); }
+[data-sim="cmp-patch-sla"] .ps-step[data-sev="2"] .ps-sv::before { background: color-mix(in srgb, var(--c1) 40%, var(--bg)); }
+[data-sim="cmp-patch-sla"] .ps-step[data-sev="3"] .ps-sv::before { background: var(--bg); }
+[data-sim="cmp-patch-sla"] .ps-b:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="cmp-patch-sla"] .ps-b kbd { margin-left: 0.4rem; font: inherit; padding: 0 0.3rem; border: 1px solid currentColor; border-radius: 0.2rem; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cmp-patch-sla"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cmp-patch-sla"] .ps { height: auto; grid-template-rows: auto auto auto auto; padding: 0.4rem; }
+  [data-sim="cmp-patch-sla"] .ps-tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="cmp-patch-sla"] .ps-mid { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="cmp-patch-sla"] .ps-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="cmp-patch-sla"] .ps-bar .ps-btext { grid-column: 1 / -1; }
+  [data-sim="cmp-patch-sla"] .ps-age { grid-template-columns: 4.6rem minmax(0, 1fr); grid-template-rows: auto auto 5.4rem 9rem 9rem auto; column-gap: 0.3rem; }
+  [data-sim="cmp-patch-sla"] .ps-name { font-size: var(--fs-sm); }
+  [data-sim="cmp-patch-sla"] .ps-name small, [data-sim="cmp-patch-sla"] .ps-axname { display: none; }
+  [data-sim="cmp-patch-sla"] .ps-tick:nth-child(even) { display: none; }
+  [data-sim="cmp-patch-sla"] .ps-col { padding: 0 1px; gap: 1px; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Rokovi za otklanjanje ranjivosti: prosjek i rep</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var LOCALE = Simdeck.lang === 'hr' ? 'hr-HR' : 'en-GB';
+  var SPAN = (Math.floor(L.DAYS / L.BIN) + 1) * L.BIN;  // the age axis: 0…370 days, 37 columns of 10
+
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function int(x) { return new Intl.NumberFormat(LOCALE).format(Math.round(x)); }
+  function dec(x) { return new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(x); }
+  function pct1(x) { return dec(x * 100) + ' %'; }
+  function pct0(x) { return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 }).format(x * 100) + ' %'; }
+  function days(n) { return t.n('days', n, { d: int(n) }); }
+  function at(age) { return (age / SPAN * 100) + '%'; }
+  function exposure(n) { return t('expUnit', { n: int(n) }); }
+
+  var sim = null;
+  function noFocus(e) { e.preventDefault(); }         // buttons do not take focus on click (docs/sim-ui.md §3)
+  var refocus = null;                                 // after a keyboard press, focus goes back to the same button
+  function btn(sel, attrs, run, kids) {
+    return h('button', Object.assign({ type: 'button', class: 'ps-b', onmousedown: noFocus, dataset: { sel: sel },
+      onclick: function (e) { refocus = e.detail === 0 ? sel : null; run(); } }, attrs), kids);
+  }
+  function newStream() { sim.set({ seed: L.nextSeed(sim.params.seed) }); }
+
+  // the deadlines: steppers on the stage, next to the lines they move (the panel must fit one screen)
+  function steppers(s) {
+    return h('div', { class: 'ps-dlctl' }, h('span', { class: 'ps-head' }, t('dlHead')), L.DKEYS.map(function (k, sev) {
+      var what = t(k), v = s.p[k];
+      var move = function (dir) { return function () { var o = {}; o[k] = L.stepDeadline(sev, sim.params[k], dir); sim.set(o); }; };
+      return h('span', { class: 'ps-step', dataset: { sev: String(sev) } },
+        btn(k + '-', { 'aria-label': t('dlDown', { what: what }), 'aria-disabled': String(v <= L.DL_MIN[sev]) }, move(-1), '−'),
+        h('span', { class: 'ps-sv' }, t('sev_' + sev), ' ', b(t('dShort', { d: int(v) }))),
+        btn(k + '+', { 'aria-label': t('dlUp', { what: what }), 'aria-disabled': String(v >= L.DL_MAX[sev]) }, move(1), '+'));
+    }));
+  }
+
+  // ── the four numbers ──
+
+  function tile(kind, label, value, sub) {
+    return h('div', { class: 'ps-k', dataset: { kind: kind } }, h('span', null, label), h('b', { class: 'ps-num', translate: 'no' }, value), sub);
+  }
+
+  function tiles(s) {
+    var m = s.m, c = m.counts;
+    var subIn = [h('small', null, t('kInTimeSub', { n: int(c.inTime), c: int(m.counted) }))];
+    if (c.excepted > 0) subIn.push(h('small', null, t.n('kInTimeExc', c.excepted, { e: int(c.excepted) })));
+    var old = m.oldest;
+    var looks = m.inTime >= 0.95 ? 'report' : 'plain';  // the report's two numbers get the green tick when they look good
+    return h('div', { class: 'ps-tiles' },
+      tile(looks, t('kInTime'), pct1(m.inTime), subIn),
+      tile(looks, t('kMean'), t('daysAvg', { d: dec(m.meanFix) }), h('small', null, t('kMeanSub', { f: int(m.fixed) }))),
+      tile(old && old.age > 30 ? 'tail' : 'plain', t('kOldest'), old ? days(old.age) : t('kNoneOpen'),
+        old ? h('small', null, t(old.owned ? 'kOldestOwned' : 'kOldestUnowned', { sev: t('sev_' + old.sev) })) : null),
+      tile(c.overdue > 0 ? 'tail' : 'plain', t('kOpen'), int(m.open), h('small', null, t('kOpenSub', { o: int(c.overdue) }))));
+  }
+
+  // ── where the exposure is; the exploited exposure under both orders ──
+
+  function split(label, owned, unowned, text) {
+    var total = owned + unowned || 1;
+    return h('div', { class: 'ps-bar' },
+      h('span', { class: 'ps-blabel' }, label),
+      h('span', { class: 'ps-track', 'aria-hidden': 'true' },
+        h('span', { class: 'ps-seg', dataset: { k: 'owned' }, style: { width: (owned / total * 100) + '%' } }),
+        h('span', { class: 'ps-seg sd-hatch', dataset: { k: 'unowned' }, style: { width: (unowned / total * 100) + '%' } })),
+      h('span', { class: 'ps-btext ps-num' }, text));
+  }
+
+  function where(s) {
+    var m = s.m;
+    var iu = m.unownedItems, eu = m.exposureUnowned;
+    return h('div', { class: 'ps-box' },
+      h('p', { class: 'ps-head' }, t('headWhere')),
+      split(t('rowItems'), m.items - iu, iu, [t('segUnowned') + ' ', b(int(iu)), ' / ' + int(m.items) + ' (' + pct0(iu / (m.items || 1)) + ')']),
+      split(t('rowExposure'), m.exposure - eu, eu, [t('segUnowned') + ' ', b(pct0(eu / (m.exposure || 1))), ' · ' + exposure(m.exposure)]));
+  }
+
+  function kevBar(on, label, v, max, inTime) {
+    return h('div', { class: 'ps-bar', dataset: { on: String(on) } },
+      h('span', { class: 'ps-blabel' }, label),
+      h('span', { class: 'ps-track', 'aria-hidden': 'true' },
+        h('span', { class: 'ps-seg', dataset: { k: 'kev' }, style: { width: (v / (max || 1) * 100) + '%' } })),
+      h('span', { class: 'ps-btext ps-num' }, b(exposure(v)), h('small', null, t('kevInTime', { pct: pct1(inTime) }))));
+  }
+
+  function kev(s) {
+    var max = Math.max(s.kevBy.score, s.kevBy.exploited);
+    return h('div', { class: 'ps-box ps-kev' },
+      h('p', { class: 'ps-head' }, t('headKev')),
+      kevBar(s.p.order === 'score', t('byScore'), s.kevBy.score, max, s.inTimeBy.score),
+      kevBar(s.p.order === 'exploited', t('byKev'), s.kevBy.exploited, max, s.inTimeBy.exploited));
+  }
+
+  // ── the age chart ──
+
+  function lane(items, cap) {
+    var bins = {};
+    items.forEach(function (x) { (bins[x.bin] = bins[x.bin] || []).push(x); });
+    return Object.keys(bins).map(function (k) {
+      var bin = Number(k), list = bins[k];
+      return h('div', { class: 'ps-col', role: 'img',
+        'aria-label': t('binLabel', { a: bin * L.BIN, b: bin * L.BIN + L.BIN - 1, n: list.length }),
+        style: { left: at(bin * L.BIN), width: at(L.BIN), '--cap': String(cap) } },
+        list.slice(0, cap).map(function (x) {
+          return h('span', { class: 'ps-t', dataset: { sev: String(x.sev), kev: String(x.kev), exc: String(x.mark === 'exc') } });
+        }));
+    });
+  }
+
+  function ages(s) {
+    var owned = s.open.filter(function (x) { return x.owned; });
+    var unowned = s.open.filter(function (x) { return !x.owned; });
+    var counts = {};
+    s.open.forEach(function (x) { var k = (x.owned ? 'o' : 'u') + x.bin; counts[k] = (counts[k] || 0) + 1; });
+    var cap = 10;
+    Object.keys(counts).forEach(function (k) { cap = Math.max(cap, counts[k]); });
+    var exc = unowned.filter(function (x) { return x.mark === 'exc'; }).length;
+
+    var lines = L.DKEYS.map(function (k, sev) {
+      var d = s.p[k];
+      return h('div', { class: 'ps-dl', dataset: { sev: String(sev), flip: String(d / SPAN > 0.72) },
+        style: { left: at(d), top: (sev * 1.35) + 'rem' } },
+        h('span', null, t('dlLabel', { sev: t('sev_' + sev), d: int(d) })));
+    });
+    var ticks = [];
+    for (var a = 0; a <= L.DAYS; a += 30) ticks.push(h('span', { class: 'ps-tick ps-num', style: { left: at(a) } }, int(a)));
+
+    return h('div', { class: 'ps-age', style: { '--cap': String(cap) } },
+      h('div', { class: 'ps-ahead' },
+        h('p', { class: 'ps-head' }, t('headAge')),
+        btn('new', { 'aria-keyshortcuts': 'N' }, newStream, [t('newStream'), h('kbd', { 'aria-hidden': 'true' }, 'N')])),
+      steppers(s),
+      h('div', { class: 'ps-over', 'aria-hidden': 'true' }, lines),
+      h('div', { class: 'ps-name', style: { gridRow: '4' } }, h('span', null, t('laneOwned')),
+        h('small', null, t('laneSub', { n: int(owned.length) }))),
+      h('div', { class: 'ps-lane', style: { gridRow: '4' } }, lane(owned, cap)),
+      h('div', { class: 'ps-name', style: { gridRow: '5' } }, h('span', null, t('laneUnowned')),
+        h('small', null, exc ? t('laneSubExc', { n: int(unowned.length), e: int(exc) }) : t('laneSub', { n: int(unowned.length) }))),
+      s.p.unowned > 0
+        ? h('div', { class: 'ps-lane', style: { gridRow: '5' } }, lane(unowned, cap))
+        : h('div', { class: 'ps-lane', dataset: { empty: 'true' }, style: { gridRow: '5' } }, t('laneEmpty')),
+      h('span', { class: 'ps-axname', style: { gridRow: '6' } }, t('axisAge')),
+      h('div', { class: 'ps-axis', style: { gridRow: '6' } }, ticks));
+  }
+
+  function render(c) {
+    var s = c.state;
+    // a shortcut (N) re-renders the stage: a focused stage button keeps its focus
+    var had = document.activeElement && c.stage.contains(document.activeElement) && document.activeElement.dataset
+      ? document.activeElement.dataset.sel : null;
+    if (refocus === null && had) refocus = had;
+    c.stage.replaceChildren(h('div', { class: 'ps' },
+      tiles(s), h('div', { class: 'ps-mid' }, where(s), kev(s)), ages(s), h('p', { class: 'ps-foot' }, t('foot'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-sel="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, m = s.m, k = L.captionKey(s);
+    var out = t.parts(k.key, {
+      pct: b(pct1(m.inTime)),
+      mean: b(t('daysAvg', { d: dec(m.meanFix) })),
+      open: b(t.n('nVulns', m.open, { c: int(m.open) })),
+      oldest: b(m.oldest ? days(m.oldest.age) : t('kNoneOpen')),
+      iu: b(pct0(m.unownedItems / (m.items || 1))),
+      eu: b(pct0(m.exposureUnowned / (m.exposure || 1)))
+    });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, {
+        e: b(int(m.counts.excepted)), u: b(int(m.overdueUnowned)),
+        a: b(exposure(s.kevBy.score)), b: b(exposure(s.kevBy.exploited)),
+        p0: b(s.inTimeStd === null ? '' : pct1(s.inTimeStd)),
+        p1: b(pct1(s.inTimeBy.score)), p2: b(pct1(s.inTimeBy.exploited))
+      }));
+    });
+    return out;
+  }
+
+  var hidden = function () { return false; };
+  var noUnowned = function (p) { return p.unowned === 0 ? t('noUnowned') : false; };
+  var labels = { report: 'pReport', 'no-exc': 'pNoExc', dated: 'pDated', short: 'pShort', kev: 'pKev', tight: 'pTight' };
+  var dayFmt = function (v) { return t('dShort', { d: int(v) }); };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'order', type: 'choice', label: t('order'), options: [['score', t('orderScore')], ['exploited', t('orderKev')]] },
+      { key: 'cap', type: 'range', label: t('cap'), min: 1, max: 6, step: 0.5, format: function (v) { return dec(v); } },
+      { key: 'unowned', type: 'range', label: t('unowned'), min: 0, max: 6, step: 1 },
+      { key: 'exc', type: 'choice', label: t('exc'), disabled: noUnowned,
+        options: [['none', t('excNone')], ['open', t('excOpen')], ['dated', t('excDated')]] },
+      { key: 'dCrit', type: 'range', label: t('dCrit'), min: L.DL_MIN[0], max: L.DL_MAX[0], step: 1, format: dayFmt, visible: hidden },
+      { key: 'dHigh', type: 'range', label: t('dHigh'), min: L.DL_MIN[1], max: L.DL_MAX[1], step: 1, format: dayFmt, visible: hidden },
+      { key: 'dMed', type: 'range', label: t('dMed'), min: L.DL_MIN[2], max: L.DL_MAX[2], step: 1, format: dayFmt, visible: hidden },
+      { key: 'dLow', type: 'range', label: t('dLow'), min: L.DL_MIN[3], max: L.DL_MAX[3], step: 1, format: dayFmt, visible: hidden },
+      { key: 'seed', type: 'range', label: t('newStream'), min: 1, max: L.SEED_MAX, step: 1, visible: hidden }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'ps-0', label: t('legCrit') },
+      { shape: 'ps-1', label: t('legHigh') },
+      { shape: 'ps-2', label: t('legMed') },
+      { shape: 'ps-3', label: t('legLow') },
+      { shape: 'ps-kev', label: t('legKev') },
+      { shape: 'ps-exc', label: t('legExc') }
+    ],
+    keys: [{ key: 'n', label: t('newStream'), run: function () { newStream(); } }],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
