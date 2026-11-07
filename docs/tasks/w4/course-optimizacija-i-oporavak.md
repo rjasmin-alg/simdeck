@@ -21,7 +21,7 @@ published).
   sections (lectures or weeks) and a short address only when the page is published.
 - Order the sims below by the syllabus; leave out what the owner drops; tools never go on course pages.
 
-## Candidate sims (55, from the catalogue's course column)
+## Candidate sims (58, from the catalogue's course column)
 
 | Sim | Title | Wave | Catalogue § |
 |---|---|---|---|
@@ -44,6 +44,9 @@ published).
 | `fin-fixed-variable` | Fixed, variable and step costs; break-even | 3 | 4.12 |
 | `fin-refresh-cycle` | Refresh cycles and economic life | 3 | 4.12 |
 | `fin-tco` | Total cost of ownership | 3 | 4.12 |
+| `cmp-bia` | Business impact analysis: what must come back first | 3 | 4.13 |
+| `cmp-incident-clocks` | Incident reporting clocks: 24 hours, 72 hours, one month | 3 | 4.13 |
+| `cmp-restore-evidence` | Restore tests as evidence: covering the estate in a year | 3 | 4.13 |
 | `dns-secondary-expiry` | A secondary is a cache with a timer | 3 | 4.2 |
 | `dns-split-brain` | Two primaries are two zones | 3 | 4.2 |
 | `dns-ttl-cache` | TTL caching and the cutover | 3 | 4.2 |
