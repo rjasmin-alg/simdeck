@@ -1,0 +1,498 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-accruals-cash: an expense belongs to the month the service is used, not the month it is paid.
+     One grid whose thirteen month columns (the fiscal year, then the next year's first month) are shared by the chart
+     on top (cash paid so far, solid; expensed so far, dashed; the gap shaded up to the cursor) and the contracts
+     beneath (a coin where an invoice is paid, a hatched bar where the service is used, each contract's balance on the
+     right). Each step posts one month. Ledger: ledger.js (promotable); model: sim.js; rules: SPEC.md; words:
+     strings.js. -->
+<html lang="hr" data-sim="fin-accruals-cash">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trošak ili plaćanje: vremenska razgraničenja kroz godinu · simdeck</title>
+<meta name="description" content="Godina računa za IT: podrška plaćena unaprijed, kolokacija naplaćena unatrag, račun koji kasni. Novac i trošak se razilaze i susreću na kraju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-accruals-cash",
+  "title": {
+    "hr": "Trošak ili plaćanje: vremenska razgraničenja kroz godinu",
+    "en": "Accruals vs cash: a year of invoices"
+  },
+  "concept": {
+    "hr": "Trošak pripada mjesecu uporabe, a ne mjesecu u kojem je plaćen",
+    "en": "An expense belongs to the month of use, not the month it is paid"
+  },
+  "summary": {
+    "hr": "Godina računa za IT: podrška plaćena unaprijed, kolokacija naplaćena unatrag, račun koji kasni. Novac i trošak se razilaze i susreću na kraju.",
+    "en": "A year of IT invoices: support paid in advance, colocation billed in arrears, a late invoice. Watch cash and expense part and meet again."
+  },
+  "tags": [
+    "accounting"
+  ],
+  "class": "stepper",
+  "steps": 13,
+  "entries": [
+    {
+      "preset": "year-end"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-accruals-cash"]; colours only from kit tokens. */
+[data-sim="fin-accruals-cash"] .ac {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+/* one grid: label column, thirteen months, value column; the chart and every contract share the month columns */
+[data-sim="fin-accruals-cash"] .ac-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 12.5rem repeat(13, minmax(0, 1fr)) 10.5rem;
+  grid-template-rows: auto minmax(7rem, 1fr);
+  grid-auto-rows: auto;
+  column-gap: 0;
+  row-gap: 0.15rem;
+  align-items: stretch;
+}
+/* every child is placed by the page: --c/--r on the projector, --pc/--pr on a phone */
+[data-sim="fin-accruals-cash"] .ac-grid > * { grid-column: var(--c); grid-row: var(--r); }
+
+/* the year bracket */
+[data-sim="fin-accruals-cash"] .ac-year {
+  margin: 0 0.15rem;
+  padding-bottom: 0.1rem;
+  border-bottom: 0.2rem solid var(--line);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+[data-sim="fin-accruals-cash"] .ac-year[data-y="next"] { border-bottom-style: dashed; }
+[data-sim="fin-accruals-cash"] .ac-yshort { display: none; }
+
+/* the chart: axis, plot, values at the cursor */
+[data-sim="fin-accruals-cash"] .ac-axis { position: relative; margin: 0.6rem 0 0.2rem; }
+[data-sim="fin-accruals-cash"] .ac-tick {
+  position: absolute;
+  right: 0.35rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-accruals-cash"] .ac-plot {
+  position: relative;
+  margin: 0.6rem 0 0.2rem;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: var(--line-w) solid var(--ink);
+}
+[data-sim="fin-accruals-cash"] .ac-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.55; }
+[data-sim="fin-accruals-cash"] .ac-ye { position: absolute; top: -0.6rem; bottom: 0; border-left: 0.2rem solid var(--ink); }
+[data-sim="fin-accruals-cash"] .ac-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-accruals-cash"] .ac-svg path { fill: none; stroke: var(--sw); vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-accruals-cash"] .ac-svg .ac-gap { fill: color-mix(in srgb, var(--line) 26%, transparent); stroke: none; }
+[data-sim="fin-accruals-cash"] .ac-svg .ac-l[data-k="cash"] { stroke-width: 6; }
+[data-sim="fin-accruals-cash"] .ac-svg .ac-l[data-k="expense"] { stroke-width: 4; stroke-dasharray: 14 8; }
+[data-sim="fin-accruals-cash"] .ac-svg .ac-future { opacity: 0.25; }
+[data-sim="fin-accruals-cash"] .ac-cursor { position: absolute; top: 0; bottom: 0; border-left: 0.2rem solid var(--ink); transform: translateX(-50%); }
+[data-sim="fin-accruals-cash"] .ac-dot {
+  position: absolute;
+  width: 0.95rem;
+  height: 0.95rem;
+  transform: translate(-50%, -50%);
+  background: var(--sw);
+  border: 0.15rem solid var(--ink);
+}
+[data-sim="fin-accruals-cash"] .ac-dot[data-k="expense"] { transform: translate(-50%, -50%) rotate(45deg); }
+
+[data-sim="fin-accruals-cash"] .ac-vals {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  margin: 0;
+  padding-left: 0.6rem;
+}
+[data-sim="fin-accruals-cash"] .ac-val { display: grid; grid-template-columns: 1.9rem minmax(0, 1fr); column-gap: 0.4rem; align-items: center; }
+[data-sim="fin-accruals-cash"] .ac-val dt { grid-column: 1 / -1; display: contents; }
+[data-sim="fin-accruals-cash"] .ac-vlabel { font-size: var(--fs-sm); color: var(--muted); line-height: 1.2; }
+[data-sim="fin-accruals-cash"] .ac-val dd { grid-column: 2; margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+[data-sim="fin-accruals-cash"] .ac-mark { width: 1.9rem; height: 0; border-top: 0.3rem solid var(--sw); }
+[data-sim="fin-accruals-cash"] .ac-mark[data-k="expense"] { border-top-style: dashed; }
+[data-sim="fin-accruals-cash"] .ac-mark[data-k="prepaid"], [data-sim="fin-accruals-cash"] .ac-mark[data-k="accrued"] { border: 0; height: auto; text-align: center; font-weight: 700; color: var(--sw); }
+
+/* month header */
+[data-sim="fin-accruals-cash"] .ac-head {
+  padding: 0.1rem 0;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  border-bottom: var(--line-w) solid var(--line);
+}
+[data-sim="fin-accruals-cash"] .ac-head[data-side] { text-align: left; color: var(--muted); font-weight: 400; padding-left: 0.2rem; }
+[data-sim="fin-accruals-cash"] .ac-head[data-side="r"] { padding-left: 0.6rem; }
+[data-sim="fin-accruals-cash"] .ac-mnum { display: none; }
+
+/* contract rows */
+[data-sim="fin-accruals-cash"] .ac-label { padding: 0.2rem 0.5rem 0.2rem 0.2rem; line-height: 1.2; align-self: center; }
+[data-sim="fin-accruals-cash"] .ac-name { display: block; font-weight: 700; }
+[data-sim="fin-accruals-cash"] .ac-sub { display: block; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-accruals-cash"] .ac-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 3.6rem;
+  padding: 0.15rem 0 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+[data-sim="fin-accruals-cash"] .ac-cell[data-when="future"] > * { opacity: 0.28; }
+[data-sim="fin-accruals-cash"] :is(.ac-cell, .ac-head)[data-when="now"] { background: color-mix(in srgb, var(--hl) 45%, transparent); }
+[data-sim="fin-accruals-cash"] :is(.ac-cell, .ac-head)[data-m="13"] { border-left: 0.2rem solid var(--ink); }
+[data-sim="fin-accruals-cash"] .ac-coin {
+  padding: 0 0.3rem;
+  border: 0.15rem solid var(--ink);
+  border-radius: 1rem;
+  background: var(--sw);
+  color: var(--on-series);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-accruals-cash"] .ac-coin.sd-changed { outline: 0.25rem solid var(--ink); outline-offset: 0.1rem; }
+[data-sim="fin-accruals-cash"] .ac-use {
+  align-self: stretch;
+  margin-top: auto;
+  height: 0.85rem;
+  border-top: 0.15rem solid var(--sw);
+  border-bottom: 0.15rem solid var(--sw);
+  background: repeating-linear-gradient(135deg, var(--sw) 0 0.2rem, transparent 0.2rem 0.5rem);
+}
+[data-sim="fin-accruals-cash"] .ac-use[data-start] { margin-left: 0.2rem; border-left: 0.15rem solid var(--sw); }
+[data-sim="fin-accruals-cash"] .ac-use[data-end] { margin-right: 0.2rem; border-right: 0.15rem solid var(--sw); }
+[data-sim="fin-accruals-cash"] .ac-bal {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-left: 0.6rem;
+  line-height: 1.2;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+[data-sim="fin-accruals-cash"] .ac-bal b { font-variant-numeric: tabular-nums; }
+[data-sim="fin-accruals-cash"] .ac-bal span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-accruals-cash"] .ac-bal[data-k="prepaid"] b { color: var(--c3); }
+[data-sim="fin-accruals-cash"] .ac-bal[data-k="accrued"] b { color: var(--c4); }
+[data-sim="fin-accruals-cash"] .ac-label, [data-sim="fin-accruals-cash"] .ac-bal { border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
+[data-sim="fin-accruals-cash"] .ac-empty { padding: 1rem; color: var(--muted); text-align: center; }
+
+[data-sim="fin-accruals-cash"] .ac-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-accruals-cash"] .sd-swatch[data-shape^="ac-l"] { width: 1.9em; height: 0; border: 0; border-radius: 0; border-top: 0.3rem solid var(--sw); background: transparent; }
+[data-sim="fin-accruals-cash"] .sd-swatch[data-shape="ac-lexp"] { border-top-style: dashed; }
+[data-sim="fin-accruals-cash"] .sd-swatch[data-shape="ac-coin"] { width: 1.6em; border-radius: 1em; }
+[data-sim="fin-accruals-cash"] .sd-swatch[data-shape="ac-use"] { width: 1.6em; height: 0.75em; border: 0.15rem solid var(--sw); border-radius: 0; background: repeating-linear-gradient(135deg, var(--sw) 0 0.2rem, transparent 0.2rem 0.5rem); }
+[data-sim="fin-accruals-cash"] .sd-swatch[data-shape="ac-now"] { border: 0; background: color-mix(in srgb, var(--hl) 45%, transparent); outline: 2px solid var(--line); }
+
+/* Phone and portrait: thirteen narrow columns; labels and values take whole rows; months by number. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-accruals-cash"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-accruals-cash"] .ac { height: auto; padding: 0.4rem; }
+  [data-sim="fin-accruals-cash"] .ac-grid { grid-template-columns: repeat(13, minmax(0, 1fr)); grid-template-rows: auto 14rem; }
+  [data-sim="fin-accruals-cash"] .ac-grid > * { grid-column: var(--pc); grid-row: var(--pr); }
+  [data-sim="fin-accruals-cash"] :is(.ac-axis, .ac-head[data-side], .ac-coin-amt, .ac-mname) { display: none; }
+  [data-sim="fin-accruals-cash"] .ac-year[data-y="next"] .ac-ylong { display: none; }
+  [data-sim="fin-accruals-cash"] .ac-year[data-y="next"] .ac-yshort { display: inline; }
+  [data-sim="fin-accruals-cash"] .ac-vals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem 0.6rem; padding: 0.3rem 0; }
+  [data-sim="fin-accruals-cash"] .ac-mnum { display: inline; }
+  [data-sim="fin-accruals-cash"] .ac-label { padding-top: 0.5rem; border-bottom: 0; }
+  [data-sim="fin-accruals-cash"] .ac-bal { padding-top: 0.5rem; text-align: right; border-bottom: 0; }
+  [data-sim="fin-accruals-cash"] .ac-cell { min-height: 2rem; }
+  [data-sim="fin-accruals-cash"] .ac-coin { width: 1rem; height: 1rem; padding: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Trošak ili plaćanje: vremenska razgraničenja kroz godinu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="ledger.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var Lg = window.SimdeckModels.ledger;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var M = L.MONTHS, Y = L.YEAR;
+
+  // ── numbers and months in the page's language ──
+
+  /** A whole number with thousands grouped (12 000 / 12,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro. Minus is U+2212. */
+  function money(x) {
+    var r = Lg.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  var SHORT = t('monthsShort').split('|'), LONG = t('monthsLong').split('|'), LOC = t('monthsLoc').split('|');
+  function cal(m, fy) { return L.calMonth(m, fy) - 1; }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  var NAME = { support: 'iSupport', colo: 'iColo', link: 'iLink', late: 'iLate' };
+
+  function sub(it, fy) {
+    switch (it.id) {
+      case 'support': return t('sSupport', { x: money(it.fee * Y), k: t.n('nMonths', Y) });
+      case 'colo': return t('sColo', { fee: money(it.fee) });
+      case 'link': return t('sLink', { fee: money(it.fee) });
+      default: return t('sLate', { x: money(it.fee), last: LOC[cal(Y, fy)], first: LOC[cal(M, fy)] });
+    }
+  }
+
+  // ── the chart ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step at or above x. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  function chart(s) {
+    var n = s.n, lines = s.lines;
+    var max = Math.max(lines.cash[M], lines.expense[M]) || 10000;   // nothing on: an empty but round scale
+    var step = niceStep(max / 4);
+    var top = Math.max(step, Math.ceil(max / step) * step);
+    var X = function (k) { return 1000 * k / M; };
+    var Yp = function (v) { return 1000 * (1 - v / top); };
+    var pct = function (v) { return (100 * (1 - v / top)) + '%'; };
+    var pts = function (arr, from, to, rev) {
+      var d = '', ks = [];
+      for (var k = from; k <= to; k++) ks.push(k);
+      if (rev) ks.reverse();
+      ks.forEach(function (k, i) { d += (i === 0 ? 'M' : 'L') + X(k).toFixed(2) + ' ' + Yp(arr[k]).toFixed(2); });
+      return d;
+    };
+
+    var ticks = [], grid = [];
+    for (var v = 0; v <= top + 1e-6; v += step) {
+      ticks.push(h('span', { class: 'ac-tick', translate: 'no', style: { top: pct(v) } }, money(v)));
+      if (v > 0) grid.push(h('div', { class: 'ac-gl', style: { top: pct(v) } }));
+    }
+    grid.push(h('div', { class: 'ac-ye', style: { left: (100 * Y / M) + '%' } }));
+
+    var g = svg('svg', { class: 'ac-svg', viewBox: '0 0 1000 1000', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    if (n > 0) g.appendChild(svg('path', { class: 'ac-gap', d: pts(lines.cash, 0, n) + pts(lines.expense, 0, n, true).replace(/^M/, 'L') + 'Z' }));
+    [['cash', '1'], ['expense', '2']].forEach(function (kc) {
+      var k = kc[0];
+      g.appendChild(svg('path', { class: 'ac-l ac-future', 'data-k': k, 'data-c': kc[1], d: pts(lines[k], 0, M) }));
+      if (n > 0) g.appendChild(svg('path', { class: 'ac-l', 'data-k': k, 'data-c': kc[1], d: pts(lines[k], 0, n) }));
+    });
+    var left = (100 * n / M) + '%';
+    var dots = [['cash', '1'], ['expense', '2']].map(function (kc) {
+      return h('span', { class: 'ac-dot', dataset: { k: kc[0], c: kc[1] }, style: { left: left, top: pct(lines[kc[0]][n]) } });
+    });
+
+    var val = function (k, c, mark, label, value) {
+      return h('div', { class: 'ac-val' },
+        h('dt', null, h('span', { class: 'ac-mark', dataset: { k: k, c: c } }, mark), h('span', { class: 'ac-vlabel' }, label)),
+        h('dd', { translate: 'no' }, value));
+    };
+    return [
+      at(h('div', { class: 'ac-axis', 'aria-hidden': 'true' }, ticks), 1, 2, 1, 2),
+      at(h('div', { class: 'ac-plot' }, grid, g, h('div', { class: 'ac-cursor', style: { left: left } }), dots), '2 / span 13', 2, '1 / -1', 2),
+      at(h('dl', { class: 'ac-vals' },
+        val('cash', '1', null, t('vCash'), money(s.cash)),
+        val('expense', '2', null, t('vExpense'), money(s.expense)),
+        val('prepaid', '3', '▲', t('vPrepaid'), money(s.prepaid)),
+        val('accrued', '4', '▼', t('vAccrued'), money(s.accrued))), 15, 2, '1 / -1', 3)
+    ];
+  }
+
+  // ── the contracts ──
+
+  /** Grid position: column and row on the projector, then on a phone (CSS picks one set). */
+  function at(el, c, r, pc, pr) {
+    el.style.setProperty('--c', String(c));
+    el.style.setProperty('--r', String(r));
+    el.style.setProperty('--pc', String(pc));
+    el.style.setProperty('--pr', String(pr));
+    return el;
+  }
+
+  function when(m, n) { return m < n ? 'past' : m === n ? 'now' : 'future'; }
+
+  function header(s) {
+    var out = [at(h('div', { class: 'ac-head', dataset: { side: 'l' } }, t('colContract')), 1, 3, 1, 4)];
+    for (var m = 1; m <= M; m++) {
+      out.push(at(h('div', { class: 'ac-head', dataset: { m: String(m), when: when(m, s.n) } },
+        h('span', { class: 'ac-mname' }, SHORT[cal(m, s.fy)]), h('span', { class: 'ac-mnum', translate: 'no' }, String(m))), m + 1, 3, m, 4));
+    }
+    out.push(at(h('div', { class: 'ac-head', dataset: { side: 'r' } }, t('colBalance')), 15, 3, 1, 4));
+    return out;
+  }
+
+  function balance(it) {
+    var k = it.bal > 0 ? 'prepaid' : it.bal < 0 ? 'accrued' : (it.paid === 0 && it.used === 0) ? 'waiting' : 'settled';
+    var sign = { prepaid: '▲ ', accrued: '▼ ', settled: '= ', waiting: '' }[k];
+    var word = { prepaid: 'bPrepaid', accrued: 'bAccrued', settled: 'bSettled', waiting: 'bWaiting' }[k];
+    return h('div', { class: 'ac-bal', dataset: { k: k } },
+      k === 'waiting' ? null : b(sign + money(Math.abs(it.bal))), h('span', null, t(word)));
+  }
+
+  function row(it, i, s) {
+    var r = 4 + i, pr = 5 + 2 * i;
+    var out = [at(h('div', { class: 'ac-label' }, h('span', { class: 'ac-name' }, t(NAME[it.id])), h('span', { class: 'ac-sub' }, sub(it, s.fy))), 1, r, '1 / span 8', pr)];
+    for (var m = 1; m <= M; m++) {
+      var w = when(m, s.n), kids = [];
+      if (it.pay[m] > 0) {
+        kids.push(h('span', { class: 'ac-coin' + (w === 'now' ? ' sd-changed' : ''), dataset: { c: '1' }, translate: 'no',
+          'aria-label': money(it.pay[m]) }, h('span', { class: 'ac-coin-amt' }, group(it.pay[m]))));
+      }
+      if (it.use[m] > 0) {
+        var attrs = { class: 'ac-use', dataset: { c: '2' } };
+        if (!(it.use[m - 1] > 0)) attrs.dataset.start = '';
+        if (!(it.use[m + 1] > 0)) attrs.dataset.end = '';
+        kids.push(h('span', attrs));
+      }
+      out.push(at(h('div', { class: 'ac-cell', dataset: { m: String(m), when: w } }, kids), m + 1, r, m, pr + 1));
+    }
+    out.push(at(balance(it), 15, r, '9 / -1', pr));
+    return out;
+  }
+
+  function render(c) {
+    var s = c.state;
+    var body = [
+      at(h('div', { class: 'ac-year', dataset: { y: 'this' } }, t('yearThis')), '2 / span 12', 1, '1 / span 12', 1),
+      at(h('div', { class: 'ac-year', dataset: { y: 'next' } },
+        h('span', { class: 'ac-ylong' }, t('yearNext')), h('span', { class: 'ac-yshort', translate: 'no' }, '+1')), 14, 1, 13, 1)
+    ].concat(chart(s), header(s));
+    if (s.items.length === 0) body.push(at(h('p', { class: 'ac-empty' }, t('noContract')), '1 / -1', 4, '1 / -1', 5));
+    s.items.forEach(function (it, i) { body = body.concat(row(it, i, s)); });
+    c.stage.replaceChildren(h('div', { class: 'ac' },
+      h('div', { class: 'ac-grid' }, body),
+      h('p', { class: 'ac-foot' }, t('illustrative'))));
+  }
+
+  // ── caption ──
+
+  function caption(c) {
+    var s = c.state, k = L.captionKey(s);
+    var it = s.items.filter(function (x) { return x.id === k.item; })[0];
+    var month = s.n > 0 ? cap(LONG[cal(s.n, s.fy)]) : '';
+    var vars = {
+      month: h('b', null, month),
+      item: it ? t(NAME[it.id]) : '',
+      x: b(money(it ? it.payNow : s.cashNow)),
+      now: b(money(it ? it.useNow : 0)),
+      rest: b(money(it ? Math.abs(it.bal) : 0)),
+      k: t.n('nMonths', it ? it.use.filter(function (u, m) { return u > 0 && m >= s.n; }).length : 0),
+      q: b(L.quarterOf(s.n)),
+      exp: b(money(s.expense)),
+      cash: b(money(s.cash)),
+      acc: b(money(s.accrued)),
+      pre: b(money(s.prepaid))
+    };
+    if (s.n === M) vars.x = b(money(s.cashNow));
+    if (s.n === Y) vars.cash = b(money(s.yearCash));
+    var out = t.parts(k.lead, vars);
+    if (k.gap) out.push(' ', t.parts(k.gap, vars));
+    return out;
+  }
+
+  var labels = { 'year': 'prYear', 'prepaid': 'prPrepaid', 'arrears': 'prArrears', 'late': 'prLate', 'year-end': 'prYearEnd' };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: [
+      { key: 'support', type: 'toggle', label: t('pSupport') },
+      { key: 'colo', type: 'toggle', label: t('pColo') },
+      { key: 'link', type: 'toggle', label: t('pLink') },
+      { key: 'late', type: 'toggle', label: t('pLate') },
+      { key: 'fy', type: 'select', label: t('fy'), hint: t('fyHint'),
+        options: LONG.map(function (name, i) { return [i + 1, cap(name)]; }) }
+    ],
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params, step: x.step };
+    }),
+    legend: [
+      { shape: 'ac-lcash', c: 1, label: t('legCash') },
+      { shape: 'ac-lexp', c: 2, label: t('legExpense') },
+      { shape: 'ac-coin', c: 1, label: t('legPay') },
+      { shape: 'ac-use', c: 2, label: t('legUse') },
+      { shape: 'ac-now', label: t('legNow') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
