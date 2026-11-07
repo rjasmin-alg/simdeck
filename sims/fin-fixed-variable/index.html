@@ -1,0 +1,563 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-fixed-variable: a platform's fixed cost spread over more users lowers the average cost; capacity comes in
+     steps; the next user's marginal cost is not the average; the break-even volume between running it yourself and
+     paying per user. The stage: two charts over 0–1 000 users (the cost a month: in-house staircase, the service's
+     line, the fixed floor, the break-even zone; the cost per user: the falling average, the flat price, the next
+     user's cost with a spike at each block edge), then four cards at the chosen count and the result.
+     Sums: stepcost.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-fixed-variable">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fiksni, varijabilni i stepenasti troškovi; točka pokrića · simdeck</title>
+<meta name="description" content="Pomiči broj korisnika i iskorištenost, usporedi vlastitu platformu s uslugom po korisniku; gledaj prosječni i granični trošak i točku pokrića.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-fixed-variable",
+  "title": {
+    "hr": "Fiksni, varijabilni i stepenasti troškovi; točka pokrića",
+    "en": "Fixed, variable and step costs; break-even"
+  },
+  "concept": {
+    "hr": "Fiksni trošak na više korisnika: prosjek pada, a sljedeći korisnik nije prosjek",
+    "en": "Fixed cost over more users lowers the average; the next user is not the average"
+  },
+  "summary": {
+    "hr": "Pomiči broj korisnika i iskorištenost, usporedi vlastitu platformu s uslugom po korisniku; gledaj prosječni i granični trošak i točku pokrića.",
+    "en": "Move the user count and utilisation, compare an in-house platform with a per-user service; watch average and marginal cost and break-even."
+  },
+  "tags": [
+    "costs"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-fixed-variable"]; colours only from kit tokens. */
+[data-sim="fin-fixed-variable"] .fv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-fixed-variable"] .fv-head { margin: 0 0 0.2rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+
+/* the two charts */
+[data-sim="fin-fixed-variable"] .fv-charts {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 1.2rem;
+}
+[data-sim="fin-fixed-variable"] .fv-chart {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 0.5rem;
+}
+[data-sim="fin-fixed-variable"] .fv-chart > .fv-head { grid-column: 1 / -1; margin-bottom: 0.5rem; }
+[data-sim="fin-fixed-variable"] .fv-axis { grid-column: 1; grid-row: 2; position: relative; }
+[data-sim="fin-fixed-variable"] .fv-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-fixed-variable"] .fv-plot {
+  grid-column: 2;
+  grid-row: 2;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border-left: var(--line-w) solid var(--ink);
+  border-bottom: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(to top, var(--line) 0 0.0625rem, transparent 0.0625rem 25%);
+  cursor: crosshair;
+  touch-action: none;
+}
+[data-sim="fin-fixed-variable"] .fv-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+[data-sim="fin-fixed-variable"] .fv-xs { grid-column: 2; grid-row: 3; position: relative; height: 1.3rem; }
+[data-sim="fin-fixed-variable"] .fv-xs > span {
+  position: absolute;
+  top: 0.1rem;
+  transform: translateX(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-fixed-variable"] .fv-xs > span:first-child { transform: none; }
+[data-sim="fin-fixed-variable"] .fv-xs > span:last-child { transform: translateX(-100%); }
+
+/* lines and marks */
+[data-sim="fin-fixed-variable"] .fv-in { fill: none; stroke: var(--c1); stroke-width: 4; stroke-linejoin: round; }
+[data-sim="fin-fixed-variable"] .fv-svc { fill: none; stroke: var(--c2); stroke-width: 4; stroke-dasharray: 12 7; }
+[data-sim="fin-fixed-variable"] .fv-fix { position: absolute; left: 0; right: 0; border-top: 0.2rem dotted var(--c3); pointer-events: none; }
+[data-sim="fin-fixed-variable"] .fv-marg { position: absolute; left: 0; right: 0; border-top: 0.2rem dotted var(--c4); pointer-events: none; }
+[data-sim="fin-fixed-variable"] .fv-edge {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 0.45rem solid transparent;
+  border-right: 0.45rem solid transparent;
+  border-bottom: 0.7rem solid var(--c4);
+  pointer-events: none;
+}
+[data-sim="fin-fixed-variable"] .fv-edge[data-on] { border-bottom-color: var(--ink); border-left-width: 0.6rem; border-right-width: 0.6rem; border-bottom-width: 0.95rem; }
+[data-sim="fin-fixed-variable"] .fv-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 0.25rem;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c3) 45%, transparent) 0 0.2rem, transparent 0.2rem 0.6rem);
+  border-left: 0.15rem solid var(--c3);
+  border-right: 0.15rem solid var(--c3);
+  pointer-events: none;
+}
+[data-sim="fin-fixed-variable"] .fv-now { position: absolute; top: 0; bottom: 0; border-left: 0.2rem solid var(--ink); transform: translateX(-50%); pointer-events: none; }
+[data-sim="fin-fixed-variable"] .fv-dot {
+  position: absolute;
+  width: 1rem;
+  height: 1rem;
+  transform: translate(-50%, 50%);
+  border: 0.18rem solid var(--bg);
+  pointer-events: none;
+}
+[data-sim="fin-fixed-variable"] .fv-dot[data-k="in"] { background: var(--c1); border-radius: 50%; }
+[data-sim="fin-fixed-variable"] .fv-dot[data-k="svc"] { background: var(--c2); }
+[data-sim="fin-fixed-variable"] .fv-tag {
+  position: absolute;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+[data-sim="fin-fixed-variable"] .fv-tag[data-k="in"] { color: var(--c1); border: 0.12rem solid var(--c1); }
+[data-sim="fin-fixed-variable"] .fv-tag[data-k="svc"] { color: var(--c2); border: 0.12rem dashed var(--c2); }
+[data-sim="fin-fixed-variable"] .fv-tag[data-k="zone"] { top: 0.2rem; color: var(--ink); border: 0.12rem solid var(--c3); }
+[data-sim="fin-fixed-variable"] .fv-tag[data-k="edge"] { top: 1rem; color: var(--ink); border: 0.12rem solid var(--c4); }
+[data-sim="fin-fixed-variable"] .fv-tag[data-left] { transform: translateX(-100%); }
+
+/* the cards at the chosen count */
+[data-sim="fin-fixed-variable"] .fv-cards {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+[data-sim="fin-fixed-variable"] .fv-card {
+  min-width: 0;
+  padding: 0.3rem 0.6rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="fin-fixed-variable"] .fv-card[data-k="in"] { border-left: 0.45rem solid var(--c1); }
+[data-sim="fin-fixed-variable"] .fv-card[data-k="svc"] { border-left: 0.45rem dashed var(--c2); }
+[data-sim="fin-fixed-variable"] .fv-card[data-k="avg"] { border-left: 0.45rem dotted var(--c4); }
+[data-sim="fin-fixed-variable"] .fv-card[data-k="be"] { border-left: 0.45rem double var(--c3); }
+[data-sim="fin-fixed-variable"] .fv-card h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.2; }
+[data-sim="fin-fixed-variable"] .fv-big { display: block; font-size: var(--fs-lg); font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="fin-fixed-variable"] .fv-line { display: block; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="fin-fixed-variable"] .fv-line[data-hot]::before { content: '⚠ '; }
+[data-sim="fin-fixed-variable"] .fv-line[data-edge] { font-weight: 700; }
+[data-sim="fin-fixed-variable"] .fv-line[data-edge]::before { content: '▲ '; }
+
+/* the result and the footnote */
+[data-sim="fin-fixed-variable"] .fv-bottom { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; }
+[data-sim="fin-fixed-variable"] .fv-result {
+  margin: 0;
+  padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="fin-fixed-variable"] .fv-result[data-o="inhouse"] { background: var(--ink); color: var(--bg); }
+[data-sim="fin-fixed-variable"] .fv-result[data-o="inhouse"]::before { content: '● '; }
+[data-sim="fin-fixed-variable"] .fv-result[data-o="service"]::before { content: '■ '; }
+[data-sim="fin-fixed-variable"] .fv-result[data-o="even"],
+[data-sim="fin-fixed-variable"] .fv-result[data-o="none"] { border-style: dashed; }
+[data-sim="fin-fixed-variable"] .fv-result[data-o="even"]::before { content: '= '; }
+[data-sim="fin-fixed-variable"] .fv-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-fixed-variable"] .fv-foot { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the panel holds 5 presets and 4 sliders: gaps and sliders a little tighter, so the Croatian panel fits 1920×1080 */
+[data-sim="fin-fixed-variable"] .sd-group { gap: 0.3rem; }
+[data-sim="fin-fixed-variable"] .sd-ctl { gap: 0.1rem; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape^="fv-"] { border-radius: 0; background: transparent; }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-in"] { height: 0; margin-block: 0.45em; border-width: 0.22em 0 0; border-style: solid; border-color: var(--c1); }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-svc"] { height: 0; margin-block: 0.45em; border-width: 0.22em 0 0; border-style: dashed; border-color: var(--c2); }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-fix"] { height: 0; margin-block: 0.45em; border-width: 0.22em 0 0; border-style: dotted; border-color: var(--c3); }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-marg"] { height: 0; margin-block: 0.45em; border-width: 0.22em 0 0; border-style: dotted; border-color: var(--c4); }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-zone"] { border-color: var(--c3); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c3) 45%, transparent) 0 0.15em, transparent 0.15em 0.4em); }
+[data-sim="fin-fixed-variable"] .sd-swatch[data-shape="fv-now"] { width: 0; border-width: 0 0 0 0.22em; border-style: solid; border-color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content; charts stack, cards in two columns. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-fixed-variable"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-fixed-variable"] .fv { height: auto; padding: 0.4rem 0.4rem; }
+  [data-sim="fin-fixed-variable"] .fv-charts { flex: none; grid-template-columns: minmax(0, 1fr); row-gap: 0.8rem; }
+  [data-sim="fin-fixed-variable"] .fv-chart { height: 15rem; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: 0.3rem; }
+  [data-sim="fin-fixed-variable"] .fv-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="fin-fixed-variable"] .fv-big { white-space: normal; }
+  [data-sim="fin-fixed-variable"] .fv-xs > span:nth-child(2n) { display: none; }
+}
+@media (max-width: 480px) {
+  [data-sim="fin-fixed-variable"] .fv-cards { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Fiksni, varijabilni i stepenasti troškovi; točka pokrića</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="stepcost.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+  var N = L.N_MAX;
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (3 000 / 3,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '\u00a0' : ',');
+  }
+  /** Whole euros (rounded), sign dropped. */
+  function money(x) { return t('eur', { n: group(Math.abs(Math.round(x))) }); }
+  /** Euros and cents from cents: 1575 → 15,75 € / €15.75. */
+  function cents(c) {
+    var a = Math.abs(Math.round(c)), whole = Math.floor(a / 100), cc = a % 100;
+    return t('eur', { n: group(whole) + (Simdeck.lang === 'hr' ? ',' : '.') + (cc < 10 ? '0' : '') + cc });
+  }
+  function users(n) { return t.n('nUsers', n, { n: group(n) }); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function pctX(n) { return (100 * n / N) + '%'; }
+
+  // ── the charts ──
+
+  function svg(children) {
+    var s = document.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', '0 0 1000 1000');
+    s.setAttribute('preserveAspectRatio', 'none');
+    s.setAttribute('aria-hidden', 'true');
+    children.forEach(function (c) { s.appendChild(c); });
+    return s;
+  }
+  function poly(cls, pts) {
+    var el = document.createElementNS(SVGNS, 'polyline');
+    el.setAttribute('class', cls);
+    el.setAttribute('vector-effect', 'non-scaling-stroke');
+    el.setAttribute('points', pts.map(function (q) { return q[0].toFixed(2) + ',' + q[1].toFixed(2); }).join(' '));
+    return el;
+  }
+  function yOf(v, top) { return 1000 - 1000 * v / top; }
+
+  /** Click or drag on a chart sets the user count (snapped to the slider's step). */
+  function pointer(plot) {
+    function at(e) {
+      var r = plot.getBoundingClientRect();
+      if (!r.width) return;
+      var step = L.RANGES.users[2];
+      var n = Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * N / step) * step;
+      if (n !== sim.params.users) sim.set({ users: n });
+    }
+    plot.addEventListener('pointerdown', function (e) { e.preventDefault(); plot.setPointerCapture(e.pointerId); at(e); });
+    plot.addEventListener('pointermove', function (e) { if (e.buttons & 1) at(e); });
+  }
+
+  function ticksY(top, fmt) {
+    return [0, 0.5, 1].map(function (f) {
+      return h('span', { class: 'fv-tick', translate: 'no', style: { bottom: (100 * f) + '%' } }, fmt(top * f));
+    });
+  }
+  function ticksX() {
+    return h('div', { class: 'fv-xs', 'aria-hidden': 'true' }, [0, 250, 500, 750, 1000].map(function (n, i, a) {
+      return h('span', { translate: 'no', style: { left: pctX(n) } }, i === a.length - 1 ? group(n) + ' ' + t('axisUsers') : group(n));
+    }));
+  }
+  /** A value tag beside a marker: to its right, or to its left past the middle. */
+  function tag(kind, n, bottomPct, text) {
+    var right = n > N * 0.6;
+    var style = { bottom: 'calc(' + bottomPct + '% + 0.5rem)' };
+    style.left = 'calc(' + pctX(n) + (right ? ' - 0.6rem)' : ' + 0.6rem)');
+    return h('span', { class: 'fv-tag', translate: 'no', dataset: right ? { k: kind, left: '' } : { k: kind }, style: style }, text);
+  }
+  function clampPct(v) { return Math.max(0, Math.min(100, v)); }
+  /** Bottoms (%) for the in-house and service tags: the higher one above its marker, the lower one below, in the plot. */
+  function pair(yIn, ySvc) {
+    var inHigh = yIn >= ySvc, hi = Math.max(yIn, ySvc), lo = Math.min(yIn, ySvc);
+    var loB = Math.max(lo - 9, 0), hiB = Math.min(Math.max(hi, loB + 8), 88);
+    return inHigh ? { in: hiB, svc: loB } : { in: loB, svc: hiB };
+  }
+
+  function zone(s) {
+    if (s.forGood === null || s.first > N) return [];   // never cheaper: no zone, even where costs touch
+    var a = s.first, z = s.forGood === null ? null : Math.min(s.forGood, N);
+    var out = [];
+    if (z !== null && z > a) {
+      out.push(h('div', { class: 'fv-zone', style: { left: pctX(a), width: (100 * (z - a) / N) + '%' } }));
+    } else {
+      out.push(h('div', { class: 'fv-zone', style: { left: pctX(a), width: '0' } }));
+    }
+    var label = s.forGood !== null && s.forGood > a ? t('zoneTag', { a: group(a), b: group(s.forGood) }) : t('beTag', { a: group(a) });
+    var mid = z !== null ? (a + z) / 2 : a;
+    var left = mid > N * 0.6;
+    out.push(h('span', {
+      class: 'fv-tag', translate: 'no', dataset: left ? { k: 'zone', left: '' } : { k: 'zone' },
+      style: { left: left ? 'calc(' + pctX(Math.min(a, z === null ? a : z)) + ' - 0.3rem)' : 'calc(' + pctX(a) + ' + 0.3rem)' }
+    }, label));
+    return out;
+  }
+
+  function costChart(s) {
+    var top = s.chart.top, n = s.p.users;
+    var stairs = s.chart.stairs.map(function (q) { return [q[0] * 1000 / N, yOf(q[1], top)]; });
+    var svcLine = [[0, 1000], [1000, yOf(s.p.price * N, top)]];
+    var yIn = 100 * s.inhouse.total / top, ySvc = 100 * s.service / top, at = pair(yIn, ySvc);
+    var plot = h('div', { class: 'fv-plot' },
+      zone(s),
+      h('div', { class: 'fv-fix', style: { bottom: (100 * s.p.fixed / top) + '%' } }),
+      svg([poly('fv-svc', svcLine), poly('fv-in', stairs)]),
+      h('div', { class: 'fv-now', style: { left: pctX(n) } }),
+      h('div', { class: 'fv-dot', dataset: { k: 'svc' }, style: { left: pctX(n), bottom: ySvc + '%' } }),
+      h('div', { class: 'fv-dot', dataset: { k: 'in' }, style: { left: pctX(n), bottom: yIn + '%' } }),
+      tag('in', n, at.in, money(s.inhouse.total)),
+      tag('svc', n, at.svc, money(s.service)));
+    pointer(plot);
+    return h('div', { class: 'fv-chart' },
+      h('p', { class: 'fv-head' }, t('headCost')),
+      h('div', { class: 'fv-axis', 'aria-hidden': 'true' }, ticksY(top, money)),
+      plot,
+      ticksX());
+  }
+
+  function avgChart(s) {
+    var top = L.AVG_TOP, n = s.p.users;
+    var curve = s.chart.avg.map(function (q) { return [q[0] * 1000 / N, Math.max(-50, yOf(q[1], top))]; });
+    var svcY = yOf(s.p.price, top);
+    var edges = s.chart.edges.map(function (e) {
+      return h('div', { class: 'fv-edge', style: { left: pctX(e) }, dataset: e === n ? { on: '' } : {} });
+    });
+    var parts = [
+      h('div', { class: 'fv-marg', style: { bottom: (100 * L.PER_USER / top) + '%' } }),
+      svg([poly('fv-svc', [[0, svcY], [1000, svcY]]), poly('fv-in', curve)])
+    ].concat(edges);
+    parts.push(h('div', { class: 'fv-now', style: { left: pctX(n) } }));
+    var ySvc = 100 * s.p.price / top;
+    var yA = s.avg ? clampPct(s.avg.total / top) : 0, at = pair(yA, ySvc);
+    parts.push(h('div', { class: 'fv-dot', dataset: { k: 'svc' }, style: { left: pctX(n), bottom: ySvc + '%' } }));
+    if (s.avg) {
+      parts.push(h('div', { class: 'fv-dot', dataset: { k: 'in' }, style: { left: pctX(n), bottom: (yA >= 100 ? 97 : yA) + '%' } }));
+      var txt = s.avg.total > 100 * top ? t('offTop', { v: cents(s.avg.total) }) : cents(s.avg.total);
+      parts.push(tag('in', n, at.in, txt));
+    }
+    parts.push(tag('svc', n, at.svc, cents(100 * s.p.price)));
+    if (s.opens) {
+      var right = n > N * 0.6;
+      parts.push(h('span', {
+        class: 'fv-tag', translate: 'no', dataset: right ? { k: 'edge', left: '' } : { k: 'edge' },
+        style: { left: 'calc(' + pctX(n) + (right ? ' - 0.6rem)' : ' + 0.6rem)') }
+      }, t('edgeTag', { s: money(L.STEP) })));
+    }
+    var plot = h('div', { class: 'fv-plot' }, parts);
+    pointer(plot);
+    return h('div', { class: 'fv-chart' },
+      h('p', { class: 'fv-head' }, t('headAvg')),
+      h('div', { class: 'fv-axis', 'aria-hidden': 'true' }, ticksY(top, money)),
+      plot,
+      ticksX());
+  }
+
+  // ── the cards ──
+
+  function line(text, data) { return h('span', { class: 'fv-line', dataset: data || {} }, text); }
+  function card(kind, head, big, lines) {
+    return h('div', { class: 'fv-card', dataset: { k: kind } }, h('h3', null, head), h('span', { class: 'fv-big', translate: 'no' }, big), lines);
+  }
+
+  function cards(s) {
+    var i = s.inhouse, n = s.p.users;
+    var inLines = [
+      line(t('lineFixed', { v: money(i.fixed) })),
+      line(t('lineSteps', { b: t.n('nBlocks', i.blocks, { n: group(i.blocks) }), s: money(L.STEP), v: money(i.steps) })),
+      line(t('lineVar', { n: users(n), v: money(L.PER_USER), t: money(i.variable) })),
+      line(t('lineIdle', { p: t.n('nPlaces', s.spare.places, { n: group(s.spare.places) }), v: money(s.spare.cost) }))
+    ];
+    if (s.p.util >= 90) inLines.push(line(t('lineHot'), { hot: '' }));
+    var avgBig = s.avg ? t('avgBig', { v: cents(s.avg.total) }) : t('avgNone');
+    var avgLines = [];
+    if (s.avg) avgLines.push(line(t('avgParts', { f: cents(s.avg.fixed), s: cents(s.avg.steps), v: cents(s.avg.variable) })));
+    avgLines.push(s.opens
+      ? line(t('nextEdge', { m: money(s.marginal), k: i.blocks + 1 }), { edge: '' })
+      : line(t('nextPlain', { m: money(s.marginal) })));
+
+    var beBig, beLines = [];
+    if (s.forGood === null) {
+      beBig = t('beNever');
+      beLines.push(line(t('beNo', { c: cents(s.unitCents), p: cents(100 * s.p.price) })));
+    } else if (s.first < s.forGood) {
+      beBig = t('beRange', { a: group(s.first), b: group(s.forGood) });
+      beLines.push(line(t('beFirst', { a: group(s.first), b: group(s.forGood) })));
+    } else {
+      beBig = users(s.forGood);
+      beLines.push(line(t('beOne', { a: group(s.forGood) })));
+    }
+    var marginCents = 100 * s.p.price - s.unitCents;
+    if (s.textbook === null) {
+      beLines.push(line(t('beTextbookNone', { m: (marginCents < 0 ? '−' : '') + cents(marginCents) })));
+    } else {
+      // "=" only when the shown margin is exact in cents and the result a whole number; else "≈"
+      var exact = (100 * L.STEP) % s.cap === 0 && Math.abs(s.textbook - Math.round(s.textbook)) < 1e-9;
+      beLines.push(line(t(exact ? 'beTextbook' : 'beTextbookApprox',
+        { f: money(s.p.fixed), m: cents(marginCents), n: group(Math.round(s.textbook)) })));
+    }
+    return h('div', { class: 'fv-cards' },
+      card('in', t('cardIn'), t('perMonth', { v: money(i.total) }), inLines),
+      card('svc', t('cardSvc'), t('perMonth', { v: money(s.service) }), [line(t('lineSvc', { n: users(n), p: money(s.p.price) }))]),
+      card('avg', t('cardAvg'), avgBig, avgLines),
+      card('be', t('cardBe'), beBig, beLines));
+  }
+
+  function result(s, chg) {
+    var o = s.outcome;
+    var key = { inhouse: 'resIn', service: 'resSvc', even: 'resEven', none: s.p.fixed ? 'resNone' : 'resNoneFree' }[o];
+    return h('p', { class: 'fv-result' + (chg.indexOf('outcome') >= 0 ? ' sd-changed' : ''), dataset: { o: o } },
+      t(key, { d: money(s.diff) }));
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'fv' },
+      h('div', { class: 'fv-charts' }, costChart(s), avgChart(s)),
+      cards(s),
+      h('div', { class: 'fv-bottom' },
+        result(s, chg),
+        h('p', { class: 'fv-foot' }, t('foot', { s: money(L.STEP), k: L.SIZE, v: money(L.PER_USER) }), ' ', t('illustrative')))));
+  }
+
+  // ── the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, k = L.captionKey(s);
+    var out = t.parts(k.key, {
+      n: b(users(s.p.users)), f: b(money(s.p.fixed)), c: b(money(s.inhouse.total)), s: b(money(s.service)),
+      a: b(s.avg ? cents(s.avg.total) : ''), p: b(cents(100 * s.p.price)), d: b(money(s.diff))
+    });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, {
+        k: b(s.inhouse.blocks + 1), m: b(money(s.marginal)), a: b(s.avg ? cents(s.avg.total) : ''),
+        e: b(group(s.first === null ? 0 : s.first)), b: b(group(s.forGood === null ? 0 : s.forGood)), u: b(t('pct', { n: s.p.util })),
+        c: b(cents(s.unitCents)), p: b(cents(100 * s.p.price))
+      }));
+    });
+    return out;
+  }
+
+  var labels = { 'few-users': 'pFewUsers', 'step-edge': 'pStepEdge', grown: 'pGrown', headroom: 'pHeadroom', 'run-hot': 'pRunHot' };
+  var R = L.RANGES;
+  function range(key, fmt) {
+    return { key: key, type: 'range', label: t(key), min: R[key][0], max: R[key][1], step: R[key][2], format: fmt };
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      range('users', function (v) { return users(v); }),
+      range('util', function (v) { return t('pct', { n: v }); }),
+      range('fixed', function (v) { return t('perMonth', { v: money(v) }); }),
+      range('price', function (v) { return t('perMonth', { v: money(v) }); })
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'fv-in', label: t('legIn') },
+      { shape: 'fv-svc', label: t('legSvc') },
+      { shape: 'fv-fix', label: t('legFixed') },
+      { shape: 'fv-marg', label: t('legMarg') },
+      { shape: 'fv-zone', label: t('legZone') },
+      { shape: 'fv-now', label: t('legNow') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
