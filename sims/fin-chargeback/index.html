@@ -1,0 +1,468 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-chargeback: a shared IT cost allocated to departments by a key; the key decides who pays; under chargeback a
+     department whose bill passes its outside offer leaves, the fixed cost stays with the rest, and the next one leaves
+     (the spiral). The stage: one row per department (its units of the key, −/+ usage, leave/come back, its bill as a
+     bar against its own variable cost and its outside offer), and beside them the company's total round by round
+     (the shared cost and what the departments that left spend outside, against everyone in).
+     Sums: allocation.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-chargeback">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raspodjela troškova IT-a: prikaz ili interna naplata · simdeck</title>
+<meta name="description" content="Biraj ključ raspodjele, mijenjaj potrošnju odjela, prijeđi s prikaza na internu naplatu i pusti odjel da izađe: gledaj kako cijena raste i kreće spirala.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-chargeback",
+  "title": {
+    "hr": "Raspodjela troškova IT-a: prikaz ili interna naplata",
+    "en": "Showback and chargeback"
+  },
+  "concept": {
+    "hr": "Ključ odlučuje tko plaća; uz naplatu odlazak jednog odjela diže cijenu ostalima",
+    "en": "The key decides who pays; under chargeback one leaving raises the others' price"
+  },
+  "summary": {
+    "hr": "Biraj ključ raspodjele, mijenjaj potrošnju odjela, prijeđi s prikaza na internu naplatu i pusti odjel da izađe: gledaj kako cijena raste i kreće spirala.",
+    "en": "Pick the allocation key, move each department's usage, switch from showback to chargeback and let a department leave: watch the price rise and the spiral start."
+  },
+  "tags": [
+    "costs",
+    "budgeting"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-chargeback"]; colours only from kit tokens. */
+[data-sim="fin-chargeback"] .cb {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.4rem 1.4rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-chargeback"] .cb-head { margin: 0 0 0.2rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+[data-sim="fin-chargeback"] .cb-col { min-height: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+
+/* department rows */
+[data-sim="fin-chargeback"] .cb-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.1rem 0.5rem 0.2rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.45rem solid var(--c1);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="fin-chargeback"] .cb-row[data-st="over"] { border-left-style: double; border-left-color: var(--warn); }
+[data-sim="fin-chargeback"] .cb-row[data-st="left"],
+[data-sim="fin-chargeback"] .cb-row[data-st="forced"] { border-left-style: dashed; border-left-color: var(--c2); }
+[data-sim="fin-chargeback"] .cb-top { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+[data-sim="fin-chargeback"] .cb-name { font-weight: 700; white-space: nowrap; }
+[data-sim="fin-chargeback"] .cb-units { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+[data-sim="fin-chargeback"] .cb-btns { display: flex; gap: 0.25rem; margin-left: auto; }
+[data-sim="fin-chargeback"] .cb-btn {
+  min-width: 2.2rem;
+  min-height: 2.2rem;
+  padding: 0 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+[data-sim="fin-chargeback"] .cb-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+[data-sim="fin-chargeback"] .cb-btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+[data-sim="fin-chargeback"] .cb-st {
+  min-width: 13.5rem;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: right;
+}
+[data-sim="fin-chargeback"] .cb-st > .sd-changed { padding: 0 0.3rem; background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+
+/* the bar track: bill, own variable cost, outside offer */
+[data-sim="fin-chargeback"] .cb-track {
+  position: relative;
+  height: 1.5rem;
+  border-left: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(to right, var(--line) 0 0.0625rem, transparent 0.0625rem 10%);
+}
+[data-sim="fin-chargeback"] .cb-bar { position: absolute; top: 0.15rem; bottom: 0.15rem; left: 0; max-width: 100%; }
+[data-sim="fin-chargeback"] .cb-bar[data-k="charged"] { background: var(--c1); }
+[data-sim="fin-chargeback"] .cb-bar[data-k="shown"] { border: 0.18rem dashed var(--c1); background: color-mix(in srgb, var(--c1) 14%, transparent); }
+[data-sim="fin-chargeback"] .cb-bar[data-k="outside"] {
+  border: 0.12rem solid var(--c2);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c2) 55%, transparent) 0 0.2rem, transparent 0.2rem 0.55rem);
+}
+[data-sim="fin-chargeback"] .cb-bar[data-k="was"] { border: 0.15rem solid var(--c1); background: transparent; }
+[data-sim="fin-chargeback"] .cb-own { position: absolute; top: -0.1rem; bottom: -0.1rem; border-left: 0.25rem dotted var(--c4); transform: translateX(-50%); }
+[data-sim="fin-chargeback"] .cb-offer { position: absolute; top: -0.25rem; bottom: -0.1rem; border-left: 0.15rem dashed var(--c2); transform: translateX(-50%); }
+[data-sim="fin-chargeback"] .cb-offer::before {
+  content: '';
+  position: absolute;
+  top: -0.2rem;
+  left: -0.55rem;
+  border-left: 0.5rem solid transparent;
+  border-right: 0.5rem solid transparent;
+  border-top: 0.6rem solid var(--c2);
+}
+[data-sim="fin-chargeback"] .cb-nums { font-size: var(--fs-sm); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+[data-sim="fin-chargeback"] .cb-nums b { font-weight: 700; }
+
+/* the company, round by round */
+[data-sim="fin-chargeback"] .cb-sum { margin: 0; font-size: var(--fs-sm); line-height: 1.25; font-variant-numeric: tabular-nums; }
+[data-sim="fin-chargeback"] .cb-rounds { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; min-height: 0; }
+[data-sim="fin-chargeback"] .cb-round { display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="fin-chargeback"] .cb-rtop { display: flex; gap: 0.6rem; align-items: baseline; font-size: var(--fs-sm); line-height: 1.2; font-variant-numeric: tabular-nums; }
+[data-sim="fin-chargeback"] .cb-rtop > b:last-child { margin-left: auto; }
+[data-sim="fin-chargeback"] .cb-rtrack { position: relative; height: 1.25rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="fin-chargeback"] .cb-rtrack > .cb-bar { top: 0.1rem; bottom: 0.1rem; }
+[data-sim="fin-chargeback"] .cb-base { position: absolute; top: -0.15rem; bottom: -0.15rem; border-left: 0.2rem solid var(--ink); }
+[data-sim="fin-chargeback"] .cb-rnote { font-size: var(--fs-sm); line-height: 1.2; color: var(--muted); }
+[data-sim="fin-chargeback"] .cb-rnote[data-go] { color: var(--ink); font-weight: 700; }
+
+/* the result and the footnote */
+[data-sim="fin-chargeback"] .cb-bottom { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; }
+[data-sim="fin-chargeback"] .cb-result {
+  margin: 0;
+  padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="fin-chargeback"] .cb-result[data-o="show"] { border-style: dashed; }
+[data-sim="fin-chargeback"] .cb-result[data-o="stable"]::before { content: '● '; }
+[data-sim="fin-chargeback"] .cb-result[data-o="spiral"]::before,
+[data-sim="fin-chargeback"] .cb-result[data-o="collapse"]::before,
+[data-sim="fin-chargeback"] .cb-result[data-o="empty"]::before { content: '✕ '; }
+[data-sim="fin-chargeback"] .cb-result[data-o="collapse"],
+[data-sim="fin-chargeback"] .cb-result[data-o="empty"] { background: var(--ink); color: var(--bg); }
+[data-sim="fin-chargeback"] .cb-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-chargeback"] .cb-foot { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the per-department params are set from the stage; their kit controls are hidden (visible: false), but the kit's
+   .sd-ctl display beats the [hidden] attribute, so hide them here (shared request in NOTES.md) */
+[data-sim="fin-chargeback"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-chargeback"] .sd-swatch[data-shape^="cb-"] { border-radius: 0; }
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-charged"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-shown"] { border: 0.15em dashed var(--c1); background: color-mix(in srgb, var(--c1) 14%, transparent); }
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-own"] { width: 0; border-width: 0 0 0 0.25em; border-style: dotted; border-color: var(--c4); background: transparent; }
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-offer"] {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-width: 0.6em 0.45em 0;
+  border-style: solid;
+  border-color: var(--c2) transparent transparent;
+}
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-base"] { width: 0; border-width: 0 0 0 0.2em; border-style: solid; border-color: var(--ink); background: transparent; }
+[data-sim="fin-chargeback"] .sd-swatch[data-shape="cb-out"] {
+  border-color: var(--c2);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c2) 55%, transparent) 0 0.15em, transparent 0.15em 0.4em);
+}
+
+/* Phone and portrait: the stage grows with its content; the two columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-chargeback"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-chargeback"] .cb { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; padding: 0.4rem; }
+  [data-sim="fin-chargeback"] .cb-row { flex: none; padding: 0.3rem 0.4rem; }
+  [data-sim="fin-chargeback"] .cb-top { flex-wrap: wrap; }
+  [data-sim="fin-chargeback"] .cb-st { min-width: 0; text-align: left; white-space: normal; flex-basis: 100%; order: 3; }
+  [data-sim="fin-chargeback"] .cb-nums { white-space: normal; }
+  [data-sim="fin-chargeback"] .cb-btn { min-width: 2.75rem; min-height: 2.75rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Raspodjela troškova IT-a: prikaz ili interna naplata</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="allocation.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  // ── words and numbers in the page's language ──
+
+  var CAP = { users: 'Users', vms: 'Vms', tb: 'Tb', tickets: 'Tickets' };
+  var DNAME = { sales: 'dSales', acct: 'dAcct', dev: 'dDev', sup: 'dSup', mkt: 'dMkt' };
+  function dname(id) { return t(DNAME[id]); }
+
+  /** A whole number with thousands grouped (3 000 / 3,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Whole euros (rounded), sign dropped. */
+  function money(x) { return t('eur', { n: group(Math.abs(Math.round(x))) }); }
+  /** Euros and cents from cents: 15919 → 159,19 € / €159.19. */
+  function cents(c) {
+    var a = Math.abs(Math.round(c)), whole = Math.floor(a / 100), cc = a % 100;
+    return t('eur', { n: group(whole) + (Simdeck.lang === 'hr' ? ',' : '.') + (cc < 10 ? '0' : '') + cc });
+  }
+  function unitsOf(key, n) {
+    var k = 'n' + CAP[key];
+    return Array.isArray(window.SimStrings[Simdeck.lang][k]) ? t.n(k, n, { n: group(n) }) : t(k, { n: group(n) });
+  }
+  function perUnit(key, c) { return c === null ? '' : t('per' + CAP[key], { v: cents(c) }); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function pct(x, top) { return Math.min(100, 100 * x / top) + '%'; }
+  function term(key) { var s = h('span'); s.innerHTML = t.html(key); return s; }
+
+  // ── the department rows ──
+
+  /** Stage buttons keep keyboard focus across re-renders (found again by data-act after a render). */
+  function button(act, label, aria, disabled, run, pressed) {
+    var attrs = {
+      class: 'cb-btn', type: 'button', 'aria-label': aria, 'aria-disabled': disabled ? 'true' : 'false',
+      dataset: { act: act },
+      onmousedown: function (e) { e.preventDefault(); },
+      onclick: function () { if (!disabled) run(); }
+    };
+    if (pressed !== undefined) attrs['aria-pressed'] = pressed ? 'true' : 'false';
+    return h('button', attrs, label);
+  }
+
+  function row(s, x, chg) {
+    var U = L.RANGES['use_' + x.id];
+    var use = x.use, name = dname(x.id);
+    var out = x.status === 'forced';
+    var units = unitsOf(s.key, x.units) + (use !== 100 ? ' · ' + t('pct', { n: use }) : '');
+    var st = { in: t('stIn'), over: t('stOver'), left: t('stLeft', { r: x.round + 1 }), forced: t('stForced') }[x.status];
+    var track = [];
+    if (x.status === 'left') {
+      track.push(h('div', { class: 'cb-bar', dataset: { k: 'was' }, style: { width: pct(x.bill, s.scale) } }));
+    }
+    if (x.status === 'left' || out) {
+      track.push(h('div', { class: 'cb-bar', dataset: { k: 'outside' }, style: { width: pct(x.quote, s.scale) } }));
+    } else {
+      track.push(h('div', { class: 'cb-bar', dataset: { k: s.p.mode === 'charge' ? 'charged' : 'shown' }, style: { width: pct(x.bill, s.scale) } }));
+    }
+    track.push(h('div', { class: 'cb-own', style: { left: pct(x.variable, s.scale) } }));
+    track.push(h('div', { class: 'cb-offer', style: { left: pct(x.quote, s.scale) } }));
+    var nums = [];
+    if (x.bill !== null) {
+      var bk = x.status === 'left' ? 'billLeft' : s.p.mode === 'charge' ? 'billCharged' : 'billShown';
+      nums.push(t(bk, { b: money(x.bill) }), ' · ');
+    }
+    nums.push(t('offer', { q: money(x.quote) }), ' · ', t('own', { v: money(x.variable) }));
+    return h('div', { class: 'cb-row', dataset: { st: x.status } },
+      h('div', { class: 'cb-top' },
+        h('span', { class: 'cb-name' }, name),
+        h('span', { class: 'cb-units', translate: 'no' }, units),
+        h('span', { class: 'cb-btns' },
+          button(x.id + '-less', '−', t('less') + ': ' + name, use <= U[0] || out, function () { setUse(x.id, use - U[2]); }),
+          button(x.id + '-more', '+', t('more') + ': ' + name, use >= U[1] || out, function () { setUse(x.id, use + U[2]); }),
+          button(x.id + '-out', out ? t('back') : t('leave'), (out ? t('back') : t('leave')) + ': ' + name, false,
+            function () { var p = {}; p['out_' + x.id] = !out; sim.set(p); }, out)),
+        h('span', { class: 'cb-st' }, h('span', { class: chg.indexOf(x.id) >= 0 ? 'sd-changed' : null }, st))),
+      h('div', { class: 'cb-track', 'aria-hidden': 'true' }, track),
+      h('div', { class: 'cb-nums', translate: 'no' }, nums));
+  }
+  function setUse(id, v) { var p = {}; p['use_' + id] = v; sim.set(p); }
+
+  // ── the company, round by round ──
+
+  function rounds(s) {
+    var r0 = s.rounds[0];
+    var out = [
+      h('p', { class: 'cb-head' }, t('headRounds')),
+      h('p', { class: 'cb-sum', translate: 'no' }, t('sharedLine', { t: money(r0.total), f: money(s.p.fixed), v: money(r0.total - s.p.fixed) })),
+      h('p', { class: 'cb-sum', translate: 'no' }, t('baseLine', { c: money(s.baseline) }))
+    ];
+    var list = s.rounds.map(function (r, i) {
+      var note, go = false;
+      if (!r.in.length) note = t('roundEmpty');
+      else if (r.leaves) { note = t('roundLeaves', { d: dname(r.leaves) }); go = true; }
+      else note = s.p.mode === 'show' ? t('roundShow') : t('roundStays');
+      return h('div', { class: 'cb-round' },
+        h('div', { class: 'cb-rtop', translate: 'no' },
+          h('b', null, t('round', { r: i + 1 })),
+          h('span', null, perUnit(s.key, r.unit)),
+          h('b', null, money(r.company))),
+        h('div', { class: 'cb-rtrack', 'aria-hidden': 'true' },
+          h('div', { class: 'cb-bar', dataset: { k: 'charged' }, style: { width: pct(r.total, s.cscale) } }),
+          h('div', { class: 'cb-bar', dataset: { k: 'outside' }, style: { left: pct(r.total, s.cscale), width: pct(r.company - r.total, s.cscale) } }),
+          h('div', { class: 'cb-base', style: { left: pct(s.baseline, s.cscale) } })),
+        h('div', { class: 'cb-rnote', dataset: go ? { go: '' } : {} }, note));
+    });
+    out.push(h('div', { class: 'cb-rounds' }, list));
+    return out;
+  }
+
+  function result(s, chg) {
+    var o = s.outcome, text;
+    if (o === 'show') text = s.firstOver ? t('resShowOver', { d: dname(s.firstOver) }) : t(s.forced.ids.length ? 'resShowOut' : 'resShow');
+    else if (o === 'stable') text = s.forced.ids.length ? t('resStableOut', { c: money(s.company - s.baseline) }) : t('resStable');
+    else if (o === 'spiral') text = t.n('resSpiral', s.departed.length, { c: money(s.company - s.baseline) });
+    else if (o === 'collapse') text = t('resCollapse');
+    else text = t(s.p.fixed ? 'resEmpty' : 'resEmptyFree');
+    return h('p', { class: 'cb-result' + (chg.indexOf('result') >= 0 ? ' sd-changed' : ''), dataset: { o: o } }, text);
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    var focus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.act : null;
+    c.stage.replaceChildren(h('div', { class: 'cb' },
+      h('div', { class: 'cb-col' }, h('p', { class: 'cb-head' }, t('headDepts')), s.rows.map(function (x) { return row(s, x, chg); })),
+      h('div', { class: 'cb-col' }, rounds(s)),
+      h('div', { class: 'cb-bottom' },
+        result(s, chg),
+        h('p', { class: 'cb-foot' },
+          t('foot', { u: money(L.RATE.users), m: money(L.RATE.vms), t: money(L.RATE.tb), k: money(L.RATE.tickets) }), ' ',
+          t('illustrative')))));
+    if (focus) {
+      var el = c.stage.querySelector('[data-act="' + focus + '"]');
+      if (el) el.focus();
+    }
+  }
+
+  // ── the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, k = L.captionKey(s), v = captionVars(s), main = v.main, note = v.note;
+    var out = [];
+    k.before.concat([k.key], k.notes).forEach(function (key, i) {
+      if (i) out.push(' ');
+      out = out.concat(t.parts(key, key === k.key ? main : note(key)));
+    });
+    return out;
+  }
+  function captionVars(s) {
+    var r0 = s.rounds[0], last = s.rounds[s.rounds.length - 1];
+    var row0 = function (id) { return s.rows.filter(function (x) { return x.id === id; })[0]; };
+    var lead = s.departed[0] || s.firstOver;
+    var outside = s.rows.reduce(function (a, x) { return a + (x.status === 'forced' ? x.quote : 0); }, 0);
+    var f = s.forced;
+    var main = {
+      s: term(s.p.mode === 'charge' ? 'termCharge' : 'termShow'),
+      k: t('by' + CAP[s.key]),
+      t: b(money(r0.total)), u: b(perUnit(s.key, r0.unit)), f: b(money(s.p.fixed)),
+      d: b(lead ? dname(lead) : ''), b: b(lead ? money(r0.bills[lead]) : ''), q: b(lead ? money(row0(lead).quote) : ''),
+      u0: b(perUnit(s.key, r0.unit)), u1: b(perUnit(s.key, last.unit)),
+      m: b(t.n('nMore', s.departed.length, { n: s.departed.length })), o: b(money(outside))
+    };
+    return {
+      main: main,
+      note: function (key) {
+        return {
+          d: b(key === 'nWould' ? dname(s.firstOver) : f.ids.length ? dname(f.ids[0]) : ''),
+          b: b(key === 'nWould' ? money(r0.bills[s.firstOver]) : money(f.bill)),
+          q: b(s.firstOver ? money(row0(s.firstOver).quote) : ''),
+          v: b(money(f.variable)), r: b(money(Math.abs(f.shifted))),
+          c: b(money(s.company)), c0: b(money(s.baseline))
+        };
+      }
+    };
+  }
+
+  var labels = {
+    'by-users': 'pByUsers', 'by-vms': 'pByVms', 'dev-grows': 'pDevGrows', charged: 'pCharged',
+    'one-leaves': 'pOneLeaves', spiral: 'pSpiral'
+  };
+  var R = L.RANGES;
+  var hidden = function () { return false; };
+  var specs = [
+    { key: 'key', type: 'choice', label: t('key'), options: L.KEYS.map(function (k) { return [k, t('k' + CAP[k])]; }) },
+    { key: 'mode', type: 'choice', label: t('mode'), options: [['show', t('mShow')], ['charge', t('mCharge')]] },
+    { key: 'fixed', type: 'range', label: t('fixed'), min: R.fixed[0], max: R.fixed[1], step: R.fixed[2],
+      format: function (v) { return t('perMonth', { v: money(v) }); } }
+  ];
+  // per-department usage and "out": set from the stage's buttons; hidden controls keep them in the URL
+  L.IDS.forEach(function (id) {
+    var u = R['use_' + id];
+    specs.push({ key: 'use_' + id, type: 'range', label: t('use', { d: dname(id) }), min: u[0], max: u[1], step: u[2],
+      visible: hidden, format: function (v) { return t('pct', { n: v }); } });
+    specs.push({ key: 'out_' + id, type: 'toggle', label: t('out', { d: dname(id) }), visible: hidden });
+  });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: specs,
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cb-charged', label: t('legCharged') },
+      { shape: 'cb-shown', label: t('legShown') },
+      { shape: 'cb-own', label: t('legOwn') },
+      { shape: 'cb-offer', label: t('legOffer') },
+      { shape: 'cb-out', label: t('legOut') },
+      { shape: 'cb-base', label: t('legBase') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
