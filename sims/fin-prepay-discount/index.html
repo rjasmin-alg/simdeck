@@ -1,0 +1,602 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-prepay-discount: one three-year contract paid monthly or some years upfront at a discount. Top left, the
+     discount as a yearly rate next to the cost of capital and the verdict; top right, the scoreboard (paid in total,
+     worth today, expense by year, lowest cash buffer) per way of paying; then the years-upfront and payment-terms
+     buttons; below, the cash buffer month by month against the minimum. Schedule, balance and rate: prepay.js
+     (promotable); discounting: discount.js (copied from fin-npv-discounting); model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="fin-prepay-discount">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Popust za plaćanje unaprijed i rokovi plaćanja · simdeck</title>
+<meta name="description" content="Ugovor plaćen mjesečno ili godinama unaprijed uz popust: biraj popust, godine i rok plaćanja, usporedi stopu s troškom kapitala i prati rezervu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-prepay-discount",
+  "title": {
+    "hr": "Popust za plaćanje unaprijed i rokovi plaćanja",
+    "en": "Pay upfront for a discount?"
+  },
+  "concept": {
+    "hr": "Popust za uplatu unaprijed je skrivena kamata; rok pomiče novac, a ne trošak",
+    "en": "A prepayment discount is hidden interest; payment terms move cash, not cost"
+  },
+  "summary": {
+    "hr": "Ugovor plaćen mjesečno ili godinama unaprijed uz popust: biraj popust, godine i rok plaćanja, usporedi stopu s troškom kapitala i prati rezervu.",
+    "en": "A contract paid monthly or years upfront at a discount: set the discount, years and payment terms; compare the rate with the cost of capital, watch the cash."
+  },
+  "tags": [
+    "contracts",
+    "investment"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "three-years"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-prepay-discount"]; colours only from kit tokens.
+   Each way has a colour, a mark and a line style: monthly ● solid --c1, upfront ■ dashed --c2; the minimum is a
+   dotted --danger line with its label (colour is never the only carrier). */
+[data-sim="fin-prepay-discount"] .pd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+
+[data-sim="fin-prepay-discount"] .pd-g {
+  display: inline-block;
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--sw);
+  border: 0.14rem solid var(--ink);
+}
+[data-sim="fin-prepay-discount"] .pd-g[data-w="monthly"] { border-radius: 50%; }
+
+/* top: the rate tile and the scoreboard */
+[data-sim="fin-prepay-discount"] .pd-top {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 2.4fr);
+  gap: 0.8rem;
+  align-items: stretch;
+}
+[data-sim="fin-prepay-discount"] .pd-rate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem 0.8rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.45rem solid var(--c2);
+  border-radius: var(--radius);
+  background: var(--panel);
+  min-width: 0;
+}
+[data-sim="fin-prepay-discount"] .pd-rate-label { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-prepay-discount"] .pd-rate-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-prepay-discount"] .pd-bars { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.6rem; align-items: center; margin: 0.15rem 0; }
+[data-sim="fin-prepay-discount"] .pd-bar-l { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-prepay-discount"] .pd-track { position: relative; height: 2.1rem; }
+[data-sim="fin-prepay-discount"] .pd-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  min-width: 0.3rem;
+  border: 0.14rem solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+[data-sim="fin-prepay-discount"] .pd-bar[data-k="rate"] { background: var(--c2); }
+[data-sim="fin-prepay-discount"] .pd-bar[data-k="coc"] {
+  background: repeating-linear-gradient(45deg, var(--muted) 0 0.25rem, color-mix(in srgb, var(--muted) 25%, var(--bg)) 0.25rem 0.5rem);
+}
+[data-sim="fin-prepay-discount"] .pd-bar-v {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-left: 0.4rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-prepay-discount"] .pd-bar-v[data-in] { padding: 0 0.4rem 0 0; transform: translate(-100%, -50%); color: var(--on-accent); }
+[data-sim="fin-prepay-discount"] .pd-bar-v[data-in][data-k="coc"] { color: var(--ink); }
+[data-sim="fin-prepay-discount"] .pd-verdict { display: flex; align-items: center; gap: 0.45rem; font-weight: 700; line-height: 1.2; }
+[data-sim="fin-prepay-discount"] .pd-verdict::before { flex: none; font-size: 1.3rem; }
+[data-sim="fin-prepay-discount"] .pd-verdict[data-v="1"] { color: var(--ok); }
+[data-sim="fin-prepay-discount"] .pd-verdict[data-v="1"]::before { content: '✓'; }
+[data-sim="fin-prepay-discount"] .pd-verdict[data-v="-1"] { color: var(--danger); }
+[data-sim="fin-prepay-discount"] .pd-verdict[data-v="-1"]::before { content: '✗'; }
+[data-sim="fin-prepay-discount"] .pd-verdict[data-v="0"]::before { content: '='; }
+[data-sim="fin-prepay-discount"] .pd-rate.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-prepay-discount"] .pd-rate.sd-changed :is(.pd-rate-label, .pd-rate-sub, .pd-bar-l, .pd-verdict, .pd-bar-v:not([data-in])) { color: var(--on-hl); }
+
+[data-sim="fin-prepay-discount"] .pd-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) repeat(2, minmax(0, 1.05fr)) minmax(0, 1.5fr) minmax(0, 1.1fr);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  min-width: 0;
+  align-content: start;
+}
+[data-sim="fin-prepay-discount"] .pd-board > * {
+  padding: 0.25rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+[data-sim="fin-prepay-discount"] .pd-board > .pd-th {
+  border-top: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0;
+  line-height: 1.15;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+}
+[data-sim="fin-prepay-discount"] .pd-th span { font-weight: 400; }
+[data-sim="fin-prepay-discount"] .pd-th[data-k="way"] { align-items: flex-start; text-align: left; }
+[data-sim="fin-prepay-discount"] .pd-name { gap: 0.6rem; }
+[data-sim="fin-prepay-discount"] .pd-name div { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+[data-sim="fin-prepay-discount"] .pd-name b { font-size: 1rem; }
+[data-sim="fin-prepay-discount"] .pd-name span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-prepay-discount"] .pd-val {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+[data-sim="fin-prepay-discount"] .pd-val small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="fin-prepay-discount"] .pd-val[data-k="exp"] { font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="fin-prepay-discount"] .pd-val.pd-win { background: color-mix(in srgb, var(--ok) 16%, var(--panel)); }
+[data-sim="fin-prepay-discount"] .pd-val.pd-win > b::before { content: '✓ '; color: var(--ok); }
+[data-sim="fin-prepay-discount"] .pd-val.pd-below { background: color-mix(in srgb, var(--danger) 14%, var(--panel)); }
+[data-sim="fin-prepay-discount"] .pd-val.pd-below small { color: var(--danger); font-weight: 700; }
+[data-sim="fin-prepay-discount"] .pd-val.pd-below small::before { content: '⚠ '; }
+
+/* the stage's button groups */
+[data-sim="fin-prepay-discount"] .pd-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.6rem; }
+[data-sim="fin-prepay-discount"] .pd-tool { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="fin-prepay-discount"] .pd-tool-l { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-prepay-discount"] .pd-tool .sd-seg { flex-wrap: nowrap; }
+[data-sim="fin-prepay-discount"] .pd-tool button { min-height: 2.2rem; padding: 0 0.8rem; white-space: nowrap; }
+[data-sim="fin-prepay-discount"] .pd-tool button[aria-pressed="true"] { font-weight: 700; }
+
+/* the cash chart */
+[data-sim="fin-prepay-discount"] .pd-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+[data-sim="fin-prepay-discount"] .pd-title {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.8rem;
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+}
+[data-sim="fin-prepay-discount"] .pd-title span { font-weight: 400; }
+[data-sim="fin-prepay-discount"] .pd-plotgrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  grid-template-rows: minmax(6rem, 1fr) 1.7rem;
+  padding: 0.8rem 1.4rem 0 0;
+}
+[data-sim="fin-prepay-discount"] .pd-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-prepay-discount"] .pd-tick {
+  position: absolute;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-prepay-discount"] .pd-plot { position: relative; grid-column: 2; grid-row: 1; border-left: var(--line-w) solid var(--line); }
+[data-sim="fin-prepay-discount"] .pd-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.6; }
+[data-sim="fin-prepay-discount"] .pd-gl[data-zero] { border-top: 0.2rem solid var(--ink); opacity: 1; }
+[data-sim="fin-prepay-discount"] .pd-vl { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); opacity: 0.7; }
+[data-sim="fin-prepay-discount"] .pd-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-prepay-discount"] .pd-line { fill: none; stroke: var(--sw); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-prepay-discount"] .pd-line[data-w="upfront"] { stroke-dasharray: 12 7; }
+[data-sim="fin-prepay-discount"] .pd-floor { position: absolute; left: 0; right: 0; border-top: 0.25rem dotted var(--danger); z-index: 1; }
+[data-sim="fin-prepay-discount"] .pd-floor span {
+  position: absolute;
+  right: 0.2rem;
+  bottom: 0.15rem;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--danger);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  padding: 0 0.2rem;
+}
+[data-sim="fin-prepay-discount"] .pd-low { position: absolute; z-index: 2; transform: translate(-50%, -50%); }
+[data-sim="fin-prepay-discount"] .pd-low-v {
+  position: absolute;
+  left: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-prepay-discount"] .pd-xaxis { position: relative; grid-column: 2; grid-row: 2; }
+[data-sim="fin-prepay-discount"] .pd-xtick { position: absolute; top: 0.15rem; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-prepay-discount"] .pd-xtick[data-first] { transform: none; }
+
+[data-sim="fin-prepay-discount"] .sd-ctl[hidden] { display: none; }
+[data-sim="fin-prepay-discount"] .pd-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-prepay-discount"] .sd-swatch[data-shape="pd-floor"] { height: 0; border: 0; border-top: 0.25rem dotted var(--danger); border-radius: 0; background: none; }
+[data-sim="fin-prepay-discount"] .sd-swatch[data-shape="pd-upfront"] {
+  height: 0.3rem; border: 0; border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--c2) 0 0.45em, transparent 0.45em 0.7em);
+}
+[data-sim="fin-prepay-discount"] .sd-swatch[data-shape="pd-monthly"] { height: 0.3rem; border: 0; border-radius: 0; background: var(--c1); }
+
+/* Phone and portrait: the stage grows with its content; the rate tile and the board stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-prepay-discount"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-prepay-discount"] .pd { height: auto; padding: 0.4rem; }
+  [data-sim="fin-prepay-discount"] .pd-top { grid-template-columns: minmax(0, 1fr); }
+  /* a phone shows paid in total and worth today; the expense by year and the lowest buffer need the wide screen
+     (the lowest buffer is also marked on the chart) */
+  [data-sim="fin-prepay-discount"] .pd-board { grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)); }
+  [data-sim="fin-prepay-discount"] .pd-board > [data-col] { display: none; }
+  [data-sim="fin-prepay-discount"] .pd-val { padding: 0.2rem 0.3rem; font-size: 1.05rem; }
+  [data-sim="fin-prepay-discount"] .pd-name { gap: 0.4rem; }
+  [data-sim="fin-prepay-discount"] .pd-plotgrid { grid-template-columns: 5.6rem minmax(0, 1fr); grid-template-rows: 15rem 1.7rem; padding-right: 0.6rem; }
+  [data-sim="fin-prepay-discount"] .pd-tool { flex-wrap: wrap; }
+  [data-sim="fin-prepay-discount"] .pd-tool .sd-seg { flex-wrap: wrap; }
+  [data-sim="fin-prepay-discount"] .pd-tool button { padding: 0 0.5rem; }
+  [data-sim="fin-prepay-discount"] .pd-low-v { display: none; }
+  [data-sim="fin-prepay-discount"] .pd-xtick:is([data-minor], [data-first]) { display: none; }
+  [data-sim="fin-prepay-discount"] .pd-val.pd-win > b::before { content: none; }
+  [data-sim="fin-prepay-discount"] .pd-board { grid-template-columns: minmax(0, 1.15fr) repeat(2, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Popust za plaćanje unaprijed i rokovi plaćanja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="discount.js"></script>
+<script src="prepay.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var D = window.SimdeckModels.discount;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { monthly: '1', upfront: '2' };
+  var sim = null;
+  var refocus = null;   // the stage button to give focus back to after a render
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 11); minus is U+2212. */
+  function money(x) {
+    var r = D.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  /** A percentage with d decimals, or with as many as it needs (0 or 1) when d is left out. */
+  function pct(v, d) { return t('pct', { n: dec(v, d == null ? (v % 1 ? 1 : 0) : d) }); }
+  function rateText(s) { return s.rate === null ? t('rateNone') : pct(100 * s.rate, L.rateDigits(s)); }
+  function glyph(w) { return h('span', { class: 'pd-g', dataset: { w: w, c: COLOUR[w] } }); }
+  function upfrontName(s) { return t('wayUpfront', { k: t.n('yearsN', s.p.years) }); }
+  /** When a low point happens: at signing, or in month n (month 1 is t in [0, 1)). */
+  function when(low) { return low.t === 0 ? t('atSigning') : t('inMonth', { n: Math.floor(low.t) + 1 }); }
+
+  // ── the rate tile ──
+
+  function rateTile(s, changed) {
+    var p = s.p, r = s.rate === null ? Infinity : 100 * s.rate;
+    var top = Math.min(60, Math.max(10, r, p.coc) * 1.15);
+    var bar = function (k, v, label, text) {
+      var w = Math.min(100, 100 * v / top);
+      var inside = k === 'rate' && w > 55; // the hatched bar never carries its label (unreadable on the stripes)
+      return [
+        h('span', { class: 'pd-bar-l' }, label),
+        h('div', { class: 'pd-track' },
+          h('div', { class: 'pd-bar', dataset: { k: k }, style: { width: w + '%' } }),
+          h('span', Object.assign({ class: 'pd-bar-v', translate: 'no', dataset: { k: k }, style: { left: w + '%' } },
+            inside ? { dataset: { k: k, in: 'true' } } : {}), text + (v > top ? ' »' : '')))
+      ];
+    };
+    var vkey = s.verdict > 0 ? 'verdictTake' : s.verdict < 0 ? 'verdictSkip' : 'verdictEven';
+    return h('div', { class: 'pd-rate' + (changed ? ' sd-changed' : '') },
+      h('span', { class: 'pd-rate-label' }, t('tileRate')),
+      h('span', { class: 'pd-rate-sub' }, t('rateSub', { d: pct(p.discount), months: t.n('monthsN', s.n) })),
+      h('div', { class: 'pd-bars' },
+        bar('rate', r, t('rateLabel'), rateText(s)),
+        bar('coc', p.coc, t('cocLabel'), pct(p.coc))),
+      h('span', { class: 'pd-verdict', dataset: { v: String(s.verdict) } }, t(vkey)));
+  }
+
+  // ── the scoreboard ──
+
+  function board(s) {
+    var p = s.p;
+    var th = function (k, title, sub) {
+      var attrs = { class: 'pd-th', dataset: { k: k } };
+      if (k === 'exp' || k === 'low') attrs.dataset.col = k;
+      return h('div', attrs, title, sub ? h('span', null, sub) : null);
+    };
+    var cells = [
+      th('way', t('thWay')),
+      th('paid', t('thPaid'), t('thPaidSub')),
+      th('cost', t('thCost', { rate: pct(p.coc) }), t('thCostSub')),
+      th('exp', t('thExpense'), t('thExpenseSub')),
+      th('low', t('thLow'), t('thLowSub'))
+    ];
+    var paidBest = Math.min(s.ways[0].paidR, s.ways[1].paidR);
+    var costBest = Math.min(s.ways[0].costR, s.ways[1].costR);
+    s.ways.forEach(function (w) {
+      var sub = w.id === 'monthly'
+        ? t('subMonthly', { m: money(s.monthly) })
+        : (s.n < s.months ? t('subUpfrontRest', { a: money(s.upfrontAmount), m: money(s.monthly) })
+          : t('subUpfront', { a: money(s.upfrontAmount), d: pct(p.discount) }));
+      cells.push(h('div', { class: 'pd-name' }, glyph(w.id),
+        h('div', null, h('b', null, w.id === 'monthly' ? t('wayMonthly') : upfrontName(s)), h('span', null, sub))));
+      var tie = s.ways[0].paidR === s.ways[1].paidR;
+      cells.push(h('div', { class: 'pd-val' + (!tie && w.paidR === paidBest ? ' pd-win' : ''), translate: 'no' }, h('b', null, money(w.paid))));
+      var tieC = s.ways[0].costR === s.ways[1].costR;
+      cells.push(h('div', { class: 'pd-val' + (!tieC && w.costR === costBest ? ' pd-win' : ''), translate: 'no' }, h('b', null, money(w.cost))));
+      cells.push(h('div', { class: 'pd-val', dataset: { k: 'exp', col: 'exp' }, translate: 'no' },
+        w.expense.map(function (e) { return group(D.roundMoney(e)); }).join(' · ')));
+      cells.push(h('div', { class: 'pd-val' + (w.below ? ' pd-below' : ''), dataset: { col: 'low' } },
+        h('b', { translate: 'no' }, money(w.low.bal)),
+        h('small', null, w.below ? t('belowMark') : when(w.low))));
+    });
+    return h('div', { class: 'pd-board' }, cells);
+  }
+
+  // ── the stage's own controls: years paid upfront, payment terms ──
+
+  function buttons(label, key, options, current) {
+    return h('div', { class: 'pd-tool', role: 'group', 'aria-label': label },
+      h('span', { class: 'pd-tool-l' }, label),
+      h('div', { class: 'sd-seg' }, options.map(function (o) {
+        return h('button', {
+          type: 'button', 'aria-pressed': String(o[0] === current), dataset: { key: key + ':' + o[0] },
+          onclick: function () {
+            var patch = {};
+            patch[key] = o[0];
+            refocus = key + ':' + o[0];
+            sim.set(patch);
+          }
+        }, o[1]);
+      })));
+  }
+
+  function tools(s) {
+    var years = [], terms = L.TERMS.map(function (d) { return [d, d === 0 ? t('termsNow') : t('termsN', { n: d })]; });
+    for (var k = L.LIM.years.min; k <= L.LIM.years.max; k++) years.push([k, t.n('yearsN', k)]);
+    return h('div', { class: 'pd-tools' },
+      buttons(t('years'), 'years', years, s.p.years),
+      buttons(t('terms'), 'terms', terms, s.p.terms));
+  }
+
+  // ── the cash buffer, month by month ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step that keeps the axis to about four or five grid lines. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+
+  var X_END = 39; // months shown: the 36 of the contract and 90 days of terms after it
+
+  function chart(s) {
+    var vals = [s.p.floor, 0];
+    s.ways.forEach(function (w) { w.points.forEach(function (q) { vals.push(q.bal); }); });
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var step = niceStep(Math.max(hi - lo, 10000) / 4);
+    var bottom = Math.floor(lo / step) * step, top = Math.ceil(hi / step) * step;
+    if (top === bottom) top = bottom + step;
+    var yp = function (v) { return (100 * (top - v) / (top - bottom)) + '%'; };
+    var yn = function (v) { return (1000 * (top - v) / (top - bottom)).toFixed(1); };
+    var xn = function (m) { return (1000 * m / X_END).toFixed(1); };
+    var ticks = [], lines = [];
+    for (var v = bottom; v <= top + 1e-6; v += step) {
+      ticks.push(h('span', { class: 'pd-tick', translate: 'no', style: { top: yp(v) } }, money(v)));
+      lines.push(h('div', Object.assign({ class: 'pd-gl', style: { top: yp(v) } }, Math.abs(v) < 1e-6 ? { dataset: { zero: 'true' } } : {})));
+    }
+    var xt = [];
+    for (var m = 0; m <= 36; m += 6) {
+      lines.push(h('div', { class: 'pd-vl', style: { left: (100 * m / X_END) + '%' } }));
+      xt.push(h('span', { class: 'pd-xtick', style: { left: (100 * m / X_END) + '%' }, dataset: m === 0 ? { first: 'true' } : m % 12 ? { minor: 'true' } : {} },
+        m === 0 ? t('startN') : t('monthN', { n: m })));
+    }
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    var marks = [];
+    s.ways.forEach(function (w) {
+      var pts = w.points, d = 'M0,' + yn(pts[0].bal);
+      for (var i = 1; i < pts.length; i++) d += ' H' + xn(pts[i].t) + ' V' + yn(pts[i].bal);
+      d += ' H' + xn(X_END);
+      var path = document.createElementNS(NS, 'path');
+      path.setAttribute('class', 'pd-line');
+      path.setAttribute('data-w', w.id);
+      path.setAttribute('data-c', COLOUR[w.id]);
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+      // the lowest point: a mark for each plan, the amount for the upfront plan (the monthly plan's is in the board)
+      marks.push(h('span', { class: 'pd-low', style: { left: (100 * w.low.t / X_END) + '%', top: yp(w.low.bal) } },
+        glyph(w.id), w.id === 'upfront' ? h('span', { class: 'pd-low-v', translate: 'no' }, money(w.low.bal)) : null));
+    });
+    var floorLine = h('div', { class: 'pd-floor', style: { top: yp(s.p.floor) } }, h('span', null, t('floorTag', { x: money(s.p.floor) })));
+    return h('div', { class: 'pd-panel' },
+      h('p', { class: 'pd-title' }, t('chartTitle'), h('span', null, t('chartNote', { m: money(s.monthly) }))),
+      h('div', { class: 'pd-plotgrid' }, h('div', { class: 'pd-axis' }, ticks),
+        h('div', { class: 'pd-plot' }, lines, floorLine, svg, marks),
+        h('div', { class: 'pd-xaxis' }, xt)));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'pd' },
+      h('div', { class: 'pd-top' }, rateTile(s, chg.indexOf('verdict') >= 0), board(s)),
+      tools(s),
+      chart(s),
+      h('p', { class: 'pd-foot' }, s.p.terms === 0 ? t('illustrativeNow') : t('illustrative', { n: s.p.terms }))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-key="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var b = function (x) { return h('b', { translate: 'no' }, x); };
+    var up = s.ways[1];
+    var out = t.parts(k.key, {
+      d: b(pct(p.discount)), months: b(t.n('monthsN', s.n)), r: b(rateText(s)), c: b(pct(p.coc)),
+      s: b(money(Math.abs(s.saving))), p: b(money(s.savingPaper))
+    });
+    k.notes.forEach(function (key) {
+      var vars = {
+        nBelowFloor: { low: b(money(up.low.bal)), when: when(up.low), f: b(money(p.floor)) },
+        nOverdrawn: { low: b(money(up.low.bal)), when: when(up.low) },
+        nTied: { x: b(money(s.tied)), low: b(money(up.low.bal)) },
+        nTerms: { n: String(p.terms) }
+      }[key];
+      out.push(' ');
+      out = out.concat(t.parts(key, vars));
+    });
+    return out;
+  }
+
+  var labels = {
+    'year-upfront': 'pYearUpfront', 'three-years': 'pThreeYears', 'bigger-discount': 'pBiggerDiscount',
+    'two-years': 'pTwoYears', 'long-terms': 'pLongTerms', 'no-discount': 'pNoDiscount'
+  };
+  var R = L.LIM;
+  var never = function () { return false; };
+  var euros = function (v) { return money(v); };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'discount', type: 'range', label: t('discount'), min: R.discount.min, max: R.discount.max, step: R.discount.step, format: function (v) { return pct(v); } },
+      { key: 'coc', type: 'range', label: t('coc'), min: R.coc.min, max: R.coc.max, step: R.coc.step, format: function (v) { return pct(v); } },
+      { key: 'buffer', type: 'range', label: t('buffer'), min: R.buffer.min, max: R.buffer.max, step: R.buffer.step, format: euros },
+      { key: 'floor', type: 'range', label: t('floor'), min: R.floor.min, max: R.floor.max, step: R.floor.step, format: euros },
+      // set on the stage (the two button groups) or fixed (the price); hidden here, kept in the URL and clamped
+      { key: 'years', type: 'range', label: t('years'), min: R.years.min, max: R.years.max, step: R.years.step, visible: never },
+      { key: 'terms', type: 'choice', label: t('terms'), options: L.TERMS.map(function (d) { return [d, String(d)]; }), visible: never },
+      { key: 'price', type: 'range', label: t('price'), min: R.price.min, max: R.price.max, step: R.price.step, visible: never }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'pd-monthly', label: t('legMonthly') },
+      { shape: 'pd-upfront', label: t('legUpfront') },
+      { shape: 'pd-floor', label: t('legFloor') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
