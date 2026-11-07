@@ -325,7 +325,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-07** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **272 of 409 entries are live**, 97 w3, 29 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-07** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **272 of 432 entries are live**, 120 w3, 28 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -351,7 +351,8 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.9 Computer architecture, OS gaps and automata | 8 | 0 | 6 w3, 2 w3 · queued |
 | §4.10 Radio and crisis communications | 17 | 0 | 17 w3 |
 | §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 |
-| §4.12 Finance basics for IT managers | 20 | 17 | 3 w3 · queued |
+| §4.12 Finance basics for IT managers | 20 | 17 | 1 w3 · building, 2 w3 · queued |
+| §4.13 Compliance and procedures for IT managers | 23 | 0 | 23 w3 |
 
 <!-- status:end -->
 
@@ -851,7 +852,7 @@ no tax law, no products; money is in euros and the fiscal year's first month is 
 | `fin-indexation-fx` | w3 · queued | Inflation, indexation and currency in a multi-year contract | a fixed price loses real value to inflation; an indexation clause passes inflation on (with a cap or a floor); a price in a foreign currency adds exchange-rate risk; nominal vs real euros | run a five-year contract along inflation and exchange-rate paths, choose fixed, indexed or capped, and the currency | expl | S | P3 | FIN |  |  |
 | `fin-contingency-reserve` | live | Contingency reserve: P50 vs P80 | each line of a project estimate is a range skewed towards overruns, so the total's median is above the sum of the most likely values; the reserve buys a level of confidence | set ranges for the line items, run many trials, choose the confidence level, read the reserve it needs | expl | M | P2 | FIN, DR | DR P07 brief (one-off spend cap, approval threshold) |  |
 | `fin-downtime-cost` | live | What an hour down costs, and what a nine is worth | cost of downtime = lost revenue + idle staff + recovery work + penalties, varying with the hour and the day; each extra nine removes less downtime and costs more redundancy | set the cost components and the availability target; compare the expected yearly downtime cost with the yearly cost of the HA option | expl | S | P1 | FIN, DR | `rpo-rto` gives the hours down; `perf-slo-error-budget` (§4.8) → §5.23 |  |
-| `fin-ale-risk` | w3 · queued | Expected annual loss and the price of a control | ALE = single loss expectancy × annual rate of occurrence; a control is worth its yearly cost when it removes more ALE than that; accept, reduce, transfer (insurance) or avoid; a rare large loss hides behind a small average | add risks with a loss and a frequency, buy controls and insurance, watch ALE, control cost and the worst simulated year | expl | S | P2 | FIN, DR, SEC | `ransomware-321` (an immutable copy as a control), `faultline` → §5.23 |  |
+| `fin-ale-risk` | w3 · building | Expected annual loss and the price of a control | ALE = single loss expectancy × annual rate of occurrence; a control is worth its yearly cost when it removes more ALE than that; accept, reduce, transfer (insurance) or avoid; a rare large loss hides behind a small average | add risks with a loss and a frequency, buy controls and insurance, watch ALE, control cost and the worst simulated year | expl | S | P2 | FIN, DR, SEC | `ransomware-321` (an immutable copy as a control), `faultline` → §5.23 |  |
 | `fin-sunk-cost` | live | Sunk cost: decide looking forward | money already spent, and an old system's remaining book value, is the same whichever way you choose, so only the cost still to come and the benefit still to come count; the opportunity cost of the people tied up | step a project that overruns; at each gate continue, stop or switch, and compare deciding by "already spent" with deciding by "still to spend" | step | S | P2 | FIN | the write-off from `fin-depreciation` |  |
 | `fin-cost-of-delay` | w3 · queued | Cost of delay: which project first | each project loses value for every week it waits; ordering by value lost per week ÷ duration beats ordering by size or by who asks loudest | reorder three to five projects in a queue and watch the total value lost | expl | S | P3 | FIN |  |  |
 
