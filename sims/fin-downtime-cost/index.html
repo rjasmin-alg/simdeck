@@ -1,0 +1,443 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-downtime-cost: the cost of downtime is lost revenue + idle staff + recovery work + penalties, and it varies
+     with the hour and the day; each extra nine removes a tenth as much downtime as the one before and costs more
+     redundancy. The stage: what an hour down costs across the week (stacked by component, the average hour dashed),
+     then one row per availability level with its expected yearly downtime cost, the redundancy's cost, the total and
+     what its nine saves against what it costs; the target row is outlined (click a row to choose it).
+     Sums: downtime.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-downtime-cost">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Koliko košta sat zastoja i koliko vrijedi jedna devetka · simdeck</title>
+<meta name="description" content="Postavi dijelove troška zastoja i ciljanu dostupnost; usporedi očekivani godišnji trošak zastoja s godišnjim troškom redundancije.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-downtime-cost",
+  "title": {
+    "hr": "Koliko košta sat zastoja i koliko vrijedi jedna devetka",
+    "en": "What an hour down costs, and what a nine is worth"
+  },
+  "concept": {
+    "hr": "Sat zastoja košta prosjek tjedna; svaka devetka štedi manje, a košta više",
+    "en": "An hour down costs the week's average; each nine saves less and costs more"
+  },
+  "summary": {
+    "hr": "Postavi dijelove troška zastoja i ciljanu dostupnost; usporedi očekivani godišnji trošak zastoja s godišnjim troškom redundancije.",
+    "en": "Set the parts of what an hour down costs and the availability target; compare the expected yearly cost of downtime with the yearly cost of redundancy."
+  },
+  "tags": [
+    "risk",
+    "costs"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-downtime-cost"]; colours only from kit tokens. */
+[data-sim="fin-downtime-cost"] .dt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-downtime-cost"] .dt-head { margin: 0 0 0.3rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+
+/* the week: three bands a day, each a stack of the hour's cost by component */
+[data-sim="fin-downtime-cost"] .dt-week {
+  flex: 0 0 34%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 0.6rem;
+}
+[data-sim="fin-downtime-cost"] .dt-week > .dt-head { grid-column: 1 / -1; }
+[data-sim="fin-downtime-cost"] .dt-axis { grid-column: 1; grid-row: 2; position: relative; }
+[data-sim="fin-downtime-cost"] .dt-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-downtime-cost"] .dt-plot {
+  grid-column: 2;
+  grid-row: 2;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0 0.15rem;
+  border-left: var(--line-w) solid var(--ink);
+  border-bottom: var(--line-w) solid var(--ink);
+  background: repeating-linear-gradient(to top, var(--line) 0 0.0625rem, transparent 0.0625rem 25%);
+}
+[data-sim="fin-downtime-cost"] .dt-day { flex: 1 1 0; min-width: 0; display: flex; }
+[data-sim="fin-downtime-cost"] .dt-band { min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; }
+[data-sim="fin-downtime-cost"] .dt-band + .dt-band { border-left: 0.0625rem solid var(--bg); }
+[data-sim="fin-downtime-cost"] .dt-avg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 0.2rem dashed var(--ink);
+  pointer-events: none;
+}
+[data-sim="fin-downtime-cost"] .dt-avgtag {
+  position: absolute;
+  right: 0.2rem;
+  bottom: 0.2rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+[data-sim="fin-downtime-cost"] .dt-avgtag[data-low] { bottom: auto; top: 0.2rem; }
+[data-sim="fin-downtime-cost"] .dt-days { grid-column: 2; grid-row: 3; display: flex; gap: 0.35rem; padding: 0.15rem 0.15rem 0; }
+[data-sim="fin-downtime-cost"] .dt-days > span { flex: 1 1 0; min-width: 0; text-align: center; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the cost parts: colour and pattern */
+[data-sim="fin-downtime-cost"] .dt-seg { flex: none; min-width: 0; min-height: 0; }
+[data-sim="fin-downtime-cost"] [data-k="rev"] { background: var(--c1); }
+[data-sim="fin-downtime-cost"] [data-k="staff"] {
+  background: repeating-linear-gradient(135deg, var(--c2) 0 0.25rem, color-mix(in srgb, var(--c2) 25%, var(--bg)) 0.25rem 0.5rem);
+}
+[data-sim="fin-downtime-cost"] [data-k="fix"] {
+  background: repeating-linear-gradient(180deg, var(--c3) 0 0.25rem, color-mix(in srgb, var(--c3) 25%, var(--bg)) 0.25rem 0.45rem);
+}
+[data-sim="fin-downtime-cost"] [data-k="pen"] {
+  background: repeating-linear-gradient(90deg, var(--c4) 0 0.25rem, color-mix(in srgb, var(--c4) 25%, var(--bg)) 0.25rem 0.45rem);
+}
+[data-sim="fin-downtime-cost"] [data-k="ha"] {
+  outline: 0.15rem dashed var(--c5);
+  outline-offset: -0.15rem;
+  background: radial-gradient(circle, var(--c5) 0 30%, transparent 34%) 0 0 / 0.5rem 0.5rem, color-mix(in srgb, var(--c5) 14%, var(--bg));
+}
+
+/* the levels: one row each, a button that sets the target */
+[data-sim="fin-downtime-cost"] .dt-levels { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="fin-downtime-cost"] .dt-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) 9rem minmax(0, 19rem);
+  column-gap: 0.8rem;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border: 0.2rem solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+[data-sim="fin-downtime-cost"] .dt-row:hover { background: color-mix(in srgb, var(--panel) 60%, transparent); }
+[data-sim="fin-downtime-cost"] .dt-row:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="fin-downtime-cost"] .dt-row[aria-pressed="true"] { border-color: var(--ink); background: var(--panel); }
+[data-sim="fin-downtime-cost"] .dt-lvl { display: block; font-size: var(--fs-lg); font-weight: 700; line-height: 1.15; white-space: nowrap; }
+[data-sim="fin-downtime-cost"] .dt-row[aria-pressed="true"] .dt-lvl::before { content: '▶ '; }
+[data-sim="fin-downtime-cost"] .dt-down { display: block; font-size: var(--fs-sm); color: var(--muted); line-height: 1.2; }
+[data-sim="fin-downtime-cost"] .dt-bar { display: flex; height: min(2rem, 70%); min-height: 1rem; border-left: var(--line-w) solid var(--ink); }
+[data-sim="fin-downtime-cost"] .dt-bar > .dt-seg { height: 100%; }
+[data-sim="fin-downtime-cost"] .dt-tot { text-align: right; font-size: var(--fs-lg); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+[data-sim="fin-downtime-cost"] .dt-tot[data-best]::before { content: '★ '; }
+[data-sim="fin-downtime-cost"] .dt-tot.sd-changed { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="fin-downtime-cost"] .dt-nine { font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="fin-downtime-cost"] .dt-nine[data-v="pays"]::before { content: '✓ '; font-weight: 700; }
+[data-sim="fin-downtime-cost"] .dt-nine[data-v="even"]::before { content: '= '; font-weight: 700; }
+[data-sim="fin-downtime-cost"] .dt-nine[data-v="loses"]::before { content: '✗ '; font-weight: 700; }
+[data-sim="fin-downtime-cost"] .dt-nine[data-v="loses"] { color: var(--muted); }
+[data-sim="fin-downtime-cost"] .dt-nine[data-v="none"] { color: var(--muted); }
+
+/* the result and the footnote */
+[data-sim="fin-downtime-cost"] .dt-result {
+  flex: none;
+  align-self: flex-start;
+  margin: 0;
+  padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="fin-downtime-cost"] .dt-result[data-o="save"] { background: var(--ink); color: var(--bg); }
+[data-sim="fin-downtime-cost"] .dt-result[data-o="save"]::before { content: '★ '; }
+[data-sim="fin-downtime-cost"] .dt-result[data-o="loss"]::before { content: '✗ '; }
+[data-sim="fin-downtime-cost"] .dt-result[data-o="even"],
+[data-sim="fin-downtime-cost"] .dt-result[data-o="base"] { border-style: dashed; }
+[data-sim="fin-downtime-cost"] .dt-result[data-o="even"]::before { content: '= '; }
+[data-sim="fin-downtime-cost"] .dt-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-downtime-cost"] .dt-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the panel holds 5 presets and 6 controls: presets in two columns, sliders and gaps tighter, so it fits 1920×1080 */
+[data-sim="fin-downtime-cost"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="fin-downtime-cost"] .sd-group { gap: 0.3rem; }
+[data-sim="fin-downtime-cost"] .sd-ctl { gap: 0.1rem; }
+[data-sim="fin-downtime-cost"] .sd-range { height: 1.5rem; }
+
+/* the hidden param (the target) keeps the URL; the kit marks it [hidden] */
+[data-sim="fin-downtime-cost"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape^="dt-"] { border-radius: 0; }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-rev"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-staff"] { border-color: var(--c2); background: repeating-linear-gradient(135deg, var(--c2) 0 0.18em, color-mix(in srgb, var(--c2) 25%, var(--bg)) 0.18em 0.36em); }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-fix"] { border-color: var(--c3); background: repeating-linear-gradient(180deg, var(--c3) 0 0.18em, color-mix(in srgb, var(--c3) 25%, var(--bg)) 0.18em 0.32em); }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-pen"] { border-color: var(--c4); background: repeating-linear-gradient(90deg, var(--c4) 0 0.18em, color-mix(in srgb, var(--c4) 25%, var(--bg)) 0.18em 0.32em); }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-ha"] { border-style: dashed; border-color: var(--c5); background: radial-gradient(circle, var(--c5) 0 30%, transparent 34%) 0 0 / 0.4em 0.4em, color-mix(in srgb, var(--c5) 14%, var(--bg)); }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-avg"] { height: 0; margin-block: 0.45em; border-width: 0.2em 0 0; border-style: dashed; border-color: var(--ink); background: transparent; }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-best"] { border: 0; background: transparent; width: auto; height: auto; line-height: 1; }
+[data-sim="fin-downtime-cost"] .sd-swatch[data-shape="dt-best"]::before { content: '★'; }
+
+/* Phone and portrait: the stage grows with its content; each level row wraps. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-downtime-cost"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-downtime-cost"] .dt { height: auto; padding: 0.4rem 0.4rem; }
+  [data-sim="fin-downtime-cost"] .dt-week { flex: none; height: 17rem; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: 0.4rem; }
+  [data-sim="fin-downtime-cost"] .dt-plot, [data-sim="fin-downtime-cost"] .dt-days { gap: 0.15rem; padding: 0; }
+  [data-sim="fin-downtime-cost"] .dt-row { flex: none; grid-template-columns: minmax(0, 1fr) auto; row-gap: 0.2rem; padding: 0.3rem 0.4rem; }
+  [data-sim="fin-downtime-cost"] .dt-bar { grid-column: 1 / -1; grid-row: 2; height: 1.5rem; }
+  [data-sim="fin-downtime-cost"] .dt-nine { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Koliko košta sat zastoja i koliko vrijedi jedna devetka</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="downtime.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+  var PARTS = ['rev', 'staff', 'fix', 'pen'];
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (30 000 / 30,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Whole euros, sign dropped (the model rounds; the average hour is rounded here). */
+  function money(x) { return t('eur', { n: group(Math.abs(Math.round(x))) }); }
+  function perHour(x) { return t('perHour', { v: money(x) }); }
+  function pct(n) { return t('pct', { n: String(n) }); }
+  function lvl(n) { return t('lvl' + n); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+
+  /** Seconds as hours and minutes (an hour or more) or minutes and seconds, rounded to the shown unit. */
+  function dur(sec) {
+    if (sec >= 3600) {
+      var m = Math.round(sec / 60), hh = Math.floor(m / 60), mm = m % 60;
+      return mm ? t('durHM', { h: hh, m: mm }) : t('durH', { h: hh });
+    }
+    var s = Math.round(sec), mi = Math.floor(s / 60), ss = s % 60;
+    if (!mi) return t('durS', { s: ss });
+    return ss ? t('durMS', { m: mi, s: ss }) : t('durM', { m: mi });
+  }
+
+  function noFocus(e) { e.preventDefault(); }   // buttons do not take focus on click (docs/sim-ui.md §3)
+  var refocus = null;                           // the row to give focus back to after a render (keyboard)
+
+  // ── the week ──
+
+  var BANDS = [[8, 'off'], [10, 'work'], [6, 'off']];   // hours of the day: 00–08, 08–18, 18–24
+
+  function stack(costs, top) {
+    return PARTS.map(function (k) {
+      var v = costs[k];
+      return v > 0 ? h('div', { class: 'dt-seg', dataset: { k: k }, style: { height: (100 * v / top) + '%' } }) : null;
+    });
+  }
+
+  function week(s) {
+    var top = Math.max(s.top, 1);
+    var avg = Math.round(s.avg);
+    var days = [];
+    for (var d = 1; d <= 7; d++) {
+      days.push(h('div', { class: 'dt-day' }, BANDS.map(function (bd) {
+        var kind = d <= 5 ? bd[1] : 'off';
+        return h('div', { class: 'dt-band', style: { flex: bd[0] + ' 1 0' } }, stack(s.hour[kind], top));
+      })));
+    }
+    var line = (100 * s.avg / top);
+    days.push(h('div', { class: 'dt-avg', style: { bottom: line + '%' } },
+      h('span', { class: 'dt-avgtag', dataset: line > 82 ? { low: '' } : {} }, t('avgTag', { a: perHour(avg) }))));
+    return h('div', { class: 'dt-week' },
+      h('p', { class: 'dt-head' }, t.parts('headWeek', { w: b(perHour(s.hour.work.sum)), o: b(perHour(s.hour.off.sum)) })),
+      h('div', { class: 'dt-axis', 'aria-hidden': 'true' },
+        h('span', { class: 'dt-tick', translate: 'no', style: { bottom: '0%' } }, money(0)),
+        h('span', { class: 'dt-tick', translate: 'no', style: { bottom: '100%' } }, money(top))),
+      h('div', { class: 'dt-plot', 'aria-hidden': 'true' }, days),
+      h('div', { class: 'dt-days', 'aria-hidden': 'true' }, [1, 2, 3, 4, 5, 6, 7].map(function (i) { return h('span', null, t('d' + i)); })));
+  }
+
+  // ── the levels ──
+
+  function levels(s, chg) {
+    var top = Math.max.apply(null, s.levels.map(function (l) { return l.tot; }).concat(1));
+    var rows = s.levels.map(function (l, i) {
+      var on = l.n === s.p.target, isBest = l.n === s.best;
+      var segs = PARTS.map(function (k) { return [k, l.parts[k]]; }).concat([['ha', l.ha]]).map(function (x) {
+        return x[1] > 0 ? h('div', { class: 'dt-seg', dataset: { k: x[0] }, style: { width: (100 * x[1] / top) + '%' } }) : null;
+      });
+      var nine = i === 0 ? h('span', { class: 'dt-nine', dataset: { v: 'none' } }, t('noRedundancy'))
+        : h('span', { class: 'dt-nine', dataset: { v: s.nines[i - 1].verdict } },
+          t('nineCell', { v: money(s.nines[i - 1].value), c: money(s.nines[i - 1].cost) }));
+      var label = t('levelLabel', { lvl: lvl(l.n), down: t('downYear', { d: dur(l.seconds) }), tot: money(l.tot) });
+      var pick = function () { refocus = l.n; sim.set({ target: l.n }); };
+      return h('div', {
+        class: 'dt-row', role: 'button', tabindex: '0', 'aria-pressed': String(on), 'aria-label': label, title: label,
+        dataset: { n: String(l.n) }, onmousedown: noFocus, onclick: function () { refocus = null; sim.set({ target: l.n }); },
+        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } }
+      },
+      h('span', null, h('span', { class: 'dt-lvl', translate: 'no' }, lvl(l.n)),
+        h('span', { class: 'dt-down' }, t('downYear', { d: dur(l.seconds) }))),
+      h('div', { class: 'dt-bar', 'aria-hidden': 'true' }, segs),
+      h('span', { class: 'dt-tot' + (isBest && chg.indexOf('best') >= 0 ? ' sd-changed' : ''), translate: 'no', dataset: isBest ? { best: '' } : {} }, money(l.tot)),
+      nine);
+    });
+    return h('div', { class: 'dt-levels' }, h('p', { class: 'dt-head' }, t('headLevels')), rows);
+  }
+
+  function result(s, chg) {
+    var key = { base: 'resultBase', save: 'resultSave', loss: 'resultLoss', even: 'resultEven' }[s.outcome];
+    return h('p', { class: 'dt-result' + (chg.indexOf('outcome') >= 0 ? ' sd-changed' : ''), dataset: { o: s.outcome } },
+      t(key, { lvl: lvl(s.p.target), d: money(s.save) }));
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'dt' },
+      week(s),
+      levels(s, chg),
+      result(s, chg),
+      h('p', { class: 'dt-foot' }, t('foot', { w: money(L.WAGE), g: String(L.GROW) }), ' ', t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('.dt-row[data-n="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  // ── the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, x = s.target;
+    var k = L.captionKey(s);
+    var out = t.parts(k.key, {
+      lvl: b(lvl(s.p.target)), down: b(dur(x.seconds)), dc: b(money(x.down)), ha: b(money(x.ha)), tot: b(money(x.tot)),
+      base: b(money(s.base.tot)), d: b(money(s.save))
+    });
+    var bl = s.levels[L.LEVELS.indexOf(s.best)];
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, {
+        lvl: b(lvl(key === 'nNaive' ? s.naive : s.best)), tot: b(money(bl.tot)),
+        v: b(money(s.nines[0].value)), c: b(money(s.nines[0].cost)),
+        w: b(perHour(s.hour.work.sum)), a: b(perHour(Math.round(s.avg)))
+      }));
+    });
+    return out;
+  }
+
+  var labels = {
+    'small-office': 'pSmallOffice', office: 'pOffice', shop: 'pShop', payments: 'pPayments', 'five-nines': 'pFiveNines'
+  };
+  var R = L.RANGES;
+  function range(key, fmt) {
+    return { key: key, type: 'range', label: t(key), min: R[key][0], max: R[key][1], step: R[key][2], format: fmt };
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      // the target is chosen on the stage (the level rows); this hidden param keeps it in the URL and checks it
+      { key: 'target', type: 'choice', label: t('target'), options: L.LEVELS.map(function (n) { return [n, lvl(n)]; }),
+        visible: function () { return false; } },
+      range('rev', perHour),
+      range('off', pct),
+      range('people', function (v) { return t.n('nPeople', v); }),
+      range('fix', perHour),
+      range('pen', perHour),
+      range('ha', function (v) { return t('perYear', { v: money(v) }); }),
+      { type: 'button', label: t('best'), key: 'o', run: function (api) { api.set({ target: api.state.best }); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'dt-rev', label: t('legRev') },
+      { shape: 'dt-staff', label: t('legStaff') },
+      { shape: 'dt-fix', label: t('legFix') },
+      { shape: 'dt-pen', label: t('legPen') },
+      { shape: 'dt-ha', label: t('legHa') },
+      { shape: 'dt-avg', label: t('legAvg') },
+      { shape: 'dt-best', label: t('legBest') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
