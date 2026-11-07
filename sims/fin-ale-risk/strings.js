@@ -1,0 +1,260 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   Every visible string of fin-ale-risk, in both languages (docs/sim-ui.md §9). Same keys in hr and en.
+   The title and subtitle come from sim.json. Numbers are formatted in the page (index.html) and passed in. */
+(function (root) {
+  'use strict';
+
+  var strings = {
+    hr: {
+      stage: 'Registar rizika s očekivanim godišnjim gubitkom i odabranim postupanjem, simulirane godine i najgora godina',
+      risk: 'Rizik',
+      years: 'Simulirane godine',
+      runAgain: 'Ponovi simulaciju',
+      ded: 'Franšiza po događaju',
+      load: 'Premija, % očekivane isplate',
+      r_laptop: 'Izgubljen prijenosnik',
+      r_fraud: 'Lažni račun e-poštom',
+      r_ransom: 'Ucjenjivački program',
+      r_outage: 'Nestanak struje',
+      r_portal: 'Proboj starog portala',
+      ctrl_laptop: 'Šifrirani diskovi',
+      ctrl_fraud: 'Povratni poziv kad se promijeni bankovni račun',
+      ctrl_ransom: 'Nepromjenjiva sigurnosna kopija',
+      ctrl_outage: 'Drugi priključak i agregat',
+      ctrl_portal: 'Godišnja sigurnosna provjera',
+      avoid_laptop: 'Bez prijenosnika, samo stolna računala',
+      avoid_fraud: 'Nema plaćanja novim dobavljačima',
+      avoid_ransom: 'Bez umreženih sustava',
+      avoid_outage: 'Bez usluga na lokaciji',
+      avoid_portal: 'Stari portal se gasi',
+      t_accept: 'Prihvati',
+      t_reduce: 'Smanji',
+      t_transfer: 'Prenesi',
+      t_avoid: 'Izbjegni',
+      lossOf: '{risk}: gubitak po događaju',
+      freqOf: 'Koliko često',
+      treatOf: 'Postupanje',
+      treatGroup: '{risk}: postupanje',
+      costOf: 'Zaštita stoji godišnje',
+      effOfAro: 'Zaštita uklanja dio događaja',
+      effOfSle: 'Zaštita uklanja dio gubitka',
+      avoidOf: 'Odricanje od koristi godišnje',
+      lossOff: 'nije u registru',
+      freqRare: ['{f} (jednom u {n} godinu)', '{f} (jednom u {n} godine)', '{f} (jednom u {n} godina)'],
+      freqOften: ['{n} put godišnje', '{n} puta godišnje', '{n} puta godišnje'],
+      perYr: '{f}/god.',
+      headRisk: 'Rizik',
+      headAle: 'gubitak × učestalost = ALE godišnje',
+      headTreat: 'postupanje',
+      rowAle: '{l} × {f} = {a}',
+      rowOffAle: '—',
+      rowOff: 'Nije u registru: odaberi gubitak po događaju i rizik se dodaje.',
+      rowAccept: 'Prihvaćeno: cijelih {a} godišnje ostaje na tebi.',
+      rowReduceAro: '{ctrl}: −{e} događaja za {c} godišnje; uklanja {rm}',
+      rowReduceSle: '{ctrl}: −{e} svakog gubitka za {c} godišnje; uklanja {rm}',
+      rowTransfer: 'Osiguranje: premija {c} godišnje, po događaju zadržavaš {d}; uklanja {rm}',
+      rowBelowDed: 'Osiguranje: gubitak nije veći od franšize ({d}), pa ne pokriva ništa',
+      rowAvoid: '{avoid}: odricanje od {c} godišnje; uklanja {rm}',
+      vWorth: '✓ isplati se: +{n} godišnje',
+      vEven: '= na nuli: ni dobitka ni gubitka',
+      vNot: '✗ ne isplati se u prosjeku: −{n} godišnje',
+      rowLabel: '{risk}: {a} godišnje',
+      treatLabel: '{risk}: {t}',
+      headYears: '{n}: bez postupanja i s tvojim odabirom',
+      nYears: ['{n} simulirana godina', '{n} simulirane godine', '{n} simuliranih godina'],
+      tagAle: 'ALE {v}',
+      tagExp: 's odabirom {v}',
+      tagWorst: '▼ najgora {v}',
+      tagWorst0: '▼ najgora bez postupanja {v}',
+      tagWorst1: '▼ najgora s odabirom {v}',
+      headTable: 'Godišnje',
+      colBefore: 'bez postupanja',
+      colAfter: 's odabirom',
+      rowExp: 'očekivano',
+      rowAvg: 'prosjek simuliranih',
+      rowWorst: 'najgora godina',
+      rowHit: 'godine s gubitkom',
+      resultNone: 'Bez postupanja: očekivano {ale} godišnje, a najgora od {n} godina {w}',
+      resultSave: 'Postupanje stoji {c} godišnje i uklanja {rm}: u prosjeku {s} godišnje manje; najgora godina {w0} → {w1}',
+      resultEven: 'Postupanje stoji {c} godišnje i uklanja točno toliko: u prosjeku ništa; najgora godina {w0} → {w1}',
+      resultCost: 'Postupanje stoji {c} godišnje i uklanja {rm}: u prosjeku {s} godišnje više; najgora godina {w0} → {w1}',
+      foot: 'Gubitak po događaju je stalan; broj događaja u godini je Poissonov, za svaki rizik neovisno.',
+      illustrative: 'Iznosi su izmišljeni, ali uvjerljivi.',
+      eur: '{n}\u00a0€',
+      pct: '{n}\u00a0%',
+      times: '{n}\u00a0puta',
+      pRegister: 'Registar',
+      pRegisterHint: 'Pet rizika, sve prihvaćeno: ALE je 88 000 € godišnje, a najgora od 100 godina 592 000 €.',
+      pControls: 'Zaštite',
+      pControlsHint: 'Četiri postupanja se isplate, agregat ne: uklanja 9 000 € za 20 000 € godišnje.',
+      pInsure: 'Osiguranje',
+      pInsureHint: 'Ucjenjivački program i portal osigurani: u prosjeku skuplje, a najgora godina mnogo manja.',
+      pRare: 'Rijetko i veliko',
+      pRareHint: 'Milijun eura jednom u 100 godina: ALE 10 000 €, a gotovo svaka godina prođe bez ičega. Pritisni Ponovi simulaciju (N).',
+      pBreakEven: 'Na nuli',
+      pBreakEvenHint: 'Zaštita stoji točno koliko uklanja: očekivani trošak ostaje isti, najgora godina ne.',
+      legBefore: 'godina bez postupanja',
+      legFixed: 'cijena postupanja',
+      legKept: 'zadržani gubitak',
+      legAle: 'ALE bez postupanja',
+      legExp: 'očekivano s odabirom',
+      legWorst: 'najgora godina',
+      legChanged: 'ishod se promijenio: štedi, na nuli ili košta',
+      capEmpty: 'Registar je prazan: odaberi rizik i zadaj mu gubitak po događaju.',
+      capNoLoss: 'Registar očekuje {ale} godišnje, a u {n} simuliranih godina nije se dogodilo ništa: rijedak gubitak ' +
+        'može dugo ostati skriven. Pritisni Ponovi simulaciju.',
+      capNone: 'Registar očekuje {ale} godišnje: zbroj gubitka × učestalosti (ALE). U {n} simuliranih godina prosjek je ' +
+        'bio {avg}, ali najgora je godina stajala {w}, {x} koliko ALE.',
+      capSave: 'Postupanje stoji {c} godišnje i spušta očekivani gubitak s {ale} na {res}: u prosjeku trošiš {s} ' +
+        'godišnje manje. Najgora od {n} godina pada s {w0} na {w1}.',
+      capEven: 'Postupanje stoji {c} godišnje i spušta očekivani gubitak s {ale} na {res}: očekivani trošak ostaje ' +
+        'isti. Najgora od {n} godina ide s {w0} na {w1}.',
+      capCost: 'Postupanje stoji {c} godišnje i spušta očekivani gubitak s {ale} na {res}: u prosjeku trošiš {s} ' +
+        'godišnje više. Najgora od {n} godina ide s {w0} na {w1}.',
+      nNotWorth: 'Ne isplati se u prosjeku: {list}; ne uklanja više ALE-a nego što stoji.',
+      nInsure: 'Osiguranje stoji više od gubitka koji uklanja, za dio koji zadržava osiguratelj; ono kupuje manju najgoru godinu.',
+      nBelowDed: 'Gubitak koji nije veći od franšize osiguranje ne pokriva: osiguratelj ne plaća ništa.',
+      nQuiet: 'U {q} od {n} godina nije se dogodilo ništa: prosjek čini nekoliko teških godina.',
+      explain: '<p><i lang="en">Annualised loss expectancy</i> (<b>očekivani godišnji gubitak</b>, ALE) je ' +
+        '<i lang="en">single loss expectancy</i> (<b>očekivani pojedinačni gubitak</b>, SLE: gubitak po događaju) puta ' +
+        '<i lang="en">annualised rate of occurrence</i> (<b>godišnja stopa pojavljivanja</b>, ARO: koliko puta godišnje): 500 000 € jednom u 20 godina je 25 000 € godišnje.</p>' +
+        '<p>Na rizik se može odgovoriti na četiri načina. <b>Prihvatiti</b> ga. <b>Smanjiti</b> ga zaštitom koja ' +
+        'smanjuje učestalost ili gubitak po događaju. <b>Prenijeti</b> ga, najčešće osiguranjem: ti zadržavaš ' +
+        'franšizu, osiguratelj plaća ostatak za premiju. <b>Izbjeći</b> ga tako da se aktivnost ne radi, uz odricanje ' +
+        'od njezine koristi. Zaštita se isplati kad uklanja <b>više</b> ALE-a nego što godišnje stoji.</p>' +
+        '<p>ALE je prosjek, a ne godina koja će doći. Rijedak velik gubitak skriva se iza malog prosjeka: milijun ' +
+        'eura jednom u 100 godina je samo 10 000 € godišnje, a većina godina prođe bez ičega. Zato se <b>najgora ' +
+        'godina</b> čita uz prosjek. Osiguranje u prosjeku stoji više nego što uklanja (osiguratelj ima troškove i ' +
+        'zaradu), ali kupuje manju najgoru godinu; zaštita poput nepromjenjive sigurnosne kopije smanjuje oboje.</p>' +
+        '<p>Ovdje je gubitak po događaju stalan, a rizici su neovisni. Ograničenja osiguranja, rizici koji dolaze ' +
+        'zajedno i diskontiranje višegodišnjih zaštita izvan su ovog modela.</p>'
+    },
+    en: {
+      stage: 'A risk register with each risk\'s annual loss expectancy and treatment, simulated years and the worst year',
+      risk: 'Risk',
+      years: 'Simulated years',
+      runAgain: 'Run again',
+      ded: 'Deductible per event',
+      load: 'Premium, % of expected payout',
+      r_laptop: 'Lost laptop',
+      r_fraud: 'Fake invoice fraud',
+      r_ransom: 'Ransomware',
+      r_outage: 'Power outage',
+      r_portal: 'Old portal breach',
+      ctrl_laptop: 'Encrypted disks',
+      ctrl_fraud: 'Call back when bank details change',
+      ctrl_ransom: 'An immutable backup copy',
+      ctrl_outage: 'Second feed and generator',
+      ctrl_portal: 'Yearly security review',
+      avoid_laptop: 'No laptops, desktops only',
+      avoid_fraud: 'No payments to new suppliers',
+      avoid_ransom: 'No networked systems at all',
+      avoid_outage: 'No services on site',
+      avoid_portal: 'The old portal is shut down',
+      t_accept: 'Accept',
+      t_reduce: 'Reduce',
+      t_transfer: 'Transfer',
+      t_avoid: 'Avoid',
+      lossOf: '{risk}: loss per event',
+      freqOf: 'How often',
+      treatOf: 'Treatment',
+      treatGroup: '{risk}: treatment',
+      costOf: 'The control costs a year',
+      effOfAro: 'Share of the events it removes',
+      effOfSle: 'Share of each loss it removes',
+      avoidOf: 'Benefit given up a year',
+      lossOff: 'not in the register',
+      freqRare: ['{f} (once in {n} year)', '{f} (once in {n} years)'],
+      freqOften: ['once a year', '{n} times a year'],
+      perYr: '{f}/yr',
+      headRisk: 'Risk',
+      headAle: 'loss × frequency = ALE a year',
+      headTreat: 'treatment',
+      rowAle: '{l} × {f} = {a}',
+      rowOffAle: '—',
+      rowOff: 'Not in the register: choose a loss per event to add it.',
+      rowAccept: 'Accepted: the whole {a} a year stays with you.',
+      rowReduceAro: '{ctrl}: −{e} of the events for {c} a year; removes {rm}',
+      rowReduceSle: '{ctrl}: −{e} of each loss for {c} a year; removes {rm}',
+      rowTransfer: 'Insurance: premium {c} a year, you keep {d} per event; removes {rm}',
+      rowBelowDed: 'Insurance: the loss is within the deductible ({d}), so it covers nothing',
+      rowAvoid: '{avoid}: gives up {c} a year; removes {rm}',
+      vWorth: '✓ worth it: +{n} a year',
+      vEven: '= break-even: no gain, no loss',
+      vNot: '✗ not worth it on average: −{n} a year',
+      rowLabel: '{risk}: {a} a year',
+      treatLabel: '{risk}: {t}',
+      headYears: '{n}: untreated and with your choices',
+      nYears: ['{n} simulated year', '{n} simulated years'],
+      tagAle: 'ALE {v}',
+      tagExp: 'with choices {v}',
+      tagWorst: '▼ worst {v}',
+      tagWorst0: '▼ worst untreated {v}',
+      tagWorst1: '▼ worst with choices {v}',
+      headTable: 'Per year',
+      colBefore: 'untreated',
+      colAfter: 'with choices',
+      rowExp: 'expected',
+      rowAvg: 'simulated average',
+      rowWorst: 'worst year',
+      rowHit: 'years with a loss',
+      resultNone: 'Nothing treated: {ale} a year expected, and the worst of {n} years {w}',
+      resultSave: 'The treatments cost {c} a year and remove {rm}: {s} a year less on average; worst year {w0} → {w1}',
+      resultEven: 'The treatments cost {c} a year and remove exactly that: no change on average; worst year {w0} → {w1}',
+      resultCost: 'The treatments cost {c} a year and remove {rm}: {s} a year more on average; worst year {w0} → {w1}',
+      foot: 'The loss per event is fixed; the events in a year are Poisson, independent for each risk.',
+      illustrative: 'The amounts are made up but plausible.',
+      eur: '€{n}',
+      pct: '{n}%',
+      times: '{n} times',
+      pRegister: 'Register',
+      pRegisterHint: 'Five risks, all accepted: ALE is €88,000 a year, the worst of 100 years €592,000.',
+      pControls: 'Controls',
+      pControlsHint: 'Four treatments pay for themselves, the generator does not: it removes €9,000 for €20,000 a year.',
+      pInsure: 'Insurance',
+      pInsureHint: 'Ransomware and the portal insured: dearer on average, and a much smaller worst year.',
+      pRare: 'Rare and large',
+      pRareHint: 'A million euros once in 100 years: ALE €10,000, and almost every year passes with nothing. Press Run again (N).',
+      pBreakEven: 'Break-even',
+      pBreakEvenHint: 'A control that costs exactly what it removes: the expected cost stays, the worst year does not.',
+      legBefore: 'untreated year',
+      legFixed: 'cost of the treatments',
+      legKept: 'loss kept',
+      legAle: 'ALE untreated',
+      legExp: 'expected with choices',
+      legWorst: 'worst year',
+      legChanged: 'the outcome changed: saving, even or costing',
+      capEmpty: 'The register is empty: choose a risk and give it a loss per event.',
+      capNoLoss: 'The register expects {ale} a year, yet in {n} simulated years nothing happened at all: a rare loss ' +
+        'can stay hidden for a long time. Press Run again.',
+      capNone: 'The register expects {ale} a year: the sum of loss × frequency (ALE). In {n} simulated years the average ' +
+        'was {avg}, but the worst year cost {w}, {x} the ALE.',
+      capSave: 'The treatments cost {c} a year and bring the expected loss down from {ale} to {res}: on average you spend ' +
+        '{s} a year less. The worst of {n} years falls from {w0} to {w1}.',
+      capEven: 'The treatments cost {c} a year and bring the expected loss down from {ale} to {res}: the expected cost ' +
+        'stays the same. The worst of {n} years goes from {w0} to {w1}.',
+      capCost: 'The treatments cost {c} a year and bring the expected loss down from {ale} to {res}: on average you spend ' +
+        '{s} a year more. The worst of {n} years goes from {w0} to {w1}.',
+      nNotWorth: 'Not worth it on average: {list}; it removes no more ALE than it costs.',
+      nInsure: 'Insurance costs more than the loss it removes, by the insurer\'s share; what it buys is a smaller worst year.',
+      nBelowDed: 'A loss no larger than the deductible is not covered: the insurer pays nothing.',
+      nQuiet: 'In {q} of {n} years nothing happened at all: the average is made of a few heavy years.',
+      explain: '<p>The <b>annualised loss expectancy</b> (ALE) is the <b>loss per event</b> (single loss expectancy, SLE) ' +
+        'times <b>how often it happens a year</b> (annualised rate of occurrence, ARO): €500,000 once in 20 years is ' +
+        '€25,000 a year.</p>' +
+        '<p>There are four answers to a risk. <b>Accept</b> it. <b>Reduce</b> it with a control that lowers the ' +
+        'frequency or the loss per event. <b>Transfer</b> it, usually by insurance: you keep the deductible, the insurer ' +
+        'pays the rest for a premium. <b>Avoid</b> it by not doing the activity, and give up its benefit. A control is ' +
+        'worth it when it removes <b>more</b> ALE than it costs a year.</p>' +
+        '<p>The ALE is an average, not the year to come. A rare large loss hides behind a small average: a million euros ' +
+        'once in 100 years is only €10,000 a year, and most years pass with nothing. So read the <b>worst year</b> next ' +
+        'to the average. Insurance costs more on average than it removes (the insurer has costs and a margin), but it ' +
+        'buys a smaller worst year; a control such as an immutable backup copy shrinks both.</p>' +
+        '<p>Here the loss per event is fixed and the risks are independent. Insurance limits, risks that strike together ' +
+        'and discounting multi-year controls are outside this model.</p>'
+    }
+  };
+
+  if (typeof module === 'object' && module.exports) module.exports = strings;
+  else root.SimStrings = strings;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
