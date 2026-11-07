@@ -152,6 +152,12 @@ BUILDS_ON = {
     "fin-depreciation": "fin-capex-opex", "fin-licence-models": "fin-capex-opex",
     "fin-budget-variance": "fin-accruals-cash", "fin-refresh-cycle": "fin-depreciation",
     "fin-sunk-cost": "fin-depreciation", "fin-chargeback": "fin-fixed-variable",
+    # compliance (§4.13): people × roles × rights, risk scoring, incident clocks and the evidence trail are shared, §5.24
+    "cmp-sod-toxic": "cmp-jml-drift", "cmp-privileged-access": "cmp-jml-drift",
+    "cmp-dpia-triage": "cmp-risk-register", "cmp-vendor-tiers": "cmp-risk-register",
+    "cmp-exceptions": "cmp-risk-register", "cmp-cost-of-noncompliance": "fin-ale-risk",
+    "cmp-breach-triage": "cmp-incident-clocks", "cmp-audit-sampling": "cmp-policy-to-record",
+    "cmp-restore-evidence": "cmp-policy-to-record", "cmp-data-subject-request": "cmp-retention-hold",
 }
 
 # ---------------------------------------------------------------- sim folder ids
@@ -201,6 +207,7 @@ def topic_of(cid, area):
         "win": "windows-admin", "sto": "storage", "dr": "storage", "ha": "distributed", "perf": "distributed",
         "arh": "architecture", "os": "os", "ossim": "os", "aut": "theory", "ham": "radio", "kk": "radio",
         "50ohm": "radio", "tool": "classroom", "app": "distributed", "fin": "finance",
+        "cmp": "compliance",
     }.get(pre, "networks")
 
 
@@ -293,7 +300,19 @@ TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"], "ham-multiple-access": ["modul
     "fin-lease-vs-buy": ["investment", "contracts"], "fin-licence-models": ["contracts", "costs"],
     "fin-prepay-discount": ["contracts", "investment"], "fin-indexation-fx": ["contracts"],
     "fin-contingency-reserve": ["budgeting", "risk"], "fin-downtime-cost": ["risk", "costs"],
-    "fin-ale-risk": ["risk"], "fin-sunk-cost": ["investment"], "fin-cost-of-delay": ["investment"]}
+    "fin-ale-risk": ["risk"], "fin-sunk-cost": ["investment"], "fin-cost-of-delay": ["investment"],
+    "cmp-policy-to-record": ["governance", "audit"], "cmp-audit-sampling": ["audit"],
+    "cmp-risk-register": ["risk", "governance"], "cmp-change-risk-class": ["change-management"],
+    "cmp-jml-drift": ["identity-governance", "permissions"], "cmp-sod-toxic": ["identity-governance", "audit"],
+    "cmp-four-eyes": ["audit", "governance"], "cmp-privileged-access": ["identity-governance", "permissions"],
+    "cmp-log-evidence": ["logging", "audit"], "cmp-patch-sla": ["updates", "risk"],
+    "cmp-dpia-triage": ["data-protection", "risk"], "cmp-retention-hold": ["data-protection", "backup"],
+    "cmp-data-subject-request": ["data-protection"], "cmp-breach-triage": ["data-protection", "incident-response"],
+    "cmp-nis2-scope": ["governance"], "cmp-incident-clocks": ["incident-response", "data-protection"],
+    "cmp-bia": ["disaster-recovery", "risk"], "cmp-restore-evidence": ["backup", "audit", "disaster-recovery"],
+    "cmp-vendor-tiers": ["risk", "governance"], "cmp-shared-responsibility": ["governance", "risk"],
+    "cmp-exceptions": ["governance", "risk"], "cmp-maturity-levels": ["governance"],
+    "cmp-cost-of-noncompliance": ["risk", "governance"]}
 
 
 def tags_of(cid):
@@ -322,7 +341,7 @@ ADOPT_COURSES = {
 
 def level_of(courses):
     """sim.json level from the courses: intro courses first, then advanced ones (owner may override)."""
-    if re.search(r"\bFIN\b", courses):
+    if re.search(r"\b(FIN|CMP)\b", courses):
         return "intro"
     if re.search(r"\b(URM|UL|WIN1|AUT)\b", courses):
         return "intro"
@@ -576,6 +595,41 @@ FIN_NOTES = ["## Finance notes (all `fin-` tasks)", "",
     "(catalogue §4.12 has the proposed `money` area).", ""]
 
 
+CMP_NOTES = ["## Compliance notes (all `cmp-` tasks)", "",
+    "- **Who it is for:** IT managers, and IT staff stepping into management, in Croatia; they know the systems, not "
+    "the law or the audit. Each page puts a procedure or a control in motion and shows one contrast (with and without "
+    "the control, written vs operating, the average vs the tail, the clock started at awareness vs at the attack); "
+    "make that contrast the stage, not the rule text.",
+    "- **Not legal advice.** Name a law or standard only where the concept comes from it (GDPR / Opća uredba o zaštiti "
+    "podataka, NIS2 and the Croatian Zakon o kibernetičkoj sigurnosti, ISO/IEC 27001, DORA) and cite the article or "
+    "clause in the explanation, not on the stage. General principles only; no product, vendor or tool names; no step "
+    "that reads as \"do this and you are compliant\". The page says once that it simplifies and is not legal advice.",
+    "- **Primary sources:** the EU texts on EUR-Lex (GDPR is Regulation (EU) 2016/679, NIS2 Directive (EU) 2022/2555, "
+    "DORA Regulation (EU) 2022/2554; use the official Croatian versions for the Croatian strings), the Croatian law in "
+    "Narodne novine, the European Data Protection Board's guidelines (breach notification, impact assessment "
+    "criteria), and ISO/IEC 27001 by clause number only (the text is paid; never quote it). Cite them in SPEC.md.",
+    "- **Deadlines, thresholds and fines:** use the EU text's values where the entry needs them (GDPR's 72 hours and "
+    "one month, NIS2's 24 hours / 72 hours / one month) with the article. Anything Croatian the catalogue marks "
+    "*(check)* in §4.13 (\"Where Croatian and EU practice matters\": bodies, national thresholds, retention periods, "
+    "fine amounts, the regulation's number) is unverified: keep it off the page and copy it into `NOTES.md` under "
+    "\"For the owner\" with the source you would check.",
+    "- **Numbers are illustrative.** Failure rates, team sizes, ticket counts and costs are made-up but plausible, and "
+    "the page says so once; formulas (sampling probability, likelihood × impact, a fine ceiling as the higher of two "
+    "values) are standard and checked in SPEC.md with a small script.",
+    "- **One fictional organisation:** a small made-up firm with made-up people and systems; never a real company, a "
+    "real authority's logo or a copy of an official form. Authorities appear by role (nadzorno tijelo / supervisory "
+    "authority, nadležni CSIRT / competent CSIRT).",
+    "- **Croatian terms:** the terms of the official Croatian texts (voditelj obrade, izvršitelj obrade, ispitanik, "
+    "povreda osobnih podataka, procjena učinka na zaštitu podataka, nadzorno tijelo; ključni i važni subjekti, "
+    "značajan incident); where there is no settled term (legal hold, break-glass, change advisory board) choose one, "
+    "give the English in brackets once, and list your choices in `NOTES.md` so the owner can check them in one place.",
+    "- **Shared models (catalogue §5.24):** keep people × roles × rights, the risk scoring, the incident clocks or the "
+    "evidence trail in its own module file inside your sim folder, pure and tested, so the coordinator can promote it "
+    "to `models/` later. When the entry builds on another sim, copy its module (COMMON.md §6).",
+    "- **Learn tree:** the `npm run check` warning \"in no leaf yet\" is expected; suggest a leaf in your report "
+    "(catalogue §4.13 has the proposed `compliance` area).", ""]
+
+
 def render(cid, r, wave, group, by_id, sids, clusters):
     sid = sids[cid]
     kind = "adopt" if wave == "1" else "build"
@@ -653,6 +707,9 @@ def render(cid, r, wave, group, by_id, sids, clusters):
     if kind == "adopt":
         srcs.append(f"`{adopt_source(cid, r)}` (the original)")
     srcs += sources_of(seed)
+    if cid.startswith("cmp-"):
+        srcs.append("The primary texts under \"Compliance notes\" below (EUR-Lex, Narodne novine, the EDPB's guidelines); "
+                    "mark every number and rule you could not check with *(check)* and list it in `NOTES.md`.")
     lines += ["## Sources", ""]
     lines += [f"- {s}" for s in srcs] if srcs else ["- No local course material. Use the vendor's documentation and "
                                                    "standard textbooks; mark every number and rule you could not check "
@@ -663,6 +720,8 @@ def render(cid, r, wave, group, by_id, sids, clusters):
 
     if cid.startswith("fin-"):
         lines += FIN_NOTES
+    if cid.startswith("cmp-"):
+        lines += CMP_NOTES
     if clusters.get(cid):
         lines += ["## Overlaps (catalogue §5)", ""]
         for num, name, rec in clusters[cid]:
@@ -750,7 +809,9 @@ VIEW_OVERRIDE = {"net-osi-tcpip-map": None, "sec-digital-signature": None, "win-
                  "win-ad-backup-restore": "K2 topology with moving packets", "sto-ec-vs-replication": "K3 block grid",
                  "ham-multiple-access": "K3 block grid", "win-dhcp-policies": "K4 rule table",
                  "win-dhcp-superscope": None,
-                 "win-ntfs-mft": "K3 block grid", "win-dhcp-scope-options": "K4 rule table", "win-dns-policies": "K4 rule table", "win-ipam-address-plan": "K3 block grid", "win-ipam-utilisation": None, "win-ipam-discovery": None, "net-tcp-congestion": None, "perf-utilisation-latency": None}
+                 "win-ntfs-mft": "K3 block grid", "win-dhcp-scope-options": "K4 rule table", "win-dns-policies": "K4 rule table", "win-ipam-address-plan": "K3 block grid", "win-ipam-utilisation": None, "win-ipam-discovery": None, "net-tcp-congestion": None, "perf-utilisation-latency": None,
+                 # compliance pages draw their own (a matrix, a timeline), not the rule table or the block grid
+                 "cmp-privileged-access": None, "cmp-retention-hold": None}
 
 
 def view_for(cid):
@@ -809,7 +870,7 @@ def write_index(tasks, by_id, sids):
               "- The 50ohm maps (`maidenhead`, `aprs_map`, `hamnet_map`): they need live map tiles or external "
               "services, which the build refuses. Revisit if the owner wants online-only pages.", "",
               "## Catalogue id → sim folder", "",
-              "Area prefixes are dropped from folder names except `win-`, `lnx-` and `fin-`; a few names are overridden for "
+              "Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-` and `cmp-`; a few names are overridden for "
               "clarity (`tasks.py` `SIM_ID_OVERRIDE`).", "",
               "| Catalogue id | Sim folder |", "|---|---|"]
     for cid, r, w, g in sorted(tasks, key=lambda t: t[0]):
