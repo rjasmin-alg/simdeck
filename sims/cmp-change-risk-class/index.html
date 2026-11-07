@@ -1,0 +1,384 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cmp-change-risk-class: sending every change to a weekly change advisory board adds days of lead time and makes
+     teams batch changes, so each release is bigger and fails more often; risk classes (standard, normal with the board
+     only for high risk, emergency) cut lead time without raising the failure rate; unrecorded changes show up only as
+     incidents. The stage: three lanes (no process, everything to the board, risk classes) over the same quarter of
+     changes, each deployment a stack of blocks on its day, failed ones hatched with ✗, unrecorded ones dashed, board
+     meetings ticked; beside each lane its lead time, changes per deployment, failure rate and unrecorded changes.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cmp-change-risk-class">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upravljanje promjenama: razredi rizika ili odbor za sve · simdeck</title>
+<meta name="description" content="Provedi tromjesečje promjena bez procesa, kroz tjedni odbor i po razredima rizika; usporedi čekanje, pakete, neuspjehe i promjene bez zapisa.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cmp-change-risk-class",
+  "title": {
+    "hr": "Upravljanje promjenama: razredi rizika ili odbor za sve",
+    "en": "Change management: risk classes or one board for everything"
+  },
+  "concept": {
+    "hr": "Odbor za svaku promjenu rađa velike pakete koji češće padaju; razredi rizika ne",
+    "en": "A board for every change breeds big batches that fail more; risk classes don't"
+  },
+  "summary": {
+    "hr": "Provedi tromjesečje promjena bez procesa, kroz tjedni odbor i po razredima rizika; usporedi čekanje, pakete, neuspjehe i promjene bez zapisa.",
+    "en": "Run a quarter of changes with no process, through a weekly board and by risk class; compare waiting, batches, failures and unrecorded changes."
+  },
+  "tags": [
+    "change-management"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cmp-change-risk-class"]; colours only from kit tokens. */
+[data-sim="cmp-change-risk-class"] .cr {
+  display: grid;
+  grid-template-columns: 19rem minmax(0, 1fr);
+  grid-template-rows: auto repeat(3, minmax(0, 1fr)) auto;
+  column-gap: 0.9rem;
+  height: 100%;
+  padding: 0.4rem 0.8rem 0.3rem;
+  font-size: 1rem;
+}
+[data-sim="cmp-change-risk-class"] .cr-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* the week axis */
+[data-sim="cmp-change-risk-class"] .cr-axis {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(var(--h), minmax(0, 1fr));
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  line-height: 1.3;
+}
+[data-sim="cmp-change-risk-class"] .cr-wk { grid-column: span 5; padding-left: 0.2rem; border-left: var(--line-w) solid var(--line); white-space: nowrap; overflow: hidden; }
+
+/* a lane: the label with its numbers, then the timeline */
+[data-sim="cmp-change-risk-class"] .cr-lab {
+  grid-column: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.3rem 0;
+  border-top: var(--line-w) solid var(--line);
+  line-height: 1.25;
+}
+[data-sim="cmp-change-risk-class"] .cr-lab p { margin: 0; }
+[data-sim="cmp-change-risk-class"] .cr-name { font-weight: 700; font-size: 1.15rem; }
+[data-sim="cmp-change-risk-class"] .cr-sub,
+[data-sim="cmp-change-risk-class"] .cr-lf { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cmp-change-risk-class"] .cr-ms { display: grid; grid-template-columns: 1fr 1fr; gap: 0.1rem 0.6rem; margin: 0.15rem 0; }
+[data-sim="cmp-change-risk-class"] .cr-m { display: flex; flex-direction: column; }
+[data-sim="cmp-change-risk-class"] .cr-mv { font-size: 1.3rem; font-weight: 700; line-height: 1.15; }
+[data-sim="cmp-change-risk-class"] .cr-mv small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="cmp-change-risk-class"] .cr-ml { font-size: var(--fs-sm); }
+[data-sim="cmp-change-risk-class"] .cr-m[data-worst="true"] .cr-mv { color: var(--danger); }
+[data-sim="cmp-change-risk-class"] .cr-m[data-worst="true"] .cr-mv::after { content: ' ▲'; font-size: var(--fs-sm); }
+
+[data-sim="cmp-change-risk-class"] .cr-tl {
+  grid-column: 2;
+  min-height: 0;
+  position: relative;
+  container-type: size;
+  display: grid;
+  grid-template-columns: repeat(var(--h), minmax(0, 1fr));
+  border-top: var(--line-w) solid var(--line);
+  border-bottom: var(--line-w) solid var(--ink);
+  background:
+    repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px calc(100% * 5 / var(--h))),
+    linear-gradient(to right, transparent calc(100% * var(--q) / var(--h)), var(--panel) 0);
+  /* one change's block: the tallest column of any lane fits, labels and the meeting strip included */
+  --u: min(1.6rem, calc((100cqh - var(--lab) * 1.3rem - 1.2rem - var(--gaps) * 2px) / var(--max)));
+}
+[data-sim="cmp-change-risk-class"] .cr-col {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 0 1px 0.9rem;
+}
+[data-sim="cmp-change-risk-class"] .cr-dep {
+  flex: 0 0 auto;
+  height: calc(var(--u) * var(--n));
+  border: 2px solid var(--c1);
+  background: repeating-linear-gradient(to top, var(--c1) 0 calc(var(--u) - 3px), var(--bg) calc(var(--u) - 3px) var(--u));
+  background-position: 0 -2px;
+}
+[data-sim="cmp-change-risk-class"] .cr-tl[data-dense="true"] .cr-dep { background: var(--c1); }
+[data-sim="cmp-change-risk-class"] .cr-dep[data-unrec="true"] { border: 2px dashed var(--ink); background: transparent; }
+[data-sim="cmp-change-risk-class"] .cr-dep[data-failed="true"],
+[data-sim="cmp-change-risk-class"] .cr-tl[data-dense="true"] .cr-dep[data-failed="true"] {
+  border: 2px solid var(--danger);
+  background: repeating-linear-gradient(135deg, var(--danger) 0 0.16rem, transparent 0.16rem 0.4rem);
+}
+[data-sim="cmp-change-risk-class"] .cr-dep[data-failed="true"][data-unrec="true"] { border-style: dashed; }
+[data-sim="cmp-change-risk-class"] .cr-tag {
+  flex: 0 0 1.25rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: visible;
+}
+[data-sim="cmp-change-risk-class"] .cr-tag[data-failed="true"] { color: var(--danger); }
+[data-sim="cmp-change-risk-class"] .cr-meet {
+  position: absolute;
+  left: 50%;
+  bottom: 0.1rem;
+  transform: translateX(-50%);
+  border: 0.35rem solid transparent;
+  border-bottom: 0.55rem solid var(--muted);
+  border-top: 0;
+}
+[data-sim="cmp-change-risk-class"] .cr-foot { grid-column: 1 / -1; margin: 0.3rem 0 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the panel */
+[data-sim="cmp-change-risk-class"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="cmp-change-risk-class"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape^="cr-"] { border-width: 0.15em; }
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape="cr-dep"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape="cr-fail"] {
+  border-color: var(--danger);
+  background: repeating-linear-gradient(135deg, var(--danger) 0 0.12em, transparent 0.12em 0.3em);
+}
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape="cr-unrec"] { background: transparent; border-style: dashed; border-color: var(--ink); }
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape="cr-meet"] {
+  width: 0;
+  height: 0;
+  border: 0.4em solid transparent;
+  border-bottom: 0.65em solid var(--muted);
+  border-top: 0;
+  border-radius: 0;
+  background: transparent;
+}
+[data-sim="cmp-change-risk-class"] .sd-swatch[data-shape="cr-after"] { background: var(--panel); border-color: var(--line); }
+
+/* Phone and portrait: the stage grows with its content; each lane's label goes above its timeline. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cmp-change-risk-class"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cmp-change-risk-class"] .cr { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; padding: 0.4rem; }
+  [data-sim="cmp-change-risk-class"] .cr-axis,
+  [data-sim="cmp-change-risk-class"] .cr-lab,
+  [data-sim="cmp-change-risk-class"] .cr-tl { grid-column: 1; }
+  [data-sim="cmp-change-risk-class"] .cr-axis { order: 0; }
+  [data-sim="cmp-change-risk-class"] .cr-wk { overflow: visible; font-size: 14px; }
+  [data-sim="cmp-change-risk-class"] .cr-wk:nth-child(even) { color: transparent; }
+  [data-sim="cmp-change-risk-class"] .cr-ms { grid-template-columns: 1fr 1fr; }
+  [data-sim="cmp-change-risk-class"] .cr-tl { height: 11rem; }
+  [data-sim="cmp-change-risk-class"] .cr-tag { font-size: 14px; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Upravljanje promjenama: razredi rizika ili odbor za sve</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  // ── numbers in the page's language ──
+
+  /** Tenths as text: 47 → "4,7" / "4.7". */
+  function dec(x10) {
+    var s = Math.floor(x10 / 10) + '.' + (x10 % 10);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function pct(n) { return t('pct', { n: String(n) }); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function freq(I) { return t('b_' + I); }
+
+  // ── the lanes ──
+
+  /** Per lane: the deployments of each day, and what the tallest column needs (blocks, labels, gaps). */
+  function columns(lane, H) {
+    var cols = [];
+    for (var d = 0; d < H; d++) cols.push([]);
+    lane.deploys.forEach(function (x) { cols[x.day].push(x); });
+    var max = 0, lab = 0, gaps = 0;
+    cols.forEach(function (c) {
+      var n = 0, k = 0;
+      c.forEach(function (x) { n += x.size; if (tagOf(x)) k++; });
+      max = Math.max(max, n); lab = Math.max(lab, k); gaps = Math.max(gaps, c.length);
+    });
+    return { cols: cols, max: max, lab: lab, gaps: gaps };
+  }
+  /** The label over a deployment: ✗ when it failed, its size from 3 changes up. */
+  function tagOf(x) { return (x.failed ? '✗' : '') + (x.size >= 3 ? String(x.size) : ''); }
+
+  function title(x, day) {
+    var what = t.n(x.failed ? 'depFail' : 'depOk', x.size) + (x.unrec ? t('depUnrec') : '');
+    return t('dayLabel', { w: Math.floor(day / 5) + 1, d: day % 5 + 1, what: what });
+  }
+
+  function timeline(s, g, c, fit) {
+    var meets = g !== 'none';
+    var cols = c.cols.map(function (list, day) {
+      var kids = [];
+      list.forEach(function (x) {
+        kids.push(h('span', { class: 'cr-dep', title: title(x, day),
+          dataset: { failed: String(x.failed), unrec: String(x.unrec) }, style: { '--n': String(x.size) } }));
+        var tag = tagOf(x);
+        if (tag) kids.push(h('span', { class: 'cr-tag', translate: 'no', dataset: { failed: String(x.failed) } }, tag));
+      });
+      if (meets && L.isMeeting(day, s.p.board)) kids.push(h('span', { class: 'cr-meet' }));
+      return h('div', { class: 'cr-col' }, kids);
+    });
+    var m = s.lanes[g].m;
+    return h('div', {
+      class: 'cr-tl', role: 'img', dataset: { dense: String(fit.max > 30) },
+      'aria-label': t('laneLabel', { name: t('r_' + g), lead: dec(m.lead10), batch: dec(m.batch10), f: m.failed, d: m.deploys, u: m.unrec }),
+      style: { '--h': String(s.horizon), '--q': String(L.DAYS), '--max': String(fit.max), '--lab': String(fit.lab), '--gaps': String(fit.gaps) }
+    }, cols);
+  }
+
+  /** Rule 7: the lane's numbers; the worst value of each across the three lanes is marked. */
+  function label(s, g, worst) {
+    var m = s.lanes[g].m;
+    function cell(key, value, extra) {
+      return h('div', { class: 'cr-m', dataset: { worst: String(worst[key] === g) } },
+        h('span', { class: 'cr-mv cr-num', translate: 'no' }, value, extra ? h('small', null, ' ' + extra) : null),
+        h('span', { class: 'cr-ml' }, t('m_' + key)));
+    }
+    return h('div', { class: 'cr-lab' },
+      h('p', { class: 'cr-name' }, t('r_' + g)),
+      h('p', { class: 'cr-sub' }, t('sub_' + g, { f: freq(s.p.board) })),
+      h('div', { class: 'cr-ms' },
+        cell('lead', dec(m.lead10)),
+        cell('batch', dec(m.batch10)),
+        cell('cfr', pct(m.cfr), m.failed + '/' + m.deploys),
+        cell('unrec', String(m.unrec))),
+      h('p', { class: 'cr-lf', translate: 'no' }, t.n('laneFoot', m.deploys, { r: m.rolled })));
+  }
+
+  /** The lane with the highest value of each number, when one lane alone has it and it is above zero. */
+  function worstOf(s) {
+    var out = {};
+    [['lead', 'lead10'], ['batch', 'batch10'], ['cfr', 'cfr'], ['unrec', 'unrec']].forEach(function (k) {
+      var vals = L.REGIMES.map(function (g) { return s.lanes[g].m[k[1]]; });
+      var top = Math.max.apply(null, vals);
+      var at = vals.filter(function (v) { return v === top; }).length;
+      out[k[0]] = top > 0 && at === 1 ? L.REGIMES[vals.indexOf(top)] : null;
+    });
+    return out;
+  }
+
+  function render(c) {
+    var s = c.state;
+    var fits = {}, fit = { max: 1, lab: 0, gaps: 1 };
+    L.REGIMES.forEach(function (g) {
+      fits[g] = columns(s.lanes[g], s.horizon);
+      fit.max = Math.max(fit.max, fits[g].max); fit.lab = Math.max(fit.lab, fits[g].lab); fit.gaps = Math.max(fit.gaps, fits[g].gaps);
+    });
+    var wk = [];
+    for (var w = 0; w < L.DAYS / 5; w++) wk.push(h('span', { class: 'cr-wk', translate: 'no' }, t('week', { n: w + 1 })));
+    var worst = worstOf(s);
+    var kids = [h('div', { class: 'cr-axis', 'aria-hidden': 'true', style: { '--h': String(s.horizon) } }, wk)];
+    L.REGIMES.forEach(function (g) {
+      fits[g].max = fit.max; fits[g].lab = fit.lab; fits[g].gaps = fit.gaps;
+      kids.push(label(s, g, worst), timeline(s, g, fits[g], fits[g]));
+    });
+    kids.push(h('p', { class: 'cr-foot' }, t('foot')));
+    c.stage.replaceChildren(h('div', { class: 'cr' }, kids));
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var k = L.captionKey(s);
+    var cab = s.lanes.cab.m, cl = s.lanes.classes.m;
+    var out = t.parts(k.key, {
+      f: freq(s.p.board), cl: b(dec(cab.lead10)), cb: b(dec(cab.batch10)), cf: b(cab.failed), cd: b(cab.deploys),
+      cp: b(pct(cab.cfr)), kl: b(dec(cl.lead10)), kp: b(pct(cl.cfr))
+    });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, { n: cab.unrec, u: b(cab.unrec), uf: b(cab.unrecFailed), k: b(s.stdMediumFailed), m: b(cab.meetings) }));
+    });
+    return out;
+  }
+
+  var labels = { weekly: 'pWeekly', fortnight: 'pFortnight', daily: 'pDaily', 'wide-standard': 'pWideStandard', busy: 'pBusy' };
+  var R = L.RANGES;
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'board', type: 'choice', label: t('board'), options: L.BOARDS.map(function (I) { return [I, freq(I)]; }) },
+      { key: 'standard', type: 'choice', label: t('standard'), options: L.STANDARDS.map(function (x) { return [x, t('s_' + x)]; }) },
+      { key: 'load', type: 'range', label: t('load'), min: R.load[0], max: R.load[1], step: 1 },
+      // the seed: "New quarter" adds 1; hidden, kept in the URL
+      { key: 'seed', type: 'range', label: t('newQuarter'), min: R.seed[0], max: R.seed[1], step: 1, visible: function () { return false; } },
+      { type: 'button', label: t('newQuarter'), key: 'n', run: function (api) { api.set({ seed: L.nextSeed(api.params.seed) }); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cr-dep', label: t('legDeploy') },
+      { shape: 'cr-fail', label: t('legFailed') },
+      { shape: 'cr-unrec', label: t('legUnrec') },
+      { shape: 'cr-meet', label: t('legMeeting') },
+      { shape: 'cr-after', label: t('legAfter') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
