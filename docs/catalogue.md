@@ -985,7 +985,7 @@ organisation; Croatian details not yet verified are marked *(check)* and stay of
 - `cmp-log-evidence` — Zapisi kao dokaz: potpuni, točnog vremena, izvan dosega administratora
 - `cmp-patch-sla` — Rokovi za otklanjanje ranjivosti: prosjek i rep
 - `cmp-dpia-triage` — Treba li projektu procjena učinka na zaštitu podataka?
-- `cmp-retention-hold` — Rokovi čuvanja i obustava brisanja zbog spora *(check the term for "legal hold")*
+- `cmp-retention-hold` — Rokovi čuvanja i obustava brisanja zbog spora
 - `cmp-data-subject-request` — Zahtjev ispitanika: pronaći svaku kopiju u roku od mjesec dana
 - `cmp-breach-triage` — Povreda osobnih podataka: evidentirati, prijaviti, obavijestiti
 - `cmp-nis2-scope` — Jesmo li obveznici? Ključni i važni subjekti

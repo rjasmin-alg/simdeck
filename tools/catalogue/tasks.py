@@ -621,8 +621,11 @@ CMP_NOTES = ["## Compliance notes (all `cmp-` tasks)", "",
     "authority, nadležni CSIRT / competent CSIRT).",
     "- **Croatian terms:** the terms of the official Croatian texts (voditelj obrade, izvršitelj obrade, ispitanik, "
     "povreda osobnih podataka, procjena učinka na zaštitu podataka, nadzorno tijelo; ključni i važni subjekti, "
-    "značajan incident); where there is no settled term (legal hold, break-glass, change advisory board) choose one, "
-    "give the English in brackets once, and list your choices in `NOTES.md` so the owner can check them in one place.",
+    "značajan incident). The owner settled these on 2026-11-07, use them as they are: obustava brisanja zbog spora "
+    "(legal hold), odbor za promjene (change advisory board), račun za hitne slučajeve (break-glass account), dolazak, "
+    "premještaj, odlazak (joiner, mover, leaver), načelo četiri oka, razdvajanje dužnosti, razine zrelosti. For any "
+    "other term without a settled Croatian form, choose one, give the English in brackets once, and list your choices "
+    "in `NOTES.md` so the owner can check them in one place.",
     "- **Shared models (catalogue §5.24):** keep people × roles × rights, the risk scoring, the incident clocks or the "
     "evidence trail in its own module file inside your sim folder, pure and tested, so the coordinator can promote it "
     "to `models/` later. When the entry builds on another sim, copy its module (COMMON.md §6).",
