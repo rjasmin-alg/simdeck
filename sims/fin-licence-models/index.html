@@ -1,0 +1,671 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-licence-models: the same software as a perpetual licence or a subscription. On top, the scoreboard: per option
+     the cash paid by the end of the horizon (the lesser ticked), what was expensed, what is still on the balance sheet,
+     and the crossing year. Then the stage's choices (metric, hardware refresh, a maintenance lapse), the licences each
+     metric counts year by year, and two charts: the cash paid so far (the crossing year marked) and each year's
+     expense (amortisation, maintenance, back-fees; the subscription). Ledger: ledger.js (copied from fin-capex-opex);
+     licensing: licensing.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-licence-models">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trajna licenca ili pretplata · simdeck</title>
+<meta name="description" content="Licence kupljene trajno uz godišnje održavanje ili u pretplati: rast korisnika, održavanje i cijene; nađi godinu prijelaza, prekini održavanje, broji po jezgri">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-licence-models",
+  "title": {
+    "hr": "Trajna licenca ili pretplata",
+    "en": "Perpetual licence or subscription"
+  },
+  "concept": {
+    "hr": "Trajna licenca je imovina uz godišnje održavanje, pretplata je trošak",
+    "en": "A perpetual licence is an asset plus maintenance, a subscription an expense"
+  },
+  "summary": {
+    "hr": "Licence kupljene trajno uz godišnje održavanje ili u pretplati: rast korisnika, održavanje i cijene; nađi godinu prijelaza, prekini održavanje, broji po jezgri",
+    "en": "Licences bought outright with yearly maintenance, or subscribed: set user growth, maintenance and price rises; find the crossing year, lapse, count per core."
+  },
+  "tags": [
+    "contracts",
+    "costs"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "per-core"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-licence-models"]; colours only from kit tokens.
+   Each option has a colour, a shape and a line style: perpetual ● solid --c1, subscription ■ dashed --c2.
+   Expense parts by pattern: amortisation solid, maintenance hatched, back-fees dotted (colour is never the only
+   carrier). */
+[data-sim="fin-licence-models"] .lm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+
+/* the options' marks */
+[data-sim="fin-licence-models"] .lm-g {
+  display: inline-block;
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--sw);
+  border: 0.14rem solid var(--ink);
+}
+[data-sim="fin-licence-models"] .lm-g[data-o="perp"] { border-radius: 50%; }
+
+/* the scoreboard */
+[data-sim="fin-licence-models"] .lm-board {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 2.6fr) repeat(3, minmax(0, 1fr)) minmax(0, 1.25fr);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="fin-licence-models"] .lm-board > * {
+  padding: 0.2rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+[data-sim="fin-licence-models"] .lm-board > .lm-top { border-top: 0; }
+[data-sim="fin-licence-models"] .lm-th {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0;
+  line-height: 1.15;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+}
+[data-sim="fin-licence-models"] .lm-th span { font-weight: 400; }
+[data-sim="fin-licence-models"] .lm-th[data-k="opt"] { align-items: flex-start; text-align: left; }
+[data-sim="fin-licence-models"] .lm-th[data-k="cross"] { align-items: center; text-align: center; }
+[data-sim="fin-licence-models"] .lm-name { gap: 0.6rem; }
+[data-sim="fin-licence-models"] .lm-name div { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+[data-sim="fin-licence-models"] .lm-name b { font-size: 1rem; }
+[data-sim="fin-licence-models"] .lm-name span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-licence-models"] .lm-val {
+  justify-content: flex-end;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+[data-sim="fin-licence-models"] .lm-val[data-soft] { font-weight: 400; }
+[data-sim="fin-licence-models"] .lm-val.lm-win { background: color-mix(in srgb, var(--ok) 16%, var(--panel)); }
+[data-sim="fin-licence-models"] .lm-val.lm-win::before { content: '✓'; color: var(--ok); }
+[data-sim="fin-licence-models"] .lm-cross {
+  grid-row: span 2;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  border-left: var(--line-w) solid var(--line);
+  text-align: center;
+  line-height: 1.15;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+[data-sim="fin-licence-models"] .lm-cross b { font-size: 1.5rem; }
+[data-sim="fin-licence-models"] .lm-cross span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-licence-models"] .lm-cross[data-none] { background: var(--panel); }
+[data-sim="fin-licence-models"] .lm-cross[data-none] b { font-size: 1.1rem; }
+[data-sim="fin-licence-models"] .sd-changed { box-shadow: none; outline-offset: -0.25rem; background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-licence-models"] .sd-changed::before,
+[data-sim="fin-licence-models"] .sd-changed span { color: var(--on-hl); }
+
+/* the stage's button groups */
+[data-sim="fin-licence-models"] .lm-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.4rem; }
+[data-sim="fin-licence-models"] .lm-tool { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="fin-licence-models"] .lm-tool-l { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-licence-models"] .lm-tool .sd-seg { flex-wrap: nowrap; }
+[data-sim="fin-licence-models"] .lm-tool button { min-height: 2.2rem; padding: 0 0.7rem; white-space: nowrap; }
+[data-sim="fin-licence-models"] .lm-tool button[aria-pressed="true"] { font-weight: 700; }
+
+/* the licences counted each year */
+[data-sim="fin-licence-models"] .lm-counts {
+  flex: none;
+  display: grid;
+  grid-template-columns: 11rem repeat(var(--h), minmax(0, 1fr));
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-licence-models"] .lm-counts > * {
+  padding: 0.05rem 0.4rem;
+  text-align: center;
+  white-space: nowrap;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+}
+[data-sim="fin-licence-models"] .lm-counts > .lm-chead { border-top: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-licence-models"] .lm-chead[data-refresh] { color: var(--ink); font-weight: 700; }
+[data-sim="fin-licence-models"] .lm-chead[data-refresh]::before { content: '⟳ '; }
+[data-sim="fin-licence-models"] .lm-ry { display: none; }
+[data-sim="fin-licence-models"] .lm-rlabel { text-align: left; font-size: var(--fs-sm); color: var(--muted); display: flex; align-items: baseline; gap: 0.4rem; }
+[data-sim="fin-licence-models"] .lm-rlabel b { color: var(--ink); font-size: 1rem; }
+[data-sim="fin-licence-models"] .lm-cnt { font-size: 1rem; color: var(--muted); }
+[data-sim="fin-licence-models"] [data-counted] { color: var(--ink); font-weight: 700; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+[data-sim="fin-licence-models"] .lm-rlabel[data-counted] { box-shadow: inset 0.3rem 0 0 var(--accent); }
+[data-sim="fin-licence-models"] .lm-rlabel[data-counted]::after { content: '◀'; color: var(--accent); margin-left: auto; }
+[data-sim="fin-licence-models"] .lm-cnt[data-jump] { text-decoration: underline 0.15rem; text-underline-offset: 0.2rem; }
+
+/* the two charts */
+[data-sim="fin-licence-models"] .lm-charts {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.2rem;
+}
+[data-sim="fin-licence-models"] .lm-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+[data-sim="fin-licence-models"] .lm-title {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.8rem;
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--muted);
+}
+[data-sim="fin-licence-models"] .lm-key { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; }
+[data-sim="fin-licence-models"] .lm-key i { display: inline-block; width: 1rem; height: 1rem; border: 0.12rem solid var(--ink); --sw: var(--muted); }
+[data-sim="fin-licence-models"] .lm-plotgrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 6.4rem minmax(0, 1fr);
+  grid-template-rows: minmax(5rem, 1fr) 1.7rem;
+  padding: 0.7rem 1.2rem 0 0;
+}
+[data-sim="fin-licence-models"] .lm-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-licence-models"] .lm-tick {
+  position: absolute;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-licence-models"] .lm-plot {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  border-left: var(--line-w) solid var(--line);
+  border-bottom: 0.2rem solid var(--ink);
+}
+[data-sim="fin-licence-models"] .lm-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.6; }
+[data-sim="fin-licence-models"] .lm-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-licence-models"] .lm-line { fill: none; stroke: var(--sw); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="fin-licence-models"] .lm-line[data-o="sub"] { stroke-dasharray: 12 7; }
+[data-sim="fin-licence-models"] .lm-endmark { position: absolute; transform: translate(-50%, -50%); z-index: 2; }
+[data-sim="fin-licence-models"] .lm-xaxis { position: relative; grid-column: 2; grid-row: 2; }
+[data-sim="fin-licence-models"] .lm-xlabels { position: absolute; inset: 0; display: flex; }
+[data-sim="fin-licence-models"] .lm-xlabels span { flex: 1 1 0; text-align: center; padding-top: 0.15rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-licence-models"] .lm-xlabels span[data-cross] { color: var(--ink); font-weight: 700; }
+
+/* year columns behind both charts: the crossing year outlined, lapsed years hatched */
+[data-sim="fin-licence-models"] .lm-cols { position: absolute; inset: 0; display: flex; }
+[data-sim="fin-licence-models"] .lm-col { position: relative; flex: 1 1 0; min-width: 0; }
+[data-sim="fin-licence-models"] .lm-col[data-cross] { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 0.15rem solid var(--accent); outline-offset: -0.15rem; }
+[data-sim="fin-licence-models"] .lm-col[data-lapsed] {
+  background: repeating-linear-gradient(-45deg, transparent 0 0.5rem, color-mix(in srgb, var(--muted) 22%, transparent) 0.5rem 0.75rem);
+}
+[data-sim="fin-licence-models"] .lm-crosslabel {
+  position: absolute;
+  top: 0.1rem;
+  left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 3;
+}
+[data-sim="fin-licence-models"] .lm-col[data-late] .lm-crosslabel { left: auto; right: 0.3rem; }
+
+/* the expense bars */
+[data-sim="fin-licence-models"] .lm-years { position: absolute; inset: 0; display: flex; }
+[data-sim="fin-licence-models"] .lm-year { flex: 1 1 0; display: flex; gap: 0.25rem; padding: 0 0.5rem; min-width: 0; }
+[data-sim="fin-licence-models"] .lm-barcol { position: relative; flex: 1 1 0; min-width: 0; }
+[data-sim="fin-licence-models"] .lm-stack {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  border: 0.12rem solid var(--ink);
+  border-bottom: 0;
+}
+[data-sim="fin-licence-models"] .lm-seg { flex: none; }
+[data-sim="fin-licence-models"] [data-k="amort"],
+[data-sim="fin-licence-models"] [data-k="fee"] { background: var(--sw); }
+[data-sim="fin-licence-models"] [data-k="maint"] {
+  background: repeating-linear-gradient(45deg, var(--sw) 0 0.25rem, color-mix(in srgb, var(--sw) 25%, var(--bg)) 0.25rem 0.5rem);
+}
+[data-sim="fin-licence-models"] [data-k="back"] {
+  background: radial-gradient(circle, var(--sw) 0.15rem, color-mix(in srgb, var(--sw) 22%, var(--bg)) 0.17rem) 0 0 / 0.55rem 0.55rem;
+}
+[data-sim="fin-licence-models"] .lm-key i[data-k="lapsed"] {
+  border-color: var(--muted);
+  background: repeating-linear-gradient(-45deg, transparent 0 0.2rem, color-mix(in srgb, var(--muted) 45%, transparent) 0.2rem 0.32rem);
+}
+[data-sim="fin-licence-models"] .lm-stack .lm-g { position: absolute; left: 50%; top: -0.75rem; transform: translate(-50%, -50%); width: 0.95rem; height: 0.95rem; }
+
+[data-sim="fin-licence-models"] .sd-ctl[hidden] { display: none; }
+
+[data-sim="fin-licence-models"] .lm-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-licence-models"] .sd-swatch[data-shape="lm-perp"] { border-radius: 50%; }
+[data-sim="fin-licence-models"] .sd-swatch[data-shape="lm-best"] { position: relative; background: color-mix(in srgb, var(--ok) 16%, var(--panel)); border-color: var(--ok); }
+[data-sim="fin-licence-models"] .sd-swatch[data-shape="lm-best"]::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; color: var(--ok); line-height: 1; }
+[data-sim="fin-licence-models"] .sd-swatch[data-shape="lm-cross"] { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border: 0.15rem solid var(--accent); }
+
+/* Phone and portrait: the stage grows with its content; the charts stack; the scoreboard drops the accounting
+   columns (expensed, balance sheet), which need the wide screen. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-licence-models"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-licence-models"] .lm { height: auto; padding: 0.4rem; }
+  [data-sim="fin-licence-models"] .lm-board { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="fin-licence-models"] .lm-board > [data-col] { display: none; }
+  [data-sim="fin-licence-models"] .lm-name { gap: 0.4rem; }
+  [data-sim="fin-licence-models"] .lm-val { padding: 0.2rem 0.3rem; font-size: 1.05rem; }
+  [data-sim="fin-licence-models"] .lm-cross b { font-size: 1.1rem; }
+  [data-sim="fin-licence-models"] .lm-counts { grid-template-columns: 5.5rem repeat(var(--h), minmax(0, 1fr)); }
+  [data-sim="fin-licence-models"] .lm-counts > * { padding: 0.05rem 0.1rem; }
+  [data-sim="fin-licence-models"] .lm-rlabel span,
+  [data-sim="fin-licence-models"] .lm-rw { display: none; }
+  [data-sim="fin-licence-models"] .lm-ry { display: inline; }
+  [data-sim="fin-licence-models"] .lm-chead[data-refresh]::before { content: none; }
+  [data-sim="fin-licence-models"] .lm-chead[data-refresh] { text-decoration: underline 0.15rem; text-underline-offset: 0.2rem; }
+  [data-sim="fin-licence-models"] .lm-counts { overflow-x: auto; }
+  [data-sim="fin-licence-models"] .lm-charts { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-licence-models"] .lm-plotgrid { grid-template-columns: 5.2rem minmax(0, 1fr); grid-template-rows: 14rem 1.7rem; padding-right: 0.6rem; }
+  [data-sim="fin-licence-models"] .lm-year { padding: 0 0.1rem; gap: 0.1rem; }
+  [data-sim="fin-licence-models"] .lm-tool { flex-wrap: wrap; }
+  [data-sim="fin-licence-models"] .lm-tool .sd-seg { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Trajna licenca ili pretplata</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="ledger.js"></script>
+<script src="licensing.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var Lg = window.SimdeckModels.ledger;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { perp: '1', sub: '2' };
+  var NAME = { perp: 'optPerp', sub: 'optSub' };
+  var sim = null;
+  var refocus = null;   // the stage button to give focus back to after a render
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? '\u00a0' : ',');
+  }
+  /** Euros, rounded to the euro (SPEC.md rule 12); minus is U+2212. */
+  function money(x) {
+    var r = Lg.roundMoney(x);
+    return (r < 0 ? '−' : '') + t('eur', { n: group(Math.abs(r)) });
+  }
+  /** A percentage with as many decimals as it needs (0 or 1). */
+  function pct(v) { return t('pct', { n: dec(v, v % 1 ? 1 : 0) }); }
+  function glyph(o) { return h('span', { class: 'lm-g', dataset: { o: o, c: COLOUR[o] } }); }
+
+  // ── the scoreboard ──
+
+  function board(s, chg) {
+    var th = function (k, title, sub, extra) {
+      return h('div', Object.assign({ class: 'lm-th', dataset: { k: k } }, extra || {}), title, sub ? h('span', null, sub) : null);
+    };
+    var cells = [
+      th('opt', t('thOption'), null, { class: 'lm-th lm-top' }),
+      th('paid', t('thPaid'), t('thPaidSub', { h: s.H }), { class: 'lm-th lm-top' }),
+      th('exp', t('thExp'), t('thExpSub'), { class: 'lm-th lm-top', dataset: { k: 'exp', col: 'exp' } }),
+      th('book', t('thBook'), t('thBookSub'), { class: 'lm-th lm-top', dataset: { k: 'book', col: 'book' } }),
+      th('cross', t('thCross'), null, { class: 'lm-th lm-top', dataset: { k: 'cross' } })
+    ];
+    var picked = chg.indexOf('pick') >= 0;
+    ['perp', 'sub'].forEach(function (o, i) {
+      var at = s[o].at;
+      var win = s.pick.indexOf(o) >= 0;
+      var sub = o === 'perp'
+        ? t('subPerp', { price: money(s.price), mf: money(s.maintFee) })
+        : t('subSub', { fee: money(s.fee) });
+      cells.push(h('div', { class: 'lm-name' }, glyph(o), h('div', null, h('b', null, t(NAME[o])), h('span', null, sub))));
+      cells.push(h('div', { class: 'lm-val' + (win ? ' lm-win' : '') + (win && picked ? ' sd-changed' : ''), translate: 'no' }, money(at.cash)));
+      cells.push(h('div', { class: 'lm-val', translate: 'no', dataset: { soft: 'true', col: 'exp' } }, money(at.expense)));
+      cells.push(h('div', { class: 'lm-val', translate: 'no', dataset: { soft: 'true', col: 'book' } }, money(at.book)));
+      if (i === 0) {
+        var changed = chg.indexOf('cross') >= 0 ? ' sd-changed' : '';
+        cells.push(s.cross
+          ? h('div', { class: 'lm-cross' + changed }, h('b', null, t('crossYear', { n: s.cross })), h('span', null, t('crossWhat')))
+          : h('div', { class: 'lm-cross' + changed, dataset: { none: 'true' } }, h('b', null, t('crossNone', { h: s.H }))));
+      }
+    });
+    return h('div', { class: 'lm-board' }, cells);
+  }
+
+  // ── the licences counted each year ──
+
+  function counts(s) {
+    var head = [h('div', { class: 'lm-chead' }, '')];
+    var users = [h('div', { class: 'lm-rlabel', dataset: s.p.metric === 'user' ? { counted: 'true' } : {} }, h('b', null, t('rowUsers')))];
+    var cores = [h('div', { class: 'lm-rlabel', dataset: s.p.metric === 'core' ? { counted: 'true' } : {} },
+      h('b', null, t('rowCores')), h('span', null, t('rowCoresSub')))];
+    s.years.forEach(function (y, i) {
+      var prev = i > 0 ? s.years[i - 1] : null;
+      head.push(h('div', { class: 'lm-chead', dataset: s.refreshIn === y.y ? { refresh: 'true' } : {} },
+        s.refreshIn === y.y
+          ? [h('span', { class: 'lm-rw' }, t('refreshMark')), h('span', { class: 'lm-ry' }, t('yearN', { n: y.y }))]
+          : t('yearN', { n: y.y })));
+      var cu = s.p.metric === 'user' ? { counted: 'true' } : {};
+      var cc = s.p.metric === 'core' ? { counted: 'true' } : {};
+      if (prev && y.perServer > prev.perServer) cc.jump = 'true';
+      users.push(h('div', { class: 'lm-cnt', translate: 'no', dataset: cu }, group(y.users)));
+      cores.push(h('div', { class: 'lm-cnt', translate: 'no', dataset: cc, title: y.servers + ' × ' + y.perServer }, group(y.cores)));
+    });
+    return h('div', { class: 'lm-counts', style: { '--h': String(s.H) }, role: 'table', 'aria-label': t('cntTitle') }, head, users, cores);
+  }
+
+  // ── scales ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step that keeps the axis to about four grid lines. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+  function domainOf(max) {
+    var step = niceStep(Math.max(max, 1000) / 4);
+    return { top: Math.max(step, Math.ceil(max / step) * step), step: step };
+  }
+  function yOf(dom) { return function (v) { return (100 * (dom.top - v) / dom.top) + '%'; }; }
+  function axis(dom, y) {
+    var ticks = [], lines = [];
+    for (var v = 0; v <= dom.top + 1e-6; v += dom.step) {
+      ticks.push(h('span', { class: 'lm-tick', translate: 'no', style: { top: y(v) } }, money(v)));
+      if (v > 0) lines.push(h('div', { class: 'lm-gl', style: { top: y(v) } }));
+    }
+    return { ticks: h('div', { class: 'lm-axis' }, ticks), lines: lines };
+  }
+
+  /** The year columns behind a chart: the crossing year outlined (with its label on the cash chart), lapsed years
+      hatched. */
+  function columns(s, label) {
+    return h('div', { class: 'lm-cols' }, s.years.map(function (y) {
+      var d = {};
+      if (y.y === s.cross) d.cross = 'true';
+      if (y.lapsed) d.lapsed = 'true';
+      if (y.y > s.H / 2) d.late = 'true';
+      return h('div', { class: 'lm-col', dataset: d },
+        label && y.y === s.cross ? h('span', { class: 'lm-crosslabel' }, t('crossLabel', { n: y.y })) : null);
+    }));
+  }
+  function xlabels(s) {
+    return h('div', { class: 'lm-xaxis' }, h('div', { class: 'lm-xlabels' }, s.years.map(function (y) {
+      return h('span', { dataset: y.y === s.cross ? { cross: 'true' } : {} }, t('yearN', { n: y.y }));
+    })));
+  }
+
+  // ── cash paid so far: a step at the start of each year ──
+
+  function cashChart(s) {
+    var H = s.H;
+    var dom = domainOf(Math.max(s.perp.at.cash, s.sub.at.cash));
+    var y = yOf(dom);
+    var ax = axis(dom, y);
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    var yNum = function (v) { return (1000 * (dom.top - v) / dom.top).toFixed(1); };
+    var xNum = function (k) { return (1000 * k / H).toFixed(1); };
+    var marks = [];
+    ['perp', 'sub'].forEach(function (o) {
+      var cum = s[o].cum, pts = [xNum(0) + ',' + yNum(0)];
+      for (var k = 1; k <= H; k++) pts.push(xNum(k - 1) + ',' + yNum(cum[k]), xNum(k) + ',' + yNum(cum[k]));
+      var pl = document.createElementNS(NS, 'polyline');
+      pl.setAttribute('class', 'lm-line');
+      pl.setAttribute('data-o', o);
+      pl.setAttribute('data-c', COLOUR[o]);
+      pl.setAttribute('points', pts.join(' '));
+      svg.appendChild(pl);
+      marks.push(h('span', { class: 'lm-endmark', style: { left: '100%', top: y(cum[H]) } }, glyph(o)));
+    });
+    return h('div', { class: 'lm-panel' },
+      h('p', { class: 'lm-title' }, t('cashTitle')),
+      h('div', { class: 'lm-plotgrid' }, ax.ticks,
+        h('div', { class: 'lm-plot' }, columns(s, true), ax.lines, svg, marks),
+        xlabels(s)));
+  }
+
+  // ── expense in each year ──
+
+  var KINDS = [['amort', 'kAmort'], ['maint', 'kMaint'], ['back', 'kBack']];
+
+  function stack(o, parts, total, top, title) {
+    if (total <= 0.5) return h('div', { class: 'lm-barcol', title: title });
+    var segs = parts.filter(function (x) { return x[1] > 0.5; }).map(function (x) {
+      return h('div', { class: 'lm-seg', dataset: { k: x[0] }, style: { height: (100 * x[1] / total) + '%' } });
+    });
+    return h('div', { class: 'lm-barcol', title: title },
+      h('div', { class: 'lm-stack', dataset: { c: COLOUR[o] }, style: { height: (100 * total / top) + '%' } }, segs, glyph(o)));
+  }
+
+  function expenseChart(s) {
+    var max = 0;
+    s.years.forEach(function (y) { max = Math.max(max, y.perp.total, y.sub.total); });
+    var dom = domainOf(max);
+    var y = yOf(dom);
+    var ax = axis(dom, y);
+    var years = s.years.map(function (yr) {
+      var lab = function (o, v) { return t(NAME[o]) + ', ' + t('yearN', { n: yr.y }) + ': ' + money(v); };
+      return h('div', { class: 'lm-year' },
+        stack('perp', KINDS.map(function (k) { return [k[0], yr.perp[k[0]]]; }), yr.perp.total, dom.top, lab('perp', yr.perp.total)),
+        stack('sub', [['fee', yr.sub.fee]], yr.sub.total, dom.top, lab('sub', yr.sub.total)));
+    });
+    var key = KINDS.map(function (k) { return h('span', { class: 'lm-key' }, h('i', { dataset: { k: k[0] } }), t(k[1])); });
+    if (s.lapse) key.push(h('span', { class: 'lm-key' }, h('i', { dataset: { k: 'lapsed' } }), t('kLapsed')));
+    return h('div', { class: 'lm-panel' },
+      h('p', { class: 'lm-title' }, h('span', null, t('expTitle')), key),
+      h('div', { class: 'lm-plotgrid' }, ax.ticks,
+        h('div', { class: 'lm-plot' }, columns(s, false), ax.lines, h('div', { class: 'lm-years' }, years)),
+        xlabels(s)));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  // ── the stage's own controls: metric, hardware refresh, a maintenance lapse ──
+
+  function buttons(label, key, options, current) {
+    return h('div', { class: 'lm-tool', role: 'group', 'aria-label': label },
+      h('span', { class: 'lm-tool-l' }, label),
+      h('div', { class: 'sd-seg' }, options.map(function (o) {
+        return h('button', {
+          type: 'button', 'aria-pressed': String(o[0] === current), dataset: { key: key + ':' + o[0] },
+          onclick: function () {
+            var patch = {};
+            patch[key] = o[0];
+            refocus = key + ':' + o[0];
+            sim.set(patch);
+          }
+        }, o[1]);
+      })));
+  }
+
+  function tools(s) {
+    var p = s.p, H = s.H;
+    var refresh = [[0, t('refreshNone')]], lapse = [[0, t('lapseNone')]], gap = [];
+    for (var y = 3; y <= Math.min(5, H); y++) refresh.push([y, t('yearOrd', { n: y })]);
+    if (s.refreshIn > 0 && !refresh.some(function (o) { return o[0] === s.refreshIn; })) refresh.push([s.refreshIn, t('yearOrd', { n: s.refreshIn })]);
+    for (y = 2; y <= Math.min(5, H - 1); y++) lapse.push([y, t('yearOrd', { n: y })]);
+    if (p.lapse > 0 && !lapse.some(function (o) { return o[0] === p.lapse; })) lapse.push([p.lapse, t('yearOrd', { n: p.lapse })]);
+    for (var g = 1; g <= Math.min(3, H - Math.max(p.lapse, 1)); g++) gap.push([g, t.n('gapN', g)]);
+    return h('div', { class: 'lm-tools' },
+      buttons(t('metric'), 'metric', [['user', t('metricUser')], ['core', t('metricCore')]], p.metric),
+      buttons(t('refresh'), 'refresh', refresh, s.refreshIn),
+      buttons(t('lapse'), 'lapse', lapse, p.lapse),
+      p.lapse > 0 ? buttons(t('gap'), 'gap', gap, p.gap) : null);
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'lm' }, board(s, chg), tools(s), counts(s),
+      h('div', { class: 'lm-charts' }, cashChart(s), expenseChart(s)),
+      h('p', { class: 'lm-foot' }, t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-key="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    var b = function (x) { return h('b', { translate: 'no' }, String(x)); };
+    var out = k.key === 'capCross'
+      ? t.parts('capCross', { y: b(s.cross), h: b(s.H), s: b(money(s.sub.at.cash)), p: b(money(s.perp.at.cash)) })
+      : t.parts('capNever', { h: b(s.H), s: b(money(s.sub.at.cash)), p: b(money(s.perp.at.cash)) });
+    var sp = s.span;
+    k.notes.forEach(function (key) {
+      var vars;
+      if (key === 'nLapse') {
+        var lp = s.lapse;
+        var years = lp.from === lp.to ? t('yrsOne', { a: lp.from }) : t('yrsMany', { a: lp.from, b: lp.to });
+        vars = { years: years, skip: b(money(lp.skipped)), r: b(lp.back), q: b(lp.back), paid: b(money(lp.paid)), fee: b(pct(100 * L.C.fee)), extra: b(money(lp.extra)) };
+      } else if (key === 'nExpense') {
+        vars = { cash: b(money(s.perp.first.cash)), exp: b(money(s.perp.first.expense)), life: b(L.C.life) };
+      } else {
+        vars = { u1: b(group(sp.u1)), uH: b(group(sp.uH)), c1: b(group(sp.c1)), cH: b(group(sp.cH)), r: b(s.refreshIn) };
+      }
+      out.push(' ');
+      out = out.concat(t.parts(key, vars));
+    });
+    return out;
+  }
+
+  var labels = {
+    'crossing': 'pCrossing', 'flat': 'pFlat', 'lapse': 'pLapse',
+    'per-core': 'pPerCore', 'core-no-refresh': 'pCoreNoRefresh', 'short': 'pShort'
+  };
+  var R = L.LIM;
+  var never = function () { return false; };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'growth', type: 'range', label: t('growth'), min: R.growth.min, max: R.growth.max, step: R.growth.step, format: pct },
+      { key: 'maint', type: 'range', label: t('maint'), min: R.maint.min, max: R.maint.max, step: R.maint.step, format: pct },
+      { key: 'rise', type: 'range', label: t('rise'), min: R.rise.min, max: R.rise.max, step: R.rise.step, format: pct },
+      { key: 'horizon', type: 'range', label: t('horizon'), min: R.horizon.min, max: R.horizon.max, step: R.horizon.step, format: function (v) { return t.n('horizonN', v); } },
+      // set on the stage (the button groups) or fixed (the subscription price); hidden here, kept in the URL and clamped
+      { key: 'sub', type: 'range', label: t('sub'), min: R.sub.min, max: R.sub.max, step: R.sub.step, visible: never },
+      { key: 'metric', type: 'choice', label: t('metric'), options: [['user', t('metricUser')], ['core', t('metricCore')]], visible: never },
+      { key: 'refresh', type: 'range', label: t('refresh'), min: R.refresh.min, max: R.refresh.max, step: 1, visible: never },
+      { key: 'lapse', type: 'range', label: t('lapse'), min: R.lapse.min, max: R.lapse.max, step: 1, visible: never },
+      { key: 'gap', type: 'range', label: t('gap'), min: R.gap.min, max: R.gap.max, step: 1, visible: never }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'lm-perp', c: 1, label: t('legPerp') },
+      { shape: 'lm-sub', c: 2, label: t('legSub') },
+      { shape: 'lm-best', label: t('legBest') },
+      { shape: 'lm-cross', label: t('legCross') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
