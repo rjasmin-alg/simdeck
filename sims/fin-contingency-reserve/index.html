@@ -1,0 +1,520 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-contingency-reserve: each line of a project estimate is a range skewed towards overruns, so the total's median
+     is above the sum of the most likely values; the reserve buys a level of confidence. The stage: the five lines as
+     triangles (most likely and average marked; click a row to edit it), the totals of many trials as a histogram with
+     the cumulative share, the sum of the most likely values and the chosen level's budget, the reserve between them;
+     beside it the ladder of confidence levels (click a row to choose it).
+     Draws and levels: reserve.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-contingency-reserve">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pričuva za nepredviđene troškove: P50 ili P80 · simdeck</title>
+<meta name="description" content="Zadaj raspone stavki projekta, pokreni mnogo pokusa, odaberi razinu pouzdanosti i pročitaj koliku pričuvu traži.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-contingency-reserve",
+  "title": {
+    "hr": "Pričuva za nepredviđene troškove: P50 ili P80",
+    "en": "Contingency reserve: P50 vs P80"
+  },
+  "concept": {
+    "hr": "Rasponi stavki nagnuti su prema prekoračenju; pričuva kupuje pouzdanost",
+    "en": "Line ranges lean towards overruns; the reserve buys a level of confidence"
+  },
+  "summary": {
+    "hr": "Zadaj raspone stavki projekta, pokreni mnogo pokusa, odaberi razinu pouzdanosti i pročitaj koliku pričuvu traži.",
+    "en": "Set ranges for the lines of a project estimate, run many trials, choose the confidence level and read the reserve it needs."
+  },
+  "tags": [
+    "budgeting",
+    "risk"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-contingency-reserve"]; colours only from kit tokens. */
+[data-sim="fin-contingency-reserve"] .cr {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+[data-sim="fin-contingency-reserve"] .cr-head { margin: 0 0 0.25rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; }
+[data-sim="fin-contingency-reserve"] .cr-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* the lines: one row each, a button that chooses the line the sliders edit */
+[data-sim="fin-contingency-reserve"] .cr-lines { flex: none; display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="fin-contingency-reserve"] .cr-row {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) minmax(0, 24rem);
+  column-gap: 0.8rem;
+  align-items: center;
+  padding: 0.05rem 0.5rem;
+  border: 0.2rem solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+[data-sim="fin-contingency-reserve"] .cr-row:hover,
+[data-sim="fin-contingency-reserve"] .cr-lad:hover { background: color-mix(in srgb, var(--panel) 60%, transparent); }
+[data-sim="fin-contingency-reserve"] .cr-row:focus-visible,
+[data-sim="fin-contingency-reserve"] .cr-lad:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="fin-contingency-reserve"] .cr-row[aria-pressed="true"],
+[data-sim="fin-contingency-reserve"] .cr-lad[aria-pressed="true"] { border-color: var(--ink); background: var(--panel); }
+[data-sim="fin-contingency-reserve"] .cr-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="fin-contingency-reserve"] .cr-row[aria-pressed="true"] .cr-name::before,
+[data-sim="fin-contingency-reserve"] .cr-lad[aria-pressed="true"] .cr-p::before { content: '▶ '; }
+[data-sim="fin-contingency-reserve"] .cr-track { position: relative; height: 1.45rem; border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="fin-contingency-reserve"] .cr-tri {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  min-width: 0.2rem;
+  background: color-mix(in srgb, var(--c3) 45%, var(--bg));
+}
+[data-sim="fin-contingency-reserve"] .cr-row[aria-pressed="true"] .cr-tri { background: var(--c3); }
+[data-sim="fin-contingency-reserve"] .cr-tick { position: absolute; bottom: 0; height: 100%; width: 0; pointer-events: none; }
+[data-sim="fin-contingency-reserve"] .cr-tick[data-k="ml"] { border-left: 0.2rem solid var(--ink); margin-left: -0.1rem; }
+[data-sim="fin-contingency-reserve"] .cr-tick[data-k="mean"] { border-left: 0.2rem dashed var(--ink); margin-left: -0.1rem; height: 130%; }
+[data-sim="fin-contingency-reserve"] .cr-nums { display: flex; justify-content: space-between; gap: 0.6rem; font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="fin-contingency-reserve"] .cr-nums > :last-child { color: var(--muted); }
+[data-sim="fin-contingency-reserve"] .cr-sum { margin: 0.15rem 0 0; padding: 0 0.7rem; font-size: var(--fs-sm); font-weight: 700; }
+
+/* the trials and the ladder */
+[data-sim="fin-contingency-reserve"] .cr-mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  column-gap: 1rem;
+}
+[data-sim="fin-contingency-reserve"] .cr-chart {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.6rem;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  column-gap: 0.4rem;
+}
+[data-sim="fin-contingency-reserve"] .cr-chart > .cr-head { grid-column: 1 / -1; }
+[data-sim="fin-contingency-reserve"] .cr-plot {
+  grid-column: 1;
+  grid-row: 2;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.0625rem;
+  padding-top: 4.6rem;            /* room for the two tags above the bars */
+  border-left: var(--line-w) solid var(--ink);
+  border-bottom: var(--line-w) solid var(--ink);
+}
+[data-sim="fin-contingency-reserve"] .cr-bin { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; }
+[data-sim="fin-contingency-reserve"] .cr-seg { flex: none; min-height: 0; }
+[data-sim="fin-contingency-reserve"] [data-k="in"] { background: var(--c1); }
+[data-sim="fin-contingency-reserve"] [data-k="res"] {
+  background: repeating-linear-gradient(135deg, var(--c2) 0 0.25rem, color-mix(in srgb, var(--c2) 25%, var(--bg)) 0.25rem 0.5rem);
+}
+[data-sim="fin-contingency-reserve"] [data-k="over"] {
+  background: radial-gradient(circle, var(--c4) 0 32%, transparent 36%) 0 0 / 0.45rem 0.45rem, color-mix(in srgb, var(--c4) 18%, var(--bg));
+}
+[data-sim="fin-contingency-reserve"] .cr-layer { position: absolute; left: 0; right: 0; bottom: 0; top: 4.6rem; pointer-events: none; }
+[data-sim="fin-contingency-reserve"] .cr-curve { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-contingency-reserve"] .cr-curve polyline { fill: none; stroke: var(--ink); stroke-width: 3; vector-effect: non-scaling-stroke; }
+[data-sim="fin-contingency-reserve"] .cr-curve line { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 2 5; vector-effect: non-scaling-stroke; }
+[data-sim="fin-contingency-reserve"] .cr-mark { position: absolute; bottom: 0; top: -4.6rem; width: 0; pointer-events: none; }
+[data-sim="fin-contingency-reserve"] .cr-mark[data-k="base"] { border-left: 0.2rem dashed var(--ink); margin-left: -0.1rem; }
+[data-sim="fin-contingency-reserve"] .cr-mark[data-k="level"] { border-left: 0.3rem solid var(--ink); margin-left: -0.15rem; }
+[data-sim="fin-contingency-reserve"] .cr-tag {
+  position: absolute;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+[data-sim="fin-contingency-reserve"] .cr-mark[data-k="base"] .cr-tag { top: 0; border: var(--line-w) dashed var(--ink); background: var(--bg); }
+[data-sim="fin-contingency-reserve"] .cr-mark[data-k="level"] .cr-tag { top: 2.2rem; background: var(--ink); color: var(--bg); }
+[data-sim="fin-contingency-reserve"] .cr-tag[data-side="r"] { left: 0.3rem; }
+[data-sim="fin-contingency-reserve"] .cr-tag[data-side="l"] { right: 0.3rem; }
+[data-sim="fin-contingency-reserve"] .cr-share { grid-column: 2; grid-row: 2; position: relative; margin-top: 4.6rem; }
+[data-sim="fin-contingency-reserve"] .cr-share > span,
+[data-sim="fin-contingency-reserve"] .cr-ticks > span {
+  position: absolute;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-contingency-reserve"] .cr-share > span { left: 0; transform: translateY(50%); }
+[data-sim="fin-contingency-reserve"] .cr-ticks { grid-column: 1; grid-row: 3; position: relative; height: 1.4rem; }
+[data-sim="fin-contingency-reserve"] .cr-ticks > span { top: 0.25rem; transform: translateX(-50%); }
+[data-sim="fin-contingency-reserve"] .cr-ticks > span:first-child { transform: none; }
+[data-sim="fin-contingency-reserve"] .cr-ticks > span:last-child { transform: translateX(-100%); }
+[data-sim="fin-contingency-reserve"] .cr-brk { grid-column: 1; grid-row: 4; position: relative; height: 1.9rem; }
+[data-sim="fin-contingency-reserve"] .cr-brk > div {
+  position: absolute;
+  top: 0.2rem;
+  height: 0.7rem;
+  border: var(--line-w) solid var(--ink);
+  border-top: 0;
+}
+[data-sim="fin-contingency-reserve"] .cr-brk > span {
+  position: absolute;
+  top: 0.55rem;
+  transform: translateX(-50%);
+  padding: 0 0.35rem;
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+[data-sim="fin-contingency-reserve"] .cr-ladder { min-height: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="fin-contingency-reserve"] .cr-lad {
+  flex: 1 0 auto;
+  max-height: 3.6rem;
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 0.5rem;
+  align-content: center;
+  padding: 0.05rem 0.5rem;
+  border: 0.2rem solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+[data-sim="fin-contingency-reserve"] .cr-p { grid-row: 1 / 3; align-self: center; font-size: var(--fs-lg); font-weight: 700; white-space: nowrap; }
+[data-sim="fin-contingency-reserve"] .cr-b { font-weight: 700; text-align: right; line-height: 1.15; }
+[data-sim="fin-contingency-reserve"] .cr-r { font-size: var(--fs-sm); text-align: right; color: var(--muted); line-height: 1.15; }
+
+/* the result and the footnote */
+[data-sim="fin-contingency-reserve"] .cr-result {
+  flex: none;
+  align-self: flex-start;
+  margin: 0;
+  padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+[data-sim="fin-contingency-reserve"] .cr-result[data-o="covered"] { border-style: dashed; }
+[data-sim="fin-contingency-reserve"] .cr-result.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-contingency-reserve"] .cr-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the panel: presets in two columns, sliders tighter, so it fits 1920×1080 */
+[data-sim="fin-contingency-reserve"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="fin-contingency-reserve"] .sd-group { gap: 0.3rem; }
+[data-sim="fin-contingency-reserve"] .sd-ctl { gap: 0.1rem; }
+[data-sim="fin-contingency-reserve"] .sd-range { height: 1.5rem; }
+[data-sim="fin-contingency-reserve"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape^="cr-"] { border-radius: 0; }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-in"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-res"] { border-color: var(--c2); background: repeating-linear-gradient(135deg, var(--c2) 0 0.18em, color-mix(in srgb, var(--c2) 25%, var(--bg)) 0.18em 0.36em); }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-over"] { border-color: var(--c4); background: radial-gradient(circle, var(--c4) 0 32%, transparent 36%) 0 0 / 0.36em 0.36em, color-mix(in srgb, var(--c4) 18%, var(--bg)); }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-base"],
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-level"],
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-mean"],
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-ml"] { width: 0; background: transparent; border-width: 0 0 0 0.2em; border-color: var(--ink); }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-base"],
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-mean"] { border-left-style: dashed; }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-level"] { border-left-width: 0.3em; }
+[data-sim="fin-contingency-reserve"] .sd-swatch[data-shape="cr-curve"] { height: 0.7em; background: transparent; border-width: 0 0.2em 0.2em 0; border-color: var(--ink); border-radius: 0 0 0.6em 0; transform: scaleX(-1); }
+
+/* Phone and portrait: the stage grows with its content; rows wrap. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-contingency-reserve"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-contingency-reserve"] .cr { height: auto; padding: 0.4rem; }
+  [data-sim="fin-contingency-reserve"] .cr-row { grid-template-columns: minmax(0, 1fr); row-gap: 0.1rem; padding: 0.2rem 0.4rem; }
+  [data-sim="fin-contingency-reserve"] .cr-nums { flex-wrap: wrap; }
+  [data-sim="fin-contingency-reserve"] .cr-mid { grid-template-columns: minmax(0, 1fr); row-gap: 0.6rem; }
+  [data-sim="fin-contingency-reserve"] .cr-chart { height: 22rem; grid-template-columns: minmax(0, 1fr) 3rem; }
+  [data-sim="fin-contingency-reserve"] .cr-lad { flex: none; }
+  [data-sim="fin-contingency-reserve"] .cr-ticks > span:not(:first-child, :last-child) { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Pričuva za nepredviđene troškove: P50 ili P80</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="reserve.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (65 443 / 65,443). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  function money(x) { return t('eur', { n: group(Math.abs(Math.round(x))) }); }
+  function pct(n) { return t('pct', { n: String(n) }); }
+  /** A share in tenths of a per cent, with one decimal (1,5 % / 1.5%). */
+  function share(tenths) {
+    var s = (tenths / 10).toFixed(1);
+    return t('share', { n: Simdeck.lang === 'hr' ? s.replace('.', ',') : s });
+  }
+  function pq(q) { return t('pq', { q: q }); }
+  function lineName(id) { return t('line_' + id); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+
+  function noFocus(e) { e.preventDefault(); }   // buttons do not take focus on click (docs/sim-ui.md §3)
+  var refocus = null;                           // the row to give focus back to after a render (keyboard)
+
+  /** A stage row that acts as a button: click, or Enter / Space when focused. */
+  function rowButton(cls, on, label, sel, apply, children) {
+    return h('div', {
+      class: cls, role: 'button', tabindex: '0', 'aria-pressed': String(on), 'aria-label': label, title: label,
+      dataset: { sel: sel }, onmousedown: noFocus,
+      onclick: function () { refocus = null; apply(); },
+      onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); refocus = sel; apply(); } }
+    }, children);
+  }
+
+  // ── the lines ──
+
+  function lines(s) {
+    var top = s.top;
+    var x = function (v) { return (100 * v / top) + '%'; };
+    var rows = s.lines.map(function (l) {
+      var w = l.hi - l.lo, m = w ? 100 * (l.ml - l.lo) / w : 50;
+      var label = t('lineLabel', { line: lineName(l.id), lo: money(l.lo), hi: money(l.hi), ml: money(l.ml) });
+      return rowButton('cr-row', l.id === s.p.line, label, 'line-' + l.id, function () { sim.set({ line: l.id }); }, [
+        h('span', { class: 'cr-name' }, lineName(l.id)),
+        h('div', { class: 'cr-track', 'aria-hidden': 'true' },
+          h('div', { class: 'cr-tri', style: { left: x(l.lo), width: (100 * w / top) + '%',
+            clipPath: w ? 'polygon(0 100%, ' + m + '% 0, 100% 100%)' : 'none' } }),
+          h('div', { class: 'cr-tick', dataset: { k: 'mean' }, style: { left: x((l.lo + l.ml + l.hi) / 3) } }),
+          h('div', { class: 'cr-tick', dataset: { k: 'ml' }, style: { left: x(l.ml) } })),
+        h('span', { class: 'cr-nums' },
+          h('span', { class: 'cr-num', translate: 'no' }, t('lineNums', { lo: money(l.lo), hi: money(l.hi) })),
+          h('span', null, t('lineMl', { ml: money(l.ml), m: money(l.mean) })))
+      ]);
+    });
+    return h('div', { class: 'cr-lines' },
+      h('p', { class: 'cr-head' }, t('headLines')),
+      rows,
+      h('p', { class: 'cr-sum' }, t('sumRow', { base: money(s.base), m: money(s.mean) })));
+  }
+
+  // ── the trials ──
+
+  function chart(s) {
+    var hs = s.hist, span = hs.hi - hs.lo;
+    var px = function (v) { return 100 * (v - hs.lo) / span; };
+    var most = Math.max.apply(null, hs.bins.map(function (x) { return x.in + x.res + x.over; }).concat(1));
+    var bins = hs.bins.map(function (x) {
+      return h('div', { class: 'cr-bin' }, ['in', 'res', 'over'].map(function (k) {
+        return x[k] ? h('div', { class: 'cr-seg', dataset: { k: k }, style: { height: (100 * x[k] / most) + '%' } }) : null;
+      }));
+    });
+    // the S-curve: the cumulative share at each bin's upper edge (viewBox 1000 × 1000, y down)
+    var cum = 0, pts = ['0,1000'];
+    hs.bins.forEach(function (x, i) {
+      cum += x.in + x.res + x.over;
+      pts.push((1000 * (i + 1) / hs.bins.length).toFixed(1) + ',' + (1000 - 1000 * cum / s.n).toFixed(1));
+    });
+    var lx = px(s.at.budget), bx = px(s.base);
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'cr-curve');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    var guide = document.createElementNS(NS, 'line');   // the chosen share, across to the budget
+    guide.setAttribute('x1', '0');
+    guide.setAttribute('x2', String(10 * lx));
+    guide.setAttribute('y1', String(1000 - 10 * s.at.q));
+    guide.setAttribute('y2', String(1000 - 10 * s.at.q));
+    var poly = document.createElementNS(NS, 'polyline');
+    poly.setAttribute('points', pts.join(' '));
+    svg.append(guide, poly);
+
+    function mark(k, x, text) {
+      return h('div', { class: 'cr-mark', dataset: { k: k }, style: { left: x + '%' } },
+        h('span', { class: 'cr-tag', translate: 'no', dataset: { side: x > 55 ? 'l' : 'r' } }, text));
+    }
+    var brk = s.at.reserve > 0
+      ? [h('div', { style: { left: bx + '%', width: (lx - bx) + '%' } }),
+        h('span', { style: { left: ((bx + lx) / 2) + '%' } }, t('bracket', { v: money(s.at.reserve) }))]
+      : [];
+    return h('div', { class: 'cr-chart' },
+      h('p', { class: 'cr-head' }, t('headTrials', { n: t.n('nTrials', s.n, { n: group(s.n) }) })),
+      h('div', { class: 'cr-plot', 'aria-hidden': 'true' }, bins,
+        h('div', { class: 'cr-layer' }, svg,
+          mark('base', bx, t('tagBase', { v: money(s.base) })),
+          mark('level', lx, t('tagLevel', { p: pq(s.at.q), v: money(s.at.budget) })))),
+      h('div', { class: 'cr-share', 'aria-hidden': 'true', title: t('axisShare') }, [0, 50, 100].map(function (q) {
+        return h('span', { translate: 'no', style: { bottom: q + '%' } }, pct(q));
+      })),
+      h('div', { class: 'cr-ticks', 'aria-hidden': 'true' }, hs.ticks.map(function (v) {
+        return h('span', { translate: 'no', style: { left: px(v) + '%' } }, money(v));
+      })),
+      h('div', { class: 'cr-brk' }, brk));
+  }
+
+  // ── the ladder of confidence levels ──
+
+  function ladder(s) {
+    return h('div', { class: 'cr-ladder' },
+      h('p', { class: 'cr-head' }, t('headLadder')),
+      s.levels.map(function (l) {
+        var label = t('ladderLabel', { p: pq(l.q), b: money(l.budget) });
+        return rowButton('cr-lad', l.q === s.p.conf, label, 'conf-' + l.q, function () { sim.set({ conf: l.q }); }, [
+          h('span', { class: 'cr-p', translate: 'no' }, pq(l.q)),
+          h('span', { class: 'cr-b cr-num', translate: 'no' }, money(l.budget)),
+          h('span', { class: 'cr-r cr-num' }, l.reserve > 0 ? t('ladderRes', { r: money(l.reserve), pct: pct(l.pct) }) : t('ladderCovered'))
+        ]);
+      }));
+  }
+
+  function result(s, chg) {
+    var p = pq(s.at.q);
+    var text = s.covered
+      ? t('resultCovered', { p: p, b: money(s.at.budget), base: money(s.base) })
+      : t('resultReserve', { p: p, b: money(s.at.budget), base: money(s.base), r: money(s.at.reserve), pct: pct(s.at.pct) });
+    return h('p', { class: 'cr-result' + (chg.indexOf('outcome') >= 0 ? ' sd-changed' : ''), dataset: { o: s.covered ? 'covered' : 'reserve' } }, text);
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'cr' },
+      lines(s),
+      h('div', { class: 'cr-mid' }, chart(s), ladder(s)),
+      result(s, chg),
+      h('p', { class: 'cr-foot' }, t('foot', { low: money(s.low), high: money(s.high) }), ' ', t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-sel="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  // ── the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var k = L.captionKey(s);
+    var out = t.parts(k.key, {
+      base: b(money(s.base)), e: b(share(s.enoughTenths)), p50: b(money(s.p50)), q: b(pct(s.at.q)),
+      b: b(money(s.at.budget)), r: b(money(s.at.reserve)), pct: b(pct(s.at.pct))
+    });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, { m: b(money(s.mean)), n: b(group(s.n)) }));
+    });
+    return out;
+  }
+
+  var labels = { project: 'pProject', symmetric: 'pSymmetric', 'one-wild': 'pOneWild', 'few-trials': 'pFewTrials', 'spend-cap': 'pSpendCap' };
+  var R = L.RANGES;
+  function range(key, label, fmt, id) {
+    return { key: key, type: 'range', label: label, min: R[key][0], max: R[key][1], step: R[key][2], format: fmt,
+      visible: function (p) { return p.line === id; } };
+  }
+  var lineParams = [];
+  L.LINES.forEach(function (id) {
+    var name = lineName(id);
+    lineParams.push(
+      range(id, t('mlOf', { line: name }), money, id),
+      range(id + 'D', t('downOf', { line: name }), pct, id),
+      range(id + 'U', t('upOf', { line: name }), pct, id));
+  });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      // the line is chosen on the stage (the line rows); this hidden param keeps it in the URL and checks it
+      { key: 'line', type: 'choice', label: t('line'), options: L.LINES.map(function (id) { return [id, lineName(id)]; }),
+        visible: function () { return false; } },
+      // the seed: "Run again" adds 1; hidden, kept in the URL
+      { key: 'seed', type: 'range', label: t('runAgain'), min: 1, max: L.SEED_MAX, step: 1, visible: function () { return false; } }
+    ].concat(lineParams, [
+      { key: 'conf', type: 'choice', label: t('conf'), options: L.CONF.map(function (q) { return [q, pq(q)]; }) },
+      { key: 'trials', type: 'choice', label: t('trials'), options: L.TRIALS.map(function (n) { return [n, group(n)]; }) },
+      { type: 'button', label: t('runAgain'), key: 'n', run: function (api) {
+        api.set({ seed: L.nextSeed(api.params.seed) });
+      } }
+    ]),
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'cr-in', label: t('legIn') },
+      { shape: 'cr-res', label: t('legRes') },
+      { shape: 'cr-over', label: t('legOver') },
+      { shape: 'cr-base', label: t('legBase') },
+      { shape: 'cr-level', label: t('legLevel') },
+      { shape: 'cr-curve', label: t('legCurve') },
+      { shape: 'cr-ml', label: t('legMl') },
+      { shape: 'cr-mean', label: t('legMean') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
