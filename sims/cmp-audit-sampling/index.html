@@ -1,0 +1,439 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cmp-audit-sampling: an auditor tests a sample of a control's occurrences; the chance of finding at least one
+     failure is 1 − (1 − rate)ⁿ, so 25 misses a 2 % failure rate about 60 % of the time; how often a control runs sets
+     the usual sample; one exception means a larger sample or a finding; "no exceptions" is not "no failures".
+     The stage: the population grid (failed items hatched, the last sample filled, exceptions highlighted), beside it
+     the last sample's conclusion against the truth, the tally of every sample drawn against the exact chance, the
+     numbers (formula, exact, size for 95 %, the bound) and the usual sample by frequency.
+     Sampling: sampling.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cmp-audit-sampling">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uzorkovanje u reviziji: koliko zahtjeva treba provjeriti · simdeck</title>
+<meta name="description" content="Zadaj populaciju, stvarnu stopu neispravnih i veličinu uzorka, izvuci mnogo uzoraka i usporedi zaključak revizora s istinom.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cmp-audit-sampling",
+  "title": {
+    "hr": "Uzorkovanje u reviziji: koliko zahtjeva treba provjeriti",
+    "en": "Audit sampling: how many tickets to check"
+  },
+  "concept": {
+    "hr": "Uzorak od 25 češće promaši nego nađe 2 % neispravnih zahtjeva",
+    "en": "A sample of 25 misses a 2% failure rate more often than it finds it"
+  },
+  "summary": {
+    "hr": "Zadaj populaciju, stvarnu stopu neispravnih i veličinu uzorka, izvuci mnogo uzoraka i usporedi zaključak revizora s istinom.",
+    "en": "Set the population, the true failure rate and the sample size, draw many samples and compare the auditor's conclusion with the truth."
+  },
+  "tags": [
+    "audit"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "many"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cmp-audit-sampling"]; colours only from kit tokens. */
+[data-sim="cmp-audit-sampling"] .as {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 33rem;
+  column-gap: 1.2rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.4rem;
+  font-size: 1rem;
+}
+[data-sim="cmp-audit-sampling"] .as-head { margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.25; color: var(--muted); }
+[data-sim="cmp-audit-sampling"] .as-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* the population grid */
+[data-sim="cmp-audit-sampling"] .as-pop { min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+[data-sim="cmp-audit-sampling"] .as-pophead { margin: 0; font-weight: 700; line-height: 1.25; }
+[data-sim="cmp-audit-sampling"] .as-pophead .as-failed { color: var(--danger); }
+[data-sim="cmp-audit-sampling"] .as-gridbox { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; }
+[data-sim="cmp-audit-sampling"] .as-grid {
+  --cell: min(calc((100cqw - 36rem) / var(--cols)), calc((100cqh - 4.5rem) / var(--rows)), 7rem);
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--cell));
+  grid-auto-rows: var(--cell);
+}
+[data-sim="cmp-audit-sampling"] .as-cell {
+  display: grid;
+  place-items: center;
+  margin: max(1px, calc(var(--cell) * 0.08));
+  border: max(2px, calc(var(--cell) * 0.06)) solid var(--line);
+  border-radius: max(2px, calc(var(--cell) * 0.12));
+  background: var(--bg);
+  font-size: max(16px, calc(var(--cell) * 0.5));
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+}
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="ok"]::after { content: '✓'; }
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="bad"]::after,
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="exc"]::after { content: '✗'; }
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="bad"] {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--danger) 45%, transparent) 0 0.18rem, transparent 0.18rem 0.42rem);
+}
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="ok"] { border-color: var(--c1); background: var(--c1); color: var(--on-series); }
+[data-sim="cmp-audit-sampling"] .as-cell[data-k="exc"] {
+  border-color: var(--ink);
+  border-width: max(3px, calc(var(--cell) * 0.12));
+  background: var(--hl);
+  color: var(--on-hl);
+}
+[data-sim="cmp-audit-sampling"] .as-grid[data-dense="true"] .as-cell::after { content: none; }
+
+/* the side */
+[data-sim="cmp-audit-sampling"] .as-side { min-height: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+[data-sim="cmp-audit-sampling"] .as-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.3rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  line-height: 1.3;
+}
+[data-sim="cmp-audit-sampling"] .as-card p { margin: 0; }
+[data-sim="cmp-audit-sampling"] .as-concl { font-weight: 700; padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); border: var(--line-w) solid var(--ink); }
+[data-sim="cmp-audit-sampling"] .as-concl[data-v="pass"] { border-style: dashed; }
+[data-sim="cmp-audit-sampling"] .as-concl[data-v="finding"] { background: var(--ink); color: var(--bg); }
+[data-sim="cmp-audit-sampling"] .as-truth { display: flex; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; }
+[data-sim="cmp-audit-sampling"] .as-out { font-weight: 700; }
+[data-sim="cmp-audit-sampling"] .as-out[data-o="missed"] { color: var(--danger); }
+[data-sim="cmp-audit-sampling"] .as-out[data-o="right"],
+[data-sim="cmp-audit-sampling"] .as-out[data-o="caught"] { color: var(--ok); }
+[data-sim="cmp-audit-sampling"] .as-muted { color: var(--muted); }
+[data-sim="cmp-audit-sampling"] sup { font-size: max(16px, 0.8em); line-height: 0; }
+
+/* the tally bars */
+[data-sim="cmp-audit-sampling"] .as-bars {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
+  align-items: center;
+}
+[data-sim="cmp-audit-sampling"] .as-bl { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="cmp-audit-sampling"] .as-track { position: relative; height: 1.2rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="cmp-audit-sampling"] .as-fill { position: absolute; left: 0; top: 0; bottom: 0; }
+[data-sim="cmp-audit-sampling"] .as-fill[data-b="0"] { background: transparent; border-right: 0; background-image: repeating-linear-gradient(135deg, var(--muted) 0 0.12rem, transparent 0.12rem 0.36rem); }
+[data-sim="cmp-audit-sampling"] .as-fill[data-b="1"] { background: var(--c1); }
+[data-sim="cmp-audit-sampling"] .as-fill[data-b="2"] { background: var(--ink); }
+[data-sim="cmp-audit-sampling"] .as-tick { position: absolute; top: -0.35rem; bottom: -0.35rem; width: 0; border-left: 0.22rem solid var(--accent); }
+[data-sim="cmp-audit-sampling"] .as-tick::after {
+  content: '';
+  position: absolute;
+  top: -0.1rem;
+  left: -0.42rem;
+  border: 0.32rem solid transparent;
+  border-top-color: var(--accent);
+}
+[data-sim="cmp-audit-sampling"] .as-bv { font-size: var(--fs-sm); text-align: right; }
+
+/* the table */
+[data-sim="cmp-audit-sampling"] .as-table { display: flex; flex-direction: column; gap: 0.05rem; }
+[data-sim="cmp-audit-sampling"] .as-tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.2rem 4rem 7.6rem;
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0 0.4rem;
+  border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  text-align: left;
+}
+[data-sim="cmp-audit-sampling"] button.as-tr { cursor: pointer; }
+[data-sim="cmp-audit-sampling"] button.as-tr:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="cmp-audit-sampling"] .as-tr[aria-pressed="true"] { border-color: var(--ink); background: var(--panel); font-weight: 700; }
+[data-sim="cmp-audit-sampling"] .as-tr[aria-pressed="true"] > span:first-child::before { content: '▶ '; }
+[data-sim="cmp-audit-sampling"] .as-th { color: var(--muted); font-weight: 700; }
+[data-sim="cmp-audit-sampling"] .as-tr > span:not(:first-child) { text-align: right; }
+[data-sim="cmp-audit-sampling"] .as-band[data-band="below"] { color: var(--danger); }
+[data-sim="cmp-audit-sampling"] .as-band[data-band="below"]::before { content: '▼ '; }
+[data-sim="cmp-audit-sampling"] .as-band[data-band="above"]::before { content: '▲ '; }
+[data-sim="cmp-audit-sampling"] .as-band[data-band="in"]::before { content: '● '; }
+[data-sim="cmp-audit-sampling"] .as-foot { margin: auto 0 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the panel: presets in two columns, so it fits 1920×1080 */
+[data-sim="cmp-audit-sampling"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="cmp-audit-sampling"] .sd-group { gap: 0.3rem; }
+[data-sim="cmp-audit-sampling"] .sd-ctl { gap: 0.1rem; }
+[data-sim="cmp-audit-sampling"] .sd-range { height: 1.5rem; }
+[data-sim="cmp-audit-sampling"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape^="as-"] { border-width: 0.15em; }
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape="as-not"] { background: var(--bg); border-color: var(--line); }
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape="as-bad"] {
+  border-color: var(--danger);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--danger) 45%, transparent) 0 0.12em, transparent 0.12em 0.3em);
+}
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape="as-ok"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape="as-exc"] { background: var(--hl); border-color: var(--ink); border-width: 0.2em; }
+[data-sim="cmp-audit-sampling"] .sd-swatch[data-shape="as-tick"] { width: 0; background: transparent; border: 0; border-left: 0.22em solid var(--accent); border-radius: 0; }
+
+/* Phone and portrait: the stage grows with its content; the side goes under the grid. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cmp-audit-sampling"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cmp-audit-sampling"] .as { height: auto; grid-template-columns: minmax(0, 1fr); row-gap: 0.6rem; padding: 0.4rem; }
+  [data-sim="cmp-audit-sampling"] .as-grid { --cell: min(calc((100cqw - 1rem) / var(--cols)), 3rem); }
+  [data-sim="cmp-audit-sampling"] .as-grid[data-n="250"] .as-cell::after { content: none; }
+  [data-sim="cmp-audit-sampling"] .as-tr { grid-template-columns: minmax(0, 1fr) 4rem 4rem; column-gap: 0.4rem; padding: 0 0.2rem; }
+  [data-sim="cmp-audit-sampling"] .as-tr > .as-band { grid-column: 1 / -1; text-align: left; }
+  [data-sim="cmp-audit-sampling"] .as-tr > span:empty:last-child { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Uzorkovanje u reviziji: koliko zahtjeva treba provjeriti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="sampling.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  // ── numbers in the page's language ──
+
+  /** A whole number with thousands grouped (1 000 / 1,000). */
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  function pct(n) { return t('pct', { n: String(n) }); }
+  /** A rate in tenths of a percent: 20 → "2 %", 83 → "8,3 %". */
+  function rate10(x) {
+    var s = x % 10 === 0 ? String(x / 10) : (x / 10).toFixed(1);
+    return pct(Simdeck.lang === 'hr' ? s.replace('.', ',') : s);
+  }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+  function items(freq, n) { return t.n('item_' + freq, n, { n: group(n) }); }
+  function usual(f) { var u = L.USUAL[f]; return u[0] === u[1] ? String(u[0]) : u[0] + '–' + u[1]; }
+
+  function noFocus(e) { e.preventDefault(); }   // buttons do not take focus on click (docs/sim-ui.md §3)
+  var refocus = null;                           // the row to give focus back to after a render (keyboard)
+
+  // ── the population grid ──
+
+  var COLS = { quarterly: 2, monthly: 4, weekly: 8, daily: 16, multi: 32 };   // ⌈√N⌉: a square grid
+
+  function grid(s, anim) {
+    var cols = COLS[s.p.freq], rows = Math.ceil(s.N / cols);
+    var bad = new Set(s.failed), inS = new Set(s.last ? s.last.idx : []);
+    var cells = [];
+    for (var i = 0; i < s.N; i++) {
+      var sampled = inS.has(i), failed = bad.has(i);
+      var k = sampled ? (failed ? 'exc' : 'ok') : (failed ? 'bad' : 'not');
+      cells.push(h('span', {
+        class: 'as-cell' + (sampled && anim ? ' sd-anim-in' : ''), dataset: { k: k }, 'aria-hidden': 'true'
+      }));
+    }
+    var head = [h('span', null, t('gridHead', { pop: items(s.p.freq, s.N) })), ' · ',
+      s.k ? h('span', { class: 'as-failed' }, t('failedN', { k: group(s.k), r: rate10(s.rate10) })) : h('span', null, t('failedNone'))];
+    return h('div', { class: 'as-pop' },
+      h('p', { class: 'as-pophead', translate: 'no' }, head),
+      h('div', { class: 'as-gridbox' },
+        h('div', { class: 'as-grid', dataset: { dense: String(s.N > 400), n: String(s.N) },
+          style: { '--cols': String(cols), '--rows': String(rows) } }, cells)));
+  }
+
+  // ── the side ──
+
+  function lastCard(s) {
+    var kids = [h('p', { class: 'as-head' }, t('lastHead'))];
+    if (!s.last) kids.push(h('p', { class: 'as-muted' }, t('noSample')));
+    else {
+      var x = s.last;
+      kids.push(
+        h('p', { translate: 'no' }, t('lastChecked', { n: group(s.n), N: group(s.N), x: t.n('exc', x.x, { n: x.x }) })),
+        h('p', { class: 'as-concl', dataset: { v: x.verdict } }, t(x.verdict === 'extend' && s.all ? 'c_extendAll' : 'c_' + x.verdict)),
+        h('p', { class: 'as-truth' },
+          h('span', { translate: 'no' }, t('truthLine', { failed: s.k ? t('failedN', { k: group(s.k), r: rate10(s.rate10) }) : t('failedNone') })),
+          h('span', { class: 'as-out', dataset: { o: x.outcome } }, t('o_' + x.outcome))));
+    }
+    return h('div', { class: 'as-card' }, kids);
+  }
+
+  function tallyCard(s) {
+    var kids = [h('p', { class: 'as-head' }, t('allHead', { n: group(s.draws) }))];
+    if (s.draws < 2) kids.push(h('p', { class: 'as-muted' }, t('noDraws')));
+    else {
+      kids.push(h('p', { translate: 'no' }, t('foundLine', { f: group(s.found), fp: pct(s.foundPct), ep: pct(s.expPct.found) })));
+      var exp = [s.expPct.p0, s.expPct.p1, s.expPct.p2];
+      var rows = [];
+      [0, 1, 2].forEach(function (i) {
+        var p = s.histPct[i], what = t('b' + i);
+        rows.push(
+          h('span', { class: 'as-bl' }, what),
+          h('span', { class: 'as-track', role: 'img',
+            'aria-label': t('barLabel', { what: what, c: group(s.hist[i]), p: pct(p), e: pct(exp[i]) }) },
+            h('span', { class: 'as-fill', dataset: { b: String(i) }, style: { width: (100 * s.hist[i] / s.draws) + '%' } }),
+            h('span', { class: 'as-tick', style: { left: (100 * [s.exact.p0, s.exact.p1, s.exact.p2][i]) + '%' } })),
+          h('span', { class: 'as-bv as-num', translate: 'no' }, group(s.hist[i]) + ' · ' + pct(p)));
+      });
+      kids.push(h('div', { class: 'as-bars' }, rows));
+    }
+    return h('div', { class: 'as-card' }, kids);
+  }
+
+  function numbersCard(s) {
+    var kids = [h('p', { class: 'as-head' }, t('numHead'))];
+    if (s.k) {
+      kids.push(
+        h('p', { translate: 'no' }, t.parts('formulaLine', { r: rate10(s.rate10), n: h('sup', null, String(s.n)), p: b(pct(s.formula)) })),
+        h('p', { translate: 'no' }, t.parts('exactLine', { N: group(s.N), p: b(pct(s.expPct.found)) })),
+        h('p', { translate: 'no' }, t.parts('needLine', { m: b(group(s.need)) })));
+    } else kids.push(h('p', null, t('needNone')));
+    // the bound is the large-population one; when every item is tested there is nothing left to bound
+    if (!s.all) kids.push(h('p', { translate: 'no' }, t.parts('boundLine', { n: group(s.n), b: b(pct(s.bound)) })));
+    return h('div', { class: 'as-card' }, kids);
+  }
+
+  function table(s) {
+    var rows = [h('div', { class: 'as-tr as-th', 'aria-hidden': 'true' },
+      h('span', null, t('colFreq')), h('span', null, t('colPop')), h('span', null, t('colUsual')), h('span'))];
+    L.FREQS.forEach(function (f) {
+      var on = f === s.p.freq, sel = 'freq-' + f;
+      rows.push(h('button', {
+        type: 'button', class: 'as-tr', 'aria-pressed': String(on), dataset: { sel: sel }, onmousedown: noFocus,
+        'aria-label': t('rowLabel', { f: t('f_' + f), pop: items(f, L.POP[f]) }),
+        onclick: function (e) { refocus = e.detail === 0 ? sel : null; sim.set({ freq: f }); }
+      },
+        h('span', null, t('f_' + f)),
+        h('span', { class: 'as-num', translate: 'no' }, group(L.POP[f])),
+        h('span', { class: 'as-num', translate: 'no' }, usual(f)),
+        on ? h('span', { class: 'as-band as-num', dataset: { band: s.band } }, t('band_' + s.band, { n: group(s.n) })) : h('span')));
+    });
+    return h('div', { class: 'as-table' }, h('p', { class: 'as-head' }, t('tabHead')), rows);
+  }
+
+  // ── render and caption ──
+
+  var lastKey = null;
+  function render(c) {
+    var s = c.state;
+    var key = JSON.stringify(c.params);
+    var anim = lastKey !== null && key !== lastKey;
+    lastKey = key;
+    c.stage.replaceChildren(h('div', { class: 'as' },
+      grid(s, anim),
+      h('div', { class: 'as-side' }, lastCard(s), tallyCard(s), numbersCard(s), table(s),
+        h('p', { class: 'as-foot' }, t('foot')))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('[data-sel="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var k = L.captionKey(s);
+    var out = t.parts(k.key, {
+      pop: items(s.p.freq, s.N), k: b(group(s.k)), r: b(rate10(s.rate10)), n: b(group(s.n)), N: b(group(s.N)),
+      x: b(s.last ? s.last.x : 0), d: b(group(s.draws)), f: b(group(s.found)), fp: b(pct(s.foundPct || 0)),
+      ep: b(pct(s.expPct.found)), fm: b(pct(s.formula)), m: b(group(s.draws - s.found))
+    });
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(t.parts(key, { u: b(usual(s.p.freq)), f: t('f_' + s.p.freq), m: b(group(s.draws - s.found)), k: b(group(s.k)) }));
+    });
+    return out;
+  }
+
+  var labels = { 'one-sample': 'pOneSample', many: 'pMany', clean: 'pClean', 'bad-control': 'pBadControl', sure: 'pSure', monthly: 'pMonthly' };
+  var R = L.RANGES;
+  function full(p) { return p.draws >= L.DRAWS_MAX ? t('drawsFull') : false; }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'freq', type: 'choice', label: t('freq'), options: L.FREQS.map(function (f) { return [f, group(L.POP[f])]; }) },
+      { key: 'rate', type: 'range', label: t('rate'), min: R.rate[0], max: R.rate[1], step: 1, format: pct },
+      { key: 'n', type: 'range', label: t('n'), min: 1, max: function (p) { return L.nMax(p.freq); }, step: 1, format: group },
+      { key: 'draws', type: 'range', label: t('draws'), min: R.draws[0], max: R.draws[1], step: 1, format: group },
+      // the seed: "New population" adds 1; hidden, kept in the URL
+      { key: 'seed', type: 'range', label: t('newPop'), min: R.seed[0], max: R.seed[1], step: 1, visible: function () { return false; } },
+      { type: 'button', label: t('drawOne'), key: 'd', disabled: full, run: function (api) {
+        api.set({ draws: L.more(api.params.draws, 1) });
+      } },
+      { type: 'button', label: t('drawMany'), key: 'm', disabled: full, run: function (api) {
+        api.set({ draws: L.more(api.params.draws, 100) });
+      } },
+      { type: 'button', label: t('newPop'), key: 'n', run: function (api) {
+        api.set({ seed: L.nextSeed(api.params.seed) });
+      } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'as-not', label: t('legNot') },
+      { shape: 'as-bad', label: t('legFailed') },
+      { shape: 'as-ok', label: t('legOk') },
+      { shape: 'as-exc', label: t('legExc') },
+      { shape: 'as-tick', label: t('legExp') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
