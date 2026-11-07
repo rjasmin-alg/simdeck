@@ -1,0 +1,695 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- fin-roi-payback-npv: three yardsticks rank the same projects differently; IRR is the rate at which NPV is zero.
+     On top, the scoreboard: ROI, payback, NPV at the rate and IRR for projects A and B, and what each yardstick picks.
+     Below left, both projects' cash flows as paired bars per year (dragged with the pointer or ↑/↓), each payback point
+     marked; below right, the NPV profile: both NPVs against the rate, each IRR where a curve crosses zero, the crossing
+     where they swap, and the chosen rate. Discounting: discount.js (copied from fin-npv-discounting); yardsticks:
+     yardsticks.js (promotable); model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="fin-roi-payback-npv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Povrat ulaganja, razdoblje povrata i NSV ne slažu se · simdeck</title>
+<meta name="description" content="Oblikuj novčane tokove dvaju projekata, brzog dobitka i sporog velikog povrata, čitaj poredak triju mjerila i nađi stopu uz koju se zamijene.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "fin-roi-payback-npv",
+  "title": {
+    "hr": "Povrat ulaganja, razdoblje povrata i NSV ne slažu se",
+    "en": "ROI, payback and NPV disagree"
+  },
+  "concept": {
+    "hr": "Tri mjerila različito rangiraju iste projekte; ISP je stopa uz koju je NSV nula",
+    "en": "Three yardsticks rank the same projects differently; IRR is where NPV is zero"
+  },
+  "summary": {
+    "hr": "Oblikuj novčane tokove dvaju projekata, brzog dobitka i sporog velikog povrata, čitaj poredak triju mjerila i nađi stopu uz koju se zamijene.",
+    "en": "Shape two projects' cash flows, a quick win and a slow large return, read the three rankings and find the rate at which they swap."
+  },
+  "tags": [
+    "investment"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dear-money"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="fin-roi-payback-npv"]; colours only from kit tokens.
+   Project A: solid, --c1; project B: hatched or dashed, --c2 (colour is never the only carrier). */
+[data-sim="fin-roi-payback-npv"] .rp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem 0.35rem;
+  font-size: 1rem;
+}
+
+/* the scoreboard */
+[data-sim="fin-roi-payback-npv"] .rp-board {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="fin-roi-payback-npv"] .rp-board > * {
+  padding: 0.2rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+[data-sim="fin-roi-payback-npv"] .rp-board > .rp-th { border-top: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-roi-payback-npv"] .rp-name { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.2; }
+[data-sim="fin-roi-payback-npv"] .rp-name b { font-size: 1rem; }
+[data-sim="fin-roi-payback-npv"] .rp-name span { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-roi-payback-npv"] .rp-val {
+  justify-content: flex-end;
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+[data-sim="fin-roi-payback-npv"] .rp-val[data-irr] { font-weight: 400; color: var(--muted); }
+[data-sim="fin-roi-payback-npv"] .rp-val.rp-win { background: color-mix(in srgb, var(--sw) 16%, var(--panel)); }
+[data-sim="fin-roi-payback-npv"] .rp-val.rp-win::before { content: '✓'; color: var(--ok); }
+[data-sim="fin-roi-payback-npv"] .rp-pick { font-weight: 700; white-space: nowrap; }
+[data-sim="fin-roi-payback-npv"] .rp-pick[data-p="none"], [data-sim="fin-roi-payback-npv"] .rp-pick[data-p="irr"] { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="fin-roi-payback-npv"] .rp-pick.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="fin-roi-payback-npv"] .rp-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  color: var(--on-series);
+  background: var(--sw);
+}
+[data-sim="fin-roi-payback-npv"] .rp-letter[data-c="2"], [data-sim="fin-roi-payback-npv"] .rp-bar[data-c="2"], [data-sim="fin-roi-payback-npv"] .sd-swatch[data-shape="rp-b"] {
+  background: repeating-linear-gradient(45deg, var(--sw) 0 0.3rem, color-mix(in srgb, var(--sw) 45%, var(--bg)) 0.3rem 0.5rem);
+}
+[data-sim="fin-roi-payback-npv"] .rp-letter[data-c="2"] { color: var(--ink); text-shadow: 0 0 0.2rem var(--bg); }
+
+/* the two charts */
+[data-sim="fin-roi-payback-npv"] .rp-charts {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 0.8rem;
+}
+[data-sim="fin-roi-payback-npv"] .rp-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+[data-sim="fin-roi-payback-npv"] .rp-title { flex: none; margin: 0 0 0.2rem; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="fin-roi-payback-npv"] .rp-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+[data-sim="fin-roi-payback-npv"] .rp-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 6.4rem repeat(var(--cols), minmax(0, 1fr));
+  grid-template-rows: minmax(5rem, 1fr) auto;
+  padding-top: 0.7rem;
+}
+[data-sim="fin-roi-payback-npv"] .rp-axis { position: relative; grid-column: 1; grid-row: 1; }
+[data-sim="fin-roi-payback-npv"] .rp-tick {
+  position: absolute;
+  right: 0.3rem;
+  transform: translateY(-50%);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-sim="fin-roi-payback-npv"] .rp-grid { position: relative; grid-column: 2 / -1; grid-row: 1; border-left: var(--line-w) solid var(--line); }
+[data-sim="fin-roi-payback-npv"] .rp-gl { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: 0.6; }
+[data-sim="fin-roi-payback-npv"] .rp-zero { position: absolute; left: 0; right: 0; border-top: 0.2rem solid var(--ink); }
+[data-sim="fin-roi-payback-npv"] .rp-dir { position: absolute; right: 0.3rem; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+
+[data-sim="fin-roi-payback-npv"] .rp-year { position: relative; grid-row: 1; z-index: 1; display: flex; gap: 0.15rem; padding: 0 0.2rem; }
+[data-sim="fin-roi-payback-npv"] .rp-col {
+  position: relative;
+  flex: 1 1 0;
+  cursor: ns-resize;
+  touch-action: pan-x; /* vertical drags set the flow; sideways ones still scroll the chart on a phone */
+  border-radius: var(--radius-sm);
+}
+[data-sim="fin-roi-payback-npv"] .rp-col:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+[data-sim="fin-roi-payback-npv"] .rp-col:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.1rem; }
+[data-sim="fin-roi-payback-npv"] .rp-col[data-drag] { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+[data-sim="fin-roi-payback-npv"] .rp-bar {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  min-height: 1px;
+  background: var(--sw);
+  border: 0.12rem solid var(--ink);
+}
+[data-sim="fin-roi-payback-npv"] .rp-grip {
+  position: absolute;
+  left: 50%;
+  width: 1.6rem;
+  height: 0.6rem;
+  transform: translate(-50%, -50%);
+  border: 0.15rem solid var(--ink);
+  border-radius: 0.3rem;
+  background: var(--bg);
+}
+[data-sim="fin-roi-payback-npv"] .rp-ylabel { grid-row: 2; text-align: center; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; padding-top: 0.55rem; }
+
+/* payback markers over the flows */
+[data-sim="fin-roi-payback-npv"] .rp-pbs { position: relative; grid-column: 2 / -1; grid-row: 1; z-index: 2; pointer-events: none; }
+[data-sim="fin-roi-payback-npv"] .rp-pb { position: absolute; top: 0; bottom: 0; border-left: 0.2rem dashed var(--sw); }
+[data-sim="fin-roi-payback-npv"] .rp-pb[data-c="1"] { border-left-style: solid; }
+[data-sim="fin-roi-payback-npv"] .rp-pb-label {
+  position: absolute;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 0 0.3rem;
+  border: 0.15rem solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* the NPV profile */
+[data-sim="fin-roi-payback-npv"] .rp-prof {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 6.4rem minmax(0, 1fr);
+  grid-template-rows: minmax(5rem, 1fr) 1.6rem;
+  padding: 0.7rem 1.4rem 0 0;
+}
+[data-sim="fin-roi-payback-npv"] .rp-plot { position: relative; grid-column: 2; grid-row: 1; border-left: var(--line-w) solid var(--line); border-bottom: var(--line-w) solid var(--line); }
+[data-sim="fin-roi-payback-npv"] .rp-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="fin-roi-payback-npv"] .rp-curve { fill: none; stroke: var(--sw); stroke-width: 4; vector-effect: non-scaling-stroke; }
+[data-sim="fin-roi-payback-npv"] .rp-curve[data-c="2"] { stroke-dasharray: 10 6; }
+[data-sim="fin-roi-payback-npv"] .rp-xaxis { position: relative; grid-column: 2; grid-row: 2; }
+[data-sim="fin-roi-payback-npv"] .rp-xtick { position: absolute; top: 0.1rem; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="fin-roi-payback-npv"] .rp-now { position: absolute; top: 0; bottom: 0; border-left: 0.2rem solid var(--accent); }
+[data-sim="fin-roi-payback-npv"] .rp-now-label {
+  position: absolute;
+  bottom: 0.1rem;
+  left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="fin-roi-payback-npv"] .rp-now[data-end] .rp-now-label { left: auto; right: 0.3rem; }
+[data-sim="fin-roi-payback-npv"] .rp-dot {
+  position: absolute;
+  width: 1rem;
+  height: 1rem;
+  transform: translate(-50%, -50%);
+  background: var(--sw);
+  border: 0.15rem solid var(--ink);
+  z-index: 2;
+}
+[data-sim="fin-roi-payback-npv"] .rp-dot[data-c="1"] { border-radius: 50%; }
+[data-sim="fin-roi-payback-npv"] .rp-mark {
+  position: absolute;
+  width: 0.9rem;
+  height: 0.9rem;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--sw, var(--bg));
+  border: 0.15rem solid var(--ink);
+}
+[data-sim="fin-roi-payback-npv"] .rp-mark[data-k="swap"] { transform: translate(-50%, -50%); border-radius: 50%; width: 1.3rem; height: 1.3rem; background: transparent; border-width: 0.22rem; }
+[data-sim="fin-roi-payback-npv"] .rp-mlabel {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: 0 0.25rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="fin-roi-payback-npv"] .rp-mlabel[data-edge="start"] { transform: none; }
+[data-sim="fin-roi-payback-npv"] .rp-mlabel[data-edge="end"] { transform: translateX(-100%); }
+
+[data-sim="fin-roi-payback-npv"] .rp-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="fin-roi-payback-npv"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches of the page's own marks */
+[data-sim="fin-roi-payback-npv"] .sd-swatch[data-shape="rp-pb"] { border: 0; border-left: 0.2rem dashed var(--ink); border-radius: 0; background: transparent; width: 0.5rem; }
+[data-sim="fin-roi-payback-npv"] .sd-swatch[data-shape="rp-rate"] { border: 0; border-left: 0.25rem solid var(--accent); border-radius: 0; background: transparent; width: 0.5rem; }
+
+/* Phone and portrait: the stage grows with its content; the charts stack; the flows scroll sideways in their box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="fin-roi-payback-npv"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="fin-roi-payback-npv"] .rp { height: auto; padding: 0.4rem; }
+  [data-sim="fin-roi-payback-npv"] .rp-board { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); }
+  [data-sim="fin-roi-payback-npv"] .rp-board > .rp-pick, [data-sim="fin-roi-payback-npv"] .rp-board > .rp-th[data-k="picks"] { grid-column: 2 / -1; justify-content: flex-end; border-top: 0; padding-top: 0; }
+  [data-sim="fin-roi-payback-npv"] .rp-board > .rp-th[data-k="picks"] { display: none; }
+  [data-sim="fin-roi-payback-npv"] .rp-val { font-size: 1.05rem; }
+  [data-sim="fin-roi-payback-npv"] .rp-val.rp-win::before { content: none; } /* the picks line under the row says it */
+  [data-sim="fin-roi-payback-npv"] .rp-xtick[data-minor] { display: none; }
+  [data-sim="fin-roi-payback-npv"] .rp-charts { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="fin-roi-payback-npv"] .rp-scroll { overflow-x: auto; }
+  [data-sim="fin-roi-payback-npv"] .rp-chart {
+    grid-template-columns: 5.2rem repeat(var(--cols), minmax(4.4rem, 1fr));
+    grid-template-rows: 14rem auto;
+    padding-top: 1.8rem;
+  }
+  [data-sim="fin-roi-payback-npv"] .rp-prof { grid-template-columns: 5.2rem minmax(0, 1fr); grid-template-rows: 14rem 1.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Povrat ulaganja, razdoblje povrata i NSV ne slažu se</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="discount.js"></script>
+<script src="yardsticks.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var D = window.SimdeckModels.discount;
+  var Y = window.SimdeckModels.yardsticks;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+  var WHO = { a: 'A', b: 'B' }, COLOUR = { a: '1', b: '2' };
+
+  // ── numbers in the page's language ──
+
+  function dec(x, d) {
+    var s = x.toFixed(d);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** Half away from zero to d decimals (SPEC.md rule 9). */
+  function round(x, d) {
+    var f = Math.pow(10, d);
+    return D.roundMoney(x * f) / f;
+  }
+  /** One decimal, dropped when whole; minus is U+2212. */
+  function num1(x) {
+    var r = round(x, 1);
+    var s = dec(Math.abs(r), r % 1 ? 1 : 0);
+    return (r < 0 ? '−' : '') + s;
+  }
+  function group(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, Simdeck.lang === 'hr' ? ' ' : ',');
+  }
+  /** Euros, rounded to the euro; plus adds "+" to positive amounts. */
+  function money(x, plus) {
+    var r = D.roundMoney(x);
+    var s = t('eur', { n: group(Math.abs(r)) });
+    return (r < 0 ? '−' : plus && r > 0 ? '+' : '') + s;
+  }
+  /** A whole-or-half percent (the rate control). */
+  function pct(rate) { return t('pct', { n: dec(rate, rate % 1 ? 1 : 0) }); }
+  /** A ratio or rate shown to 0.1 %, rounded as yardsticks.js compares it (tenthsPct). */
+  function pct1(x) {
+    var r = Y.tenthsPct(x) / 10;
+    return t('pct', { n: (r < 0 ? '−' : '') + dec(Math.abs(r), r % 1 ? 1 : 0) });
+  }
+  /** A crossing: two decimals when it is under 1 %, so a tiny one does not read "0 %" (only an exact 0 does). */
+  function pctCross(x) {
+    if (x > 0 && x < 0.01) return t('pct', { n: dec(Math.max(0.01, Math.round(x * 10000) / 100), 2) });
+    return pct1(x);
+  }
+  function data(text, tag) { return h(tag || 'span', { translate: 'no' }, String(text)); }
+  function yearName(k) { return k === 0 ? t('today') : t('yearN', { n: k }); }
+
+  // ── the scoreboard ──
+
+  function roiText(r) { return r.value === null ? '—' : pct1(r.value); }
+  function paybackText(p) {
+    if (p.kind === 'none') return '—';
+    if (p.kind === 'never') return t('never');
+    return t(round(p.years, 1) === 1 ? 'yearsOne' : 'yearsN', { n: num1(p.years) });
+  }
+  function irrText(i) {
+    if (i.kind === 'none') return t('none');
+    if (i.kind === 'out') return t('outside');
+    if (i.kind === 'many') return t('several') + ': ' + i.rates.map(pct1).join(' · ');
+    return pct1(i.rates[0]);
+  }
+  function letter(x) { return h('span', { class: 'rp-letter', translate: 'no', dataset: { c: COLOUR[x] } }, WHO[x]); }
+  function pickCell(p, changed) {
+    var cls = 'rp-pick' + (changed ? ' sd-changed' : '');
+    if (p === 'A' || p === 'B') return h('div', { class: cls, dataset: { p: p } }, '✓ ', letter(p.toLowerCase()));
+    if (p === 'tie') return h('div', { class: cls, dataset: { p: 'tie' } }, '= ' + t('tie'));
+    return h('div', { class: cls, dataset: { p: 'none' } }, '— ' + t('noPick'));
+  }
+
+  function board(s, chg) {
+    var rate = pct(s.p.rate);
+    var rows = [
+      { k: 'roi', name: t('rowRoi'), sub: t('rowRoiSub'), a: roiText(s.A.roi), b: roiText(s.B.roi) },
+      { k: 'payback', name: t('rowPayback'), sub: t('rowPaybackSub'), a: paybackText(s.A.payback), b: paybackText(s.B.payback) },
+      { k: 'npv', name: t.parts('rowNpv', { rate: data(rate) }), sub: t('rowNpvSub'), a: money(s.A.npv, true), b: money(s.B.npv, true) },
+      { k: 'irr', name: t('rowIrr'), sub: t('rowIrrSub'), a: irrText(s.A.irr), b: irrText(s.B.irr) }
+    ];
+    var cells = [
+      h('div', { class: 'rp-th' }, t('thYardstick')),
+      h('div', { class: 'rp-th', style: { justifyContent: 'flex-end' } }, t('project', { who: '' }).trim(), letter('a')),
+      h('div', { class: 'rp-th', style: { justifyContent: 'flex-end' } }, t('project', { who: '' }).trim(), letter('b')),
+      h('div', { class: 'rp-th', dataset: { k: 'picks' } }, t('thPicks'))
+    ];
+    rows.forEach(function (r) {
+      var p = r.k === 'irr' ? 'irr' : s.picks[r.k];
+      cells.push(h('div', { class: 'rp-name' }, h('b', null, r.name), h('span', null, r.sub)));
+      ['a', 'b'].forEach(function (x) {
+        cells.push(h('div', {
+          class: 'rp-val' + (p === WHO[x] ? ' rp-win' : ''), translate: 'no',
+          dataset: r.k === 'irr' ? { c: COLOUR[x], irr: 'true' } : { c: COLOUR[x] }
+        }, r[x]));
+      });
+      cells.push(r.k === 'irr'
+        ? h('div', { class: 'rp-pick', dataset: { p: 'irr' } }, t('irrNoRank'))
+        : pickCell(p, chg.indexOf(r.k) >= 0));
+    });
+    return h('div', { class: 'rp-board' }, cells);
+  }
+
+  // ── scales ──
+
+  /** 1, 2, 2.5, 5 × 10^k: the smallest step that keeps a side to about four grid lines. */
+  function niceStep(x) {
+    var mag = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) if (steps[i] * mag >= x) return steps[i] * mag;
+    return 10 * mag;
+  }
+  /** Top and bottom on whole grid steps, at least one step each side, so a bar can cross zero. */
+  function domainOf(values, lines) {
+    var pos = 0, neg = 0;
+    values.forEach(function (v) { pos = Math.max(pos, v); neg = Math.max(neg, -v); });
+    var step = niceStep(Math.max(pos, neg, 10000) / (lines || 4));
+    return { top: Math.max(step, Math.ceil(pos / step) * step), bot: Math.max(step, Math.ceil(neg / step) * step), step: step };
+  }
+  function yOf(dom) {
+    var span = dom.top + dom.bot;
+    return function (v) { return (100 * (dom.top - v) / span) + '%'; };
+  }
+  function ticks(dom, y) {
+    var out = [], lines = [];
+    for (var v = -dom.bot; v <= dom.top + 1e-6; v += dom.step) {
+      out.push(h('span', { class: 'rp-tick', translate: 'no', style: { top: y(v) } }, money(v)));
+      if (Math.abs(v) > 1e-6) lines.push(h('div', { class: 'rp-gl', style: { top: y(v) } }));
+    }
+    return { ticks: out, lines: lines };
+  }
+
+  // ── the flows: paired bars per year, dragged ──
+
+  var drag = null;      // { key, rect, dom } while a bar is dragged; the range stays frozen meanwhile
+  var refocus = null;   // the bar to give focus back to after a render (keyboard changes)
+
+  function setFlow(key, v) {
+    var x = Math.round(v / L.CF_STEP) * L.CF_STEP;
+    x = Math.max(L.CF_MIN, Math.min(L.CF_MAX, x));
+    var patch = {};
+    patch[key] = x;
+    sim.set(patch);
+  }
+  function valueAt(clientY) {
+    var span = drag.dom.top + drag.dom.bot;
+    return drag.dom.top - (clientY - drag.rect.top) / drag.rect.height * span;
+  }
+  function onMove(e) { if (drag) setFlow(drag.key, valueAt(e.clientY)); }
+  function onUp() {
+    if (!drag) return;
+    drag = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    sim.render();
+  }
+  function startDrag(e, key, dom) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    drag = { key: key, rect: e.currentTarget.getBoundingClientRect(), dom: dom };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    setFlow(key, valueAt(e.clientY));
+  }
+  function onKey(e, key, cf) {
+    var by = e.shiftKey ? 10 * L.CF_STEP : L.CF_STEP;
+    var to = null;
+    if (e.key === 'ArrowUp') to = cf + by;
+    else if (e.key === 'ArrowDown') to = cf - by;
+    if (to === null) return;
+    e.preventDefault();
+    refocus = key;
+    setFlow(key, to);
+  }
+
+  function flows(s) {
+    var n = s.p.years + 1;
+    var dom = drag ? drag.dom : domainOf(s.A.flows.concat(s.B.flows));
+    var y = yOf(dom), span = dom.top + dom.bot;
+    var hgt = function (v) { return (100 * Math.abs(v) / span) + '%'; };
+    var tk = ticks(dom, y);
+    var cells = [
+      h('div', { class: 'rp-axis' }, tk.ticks),
+      h('div', { class: 'rp-grid' }, tk.lines,
+        h('div', { class: 'rp-zero', style: { top: y(0) } }),
+        h('span', { class: 'rp-dir', style: { top: '0.1rem' } }, t('inflow')),
+        h('span', { class: 'rp-dir', style: { bottom: '0.1rem' } }, t('outflow')))
+    ];
+    for (var k = 0; k < n; k++) {
+      cells.push(h('div', { class: 'rp-year', style: { gridColumn: String(k + 2) } }, ['a', 'b'].map(function (x) {
+        var key = x + k, cf = s.p[key];
+        var text = t('barValue', { cf: money(cf) });
+        return h('div', {
+          class: 'rp-col', role: 'slider', tabindex: '0',
+          dataset: drag && drag.key === key ? { drag: 'true', key: key } : { key: key },
+          'aria-label': t('barLabel', { who: WHO[x], year: yearName(k) }), 'aria-orientation': 'vertical',
+          'aria-valuemin': String(L.CF_MIN), 'aria-valuemax': String(L.CF_MAX), 'aria-valuenow': String(cf),
+          'aria-valuetext': text, title: WHO[x] + ' · ' + text,
+          onpointerdown: function (e) { startDrag(e, key, dom); },
+          onkeydown: function (e) { onKey(e, key, cf); }
+        },
+          cf !== 0 ? h('div', { class: 'rp-bar', dataset: { c: COLOUR[x] }, style: { top: y(Math.max(cf, 0)), height: hgt(cf) } }) : null,
+          h('span', { class: 'rp-grip', style: { top: y(cf) } }));
+      })));
+      cells.push(h('span', { class: 'rp-ylabel', style: { gridColumn: String(k + 2) } }, yearName(k)));
+    }
+    // payback points: between the centres of the years, as the cumulative flow is interpolated (SPEC.md rule 5)
+    var marks = [];
+    ['a', 'b'].forEach(function (x, i) {
+      var pb = s[WHO[x]].payback;
+      if (pb.kind !== 'at') return;
+      var left = (100 * (pb.years + 0.5) / n) + '%';
+      marks.push(h('div', { class: 'rp-pb', dataset: { c: COLOUR[x] }, style: { left: left } },
+        h('span', { class: 'rp-pb-label', translate: 'no', style: { top: i ? '1.7rem' : '0.1rem' } }, '▼ ' + WHO[x] + ' ' + paybackText(pb))));
+    });
+    cells.push(h('div', { class: 'rp-pbs' }, marks));
+    return h('div', { class: 'rp-panel' },
+      h('p', { class: 'rp-title' }, t('flowsTitle')),
+      h('div', { class: 'rp-scroll' }, h('div', { class: 'rp-chart', style: { '--cols': String(n) } }, cells)));
+  }
+
+  // ── the NPV profile ──
+
+  function profile(s) {
+    var pts = s.profile, max = L.RATE_MAX;
+    var vals = [];
+    pts.forEach(function (q) { vals.push(q.a, q.b); });
+    var dom = domainOf(vals);
+    var y = yOf(dom), span = dom.top + dom.bot;
+    var x = function (pct) { return (100 * pct / max) + '%'; };
+    var yNum = function (v) { return 1000 * (dom.top - v) / span; };
+    var tk = ticks(dom, y);
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 1000');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    ['a', 'b'].forEach(function (k) {
+      var pl = document.createElementNS(NS, 'polyline');
+      pl.setAttribute('class', 'rp-curve');
+      pl.setAttribute('data-c', COLOUR[k]);
+      pl.setAttribute('points', pts.map(function (q) { return (1000 * q.rate / max).toFixed(1) + ',' + yNum(q[k]).toFixed(1); }).join(' '));
+      svg.appendChild(pl);
+    });
+    var edge = function (pct) { return pct < 4 ? 'start' : pct > max - 4 ? 'end' : null; };
+    var labelAt = function (pct, top, text, extra, side) {
+      var e = edge(pct) || side;
+      return h('span', Object.assign({ class: 'rp-mlabel', translate: 'no', style: { left: x(pct), top: top } }, e ? { dataset: { edge: e } } : {}, extra || {}), text);
+    };
+    var marks = [];
+    // each IRR in range: a diamond on the zero line, A's label above it, B's below
+    ['a', 'b'].forEach(function (k, i) {
+      s[WHO[k]].irr.rates.forEach(function (r) {
+        var pc = r * 100;
+        if (pc < -1e-9 || pc > max + 1e-9) return;
+        marks.push(h('span', { class: 'rp-mark', dataset: { c: COLOUR[k], k: 'irr' }, style: { left: x(pc), top: y(0) } }));
+        // B's label ends at its marker, so it keeps clear of a crossing to its right
+        marks.push(labelAt(pc, 'calc(' + y(0) + (i ? ' + 0.7rem)' : ' - 2.3rem)'), t('irrMark', { who: WHO[k] }) + ' ' + pct1(r), null, i ? 'end' : null));
+      });
+    });
+    // each crossing: a ring where the curves meet, labelled above
+    s.swaps.forEach(function (r) {
+      var pc = r * 100, v = D.npv(s.A.flows, r);
+      marks.push(h('span', { class: 'rp-mark', dataset: { k: 'swap' }, style: { left: x(pc), top: y(v) } }));
+      marks.push(labelAt(pc, 'calc(' + y(v) + ' - 2.5rem)', t('swapMark') + ' ' + pctCross(r)));
+    });
+    var xt = [];
+    for (var v = 0; v <= max; v += 5) {
+      xt.push(h('span', Object.assign({ class: 'rp-xtick', translate: 'no', style: { left: x(v) } }, v % 10 ? { dataset: { minor: 'true' } } : {}), pct(v)));
+    }
+    var now = s.p.rate;
+    return h('div', { class: 'rp-panel' },
+      h('p', { class: 'rp-title' }, t('profileTitle')),
+      h('div', { class: 'rp-prof' },
+        h('div', { class: 'rp-axis' }, tk.ticks),
+        h('div', { class: 'rp-plot' }, tk.lines,
+          h('div', { class: 'rp-zero', style: { top: y(0) } }),
+          svg,
+          h('div', Object.assign({ class: 'rp-now', style: { left: x(now) } }, now > max * 0.8 ? { dataset: { end: 'true' } } : {}),
+            h('span', { class: 'rp-now-label', translate: 'no' }, pct(now))),
+          h('span', { class: 'rp-dot', dataset: { c: '1' }, style: { left: x(now), top: y(s.A.npv) } }),
+          h('span', { class: 'rp-dot', dataset: { c: '2' }, style: { left: x(now), top: y(s.B.npv) } }),
+          marks),
+        h('div', { class: 'rp-xaxis' }, xt)));
+  }
+
+  // ── render; the changed mark follows param changes ──
+
+  var lastKey = null, lastState = null, chg = [];
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = L.flipped(lastState, c.state);
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'rp' }, board(s, chg),
+      h('div', { class: 'rp-charts' }, flows(s), profile(s)),
+      h('p', { class: 'rp-foot' }, t('dragHint'), ' ', t('illustrative'))));
+    if (refocus !== null) {
+      var el = c.stage.querySelector('.rp-col[data-key="' + refocus + '"]');
+      refocus = null;
+      if (el) el.focus();
+    }
+  }
+
+  function caption(c) {
+    var s = c.state, p = s.p;
+    var k = L.captionKey(s);
+    if (k.key === 'capEmpty') return t(k.key);
+    var b = function (x) { return h('b', { translate: 'no' }, x); };
+    var bw = function (x) { return h('b', null, x); };
+    var phrase = function (q) {
+      if (q === 'A' || q === 'B') return t.parts('pickWho', { who: b(q) });
+      return t(q === 'tie' ? 'pickTie' : 'pickNone');
+    };
+    var rate = b(pct(p.rate)), maxR = b(pct(L.RATE_MAX));
+    var out = k.key === 'capAgree'
+      ? t.parts('capAgree', { who: b(s.agree) })
+      : t.parts(k.key, { roi: bw(phrase(s.picks.roi)), payback: bw(phrase(s.picks.payback)), npv: bw(phrase(s.picks.npv)), rate: rate });
+    if (k.swap) {
+      out.push(' ');
+      out = out.concat(t.parts(k.swap, {
+        x: b(s.swaps.length ? pctCross(s.swaps[0]) : ''), lo: b(s.below || ''), hi: b(s.above || ''), who: b(s.above || ''), max: maxR
+      }));
+    }
+    k.notes.forEach(function (key) {
+      out.push(' ');
+      out = out.concat(key === 'nAtSwap' ? t.parts('nAtSwap', { rate: b(pct(p.rate)) })
+        : t.parts(key.indexOf('Some') >= 0 ? 'nIrrSome' : 'nIrr', { who: b(key.slice(-1)), rate: b(pct(p.rate)), irr: b(pct(p.rate)) }));
+    });
+    return out;
+  }
+
+  var labels = {
+    'quick-vs-slow': 'pQuickVsSlow', 'dear-money': 'pDearMoney', 'same-total': 'pSameTotal',
+    'after-payback': 'pAfterPayback', 'at-the-swap': 'pAtTheSwap', 'irr': 'pIrr'
+  };
+  var never = function () { return false; };
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'rate', type: 'range', label: t('rate'), hint: t('rateHint'), min: 0, max: L.RATE_MAX, step: L.RATE_STEP, format: pct },
+      { key: 'years', type: 'range', label: t('years'), min: 1, max: L.MAX_YEARS, step: 1 }
+    ].concat(L.CF_KEYS.map(function (key) {
+      // The flows are dragged on the stage; these hidden ranges keep them in the URL and clamp them.
+      var k = Number(key.slice(1));
+      return { key: key, type: 'range', label: t('barLabel', { who: key[0].toUpperCase(), year: yearName(k) }), min: L.CF_MIN, max: L.CF_MAX, step: L.CF_STEP, visible: never };
+    })),
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { c: 1, label: t('legA') },
+      { shape: 'rp-b', c: 2, label: t('legB') },
+      { shape: 'rp-pb', label: t('legPayback') },
+      { shape: 'rp-rate', label: t('legRate') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
