@@ -1237,7 +1237,7 @@ text only, no file yet):
 **Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area after `radio`
 and before `lecturer`, since none of the existing areas is about work outside IT:
 
-- **`film-set`**: "Na filmskom setu: sigurnost i tko što radi" / "On a film set: safety and who does what"; blurb
+- **`film-set`**: "Rad na setu: sigurnost i tko što radi" / "Working on set: safety and who does what"; blurb
   "Sigurnost, odjeli i snimateljski dan: tko što radi, kojim redom i kada se sve zaustavlja." / "Safety, departments
   and the shooting day: who does what, in what order, and when everything stops." (89 / 98 chars)
   - `crew` "Ekipa i odjeli" / "Crew and departments"
