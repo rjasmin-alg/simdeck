@@ -1,0 +1,450 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ethernet-frame: one basic Ethernet frame, field by field. An explorer: the data length, the type and the destination
+     drive the pad, the frame length and the FCS live; a button flips one bit in transit and the receiver's CRC-32 no
+     longer matches. On top a length meter with the 64 and 1518 marks; in the middle the field strip (preamble and SFD
+     not counted, then destination to FCS with the running octet count); at the bottom the FCS check.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ethernet-frame">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Građa Ethernet okvira · simdeck</title>
+<meta name="description" content="Mijenjaj duljinu podataka i gledaj kako nadopuna puni okvir do 64 okteta, a FCS se mijenja. Promijeni bit na vodu: primatelj tiho odbacuje okvir.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json; the build replaces it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ethernet-frame",
+  "title": {
+    "hr": "Građa Ethernet okvira",
+    "en": "Anatomy of an Ethernet frame"
+  },
+  "concept": {
+    "hr": "Polja okvira, najmanja duljina od 64 okteta, nadopuna i FCS",
+    "en": "The frame's fields, the 64-octet minimum, padding and the FCS"
+  },
+  "summary": {
+    "hr": "Mijenjaj duljinu podataka i gledaj kako nadopuna puni okvir do 64 okteta, a FCS se mijenja. Promijeni bit na vodu: primatelj tiho odbacuje okvir.",
+    "en": "Change the data length and watch padding fill the frame to 64 octets and the FCS change. Flip a bit on the wire: the receiver silently drops the frame."
+  },
+  "tags": [
+    "ethernet"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ethernet-frame"]; colours only from kit tokens.
+   Layout: length meter on top, the field strip in the middle, the FCS check at the bottom. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (as in sims/amdahl; shared request in NOTES.md). */
+[data-sim="ethernet-frame"] .sd-ctl[hidden] { display: none; }
+/* Six presets in two columns, so the panel fits at 1920×1080 without its own scroll. */
+[data-sim="ethernet-frame"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ethernet-frame"] .ef {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2.2cqh;
+  height: 100%;
+  padding: 2.2cqh 1.6cqw;
+  font-size: 1rem;
+}
+
+/* ── length meter ── */
+[data-sim="ethernet-frame"] .ef-meter { display: flex; flex-direction: column; gap: 0.35rem; }
+[data-sim="ethernet-frame"] .ef-mhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1rem; font-size: 1.15rem; }
+[data-sim="ethernet-frame"] .ef-mhead b { font-family: var(--mono); font-size: 1.7rem; color: var(--accent); }
+[data-sim="ethernet-frame"] .ef-mhead[data-bad] b { color: var(--danger); }
+[data-sim="ethernet-frame"] .ef-mhead .ef-wire { color: var(--muted); }
+[data-sim="ethernet-frame"] .ef-bar {
+  position: relative;
+  display: flex;
+  height: 2rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="ethernet-frame"] .ef-seg { height: 100%; flex: none; }
+[data-sim="ethernet-frame"] .ef-seg[data-kind="pad"] { border: 0.12rem dashed var(--ink); background: var(--bg); }
+[data-sim="ethernet-frame"] .ef-over {
+  position: absolute;
+  top: -0.25rem; bottom: -0.25rem;
+  border: 0.2rem solid var(--danger);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, var(--danger) 0.3em 0.45em);
+}
+[data-sim="ethernet-frame"] .ef-mark { position: absolute; top: -0.45rem; bottom: -0.45rem; width: 0; border-left: 0.22rem solid var(--ink); }
+[data-sim="ethernet-frame"] .ef-mlabels { position: relative; height: 1.4rem; font-size: max(16px, 0.85rem); }
+[data-sim="ethernet-frame"] .ef-mlabels span { position: absolute; top: 0.15rem; white-space: nowrap; font-weight: 700; }
+[data-sim="ethernet-frame"] .ef-mlabels span[data-end] { transform: translateX(-100%); }
+
+/* ── field strip: bracket rows, offset ruler, blocks ── */
+[data-sim="ethernet-frame"] .ef-stripwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; overflow-x: auto; padding: 0.7rem; margin: -0.7rem; }
+[data-sim="ethernet-frame"] .ef-strip { display: grid; column-gap: 0.3rem; row-gap: 0.25rem; align-items: end; min-width: min-content; }
+[data-sim="ethernet-frame"] .ef-br {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 0.6rem;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+[data-sim="ethernet-frame"] .ef-br::after {
+  content: '';
+  position: absolute;
+  left: 0.1rem; right: 0.1rem; bottom: 0;
+  height: 0.5rem;
+  border: 0.18rem solid var(--ink);
+  border-bottom: 0;
+}
+[data-sim="ethernet-frame"] .ef-br[data-end] { justify-content: flex-end; }
+[data-sim="ethernet-frame"] .ef-br[data-outer] { font-weight: 700; font-size: 1.2rem; }
+[data-sim="ethernet-frame"] .ef-br[data-outer]::after { border-width: 0.26rem; border-bottom: 0; }
+[data-sim="ethernet-frame"] .ef-br[data-muted] { color: var(--muted); }
+[data-sim="ethernet-frame"] .ef-br[data-muted]::after { border-style: dotted; border-color: var(--muted); }
+[data-sim="ethernet-frame"] .ef-br b { font-family: var(--mono); }
+[data-sim="ethernet-frame"] .ef-off { display: flex; justify-content: space-between; font-family: var(--mono); font-size: max(16px, 0.85rem); color: var(--muted); }
+[data-sim="ethernet-frame"] .ef-off span:last-child:not(:first-child) { color: var(--ink); font-weight: 700; }
+[data-sim="ethernet-frame"] .ef-blk {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  height: clamp(8.5rem, 30cqh, 12rem);
+  padding: 0.2rem 0.3rem;
+  border: var(--line-w) solid;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  line-height: 1.15;
+}
+[data-sim="ethernet-frame"] .ef-blk b { font-size: 1.1rem; overflow-wrap: anywhere; }
+[data-sim="ethernet-frame"] .ef-blk .ef-sz { font-family: var(--mono); font-size: 1rem; }
+[data-sim="ethernet-frame"] .ef-blk .ef-val { font-family: var(--mono); font-size: max(16px, 0.9rem); font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="ethernet-frame"] .ef-blk .ef-sub { font-size: max(16px, 0.9rem); }
+[data-sim="ethernet-frame"] .ef-tag {
+  margin-top: 0.15rem;
+  padding: 0 0.35rem;
+  border: 0.12rem solid currentColor;
+  border-radius: 999px;
+  font-size: max(16px, 0.85rem);
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--bg);
+  color: var(--ink);
+}
+[data-sim="ethernet-frame"] .ef-blk[data-kind="pad"] {
+  border-style: dashed;
+  border-color: var(--ink);
+  background-color: var(--bg);
+  color: var(--ink);
+}
+[data-sim="ethernet-frame"] .ef-blk[data-kind="pre"],
+[data-sim="ethernet-frame"] .ef-blk[data-kind="sfd"] { border-style: dotted; border-color: var(--muted); color: var(--muted); background: var(--bg); }
+[data-sim="ethernet-frame"] .ef-blk[data-bad] { border: 0.25rem solid var(--danger); }
+[data-sim="ethernet-frame"] .ef-blk .ef-tag[data-bad] { border-color: var(--danger); color: var(--danger); }
+[data-sim="ethernet-frame"] .ef-blk.sd-changed { z-index: 1; }
+
+/* ── FCS check ── */
+[data-sim="ethernet-frame"] .ef-check { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.25fr); gap: 0.6rem; align-items: stretch; }
+[data-sim="ethernet-frame"] .ef-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+[data-sim="ethernet-frame"] .ef-box h3 { margin: 0; font-size: 1.1rem; }
+[data-sim="ethernet-frame"] .ef-box p { margin: 0; }
+[data-sim="ethernet-frame"] .ef-box .ef-crc { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; }
+[data-sim="ethernet-frame"] .ef-box[data-flip] { border: 0.25rem solid var(--danger); }
+[data-sim="ethernet-frame"] .ef-box.sd-changed { z-index: 1; }
+[data-sim="ethernet-frame"] .ef-arrow { align-self: center; font-size: 1.8rem; font-weight: 700; }
+[data-sim="ethernet-frame"] .ef-verdict { font-weight: 700; }
+[data-sim="ethernet-frame"] .ef-verdict i { font-style: normal; margin-right: 0.3rem; }
+[data-sim="ethernet-frame"] .ef-verdict[data-ok] i { color: var(--ok); }
+[data-sim="ethernet-frame"] .ef-verdict[data-bad] i,
+[data-sim="ethernet-frame"] .ef-refused i { color: var(--danger); }
+[data-sim="ethernet-frame"] .ef-refused { grid-column: 1 / -1; border: 0.25rem solid var(--danger); font-size: 1.15rem; }
+[data-sim="ethernet-frame"] .ef-refused i { font-style: normal; font-weight: 700; margin-right: 0.3rem; }
+
+/* legend swatches */
+[data-sim="ethernet-frame"] .sd-swatch[data-shape="ef-soft"] { background: color-mix(in srgb, var(--sw) 16%, var(--bg)); border-color: var(--sw); }
+[data-sim="ethernet-frame"] .sd-swatch[data-shape="ef-pad"] { background-color: var(--bg); border-style: dashed; }
+[data-sim="ethernet-frame"] .sd-swatch[data-shape="ef-pre"] { background: var(--bg); border-style: dotted; border-color: var(--muted); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ethernet-frame"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ethernet-frame"] .ef { height: auto; padding: 0.5rem; gap: 1rem; }
+  [data-sim="ethernet-frame"] .ef-blk { height: 9rem; }
+  [data-sim="ethernet-frame"] .ef-check { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="ethernet-frame"] .ef-arrow { justify-self: center; transform: rotate(90deg); font-size: 1.4rem; }
+  [data-sim="ethernet-frame"] .ef-mhead b { font-size: 1.35rem; }
+  [data-sim="ethernet-frame"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Građa Ethernet okvira</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var seed = 1;            // the flip button draws its bit from Simdeck.rng; the model stays deterministic
+  var METER_MAX = L.PAYLOAD_UI_MAX + L.HEADER + L.SIZE.fcs;   // the meter's scale: the largest frame the slider makes (1618)
+
+  /** Series colour per field (legend: addresses c1, length/type c2, data c3, FCS c4). */
+  var FIELD_C = { dst: '1', src: '1', type: '2', data: '3', fcs: '4' };
+  /** Minimum column width (rem) per field; the rest of the strip is shared in proportion to the octets. */
+  var MIN_W = { pre: 7.4, sfd: 3.6, dst: 7.2, src: 7.2, type: 7, data: 7.4, pad: 6.4, fcs: 6.6 };
+  var PRE_SIZE = { pre: L.SIZE.pre, sfd: L.SIZE.sfd };
+
+  /** Data (addresses, hex values) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function oct(n) { return t.n('octets', n); }
+  function bold(s) { return h('b', null, s); }
+  function key(id) { return id.replace(/-/g, '_'); }
+  /** t.parts with *word* turned into an English term in italics (term pairs not in the glossary yet). */
+  function rich(k, vars) {
+    var out = [];
+    t.parts(k, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  // ── "changed": against the state before the last input ──
+  var lastParams = null, lastState = null, marks = [], refusal = null;
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    marks = L.changed(lastState, c.state);
+    if (lastParams) refusal = null;
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+
+  // ── length meter ──
+  function meter(c) {
+    var s = c.state, bad = s.verdict === 'too-long';
+    var pct = function (n) { return (100 * n / METER_MAX) + '%'; };
+    var segs = [
+      ['hdr', L.HEADER, '1', 'sd-fill'],
+      ['data', s.payloadLen, '3', 'sd-soft'],
+      ['pad', s.padLen, null, 'sd-hatch'],
+      ['fcs', L.SIZE.fcs, '4', 'sd-fill']
+    ].filter(function (x) { return x[1] > 0; }).map(function (x) {
+      return h('span', { class: 'ef-seg ' + x[3], dataset: x[2] ? { kind: x[0], c: x[2] } : { kind: x[0] }, style: { width: pct(x[1]) } });
+    });
+    var bar = h('div', { class: 'ef-bar', role: 'img', 'aria-label': t('meterLabel') + ' ' + oct(s.frameLen) }, segs,
+      bad ? h('span', { class: 'ef-over', style: { left: pct(L.MAX_FRAME), width: pct(s.frameLen - L.MAX_FRAME) } }) : null,
+      h('span', { class: 'ef-mark', style: { left: pct(L.MIN_FRAME) } }),
+      h('span', { class: 'ef-mark', style: { left: pct(L.MAX_FRAME) } }));
+    var labels = h('div', { class: 'ef-mlabels' },
+      h('span', { style: { left: pct(L.MIN_FRAME) } }, t('mMin')),
+      h('span', { style: { left: pct(L.MAX_FRAME) }, dataset: { end: '' } }, t('mMax')));
+    var head = h('div', { class: 'ef-mhead', dataset: bad ? { bad: '' } : {} },
+      h('span', null, t('meterLabel')), bold(oct(s.frameLen)),
+      h('span', { class: 'ef-wire' }, bad ? t('meterNotSent') : t('meterWire', { n: oct(s.wireLen) })));
+    return h('div', { class: 'ef-meter' }, head, bar, labels);
+  }
+
+  // ── field strip ──
+  function macLines(text) {
+    var p = text.split('-');
+    return [data(p.slice(0, 3).join('-') + '-', 'ef-val'), data(p.slice(3).join('-'), 'ef-val')];
+  }
+
+  function blockBody(f, c) {
+    var s = c.state, p = c.params, kids = [bold(t('f_' + f.id)), h('span', { class: 'ef-sz' }, t('size', { n: f.bytes }))];
+    if (f.id === 'pre' || f.id === 'sfd') { if (f.id === 'pre') kids.push(h('span', { class: 'ef-sub' }, t('notCounted'))); }
+    else if (f.id === 'dst') { kids = kids.concat(macLines(s.dst)); kids.push(h('span', { class: 'ef-tag' }, t('tag_' + s.dstKind))); }
+    else if (f.id === 'src') kids = kids.concat(macLines(s.src));
+    else if (f.id === 'type') { kids.push(data(s.typeHex, 'ef-val'), h('span', { class: 'ef-sub' }, t('opt_' + p.type)), h('span', { class: 'ef-tag' }, t('typeTag'))); }
+    else if (f.id === 'data') {
+      kids.push(h('span', { class: 'ef-sub' }, t('dataOf_' + p.type)));
+      if (s.verdict === 'too-long') kids.push(h('span', { class: 'ef-tag', dataset: { bad: '' } }, '✗ ' + t('tooLongTag')));
+    }
+    else if (f.id === 'pad') kids.push(h('span', { class: 'ef-sub' }, t('zeros')));
+    else if (f.id === 'fcs') kids.push(data(s.fcsSent || '—', 'ef-val'));
+    if (s.flipField === f.id) kids.push(h('span', { class: 'ef-tag', dataset: { bad: '' } }, '⚡ ' + t('flipTag', { k: s.flipBit })));
+    return kids;
+  }
+
+  function strip(c) {
+    var s = c.state;
+    var counted = s.fields.filter(function (f) { return f.id !== 'pad' || f.bytes > 0; });
+    var cols = [{ id: 'pre', bytes: PRE_SIZE.pre }, { id: 'sfd', bytes: PRE_SIZE.sfd }].concat(counted);
+    var colOf = {};
+    cols.forEach(function (f, i) { colOf[f.id] = i + 1; });
+    var tmpl = cols.map(function (f) { return 'minmax(' + MIN_W[f.id] + 'rem, ' + Math.max(f.bytes, 1) + 'fr)'; }).join(' ');
+    var span = function (a, b) { return colOf[a] + ' / ' + (colOf[b] + 1); };
+    var kids = [];
+    var br = function (row, a, b, label, ds) {
+      kids.push(h('div', { class: 'ef-br', dataset: ds || {}, style: { gridColumn: span(a, b), gridRow: String(row) } }, h('span', null, label)));
+    };
+    // row 1: the counted frame, and the uncounted preamble + SFD
+    br(1, 'pre', 'sfd', t('notCounted'), { muted: '' });
+    br(1, 'dst', 'fcs', t.parts('bracketFrame', { n: bold(oct(s.frameLen)) }), { outer: '' });
+    // row 2: header, body, trailer
+    br(2, 'dst', 'type', [t('bracketHeader'), ' · ', bold(oct(L.HEADER))]);
+    br(2, 'data', s.padLen ? 'pad' : 'data', s.padLen
+      ? t.parts('bracketBody', { n: bold(oct(s.payloadLen + s.padLen)) })
+      : t.parts('bracketData', { n: bold(oct(s.payloadLen)) }));
+    br(2, 'fcs', 'fcs', t('bracketTrailer'), { end: '' });
+    // row 3: running octet count at each boundary, counted from the destination
+    counted.forEach(function (f) {
+      var nums = [data(f.from)];
+      if (f.id === 'fcs') nums.push(data(s.frameLen));
+      kids.push(h('div', { class: 'ef-off', style: { gridColumn: String(colOf[f.id]), gridRow: '3' } }, nums));
+    });
+    // row 4: the blocks
+    cols.forEach(function (f) {
+      var id = f.id, cls = 'ef-blk';
+      if (FIELD_C[id]) cls += id === 'data' ? ' sd-soft' : ' sd-fill';
+      if (id === 'pad') cls += ' sd-hatch';
+      var mark = marks.indexOf(id) >= 0;
+      if (mark) cls += ' sd-changed';
+      var ds = { kind: id };
+      if (FIELD_C[id]) ds.c = FIELD_C[id];
+      if (s.flipField === id || (id === 'data' && s.verdict === 'too-long')) ds.bad = '';
+      kids.push(h('div', {
+        class: cls, dataset: ds, style: { gridColumn: String(colOf[id]), gridRow: '4' },
+        'aria-label': t('f_' + id) + ', ' + oct(f.bytes)
+      }, blockBody(f, c)));
+    });
+    return h('div', { class: 'ef-strip', style: { gridTemplateColumns: tmpl } }, kids);
+  }
+
+  // ── FCS check ──
+  function check(c) {
+    var s = c.state;
+    var changedBox = marks.indexOf('recv') >= 0 ? ' sd-changed' : '';
+    if (s.verdict === 'too-long') {
+      return h('div', { class: 'ef-check' }, h('div', { class: 'ef-box ef-refused' + changedBox },
+        h('p', null, h('i', { 'aria-hidden': 'true' }, '✗'), t('pnRefused')), h('p', null, t('pnRefused2'))));
+    }
+    var bad = s.verdict === 'fcs-error';
+    var arrow = function () { return h('div', { class: 'ef-arrow', 'aria-hidden': 'true' }, '→'); };
+    return h('div', { class: 'ef-check' },
+      h('div', { class: 'ef-box' + (marks.indexOf('fcs') >= 0 ? ' sd-changed' : '') },
+        h('h3', null, t('pnSender')), h('p', null, t('pnSenderDo')), data(s.fcsSent, 'ef-crc')),
+      arrow(),
+      h('div', { class: 'ef-box' + changedBox, dataset: bad ? { flip: '' } : {} },
+        h('h3', null, t('pnWire')),
+        h('p', null, bad ? t('pnWireFlip', { k: s.flipBit, field: t('in_' + s.flipField) }) : t('pnWireOk'))),
+      arrow(),
+      h('div', { class: 'ef-box' + changedBox },
+        h('h3', null, t('pnReceiver')), h('p', null, t('pnRecompute')), data(s.fcsRecv, 'ef-crc'),
+        h('p', { class: 'ef-verdict', dataset: bad ? { bad: '' } : { ok: '' } },
+          h('i', { 'aria-hidden': 'true' }, bad ? '✗' : '✓'), t(bad ? 'pnMismatch' : 'pnMatch'))));
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'payload', type: 'range', label: t('payload'), min: 0, max: L.PAYLOAD_UI_MAX, step: 1, format: function (v) { return oct(v); } },
+      { key: 'type', type: 'choice', label: t('type'), options: [['ipv4', t('opt_ipv4')], ['arp', t('opt_arp')], ['ipv6', t('opt_ipv6')]] },
+      { key: 'dst', type: 'choice', label: t('dst'), options: [['unicast', t('opt_unicast')], ['broadcast', t('opt_broadcast')], ['multicast', t('opt_multicast')]] },
+      // The flipped bit: hidden, so the URL keeps it; the two buttons set and clear it.
+      { key: 'flip', type: 'range', label: t('flipBit'), min: -1, max: function (p) { return L.derive(p).coveredBits - 1; }, visible: function () { return false; } },
+      { type: 'button', label: t('flip'), key: 'e', run: function (sim) {
+          var s = sim.state;
+          if (s.verdict === 'too-long') { refusal = 'whyNoFlip'; sim.render(); return; }
+          var k = Simdeck.rng(seed++).int(s.coveredBits);
+          if (k === s.flipBit) k = (k + 1) % s.coveredBits;
+          sim.set({ flip: k });
+        } },
+      { type: 'button', label: t('fix'), key: 'x', run: function (sim) {
+          if (sim.params.flip < 0) { refusal = 'whyNoFix'; sim.render(); return; }   // a flip kept under a refused frame is cleared too
+          sim.set({ flip: -1 });
+        } }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t('preset_' + key(x.id)), hint: t('hint_' + key(x.id)), params: x.params };
+    }),
+
+    legend: [
+      { c: 1, label: t('legAddr') },
+      { c: 2, label: t('legType') },
+      { c: 3, shape: 'ef-soft', label: t('legData') },
+      { shape: 'ef-pad', label: t('legPad') },
+      { c: 4, label: t('legFcs') },
+      { shape: 'ef-pre', label: t('legPre') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      track(c);
+      c.stage.replaceChildren(h('div', { class: 'ef' }, meter(c), h('div', { class: 'ef-stripwrap' }, strip(c)), check(c)));
+    },
+
+    caption: function (c) {
+      var s = c.state, out;
+      if (s.verdict === 'too-long') out = rich('capTooLong', { data: bold(oct(s.payloadLen)) });
+      else if (s.verdict === 'fcs-error') out = rich('capFlip', { recv: data(s.fcsRecv), sent: data(s.fcsSent) });
+      else {
+        if (s.padLen) out = rich('capPad', { data: bold(oct(s.payloadLen)), pad: bold(oct(s.padLen)) });
+        else if (s.payloadLen === L.MAX_DATA) out = rich('capFull');
+        else out = rich('capNoPad', { data: bold(oct(s.payloadLen)), frame: bold(oct(s.frameLen)), wire: oct(s.wireLen) });
+        out = out.concat(' ', rich('capOk', { fcs: data(s.fcsSent) }));
+      }
+      if (refusal) out = out.concat(' ', h('span', { class: 'sd-hl' }, t(refusal)));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
