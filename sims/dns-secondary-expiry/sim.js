@@ -180,7 +180,141 @@
     s.actedSinceCheck = false;
   }
 
+
+  // ── split brain (task dns-split-brain): two primaries of one zone, no transfer either way ──
+  // A preset of this page (catalogue §5.4, "zone servers over time"), with a state of its own: two servers that are
+  // both primary for corp.example, two client groups that each have one of them as their resolver (DHCP option 6),
+  // and a direct (non-recursive) query to each server. No timer runs between two primaries; `retire` turns P1 into a
+  // secondary of P2 and uses REFRESH once. Rules and numbers: SPEC.md, "Split brain".
+
+  /** The data: documentation addresses (RFC 5737) and names (RFC 2606); the serials are the task's (derived). */
+  var SPLIT = {
+    zone: 'corp.example',
+    names: ['corp.example', 'app.corp.example'],
+    servers: {
+      P1: { name: 'ns1.corp.example', serial: 2017010101, records: { 'corp.example': '192.0.2.10' } },
+      P2: { name: 'ns2.corp.example', serial: 2026110101, records: { 'corp.example': '192.0.2.20' } }
+    },
+    groups: { H: 'P1', D: 'P2' },
+    edit: { server: 'P2', name: 'app.corp.example', value: '192.0.2.30' },
+    scripts: {
+      split: [{ act: 'ask', group: 'H' }, { act: 'ask', group: 'D' }, { act: 'edit' }, { act: 'ask', group: 'H' },
+        { act: 'ask', group: 'D' }, { act: 'direct' }],
+      retire: [{ act: 'convert', server: 'P1', master: 'P2' }, { act: 'ask', group: 'H' }, { act: 'refresh', server: 'P1' },
+        { act: 'ask', group: 'H' }, { act: 'direct' }]
+    }
+  };
+  function isSplit(scene) { return scene === 'split' || scene === 'retire'; }
+
+  /**
+   * Split rule 1 and 2: a server answers from its own copy only, and for a name of its zone it is the authority, so
+   * the answer carries aa whether the name exists (NOERROR) or not (NXDOMAIN). Nothing looks at the other server.
+   */
+  function zoneAnswer(server, qname) {
+    var v = Object.prototype.hasOwnProperty.call(server.records, qname) ? server.records[qname] : null;
+    return { qname: qname, rcode: v === null ? 'NXDOMAIN' : 'NOERROR', value: v, aa: true };
+  }
+  /** Split rule 3: a client's answers come from the resolver its group was given, whichever server "is right". */
+  function groupAnswers(s, g) {
+    var srv = s.servers[s.groups[g].resolver];
+    return SPLIT.names.map(function (q) { return zoneAnswer(srv, q); });
+  }
+  /** Every server asked directly, without recursion: each one's own answers. */
+  function directAnswers(s) {
+    var out = {};
+    Object.keys(s.servers).forEach(function (k) {
+      out[k] = SPLIT.names.map(function (q) { return zoneAnswer(s.servers[k], q); });
+    });
+    return out;
+  }
+  /**
+   * A secondary's refresh from its master (host rule 2): a greater serial on the master → zone transfer, else the
+   * secondary keeps its copy (an equal serial, or one exactly 2^31 apart, is not greater). Mutates sec.
+   */
+  function refreshFrom(sec, master) {
+    if (serialGt(master.serial, sec.serial)) {
+      sec.records = clone(master.records);
+      sec.serial = master.serial;
+      return 'transfer';
+    }
+    return 'current';
+  }
+
+  function splitInitial(p) {
+    var scene = p.scene === 'retire' ? 'retire' : 'split';
+    var servers = {};
+    Object.keys(SPLIT.servers).forEach(function (k) {
+      var d = SPLIT.servers[k];
+      servers[k] = { name: d.name, role: 'primary', master: null, serial: d.serial, records: clone(d.records) };
+    });
+    var groups = {};
+    Object.keys(SPLIT.groups).forEach(function (g) { groups[g] = { resolver: SPLIT.groups[g], answers: null }; });
+    var s = { t: 0, scene: scene, split: true, servers: servers, groups: groups, direct: null, nextRefresh: null, at: 0,
+      ev: { kind: 'start', t: 0 }, changed: [], log: [], done: false };
+    if (scene === 'retire') {
+      // where the split-brain preset ends: the edit made on P2, each group has asked its own resolver
+      var P2 = servers[SPLIT.edit.server];
+      P2.records[SPLIT.edit.name] = SPLIT.edit.value;
+      P2.serial = serialInc(P2.serial);
+      Object.keys(groups).forEach(function (g) { groups[g].answers = groupAnswers(s, g); });
+    }
+    return s;
+  }
+
+  function splitMarks(prev, s) {
+    var out = [];
+    Object.keys(s.servers).forEach(function (k) {
+      if (JSON.stringify(prev.servers[k]) !== JSON.stringify(s.servers[k])) out.push(k);
+    });
+    Object.keys(s.groups).forEach(function (g) {
+      if (JSON.stringify(prev.groups[g]) !== JSON.stringify(s.groups[g])) out.push(g);
+    });
+    if (JSON.stringify(prev.direct) !== JSON.stringify(s.direct)) out.push('direct');
+    return out;
+  }
+
+  function splitStep(s0, p) {
+    var s = clone(s0), script = SPLIT.scripts[s.scene], a = script[s.at];
+    var ev = { kind: a.act, t: s.t };
+    if (a.act === 'ask') {
+      s.groups[a.group].answers = groupAnswers(s, a.group);
+      ev.group = a.group;
+      ev.server = s.groups[a.group].resolver;
+    } else if (a.act === 'edit') {
+      var srv = s.servers[SPLIT.edit.server];
+      srv.records[SPLIT.edit.name] = SPLIT.edit.value;
+      srv.serial = serialInc(srv.serial);
+      ev.server = SPLIT.edit.server;
+    } else if (a.act === 'convert') {
+      // the secondary keeps its copy until it asks its master (no NOTIFY, as on the host page)
+      var sec = s.servers[a.server];
+      sec.role = 'secondary';
+      sec.master = a.master;
+      s.nextRefresh = s.t + p.refresh;
+      ev.server = a.server;
+      ev.master = a.master;
+    } else if (a.act === 'refresh') {
+      var sv = s.servers[a.server];
+      s.t = s.nextRefresh;
+      ev.t = s.t;
+      ev.server = a.server;
+      ev.serialM = s.servers[sv.master].serial;
+      ev.serialS = sv.serial;
+      ev.outcome = refreshFrom(sv, s.servers[sv.master]);
+      s.nextRefresh = s.t + p.refresh;
+    } else {
+      s.direct = directAnswers(s);
+    }
+    s.at++;
+    s.ev = ev;
+    s.changed = splitMarks(s0, s);
+    s.log = s0.log.concat([{ t: ev.t, kind: ev.kind }]);
+    s.done = s.at >= script.length;
+    return s;
+  }
+
   function initial(p) {
+    if (isSplit(p.scene)) return splitInitial(p);
     var sc = SCENES[p.scene] || SCENES.lab;
     var recs = {};
     sc.records.forEach(function (r) { recs[r[0]] = r[2]; });
@@ -212,6 +346,7 @@
    * (with its count, first and last time). Nothing after the end of the run (isDone) is processed.
    */
   function step(s0, n, p) {
+    if (s0.split) return splitStep(s0, p);
     var s = clone(s0);
     var nx = peek(s, p);
     if (nx.kind === 'action') {
@@ -267,6 +402,7 @@
     defaults: { scene: 'lab', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: 600, killAt: NONE, reviveAt: NONE },
 
     SCENES: SCENES,
+    SPLIT: SPLIT,
     MAX_STEPS: MAX_STEPS,
     NONE: NONE,
 
@@ -285,7 +421,12 @@
     isDone: isDone,
     answer: answer,
     routine: routine,
-    moment: moment
+    moment: moment,
+    isSplit: isSplit,
+    zoneAnswer: zoneAnswer,
+    groupAnswers: groupAnswers,
+    directAnswers: directAnswers,
+    refreshFrom: refreshFrom
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;

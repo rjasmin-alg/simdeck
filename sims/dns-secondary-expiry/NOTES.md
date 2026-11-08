@@ -129,6 +129,64 @@ Used from the glossary: *primary server*, *secondary server*, *zone transfer*, *
   needs only the SOA timers and two records), so nothing was copied. The `dns-split-brain` preset that the task says
   this page will host can reuse `SCENES`, `moment` and `serialGt`.
 
+## Split brain presets (task `dns-split-brain`)
+
+Presets `split-brain` (6 steps) and `split-brain-retire` (5), entry `split-brain`. Rules and numbers: SPEC.md, "Split
+brain". Built 2026-11-08.
+
+- **Host support, added here.** The task says to stop and file a shared request if the host cannot express two
+  primaries. It could not (one P, one S, one client). Following the precedent of the other preset tasks that extended
+  their host with an opt-in mode (`quorum-split-brain` fencing and Windows flows, `lnx-cow-filesystem` win-vss), the
+  support is added additively: scenes `split` and `retire` get a state of their own (`split: true`) and their own
+  `initial`/`step` branch, render and caption. The one-primary scenes, their state and their 29 tests are unchanged;
+  `SCENES` is untouched (the data is `SPLIT`). The host's `serialGt` and `serialInc` are reused, as its notes offered.
+- **What the task asked of the host:** (1) two primaries, each with its own copy: yes; (2) a per-client "which server"
+  mapping and a per-server non-recursive view with `aa`: yes (groups H and D, the direct table); (3) an edit on one
+  server: yes, as a fixed step. No timers between primaries; `retire` uses REFRESH once.
+- **Fixed steps, no E/K/V.** "Edit one primary, query both" is the script: the edit is step 3. E, K and V act on the
+  one-primary run; in the split mode they are hidden and their keys put a note in the caption. The SOA params are
+  hidden too.
+- **The examples follow the mode** (as in `quorum-split-brain`): the one-primary page lists its five and "Two
+  primaries" (the way in); the split mode lists "Zone edit" (the way back) and its two. Seven in a list did not fit
+  the panel at 1920×1080 (958 > 926 px). Keys 1–7 reach all of them.
+- **The edit raises P2's serial** to 2026110102; the task gives the start serial 2026110101 only.
+- **`split-brain-retire` starts where `split-brain` ends** (P2 edited, both groups have asked), so the fix is shown
+  on the broken state; the task marks this preset optional, and it is built because the host's refresh and serial
+  rule cover it.
+- **Group answers carry `aa`** too: the server a group asks is authoritative for the zone, so its answer to a
+  recursive query is authoritative (UL ch19 shows `qr aa rd ra` from the lab server). The direct table is the
+  measurement the explanation recommends.
+- **Names:** P1/P2, groups H/D as in the task; `ns1`/`ns2.corp.example` on the cards. The kinds "stand-alone" and
+  "directory-integrated" name server are said generically (no product names). No estate names; the instructor's
+  caveat is not quoted (the task's own caption is used for the direct step).
+- **Steps:** the task's first step "show both copies" is the start state; D asks again after the edit (step 5), which
+  the expected answers need. Six steps, as the task says.
+- **Layout:** two columns (P1 and group H, P2 and group D), a bracket per zone above (one bracket after the switch),
+  the direct table below. P1's side is series colour 1, P2's colour 2, always with the P1/P2 label and position. On
+  the phone each column stacks and the direct table lists each server's answer under its name.
+- **Level:** the host is `intro`; the task gives this preset `advanced`. Entries have no level field, so the entry is
+  listed under the host's level *(for the owner: in the thread report; OPEN.md is outside a preset task's scope)*.
+
+Checks: `sim.test.js` adds 10 tests (tie-breaks first); 8 mutants of the split code (aa only on NOERROR, a fixed
+resolver map, the newest serial wins, the edit reaching P1, `>=` instead of RFC 1982, a transfer at the switch, a
+fixed refresh, one step short) each fail at least one. A browser sweep over every step of both presets in both
+languages, light and dark at 1920×1080 and at 375×812: no page scroll, no card overflow, no text under 16 px, no
+console errors, no unfilled placeholder, every word from the tables, and the E key's note. Screenshots reviewed
+(light, dark, grayscale, phone, both languages).
+
+Term pairs (missing from `kit/glossary.js`; written out in both tables): *non-recursive query* — nerekurzivni upit
+(UL ch19 "rekurzivni"; task Terms); *authoritative answer (aa)* — mjerodavan odgovor (task Terms); *split-brain* —
+razdvojeni mozak (task Terms). Used from the glossary: *primary server*, *zone transfer*; *zone apex* (vrh zone) is
+said in the captions in plain words.
+
+Unchecked *(check)*: RFC 1034 §4.3.2 step 3 and RFC 9499 §6 wording are from memory (no network in this session);
+the AA flag in an answer to a recursive query from a server that is also authoritative is from UL ch19's example.
+
+Shared requests: none new. (The kit could hide `type: 'button'` params with `visible`, as it does other params; the
+page hides E/K/V by CSS on `aria-keyshortcuts`.)
+
+Time: start 2026-11-08 21:58, gate passing at about 23:25 (about 90 min).
+
 ## Time
 
 Start 2026-10-28 16:53, gate passing and status ready at 17:55: about 60 min, of which the fresh review

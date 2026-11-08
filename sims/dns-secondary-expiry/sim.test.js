@@ -353,3 +353,137 @@ test('every preset in the page is valid for the model', () => {
     assert.deepEqual(page, pre, `preset ${id} params`);
   }
 });
+
+// ── split brain (task dns-split-brain): two primaries of one zone; SPEC.md "Split brain" ──
+
+const SPLIT_PRESETS = {
+  'split-brain': { scene: 'split', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: NONE, killAt: NONE, reviveAt: NONE },
+  'split-brain-retire': { scene: 'retire', refresh: 3600, retry: 900, expire: 604800, bumpSerial: true, editAt: NONE, killAt: NONE, reviveAt: NONE }
+};
+const SPLIT = SPLIT_PRESETS['split-brain'], RETIRE = SPLIT_PRESETS['split-brain-retire'];
+const vals = (list) => list.map((a) => (a.rcode === 'NOERROR' ? a.value : a.rcode));
+/** Step a state the test has changed by hand to the end of its script. */
+const runFrom = (s0, p) => { const out = [s0]; while (!out[out.length - 1].done) out.push(logic.step(out[out.length - 1], out.length, p)); return out; };
+
+test('split tie-break: equal serials on two primaries still move nothing between them', () => {
+  const p = P(SPLIT);
+  const s0 = logic.initial(p);
+  s0.servers.P1.serial = s0.servers.P2.serial; // the serial is the one thing a transfer would compare
+  const r = runFrom(s0, p);
+  for (const s of r) assert.deepEqual(s.servers.P1, s0.servers.P1, 'P1 never changes');
+  assert.deepEqual(vals(r[r.length - 1].direct.P1), ['192.0.2.10', 'NXDOMAIN']);
+});
+
+test('split tie-break: a greater serial on the stale primary does not make its copy win, nor the other\'s', () => {
+  const p = P(SPLIT);
+  const s0 = logic.initial(p);
+  s0.servers.P1.serial = 4000000000; // P1 now "newer" by serial
+  const end = runFrom(s0, p).pop();
+  assert.deepEqual(vals(end.groups.H.answers), ['192.0.2.10', 'NXDOMAIN']);
+  assert.deepEqual(vals(end.groups.D.answers), ['192.0.2.20', '192.0.2.30']);
+  assert.deepEqual(end.servers.P2.records, { 'corp.example': '192.0.2.20', 'app.corp.example': '192.0.2.30' });
+});
+
+test('split rule 1: a primary answers from its own copy only; the edit on P2 never reaches P1', () => {
+  const r = run(SPLIT);
+  const P1 = r[0].servers.P1;
+  for (const s of r) assert.deepEqual(s.servers.P1, P1);
+  const edit = r.find((s) => s.ev.kind === 'edit');
+  assert.equal(edit.servers.P2.records['app.corp.example'], '192.0.2.30');
+  assert.equal(edit.servers.P2.serial, 2026110102);
+  assert.deepEqual(edit.changed, ['P2'], 'the edit changes P2 and nothing else');
+  assert.deepEqual(logic.zoneAnswer({ records: { a: '1' } }, 'b'), { qname: 'b', rcode: 'NXDOMAIN', value: null, aa: true });
+});
+
+test('split rule 2: both servers answer with aa, each from its own copy, NXDOMAIN included', () => {
+  const end = run(SPLIT).pop();
+  assert.deepEqual(vals(end.direct.P1), ['192.0.2.10', 'NXDOMAIN']);
+  assert.deepEqual(vals(end.direct.P2), ['192.0.2.20', '192.0.2.30']);
+  for (const k of ['P1', 'P2']) for (const a of end.direct[k]) assert.equal(a.aa, true, `${k} ${a.qname} aa`);
+  for (const g of ['H', 'D']) for (const a of end.groups[g].answers) assert.equal(a.aa, true, `group ${g} ${a.qname} aa`);
+});
+
+test('split rule 3: a group\'s answers depend only on the resolver it was given', () => {
+  const p = P(SPLIT);
+  const s0 = logic.initial(p);
+  s0.groups.H.resolver = 'P2'; s0.groups.D.resolver = 'P1'; // swap DHCP option 6
+  const end = runFrom(s0, p).pop();
+  assert.deepEqual(vals(end.groups.H.answers), ['192.0.2.20', '192.0.2.30']);
+  assert.deepEqual(vals(end.groups.D.answers), ['192.0.2.10', 'NXDOMAIN']);
+  // and in the preset: H via P1, D via P2
+  const r = run(SPLIT);
+  for (const s of r.filter((x) => x.ev.kind === 'ask')) assert.equal(s.ev.server, { H: 'P1', D: 'P2' }[s.ev.group]);
+});
+
+test('retire tie-break: the converted secondary takes the zone only on a greater serial (equal, smaller, 2^31 apart keep it)', () => {
+  const sec = (serial) => ({ serial, records: { 'corp.example': '192.0.2.10' } });
+  const master = { serial: 2026110102, records: { 'corp.example': '192.0.2.20', 'app.corp.example': '192.0.2.30' } };
+  for (const s of [2026110102, 2026110103, (2026110102 + 2147483648) % 4294967296]) {
+    const x = sec(s);
+    assert.equal(logic.refreshFrom(x, master), 'current', `serial ${s}`);
+    assert.deepEqual(x.records, { 'corp.example': '192.0.2.10' });
+  }
+  const y = sec(2017010101);
+  assert.equal(logic.refreshFrom(y, master), 'transfer');
+  assert.deepEqual(y.records, master.records);
+  assert.equal(y.serial, master.serial);
+  // in the run: a P1 serial equal to P2's leaves group H on the old answers after the refresh
+  const p = P(RETIRE);
+  const s0 = logic.initial(p);
+  s0.servers.P1.serial = s0.servers.P2.serial;
+  const end = runFrom(s0, p).pop();
+  assert.deepEqual(vals(end.groups.H.answers), ['192.0.2.10', 'NXDOMAIN']);
+});
+
+test('retire: the role changes at once, the copy only at the next refresh (REFRESH after the switch)', () => {
+  const r = run(RETIRE);
+  const conv = r.find((s) => s.ev.kind === 'convert');
+  assert.equal(conv.servers.P1.role, 'secondary');
+  assert.equal(conv.servers.P1.master, 'P2');
+  assert.equal(conv.servers.P1.serial, 2017010101);
+  assert.equal(conv.nextRefresh, 3600);
+  const before = r.find((s) => s.ev.kind === 'ask');
+  assert.deepEqual(vals(before.groups.H.answers), ['192.0.2.10', 'NXDOMAIN'], 'still the old copy, with aa');
+  const ref = r.find((s) => s.ev.kind === 'refresh');
+  assert.deepEqual([ref.t, ref.ev.outcome, ref.servers.P1.serial], [3600, 'transfer', 2026110102]);
+  assert.equal(logic.step(logic.initial(P({ ...RETIRE, refresh: 900 })), 1, P({ ...RETIRE, refresh: 900 })).nextRefresh, 900);
+});
+
+test('split presets: steps and what each one shows (SPEC.md, "Split brain")', () => {
+  const sum = (pre) => run(pre).slice(1).map((s) => [s.t, s.ev.kind + (s.ev.group ? ':' + s.ev.group : ''),
+    s.ev.group ? vals(s.groups[s.ev.group].answers).join(' ') : s.direct ? ['P1', 'P2'].map((k) => vals(s.direct[k]).join(' ')).join(' / ') : '']);
+  assert.deepEqual(sum(SPLIT), [[0, 'ask:H', '192.0.2.10 NXDOMAIN'], [0, 'ask:D', '192.0.2.20 NXDOMAIN'], [0, 'edit', ''],
+    [0, 'ask:H', '192.0.2.10 NXDOMAIN'], [0, 'ask:D', '192.0.2.20 192.0.2.30'], [0, 'direct', '192.0.2.10 NXDOMAIN / 192.0.2.20 192.0.2.30']]);
+  assert.deepEqual(sum(RETIRE), [[0, 'convert', ''], [0, 'ask:H', '192.0.2.10 NXDOMAIN'], [3600, 'refresh', ''],
+    [3600, 'ask:H', '192.0.2.20 192.0.2.30'], [3600, 'direct', '192.0.2.20 192.0.2.30 / 192.0.2.20 192.0.2.30']]);
+  assert.equal(logic.steps(P(SPLIT)), 6);
+  assert.equal(logic.steps(P(RETIRE)), 5);
+  // retire starts where split-brain ends
+  const endSplit = run(SPLIT).pop(), startRetire = logic.initial(P(RETIRE));
+  assert.deepEqual(startRetire.servers, endSplit.servers);
+  assert.deepEqual(startRetire.groups, endSplit.groups);
+});
+
+test('split marks: what changed in a step', () => {
+  const r = run(SPLIT);
+  assert.deepEqual(r.slice(1).map((s) => s.changed), [['H'], ['D'], ['P2'], [], ['D'], ['direct']]);
+});
+
+test('split: JSON-safe, deterministic, step back equals replay, input not mutated, page presets match', () => {
+  for (const pre of Object.values(SPLIT_PRESETS)) {
+    const p = P(pre), forward = run(pre);
+    for (const s of forward) assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+    for (let n = forward.length - 1; n >= 0; n--) assert.deepEqual(kit.stateAt(logic, p, n), forward[n]);
+    const s0 = logic.initial(p), copy = structuredClone(s0);
+    logic.step(s0, 1, p);
+    assert.deepEqual(s0, copy);
+  }
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, 'index.html'), 'utf8');
+  for (const [id, pre] of Object.entries(SPLIT_PRESETS)) {
+    const m = html.match(new RegExp(`id: '${id}'[\\s\\S]*?params: \\{([^}]*)\\}`));
+    assert.ok(m, `preset ${id} in the page`);
+    assert.deepEqual(Function(`return {${m[1]}}`)(), pre, `preset ${id} params`);
+  }
+  const json = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, 'sim.json'), 'utf8'));
+  assert.ok(json.entries.some((e) => e.preset === 'split-brain'), 'entry split-brain');
+});

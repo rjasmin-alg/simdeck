@@ -114,3 +114,80 @@ The estate's expiry counts from the last successful check (Tue 10 Nov 17:02), no
 
 "changed" per step: P (up/down, serial, records), S (serial, records, mode), each timer whose deadline moved, the
 client's answer. Changed record rows and serials are highlighted; S's records that differ from P's carry "≠ P".
+
+## Split brain (presets `split-brain`, `split-brain-retire`; task `dns-split-brain`)
+
+One concept: **split-brain primaries answer differently**. Task `docs/tasks/w3/dns-split-brain.md`, catalogue
+`inet-dns-split-brain` (§4.2), a preset of this page (§5.4, "zone servers over time"). The student: edit one primary,
+query both. Hidden param `scene` = `split` or `retire`; the SOA params and the E/K/V actions do not apply (the keys
+say so in the caption). A state of its own (`split: true`); the one-primary scenes above are unchanged.
+
+### Scene
+
+Zone `corp.example` (RFC 2606 name, RFC 5737 addresses) on two servers that are **both primary**, with no zone
+transfer in either direction *(task, derived)*:
+
+| server | name | kind | SOA serial | records |
+|---|---|---|---|---|
+| P1 | `ns1.corp.example` | stand-alone name server | 2017010101 | `corp.example A 192.0.2.10` |
+| P2 | `ns2.corp.example` | directory-integrated name server | 2026110101 | `corp.example A 192.0.2.20` |
+
+Clients: group H has P1 as its name server, group D has P2 (DHCP option 6). Each group asks its server, recursively,
+for `corp.example A` (the zone apex) and `app.corp.example A`. The direct view asks each server the same two names
+without recursion.
+
+### State
+
+`{ t, scene, split: true, servers: { P1|P2: { name, role: primary|secondary, master, serial, records } }, groups:
+{ H|D: { resolver, answers | null } }, direct: { P1, P2 } | null, nextRefresh, at, ev, changed[], log[], done }`.
+An answer is `{ qname, rcode: NOERROR|NXDOMAIN, value, aa }`.
+
+### Rules
+
+1. **A primary answers from its own copy only;** nothing compares or merges two primaries (UL ch19 "Vlastiti
+   poslužitelj imena": the primary is where the zone is edited and the source of zone transfers; a secondary gets the
+   zone by transfer. With two primaries and no transfer there are two zones). An edit on one never reaches the other.
+   **Tie-break:** the serials do not matter between two primaries: equal serials, or a greater one on the stale copy,
+   move nothing and change no answer.
+2. **Both answers carry `aa`** and each is right for the server that gives it: a server answers for names of a zone
+   it is authoritative for from its own data and sets AA (RFC 1034 §4.3.1, §4.3.2 step 3; RFC 9499 §6 "Primary
+   server", "Authoritative server"). A name missing from its copy is an authoritative NXDOMAIN, also with `aa`. The
+   recursive answers to the groups carry `aa` too: the server they ask is authoritative for the zone (UL ch19, the
+   `qr aa rd ra` answer of the lab server). UL ch19: the flag says who claims authority, not whether the claim is true.
+3. **A client's answer depends only on the server it was given** (DHCP option 6), not on which server "is right"
+   (by serial, age or content). **Tie-break:** swapping the groups' servers swaps their answers.
+4. **The edit** on P2 adds `app.corp.example A 192.0.2.30` and raises P2's serial by one (2026110102), as an edit
+   should *(derived: the task gives the start serial only)*. P1 is not touched.
+5. **The fix (`retire`)**: P1 becomes a secondary of P2. Its role changes at once; its copy does not (no NOTIFY, as
+   on this page): it keeps serial 2017010101 and answers from the old copy, still with `aa`, until its refresh,
+   REFRESH (3600 s) after the switch. At the refresh host rule 2 applies: P2's serial is greater (RFC 1982), so P1
+   takes the whole zone. **Tie-break:** an equal serial, a smaller one, or one exactly 2^31 apart is not greater, and
+   P1 keeps its old copy (the fix fails silently unless P2's serial is greater: check the serials first).
+
+### Steps and expected answers
+
+Checked with an independent Python count before the model (and in `sim.test.js`, "split presets").
+
+| preset | step | t | what | answers (corp.example, app.corp.example) |
+|---|---|---|---|---|
+| `split-brain` | start | 0 | both copies, no group has asked | |
+| | 1 | 0 | H asks P1 | 192.0.2.10, NXDOMAIN (aa) |
+| | 2 | 0 | D asks P2 | 192.0.2.20, NXDOMAIN (aa) |
+| | 3 | 0 | edit on P2 (serial 2026110102) | |
+| | 4 | 0 | H asks P1 again | 192.0.2.10, NXDOMAIN (still) |
+| | 5 | 0 | D asks P2 again | 192.0.2.20, 192.0.2.30 |
+| | 6 | 0 | direct, non-recursive, to each | P1: 192.0.2.10, NXDOMAIN · P2: 192.0.2.20, 192.0.2.30 (all aa) |
+| `split-brain-retire` | start | 0 | where `split-brain` ends (P2 edited; H and D have asked) | H: 192.0.2.10, NXDOMAIN · D: 192.0.2.20, 192.0.2.30 |
+| | 1 | 0 | P1 becomes a secondary of P2 (copy unchanged, refresh at 3600) | |
+| | 2 | 0 | H asks P1 | 192.0.2.10, NXDOMAIN (old copy, aa) |
+| | 3 | 3600 | P1's refresh: 2026110102 > 2017010101 → zone transfer | |
+| | 4 | 3600 | H asks P1 | 192.0.2.20, 192.0.2.30 (same as D) |
+| | 5 | 3600 | direct, non-recursive, to each | both: 192.0.2.20, 192.0.2.30 (aa) |
+
+The task's six steps list "show both copies" first; here that is the start, and D asks again after the edit (step 5),
+which the task's expected answers ("D clients get 192.0.2.20 and 192.0.2.30") need. Six steps either way.
+
+### Marks
+
+"changed" per step: a server whose role, serial or records changed (`P1`, `P2`), a group whose answers changed (`H`,
+`D`), and `direct`. The bracket over the servers is marked when P1's role changes.

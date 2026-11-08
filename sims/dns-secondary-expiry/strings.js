@@ -95,6 +95,11 @@
       prEstateHint: 'SOA iz datoteke zone imanja; loom se gasi u utorak 10. 11. navečer',
       prRevived: 'Vraćen na vrijeme',
       prRevivedHint: 'Kao „Primarni se ugasi”, ali P se vrati peti dan',
+      // split brain (task dns-split-brain)
+      prSplit: 'Dva primarna',
+      prSplitHint: 'Ista zona na dva primarna, bez prijenosa; izmjena na P2, pa upit svakome',
+      prRetire: 'Dva primarna: popravak',
+      prRetireHint: 'P1 postaje sekundarni od P2; serijski brojevi odlučuju',
 
       // legend
       lgdRefresh: 'osvježavanje',
@@ -144,6 +149,43 @@
       noteOnce: 'U jednom prikazu svaka radnja ide samo jednom; R vraća na početak.',
       noteLimit: 'Prikaz je na granici od 20 koraka.',
 
+      // split brain (task dns-split-brain): two primaries of one zone
+      sbStage: 'Dva primarna poslužitelja iste zone, dvije skupine klijenata i izravni upit svakom poslužitelju',
+      sbKind1: 'samostalni poslužitelj imena',
+      sbKind2: 'poslužitelj imena u imeniku',
+      sbRoleS: 'sekundarni od {m}',
+      sbNone: '— nema zapisa',
+      sbNext: 'osvježavanje {at}',
+      sbTwo: 'Dva primarna za {zone}, bez prijenosa zone: dvije zone',
+      sbOne: 'Primarni za {zone} i njegov sekundarni: jedna zona',
+      sbGroup: 'Skupina {g}',
+      sbDhcp: 'DHCP (opcija 6) daje poslužitelj imena {p}',
+      sbAsk: 'rekurzivni upit',
+      sbNotAsked: 'još nije pitala',
+      sbDirect: 'Nerekurzivni upit izravno svakom poslužitelju',
+      sbDirectNot: 'još nije poslan',
+      sbNx: 'NXDOMAIN (ne postoji)',
+      lgdP1: 'P1 i skupina H',
+      lgdP2: 'P2 i skupina D',
+      lgdPrimary: 'primarni',
+      lgdSecondary: 'sekundarni',
+      lgdZone: 'jedna zona',
+      capSbStart: '{p1} i {p2} oba su primarni poslužitelj zone {zone}, a prijenosa zone nema ni u jednom smjeru: svaki ima svoj serijski broj i svoje zapise, pa i drukčiju adresu na vrhu zone. Skupina H od DHCP-a dobiva {p1} kao poslužitelj imena, skupina D {p2}.',
+      capSbAsk: 'Skupina {g} pita svoj poslužitelj imena, {p}: {apex} je {v1}, a {app} {v2}. Odgovor dolazi iz kopije na {p}, sa zastavicom aa.',
+      capSbOther: 'Skupina {g} za isto ime {apex} dobiva {v}: jedno ime, dva odgovora, i nijedan nije pogreška.',
+      capSbStill: 'Izmjena na {p2} do {p1} ne stiže, jer je nitko ne prenosi.',
+      capSbOnly: 'Novi zapis vidi samo skupina {g}.',
+      capSbEdit: 'Na {p2} je dodan zapis {app} A {v}, a serijski broj podignut na {serial}. {p1} za to ne zna: dva primarna ne uspoređuju serijske brojeve i ne prenose zonu jedan drugome.',
+      capSbDirect: 'Isti upiti, sad nerekurzivno i izravno svakom poslužitelju. Oba poslužitelja odgovaraju sa zastavicom aa i oba su u pravu za svoju kopiju. Zona s dva primarna dvije su zone.',
+      capSbEnd: 'Ono što razriješi jedno računalo govori samo što zna poslužitelj imena koji mu je dodijeljen. R vraća na početak.',
+      capRtStart: 'Ovdje završava primjer „Dva primarna”: {p1} i {p2} imaju svaki svoju zonu, pa skupina H za {apex} dobiva {h}, a skupina D {d}. Popravak: jedan ostaje primarni, a drugi postaje njegov sekundarni.',
+      capRtConvert: '{p1} više nije primarni nego sekundarni od {p2}. Kopija mu ostaje ista (serijski broj {s1}) dok ne pita {p2}, a to će učiniti pri osvježavanju, {at}. Zonu preuzima samo ako je serijski broj na {p2} veći, a {s2} jest veći.',
+      capRtNotYet: 'Uloga se promijenila, ali kopija nije: {p1} kao sekundarni odgovara iz stare kopije, i dalje sa zastavicom aa.',
+      capRtRefresh: '{t}, osvježavanje: {p1} pita {p2} za serijski broj. {s2} je veći od {s1}, pa {p1} preuzima cijelu zonu (prijenos zone), a stara kopija s njegovim vrhom zone nestaje.',
+      capRtSame: 'Sad obje skupine dobivaju isto: jedna zona, jedan izvor.',
+      capRtDirect: 'Izravno i nerekurzivno: oba poslužitelja daju iste odgovore sa zastavicom aa, {p1} kao sekundarni iz kopije koju je preuzeo od {p2}.',
+      noteSplit: 'U ovom su primjeru koraci zadani (→); E, K i V rade u primjerima s jednim primarnim.',
+
       explain: '<p>Zona se uređuje na jednom poslužitelju; to je [[primary server]]. Sekundarni poslužitelj, ' +
         '[[=secondary server]], zonu dobiva od primarnog i odgovara iz svoje kopije; čin u kojem je dobiva zove se ' +
         '[[zone transfer]]. Oba su mjerodavna, svaki je [[authoritative server]]; razlika je samo u tome odakle im ' +
@@ -158,7 +200,21 @@
         'trajanja, a ne pričuvna kopija koja preživi primarni: mrtvi primarni obori zonu, samo kasnije. Rok se računa od ' +
         'zadnje uspješne provjere, ne od zadnjeg prijenosa zone.</p>' +
         '<p>Model: jedan sekundarni, bez obavijesti NOTIFY, pa izmjene stižu samo pri osvježavanju. Vrijeme teče od ' +
-        'početka prikaza; jedan korak skače na sljedeći zanimljiv trenutak, a niz jednakih provjera je jedan korak.</p>'
+        'početka prikaza; jedan korak skače na sljedeći zanimljiv trenutak, a niz jednakih provjera je jedan korak.</p>',
+
+      explainSplit: '<p><strong>Dva primarna.</strong> Zona ima jedan [[primary server]]: na njemu se uređuje, a ' +
+        'sekundarni od njega preuzimaju kopiju, [[zone transfer]]. Kad su dva poslužitelja oba primarna za istu zonu i ' +
+        'nijedan drugome ne prenosi zonu, ništa ih ne uspoređuje: svaki odgovara iz svoje kopije i svaki se izjašnjava ' +
+        'kao autoritet zastavicom <code>aa</code>, <i>authoritative answer</i> (mjerodavan odgovor). Zastavica kaže tko ' +
+        'tvrdi da je mjerodavan, ali ne i je li tvrdnja istinita.</p>' +
+        '<p>Klijent ne bira odgovor: pita poslužitelj imena koji mu je dodijeljen (DHCP, opcija 6), i to je jedini razlog ' +
+        'zašto vidi baš taj. Ono što razriješi jedno računalo nije „ono što zona kaže”. Tko je za zonu mjerodavan i što ' +
+        'tvrdi, provjerava se tako da se svakom poslužitelju koji se za nju izjašnjava izravno pošalje <i>non-recursive ' +
+        'query</i> (nerekurzivni upit). Dva primarna nisu ni zalihost: zalihost su dvije kopije iste zone, a ovo su ' +
+        'dvije zone s istim imenom, <i>split-brain</i> (razdvojeni mozak).</p>' +
+        '<p>Popravak: jedan ostaje primarni, a drugi postaje njegov sekundarni ili se ukloni. Sekundarni preuzima zonu ' +
+        'samo ako je serijski broj na primarnom veći od njegova, pa se brojevi provjere prije prelaska. Namjerno ' +
+        'različiti odgovori po mreži iz koje klijent pita (pogledi) drugo su pitanje i ovdje se ne prikazuju.</p>'
     },
     en: {
       stage: 'The primary and the secondary server of a zone, the secondary\'s timers and a client that asks it',
@@ -242,6 +298,11 @@
       prEstateHint: 'SOA from the estate\'s zone file; loom goes off on Tuesday 10 Nov in the evening',
       prRevived: 'Back in time',
       prRevivedHint: 'As "The primary dies", but P comes back on day 5',
+      // split brain (task dns-split-brain)
+      prSplit: 'Two primaries',
+      prSplitHint: 'One zone on two primaries, no transfer; an edit on P2, then ask each',
+      prRetire: 'Two primaries: the fix',
+      prRetireHint: 'P1 becomes a secondary of P2; the serials decide',
 
       lgdRefresh: 'refresh',
       lgdRetry: 'retry',
@@ -289,6 +350,43 @@
       noteOnce: 'Each action happens once per run; R goes back to the start.',
       noteLimit: 'The run is at its limit of 20 steps.',
 
+      // split brain (task dns-split-brain): two primaries of one zone
+      sbStage: 'Two primary servers of one zone, two groups of clients and a direct query to each server',
+      sbKind1: 'stand-alone name server',
+      sbKind2: 'directory-integrated name server',
+      sbRoleS: 'secondary of {m}',
+      sbNone: '— no record',
+      sbNext: 'refresh {at}',
+      sbTwo: 'Two primaries for {zone}, no zone transfer: two zones',
+      sbOne: 'A primary for {zone} and its secondary: one zone',
+      sbGroup: 'Group {g}',
+      sbDhcp: 'DHCP (option 6) gives name server {p}',
+      sbAsk: 'recursive query',
+      sbNotAsked: 'has not asked yet',
+      sbDirect: 'Non-recursive query straight to each server',
+      sbDirectNot: 'not sent yet',
+      sbNx: 'NXDOMAIN (no such name)',
+      lgdP1: 'P1 and group H',
+      lgdP2: 'P2 and group D',
+      lgdPrimary: 'primary',
+      lgdSecondary: 'secondary',
+      lgdZone: 'one zone',
+      capSbStart: '{p1} and {p2} are both primary for {zone}, with no zone transfer either way: each has its own serial and its own records, even a different address at the zone apex. DHCP gives group H {p1} as its name server, group D {p2}.',
+      capSbAsk: 'Group {g} asks its name server, {p}: {apex} is {v1} and {app} is {v2}. The answer comes from the copy on {p}, with the aa flag.',
+      capSbOther: 'Group {g} gets {v} for the same name {apex}: one name, two answers, and neither is an error.',
+      capSbStill: 'The edit on {p2} never reaches {p1}, because nothing carries it.',
+      capSbOnly: 'Only group {g} sees the new record.',
+      capSbEdit: '{app} A {v} is added on {p2} and its serial raised to {serial}. {p1} does not know: two primaries compare no serials and transfer no zone to each other.',
+      capSbDirect: 'The same queries, now non-recursive and straight to each server. Both servers answer with the aa flag and each is right about its own copy. A zone with two primaries is two zones.',
+      capSbEnd: 'What one computer resolves tells you only what its assigned name server knows. R starts over.',
+      capRtStart: 'This is where "Two primaries" ends: {p1} and {p2} each have a zone of their own, so group H gets {h} for {apex} and group D gets {d}. The fix: one stays primary, the other becomes its secondary.',
+      capRtConvert: '{p1} is no longer a primary but a secondary of {p2}. Its copy stays the same (serial {s1}) until it asks {p2}, which it does at the refresh, {at}. It takes the zone only if the serial on {p2} is greater, and {s2} is greater.',
+      capRtNotYet: 'The role has changed, the copy has not: as a secondary {p1} answers from its old copy, still with the aa flag.',
+      capRtRefresh: '{t}, refresh: {p1} asks {p2} for the serial. {s2} is greater than {s1}, so {p1} takes the whole zone (a zone transfer), and the old copy with its zone apex is gone.',
+      capRtSame: 'Now both groups get the same: one zone, one source.',
+      capRtDirect: 'Directly and non-recursively: both servers give the same answers with the aa flag, {p1} as a secondary, from the copy it took from {p2}.',
+      noteSplit: 'In this example the steps are fixed (→); E, K and V work in the examples with one primary.',
+
       explain: '<p>A zone has one [[primary server]], where it is edited, and one or more secondaries. A ' +
         '[[secondary server]] gets the zone from the primary by a [[zone transfer]] and answers from its copy. Each is ' +
         'an [[authoritative server]]; they differ only in where their data comes from.</p>' +
@@ -302,7 +400,22 @@
         'secondary is therefore a [[cache]] with a timer, not a backup that survives the primary: a dead primary takes ' +
         'the zone down, only later. The clock runs from the last successful check, not from the last zone transfer.</p>' +
         '<p>The model: one secondary, no NOTIFY messages, so changes arrive only at a refresh. Time runs from the start ' +
-        'of the run; one step jumps to the next interesting moment, and a run of identical checks is one step.</p>'
+        'of the run; one step jumps to the next interesting moment, and a run of identical checks is one step.</p>',
+
+      explainSplit: '<p><strong>Two primaries.</strong> A zone has one [[primary server]]: it is edited there, and the ' +
+        'secondaries take their copy from it by a [[zone transfer]]. When two servers are both primary for one zone and ' +
+        'neither transfers the zone to the other, nothing compares them: each answers from its own copy and each claims ' +
+        'authority with the <code>aa</code> flag (<i>authoritative answer</i>). The flag says who claims to be ' +
+        'authoritative, not whether the claim is true.</p>' +
+        '<p>A client does not choose its answer: it asks the name server it was given (DHCP, option 6), and that is the ' +
+        'only reason it sees that one. What one computer resolves is not "what the zone says". Who is authoritative ' +
+        'for a zone, and what each one claims, is checked by sending a <i>non-recursive query</i> straight to every ' +
+        'server that claims the zone. Nor are two primaries redundancy: redundancy is two copies of one zone, and ' +
+        'these are two zones with one name, a <i>split-brain</i>.</p>' +
+        '<p>The fix: one stays primary, and the other becomes its secondary or is removed. A secondary takes the zone ' +
+        'only if the primary\'s serial is greater than its own, so the serials are checked before the switch. ' +
+        'Deliberately different answers by the network a client asks from (views) are another matter and not shown ' +
+        'here.</p>'
     }
   };
 
