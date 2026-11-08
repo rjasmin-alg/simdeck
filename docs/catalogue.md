@@ -1156,7 +1156,8 @@ unverified and goes into the sim's `NOTES.md` for the owner and the colleague, n
 - All `set-` pages, set language (owner, 2026-11-08): roles, equipment and the day use the English loanwords crews
   say (gaffer, key grip, grip, boom operator, 1st AD, stand-in, call sheet, setup, wrap, picture vehicle, camera car),
   written in Croatian strings as loanwords with Croatian declension where natural (setupa, gaffera, call sheeta); a
-  Croatian gloss may appear once in an explanation. The owner is asking his colleague about the rest: the spelling and
+  Croatian gloss may appear once in an explanation. The owner is asking the colleague about the rest (builders go
+  ahead with the terms as listed meanwhile, owner 2026-11-08: easy to fix later): the spelling and
   declension of each loanword, and which equipment words crews say in English (stand or stativ, sandbag or vreća s
   pijeskom, flag, frame) *(check)*.
 - `set-calls-sequence`, `set-radio-discipline`, `set-exclusion-zone`: the calls are in Croatian ("Tišina!", "Ton!",
@@ -1207,7 +1208,7 @@ document in hand.
   of the production company (guilty plea and fine, 2016).
 - `set-weather-lightning`: the 2011 stage-roof collapse in high wind at the Indiana State Fair (USA), a concert
   stage rather than a film set, but the textbook case of a weather limit not set in advance; the state-commissioned
-  investigation reports (2012) and the state safety agency's citations *(check that the owner accepts a non-film case)*.
+  investigation reports (2012) and the state safety agency's citations (owner accepted the non-film case, 2026-11-08).
 - Candidates, used only if an official report or court record turns up: `set-fatigue-turnaround`, the 1997 death of
   a camera assistant driving home after a very long day on *Pleasantville* (California, USA) *(check for a court
   record)*; `set-picture-vehicles`, the 2007 camera-car crash during a test run for *The Dark Knight* (UK) *(check
