@@ -325,7 +325,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-07** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **294 of 432 entries are live**, 97 w3, 30 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **298 of 432 entries are live**, 97 w3, 26 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -346,8 +346,8 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
 | §4.6 Storage, backup and disaster recovery | 22 | 16 | 6 w3 |
-| §4.7 High availability and distributed systems | 11 | 7 | 3 w3, 1 w3 · queued |
-| §4.8 Performance and capacity | 10 | 1 | 4 w3, 5 w3 · queued |
+| §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
+| §4.8 Performance and capacity | 10 | 4 | 4 w3, 2 w3 · queued |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 0 | 6 w3, 2 w3 · queued |
 | §4.10 Radio and crisis communications | 17 | 0 | 17 w3 |
 | §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 |
@@ -752,7 +752,7 @@ instead of repeating them.
 | `ha-multimaster-conflict` | live | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN2 | proposal first batch; NLA T55 → §5.7 |  |
 | `ha-quorum-split-brain` | live | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN2 | NLA T52–53; cephsim MON quorum → §5.7 |  |
 | `ha-fencing` | live in `quorum-split-brain` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 |  |
-| `ha-vrrp-failover` | w3 · queued | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 |  |
+| `ha-vrrp-failover` | live | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 |  |
 | `ha-db-replication` | live | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 |  |
 | `ha-cap` | live | CAP under partition | a partitioned system picks consistency or availability | partition, issue reads and writes in CP and AP modes | step | S | P2 | NLA, DR |  |  |
 | `ha-raft` | live | Raft leader election and log replication | terms, votes, majority commit | kill leaders, partition, step messages | step | M | P2 | NLA | → §5.7 |  |
@@ -766,10 +766,10 @@ instead of repeating them.
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `perf-utilisation-latency` | live | Latency near full utilisation | waiting time explodes as ρ → 1 | slider for load, watch the queue and latency | expl | S | P2 | DR, NLA, OS | dc-sim `three_tier_chain` |  |
-| `perf-littles-law` | w3 · queued | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim |  |
+| `perf-littles-law` | live | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim |  |
 | `perf-tail-latency` | w3 · queued | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` |  |
-| `perf-retry-storm` | w3 · queued | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` |  |
-| `perf-rate-limiting` | w3 · queued | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
+| `perf-retry-storm` | live | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` |  |
+| `perf-rate-limiting` | live | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
 | `perf-cache-hit-ratio` | w3 | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH |  |  |
 | `perf-goodhart-teams` | w3 | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` |  |
 | `perf-autoscaling-lag` | w3 | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
