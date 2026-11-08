@@ -1,0 +1,398 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- rate-limiting: one arrival stream through a token bucket and a leaky bucket, side by side on one time axis.
+     Model: sim.js, rules and numbers: SPEC.md, decisions: NOTES.md. -->
+<html lang="hr" data-sim="rate-limiting">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kantica sa žetonima i kantica koja curi · simdeck</title>
+<meta name="description" content="Nalet propušten odjednom ili razvučen u čekanje: kantica sa žetonima (token bucket) i kantica koja curi (leaky bucket).">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "rate-limiting",
+  "title": {
+    "hr": "Kantica sa žetonima i kantica koja curi",
+    "en": "Token bucket vs leaky bucket"
+  },
+  "concept": {
+    "hr": "Nalet propušten odjednom ili razvučen u čekanje",
+    "en": "A burst let through at once, or spread out as delay"
+  },
+  "summary": {
+    "hr": "Pošalji nalete kroz dva ograničivača iste brzine: kantica sa žetonima propušta do b odjednom, a red jedan po jedan, uz čekanje.",
+    "en": "Send bursts through two limiters of the same rate: the token bucket passes up to b at once, the leaky bucket one by one, with delay."
+  },
+  "tags": [
+    "performance"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="rate-limiting"]; colours only from kit tokens.
+   --d is one request dot; a lane stacks up to 4 dots per column (ROWS in the script). */
+[data-sim="rate-limiting"] .rl {
+  --d: clamp(1.45rem, 4.1cqh, 2.1rem);
+  display: grid;
+  grid-template-columns: minmax(0, 31fr) minmax(0, 69fr);
+  grid-template-rows: auto auto auto auto;
+  align-content: space-evenly;
+  column-gap: 1.4rem;
+  height: 100%;
+  padding: 0.6rem 1.6rem 0.2rem 1rem;
+}
+[data-sim="rate-limiting"] .rl-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.3rem 0 0.3rem 0.8rem;
+  border-left: 0.4rem solid var(--sw, var(--line));
+}
+[data-sim="rate-limiting"] .rl-name { font-weight: 700; font-size: var(--fs-md); }
+[data-sim="rate-limiting"] .rl-small { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="rate-limiting"] .rl-count { font-size: var(--fs-sm); font-weight: 700; }
+
+/* the lanes: one time axis for all three rows */
+[data-sim="rate-limiting"] .rl-lane { position: relative; min-width: 0; }
+[data-sim="rate-limiting"] .rl-lane--one { height: calc(4 * var(--d) + 0.6rem); border-bottom: var(--line-w) solid var(--line); }
+[data-sim="rate-limiting"] .rl-lane--two { height: calc(8 * var(--d) + 1.4rem); }
+[data-sim="rate-limiting"] .rl-axis-line { position: absolute; left: 0; right: 0; top: 50%; border-top: var(--line-w) solid var(--ink); }
+[data-sim="rate-limiting"] .rl-dot {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: calc(var(--d) * 0.86);
+  height: calc(var(--d) * 0.86);
+  border: 0.14rem solid var(--sw, var(--line));
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+  z-index: 2;
+}
+[data-sim="rate-limiting"] .rl-future { border-style: dashed; border-color: var(--line); background: var(--bg); color: var(--muted); }
+[data-sim="rate-limiting"] .rl-x {
+  border-style: dashed;
+  border-color: var(--danger);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+}
+[data-sim="rate-limiting"] .rl-x::after {
+  content: '✕';
+  position: absolute;
+  top: -0.55rem;
+  right: -0.6rem;
+  display: grid;
+  place-items: center;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--bg);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+[data-sim="rate-limiting"] .rl-tick { position: absolute; top: calc(50% - 0.55rem); width: 0.3rem; height: 1.1rem; margin-left: -0.15rem; background: var(--sw); z-index: 1; }
+[data-sim="rate-limiting"] .rl-wait { position: absolute; height: 0; border-top: 0.16rem dashed var(--sw); z-index: 1; }
+[data-sim="rate-limiting"] .rl-wait::before {
+  content: '';
+  position: absolute;
+  left: -0.25rem;
+  top: -0.33rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--sw);
+}
+[data-sim="rate-limiting"] .rl-now { position: absolute; top: -0.2rem; bottom: -0.2rem; margin-left: -0.1rem; border-left: 0.2rem solid var(--ink); z-index: 0; pointer-events: none; }
+
+/* the time axis under the lanes */
+[data-sim="rate-limiting"] .rl-ticks { position: relative; height: 2.6rem; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="rate-limiting"] .rl-ticks span { position: absolute; top: 0.1rem; transform: translateX(-50%); white-space: nowrap; }
+[data-sim="rate-limiting"] .rl-ticks .rl-ticks-now { top: 1.35rem; color: var(--ink); font-family: var(--sans); font-weight: 700; }
+[data-sim="rate-limiting"] .rl-axis-name { align-self: start; justify-self: end; padding-top: 0.1rem; font-size: var(--fs-sm); color: var(--muted); }
+
+/* the token bucket: one coin per token, filled from the bottom by the level */
+[data-sim="rate-limiting"] .rl-coins { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0.35rem; border: var(--line-w) solid var(--line); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); align-self: start; }
+[data-sim="rate-limiting"] .rl-coin {
+  width: calc(var(--d) * 0.8);
+  height: calc(var(--d) * 0.8);
+  border: 0.14rem solid var(--c7);
+  border-radius: 50%;
+  background: linear-gradient(to top, var(--c7) var(--f), var(--bg) var(--f));
+}
+
+/* the leaky bucket's queue: q places, head on the left, each with the time it leaves */
+[data-sim="rate-limiting"] .rl-slots { display: flex; gap: 0.15rem; align-self: start; padding: 0.4rem 0.3rem 0.2rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); }
+[data-sim="rate-limiting"] .rl-slot { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; width: calc(var(--d) * 1.05); }
+[data-sim="rate-limiting"] .rl-slot .rl-dot { position: static; }
+[data-sim="rate-limiting"] .rl-hole { width: calc(var(--d) * 0.86); height: calc(var(--d) * 0.86); border: 0.12rem dashed var(--line); border-radius: 50%; }
+[data-sim="rate-limiting"] .rl-out { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* small stages (phone): no ids in the dots, so the dots can shrink */
+@container (max-height: 34rem) {
+  [data-sim="rate-limiting"] .rl { --d: max(1rem, 3.6cqh); padding: 0.3rem 0.6rem; column-gap: 0.6rem; }
+  [data-sim="rate-limiting"] .rl-dot span, [data-sim="rate-limiting"] .rl-out, [data-sim="rate-limiting"] .rl-count,
+  [data-sim="rate-limiting"] .rl-small, [data-sim="rate-limiting"] .rl-slot-head { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kantica sa žetonima i kantica koja curi</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var ROWS = 4; // dots per column in a lane
+
+  function num(v) { var s = String(v); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  function sec(ds) { return num(ds / 10); }       // tenths of a second → "1,5"
+  function tokens(tenths) { return num(tenths / 10); }
+  function streamKey(p) { return p.pattern === 'steady' ? 'streamSteady' : p.pattern === 'idle-burst' ? 'streamIdle' : 'streamBurst'; }
+
+  /** Where each item sits in its stack: items at the same time share a stack, ROWS high, then the next column. */
+  function stacks(items, timeOf) {
+    var seen = {};
+    return items.map(function (it) {
+      var k = timeOf(it), i = seen[k] || 0;
+      seen[k] = i + 1;
+      return { it: it, row: i % ROWS, col: Math.floor(i / ROWS) };
+    });
+  }
+
+  function dot(id, cls, c, changed, anim) {
+    return h('div', {
+      class: 'rl-dot ' + cls + (changed ? ' sd-changed' : '') + (changed && anim ? ' sd-anim-in' : ''),
+      dataset: c ? { c: String(c) } : {}, translate: 'no', 'aria-label': t('request', { id: id })
+    }, h('span', null, String(id)));
+  }
+
+  // place a dot on a lane: x in %, stacked up from the baseline (up) or down from the axis
+  function placed(el, x, row, col, where) {
+    el.style.left = 'calc(' + x + '% - var(--d) * 0.43 + ' + col + ' * var(--d))';
+    if (where === 'base') el.style.bottom = 'calc(' + row + ' * var(--d) + 0.3rem)';
+    else if (where === 'up') el.style.bottom = 'calc(50% + ' + row + ' * var(--d) + 0.75rem)';
+    else el.style.top = 'calc(50% + ' + row + ' * var(--d) + 0.75rem)';
+    return el;
+  }
+
+  function counters(list) { return h('div', { class: 'rl-count' }, list.join(' · ')); }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'pattern', type: 'choice', label: t('pattern'),
+        options: [['burst', t('patBurst')], ['steady', t('patSteady')], ['idle-burst', t('patIdle')]] },
+      { key: 'r', type: 'choice', label: t('r'), hint: t('rHint'),
+        options: [[1, t('perSec', { n: 1 })], [2, t('perSec', { n: 2 })], [5, t('perSec', { n: 5 })]] },
+      { key: 'b', type: 'choice', label: t('b'), options: [[1, '1'], [5, '5'], [10, '10']] },
+      { key: 'q', type: 'choice', label: t('q'), options: [[1, '1'], [5, '5'], [10, '10']] }
+    ],
+
+    presets: [
+      { id: 'burst-10', label: t('presetBurst'), hint: t('presetBurstHint'), params: { r: 2, b: 5, q: 5, pattern: 'burst' } },
+      { id: 'steady-3', label: t('presetSteady'), hint: t('presetSteadyHint'), params: { r: 2, b: 5, q: 5, pattern: 'steady' } },
+      { id: 'idle-then-burst', label: t('presetIdle'), hint: t('presetIdleHint'), params: { r: 2, b: 5, q: 5, pattern: 'idle-burst' } },
+      { id: 'no-burst', label: t('presetNoBurst'), hint: t('presetNoBurstHint'), params: { r: 2, b: 1, q: 5, pattern: 'steady' } }
+    ],
+
+    legend: [
+      { c: 8, shape: 'round', label: t('legRequest') },
+      { c: 7, shape: 'round', label: t('legToken') },
+      { shape: 'line', label: t('legPassed') },
+      { shape: 'bg-bad', label: t('legRejected') },
+      { c: 3, shape: 'bg-soft', label: t('legQueued') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var p = c.params, s = c.state, n = c.n;
+      var anim = c.dir === 'forward';
+      var T = s.t, tmax = c.steps * L.STEP_DS, pad = 3;
+      function x(ds) { return ((ds + pad) / (tmax + pad)) * 100; }
+      var tbNow = {}, lbNow = {};
+      s.tb.decided.forEach(function (id) { tbNow[id] = true; });
+      s.lb.decided.forEach(function (id) { lbNow[id] = true; });
+      function now() { return n > 0 ? h('div', { class: 'rl-now', style: { left: x(T) + '%' } }) : null; }
+
+      // ── arrivals ──
+      var arrLane = h('div', { class: 'rl-lane rl-lane--one' }, now());
+      stacks(s.arrivals, function (a) { return a.at; }).forEach(function (o, i) {
+        var arrived = i < s.next;
+        arrLane.append(placed(dot(o.it.id, arrived ? 'sd-fill' : 'rl-future', arrived ? 8 : 0, arrived && tbNow[o.it.id], anim),
+          x(o.it.at), o.row, o.col, 'base'));
+      });
+      var arrBox = h('div', { class: 'rl-box', dataset: { c: '8' } },
+        h('div', { class: 'rl-name' }, t('rowArrivals')),
+        h('div', { class: 'rl-small' }, t('arrived', { n: s.next, total: s.arrivals.length })));
+
+      // ── token bucket ──
+      var tbLane = h('div', { class: 'rl-lane rl-lane--two', dataset: { c: '1' } }, h('div', { class: 'rl-axis-line' }), now());
+      var tickAt = {};
+      stacks(s.tb.passed, function (r) { return r.at; }).forEach(function (o) {
+        if (!tickAt[o.it.at]) { tickAt[o.it.at] = true; tbLane.append(h('div', { class: 'rl-tick', style: { left: x(o.it.at) + '%' } })); }
+        tbLane.append(placed(dot(o.it.id, 'sd-fill', 1, tbNow[o.it.id], anim), x(o.it.at), o.row, o.col, 'up'));
+      });
+      stacks(s.tb.rejected, function (r) { return r.at; }).forEach(function (o) {
+        tbLane.append(placed(dot(o.it.id, 'rl-x', 0, tbNow[o.it.id], anim), x(o.it.at), o.row, o.col, 'down'));
+      });
+      var coins = [];
+      for (var i = 0; i < p.b; i++) {
+        var f = Math.max(0, Math.min(10, s.tb.level - 10 * i)) * 10;
+        coins.push(h('div', { class: 'rl-coin', style: { '--f': f + '%' } }));
+      }
+      var tbBox = h('div', { class: 'rl-box', dataset: { c: '1' } },
+        h('div', { class: 'rl-name' }, t('rowToken')),
+        h('div', { class: 'rl-coins' }, coins),
+        h('div', { class: 'rl-small' }, t('tokenLevel', { v: tokens(s.tb.level), b: p.b, r: p.r })),
+        counters([t('cntPassed', { n: s.tb.passed.length }), t('cntRejected', { n: s.tb.rejected.length }), t('cntDelay', { v: sec(0) })]));
+
+      // ── leaky bucket ──
+      var lbLane = h('div', { class: 'rl-lane rl-lane--two', dataset: { c: '3' } }, h('div', { class: 'rl-axis-line' }), now());
+      // a row is free for a request when the row's last request left before this one arrived, so no wait line runs
+      // through another dot; with every row busy, the row that has been free longest
+      var rowEnd = [];
+      for (var j = 0; j < ROWS; j++) rowEnd.push(-Infinity);
+      s.lb.passed.forEach(function (r) {
+        var row = 0;
+        for (var j = 0; j < ROWS; j++) { if (rowEnd[j] < r.at) { row = j; break; } if (rowEnd[j] < rowEnd[row]) row = j; }
+        rowEnd[row] = r.out;
+        lbLane.append(h('div', { class: 'rl-tick', style: { left: x(r.out) + '%' } }));
+        if (r.out > r.at) {
+          lbLane.append(h('div', { class: 'rl-wait', style: {
+            left: x(r.at) + '%', width: (x(r.out) - x(r.at)) + '%',
+            bottom: 'calc(50% + ' + row + ' * var(--d) + 0.75rem + var(--d) * 0.43)' } }));
+        }
+        lbLane.append(placed(dot(r.id, 'sd-fill', 3, lbNow[r.id], anim), x(r.out), row, 0, 'up'));
+      });
+      stacks(s.lb.dropped, function (r) { return r.at; }).forEach(function (o) {
+        lbLane.append(placed(dot(o.it.id, 'rl-x', 0, lbNow[o.it.id], anim), x(o.it.at), o.row, o.col, 'down'));
+      });
+      var slots = [];
+      for (var k = 0; k < p.q; k++) {
+        var r = s.lb.queue[k];
+        slots.push(h('div', { class: 'rl-slot' },
+          r ? dot(r.id, 'sd-soft', 3, lbNow[r.id], anim) : h('div', { class: 'rl-hole' }),
+          h('div', { class: 'rl-out', translate: 'no' }, r ? sec(r.out) : ' ')));
+      }
+      var lbBox = h('div', { class: 'rl-box', dataset: { c: '3' } },
+        h('div', { class: 'rl-name' }, t('rowLeaky')),
+        h('div', { class: 'rl-small rl-slot-head' }, t('leavesAt')),
+        h('div', { class: 'rl-slots' }, slots),
+        h('div', { class: 'rl-small' }, t('leakRate', { n: s.lb.queue.length, q: p.q, gap: sec(L.gap(p)) })),
+        counters([t('cntPassed', { n: s.lb.passed.length }), t('cntDropped', { n: s.lb.dropped.length }), t('cntDelay', { v: sec(L.maxDelay(s.lb)) })]));
+
+      // ── time axis ──
+      var every = c.steps <= 6 ? L.STEP_DS : 2 * L.STEP_DS;
+      var ticks = h('div', { class: 'rl-ticks' });
+      for (var tt = 0; tt <= tmax; tt += every) ticks.append(h('span', { style: { left: x(tt) + '%' }, translate: 'no' }, sec(tt)));
+      if (n > 0) ticks.append(h('span', { class: 'rl-ticks-now', style: { left: x(T) + '%' } }, t('now')));
+
+      c.stage.replaceChildren(h('div', { class: 'rl' },
+        arrBox, arrLane, tbBox, tbLane, lbBox, lbLane,
+        h('div', { class: 'rl-axis-name' }, t('axis')), ticks));
+    },
+
+    caption: function (c) {
+      var p = c.params, s = c.state, prev = c.prev;
+      if (c.first) return t.parts('capStart', { tokens: t.n('tokensN', p.b), stream: t(streamKey(p)) });
+      var cap = p.b * 10;
+      var parts = [h('b', null, t('capClock', { t: sec(s.t) })), ' '];
+      var k = s.next - prev.next;
+      parts.push(k ? t.n('capArrive', k) : t('capNoArrive'));
+
+      // token bucket
+      var pN = s.tb.passed.length - prev.tb.passed.length, xN = s.tb.rejected.length - prev.tb.rejected.length;
+      if (k) {
+        var before = s.tb.level + 10 * pN; // the arrivals of a step come at its own instant, after the refill
+        var head = before === cap ? t('tbFull') : t('tbHad', { v: tokens(before), b: p.b });
+        var body = pN && xN ? t.n('tbPass', pN) + t.n('tbRest', xN) : pN ? t.n('tbPass', pN) + t('dot') : t.n('tbAllRejected', xN);
+        parts.push(' ', head, ' ', body);
+        if (xN && !prev.tb.rejected.length && c.n > 1 && !c.last && s.next < s.arrivals.length) parts.push(' ', h('span', { class: 'sd-hl' }, t('tbDry')));
+      } else if (s.tb.level === cap && prev.tb.level < cap) parts.push(' ', t('tbFullAgain'));
+      else if (s.tb.level < cap) parts.push(' ', t('tbRefill', { v: tokens(s.tb.level), b: p.b }));
+
+      // leaky bucket
+      var rel = s.lb.passed.slice(prev.lb.passed.length);
+      var dN = s.lb.dropped.length - prev.lb.dropped.length, aN = k - dN;
+      var maxw = rel.reduce(function (m, r) { return Math.max(m, r.out - r.at); }, 0);
+      if (!k && rel.length && !s.lb.queue.length && maxw > 0) {
+        parts.push(' ', t('lbDrained', { gap: sec(L.gap(p)), w: sec(maxw) }));
+      } else {
+        var segs = [];
+        if (k) segs.push(aN ? t.n('lbQueued', aN) + (dN ? t.n('lbDropped', dN) : '') : t.n('lbAllDropped', dN));
+        if (rel.length === 1) segs.push(rel[0].out === rel[0].at ? t('lbOutNow', { id: rel[0].id }) : t('lbOutOne', { id: rel[0].id, w: sec(maxw) }));
+        else if (rel.length > 1) segs.push(t('lbOutMany', { ids: rel.map(function (r) { return r.id; }).join(', '), w: sec(maxw) }));
+        if (!segs.length) segs.push(s.lb.queue.length ? t.n('lbWaiting', s.lb.queue.length) : t('lbEmpty'));
+        parts.push(' ', t('lbHead'), ' ', segs.join(t('sep')), t('dot'));
+        if (dN && !prev.lb.dropped.length && c.n > 1 && !c.last) parts.push(' ', h('span', { class: 'sd-hl' }, t('lbFirstDrop')));
+      }
+
+      // the end: both outcomes, and what the queue still holds
+      if (c.last) {
+        parts.push(' ', h('b', null, t('capEnd', { p: s.tb.passed.length, x: s.tb.rejected.length, lp: s.lb.passed.length,
+          d: s.lb.dropped.length, w: sec(L.maxDelay(s.lb)) })));
+        var qn = s.lb.queue.length;
+        if (qn) {
+          var last = s.lb.queue[qn - 1];
+          parts.push(' ', t.n('capEndQueued', qn, { out: sec(last.out), w: sec(last.out - last.at) }));
+        }
+      }
+      return parts;
+    }
+  });
+})();
+</script>
+</body>
+</html>
