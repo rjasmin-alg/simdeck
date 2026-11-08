@@ -1,0 +1,465 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- retry-storm: clients → API (retries on timeout) → database, one tick per step, on a time chart of the database's
+     load (original requests and retries) against capacity, and its p99 against the timeout.
+     Model: sim.js, rules and numbers: SPEC.md, decisions: NOTES.md. -->
+<html lang="hr" data-sim="retry-storm">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oluja ponovnih pokušaja i metastabilni kvar · simdeck</title>
+<meta name="description" content="Ponovni pokušaji drže oporavljeni sustav dolje; odgoda, slučajni pomak i kontrola prijema.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "retry-storm",
+  "title": {
+    "hr": "Oluja ponovnih pokušaja i metastabilni kvar",
+    "en": "Retry storms and metastable collapse"
+  },
+  "concept": {
+    "hr": "Ponovni pokušaji drže sustav dolje; odgoda, slučajni pomak, kontrola prijema",
+    "en": "Retries keep a recovered system down; backoff, jitter, admission control"
+  },
+  "summary": {
+    "hr": "Kratak nalet sruši bazu, a ponovni pokušaji je drže zasićenom i kad nalet prođe. Više kapaciteta ne pomaže; kontrola prijema pomaže.",
+    "en": "A short spike knocks the database over, and retries keep it saturated after the spike is gone. More capacity does not help; admission control does."
+  },
+  "tags": [
+    "performance"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="retry-storm"]; colours only from kit tokens.
+   The stage: the chain (clients → API → database) on top, then one grid for both charts: an axis column, one column
+   per tick, and a gutter on the right for the line labels. Bars are positioned in % of their cell. */
+[data-sim="retry-storm"] .rs {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  height: 100%;
+  padding: 0.5rem 1rem 0.3rem 0.6rem;
+}
+
+/* the chain */
+[data-sim="retry-storm"] .rs-chain { display: flex; align-items: stretch; justify-content: center; gap: 0; min-width: 0; }
+[data-sim="retry-storm"] .rs-node {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.3rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--sw, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="retry-storm"] .rs-node b { font-size: var(--fs-md); }
+[data-sim="retry-storm"] .rs-node span { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="retry-storm"] .rs-node .rs-strong { font-weight: 700; }
+[data-sim="retry-storm"] .rs-node--sat { border-color: var(--danger); border-style: dashed; border-left-style: solid; }
+[data-sim="retry-storm"] .rs-node--gate { border-style: dashed; border-left-style: solid; }
+[data-sim="retry-storm"] .rs-node--gate.rs-on { border-style: solid; }
+[data-sim="retry-storm"] .rs-arrow {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  flex: 0 1 9rem;
+  min-width: 3rem;
+  padding: 0 0.3rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+[data-sim="retry-storm"] .rs-arrow i { font-style: normal; white-space: nowrap; line-height: 1.2; }
+[data-sim="retry-storm"] .rs-line { position: relative; align-self: stretch; margin: 0.25rem 0.5rem 0.25rem 0; border-top: 0.2rem solid var(--ink); }
+[data-sim="retry-storm"] .rs-line::after {
+  content: '';
+  position: absolute;
+  right: -0.5rem;
+  top: -0.45rem;
+  border: 0.35rem solid transparent;
+  border-left: 0.6rem solid var(--ink);
+  border-right: 0;
+}
+
+/* the charts */
+[data-sim="retry-storm"] .rs-plot {
+  display: grid;
+  grid-template-columns: 3.4rem repeat(var(--n), minmax(0, 1fr)) 4.6rem;
+  grid-template-rows: auto auto minmax(0, 2fr) auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+[data-sim="retry-storm"] .rs-title { grid-column: 1 / -1; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); padding: 0.1rem 0 0.15rem; }
+[data-sim="retry-storm"] .rs-title--p99 { padding: 0.5rem 0 0.7rem; }
+[data-sim="retry-storm"] .rs-cell { position: relative; min-width: 0; border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="retry-storm"] .rs-cell--now { background: color-mix(in srgb, var(--ink) 6%, var(--bg)); }
+[data-sim="retry-storm"] .rs-yaxis { position: relative; border-right: var(--line-w) solid var(--ink); font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="retry-storm"] .rs-yaxis span { position: absolute; right: 0.4rem; transform: translateY(50%); line-height: 1; }
+[data-sim="retry-storm"] .rs-gutter { position: relative; font-size: var(--fs-sm); }
+[data-sim="retry-storm"] .rs-gutter span { position: absolute; left: 0.4rem; transform: translateY(50%); line-height: 1; white-space: nowrap; font-weight: 700; }
+
+[data-sim="retry-storm"] .rs-bar {
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  display: flex;
+  flex-direction: column-reverse;
+  z-index: 1;
+}
+[data-sim="retry-storm"] .rs-seg { flex: none; min-height: 0; }
+[data-sim="retry-storm"] .rs-orig { background: var(--c1); }
+[data-sim="retry-storm"] .rs-retry, [data-sim="retry-storm"] .sd-swatch[data-shape='rs-retry'] {
+  background-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3rem, var(--bg) 0.3rem 0.5rem);
+}
+[data-sim="retry-storm"] .rs-shed, [data-sim="retry-storm"] .sd-swatch[data-shape='rs-shed'] {
+  border: 0.14rem dashed var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+}
+[data-sim="retry-storm"] .rs-p99 { background: var(--c6); }
+[data-sim="retry-storm"] .rs-p99--over { background-color: var(--c6); background-image: repeating-linear-gradient(0deg, transparent 0 0.4rem, var(--bg) 0.4rem 0.55rem); }
+[data-sim="retry-storm"] .rs-p99--sat, [data-sim="retry-storm"] .sd-swatch[data-shape='rs-sat'] {
+  background-color: color-mix(in srgb, var(--danger) 16%, var(--bg));
+  border: 0.14rem solid var(--danger);
+  border-top: 0;
+}
+[data-sim="retry-storm"] .rs-val {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-bottom: 0.1rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  white-space: nowrap;
+  z-index: 3;
+  padding: 0 0.15rem 0.1rem;
+  background: var(--bg);
+  border-radius: 0.2rem;
+}
+[data-sim="retry-storm"] .rs-inf {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -55%);
+  padding: 0.05rem 0.4rem;
+  border-radius: 1rem;
+  background: var(--danger);
+  color: var(--bg);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.1;
+  z-index: 3;
+}
+[data-sim="retry-storm"] .sd-swatch[data-shape='rs-sat'] { border-top: 0.14rem solid var(--danger); }
+[data-sim="retry-storm"] .rs-capline { position: absolute; left: 0; right: 0; border-top: 0.22rem solid var(--ink); z-index: 2; pointer-events: none; }
+[data-sim="retry-storm"] .rs-toline { position: absolute; left: 0; right: 0; border-top: 0.2rem dashed var(--ink); z-index: 2; pointer-events: none; }
+[data-sim="retry-storm"] .rs-capjoin { position: absolute; left: 0; border-left: 0.22rem solid var(--ink); margin-left: -0.11rem; z-index: 2; }
+
+/* the panel: seven presets in two columns (as vrrp-failover), so presets and settings fit without a scroll */
+[data-sim="retry-storm"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* the flags (interventions) and the tick numbers */
+[data-sim="retry-storm"] .rs-flags { position: relative; min-width: 0; min-height: 1.9rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 0.15rem; padding-bottom: 0.2rem; }
+[data-sim="retry-storm"] .rs-flag {
+  position: relative;
+  z-index: 3;
+  padding: 0 0.3rem 0 0.25rem;
+  border: 0.14rem solid var(--ink);
+  border-left-width: 0.3rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+[data-sim="retry-storm"] .rs-flag--future { border-style: dashed; border-left-style: solid; color: var(--muted); border-color: var(--muted); }
+[data-sim="retry-storm"] .sd-swatch[data-shape='rs-flag'] { background: var(--bg); border: 0.14rem solid var(--ink); border-left-width: 0.3rem; border-radius: 0 0.2rem 0.2rem 0; }
+[data-sim="retry-storm"] .sd-swatch[data-shape='rs-cap'] { height: 0.3rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="retry-storm"] .sd-swatch[data-shape='rs-to'] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.3em, transparent 0.3em 0.48em); }
+[data-sim="retry-storm"] .rs-ticks { text-align: center; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); padding-top: 0.15rem; }
+[data-sim="retry-storm"] .rs-ticks--done { color: var(--ink); }
+[data-sim="retry-storm"] .rs-ticks--now b { padding: 0 0.25rem; }
+[data-sim="retry-storm"] .rs-ticks-name { text-align: left; padding: 0.15rem 0 0 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* small stages (phone): the chain keeps only names and the key number; values over bars go */
+@container (max-height: 34rem) {
+  [data-sim="retry-storm"] .rs { padding: 0.3rem 0.4rem; gap: 0.3rem; }
+  [data-sim="retry-storm"] .rs-plot { grid-template-columns: 2.2rem repeat(var(--n), minmax(0, 1fr)) 0.4rem; }
+  [data-sim="retry-storm"] .rs-val, [data-sim="retry-storm"] .rs-gutter span, [data-sim="retry-storm"] .rs-node .rs-opt,
+  [data-sim="retry-storm"] .rs-arrow i + i { display: none; }
+  [data-sim="retry-storm"] .rs-node { padding: 0.15rem 0.35rem; }
+  [data-sim="retry-storm"] .rs-arrow { flex-basis: 2rem; min-width: 1.2rem; padding: 0; }
+  [data-sim="retry-storm"] .rs-flag span { display: none; }
+  [data-sim="retry-storm"] .rs-yaxis span { right: 0.2rem; }
+}
+@container (max-width: 40rem) {
+  [data-sim="retry-storm"] .rs-arrow i { display: none; }
+  [data-sim="retry-storm"] .rs-node b { font-size: var(--fs-sm); }
+  [data-sim="retry-storm"] .rs-ticks { font-size: var(--fs-sm); letter-spacing: -0.05em; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Oluja ponovnih pokušaja i metastabilni kvar</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var P99_MAX = 6; // s, the top of the p99 chart: the bounded p99 of every preset fits under it
+
+  /** Up to `sig` significant digits, trailing zeros dropped, decimal comma on the Croatian page. */
+  function num(v, sig) {
+    if (!isFinite(v)) return '∞';
+    var s = String(Math.abs(v) >= 100 ? Math.round(v) : parseFloat(v.toPrecision(sig || 3)));
+    return s.replace('.', t('dec'));
+  }
+  function pct(v) { return Math.round(v * 100) + ' %'; }
+
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function em(str) {
+    var out = [];
+    str.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    return out;
+  }
+
+  /** The λ axis: a round top with room for the value labels, fixed for the whole run. */
+  function lambdaMax(p) {
+    var peak = L.peak(p), top = Math.max(20, Math.ceil(peak / 10) * 10);
+    return peak / top > 0.85 ? top + 10 : top;
+  }
+
+  function last(s) { return s.history[s.history.length - 1] || null; }
+
+  function eventLabel(ev, p) {
+    if (ev === 'spike') return t('evSpike');
+    if (ev === 'capacity') return t('evCapacity', { c: L.capacityAt(p, L.AT) });
+    if (ev === 'shedOn') return t('evShedOn', { pct: pct(L.SHED) });
+    return t('evShedOff');
+  }
+
+  function chain(s, p) {
+    var r = last(s);
+    var offered = r ? r.lambda + r.turnedAway : null;
+    function node(c, name, lines, extra) {
+      return h('div', { class: 'rs-node' + (extra || ''), dataset: c ? { c: String(c) } : {} }, h('b', null, name), lines);
+    }
+    function arrow(top, bottom) {
+      return h('div', { class: 'rs-arrow', translate: 'no' }, h('i', null, top || ' '), h('div', { class: 'rs-line' }),
+        h('i', null, bottom || ' '));
+    }
+    var parts = [
+      node(8, t('clients'), [h('span', null, t('demand', { d: num(r ? r.demand : L.BASE) }))]),
+      arrow(t('perSec', { n: num(r ? r.demand : L.BASE) })),
+      node(4, t('api'), [
+        h('span', { class: 'rs-opt' }, t('timeoutIs', { t: num(L.TIMEOUT) })),
+        h('span', { class: r && r.mult > 1 ? 'rs-strong' : '' }, r && r.mult > 1 ? t('retries', { m: num(r.mult) }) : t('noRetries'))
+      ]),
+      arrow(r ? t('perSec', { n: num(offered) }) : '', r && r.mult > 1 ? t('split', { o: num(r.demand), r: num(r.demand * (r.mult - 1)) }) : '')
+    ];
+    if (p.shed !== 'off') {
+      var on = r && r.shed > 0;
+      parts.push(node(0, t('gate'), [h('span', { class: on ? 'rs-strong' : '' }, on ? t('gateOn', { x: num(r.turnedAway) }) : t('gateOff'))],
+        ' rs-node--gate' + (on ? ' rs-on' : '')));
+      parts.push(arrow(r ? t('perSec', { n: num(r.lambda) }) : ''));
+    }
+    var dbLines = r
+      ? [h('span', { class: 'rs-opt' }, t('dbCap', { c: num(r.capacity), rho: num(r.rho, 2) })),
+         h('span', { class: 'rs-strong' }, r.saturated ? t('dbSat') : t('dbP99', { p: num(r.p99) }))]
+      : [h('span', null, t('dbIdle', { c: num(L.capacityAt(p, 0)) }))];
+    parts.push(node(1, t('db'), dbLines, r && r.saturated ? ' rs-node--sat' : ''));
+    return h('div', { class: 'rs-chain' }, parts);
+  }
+
+  function plot(c) {
+    var p = c.params, s = c.state, N = c.steps, k0 = s.tick;
+    var ymax = lambdaMax(p);
+    var grid = h('div', { class: 'rs-plot', style: { '--n': String(N) } });
+    function at(el, col, row) { el.style.gridColumn = String(col); el.style.gridRow = String(row); grid.append(el); return el; }
+    function y(v, max) { return Math.min(100, (v / max) * 100) + '%'; }
+
+    at(h('div', { class: 'rs-title' }, t('axisLambda')), '1 / -1', 1);
+    at(h('div', { class: 'rs-title rs-title--p99' }, t('axisP99')), '1 / -1', 4);
+
+    // y axes
+    var ya = at(h('div', { class: 'rs-yaxis', translate: 'no' }), 1, 3);
+    var every = ymax <= 50 ? 10 : 20;
+    for (var v = 0; v <= ymax; v += every) ya.append(h('span', { style: { bottom: y(v, ymax) } }, num(v)));
+    var yp = at(h('div', { class: 'rs-yaxis', translate: 'no' }), 1, 5);
+    for (var w = 0; w <= P99_MAX; w += 2) yp.append(h('span', { style: { bottom: y(w, P99_MAX) } }, num(w)));
+    at(h('div', { class: 'rs-ticks-name' }, t('tick')), 1, 6);
+
+    // per tick
+    for (var k = 0; k < N; k++) {
+      var col = k + 2, r = s.history[k], now = k === k0;
+      var C = L.capacityAt(p, k);
+
+      var flags = at(h('div', { class: 'rs-flags' }), col, 2);
+      L.eventsAt(p, k).forEach(function (ev) {
+        flags.append(h('div', { class: 'rs-flag' + (k > k0 ? ' rs-flag--future' : '') }, '⚑', h('span', null, ' ' + eventLabel(ev, p))));
+      });
+
+      // λ: original + retries stacked, turned away dashed on top, the capacity line across
+      var lc = at(h('div', { class: 'rs-cell' + (now ? ' rs-cell--now' : '') }), col, 3);
+      lc.append(h('div', { class: 'rs-capline', style: { bottom: y(C, ymax) } }));
+      if (k > 0 && L.capacityAt(p, k - 1) !== C) {
+        var lo = Math.min(C, L.capacityAt(p, k - 1)), hi = Math.max(C, L.capacityAt(p, k - 1));
+        lc.append(h('div', { class: 'rs-capjoin', style: { bottom: y(lo, ymax), height: 'calc(' + y(hi, ymax) + ' - ' + y(lo, ymax) + ')' } }));
+      }
+      if (r) {
+        var tot = r.lambda + r.turnedAway;
+        var bar = h('div', { class: 'rs-bar' + (now ? ' sd-changed' : '') + (now && c.dir === 'forward' ? ' sd-anim-in' : ''),
+          style: { height: y(tot, ymax) } });
+        [['rs-orig', r.original], ['rs-retry', r.retries], ['rs-shed', r.turnedAway]].forEach(function (sg) {
+          if (sg[1] > 1e-9) bar.append(h('div', { class: 'rs-seg ' + sg[0], style: { height: (sg[1] / tot * 100) + '%' } }));
+        });
+        lc.append(bar);
+        // the value at the height of λ, the load the database actually gets (inside the turned-away part, if any)
+        lc.append(h('div', { class: 'rs-val', translate: 'no', style: { bottom: 'calc(' + y(r.lambda, ymax) + ' + 0.2rem)' } }, num(r.lambda)));
+      }
+
+      // p99: bar against the dashed timeout line; saturated = ∞ cap at the top
+      var pc = at(h('div', { class: 'rs-cell' + (now ? ' rs-cell--now' : '') }), col, 5);
+      pc.append(h('div', { class: 'rs-toline', style: { bottom: y(L.TIMEOUT, P99_MAX) } }));
+      if (r) {
+        var off = r.saturated || r.p99 > P99_MAX;
+        var pb = h('div', { class: 'rs-bar rs-seg ' + (r.saturated ? 'rs-p99--sat' : r.p99 > L.TIMEOUT ? 'rs-p99 rs-p99--over' : 'rs-p99') +
+          (now ? ' sd-changed' : ''), style: { height: off ? '100%' : y(r.p99, P99_MAX) } });
+        if (r.saturated) pb.append(h('div', { class: 'rs-inf', translate: 'no' }, '∞'));
+        pc.append(pb);
+        if (!r.saturated) {
+          pc.append(h('div', { class: 'rs-val', translate: 'no', style: { bottom: off ? 'calc(100% - 1.1rem)' : 'calc(' + y(r.p99, P99_MAX) + ' + 0.2rem)' } },
+            (off ? '↑ ' : '') + num(r.p99)));
+        }
+      }
+
+      var tk = at(h('div', { class: 'rs-ticks' + (r ? ' rs-ticks--done' : '') + (now ? ' rs-ticks--now' : ''), translate: 'no' }),
+        col, 6);
+      tk.append(now ? h('b', { class: 'sd-hl' }, String(k)) : String(k));
+    }
+
+    // line labels in the right gutter, at the height of the last tick's lines
+    var kl = Math.max(0, Math.min(N - 1, k0));
+    at(h('div', { class: 'rs-gutter' }, h('span', { style: { bottom: y(L.capacityAt(p, kl), ymax) } }, t('capLine', { c: num(L.capacityAt(p, kl)) }))), N + 2, 3);
+    at(h('div', { class: 'rs-gutter' }, h('span', { style: { bottom: y(L.TIMEOUT, P99_MAX) } }, t('timeoutLine'))), N + 2, 5);
+    return grid;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'capacity', type: 'choice', label: t('capacity'),
+        options: [['10', t('perSec', { n: 10 })], ['15', t('perSec', { n: 15 })], ['10-15', t('cap1015')]] },
+      { key: 'retryFactor', type: 'choice', label: t('retryFactor'),
+        options: [[0, t('retry0')], [0.5, t('retryHalf')], [3, t('retry3')]] },
+      { key: 'spikeAt', type: 'choice', label: t('spikeAt'), options: [[-1, t('spikeNone')], [2, t('spikeTick2')]] },
+      { key: 'shed', type: 'choice', label: t('shed'),
+        options: [['off', t('shedOff')], ['from5', t('shedFrom5')], ['5-6', t('shed56')]] }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var key = { 'collapse': 'Collapse', 'prevented': 'Prevented', 'capacity-too-late': 'TooLate', 'shed-dc-sim': 'ShedForever',
+        'metastable': 'Metastable', 'gentler-retries': 'Gentler', 'shed-briefly': 'ShedBrief' }[pr.id];
+      return { id: pr.id, label: t('preset' + key), hint: t('preset' + key + 'Hint'), params: pr.params };
+    }),
+
+    legend: [
+      { c: 1, label: t('legOriginal') },
+      { shape: 'rs-retry', label: t('legRetries') },
+      { shape: 'rs-shed', label: t('legShed') },
+      { shape: 'rs-cap', label: t('legCapacity') },
+      { shape: 'rs-to', label: t('legTimeout') },
+      { shape: 'rs-sat', label: t('legSaturated') },
+      { shape: 'rs-flag', label: t('legEvent') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'rs' }, chain(c.state, c.params), plot(c)));
+    },
+
+    caption: function (c) {
+      var p = c.params, s = c.state, r = last(s);
+      if (!r) return em(t('capStart', { base: num(L.BASE), c: num(L.capacityAt(p, 0)), t: num(L.TIMEOUT) }));
+      var prev = s.history[s.history.length - 2];
+      var parts = [h('b', null, t('capTick', { k: r.tick })), ' '];
+      r.events.forEach(function (ev) {
+        var key = { spike: 'cSpike', capacity: 'cCapacity', shedOn: 'cShedOn', shedOff: 'cShedOff' }[ev];
+        parts = parts.concat(em(t(key, { d: num(r.demand), base: num(L.BASE), c: num(r.capacity), pct: pct(L.SHED) })), [' ']);
+      });
+      if (!prev) parts.push(t('cFirst'));
+      else if (prev.p99 <= L.TIMEOUT) parts.push(t('cNoRetry', { p: num(prev.p99) }));
+      else if (r.mult === 1) parts.push(t('cRetryOff'));
+      else if (prev.saturated) parts.push(t('cRetrySat', { m: num(r.mult) }));
+      else parts.push(t('cRetry', { p: num(prev.p99), m: num(r.mult) }));
+      parts.push(' ', r.retries > 1e-9
+        ? t('cLoad', { l: num(r.lambda), o: num(r.original), r: num(r.retries), rho: num(r.rho, 2) })
+        : t('cLoadPlain', { l: num(r.lambda), rho: num(r.rho, 2) }));
+      parts.push(' ', r.saturated ? t('cSat') : t('cP99', { p: num(r.p99) }));
+
+      var key = L.story(s, p);
+      var story = {
+        stuck: 'sStuck', storm: 'sStorm', overload: 'sOverload', capacityTooLate: 'sTooLate', shedding: 'sShedding',
+        shedHealthy: 'sShedHealthy', recovered: 'sRecovered', overTimeout: 'sOverTimeout', slowNoRetry: 'sSlowNoRetry', breach: 'sBreach', healthy: 'sHealthy'
+      }[key];
+      var vars = { l: num(r.lambda), base: num(L.BASE), c: num(r.capacity), x: num(r.turnedAway), ok: num(r.original), pct: pct(L.SHED) };
+      parts.push(' ', h('span', { class: key === 'healthy' || key === 'breach' ? '' : 'sd-hl' }, em(t(story, vars))));
+      return parts;
+    }
+  });
+})();
+</script>
+</body>
+</html>
