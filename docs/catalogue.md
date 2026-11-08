@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **314 of 457 entries are live**, 97 w3, 35 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **319 of 457 entries are live**, 97 w3, 30 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -335,8 +335,8 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.3 ossimulator → import the built pages (16 pages and the map) | 17 | 17 | – |
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
-| §4.1 Networking basics and LAN protocols | 52 | 46 | 1 w3, 3 w3 · held, 2 w3 · queued |
-| §4.2 Internet and application protocols | 30 | 19 | 8 w3, 3 w3 · queued |
+| §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
+| §4.2 Internet and application protocols | 30 | 22 | 8 w3 |
 | §4.3 Security and cryptography | 17 | 11 | 2 w3, 4 w3 · queued |
 | §4.4 Linux | 55 | 40 | 14 w3, 1 wip |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 |
@@ -480,8 +480,8 @@ decides the final grouping axes (§7.1).
 | `net-wifi-association` | live | 802.11 association step by step | scan, authenticate, associate, then the 4-way handshake | step a station joining an AP | step | S | P2 | URM | URM card ch17-pridruzivanje-koraci; feeds `net-wpa-handshake` |  |
 | `net-wpa-handshake` | live | WPA2/WPA3 handshake and what an attacker sees | PMK origin, 4-way handshake, why WPA2-PSK can be cracked offline and SAE can't | step the handshake; toggle the attacker's capture view | step | M | B1 | URM, SEC | proposal first batch; URM card ch17-pmk-porijeklo-rukovanje |  |
 | `net-csma-ca-rts-cts` | live | CSMA/CA and RTS/CTS | Wi-Fi avoids collisions it can't detect; RTS/CTS fixes the hidden node | step stations with and without RTS/CTS | step | S | P3 | URM | extends `urm-hidden-node` |  |
-| `net-wifi-roaming` | w3 · queued | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 |  |
-| `net-qos-queues` | w3 · queued | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
+| `net-wifi-roaming` | live | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 |  |
+| `net-qos-queues` | live | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
 | `net-multicast-igmp` | live | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
 | `net-packet-journey` | live | The whole journey: from URL to page | DNS, ARP, TCP, TLS, HTTP in order, across the real path | step the capstone, open each part's own simulator | step | L | P2 | URM | URM card ch16-put-podataka-detaljno → §5.9 |  |
 | `net-poe-budget` | w3 | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
@@ -494,19 +494,19 @@ decides the final grouping axes (§7.1).
 | `inet-dns-ttl-cache` | live | TTL caching and the cutover | old answers live until TTL expires; lower the TTL before migrating | change a record, run time, see who still gets the old IP | step | S | P1 | UL, DR | UL ch19 Example 2 → §5.4 |  |
 | `inet-dns-records` | live | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM, WIN1 | UL ch19 |  |
 | `inet-dns-secondary-expiry` | live | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR S6 (student timeline); DR caveat CV-02 → §5.4 |  |
-| `inet-dns-split-brain` | w3 · queued | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 |  |
+| `inet-dns-split-brain` | live in `dns-secondary-expiry` | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 |  |
 | `inet-dnssec-chain` | w3 | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC |  |  |
 | `inet-dns-poisoning` | w3 | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC |  |  |
 | `inet-http-exchange` | live | One HTTP exchange | request line, headers, status codes, body | send requests, read responses | step | S | P2 | URM, UL | URM ch14 |  |
 | `inet-http-versions` | live | HTTP/1.1 vs HTTP/2 vs HTTP/3 | multiplexing, and head-of-line blocking at TCP vs QUIC | load a page with loss on each version | expl | M | P2 | URM |  |  |
 | `inet-http-caching` | live | HTTP caching | Cache-Control, ETag, 304, what a CDN edge keeps | request repeatedly, change headers | step | S | P2 | URM, UL |  |  |
 | `inet-cookies-sessions` | w3 | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC |  |  |
-| `inet-cors` | w3 · queued | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC |  |  |
+| `inet-cors` | live | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC |  |  |
 | `inet-reverse-proxy-lb` | live | Reverse proxy and load balancing | round robin vs least connections vs hash vs sticky; health checks | add servers, fail one, change the algorithm | expl | M | P2 | UL, NLA | UL ch21, NLA T54 |  |
 | `inet-cdn-anycast` | live | Anycast and CDN edges | one address, many places; BGP picks the nearest | move clients, withdraw a site | expl | S | P2 | URM |  |  |
 | `inet-tls-handshake` | live | TLS 1.2 vs 1.3 | key exchange, certificate, round trips; 1-RTT vs 2-RTT | step both handshakes side by side | step | M | P1 | UL, URM, SEC | UL ch21 → §5.5 |  |
 | `inet-cert-chain` | live | Chain of trust and expiry | leaf, intermediate, root store; a missing intermediate; expiry clocks | build a chain, remove links, advance time | step | S | P1 | UL, DR | UL ch21, DR S4 → §5.5 |  |
-| `inet-acme-renewal` | w3 · queued | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL |  |  |
+| `inet-acme-renewal` | live in `cert-chain` | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL |  |  |
 | `inet-email-path` | live | The path of an e-mail | MUA → MSA → MTA → MDA → IMAP; envelope vs header | send a mail across two domains | step | M | P2 | UL, URM | UL ch20, URM card ch14 (mail send vs fetch) |  |
 | `inet-email-auth` | live | SPF, DKIM and DMARC | three checks, alignment, and the DMARC verdict | send legitimate, forwarded and spoofed mails | step | M | P1 | UL, SEC | UL ch20 |  |
 | `inet-smtp-dialogue` | w3 | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL |  |  |
