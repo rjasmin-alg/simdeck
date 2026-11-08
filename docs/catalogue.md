@@ -325,7 +325,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **298 of 432 entries are live**, 97 w3, 26 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **303 of 432 entries are live**, 97 w3, 21 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -334,7 +334,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.3 ossimulator → import the built pages (16 pages and the map) | 17 | 17 | – |
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
-| §4.1 Networking basics and LAN protocols | 52 | 35 | 3 w3 · held, 14 w3 · queued |
+| §4.1 Networking basics and LAN protocols | 52 | 36 | 3 w3 · held, 13 w3 · queued |
 | §4.2 Internet and application protocols | 30 | 19 | 7 w3, 4 w3 · queued |
 | §4.3 Security and cryptography | 17 | 11 | 6 w3 |
 | §4.4 Linux | 55 | 40 | 14 w3, 1 wip |
@@ -347,8 +347,8 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
 | §4.6 Storage, backup and disaster recovery | 22 | 16 | 6 w3 |
 | §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
-| §4.8 Performance and capacity | 10 | 4 | 4 w3, 2 w3 · queued |
-| §4.9 Computer architecture, OS gaps and automata | 8 | 0 | 6 w3, 2 w3 · queued |
+| §4.8 Performance and capacity | 10 | 6 | 4 w3 |
+| §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
 | §4.10 Radio and crisis communications | 17 | 0 | 17 w3 |
 | §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
@@ -471,7 +471,7 @@ decides the final grouping axes (§7.1).
 | `net-tcp-vs-udp-loss` | live | TCP vs UDP under loss | the same stream: TCP retransmits and stalls, UDP drops and continues | slider for loss, play both side by side | expl | S | P2 | URM | URM card ch13-tcp-naspram-udp-gubitak |  |
 | `net-port-multiplexing` | live | Ports and sockets | the 5-tuple keeps many connections apart on one port 443 | open connections from several clients | step | S | P2 | URM | URM card ch13 (multiplexing) |  |
 | `net-syn-outcomes` | live | Open, closed, filtered | SYN gets SYN/ACK, RST or nothing, and what each means (port scanning) | probe ports on a host behind a firewall | step | S | P1 | URM, SEC | URM card ch15 (three SYN outcomes) |  |
-| `net-asymmetric-path` | w3 · queued | Asymmetric path through NAT and firewall | replies taking another path break stateful devices | toggle the return path, watch the connection die | step | S | P3 | URM | URM card ch15 |  |
+| `net-asymmetric-path` | live | Asymmetric path through NAT and firewall | replies taking another path break stateful devices | toggle the return path, watch the connection die | step | S | P3 | URM | URM card ch15 |  |
 | `net-crc` | live | Error detection with CRC | how a CRC catches burst errors where parity fails | flip bits, compute parity and CRC | step | S | P2 | URM, HAM | → §5.13 |  |
 | `net-wifi-channels` | live | Wi-Fi channels and overlap | 2.4 GHz 1/6/11, 5 GHz channel widths, co-channel interference | place APs, assign channels | expl | S | P2 | URM | URM ch17 |  |
 | `net-wifi-association` | live | 802.11 association step by step | scan, authenticate, associate, then the 4-way handshake | step a station joining an AP | step | S | P2 | URM | URM card ch17-pridruzivanje-koraci; feeds `net-wpa-handshake` |  |
@@ -767,13 +767,13 @@ instead of repeating them.
 |---|---|---|---|---|---|---|---|---|---|---|
 | `perf-utilisation-latency` | live | Latency near full utilisation | waiting time explodes as ρ → 1 | slider for load, watch the queue and latency | expl | S | P2 | DR, NLA, OS | dc-sim `three_tier_chain` |  |
 | `perf-littles-law` | live | Little's law | L = λW in a shop, a server, a build farm | change arrival rate and service time | expl | S | P2 | DR | dc-sim |  |
-| `perf-tail-latency` | w3 · queued | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` |  |
+| `perf-tail-latency` | live | Tail latency and fan-out | p99 decouples from the mean; fan-out makes the tail common | sliders for variability and fan-out | expl | S | P2 | DR, NLA | dc-sim `tail_decoupling` |  |
 | `perf-retry-storm` | live | Retry storms and metastable collapse | retries keep a recovered system down; backoff, jitter, admission control | spike the load, toggle retry policies | step | S | P2 | DR, NLA | dc-sim `metastable_collapse` |  |
 | `perf-rate-limiting` | live | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
 | `perf-cache-hit-ratio` | w3 | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH |  |  |
 | `perf-goodhart-teams` | w3 | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` |  |
 | `perf-autoscaling-lag` | w3 | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
-| `perf-slo-error-budget` | w3 · queued | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
+| `perf-slo-error-budget` | live | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
 | `perf-game-tick-server` | w3 | Authoritative tick server | a fixed tick, server-side line of sight, why clients lag | step ticks, move players, add latency | step | M | P3 | URM | agentvsagent |  |
 
 ### 4.9 Computer architecture, OS gaps and automata
@@ -782,8 +782,8 @@ ossimulator covers the OS course; these fill small gaps or extend the imported a
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `arh-cache-mapping` | w3 · queued | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS |  |  |
-| `arh-pipeline-hazards` | w3 · queued | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` |  |
+| `arh-cache-mapping` | live | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS |  |  |
+| `arh-pipeline-hazards` | live | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` |  |
 | `arh-mesi` | w3 | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` |  |
 | `arh-twos-complement` | w3 | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH |  |  |
 | `arh-floating-point` | w3 | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH |  |  |
