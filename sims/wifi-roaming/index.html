@@ -1,0 +1,550 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Roaming between access points: an explorer. A client walks a 60 m corridor past three APs of one network; the
+     RSSI chart under the corridor shares its scale, so the client stands above the cursor. The client's trigger and
+     margin decide where it roams; the AP can only ask (802.11v). The model is in sim.js (rules: SPEC.md), the words
+     in strings.js. The corridor and chart are drawn here: kit view K2 is a grid of cards and has no free position
+     along a line (NOTES.md, "Shared requests"). -->
+<html lang="hr" data-sim="wifi-roaming">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prelazak između access pointova · simdeck</title>
+<meta name="description" content="Prošetaj klijenta hodnikom s tri access pointa: sam bira kada prelazi, pa se ljepljivi klijent drži dalekog AP-a, a AP ga može samo zamoliti da ode.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "wifi-roaming",
+  "title": {
+    "hr": "Prelazak između access pointova",
+    "en": "Roaming between access points"
+  },
+  "concept": {
+    "hr": "O prelasku odlučuje klijent, a ne AP; ljepljivi klijenti",
+    "en": "The client, not the AP, decides when to roam; sticky clients"
+  },
+  "summary": {
+    "hr": "Prošetaj klijenta hodnikom s tri access pointa: sam bira kada prelazi, pa se ljepljivi klijent drži dalekog AP-a, a AP ga može samo zamoliti da ode.",
+    "en": "Walk a client down a corridor past three access points: it alone decides when to roam, so a sticky client clings to a far AP, and the AP can only ask."
+  },
+  "tags": [
+    "wifi"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="wifi-roaming"]; colours only from kit tokens. */
+[data-sim="wifi-roaming"] .wr {
+  --gl: 4.2rem;  /* left gutter of the corridor and the chart: the dBm labels; both share the x scale */
+  --gr: 2.4rem;  /* right gutter: room for AP-C and the client at 60 m */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24rem;
+  gap: 1.6cqw;
+  height: 100%;
+  padding: 1cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="wifi-roaming"] .wr-left { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; min-height: 0; }
+[data-sim="wifi-roaming"] .wr-right { display: flex; flex-direction: column; gap: 1rem; min-width: 0; min-height: 0; }
+[data-sim="wifi-roaming"] .wr-h { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 1rem; font-weight: 700; }
+[data-sim="wifi-roaming"] .wr-h small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="wifi-roaming"] .wr-plot { position: absolute; left: var(--gl); right: var(--gr); }
+[data-sim="wifi-roaming"] .wr-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="wifi-roaming"] .wr-at { position: absolute; width: 0; height: 0; }
+
+/* ── corridor ── */
+[data-sim="wifi-roaming"] .wr-corr { position: relative; flex: 0 0 auto; height: 11rem; }
+[data-sim="wifi-roaming"] .wr-corr .wr-plot { top: 0; bottom: 0; }
+[data-sim="wifi-roaming"] .wr-hall {
+  position: absolute;
+  left: -1.6rem;
+  right: -1.6rem;
+  top: 46%;
+  bottom: 0;
+  border-block: 0.25rem solid var(--ink);
+  background: var(--panel);
+}
+[data-sim="wifi-roaming"] .wr-walk { stroke: var(--muted); stroke-width: 0.12rem; stroke-dasharray: 0.4rem 0.4rem; }
+[data-sim="wifi-roaming"] .wr-ds { stroke: var(--ink); stroke-width: 0.3rem; }
+[data-sim="wifi-roaming"] .wr-stub { stroke: var(--ink); stroke-width: 0.15rem; }
+[data-sim="wifi-roaming"] .wr-dslab { position: absolute; top: 0; left: 50%; transform: translate(-50%, -0.1rem); padding: 0 0.4rem; background: var(--bg); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="wifi-roaming"] .wr-link { stroke: var(--ink); stroke-width: 0.32rem; stroke-linecap: round; }
+[data-sim="wifi-roaming"] .wr-other { stroke: var(--muted); stroke-width: 0.14rem; stroke-dasharray: 0.45rem 0.35rem; }
+[data-sim="wifi-roaming"] .wr-apdot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.2rem var(--bg), 0 0 0 0.38rem var(--ink);
+  font-weight: 700;
+}
+[data-sim="wifi-roaming"] .wr-aplab {
+  position: absolute;
+  top: 0;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  padding: 0.05rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+[data-sim="wifi-roaming"] .wr-aplab b { font-size: var(--fs-md); }
+[data-sim="wifi-roaming"] .wr-aplab.wr-cur { border: 0.2rem solid var(--ink); }
+[data-sim="wifi-roaming"] .wr-aplab.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="wifi-roaming"] .wr-lab-r { left: 1.8rem; }
+[data-sim="wifi-roaming"] .wr-lab-l { right: 1.8rem; }
+[data-sim="wifi-roaming"] .wr-who { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+[data-sim="wifi-roaming"] .wr-fig { width: 1.9rem; height: 2.6rem; }
+[data-sim="wifi-roaming"] .wr-fig circle { fill: var(--ink); }
+[data-sim="wifi-roaming"] .wr-fig path { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="wifi-roaming"] .wr-whoname { position: absolute; top: 100%; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+
+/* ── chart ── */
+[data-sim="wifi-roaming"] .wr-chart { position: relative; flex: 1; min-height: 12rem; }
+[data-sim="wifi-roaming"] .wr-chart .wr-plot { top: 0.4rem; bottom: 2rem; border-left: var(--line-w) solid var(--ink); border-bottom: var(--line-w) solid var(--ink); }
+[data-sim="wifi-roaming"] .wr-chart .wr-svg { overflow: hidden; } /* the band above a peak stops at the top */
+[data-sim="wifi-roaming"] .wr-grid { stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-curve { fill: none; stroke: var(--sw); stroke-width: 0.16rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-curve[data-ap='B'] { stroke-dasharray: 0.6rem 0.35rem; }
+[data-sim="wifi-roaming"] .wr-curve[data-ap='C'] { stroke-dasharray: 0.15rem 0.3rem; stroke-linecap: round; stroke-width: 0.22rem; }
+[data-sim="wifi-roaming"] .wr-path { fill: none; stroke: var(--sw); stroke-width: 0.55rem; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-jump { stroke: var(--ink); stroke-width: 0.16rem; stroke-dasharray: 0.3rem 0.2rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-band { fill: var(--ink); fill-opacity: 0.08; stroke: none; }
+[data-sim="wifi-roaming"] .wr-hatch { stroke: var(--ink); stroke-opacity: 0.4; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-ahead { opacity: 0.35; }
+[data-sim="wifi-roaming"] .wr-trig { stroke: var(--danger); stroke-width: 0.2rem; stroke-dasharray: 0.7rem 0.4rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-level { stroke: var(--muted); stroke-width: 0.12rem; stroke-dasharray: 0.2rem 0.3rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-cursor { stroke: var(--ink); stroke-width: 0.18rem; vector-effect: non-scaling-stroke; }
+[data-sim="wifi-roaming"] .wr-ytick { position: absolute; left: calc(-1 * var(--gl)); width: calc(var(--gl) - 0.5rem); transform: translateY(-50%); text-align: right; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="wifi-roaming"] .wr-xtick { position: absolute; top: 100%; transform: translate(-50%, 0.2rem); font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="wifi-roaming"] .wr-linelab { position: absolute; transform: translateY(-100%); padding: 0 0.3rem; font-size: var(--fs-sm); white-space: nowrap; background: var(--bg); }
+[data-sim="wifi-roaming"] .wr-linelab-r { right: 0.2rem; color: var(--danger); font-weight: 700; }
+[data-sim="wifi-roaming"] .wr-linelab-l { left: 0.2rem; color: var(--muted); }
+[data-sim="wifi-roaming"] .wr-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 0.3rem));
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+[data-sim="wifi-roaming"] .wr-tag-l { transform: translate(0.3rem, calc(-100% - 0.3rem)); }
+[data-sim="wifi-roaming"] .wr-tag-r { transform: translate(calc(-100% - 0.3rem), calc(-100% - 0.3rem)); }
+[data-sim="wifi-roaming"] .wr-dot { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 0.12rem solid var(--bg); }
+[data-sim="wifi-roaming"] .wr-dot.wr-cur { width: 1.25rem; height: 1.25rem; border: 0.22rem solid var(--ink); }
+[data-sim="wifi-roaming"] .wr-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="wifi-roaming"] .wr-mark small { position: absolute; bottom: 100%; padding: 0 0.2rem; background: var(--bg); font-size: var(--fs-sm); }
+[data-sim="wifi-roaming"] .wr-mark.wr-below small { top: 100%; bottom: auto; }
+[data-sim="wifi-roaming"] .wr-mark.sd-changed { border-radius: var(--radius-sm); padding: 0.1rem 0.15rem; }
+[data-sim="wifi-roaming"] .wr-mark.sd-changed small { background: var(--hl); color: var(--on-hl); }
+[data-sim="wifi-roaming"] .wr-mark.wr-ahead small { background: transparent; }
+[data-sim="wifi-roaming"] .wr-ignored small { color: var(--muted); }
+[data-sim="wifi-roaming"] .wr-lost { color: var(--danger); }
+
+/* ── right column: the client's card and the event log ── */
+[data-sim="wifi-roaming"] .wr-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.6rem 0.8rem; border: 0.2rem solid var(--ink); border-radius: var(--radius); background: var(--bg); }
+[data-sim="wifi-roaming"] .wr-card h2 { margin: 0; font-size: var(--fs-lg); }
+[data-sim="wifi-roaming"] .wr-table { border-collapse: collapse; width: 100%; }
+[data-sim="wifi-roaming"] .wr-table th { text-align: left; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); border-bottom: var(--line-w) solid var(--ink); padding: 0 0.3rem; white-space: nowrap; }
+[data-sim="wifi-roaming"] .wr-table td { padding: 0.12rem 0.3rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="wifi-roaming"] .wr-table td.wr-num { text-align: right; font-family: var(--mono); }
+[data-sim="wifi-roaming"] .wr-table tr.wr-cur td { font-weight: 700; }
+[data-sim="wifi-roaming"] .wr-table tr.wr-cur td:first-child { box-shadow: inset 0.35rem 0 0 var(--ink); }
+[data-sim="wifi-roaming"] .wr-table tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="wifi-roaming"] .wr-sm { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; margin-right: 0.3rem; border-radius: 50%; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="wifi-roaming"] .wr-q { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="wifi-roaming"] .wr-bars { display: inline-flex; align-items: flex-end; gap: 0.15rem; height: 1.2rem; }
+[data-sim="wifi-roaming"] .wr-bars span { width: 0.4rem; border: 0.12rem solid var(--ink); border-radius: 2px; background: var(--bg); }
+[data-sim="wifi-roaming"] .wr-bars span.on { background: var(--ink); }
+[data-sim="wifi-roaming"] .wr-q-poor b { color: var(--danger); }
+[data-sim="wifi-roaming"] .wr-set { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="wifi-roaming"] .wr-log { display: flex; flex-direction: column; gap: 0.3rem; min-height: 0; }
+[data-sim="wifi-roaming"] .wr-log ol { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="wifi-roaming"] .wr-log li { padding: 0.2rem 0.5rem; border-left: 0.35rem solid var(--line); background: var(--panel); border-radius: var(--radius-sm); }
+[data-sim="wifi-roaming"] .wr-log li.sd-changed { background: var(--hl); color: var(--on-hl); border-left-color: var(--ink); }
+[data-sim="wifi-roaming"] .wr-log li small { display: block; font-size: var(--fs-sm); }
+[data-sim="wifi-roaming"] .wr-log .wr-pair { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="wifi-roaming"] .wr-log .wr-empty, [data-sim="wifi-roaming"] .wr-log .wr-more { font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches of the page's own marks */
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='trig'] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--danger) 0 0.45em, transparent 0.45em 0.7em); }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='thick'] { height: 0.45rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='thin'] { height: 0.15rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--muted) 0 0.35em, transparent 0.35em 0.6em); }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='band'] { background-color: var(--bg); background-image: repeating-linear-gradient(-45deg, transparent 0 0.18em, color-mix(in srgb, var(--ink) 50%, transparent) 0.18em 0.28em); }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape^='sym-'] { position: relative; border: 0; background: transparent; }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape^='sym-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='sym-roam']::after { content: '◆'; }
+[data-sim="wifi-roaming"] .sd-swatch[data-shape='sym-btm']::after { content: '✉'; }
+[data-sim="wifi-roaming"] .wr-nb, [data-sim="wifi-roaming"] .sd-caption b { white-space: nowrap; }
+/* panel: presets in two columns, so five presets and six controls fit at 1920×1080 */
+[data-sim="wifi-roaming"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="wifi-roaming"] .sd-preset { line-height: 1.15; }
+[data-sim="wifi-roaming"] .sd-ctl[hidden] { display: none; } /* the kit's .sd-ctl display beats [hidden] */
+
+/* Phone and portrait: the stage grows with its content; the card and the log go under the chart. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="wifi-roaming"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="wifi-roaming"] .wr { --gl: 3rem; --gr: 1.4rem; display: flex; flex-direction: column; height: auto; gap: 1rem; padding: 0.6rem 0.3rem; }
+  [data-sim="wifi-roaming"] .wr-corr { height: 9rem; }
+  [data-sim="wifi-roaming"] .wr-chart { flex: 0 0 auto; height: 17rem; }
+  [data-sim="wifi-roaming"] .wr-aplab, [data-sim="wifi-roaming"] .wr-dslab { display: none; }
+  [data-sim="wifi-roaming"] .wr-apdot { width: 1.8rem; height: 1.8rem; }
+  [data-sim="wifi-roaming"] .wr-linelab-l { display: none; }
+  [data-sim="wifi-roaming"] .wr-xtick.wr-thin { display: none; }
+  [data-sim="wifi-roaming"] .wr-table { font-size: var(--fs-sm); }
+  [data-sim="wifi-roaming"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="wifi-roaming"] .wr-table th { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prelazak između access pointova</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var COLOUR = { A: '1', B: '2', C: '3' };
+  var TOP = -50, BOTTOM = -95; // the chart's dBm range
+
+  // ── formatting: one decimal, the language's decimal mark, a real minus ──
+  function num(v, digits) {
+    var s = (Math.round(v * 10) / 10).toFixed(digits == null ? 1 : digits);
+    if (/^-0(\.0)?$/.test(s)) s = s.slice(1);
+    return s.replace('-', '−').replace('.', t('decimal'));
+  }
+  function dbm(v) { return num(v); }
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function bold(text) { return h('b', { translate: 'no' }, String(text)); }
+  function metres(x) { return h('b', { translate: 'no' }, t('metres', { x: x })); }
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, String(attrs[k])); });
+    return el;
+  }
+  function pctX(x) { return (x / L.LENGTH * 100) + '%'; }
+  function pctY(v) { return ((TOP - v) / (TOP - BOTTOM) * 100) + '%'; }
+  function apBadge(id, cls) { return h('span', { class: (cls || 'wr-sm') + ' sd-fill', dataset: { c: COLOUR[id] }, translate: 'no' }, id); }
+
+  // ── the walk as groups of metres on one AP: the association during (x, x+1) is path[x] ──
+  function groups(path) {
+    var out = [], g = null;
+    for (var x = 0; x < path.length - 1; x++) {
+      if (!g || g.ap !== path[x]) { g = { ap: path[x], from: x, to: x + 1 }; out.push(g); } else g.to = x + 1;
+    }
+    return out;
+  }
+  function sample(ap, from, to, lift) {
+    var pts = [];
+    for (var x = from; x <= to + 1e-9; x += 0.25) pts.push([x, -(L.rssi(ap, x) + (lift || 0))]);
+    if (pts.length && pts[pts.length - 1][0] < to) pts.push([to, -(L.rssi(ap, to) + (lift || 0))]);
+    return pts;
+  }
+  function pts(list) { return list.map(function (p) { return p[0].toFixed(2) + ',' + p[1].toFixed(3); }).join(' '); }
+
+  // ── corridor ──
+  function personIcon() {
+    var s = svg('svg', { viewBox: '0 0 20 28', class: 'wr-fig', 'aria-hidden': 'true' });
+    s.append(svg('circle', { cx: 10, cy: 4.5, r: 4 }));
+    s.append(svg('path', { d: 'M10 9 L10 18 M3 13 L10 11 L17 13 M10 18 L5 26 M10 18 L15 26' }));
+    return s;
+  }
+
+  function corridorView(s, changedAt) {
+    var APY = 46, WALKY = 70, DSY = 9; // vertical places in % of the corridor
+    var g = svg('svg', { class: 'wr-svg', 'aria-hidden': 'true' });
+    g.append(svg('line', { x1: '0%', y1: WALKY + '%', x2: '100%', y2: WALKY + '%', class: 'wr-walk' }));
+    g.append(svg('line', { x1: '0%', y1: DSY + '%', x2: '100%', y2: DSY + '%', class: 'wr-ds' }));
+    L.APS.forEach(function (a) {
+      g.append(svg('line', { x1: pctX(a.x), y1: DSY + '%', x2: pctX(a.x), y2: APY + '%', class: 'wr-stub' }));
+    });
+    L.APS.forEach(function (a) {
+      if (a.id === s.current) return;
+      g.append(svg('line', { x1: pctX(s.x), y1: WALKY + '%', x2: pctX(a.x), y2: APY + '%', class: 'wr-other' }));
+    });
+    var cur = L.APS[L.IDS.indexOf(s.current)];
+    g.append(svg('line', { x1: pctX(s.x), y1: WALKY + '%', x2: pctX(cur.x), y2: APY + '%', class: 'wr-link' }));
+    var kids = [h('div', { class: 'wr-hall' }), g, h('span', { class: 'wr-dslab', style: { top: '0', left: '50%' } }, t('ds'))];
+    L.APS.forEach(function (a, i) {
+      var isCur = a.id === s.current;
+      kids.push(h('div', { class: 'wr-at', style: { left: pctX(a.x), top: APY + '%' } },
+        h('span', { class: 'wr-apdot sd-fill', dataset: { c: COLOUR[a.id] }, translate: 'no' }, a.id),
+        h('div', { class: 'wr-aplab ' + (i === 2 ? 'wr-lab-l' : 'wr-lab-r') + (isCur ? ' wr-cur' : '') + (changedAt && isCur ? ' sd-changed' : '') },
+          h('b', { translate: 'no' }, 'AP-' + a.id),
+          h('span', null, data(dbm(s.rssi[a.id])), ' ', t('dbm')))));
+    });
+    kids.push(h('div', { class: 'wr-at', style: { left: pctX(s.x), top: WALKY + '%' } },
+      h('div', { class: 'wr-who', 'aria-label': t('cardTitle', { x: t('metres', { x: s.x }) }) },
+        personIcon(), h('span', { class: 'wr-whoname' }, t('clientMark')))));
+    return h('section', { class: 'wr-corrcol' },
+      h('div', { class: 'wr-h' }, h('small', null, t('corridorTitle'))),
+      h('div', { class: 'wr-corr' }, h('div', { class: 'wr-plot' }, kids)));
+  }
+
+  // ── chart ──
+  function chartView(s, p) {
+    var x0 = s.x;
+    var g = svg('svg', { class: 'wr-svg', viewBox: '0 ' + (-TOP) + ' ' + L.LENGTH + ' ' + (TOP - BOTTOM), preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    var over = [];
+    // grid
+    [-60, -70, -80, -90].forEach(function (v) { g.append(svg('line', { x1: 0, x2: L.LENGTH, y1: -v, y2: -v, class: 'wr-grid' })); });
+    [10, 20, 30, 40, 50, 60].forEach(function (x) { g.append(svg('line', { x1: x, x2: x, y1: -TOP, y2: -BOTTOM, class: 'wr-grid' })); });
+    // the hysteresis band and the association path, walked part solid and the rest ahead faded
+    var gs = groups(s.path);
+    function part(from, to, ahead) {
+      if (to - from < 1e-9) return;
+      gs.forEach(function (gr) {
+        var a = Math.max(gr.from, from), b = Math.min(gr.to, to);
+        if (b - a < 1e-9) return;
+        var low = sample(gr.ap, a, b, 0), high = sample(gr.ap, a, b, s.delta);
+        var layer = svg('g', ahead ? { class: 'wr-ahead' } : {});
+        if (s.delta > 0) {
+          layer.append(svg('polygon', { points: pts(high.concat(low.slice().reverse())), class: 'wr-band' }));
+          for (var x = Math.ceil(a); x + 1 <= b + 1e-9; x += 1) {
+            layer.append(svg('line', { x1: x, y1: -L.rssi(gr.ap, x), x2: x + 1, y2: -(L.rssi(gr.ap, x + 1) + s.delta), class: 'wr-hatch' }));
+          }
+        }
+        layer.append(svg('polyline', { points: pts(low), class: 'wr-path', 'data-c': COLOUR[gr.ap] }));
+        g.append(layer);
+      });
+    }
+    // thin curves of every AP first
+    L.IDS.forEach(function (id) {
+      g.append(svg('polyline', { points: pts(sample(id, 0, L.LENGTH, 0)), class: 'wr-curve', 'data-ap': id, 'data-c': COLOUR[id] }));
+    });
+    part(0, x0, false);
+    part(x0, L.LENGTH, true);
+    // the jumps at roams
+    s.allRoams.forEach(function (r) {
+      g.append(svg('line', { x1: r.x, x2: r.x, y1: -r.rssiFrom, y2: -r.rssiTo, class: 'wr-jump' + (r.x > x0 ? ' wr-ahead' : '') }));
+    });
+    // levels: the client's trigger, the AP's BTM level (when on), link lost
+    g.append(svg('line', { x1: 0, x2: L.LENGTH, y1: -s.trigger, y2: -s.trigger, class: 'wr-trig' }));
+    over.push(h('span', { class: 'wr-linelab wr-linelab-r', style: { top: pctY(s.trigger) } }, t('lineTrigger', { v: num(s.trigger, 0) })));
+    if (p.btm) {
+      g.append(svg('line', { x1: 0, x2: L.LENGTH, y1: -L.BTM_LEVEL, y2: -L.BTM_LEVEL, class: 'wr-level' }));
+      over.push(h('span', { class: 'wr-linelab wr-linelab-l', style: { top: pctY(L.BTM_LEVEL) } }, t('lineBtm', { v: num(L.BTM_LEVEL, 0) })));
+    }
+    g.append(svg('line', { x1: 0, x2: L.LENGTH, y1: -L.LOST_LEVEL, y2: -L.LOST_LEVEL, class: 'wr-level' }));
+    over.push(h('span', { class: 'wr-linelab wr-linelab-l', style: { top: pctY(L.LOST_LEVEL) } }, t('lineLost', { v: num(L.LOST_LEVEL, 0) })));
+    // cursor at the client
+    g.append(svg('line', { x1: x0, x2: x0, y1: -TOP, y2: -BOTTOM, class: 'wr-cursor' }));
+    // axes
+    [-50, -60, -70, -80, -90].forEach(function (v) { over.push(h('span', { class: 'wr-ytick', translate: 'no', style: { top: pctY(v) } }, num(v, 0))); });
+    [0, 10, 20, 30, 40, 50, 60].forEach(function (x) {
+      over.push(h('span', { class: 'wr-xtick' + (x % 20 ? ' wr-thin' : ''), translate: 'no', style: { left: pctX(x), top: '100%' } }, t('metres', { x: x })));
+    });
+    // curve letters at each AP's peak
+    L.APS.forEach(function (a, i) {
+      over.push(h('div', { class: 'wr-at', style: { left: pctX(a.x), top: pctY(L.rssi(a.id, a.x)) } },
+        h('span', { class: 'wr-tag sd-fill' + (i === 0 ? ' wr-tag-l' : i === 2 ? ' wr-tag-r' : ''), dataset: { c: COLOUR[a.id] }, translate: 'no' }, a.id)));
+    });
+    // events: BTM requests (✉) and roams (◆; ✕ for a lost link)
+    s.allRequests.forEach(function (q) {
+      if (q.accepted) return; // an accepted request is drawn with its roam
+      over.push(h('div', { class: 'wr-at', style: { left: pctX(q.x), top: pctY(q.rssiFrom) } },
+        h('span', { class: 'wr-mark wr-below wr-ignored' + (q.x > x0 ? ' wr-ahead' : '') + (q.x === x0 ? ' sd-changed' : '') },
+          '✉', h('small', { translate: 'no' }, '✕ ' + q.from + '→' + q.to))));
+    });
+    s.allRoams.forEach(function (r) {
+      var sym = r.reason === 'lost' ? '✕' : r.reason === 'btm' ? '✉◆' : '◆';
+      over.push(h('div', { class: 'wr-at', style: { left: pctX(r.x), top: pctY(r.rssiTo) } },
+        h('span', { class: 'wr-mark' + (r.reason === 'lost' ? ' wr-lost' : '') + (r.x > x0 ? ' wr-ahead' : '') + (r.x === x0 ? ' sd-changed' : '') },
+          sym, h('small', { translate: 'no' }, r.from + '→' + r.to))));
+    });
+    // the client's dots on each curve
+    L.IDS.forEach(function (id) {
+      over.push(h('div', { class: 'wr-at', style: { left: pctX(x0), top: pctY(s.rssi[id]) } },
+        h('span', { class: 'wr-dot sd-fill' + (id === s.current ? ' wr-cur' : ''), dataset: { c: COLOUR[id] } })));
+    });
+    return h('section', { class: 'wr-chartcol', style: { display: 'contents' } },
+      h('div', { class: 'wr-h' }, h('span', null, t('chartTitle')), h('small', null, t('chartSub'))),
+      h('div', { class: 'wr-chart' }, h('div', { class: 'wr-plot' }, g, over)));
+  }
+
+  // ── the client's card and the log ──
+  var BARS = { good: 3, fair: 2, poor: 1 };
+  function cardView(s, p, changed) {
+    var rows = L.IDS.map(function (id) {
+      var isCur = id === s.current;
+      var diff = s.rssi[id] - s.rssi[s.current];
+      return h('tr', { class: (isCur ? 'wr-cur' : '') + (isCur && changed ? ' sd-changed' : '') },
+        h('td', null, apBadge(id), data('AP-' + id)),
+        h('td', { class: 'wr-num' }, data(dbm(s.rssi[id])), ' ', t('dbm')),
+        h('td', { class: isCur ? null : 'wr-num' }, isCur ? t('associated') : h('span', { translate: 'no' }, (diff > 0 ? '+' : '') + num(diff) + ' dB')));
+    });
+    var bars = h('span', { class: 'wr-bars', 'aria-hidden': 'true' }, [1, 2, 3].map(function (i) {
+      return h('span', { class: i <= BARS[s.quality] ? 'on' : null, style: { height: (35 + 32 * (i - 1)) + '%' } });
+    }));
+    return h('section', { class: 'wr-card' },
+      h('h2', null, t('cardTitle', { x: t('metres', { x: s.x }) })),
+      h('table', { class: 'wr-table' },
+        h('thead', null, h('tr', null, h('th', null, t('colAp')), h('th', null, t('colRssi')), h('th', null, t('colDiff')))),
+        h('tbody', null, rows)),
+      h('div', { class: 'wr-q wr-q-' + s.quality }, t('qualityLabel'), bars, h('b', null, t('q_' + s.quality))),
+      h('div', { class: 'wr-set' }, t.parts('settings', { trig: data(num(s.trigger, 0)), d: data(num(s.delta, 0)) }),
+        p.btm ? h('div', null, t('settingsBtm', { how: p.support === 'cooperative' ? t('howCoop') : t('howLegacy') })) : null));
+  }
+
+  function logView(s) {
+    var events = [];
+    s.requests.forEach(function (q) { if (!q.accepted) events.push({ x: q.x, kind: 'ignored', from: q.from, to: q.to, rf: q.rssiFrom, rt: q.rssiTo }); });
+    s.roams.forEach(function (r) { events.push({ x: r.x, kind: r.reason, from: r.from, to: r.to, rf: r.rssiFrom, rt: r.rssiTo }); });
+    events.sort(function (a, b) { return a.x - b.x; });
+    var lastRoam = s.roams.length ? s.roams[s.roams.length - 1] : null;
+    var items = events.map(function (e) {
+      var sub = null;
+      if (lastRoam && e.x === lastRoam.x && e.kind === lastRoam.reason) sub = h('small', null, e.kind === 'lost' ? t('logRejoin') : t.parts('logReassoc', { from: data('AP-' + e.from) }));
+      return h('li', { class: e.x === s.x ? 'sd-changed' : null },
+        metres(e.x), ' · ', bold(e.from + ' → ' + e.to), ' · ', t('log_' + e.kind), ' ',
+        h('span', { translate: 'no', class: 'sd-mono wr-pair' }, '(' + dbm(e.rf) + ' → ' + dbm(e.rt) + ')'), sub);
+    });
+    var ahead = s.allRoams.filter(function (r) { return r.x > s.x; }).length +
+      s.allRequests.filter(function (q) { return q.x > s.x && !q.accepted; }).length;
+    return h('section', { class: 'wr-log' },
+      h('div', { class: 'wr-h' }, h('span', null, t('logTitle'))),
+      items.length ? h('ol', null, items) : h('p', { class: 'wr-empty' }, t('logEmpty')),
+      ahead ? h('p', { class: 'wr-more' }, t.n('logAhead', ahead)) : null);
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'position', type: 'range', label: t('position'), min: 0, max: L.LENGTH, step: 1, unit: 'm' },
+      { key: 'client', type: 'choice', label: t('client'),
+        options: [['default', t('clientDefault')], ['sticky', t('clientSticky')], ['custom', t('clientCustom')]] },
+      { key: 'trigger', type: 'range', label: t('trigger'), min: -90, max: -60, step: 1,
+        format: function (v) { return num(v, 0) + ' dBm'; }, visible: function (p) { return p.client === 'custom'; } },
+      { key: 'delta', type: 'range', label: t('delta'), min: 0, max: 20, step: 1,
+        format: function (v) { return v + ' dB'; }, visible: function (p) { return p.client === 'custom'; } },
+      { key: 'btm', type: 'toggle', label: t('btm') },
+      { key: 'support', type: 'choice', label: t('support'),
+        options: [['legacy', t('supportLegacy')], ['cooperative', t('supportCoop')]], visible: function (p) { return p.btm; } }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      return { id: pr.id, label: t('preset_' + pr.id), hint: t('presetHint_' + pr.id), params: pr.params };
+    }),
+
+    legend: [
+      { c: 1, shape: 'round', label: t('legendAp') },
+      { shape: 'thick', label: t('legendLink') },
+      { shape: 'thin', label: t('legendOther') },
+      { shape: 'trig', label: t('legendTrigger') },
+      { shape: 'band', label: t('legendBand') },
+      { shape: 'sym-roam', label: t('legendRoam') },
+      { shape: 'sym-btm', label: t('legendBtm') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params;
+      var changed = s.roams.some(function (r) { return r.x === s.x; });
+      c.stage.replaceChildren(h('div', { class: 'wr' },
+        h('div', { class: 'wr-left' }, corridorView(s, changed), chartView(s, p)),
+        h('div', { class: 'wr-right' }, cardView(s, p, changed), logView(s))));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      var x = metres(s.x);
+      var ap = function (id) { return h('b', { translate: 'no', class: 'wr-nb' }, 'AP-' + id); };
+      var dB = function (v) { return bold(dbm(v)); };
+      var out;
+      var roam = s.roams.filter(function (r) { return r.x === s.x; })[0];
+      var asked = s.requests.filter(function (q) { return q.x === s.x && !q.accepted; })[0];
+      var lk = s.look;
+      if (roam && roam.reason === 'client') {
+        out = t.parts('capRoamClient', { x: x, from: ap(roam.from), to: ap(roam.to), to2: ap(roam.to), rf: dB(roam.rssiFrom), trig: bold(num(s.trigger, 0)),
+          m: bold(num(roam.rssiTo - roam.rssiFrom)), d: bold(num(s.delta, 0)) });
+      } else if (roam && roam.reason === 'btm') {
+        out = t.parts('capRoamBtm', { x: x, from: ap(roam.from), to: ap(roam.to), to2: ap(roam.to), rf: dB(roam.rssiFrom), rt: dB(roam.rssiTo) });
+      } else if (roam) {
+        out = t.parts('capLost', { x: x, from: ap(roam.from), to: ap(roam.to), rf: dB(roam.rssiFrom), rt: dB(roam.rssiTo) });
+      } else if (asked) {
+        out = t.parts('capBtmIgnored', { x: x, from: ap(asked.from), to: ap(asked.to), rf: dB(asked.rssiFrom), rt: dB(asked.rssiTo) });
+      } else {
+        var vars = { x: x, cur: ap(s.current), rc: dB(s.rssi[s.current]), trig: bold(num(s.trigger, 0)), best: ap(lk.best),
+          rb: dB(s.rssi[lk.best]), m: bold(num(lk.margin)), d: bold(num(s.delta, 0)) };
+        if (lk.under) out = t.parts(lk.margin === 0 ? 'capLookEqual' : lk.margin < 0 ? 'capLookNone' : 'capLookStay', vars);
+        else out = t.parts(lk.margin > 0 ? 'capSticky' : 'capFine', vars);
+      }
+      out.push(' ', t('capQuality', { q: t('q_' + s.quality) }));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
