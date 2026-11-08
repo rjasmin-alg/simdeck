@@ -1,0 +1,680 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SLOs and error budgets: burn rate, and fast and slow burn alerts (task docs/tasks/w3/slo-error-budget.md). An
+     explorer: the params drive the stage live; the model is in sim.js (rules in SPEC.md), the words in strings.js.
+     No kit view fits (a timeline, gauges and lamps), so the page draws its own SVG at 1:1 (no viewBox), measured after
+     layout; the budget bar and the gauges are HTML. Click or drag on a timeline to move the cursor; drag an incident's
+     bracket to move it. The incident list is kept in the URL by the page (?inc=), next to the kit's own state. -->
+<html lang="hr" data-sim="slo-error-budget">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SLO i proračun greške · simdeck</title>
+<meta name="description" content="Brzina trošenja proračuna greške i uzbune za brzo i sporo trošenje.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "slo-error-budget",
+  "title": {
+    "hr": "SLO i proračun greške",
+    "en": "SLOs and error budgets"
+  },
+  "concept": {
+    "hr": "Brzina trošenja proračuna i uzbune za brzo i sporo trošenje",
+    "en": "Burn rate, and fast and slow burn alerts"
+  },
+  "summary": {
+    "hr": "Ubaci incidente i gledaj kako se troši proračun greške. Hitna uzbuna traži brzo trošenje u dugom i kratkom prozoru; sporo trošenje hvata zahtjev.",
+    "en": "Inject incidents and watch the error budget drain. A page needs a fast burn over a long and a short window; a slow burn is caught by a ticket."
+  },
+  "tags": [
+    "monitoring"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "outage-20min"
+    },
+    {
+      "preset": "fast-burn"
+    },
+    {
+      "preset": "slow-burn"
+    },
+    {
+      "preset": "blip"
+    },
+    {
+      "preset": "under-the-radar"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="slo-error-budget"]; colours only from kit tokens. */
+/* Workaround (as amdahl, littles-law): kit.css gives .sd-ctl display: flex, which beats the hidden attribute a
+   param's visible() sets. Shared request in NOTES.md. */
+[data-sim="slo-error-budget"] .sd-ctl[hidden] { display: none; }
+/* The panel fits at 1920×1080: presets in two columns (as amdahl), the action buttons side by side. */
+[data-sim="slo-error-budget"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="slo-error-budget"] [data-sd-controls] .sd-group { flex-direction: row; flex-wrap: wrap; }
+[data-sim="slo-error-budget"] [data-sd-controls] .sd-group > * { flex: 1 1 100%; }
+[data-sim="slo-error-budget"] [data-sd-controls] .sd-group > .sd-btn { flex: 1 1 auto; }
+
+[data-sim="slo-error-budget"] .se {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 21rem);
+  grid-template-rows: auto minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  height: 100%;
+  padding: 0.6cqh 1cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="slo-error-budget"] .se-budget { grid-column: 1; grid-row: 1; }
+[data-sim="slo-error-budget"] .se-month { grid-column: 1; grid-row: 2; }
+[data-sim="slo-error-budget"] .se-zoom { grid-column: 1 / 3; grid-row: 3; }
+[data-sim="slo-error-budget"] .se-side { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+
+/* The budget bar: the part left is solid and sits on the right, so it drains left to right. */
+[data-sim="slo-error-budget"] .se-b-head { display: flex; flex-wrap: wrap; gap: 0 1rem; align-items: baseline; }
+[data-sim="slo-error-budget"] .se-b-head b { font-size: var(--fs-md); }
+[data-sim="slo-error-budget"] .se-b-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="slo-error-budget"] .se-b-gone { font-size: var(--fs-sm); color: var(--danger); font-weight: 700; }
+[data-sim="slo-error-budget"] .se-b-bar { position: relative; height: 1.5rem; margin-top: 0.25rem; border: 3px solid var(--ink); border-radius: 0.3rem; background: var(--bg); overflow: hidden; }
+[data-sim="slo-error-budget"] .se-b-fill { position: absolute; top: 0; bottom: 0; right: 0; background: var(--c3); border-left: 3px solid var(--ink); }
+[data-sim="slo-error-budget"] .se-b-fill[data-empty] { border-left: 0; }
+[data-sim="slo-error-budget"] .se-b-mark { position: absolute; top: -0.1rem; bottom: -0.1rem; width: 0; border-left: 4px dotted var(--ink); }
+
+/* Timelines: SVG drawn at 1:1 after layout. */
+[data-sim="slo-error-budget"] .se-month, [data-sim="slo-error-budget"] .se-zoom { position: relative; min-height: 8rem; touch-action: none; }
+[data-sim="slo-error-budget"] .se-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; cursor: crosshair; }
+[data-sim="slo-error-budget"] svg text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+[data-sim="slo-error-budget"] svg .se-t-b { font-weight: 700; }
+[data-sim="slo-error-budget"] svg .se-t-muted { fill: var(--muted); }
+[data-sim="slo-error-budget"] svg .se-t-bad { fill: var(--danger); font-weight: 700; }
+[data-sim="slo-error-budget"] .se-plotbg { fill: var(--panel); }
+[data-sim="slo-error-budget"] .se-axis { stroke: var(--ink); stroke-width: 2; }
+[data-sim="slo-error-budget"] .se-grid { stroke: var(--line); stroke-width: 1; }
+[data-sim="slo-error-budget"] .se-tick { stroke: var(--ink); stroke-width: 2; }
+[data-sim="slo-error-budget"] .se-bars { fill: var(--c1); }
+[data-sim="slo-error-budget"] .se-allowed { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 8 5; }
+[data-sim="slo-error-budget"] .se-gone { stroke: var(--danger); stroke-width: 3; stroke-dasharray: 10 6; }
+[data-sim="slo-error-budget"] .se-cursor { stroke: var(--ink); stroke-width: 3; }
+[data-sim="slo-error-budget"] .se-cursor-head { fill: var(--ink); }
+[data-sim="slo-error-budget"] .se-strip { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+[data-sim="slo-error-budget"] .se-lit-page { fill: var(--danger); }
+[data-sim="slo-error-budget"] .se-lit-ticket { fill: var(--warn); stroke: var(--ink); stroke-width: 1; }
+[data-sim="slo-error-budget"] .se-br { fill: none; stroke: var(--ink); stroke-width: 2; }
+[data-sim="slo-error-budget"] .se-br[data-sel] { stroke-width: 4; }
+[data-sim="slo-error-budget"] .se-sel-bg { fill: var(--hl); stroke: var(--ink); stroke-width: 2; }
+[data-sim="slo-error-budget"] svg .se-sel-text { fill: var(--on-hl); stroke: none; font-weight: 700; }
+[data-sim="slo-error-budget"] .se-hit { fill: transparent; cursor: ew-resize; }
+[data-sim="slo-error-budget"] .se-win { fill: none; stroke: var(--c2); stroke-width: 3; }
+[data-sim="slo-error-budget"] .se-win-band { fill: var(--c2); opacity: 0.12; }
+
+/* The side: the cursor's time, then one card per alert: lamp, name, threshold, its two windows' gauges. */
+[data-sim="slo-error-budget"] .se-now { font-weight: 700; }
+[data-sim="slo-error-budget"] .se-card { padding: 0.35rem 0.6rem 0.45rem; border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
+[data-sim="slo-error-budget"] .se-card[data-on] { border: 3px solid var(--ink); }
+[data-sim="slo-error-budget"] .se-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+[data-sim="slo-error-budget"] .se-name { font-weight: 700; flex: 1 1 auto; min-width: 0; }
+[data-sim="slo-error-budget"] .se-thr { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="slo-error-budget"] .se-lamp { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.05rem 0.5rem 0.05rem 0.2rem; border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; border: 2px dashed var(--muted); color: var(--muted); }
+[data-sim="slo-error-budget"] .se-lamp::before { content: ''; width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 2px dashed var(--muted); box-sizing: border-box; }
+[data-sim="slo-error-budget"] .se-lamp[data-on] { border: 2px solid var(--ink); color: var(--ink); }
+[data-sim="slo-error-budget"] .se-lamp[data-on]::before { border: 2px solid var(--ink); background: var(--danger); }
+[data-sim="slo-error-budget"] .se-lamp[data-on][data-kind='ticket']::before { background: var(--warn); }
+[data-sim="slo-error-budget"] .se-lamp.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="slo-error-budget"] .se-g { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) 3.6rem; align-items: center; gap: 0.4rem; margin-top: 0.3rem; font-size: var(--fs-sm); }
+[data-sim="slo-error-budget"] .se-g-v { text-align: right; font-weight: 700; }
+[data-sim="slo-error-budget"] .se-g-bar { position: relative; height: 1.1rem; border: 2px solid var(--ink); border-radius: 0.2rem; background: var(--bg); }
+[data-sim="slo-error-budget"] .se-g-fill { position: absolute; top: 0.15rem; bottom: 0.15rem; left: 0; border: 2px solid var(--ink); border-left: 0; background: var(--bg); }
+[data-sim="slo-error-budget"] .se-g-fill[data-over] { top: 0; bottom: 0; border: 0; background: var(--danger); }
+[data-sim="slo-error-budget"] .se-g-thr { position: absolute; top: -0.35rem; bottom: -0.35rem; width: 0; border-left: 4px solid var(--ink); }
+
+/* Legend swatches: shapes, so they read in grayscale too. */
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-bar'] { background: var(--c1); border-radius: 0; transform: scaleX(0.5); }
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-inc'] { background: transparent; border: 3px solid var(--ink); border-bottom: 0; border-radius: 0; height: 0.6em; }
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-budget'] { background: var(--c3); border: 2px solid var(--ink); border-radius: 0; }
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-gauge'] { position: relative; background: var(--danger); border: 2px solid var(--ink); border-radius: 0; }
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-gauge']::after { content: ''; position: absolute; left: 40%; top: -0.25em; bottom: -0.25em; border-left: 3px solid var(--ink); }
+[data-sim="slo-error-budget"] .sd-swatch[data-shape='se-lamp'] { border-radius: 50%; background: var(--danger); border: 2px solid var(--ink); }
+
+/* Phone and portrait: everything stacks; timelines get fixed heights. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="slo-error-budget"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="slo-error-budget"] .se { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 22rem auto 17rem; height: auto; padding: 0.4rem; }
+  [data-sim="slo-error-budget"] .se-budget, [data-sim="slo-error-budget"] .se-month, [data-sim="slo-error-budget"] .se-zoom, [data-sim="slo-error-budget"] .se-side { grid-column: 1; grid-row: auto; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">SLO i proračun greške</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var T = L.T, DAY = L.DAY;
+  var LOG_LO = -1, LOG_HI = 4;          // error-rate axis: 0.1 bp (0.001 %) … 10 000 bp (100 %), log
+  var G_LO = -1, G_HI = 4;              // gauges: burn 0.1 … 10 000, log
+  var ZOOM = 180, ZOOM_BACK = 150;      // the detail shows 3 h: 2.5 h before the cursor, 0.5 h after
+  var NAMES = { fast: 'aFast', slow: 'aSlow', ticket: 'aTicket' };
+  var GROUP = { fast: 'gFast', slow: 'gSlow', ticket: 'gTicket' };
+  var ROWS = [['fast', 'rowFast', 'se-lit-page'], ['slow', 'rowSlow', 'se-lit-page'], ['ticket', 'rowTicket', 'se-lit-ticket']];
+  var cur = L.defaults;                 // params of the last render (the sliders' value formats read them)
+
+  // ── numbers, times and durations in the page's language ──
+  /** Three significant digits, trailing zeros dropped (0.463, 14.4, 333, 1000). */
+  function num(v) {
+    if (v == null || !isFinite(v)) return t('noValue');
+    var s = Math.abs(v) >= 1000 ? String(Math.round(v)) : String(parseFloat(v.toPrecision(3)));
+    return s.replace('.', t('dec'));
+  }
+  /** A share of the budget: one decimal under 10 %, whole above (4.6 %, 46 %, 200 %). */
+  function pct(v) {
+    var r = v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+    return t('pct', { v: String(r).replace('.', t('dec')) });
+  }
+  function ratePct(bp) { return t('pct', { v: num(bp / 100) }); }
+  function sloPct(slo) { return t('pct', { v: String(slo).replace('.', t('dec')) }); }
+  function dur(min) {
+    if (min < 60) return t('dMin', { v: num(min) });
+    if (min < DAY) return t('dH', { v: num(min / 60) });
+    return t.n('dDays', min / DAY, { v: num(min / DAY) });
+  }
+  function hm(tm) {
+    var r = tm - Math.floor(tm / DAY) * DAY, pad = function (x) { return (x < 10 ? '0' : '') + x; };
+    return pad(Math.floor(r / 60)) + ':' + pad(r % 60);
+  }
+  function when(tm, key) { return t(key || 'when', { d: String(Math.floor(tm / DAY)), hm: hm(tm) }); }
+  function b(x) { return h('b', null, x); }
+  /** A caption that opens with the time starts with a capital (Dan 8, …; Day 8, …). */
+  function cap(x) { return x.charAt(0).toUpperCase() + x.slice(1); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+  function remPx() { return parseFloat(getComputedStyle(document.documentElement).fontSize); }
+  function logPos(v, lo, hi) { return v <= 0 ? 0 : Math.max(0, Math.min(1, (Math.log10(v) - lo) / (hi - lo))); }
+
+  // ── the budget bar ──
+  function budgetBar(st) {
+    var usedAtPct = 100 - st.remainingAtPct;
+    var left = Math.max(0, st.budgetMin - st.usedAtMin);
+    var head = h('div', { class: 'se-b-head' },
+      b(t('budgetTitle')),
+      h('span', null, t('budgetLeft', { left: num(left), budget: num(st.budgetMin) })),
+      h('span', { class: 'se-b-sub' }, t('budgetUsed', { pct: pct(100 * st.usedAtMin / st.budgetMin) }) + ' · ' + when(st.at)),
+      st.exhaustedAt != null
+        ? h('span', { class: 'se-b-gone' }, t('budgetGone', { day: when(st.exhaustedAt, 'onDay') }))
+        : h('span', { class: 'se-b-sub' }, t('budgetMonth', { pct: pct(st.usedPct) })));
+    var fill = h('div', { class: 'se-b-fill', style: { left: usedAtPct + '%' } });
+    if (st.remainingAtPct <= 0) fill.setAttribute('data-empty', '');
+    var bar = h('div', { class: 'se-b-bar', role: 'img', 'aria-label': t('legBudget') }, fill);
+    if (st.usedPct > usedAtPct + 0.05 && st.usedPct < 100) bar.append(h('div', { class: 'se-b-mark', style: { left: st.usedPct + '%' } }));
+    return [head, bar];
+  }
+
+  // ── the side: one card per alert ──
+  function gauge(w, v, thr10) {
+    var over = v * 10 >= thr10 - 1e-9;
+    var fill = h('span', { class: 'se-g-fill', style: { width: (100 * logPos(v, G_LO, G_HI)) + '%' } });
+    if (over) fill.setAttribute('data-over', '');
+    return h('div', { class: 'se-g' },
+      h('span', null, t(w)),
+      h('span', { class: 'se-g-bar', role: 'img', 'aria-label': t(w) + ': ' + num(v) },
+        fill, h('span', { class: 'se-g-thr', style: { left: (100 * logPos(thr10 / 10, G_LO, G_HI)) + '%' } })),
+      h('span', { class: 'se-g-v' }, num(v)));
+  }
+  function side(st, changed) {
+    var out = [h('div', { class: 'se-now' }, t('now', { when: when(st.at) }))];
+    L.ALERTS.forEach(function (a) {
+      var on = st.alerts[a.id];
+      var lamp = h('span', { class: 'se-lamp', dataset: { kind: a.id === 'ticket' ? 'ticket' : 'page' } },
+        on ? t(a.id === 'ticket' ? 'lampTicket' : 'lampPage') : t('lampOff'));
+      if (on) lamp.setAttribute('data-on', '');
+      if (changed.indexOf(a.id) >= 0) { lamp.classList.add('sd-changed'); lamp.title = t('changed'); }
+      var card = h('div', { class: 'se-card' },
+        h('div', { class: 'se-head' }, lamp, h('span', { class: 'se-name' }, t(GROUP[a.id])), h('span', { class: 'se-thr' }, t('thr', { v: num(a.thr10 / 10) }))),
+        gauge(a.long, st.burn[a.long], a.thr10),
+        gauge(a.short, st.burn[a.short], a.thr10));
+      if (on) card.setAttribute('data-on', '');
+      out.push(card);
+    });
+    return out;
+  }
+
+  // ── shared drawing for both timelines ──
+  /** Left margin wide enough for the strip labels and the y labels. */
+  function leftMargin(svg, rem) {
+    var probe = s('text', {}, '');
+    svg.append(probe);
+    var w = 0;
+    ROWS.forEach(function (r) { probe.textContent = t(r[1]); w = Math.max(w, probe.getComputedTextLength()); });
+    probe.textContent = ratePct(0.1);
+    w = Math.max(w, probe.getComputedTextLength());
+    probe.remove();
+    return w + 0.7 * rem;
+  }
+  /** Error-rate axis (log), the allowed rate, and the three lamp strips; returns the y of the bars' base. */
+  function plotFrame(svg, g, st, from, to, compact) {
+    var Y = function (bp) { return g.top + g.ph * (1 - logPos(Math.max(bp, 0.1), LOG_LO, LOG_HI)); };
+    svg.append(s('rect', { class: 'se-plotbg', x: g.l, y: g.top, width: g.pw, height: g.ph }));
+    [-1, 0, 1, 2, 3, 4].forEach(function (e) {
+      if (e === -1 || (compact && e % 2 === 1)) return;      // the bottom unlabelled; a short plot labels 0.01, 1, 100 %
+      var bp = Math.pow(10, e), y = Y(bp);
+      svg.append(s('line', { class: 'se-grid', x1: g.l, x2: g.l + g.pw, y1: y, y2: y }));
+      svg.append(s('text', { x: g.l - 0.35 * g.rem, y: y + 0.35 * g.fs, 'text-anchor': 'end' }, ratePct(bp)));
+    });
+    svg.append(s('line', { class: 'se-axis', x1: g.l, x2: g.l, y1: g.top, y2: g.top + g.ph }));
+    // lamp strips under the plot
+    ROWS.forEach(function (r, i) {
+      var y = g.top + g.ph + 0.35 * g.fs + i * g.row;
+      svg.append(s('rect', { class: 'se-strip', x: g.l, y: y, width: g.pw, height: g.row - 4 }));
+      svg.append(s('text', { x: g.l - 0.35 * g.rem, y: y + g.row * 0.72, 'text-anchor': 'end' }, t(r[1])));
+      st.lit[r[0]].forEach(function (iv) {
+        var a = Math.max(iv[0], from), z = Math.min(iv[1], to);
+        if (z < from || a > to) return;
+        var x0 = g.X(a), x1 = Math.max(g.X(z), x0 + 3);
+        svg.append(s('rect', { class: r[2], x: x0, y: y + 1, width: x1 - x0, height: g.row - 6 }));
+      });
+    });
+    return Y;
+  }
+  /** The allowed error rate (burn 1), drawn over the bars. */
+  function allowedLine(svg, g, st, Y) {
+    var ya = Y(st.allowedBp);
+    svg.append(s('line', { class: 'se-allowed', x1: g.l, x2: g.l + g.pw, y1: ya, y2: ya }));
+    svg.append(s('text', { x: g.l + g.pw - 0.3 * g.rem, y: ya - 0.3 * g.fs, 'text-anchor': 'end', class: 'se-t-b' }, t('allowed', { v: ratePct(st.allowedBp) })));
+  }
+  function cursorLine(svg, g, at, y0, y1) {
+    var x = g.X(at);
+    svg.append(s('line', { class: 'se-cursor', x1: x, x2: x, y1: y0, y2: y1 }));
+    svg.append(s('path', { class: 'se-cursor-head', d: 'M' + (x - 7) + ' ' + (y0 - 9) + ' L' + (x + 7) + ' ' + (y0 - 9) + ' L' + x + ' ' + y0 + ' Z' }));
+  }
+  /** A window that ends at the cursor: a bracket on its own row, labelled with its burn. */
+  function windowBracket(svg, g, st, k, y, from) {
+    var x1 = g.X(st.at), x0 = g.X(Math.max(from, st.at - L.WINDOWS[k]));
+    svg.append(s('rect', { class: 'se-win-band', x: x0, y: y, width: Math.max(1, x1 - x0), height: g.winBottom - y }));
+    svg.append(s('path', { class: 'se-win', d: 'M' + x0 + ' ' + (y + 7) + ' V' + y + ' H' + x1 + ' V' + (y + 7) }));
+    var label = t(k) + ' · ' + t('burnWord') + ' ' + num(st.burn[k]);
+    var el = s('text', { y: y - 0.25 * g.fs }, label);
+    svg.append(el);
+    var w = el.getComputedTextLength();
+    var x = x0 - w - 0.4 * g.rem >= g.l ? x0 - w - 0.4 * g.rem : Math.min(x1 + 0.4 * g.rem, g.l + g.pw - w);
+    if (x1 - x0 > w + 0.8 * g.rem) x = x0 + 0.4 * g.rem;      // fits inside: label inside the bracket
+    el.setAttribute('x', x);
+    el.setAttribute('y', y + 0.85 * g.fs);
+  }
+
+  // ── the month: hourly bars, incidents, windows of 6 h and 3 days, the strips ──
+  var monthSvg = null, zoomSvg = null, monthGeo = null, zoomGeo = null;
+  function drawMonth(box, st, p) {
+    var Wd = box.clientWidth, Hd = box.clientHeight;
+    if (!Wd || !Hd) return;
+    var svg = monthSvg;
+    svg.replaceChildren();
+    svg.setAttribute('width', Wd);
+    svg.setAttribute('height', Hd);
+    var rem = remPx(), fs = Math.max(16, 0.8 * rem);
+    var g = { rem: rem, fs: fs, l: leftMargin(svg, rem), row: 1.25 * fs, hits: [] };
+    g.pw = Wd - g.l - 0.8 * rem;
+    g.X = function (m) { return g.l + m / T * g.pw; };
+
+    // incident brackets, packed into rows by their labels
+    var probe = s('text', { class: 'se-t-b' }, '');
+    svg.append(probe);
+    var rows = [], items = st.incidents.map(function (n, i) {
+      probe.textContent = t('incLabel', { i: String(i + 1), dur: dur(n.end - n.start), rate: ratePct(n.bp) });
+      var x0 = g.X(n.start), w = probe.getComputedTextLength() + 0.6 * rem;
+      var lx = Math.min(x0, g.l + g.pw - w);
+      var x1 = Math.max(g.X(n.end), x0 + 3, lx + w);
+      var r = 0;
+      while (rows[r] != null && rows[r] > lx - 0.4 * rem) r++;
+      rows[r] = x1;
+      return { n: n, i: i, text: probe.textContent, x0: x0, xe: Math.max(g.X(n.end), x0 + 3), lx: lx, w: w, row: r };
+    });
+    probe.remove();
+    var incRows = Math.max(1, rows.length);
+    var winRows = p.showWindows ? 2 : 0;
+    var top = 0.4 * fs;
+    var incH = incRows * 1.5 * fs;
+    g.top = top + incH + winRows * 1.35 * fs + 0.5 * fs;
+    var below = 0.35 * fs + 3 * g.row + 2.2 * fs;
+    g.ph = Math.max(3 * fs, Hd - g.top - below);
+    g.winBottom = g.top + g.ph;
+
+    var Y = plotFrame(svg, g, st, 0, T, g.ph < 7 * fs);
+    // bars: the mean error rate of each hour
+    var d = '';
+    var base = g.top + g.ph;
+    st.hourly.forEach(function (bp, hr) {
+      if (bp <= 0) return;
+      var x0 = g.X(hr * 60), x1 = g.X((hr + 1) * 60);
+      d += 'M' + x0.toFixed(1) + ' ' + base + 'V' + Math.min(base - 2, Y(bp)).toFixed(1) + 'H' + Math.max(x1, x0 + 1.5).toFixed(1) + 'V' + base + 'Z';
+    });
+    if (d) svg.append(s('path', { class: 'se-bars', d: d }));
+    allowedLine(svg, g, st, Y);
+    if (st.exhaustedAt != null) {
+      var xg = g.X(st.exhaustedAt);
+      svg.append(s('line', { class: 'se-gone', x1: xg, x2: xg, y1: g.top, y2: base }));
+      var gt = s('text', { x: xg + 0.3 * rem, y: g.top + 1.1 * fs, class: 'se-t-bad' }, t('gone'));
+      svg.append(gt);
+      if (xg + 0.3 * rem + gt.getComputedTextLength() > g.l + g.pw) { gt.setAttribute('x', xg - 0.3 * rem); gt.setAttribute('text-anchor', 'end'); }
+    }
+    // incidents above the plot
+    items.forEach(function (it) {
+      var y = top + it.row * 1.5 * fs + 1.15 * fs;
+      var sel = it.i === p.sel && st.incidents.length > 1;
+      if (sel) svg.append(s('rect', { class: 'se-sel-bg', x: it.lx, y: y - 1.05 * fs, width: it.w, height: 1.4 * fs, rx: 4 }));
+      svg.append(s('text', { x: it.lx + 0.3 * rem, y: y, class: sel ? 'se-sel-text' : 'se-t-b' }, it.text));
+      var by = y + 0.45 * fs;
+      var br = s('path', { class: 'se-br', d: 'M' + it.x0 + ' ' + (g.top - 2) + ' V' + by + ' H' + it.xe + ' V' + (g.top - 2) });
+      if (sel) br.setAttribute('data-sel', '');
+      svg.append(br);
+      var hit = s('rect', { class: 'se-hit', x: Math.min(it.lx, it.x0), y: y - 1.1 * fs, width: Math.max(it.w, it.xe - it.x0), height: g.top - y + 1.1 * fs, 'data-i': it.i });
+      svg.append(hit);
+    });
+    // windows of 6 h and 3 days, ending at the cursor
+    if (p.showWindows) {
+      var wy = top + incH + 0.3 * fs;
+      windowBracket(svg, g, st, 'w3d', wy, 0);
+      windowBracket(svg, g, st, 'w6h', wy + 1.35 * fs, 0);
+    }
+    // x axis: days
+    var ay = base + 0.35 * fs + 3 * g.row;
+    for (var day = 0; day <= L.WINDOW_DAYS; day += 5) {
+      var x = g.X(day * DAY);
+      svg.append(s('line', { class: 'se-tick', x1: x, x2: x, y1: ay, y2: ay + 0.35 * fs }));
+      svg.append(s('text', { x: x, y: ay + 1.4 * fs, 'text-anchor': 'middle' }, String(day)));
+    }
+    svg.append(s('text', { x: g.l - 0.9 * rem, y: ay + 1.4 * fs, 'text-anchor': 'end', class: 'se-t-muted' }, t('dayAxis')));
+    cursorLine(svg, g, st.at, g.top - 0.2 * fs, ay);
+    monthGeo = g;
+  }
+
+  // ── the detail: 3 h around the cursor, minute by minute ──
+  function drawZoom(box, st, p) {
+    var Wd = box.clientWidth, Hd = box.clientHeight;
+    if (!Wd || !Hd) return;
+    var svg = zoomSvg;
+    svg.replaceChildren();
+    svg.setAttribute('width', Wd);
+    svg.setAttribute('height', Hd);
+    var rem = remPx(), fs = Math.max(16, 0.8 * rem);
+    var lo = Math.max(0, Math.min(T - ZOOM, st.at - ZOOM_BACK)), hi = lo + ZOOM;
+    var g = { rem: rem, fs: fs, l: leftMargin(svg, rem), row: 1.25 * fs, lo: lo, hi: hi };
+    g.pw = Wd - g.l - 0.8 * rem;
+    g.X = function (m) { return g.l + (m - lo) / ZOOM * g.pw; };
+    var winRows = p.showWindows ? 3 : 0;
+    var top = 1.3 * fs;
+    svg.append(s('text', { x: g.l, y: 1.05 * fs, class: 'se-t-b' }, t('zoomTitle', { from: when(lo), to: when(hi) })));
+    g.top = top + winRows * 1.35 * fs + 0.5 * fs;
+    var below = 0.35 * fs + 3 * g.row + 1.8 * fs;
+    g.ph = Math.max(3 * fs, Hd - g.top - below);
+    g.winBottom = g.top + g.ph;
+    var Y = plotFrame(svg, g, st, lo, hi, true);
+    var e = L.series(p.incidents);
+    var base = g.top + g.ph, d = '';
+    for (var m = lo; m < hi; m++) {
+      if (!e[m]) continue;
+      var run = m;
+      while (run + 1 < hi && e[run + 1] === e[m]) run++;
+      var x0 = g.X(m), x1 = g.X(run + 1);
+      d += 'M' + x0.toFixed(1) + ' ' + base + 'V' + Y(e[m]).toFixed(1) + 'H' + Math.max(x1, x0 + 1.5).toFixed(1) + 'V' + base + 'Z';
+      m = run;
+    }
+    if (d) svg.append(s('path', { class: 'se-bars', d: d }));
+    allowedLine(svg, g, st, Y);
+    if (p.showWindows) ['w1h', 'w30m', 'w5m'].forEach(function (k, i) { windowBracket(svg, g, st, k, top + 0.3 * fs + i * 1.35 * fs, lo); });
+    var ay = base + 0.35 * fs + 3 * g.row;
+    var every = g.pw < 30 * rem ? 60 : 30;                  // a narrow detail labels every hour
+    for (var tk = Math.ceil(lo / every) * every; tk <= hi; tk += every) {
+      var x = g.X(tk);
+      svg.append(s('line', { class: 'se-tick', x1: x, x2: x, y1: ay, y2: ay + 0.35 * fs }));
+      svg.append(s('text', { x: x, y: ay + 1.4 * fs, 'text-anchor': tk === lo ? 'start' : tk === hi ? 'end' : 'middle' }, hm(tk)));
+    }
+    cursorLine(svg, g, st.at, g.top - 0.2 * fs, ay);
+    zoomGeo = g;
+  }
+
+  // ── pointer: click or drag to move the cursor; drag an incident to move it ──
+  var drag = null;
+  function svgX(svg, ev) { return ev.clientX - svg.getBoundingClientRect().left; }
+  function attach(svg, geo) {
+    svg.addEventListener('pointerdown', function (ev) {
+      var g = geo(), p = sim.params;
+      if (!g) return;
+      var hitI = ev.target.getAttribute && ev.target.getAttribute('data-i');
+      try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+      ev.preventDefault();
+      if (hitI != null && svg === monthSvg) {
+        var i = Number(hitI), inc0 = p.incidents[i];
+        drag = { svg: svg, kind: 'inc', i: i, x0: svgX(svg, ev), start0: Number(inc0.startDay) * DAY };
+        if (p.sel !== i) sim.set(Object.assign({ sel: i }, L.mirror(p.incidents, i)));
+        return;
+      }
+      drag = { svg: svg, kind: 'at', lo: g.lo };          // the detail's span moves with the cursor: keep it fixed
+      move(ev);
+    });
+    function move(ev) {
+      if (!drag || drag.svg !== svg) return;
+      var g = geo(), p = sim.params, x = svgX(svg, ev);
+      if (drag.kind === 'at') {
+        var m = svg === monthSvg ? (x - g.l) / g.pw * T : drag.lo + (x - g.l) / g.pw * ZOOM;
+        sim.set({ at: Math.max(0, Math.min(T, Math.round(m))) });
+      } else {
+        var hour = Math.max(0, Math.min(L.WINDOW_DAYS * 24 - 1, Math.round((drag.start0 + (x - drag.x0) / g.pw * T) / 60)));
+        var list = p.incidents.slice();
+        if (Math.round(Number(list[drag.i].startDay) * 24) === hour) return;
+        list[drag.i] = Object.assign({}, list[drag.i], { startDay: hour / 24 });
+        sim.set(Object.assign({ incidents: list, sel: drag.i }, L.mirror(list, drag.i)));
+      }
+    }
+    svg.addEventListener('pointermove', move);
+    var end = function () { drag = null; };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var st = c.state, k = L.captionKey(st);
+    var a = k.alert ? L.ALERTS.filter(function (x) { return x.id === k.alert; })[0] : null;
+    var budget = num(st.budgetMin);
+    var sofar = { used: num(st.usedAtMin), budget: budget, pct: pct(100 * st.usedAtMin / st.budgetMin) };
+    var all = { usedAll: num(st.usedMin), budget: budget, pctAll: b(pct(st.usedPct)) };
+    var first = L.firstAlert(st);
+    switch (k.key) {
+      case 'empty': return rich('cEmpty', { slo: sloPct(cur.slo), budget: b(budget) });
+      case 'page': return rich('cPage', Object.assign(sofar, { when: cap(when(st.at)), long: b(num(st.burn[a.long])), short: b(num(st.burn[a.short])), lw: t(a.long), sw: t(a.short), thr: num(a.thr10 / 10), alert: b(t(NAMES[a.id])) }));
+      case 'cleared': return rich('cCleared', { when: cap(when(st.at)), long: b(num(st.burn[a.long])), short: b(num(st.burn[a.short])), lw: t(a.long), sw: t(a.short), thr: num(a.thr10 / 10), alert: t(NAMES[a.id]) });
+      case 'slowBurn': return rich('cSlowBurn', { rate: ratePct(st.peak.w1h * st.allowedBp), burn: b(num(st.peak.w3d)), day: b(when(st.exhaustedAt, 'onDay')), tday: when(st.firstFired.ticket, 'since') });
+      case 'ticket': return rich('cTicket', Object.assign(sofar, { when: cap(when(st.at)), long: b(num(st.burn.w3d)), short: b(num(st.burn.w6h)) }));
+      case 'exhausted':
+        if (!first) return rich('cExhaustedNone', Object.assign(all, { day: b(when(st.exhaustedAt, 'onDay')) }));
+        return rich('cExhausted', Object.assign(all, { day: b(when(st.exhaustedAt, 'onDay')), alert: t(NAMES[first]), first: when(st.firstFired[first], 'onDay') }));
+      case 'quiet': return rich('cQuiet', Object.assign(all, { peak: b(num(st.peak.w1h)) }));
+      default: return rich('cAfter', Object.assign(all, { when: cap(when(st.at)), alert: t(NAMES[first]), first: when(st.firstFired[first], 'onDay') }));
+    }
+  }
+
+  // ── the incident list in the URL (?inc=start-duration-bp.…), kept beside the kit's own params ──
+  function encode(list) {
+    return list.map(function (x) { var n = L.norm(x); return n.start + '-' + (n.end - n.start) + '-' + n.bp; }).join('.');
+  }
+  function decode(str) {
+    var out = [];
+    String(str || '').split('.').forEach(function (part) {
+      var m = /^(\d+)-(\d+)-(\d+)$/.exec(part);
+      if (m && out.length < L.MAX_INCIDENTS) out.push({ startDay: Number(m[1]) / DAY, durationMin: Number(m[2]), errorRatePct: Number(m[3]) / 100 });
+    });
+    return out;
+  }
+  var presetParams = {};
+  function writeInc(c) {
+    var base = c.preset && presetParams[c.preset] ? presetParams[c.preset].incidents : [];
+    var u = new URLSearchParams(window.location.search);
+    var enc = encode(c.params.incidents);
+    if (enc === encode(base)) u.delete('inc'); else u.set('inc', enc);
+    var qs = u.toString();
+    try { window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) { /* file:// in some browsers */ }
+  }
+
+  // ── mount ──
+  var labels = { 'outage-20min': 'presetOutage', 'fast-burn': 'presetFast', 'slow-burn': 'presetSlow', 'blip': 'presetBlip', 'under-the-radar': 'presetRadar' };
+  var presets = L.presets.map(function (x) {
+    var params = Object.assign({ sel: 0, showWindows: true }, x.params, L.mirror(x.params.incidents, 0));
+    presetParams[x.id] = params;
+    return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: params };
+  });
+  var count = function (p) { return (p.incidents || []).length; };
+  var budgetBox = null, monthBox = null, zoomBox = null, sideBox = null, last = null, prevAlerts = null;
+
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'slo', type: 'choice', label: t('slo'), options: L.SLOS.map(function (v) { return [v, sloPct(v)]; }) },
+      { key: 'at', type: 'range', label: t('at'), min: 0, max: T, step: 1, format: function (v) { return when(v); } },
+      { key: 'sel', type: 'range', label: t('sel'), min: 0, max: function (p) { return Math.max(0, count(p) - 1); }, step: 1,
+        format: function (v) { return t('selOf', { i: String(v + 1), n: String(count(cur)) }); }, visible: function (p) { return count(p) > 1; } },
+      { key: 'iStart', type: 'range', label: t('iStart'), min: 0, max: L.WINDOW_DAYS * 24 - 1, step: 1,
+        format: function (v) { return when(v * 60); }, visible: function (p) { return count(p) > 0; } },
+      { key: 'iDur', type: 'range', label: t('iDur'), min: 0, max: L.DURATIONS.length - 1, step: 1,
+        format: function (v) { return dur(L.DURATIONS[v]); }, visible: function (p) { return count(p) > 0; } },
+      { key: 'iRate', type: 'range', label: t('iRate'), min: 0, max: L.RATES.length - 1, step: 1,
+        format: function (v) { return t('pct', { v: num(L.RATES[v]) }); }, visible: function (p) { return count(p) > 0; } },
+      { type: 'button', label: t('add'), key: 'a', run: function (api) {
+        var p = api.params, list = L.addIncident(p);
+        if (list.length === count(p)) return;
+        api.set(Object.assign({ incidents: list, sel: list.length - 1 }, L.mirror(list, list.length - 1)));
+      } },
+      { type: 'button', label: t('remove'), key: 'x', run: function (api) {
+        var p = api.params;
+        if (!count(p)) return;
+        var list = p.incidents.filter(function (x, i) { return i !== p.sel; });
+        var sel = Math.max(0, Math.min(p.sel, list.length - 1));
+        api.set(Object.assign({ incidents: list, sel: sel }, L.mirror(list, sel)));
+      } },
+      { key: 'showWindows', type: 'toggle', label: t('showWindows') }
+    ],
+    presets: presets,
+    legend: [
+      { shape: 'se-bar', label: t('legBar') },
+      { shape: 'se-inc', label: t('legInc') },
+      { shape: 'se-budget', label: t('legBudget') },
+      { shape: 'se-gauge', label: t('legGauge') },
+      { shape: 'se-lamp', label: t('legLamp') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      cur = c.params;
+      if (!budgetBox) {
+        budgetBox = h('div', { class: 'se-budget' });
+        monthBox = h('div', { class: 'se-month' });
+        zoomBox = h('div', { class: 'se-zoom' });
+        sideBox = h('div', { class: 'se-side' });
+        monthSvg = s('svg', { class: 'se-svg', role: 'img', 'aria-label': t('month') });
+        zoomSvg = s('svg', { class: 'se-svg', role: 'img', 'aria-label': t('zoom') });
+        monthBox.append(monthSvg);
+        zoomBox.append(zoomSvg);
+        c.stage.replaceChildren(h('div', { class: 'se' }, budgetBox, monthBox, sideBox, zoomBox));
+        attach(monthSvg, function () { return monthGeo; });
+        attach(zoomSvg, function () { return zoomGeo; });
+        var ro = new ResizeObserver(function () { if (last) { drawMonth(monthBox, last.state, last.params); drawZoom(zoomBox, last.state, last.params); } });
+        ro.observe(monthBox);
+        ro.observe(zoomBox);
+      }
+      // "Changed": lamps whose state differs from the last different state drawn (a redraw of the same keeps them).
+      var key = JSON.stringify(c.state.alerts);
+      if (!last || last.key !== key) { prevAlerts = last ? last.state : null; }
+      last = { state: c.state, params: c.params, key: key };
+      var changed = L.changedAlerts(prevAlerts, c.state);
+      budgetBox.replaceChildren.apply(budgetBox, budgetBar(c.state));
+      sideBox.replaceChildren.apply(sideBox, side(c.state, changed));
+      drawMonth(monthBox, c.state, c.params);
+      drawZoom(zoomBox, c.state, c.params);
+    },
+    caption: caption
+  });
+
+  // The editor's sliders mirror incidents[sel]: moving one edits that incident; picking another (or a preset, or a
+  // drag) moves the sliders to it. The list itself goes in the URL.
+  var before = null;
+  function sync(c) {
+    var p = c.params, was = before;
+    before = p;
+    writeInc(c);
+    if (!count(p)) return;
+    var m = L.mirror(p.incidents, p.sel);
+    if (m.iStart === p.iStart && m.iDur === p.iDur && m.iRate === p.iRate) return;
+    var edited = was && was.incidents === p.incidents && was.sel === p.sel && !c.preset;
+    sim.set(edited ? { incidents: L.applyEdit(p) } : m);
+  }
+  sim.on(sync);
+  var fromUrl = new URLSearchParams(window.location.search).get('inc');
+  if (fromUrl != null) {
+    var list = decode(fromUrl);
+    sim.set(Object.assign({ incidents: list, sel: 0 }, L.mirror(list, 0)));
+  } else {
+    sync({ params: sim.params, preset: sim.preset });
+  }
+})();
+</script>
+</body>
+</html>
