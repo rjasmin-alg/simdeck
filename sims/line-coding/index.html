@@ -1,0 +1,492 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- line-coding: one bit string as an NRZ and a Manchester signal on a common axis of bit cells. An explorer: click a
+     cell to flip its bit, pick a pattern, drift the receiver's clock, show the sender's clock. Under each lane the bits
+     the receiver reads with its own clock, misread cells marked. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="line-coding">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linijsko kodiranje: NRZ i Manchester · simdeck</title>
+<meta name="description" content="Klikni bitove i usporedi NRZ i Manchester signal. Pomakni takt primatelja: NRZ u dugom nizu jednakih bitova izgubi bit, Manchester ne.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json; the build replaces it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "line-coding",
+  "title": {
+    "hr": "Linijsko kodiranje: NRZ i Manchester",
+    "en": "Line coding: NRZ vs Manchester"
+  },
+  "concept": {
+    "hr": "Kako bitovi postaju signal i zašto se takt mora moći izvući iz njega",
+    "en": "How bits become a signal and why the clock must be recoverable"
+  },
+  "summary": {
+    "hr": "Klikni bitove i usporedi NRZ i Manchester signal. Pomakni takt primatelja: NRZ u dugom nizu jednakih bitova izgubi bit, Manchester ne.",
+    "en": "Click the bits and compare the NRZ and Manchester signals. Drift the receiver's clock: NRZ loses a bit in a long run of equal bits, Manchester does not."
+  },
+  "tags": [
+    "physical-layer"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="line-coding"]; colours only from kit tokens.
+   Layout: a grid of a label column and a time column. Rows: the bit cells, the NRZ lane and what its receiver reads,
+   the Manchester lane and what its receiver reads, the sender's clock. Dashed cell boundaries run behind all rows. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets
+   (as in sims/amdahl and sims/ethernet-frame; shared request in NOTES.md). */
+[data-sim="line-coding"] .sd-ctl[hidden] { display: none; }
+[data-sim="line-coding"] .lc-wrap { height: 100%; overflow-x: auto; overflow-y: hidden; }
+[data-sim="line-coding"] .lc {
+  display: grid;
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+  column-gap: 1rem;
+  row-gap: 0.4rem;
+  height: 100%;
+  padding: 1.2cqh 1.4cqw 1.2cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="line-coding"] .lc-label { display: flex; flex-direction: column; justify-content: center; gap: 0.1rem; min-width: 0; line-height: 1.2; }
+[data-sim="line-coding"] .lc-label b { font-size: 1.2rem; }
+[data-sim="line-coding"] .lc-label b[data-c] { color: var(--sw); }
+[data-sim="line-coding"] .lc-label small { font-size: max(16px, 0.85rem); color: var(--muted); }
+[data-sim="line-coding"] .lc-label .lc-count { font-weight: 700; }
+[data-sim="line-coding"] .lc-label .lc-flat { color: var(--danger); font-weight: 700; }
+[data-sim="line-coding"] .lc-label .lc-ok { color: var(--ok); font-weight: 700; }
+[data-sim="line-coding"] .lc-label .lc-bad { color: var(--danger); font-weight: 700; }
+[data-sim="line-coding"] .lc-edit { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+[data-sim="line-coding"] .lc-edit button {
+  min-width: var(--hit);
+  min-height: var(--hit);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.3rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+[data-sim="line-coding"] .lc-edit button[aria-disabled="true"] { color: var(--muted); border-style: dashed; cursor: not-allowed; }
+
+/* the time column: a positioned box per row, x in percent of the string's length */
+[data-sim="line-coding"] .lc-time { position: relative; min-width: 0; }
+[data-sim="line-coding"] .lc-grid { position: relative; pointer-events: none; }
+[data-sim="line-coding"] .lc-bound { position: absolute; top: 0; bottom: 0; width: 0; border-left: 0.12rem dashed var(--line); }
+[data-sim="line-coding"] .lc-bound[data-edge] { border-left-style: solid; }
+/* the mid-cell instant: a short tick at the bottom of the time column */
+[data-sim="line-coding"] .lc-midtick { position: absolute; bottom: 0; height: 0.7rem; width: 0; border-left: 0.15rem solid var(--muted); }
+
+/* bit cells */
+[data-sim="line-coding"] .lc-bits { display: grid; gap: 0; z-index: 1; }
+[data-sim="line-coding"] .lc-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: var(--hit);
+  margin: 0 0.12rem;
+  padding: 0;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+[data-sim="line-coding"] .lc-cell b { font-family: var(--mono); font-size: 1.7rem; }
+[data-sim="line-coding"] .lc-cell small { font-size: max(16px, 0.8rem); color: var(--muted); }
+[data-sim="line-coding"] .lc-cell[data-bit="1"] { background: var(--ink); color: var(--bg); }
+[data-sim="line-coding"] .lc-cell[data-bit="1"] small { color: var(--bg); }
+[data-sim="line-coding"] .lc-cell.sd-changed { background: var(--hl); color: var(--on-hl); z-index: 2; }
+[data-sim="line-coding"] .lc-cell.sd-changed small { color: var(--on-hl); }
+
+/* waveform lanes: an SVG stretched to the box, strokes not scaled */
+[data-sim="line-coding"] .lc-lane { min-height: 4.5rem; }
+[data-sim="line-coding"] .lc-lane svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="line-coding"] .lc-lane .lc-wave { fill: none; stroke: var(--sw); stroke-width: 4px; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="line-coding"] .lc-lane .lc-jump { fill: none; stroke: var(--sw); stroke-width: 4px; stroke-dasharray: 7 6; }
+[data-sim="line-coding"] .lc-lane .lc-lvl { fill: none; stroke: var(--line); stroke-width: 1px; stroke-dasharray: 2 5; }
+[data-sim="line-coding"] .lc-mark { position: absolute; transform: translate(-50%, -50%); line-height: 1; pointer-events: none; }
+[data-sim="line-coding"] .lc-arrow { top: 50%; font-size: 1.7rem; color: var(--sw); }
+[data-sim="line-coding"] .lc-dot {
+  width: 0.85rem; height: 0.85rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: 50%;
+  background: var(--bg);
+}
+[data-sim="line-coding"] .lc-chg { top: 50%; width: 1.6rem; height: 1.6rem; border-radius: 50%; }
+[data-sim="line-coding"] .lc-hl { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); width: 1.6rem; border-radius: var(--radius-sm); background: var(--hl); outline: 0.18rem solid var(--ink); }
+[data-sim="line-coding"] .lc-lvltxt { position: absolute; left: -0.3rem; transform: translate(-100%, -50%); font-size: max(16px, 0.8rem); color: var(--muted); }
+
+/* receiver reads */
+[data-sim="line-coding"] .lc-read { min-height: 3.6rem; }
+[data-sim="line-coding"] .lc-rbit { top: 30%; font-family: var(--mono); font-size: 1.35rem; font-weight: 700; }
+[data-sim="line-coding"] .lc-miss {
+  position: absolute;
+  top: 55%; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 0.18rem solid var(--danger);
+  border-radius: var(--radius-sm);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--danger) 22%, transparent) 0.3em 0.45em);
+  color: var(--danger);
+  font-size: max(16px, 0.8rem);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+[data-sim="line-coding"] .lc-miss i { font-style: normal; }
+/* more than 8 cells: no room for the word, the symbol stays (the legend says what ✕ and +1 mean) */
+[data-sim="line-coding"] .lc[data-dense] .lc-miss span { display: none; }
+
+/* sender's clock */
+[data-sim="line-coding"] .lc-clock { min-height: 2.4rem; }
+[data-sim="line-coding"] .lc-clock .lc-wave { stroke: var(--muted); stroke-width: 3px; }
+
+/* legend swatches */
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-line"] { height: 0.3rem; border: 0; border-radius: 0; background: var(--sw); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-dash"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--sw) 0 0.3em, transparent 0.3em 0.5em); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-mid"] { position: relative; border: 0; background: none; }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-mid"]::after { content: '▲▼'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; color: var(--sw); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-dot"] { width: 0.8em; height: 0.8em; border-radius: 50%; border-width: 0.18em; background: var(--bg); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-miss"] { position: relative; border-color: var(--danger); background: var(--bg); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-miss"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--danger); }
+[data-sim="line-coding"] .sd-swatch[data-shape="lc-clock"] { height: 0.3rem; border: 0; border-radius: 0; background: var(--muted); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="line-coding"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="line-coding"] .lc-wrap { height: auto; }
+  [data-sim="line-coding"] .lc { height: auto; grid-template-columns: 7.5rem minmax(calc(var(--n) * 2.4rem), 1fr); padding: 0.4rem; column-gap: 0.5rem; }
+  [data-sim="line-coding"] .lc-lane { min-height: 5rem; }
+  [data-sim="line-coding"] .lc-label b { font-size: 1.05rem; }
+  [data-sim="line-coding"] .lc-cell b { font-size: 1.3rem; }
+  [data-sim="line-coding"] .lc-miss span { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Linijsko kodiranje: NRZ i Manchester</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var HI = 18, LO = 82;            // y of the high and low level in a lane's 0…100 box
+  var sim = null;
+
+  /** Data (bits, cell numbers) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function bold(s) { return h('b', null, s); }
+  function key(id) { return id.replace(/-/g, '_'); }
+  function pct(x, n) { return (100 * x / n) + '%'; }
+  function driftText(d) { return (d > 0 ? '+' : d < 0 ? '−' : '') + Math.abs(d) + ' %'; }
+  function svg(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  /** t.parts with *word* turned into an English term in italics (term pairs not in the glossary yet). */
+  function rich(k, vars) {
+    var out = [];
+    t.parts(k, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  // ── "changed": the cell last clicked and the transitions that click added or removed ──
+  var marks = { cells: [], nrz: [], man: [] }, lastState = null, lastKey = null, clicked = false, refusal = null, refused = false, refocus = null;
+  function track(c) {
+    var s = c.state, k = c.params.pattern + '|' + c.params.code;
+    // A new string from a click marks what the click changed; one from a pattern or preset clears the marks.
+    if (lastKey !== null && lastKey !== k) marks = clicked ? L.changed(lastState, s) : { cells: [], nrz: [], man: [] };
+    lastKey = k;
+    if (!refused) refusal = null;   // a refusal stays in the caption until the next render that is not a refusal
+    clicked = refused = false;
+    lastState = s;
+  }
+
+  function editBits(op, i, ev) {
+    var bits = sim.state.bits;
+    var next = L.edit(bits, op, i);
+    var focused = ev && ev.currentTarget === document.activeElement;
+    refocus = focused ? (op === 'flip' ? 'cell-' + i : op) : null;
+    if (next === bits) {
+      refusal = op === 'add' ? 'whyNoAdd' : 'whyNoRemove';
+      refused = true;
+      sim.render();
+      return;
+    }
+    clicked = true;
+    sim.set({ pattern: 'own', code: L.codeOf(next) });
+  }
+  /** Mouse clicks do not take focus (as the kit's own buttons), so → and Space stay with the page. */
+  function noFocus(e) { e.preventDefault(); }
+
+  // ── rows ──
+  function bounds(n) {
+    var out = [];
+    for (var i = 0; i <= n; i++) out.push(h('span', { class: 'lc-bound', dataset: i === 0 || i === n ? { edge: '' } : {}, style: { left: pct(i, n) } }));
+    for (var j = 0; j < n; j++) out.push(h('span', { class: 'lc-midtick', style: { left: pct(j + 0.5, n) } }));
+    return out;
+  }
+
+  function bitRow(s) {
+    var cells = s.bits.split('').map(function (b, i) {
+      var cls = 'lc-cell' + (marks.cells.indexOf(i) >= 0 ? ' sd-changed' : '');
+      return h('button', {
+        type: 'button', class: cls, dataset: { bit: b, focus: 'cell-' + i },
+        'aria-label': t('cellLabel', { i: i + 1, b: b }),
+        onmousedown: noFocus,
+        onclick: function (e) { editBits('flip', i, e); }
+      }, h('b', { translate: 'no' }, b), h('small', { translate: 'no' }, String(i + 1)));
+    });
+    return h('div', { class: 'lc-time lc-bits', style: { gridTemplateColumns: 'repeat(' + s.n + ', minmax(0, 1fr))' } }, cells);
+  }
+
+  function editButtons(s) {
+    var mk = function (op, sym, label, off) {
+      return h('button', {
+        type: 'button', 'aria-label': t(label), title: t(label), 'aria-disabled': off ? 'true' : 'false',
+        dataset: { focus: op }, onmousedown: noFocus, onclick: function (e) { editBits(op, -1, e); }
+      }, sym);
+    };
+    return h('div', { class: 'lc-edit' },
+      mk('remove', '−', 'remove', s.n <= L.MIN_BITS),
+      mk('add', '+', 'add', s.n >= L.MAX_BITS));
+  }
+
+  /** One waveform: horizontal levels and vertical transitions (boundary jumps dashed when `dashJumps`). */
+  function wave(segs, edges, n, dashJumps) {
+    var W = n * 100;
+    var root = svg('svg', { viewBox: '0 0 ' + W + ' 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    root.append(svg('line', { class: 'lc-lvl', x1: 0, x2: W, y1: HI, y2: HI, 'vector-effect': 'non-scaling-stroke' }));
+    root.append(svg('line', { class: 'lc-lvl', x1: 0, x2: W, y1: LO, y2: LO, 'vector-effect': 'non-scaling-stroke' }));
+    var y = function (lv) { return lv ? HI : LO; };
+    var d = segs.map(function (g) { return 'M' + g.from * 100 + ' ' + y(g.level) + 'H' + g.to * 100; }).join('');
+    var solid = edges.filter(function (e) { return !(dashJumps && e.kind === 'boundary'); });
+    d += solid.map(function (e) { return 'M' + e.t * 100 + ' ' + HI + 'V' + LO; }).join('');
+    root.append(svg('path', { class: 'lc-wave', d: d, 'vector-effect': 'non-scaling-stroke' }));
+    if (dashJumps) {
+      var dj = edges.filter(function (e) { return e.kind === 'boundary'; }).map(function (e) { return 'M' + e.t * 100 + ' ' + HI + 'V' + LO; }).join('');
+      if (dj) root.append(svg('path', { class: 'lc-jump', d: dj, 'vector-effect': 'non-scaling-stroke' }));
+    }
+    return root;
+  }
+
+  function lane(s, which) {
+    var n = s.n, isMan = which === 'man';
+    var kids = [];
+    (marks[which] || []).forEach(function (tm) { kids.push(h('span', { class: 'lc-hl', style: { left: pct(tm, n) } })); });
+    kids.push(wave(isMan ? s.man : s.nrz, s.edges[which], n, isMan));
+    kids.push(h('span', { class: 'lc-lvltxt', style: { top: HI + '%' } }, '1'), h('span', { class: 'lc-lvltxt', style: { top: LO + '%' } }, '0'));
+    if (isMan) {
+      s.edges.man.filter(function (e) { return e.kind === 'mid'; }).forEach(function (e) {
+        kids.push(h('span', { class: 'lc-mark lc-arrow', 'aria-hidden': 'true', style: { left: pct(e.t, n) } }, e.dir === 'up' ? '▲' : '▼'));
+      });
+    } else {
+      s.samples.nrz.forEach(function (x) {
+        kids.push(h('span', { class: 'lc-mark lc-dot', style: { left: pct(x.t, n), top: (x.bit ? HI : LO) + '%' } }));
+      });
+    }
+    return h('div', { class: 'lc-time lc-lane', dataset: { c: isMan ? '2' : '1' } }, kids);
+  }
+
+  function readRow(s, which) {
+    var n = s.n, kids = [];
+    s.samples[which].forEach(function (x) {
+      kids.push(h('span', { class: 'lc-mark lc-rbit', translate: 'no', style: { left: pct(x.t, n) } }, String(x.bit)));
+    });
+    s.errors[which].forEach(function (e) {
+      kids.push(h('span', { class: 'lc-miss', style: { left: 'calc(' + pct(e.cell, n) + ' + 0.15rem)', width: 'calc(' + pct(1, n) + ' - 0.3rem)' } },
+        h('i', { 'aria-hidden': 'true' }, e.kind === 'extra' ? '+1' : '✕'), h('span', null, t(e.kind))));
+    });
+    return h('div', { class: 'lc-time lc-read' }, kids);
+  }
+
+  function clockRow(s) {
+    var segs = [], edges = [];
+    for (var i = 0; i < s.n; i++) {
+      segs.push({ level: 1, from: i, to: i + 0.5 }, { level: 0, from: i + 0.5, to: i + 1 });
+      if (i) edges.push({ t: i, kind: 'mid' });
+      edges.push({ t: i + 0.5, kind: 'mid' });
+    }
+    return h('div', { class: 'lc-time lc-lane lc-clock' }, wave(segs, edges, s.n, false));
+  }
+
+  function laneLabel(s, which) {
+    var tr = s.transitions, isMan = which === 'man';
+    var kids = [h('b', { dataset: { c: isMan ? '2' : '1' } }, t(isMan ? 'laneMan' : 'laneNrz'))];
+    if (!isMan && s.noTransitions) kids.push(h('span', { class: 'lc-flat' }, '⚠ ' + t('noTrans')));
+    else kids.push(h('span', { class: 'lc-count' }, t.n('transitions', isMan ? tr.man : tr.nrz)));
+    if (isMan) kids.push(h('small', null, t('manSplit', { mid: tr.manMid, b: tr.manBoundary })));
+    return h('div', { class: 'lc-label' }, kids);
+  }
+
+  function readLabel(s, which) {
+    var got = s.samples[which].length, bad = s.errors[which].length > 0;
+    return h('div', { class: 'lc-label' }, h('span', null, t('rowRead')),
+      h('span', { class: bad ? 'lc-bad' : 'lc-ok' }, t(bad ? 'readBad' : 'readOk', { got: got, n: s.n })));
+  }
+
+  function stage(c) {
+    var s = c.state, p = c.params;
+    var showN = p.lanes !== 'manchester', showM = p.lanes !== 'nrz';
+    var rows = [];   // [label, content, track size]
+    rows.push([h('div', { class: 'lc-label' }, bold(t('rowBits')), editButtons(s)), bitRow(s), 'auto']);
+    if (showN) {
+      rows.push([laneLabel(s, 'nrz'), lane(s, 'nrz'), 'minmax(4.5rem, 1fr)']);
+      rows.push([readLabel(s, 'nrz'), readRow(s, 'nrz'), 'auto']);
+    }
+    if (showM) {
+      rows.push([laneLabel(s, 'man'), lane(s, 'man'), 'minmax(4.5rem, 1fr)']);
+      rows.push([readLabel(s, 'man'), readRow(s, 'man'), 'auto']);
+    }
+    if (p.showClock) rows.push([h('div', { class: 'lc-label' }, h('span', null, t('rowClock'))), clockRow(s), 'minmax(2.4rem, 0.45fr)']);
+    var kids = [h('div', { class: 'lc-grid', style: { gridColumn: '2', gridRow: '1 / ' + (rows.length + 1) } }, bounds(s.n))];
+    rows.forEach(function (r, i) {
+      r[0].style.gridColumn = '1'; r[0].style.gridRow = String(i + 1);
+      r[1].style.gridColumn = '2'; r[1].style.gridRow = String(i + 1);
+      kids.push(r[0], r[1]);
+    });
+    var grid = h('div', { class: 'lc', dataset: s.n > 8 ? { dense: '' } : {}, style: { gridTemplateRows: rows.map(function (r) { return r[2]; }).join(' '), '--n': String(s.n) } }, kids);
+    return h('div', { class: 'lc-wrap' }, grid);
+  }
+
+  // ── caption ──
+  function nrzPart(s) {
+    if (s.noTransitions) {
+      var flat = rich('capNrzFlat');
+      if (!s.errors.nrz.length) return flat;
+      return flat.concat(' ', rich('capNrzGot', { d: bold(driftText(s.drift)), got: bold(t.n('bitsN', s.readNrz.length)), n: String(s.n) }));
+    }
+    if (s.errors.nrz.length) {
+      var cell = s.errors.nrz[0].cell;
+      var run = s.runs.filter(function (r) { return cell >= r.from && cell < r.from + r.len; })[0];
+      var r = s.samples.nrz.filter(function (x) { return x.t >= run.from && x.t < run.from + run.len; }).length;
+      return rich('capNrzDrift', {
+        d: bold(driftText(s.drift)), k: String(run.len), what: t.n(run.bit ? 'ones' : 'zeros', run.len), r: bold(String(r)),
+        got: bold(t.n('bitsN', s.readNrz.length)), n: String(s.n)
+      });
+    }
+    var m = t.n('transitions', s.transitions.nrz);
+    if (s.drift === 0 && s.longestRun >= 6) return rich('capNrzExact', { m: m, k: String(s.longestRun) });
+    return rich('capNrzOk', { m: m, n: t.n('bitsN', s.n) });
+  }
+  function manPart(s, both) {
+    if (both && s.errors.nrz.length) return rich('capManAll', { n: bold(t.n('bitsN', s.n)) });
+    if (both && s.noTransitions) return rich('capManCost', { m: bold(t.n('transitions', s.transitions.man)), n: t.n('bitsN', s.n) });
+    if (s.n === 1) return rich('capManOne');
+    for (var i = 0; i + 1 < s.n; i++) {
+      if (s.bits[i] === s.bits[i + 1]) {
+        var zero = s.bits[i] === '0';
+        return rich('capManJump', { a: String(i + 1), b: String(i + 2), pair: t(zero ? 'zeroPair' : 'onePair'), dir: t(zero ? 'downDir' : 'upDir') });
+      }
+    }
+    return rich('capManNoJump', { m: t.n('transitions', s.transitions.man) });
+  }
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'pattern', type: 'select', label: t('pattern'),
+        options: [['own', t('opt_own')]].concat(L.PATTERNS.map(function (b) { return [b, b]; })) },
+      // The edited string, sentinel-coded (SPEC.md): hidden, so the URL and the language switch keep it.
+      { key: 'code', type: 'range', label: t('pattern'), min: L.CODE_MIN, max: L.CODE_MAX, step: 1, visible: function () { return false; } },
+      { key: 'drift', type: 'range', label: t('drift'), hint: t('driftHint'), min: L.DRIFT_MIN, max: L.DRIFT_MAX, step: 1, format: driftText },
+      { key: 'showClock', type: 'toggle', label: t('showClock') },
+      { key: 'lanes', type: 'choice', label: t('lanes'), options: [['both', t('opt_both')], ['nrz', t('opt_nrz')], ['manchester', t('opt_manchester')]] }
+    ],
+
+    presets: L.presets.map(function (x) {
+      return { id: x.id, label: t('preset_' + key(x.id)), hint: t('hint_' + key(x.id)), params: x.params };
+    }),
+
+    legend: [
+      { c: 1, shape: 'lc-line', label: t('legNrz') },
+      { c: 2, shape: 'lc-line', label: t('legMan') },
+      { c: 2, shape: 'lc-dash', label: t('legJump') },
+      { c: 2, shape: 'lc-mid', label: t('legMid') },
+      { shape: 'lc-dot', label: t('legSample') },
+      { shape: 'lc-miss', label: t('legMiss') },
+      { shape: 'lc-clock', label: t('legClock') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      track(c);
+      c.stage.replaceChildren(stage(c));
+      if (refocus) {
+        var el = c.stage.querySelector('[data-focus="' + refocus + '"]');
+        if (el) el.focus();
+        refocus = null;
+      }
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, out;
+      var showN = p.lanes !== 'manchester', showM = p.lanes !== 'nrz';
+      var nrzFirst = s.noTransitions || s.errors.nrz.length > 0;
+      var a = showN ? nrzPart(s) : null, b = showM ? manPart(s, showN) : null;
+      if (a && b) out = nrzFirst ? a.concat(' ', b) : b.concat(' ', a);
+      else out = a || b;
+      if (refusal) out = out.concat(' ', h('span', { class: 'sd-hl' }, t(refusal)));
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
