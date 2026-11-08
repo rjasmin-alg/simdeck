@@ -325,7 +325,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **308 of 432 entries are live**, 97 w3, 16 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-08** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **314 of 432 entries are live**, 72 w3, 35 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -334,9 +334,9 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.3 ossimulator → import the built pages (16 pages and the map) | 17 | 17 | – |
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
-| §4.1 Networking basics and LAN protocols | 52 | 41 | 3 w3 · held, 8 w3 · queued |
-| §4.2 Internet and application protocols | 30 | 19 | 7 w3, 4 w3 · queued |
-| §4.3 Security and cryptography | 17 | 11 | 6 w3 |
+| §4.1 Networking basics and LAN protocols | 52 | 46 | 1 w3, 3 w3 · held, 2 w3 · queued |
+| §4.2 Internet and application protocols | 30 | 19 | 8 w3, 3 w3 · queued |
+| §4.3 Security and cryptography | 17 | 11 | 2 w3, 4 w3 · queued |
 | §4.4 Linux | 55 | 40 | 14 w3, 1 wip |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
@@ -345,12 +345,12 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.5 IPAM | 5 | 3 | 2 w3 |
 | §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
-| §4.6 Storage, backup and disaster recovery | 22 | 16 | 6 w3 |
+| §4.6 Storage, backup and disaster recovery | 22 | 16 | 3 w3, 3 w3 · queued |
 | §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
-| §4.8 Performance and capacity | 10 | 6 | 4 w3 |
+| §4.8 Performance and capacity | 10 | 6 | 3 w3, 1 w3 · queued |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
-| §4.10 Radio and crisis communications | 17 | 0 | 17 w3 |
-| §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 |
+| §4.10 Radio and crisis communications | 17 | 1 | 4 w3, 12 w3 · queued |
+| §4.11 Reference posters and classroom tools | 6 | 0 | 6 w3 · queued |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 19 | 4 w3 · queued |
 
@@ -431,10 +431,10 @@ decides the final grouping axes (§7.1).
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `net-encapsulation` | live | Encapsulation and decapsulation | each layer adds its header going down and strips it coming up | step a message down the sender's stack and up the receiver's | step | S | P1 | URM | URM card ch04-enkapsulacija-dekapsulacija → §5.9 |  |
-| `net-osi-tcpip-map` | w3 · queued | OSI vs TCP/IP, and which device lives where | layer models and the layer each device works at | drag protocols and devices onto layers | expl | S | P3 | URM | URM ch04 |  |
-| `net-line-coding` | w3 · queued | Line coding: NRZ vs Manchester | how bits become a signal and why the clock must be recoverable | type bits, compare waveforms, cut the clock | expl | S | P3 | URM, HAM | URM card ch06 (Manchester) |  |
+| `net-osi-tcpip-map` | live | OSI vs TCP/IP, and which device lives where | layer models and the layer each device works at | drag protocols and devices onto layers | expl | S | P3 | URM | URM ch04 |  |
+| `net-line-coding` | live | Line coding: NRZ vs Manchester | how bits become a signal and why the clock must be recoverable | type bits, compare waveforms, cut the clock | expl | S | P3 | URM, HAM | URM card ch06 (Manchester) |  |
 | `net-delay-components` | live | Four kinds of delay | propagation vs transmission vs queuing vs processing delay | sliders for distance, bandwidth, packet size, load | expl | S | P2 | URM | URM card ch06 |  |
-| `net-nominal-vs-actual` | w3 · queued | Nominal vs actual throughput | overhead, half duplex and retries eat the link rate | toggle overheads, watch goodput | expl | S | P3 | URM | URM card ch06 |  |
+| `net-nominal-vs-actual` | live | Nominal vs actual throughput | overhead, half duplex and retries eat the link rate | toggle overheads, watch goodput | expl | S | P3 | URM | URM card ch06 |  |
 | `net-ethernet-frame` | live | Anatomy of an Ethernet frame | fields, minimum size, padding, FCS | edit the payload, see padding and FCS | expl | S | P3 | URM | URM ch07 |  |
 | `net-csma-cd` | live | CSMA/CD and binary exponential backoff | collisions on a shared bus and how backoff resolves them | step stations transmitting at once | step | M | P2 | URM | URM card ch07 |  |
 | `net-domains` | live | Collision and broadcast domains | hubs, switches and routers split different domains | place devices, see the domains coloured | expl | S | P2 | URM | URM card ch07 |  |
@@ -465,7 +465,7 @@ decides the final grouping axes (§7.1).
 | `net-port-forwarding` | live | Port forwarding (DNAT) | inbound connections to a NAT'd server | add a forward, open from outside | step | S | P2 | URM | extends `urm-pat` → §5.12 |  |
 | `net-cgnat` | live | Carrier-grade NAT | double NAT, shared address space, why port forwarding fails | step a connection through two NATs | step | S | P3 | URM | URM ch11 |  |
 | `net-tcp-teardown` | live in `tcp-handshake` | TCP connection teardown | FIN/ACK in both directions, half close, TIME_WAIT | step a close from either side | step | S | P2 | URM | extends `urm-tcp-handshake` → §5.8 |  |
-| `net-tcp-states` | w3 · queued | TCP state machine | the states a socket passes through, live | drive both ends, watch states | step | M | P3 | URM | URM ch13 |  |
+| `net-tcp-states` | live | TCP state machine | the states a socket passes through, live | drive both ends, watch states | step | M | P3 | URM | URM ch13 |  |
 | `net-tcp-retransmit` | live | Loss and retransmission | RTO, duplicate ACKs, fast retransmit | drop chosen segments, step the exchange | step | M | P2 | URM | URM ch13 → §5.8 |  |
 | `net-tcp-congestion` | live | TCP congestion control | slow start, congestion avoidance, AIMD sawtooth, Reno vs CUBIC | set loss and RTT, watch cwnd over time | expl | M | P1 | URM, NLA | URM ch13 |  |
 | `net-tcp-vs-udp-loss` | live | TCP vs UDP under loss | the same stream: TCP retransmits and stalls, UDP drops and continues | slider for loss, play both side by side | expl | S | P2 | URM | URM card ch13-tcp-naspram-udp-gubitak |  |
@@ -479,9 +479,9 @@ decides the final grouping axes (§7.1).
 | `net-csma-ca-rts-cts` | live | CSMA/CA and RTS/CTS | Wi-Fi avoids collisions it can't detect; RTS/CTS fixes the hidden node | step stations with and without RTS/CTS | step | S | P3 | URM | extends `urm-hidden-node` |  |
 | `net-wifi-roaming` | w3 · queued | Roaming between APs | the client, not the AP, decides when to roam; sticky clients | walk a client across a floor plan | expl | S | P3 | URM | URM ch17 |  |
 | `net-qos-queues` | w3 · queued | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
-| `net-multicast-igmp` | w3 · queued | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
+| `net-multicast-igmp` | live | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
 | `net-packet-journey` | live | The whole journey: from URL to page | DNS, ARP, TCP, TLS, HTTP in order, across the real path | step the capstone, open each part's own simulator | step | L | P2 | URM | URM card ch16-put-podataka-detaljno → §5.9 |  |
-| `net-poe-budget` | w3 · queued | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
+| `net-poe-budget` | w3 | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
 
 ### 4.2 Internet and application protocols
 
@@ -497,7 +497,7 @@ decides the final grouping axes (§7.1).
 | `inet-http-exchange` | live | One HTTP exchange | request line, headers, status codes, body | send requests, read responses | step | S | P2 | URM, UL | URM ch14 |  |
 | `inet-http-versions` | live | HTTP/1.1 vs HTTP/2 vs HTTP/3 | multiplexing, and head-of-line blocking at TCP vs QUIC | load a page with loss on each version | expl | M | P2 | URM |  |  |
 | `inet-http-caching` | live | HTTP caching | Cache-Control, ETag, 304, what a CDN edge keeps | request repeatedly, change headers | step | S | P2 | URM, UL |  |  |
-| `inet-cookies-sessions` | w3 · queued | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC |  |  |
+| `inet-cookies-sessions` | w3 | Cookies and sessions | a stateless protocol remembers you; SameSite | log in, browse, switch sites | step | S | P3 | URM, SEC |  |  |
 | `inet-cors` | w3 · queued | Same origin and CORS | the browser, not the server, enforces it; preflight | make cross-origin calls with different headers | step | S | P3 | SEC |  |  |
 | `inet-reverse-proxy-lb` | live | Reverse proxy and load balancing | round robin vs least connections vs hash vs sticky; health checks | add servers, fail one, change the algorithm | expl | M | P2 | UL, NLA | UL ch21, NLA T54 |  |
 | `inet-cdn-anycast` | live | Anycast and CDN edges | one address, many places; BGP picks the nearest | move clients, withdraw a site | expl | S | P2 | URM |  |  |
@@ -533,11 +533,11 @@ decides the final grouping axes (§7.1).
 | `sec-ransomware-321` | live | 3-2-1 and immutable copies vs ransomware | which copies survive encryption and deletion | release ransomware on an estate with different backup designs | step | S | P2 | DR, SEC | DR S3, P09 |  |
 | `sec-mfa-phishing` | w3 | MFA fatigue and adversary-in-the-middle | push bombing and session-token theft defeat weak MFA | step attacks against OTP, push, FIDO2 | step | S | P3 | SEC |  |  |
 | `sec-sql-injection` | live | SQL injection | concatenated input becomes code; parameters fix it | type inputs, see the built query | step | S | P2 | SEC |  |  |
-| `sec-xss` | w3 | Cross-site scripting | stored vs reflected; output encoding | post a comment with a script | step | S | P3 | SEC |  |  |
-| `sec-buffer-overflow` | w3 | Stack buffer overflow | overwriting the return address; canaries, NX, ASLR | feed longer inputs, step the stack | step | M | P3 | SEC, OS, ARH |  |  |
-| `sec-pki-revocation` | w3 | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 |  |
+| `sec-xss` | w3 · queued | Cross-site scripting | stored vs reflected; output encoding | post a comment with a script | step | S | P3 | SEC |  |  |
+| `sec-buffer-overflow` | w3 · queued | Stack buffer overflow | overwriting the return address; canaries, NX, ASLR | feed longer inputs, step the stack | step | M | P3 | SEC, OS, ARH |  |  |
+| `sec-pki-revocation` | w3 · queued | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 |  |
 | `sec-wireguard` | live | WireGuard | handshake, cryptokey routing, roaming | step a handshake; move a peer | step | M | P2 | NLA, SEC | NLA T09 → §5.9 |  |
-| `sec-ipsec-ike` | w3 | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 |  |
+| `sec-ipsec-ike` | w3 · queued | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 |  |
 | `sec-lateral-movement` | live | Lateral movement and tiering | one admin login on a workstation exposes the domain | follow credentials hop to hop; apply tiering | step | M | P2 | WIN2, SEC | → §4.5 |  |
 
 ### 4.4 Linux
@@ -729,11 +729,11 @@ instead of repeating them.
 | `sto-retention-gfs` | live | Retention: grandfather-father-son | how many copies a schedule keeps and how far back you can go | set daily/weekly/monthly counts, run a year | expl | S | P2 | DR, UL | UL ch23 Example 6 → §5.3 |  |
 | `sto-restore-drill` | live | The backup that lies | backups report OK; only a test restore shows they're empty | run the job for weeks, then restore | step | S | P2 | DR, UL | DR S8, UL ch23 (`provjera-arhive-i-proba-oporavka.svg`) → §5.3 |  |
 | `sto-backup-window` | live | Backup window and offsite seeding | data size vs bandwidth vs window; why the first offsite copy goes by truck | sliders for size, change rate, link speed | expl | S | P2 | DR | NLA T28 |  |
-| `sto-cow-vs-row` | w3 | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 |  |
+| `sto-cow-vs-row` | w3 · queued | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 |  |
 | `sto-write-cache` | live | Write-back vs write-through | write-back is fast until the power fails; battery-backed cache | write, cut power with each setting | step | S | P2 | DR, NLA | write-back durability (the scoping note's §5 "no write cache" is a performance tier: a separate idea) |  |
 | `sto-ssd-internals` | live | Inside an SSD | FTL, erase blocks, write amplification, TRIM, wear | write and overwrite, see erase cycles | step | M | P2 | OS, NLA | `ossim-disk-scheduling` hdd-vs-ssd |  |
 | `sto-iops-latency` | live | IOPS, throughput and latency | queue depth and block size trade them off | sliders for block size, queue depth, device | expl | S | P2 | NLA, DR | NLA T27 |  |
-| `sto-nas-vs-san` | w3 | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | step | S | P3 | NLA | NLA T25 |  |
+| `sto-nas-vs-san` | w3 · queued | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | step | S | P3 | NLA | NLA T25 |  |
 | `sto-ec-vs-replication` | live | Erasure coding vs replication | overhead vs failures tolerated vs rebuild cost (k+m) | choose k, m, replicas; fail disks | expl | S | P2 | NLA, DR | cephsim → §5.7 |  |
 | `sto-ceph-min-size` | live | size and min_size | `size=2 min_size=2` blocks I/O on one failure; 3/2 doesn't | fail OSDs under each setting, try to write | step | S | P2 | NLA, DR | cephsim, faultline `sizeTwo`, scoping §5, DR S2/P05 → §5.7 |  |
 | `sto-ceph-down-out` | live | down vs out | down is degraded and nothing moves; out triggers rebalancing after a timer | stop an OSD, let time pass | step | S | P2 | NLA, DR | cephsim |  |
@@ -741,7 +741,7 @@ instead of repeating them.
 | `sto-smallest-disk-caps` | live | One small or full disk caps the pool | the fullest OSD sets MAX AVAIL; uneven hosts fill first | add mismatched disks, fill the pool | expl | S | P2 | NLA, DR | cephsim, scoping note §5 |  |
 | `sto-sync-async-replication` | live in `db-replication` | Synchronous vs asynchronous replication | RPO 0 at the cost of latency vs lag and data loss on failover | write, fail the primary at different moments | step | S | P2 | DR, NLA | → §5.7 (with `ha-db-replication`) |  |
 | `dr-rpo-rto` | live | RPO and RTO | how much data and how much time you lose, on one timeline | place backups and an incident, measure loss | expl | S | P2 | DR | DR scenarios |  |
-| `dr-site-failover` | w3 | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 |  |
+| `dr-site-failover` | w3 · queued | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 |  |
 | `dr-correlated-failure` | w3 | One power strip under three replicas | redundancy that shares one hidden dependency | add dependencies, fail the PDU | step | S | P3 | DR | faultline `onePdu`: a preset on the imported faultline |  |
 | `dr-alert-to-nobody` | w3 | The alert that reaches nobody | the alert path depends on the system that failed | fail the site, follow the alert | step | S | P3 | DR | DR S1 |  |
 
@@ -772,7 +772,7 @@ instead of repeating them.
 | `perf-rate-limiting` | live | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
 | `perf-cache-hit-ratio` | w3 | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH |  |  |
 | `perf-goodhart-teams` | w3 | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` |  |
-| `perf-autoscaling-lag` | w3 | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
+| `perf-autoscaling-lag` | w3 · queued | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
 | `perf-slo-error-budget` | live | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
 | `perf-game-tick-server` | w3 | Authoritative tick server | a fixed tick, server-side line of sight, why clients lag | step ticks, move players, add latency | step | M | P3 | URM | agentvsagent |  |
 
@@ -798,33 +798,33 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `ham-superhet-image` | w3 | Superheterodyne and the image frequency | mixing to an IF, and the second frequency that also lands there | tune the LO, move a signal onto the image | expl | M | P3 | HAM | 50ohm `ueberlagerungsempfaenger_*`, `spiegelfrequenzen` |  |
-| `ham-swr` | w3 | SWR and standing waves | mismatch reflects power; standing wave on the line | change load impedance, watch the wave | expl | M | P3 | HAM | 50ohm `swr*` |  |
+| `ham-swr` | live | SWR and standing waves | mismatch reflects power; standing wave on the line | change load impedance, watch the wave | expl | M | P3 | HAM | 50ohm `swr*` |  |
 | `ham-ionosphere-muf` | w3 | Ionosphere, MUF and the dead zone | layers by day and night, skip distance, the zone nobody hears | change time of day and frequency | expl | M | P3 | HAM | 50ohm `ionosphaere*`, `muf_luf_*`; near `50ohm-skip-distance` |  |
-| `ham-fec-hamming` | w3 | Hamming code | correcting one bit error with parity bits | flip bits, decode | step | S | P3 | HAM, URM | 50ohm `fehlerkorrektur` → §5.13 |  |
-| `ham-multiple-access` | w3 | FDMA, TDMA, CDMA | three ways to share a channel | add users to each scheme | expl | S | P3 | HAM, URM | 50ohm `vielfachzugriff` |  |
-| `ham-qam-ofdm` | w3 | QAM and OFDM | constellation size vs noise; subcarriers | change order and SNR, watch errors | expl | M | P3 | HAM, URM | 50ohm `qam`, `ofdm`; extends `50ohm-qpsk` |  |
-| `ham-shannon` | w3 | Shannon–Hartley | capacity from bandwidth and SNR | sliders for B and SNR | expl | S | P3 | HAM, URM | 50ohm `shannon_hartley_gesetzt` |  |
-| `ham-packet-aprs` | w3 | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` |  |
-| `ham-fft-waterfall` | w3 | FFT and the waterfall | sample rate sets the span, FFT size sets the resolution | change sample rate and FFT size | expl | M | P3 | HAM | HamMonitor `DESIGN.md` |  |
-| `ham-ctcss` | w3 | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
-| `ham-lora-css` | w3 | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
-| `ham-fsk-psk-ask` | w3 | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) |  |
+| `ham-fec-hamming` | w3 · queued | Hamming code | correcting one bit error with parity bits | flip bits, decode | step | S | P3 | HAM, URM | 50ohm `fehlerkorrektur` → §5.13 |  |
+| `ham-multiple-access` | w3 · queued | FDMA, TDMA, CDMA | three ways to share a channel | add users to each scheme | expl | S | P3 | HAM, URM | 50ohm `vielfachzugriff` |  |
+| `ham-qam-ofdm` | w3 · queued | QAM and OFDM | constellation size vs noise; subcarriers | change order and SNR, watch errors | expl | M | P3 | HAM, URM | 50ohm `qam`, `ofdm`; extends `50ohm-qpsk` |  |
+| `ham-shannon` | w3 · queued | Shannon–Hartley | capacity from bandwidth and SNR | sliders for B and SNR | expl | S | P3 | HAM, URM | 50ohm `shannon_hartley_gesetzt` |  |
+| `ham-packet-aprs` | w3 · queued | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` |  |
+| `ham-fft-waterfall` | w3 · queued | FFT and the waterfall | sample rate sets the span, FFT size sets the resolution | change sample rate and FFT size | expl | M | P3 | HAM | HamMonitor `DESIGN.md` |  |
+| `ham-ctcss` | w3 · queued | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
+| `ham-lora-css` | w3 · queued | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
+| `ham-fsk-psk-ask` | w3 · queued | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) |  |
 | `ham-adsb-frame` | w3 | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) |  |
-| `kk-directed-net` | w3 | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides |  |
-| `kk-priority-traffic` | w3 | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
-| `kk-backup-ncs` | w3 | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
+| `kk-directed-net` | w3 · queued | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides |  |
+| `kk-priority-traffic` | w3 · queued | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
+| `kk-backup-ncs` | w3 · queued | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
 | `kk-gateway-tiers` | w3 | Multi-tier relay through a gateway | local nets, gateways and delay to the coordination level | send a message from field to HQ | step | M | P3 | KK | KK2 slides |  |
 
 ### 4.11 Reference posters and classroom tools
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `ref-ports` | w3 | Well-known ports | the ports students meet, grouped by service | filter by layer and protocol | ref | S | P3 | URM, UL |  |  |
-| `ref-http-status` | w3 | HTTP status codes | the classes and the codes that matter | filter by class | ref | S | P3 | URM |  |  |
-| `ref-linux-dirs` | w3 | The Linux directory tree | FHS: what lives where and why | click directories | ref | S | P3 | UL | UL ch05 |  |
-| `ref-protocol-headers` | w3 | Header poster | Ethernet, IPv4, IPv6, TCP, UDP headers side by side | hover fields | ref | S | P3 | URM | overlaps `spl-l2l3-protocols` |  |
-| `tool-countdown` | w3 | Exercise countdown | a projector-sized timer for in-class exercises | set and start | tool | S | P3 | all |  |  |
-| `tool-quick-poll` | w3 | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today |  |
+| `ref-ports` | w3 · queued | Well-known ports | the ports students meet, grouped by service | filter by layer and protocol | ref | S | P3 | URM, UL |  |  |
+| `ref-http-status` | w3 · queued | HTTP status codes | the classes and the codes that matter | filter by class | ref | S | P3 | URM |  |  |
+| `ref-linux-dirs` | w3 · queued | The Linux directory tree | FHS: what lives where and why | click directories | ref | S | P3 | UL | UL ch05 |  |
+| `ref-protocol-headers` | w3 · queued | Header poster | Ethernet, IPv4, IPv6, TCP, UDP headers side by side | hover fields | ref | S | P3 | URM | overlaps `spl-l2l3-protocols` |  |
+| `tool-countdown` | w3 · queued | Exercise countdown | a projector-sized timer for in-class exercises | set and start | tool | S | P3 | all |  |  |
+| `tool-quick-poll` | w3 · queued | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today |  |
 
 ### 4.12 Finance basics for IT managers
 
