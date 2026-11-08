@@ -1,0 +1,431 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cgnat: a connection through two NATs, the subscriber's home router and the carrier's NAT (CGN), with the shared
+     address space 100.64.0.0/10 between them. Outbound the packet is translated twice and the reply twice back;
+     inbound a packet nobody asked for dies at the CGN, so a port forward on the home router is never read. A stepper;
+     kit view K2 draws the scene and the tables, the page draws the packet on the wire and what the internet sees.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cgnat">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operatorski NAT: dva prijevoda · simdeck</title>
+<meta name="description" content="Veza prolazi kroz kućni usmjernik i operatorski NAT. Odlazno se prevodi dvaput; dolazni paket pada na CGN-u, pa prosljeđivanje kod kuće ne pomaže.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cgnat",
+  "title": {
+    "hr": "Operatorski NAT: dva prijevoda",
+    "en": "Carrier-grade NAT: two translations"
+  },
+  "concept": {
+    "hr": "Dva NAT-a, dijeljeni prostor 100.64/10 i zašto prosljeđivanje porta ne pomaže",
+    "en": "Two NATs, the shared space 100.64/10, and why port forwarding fails"
+  },
+  "summary": {
+    "hr": "Veza prolazi kroz kućni usmjernik i operatorski NAT. Odlazno se prevodi dvaput; dolazni paket pada na CGN-u, pa prosljeđivanje kod kuće ne pomaže.",
+    "en": "A connection crosses the home router and the carrier's NAT. Outbound it is translated twice; inbound dies at the CGN, so forwarding a port at home fails."
+  },
+  "tags": [
+    "nat"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cgnat"]; colours only from kit tokens.
+   Layout: the packet on the wire and what the internet sees on top, the kit's K2 topology under it: twenty-seven
+   columns (hosts over four, a gap, home routers over six, a gap, the CGN over six, a gap, the internet over three, a
+   gap, the server and the outside client over four) and three rows (subscribers spread over them, the CGN in the
+   middle). */
+[data-sim="cgnat"] .cg {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1.05rem;
+}
+[data-sim="cgnat"] .cg .sd-topo { row-gap: 1.2cqh; align-content: safe center; }
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as in csma-cd, cert-chain). */
+[data-sim="cgnat"] .sd-panel [hidden] { display: none; }
+[data-sim="cgnat"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="cgnat"] .cg-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.8rem 0.45rem;
+  min-width: 0;
+}
+[data-sim="cgnat"] .cg-box h2 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="cgnat"] .cg-wire { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; }
+[data-sim="cgnat"] .cg-kind { padding: 0 0.55rem; border-radius: 1rem; font-weight: 700; }
+[data-sim="cgnat"] .cg-field { display: inline-flex; flex-wrap: wrap; gap: 0.1rem 0.4rem; align-items: baseline; }
+[data-sim="cgnat"] .cg-label { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="cgnat"] .cg-chg { background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink); border-radius: var(--radius-sm); padding: 0 0.2rem; }
+[data-sim="cgnat"] .cg-was { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="cgnat"] .cg-was s { font-family: var(--mono); }
+[data-sim="cgnat"] .cg-none { color: var(--muted); }
+[data-sim="cgnat"] .cg-dropped { padding: 0 0.45rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="cgnat"] .cg-seen ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; }
+/* a card's own address (kit line 'addr'): host and home router A–C private and shared, the rest public */
+[data-sim="cgnat"] .sd-topo-card .sd-topo-addr { justify-self: start; font-size: var(--fs-sm); padding: 0 0.3rem; border: 0.18rem solid var(--c3); border-width: 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="cgnat"] .sd-topo-card:is([data-id="A"], [data-id="B"], [data-id="C"]) .sd-topo-addr { border: 0.18rem dashed var(--c1); }
+/* hosts, the server and the client: the address under the name and the mark, the card's full width */
+[data-sim="cgnat"] .sd-topo-card:is([data-kind="host"], [data-kind="server"]) .sd-topo-addr { grid-column: 1 / -1; margin-top: 0.2rem; }
+[data-sim="cgnat"] .sd-topo-card:is([data-id="hA"], [data-id="hB"], [data-id="hC"]) .sd-topo-addr {
+  border: 0.18rem solid var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--c2) 35%, transparent) 0.35em 0.55em);
+}
+[data-sim="cgnat"] .sd-topo-card[data-kind="cloud"] { padding: 0.4rem 0.2rem; }
+[data-sim="cgnat"] .sd-topo-card[data-kind="cloud"] > b { font-size: var(--fs-md); }
+/* addresses: the space is carried by the border and the pattern, the colour only adds to it */
+[data-sim="cgnat"] .cg-a {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  padding: 0 0.3rem;
+  border: 0.18rem solid var(--sw);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  background: var(--bg);
+}
+[data-sim="cgnat"] .cg-chg .cg-a { background: var(--bg); }
+[data-sim="cgnat"] .cg-a[data-sp="private"] { --sw: var(--c1); border-style: dashed; }
+[data-sim="cgnat"] .cg-a[data-sp="shared"] {
+  --sw: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--c2) 35%, transparent) 0.35em 0.55em);
+}
+[data-sim="cgnat"] .cg-a[data-sp="public"] { --sw: var(--c3); border-width: 0.3rem; }
+[data-sim="cgnat"] .cg-extra { grid-column: 1 / -1; display: grid; gap: 0.25rem; margin-top: 0.15rem; min-width: 0; }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li { font-size: var(--fs-sm); }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li { padding: 0.1rem 0.35rem; display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li .cg-a { font-size: 1em; border-width: 0.14rem; line-height: 1.3; }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li .cg-a[data-sp="public"] { border-width: 0.24rem; }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li > span { display: inline-flex; gap: 0.3rem; align-items: baseline; }
+[data-sim="cgnat"] .cg-extra .sd-topo-tab li > b { font-family: var(--sans); }
+/* legend swatches (the kit has round, hollow, hl, dash, line) */
+[data-sim="cgnat"] .sd-swatch[data-shape="private"] { background: transparent; border: 0.18rem dashed var(--c1); }
+[data-sim="cgnat"] .sd-swatch[data-shape="shared"] {
+  background: var(--bg) repeating-linear-gradient(45deg, transparent 0 0.25em, var(--c2) 0.25em 0.42em);
+  border: 0.18rem solid var(--c2);
+}
+[data-sim="cgnat"] .sd-swatch[data-shape="public"] { background: transparent; border: 0.3rem solid var(--c3); }
+[data-sim="cgnat"] .sd-swatch[data-shape="nat"] { background: transparent; border: 0.22rem solid var(--ink); border-radius: var(--radius-sm); }
+[data-sim="cgnat"] .sd-swatch[data-shape="x"] {
+  border: 0;
+  background: linear-gradient(45deg, transparent 40%, var(--danger) 40% 60%, transparent 60%),
+              linear-gradient(-45deg, transparent 40%, var(--danger) 40% 60%, transparent 60%);
+}
+/* Phone and portrait: the stage grows with its content; the kit lists the nodes. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cgnat"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cgnat"] .cg { height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Operatorski NAT: dva prijevoda</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  /** Series colours: subscribers and their home routers 5, 6, 7; the CGN 8; the server and the client 4. */
+  var SUB_C = { A: '5', B: '6', C: '7' };
+  /** Grid rows: one per subscriber, at least two (the server and the CGN beside A, the client in the last row). */
+  function rowCount(n) { return Math.max(2, n); }
+
+  function epText(e) { return e.ip + ':' + e.port; }
+  /** An address chip: the space (private, shared, public) as border and pattern. Data, not language. */
+  function addr(e) {
+    var text = typeof e === 'string' ? e : epText(e), ip = typeof e === 'string' ? e : e.ip;
+    return h('span', { class: 'cg-a', translate: 'no', dataset: { sp: L.addressSpace(ip) } }, text);
+  }
+  function data(text) { return h('span', { translate: 'no', class: 'sd-mono' }, String(text)); }
+  function hl(key) { return h('span', { class: 'sd-hl' }, t(key)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). A placeholder used twice
+      gets a copy of its node. */
+  function rich(key, vars) {
+    var out = [], used = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) {
+        out.push(used.indexOf(p) >= 0 ? p.cloneNode(true) : p);
+        used.push(p);
+        return;
+      }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  // ── top: the packet on the wire, what the internet sees ──
+
+  function field(label, value, was) {
+    var v = addr(value);
+    return h('span', { class: 'cg-field' },
+      h('span', { class: 'cg-label' }, t(label)),
+      was ? h('span', { class: 'cg-chg' }, v) : v,
+      was ? h('span', { class: 'cg-was' }, t('before'), ' ', h('s', { translate: 'no' }, epText(was))) : null);
+  }
+
+  function chipKey(s) {
+    if (s.phase === 'probe' || s.phase === 'arrive' || s.phase === 'direct') return 'chipIn';
+    return s.phase === 'reply' || s.phase === 'back2' || s.phase === 'back1' ? 'chipBack' : 'chipOut';
+  }
+
+  function renderWire(c) {
+    var s = c.state, pk = s.packet;
+    var row = h('div', { class: 'cg-wire' }, h('h2', null, t('wireTitle')));
+    if (!pk) {
+      row.append(h('span', { class: 'cg-none' }, t('wireNone')));
+    } else {
+      var who = s.who ? SUB_C[s.who] : '4';
+      row.append(
+        h('span', { class: 'cg-kind sd-fill', dataset: { c: who } }, t(chipKey(s))),
+        field('src', pk.src, pk.was && pk.was.field === 'src' ? pk.was.ep : null),
+        field('dst', pk.dst, pk.was && pk.was.field === 'dst' ? pk.was.ep : null));
+      if (pk.drop) row.append(h('span', { class: 'cg-dropped' }, t('dropped', { where: t(pk.to === 'cgn' ? 'dropCgn' : 'dropNet') })));
+    }
+    return h('section', { class: 'cg-box' }, row);
+  }
+
+  /** Under the server: the source of every packet it has received, all it knows of the subscribers. */
+  function renderSeen(c) {
+    var s = c.state;
+    if (c.params.direction === 'inbound') return null;
+    var items = s.seen.map(function (e) { return h('li', null, addr(e)); });
+    if (!items.length) items.push(h('li', { class: 'cg-none' }, t('seenEmpty')));
+    return h('div', { class: 'cg-extra cg-seen' }, h('span', { class: 'cg-label' }, t('seenTitle')), h('ul', null, items));
+  }
+
+  // ── topology ──
+
+  function badge(key, k) { return { text: t(key), k: k || 'solid', anim: true }; }
+
+  function lookupMark(s, box, i, kind) {
+    var l = s.lookup;
+    if (!l || l.box !== box || l.row !== i) return null;
+    if (kind === 'fwd') return l.result === 'forward' ? 'hit' : null;
+    return l.result === 'new' ? 'new' : l.result === 'hit' || l.result === 'reuse' ? 'hit' : null;
+  }
+
+  function homeTable(c, i) {
+    var s = c.state, home = s.homes[i], box = 'h' + home.id, fwd = c.dir === 'forward' ? 'forward' : null;
+    var inbound = c.params.direction === 'inbound' && c.n >= 2;
+    var rows = home.forwards.map(function (f) {
+      return { cells: [h('span', null, addr(f.outside), '→'), h('span', null, addr(f.inside))], note: t(inbound ? 'noteUnread' : 'noteForward'),
+        c: SUB_C[home.id], mark: inbound ? 'refreshed' : lookupMark(s, box, 0, 'fwd') };
+    }).concat(home.table.map(function (r, k) {
+      var mark = lookupMark(s, box, k, 'map');
+      return { cells: [h('span', null, addr(r.inside), '↔'), h('span', null, addr(r.outside))], note: mark === 'new' ? t('noteNew') : mark === 'hit' ? t('noteHit') : null,
+        c: SUB_C[home.id], mark: mark };
+    }));
+    return Simdeck.topology.table({ title: null, rows: rows, empty: t('tableEmpty') }, fwd);
+  }
+
+  function cgnTable(c) {
+    var s = c.state, fwd = c.dir === 'forward' ? 'forward' : null;
+    var rows = s.cgn.map(function (r, k) {
+      var mark = lookupMark(s, 'cgn', k, 'map');
+      var owner = L.subs.filter(function (x) { return x.cpe === r.inside.ip; })[0];
+      return { cells: [h('span', null, addr(r.inside), '↔'), h('span', null, addr(r.outside))], note: mark === 'new' ? t('noteNew') : mark === 'hit' ? t('noteHit') : null,
+        c: owner ? SUB_C[owner.id] : null, mark: mark };
+    });
+    return Simdeck.topology.table({ title: null, rows: rows, empty: t('tableEmpty') }, fwd);
+  }
+
+  /** A card's own address, as a kit line (beside the mark, under the name), drawn as an address chip by the CSS. */
+  function addrLine(e) {
+    return { text: typeof e === 'string' ? e : epText(e), kind: 'addr' };
+  }
+
+  function renderTopo(c) {
+    var s = c.state, ph = s.phase, n = s.homes.length, nr = rowCount(n);
+    var badges = { cgn: [], net: [], server: [], client: [] }, active = null;
+    s.homes.forEach(function (x) { badges[x.id] = []; badges['h' + x.id] = []; });
+    var who = s.who, hw = who ? 'h' + who : null;
+    switch (ph) {
+      case 'send': badges[who].push(badge('bSends', 'fill')); active = who; break;
+      case 'nat1': badges[hw].push(badge('bTranslates', 'fill')); active = hw; break;
+      case 'nat2': badges.cgn.push(badge('bTranslates', 'fill')); badges.server.push(badge('bReceives')); active = 'cgn'; break;
+      case 'reply': badges.server.push(badge('bReplies', 'fill')); active = 'server'; break;
+      case 'back2': badges.cgn.push(badge('bReverses', 'fill')); active = 'cgn'; break;
+      case 'back1': badges.hA.push(badge('bReverses', 'fill')); badges.A.push(badge('bReceives')); active = 'hA'; break;
+      case 'probe': badges.client.push(badge('bSends', 'fill')); active = 'client'; break;
+      case 'arrive': badges.cgn.push(badge('bMiss', 'fill')); active = 'cgn'; break;
+      case 'after':
+        s.homes.forEach(function (x) { badges['h' + x.id].push(badge('bNever', 'muted')); });
+        badges.client.push(badge('bNoAnswer', 'muted'));
+        badges.cgn.push(badge('bDropped', 'muted'));
+        break;
+      // the cloud is too narrow for a badge: the cross, the wire box and the caption say it
+      case 'direct': badges.client.push(badge('bSends', 'fill')); active = 'net'; break;
+    }
+    function st(id) { return active === id ? 'active' : null; }
+    var nodes = [];
+    s.homes.forEach(function (x, i) {
+      var sub = L.subs[i], r = i, hid = 'h' + x.id;
+      nodes.push({ id: x.id, kind: 'host', col: 0, span: 4, row: r, mark: x.id, c: SUB_C[x.id], name: t('host', { id: x.id }),
+        lines: [addrLine(sub.host)], badges: badges[x.id], state: st(x.id) });
+      nodes.push({ id: hid, kind: 'router', col: 5, span: 6, row: r, mark: 'NAT', c: SUB_C[x.id], name: t('home', { id: x.id }),
+        lines: [addrLine(sub.cpe)], badges: badges[hid], state: st(hid), extra: h('div', { class: 'cg-extra' }, homeTable(c, i)) });
+    });
+    nodes.push(
+      { id: 'cgn', kind: 'router', col: 12, span: 6, row: 0, mark: 'CGN', c: '8', name: t('cgn'),
+        lines: [addrLine(L.cgnPublic)], badges: badges.cgn, state: st('cgn'), extra: h('div', { class: 'cg-extra' }, cgnTable(c)) },
+      { id: 'net', kind: 'cloud', col: 19, span: 2, row: 0, name: t('internet'), badges: badges.net, state: st('net') },
+      { id: 'server', kind: 'server', col: 22, span: 5, row: 0, mark: 'S', c: '4', name: t('server'),
+        lines: [addrLine(L.server)], badges: badges.server, state: st('server'), extra: renderSeen(c) },
+      { id: 'client', kind: 'host', col: 22, span: 5, row: nr - 1, mark: 'X', c: '4', name: t('client'),
+        lines: [addrLine(L.client)], badges: badges.client, state: st('client') });
+
+    var hops = [];
+    var lbl = t(chipKey(s)), pc = who ? SUB_C[who] : '4';
+    switch (ph) {
+      case 'send': hops = [[who, hw, true]]; break;
+      case 'nat1': hops = [[hw, 'cgn', true]]; break;
+      case 'nat2': hops = [['cgn', 'net', true], ['net', 'server', false]]; break;
+      case 'reply': hops = [['server', 'net', true], ['net', 'cgn', false]]; break;
+      case 'back2': hops = [['cgn', 'hA', true]]; break;
+      case 'back1': hops = [['hA', 'A', true]]; break;
+      case 'probe': hops = [['client', 'net', true]]; break;
+      case 'arrive': hops = [['net', 'cgn', false, true]]; break; // no chip: the short link keeps the cross visible
+      case 'direct': hops = [['client', 'net', true, true]]; break;
+    }
+    var packets = hops.map(function (x) { return { from: x[0], to: x[1], label: lbl, chip: x[2], c: pc, drop: !!x[3] }; });
+    var on = function (a, b) { return hops.some(function (x) { return (x[0] === a && x[1] === b) || (x[0] === b && x[1] === a); }); };
+    var links = [];
+    s.homes.forEach(function (x) {
+      links.push({ id: 'l' + x.id, a: x.id, b: 'h' + x.id, active: on(x.id, 'h' + x.id) });
+      links.push({ id: 'c' + x.id, a: 'h' + x.id, b: 'cgn', active: on('h' + x.id, 'cgn') });
+    });
+    links.push({ id: 'cn', a: 'cgn', b: 'net', active: on('cgn', 'net') },
+      { id: 'ns', a: 'net', b: 'server', active: on('net', 'server') },
+      { id: 'nc', a: 'net', b: 'client', active: on('net', 'client') });
+    return Simdeck.topology({ cols: 27, rows: Array(nr).fill('auto'), gap: '0.5cqw', dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  // ── caption ──
+
+  function caption(c) {
+    var s = c.state, p = c.params, pk = s.packet, who = s.who;
+    var pub = data(L.cgnPublic), S = addr(L.server);
+    switch (s.phase) {
+      case 'start':
+        if (p.direction === 'inbound') {
+          return p.portForward
+            ? rich('capStartFwd', { fwd: addr(L.forward.outside), inside: addr(L.forward.inside), c: addr(L.client), pub: pub, port: data(L.probePort(p)) })
+            : rich('capStartIn', { c: addr(L.client), pub: pub, port: data(L.probePort(p)) });
+        }
+        return p.senders === 'all'
+          ? rich('capStartAll', { s: S, a: addr(L.subs[0].host), pub: pub })
+          : rich('capStart', { a: addr({ ip: L.subs[0].host, port: L.srcPort }), s: S, pub: pub });
+      case 'send':
+        return rich(who === 'A' ? 'capSend' : 'capSendSame', { who: data(who), src: addr(pk.src) });
+      case 'nat1':
+        return rich('capNat1', { who: data(who), from: addr(pk.was.ep), to: addr(pk.src), rec: hl('recWord') });
+      case 'nat2': {
+        if (p.senders === 'all' && who !== 'A') {
+          var ids = L.subs.map(function (x) { return x.id; }), prev = h('span');
+          ids.slice(0, ids.indexOf(who)).forEach(function (id, k) { prev.append(k ? t('listAnd') : '', data(id)); });
+          return rich('capNat2Shared', { who: data(who), prev: prev, from: addr(pk.was.ep), to: addr(pk.src) });
+        }
+        return rich('capNat2', { from: addr(pk.was.ep), to: addr(pk.src), rec: hl('recWord') });
+      }
+      case 'reply': return rich('capReply', { dst: addr(pk.dst) });
+      case 'back2': return rich('capBack2', { from: addr(pk.was.ep), to: addr(pk.dst) });
+      case 'back1': return rich('capBack1', { to: addr(pk.dst) });
+      case 'probe': return rich('capProbe', { dst: addr(pk.dst), pub: pub });
+      case 'arrive': return rich(p.portForward ? 'capArriveFwd' : 'capArrive', { dst: addr(pk.dst), drop: hl('dropWord') });
+      case 'after': return rich(p.portForward ? 'capAfterFwd' : 'capAfter');
+      default: return rich('capDirect', { dst: addr(pk.dst), drop: hl('dropWordNet') });
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.stepsFor,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'direction', type: 'choice', label: t('direction'), resets: true, options: [['outbound', t('dirOut')], ['inbound', t('dirIn')]] },
+      { key: 'senders', type: 'choice', label: t('senders'), resets: true, options: [['one', t('sendersOne')], ['all', t('sendersAll')]],
+        visible: function (p) { return p.direction === 'outbound'; } },
+      { key: 'portForward', type: 'toggle', label: t('portForward'), hint: t('portForwardHint') },
+      { key: 'subscribers', type: 'range', label: t('subscribers'), min: 1, max: L.maxSubscribers, step: 1 }
+    ],
+
+    presets: [
+      { id: 'outbound-works', label: t('presetWorks'), params: { direction: 'outbound', senders: 'one', portForward: false, subscribers: 2 }, hint: t('presetWorksHint') },
+      { id: 'inbound-dropped', label: t('presetDropped'), params: { direction: 'inbound', portForward: false }, hint: t('presetDroppedHint') },
+      { id: 'port-forward-fails', label: t('presetForward'), params: { direction: 'inbound', portForward: true }, hint: t('presetForwardHint') },
+      { id: 'shared-address', label: t('presetShared'), params: { direction: 'outbound', senders: 'all', subscribers: 2 }, hint: t('presetSharedHint') }
+    ],
+
+    legend: [
+      { shape: 'private', label: t('legPrivate') },
+      { shape: 'shared', label: t('legShared') },
+      { shape: 'public', label: t('legPublic') },
+      { shape: 'nat', label: t('legNat') },
+      { shape: 'x', label: t('legDrop') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'cg' }, renderWire(c), renderTopo(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
