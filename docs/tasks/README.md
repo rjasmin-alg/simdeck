@@ -295,31 +295,31 @@ Then the kit tasks: [`kit-sequence-chart`](w0/kit-sequence-chart.md), [`kit-topo
 | 104 | [`cmp-exceptions`](w3/cmp-exceptions.md) | Exceptions to policy: an accepted risk with an end date | Compliance and procedures for IT managers | S | P3 | after `cmp-risk-register` |
 | 105 | [`cmp-four-eyes`](w3/cmp-four-eyes.md) | Four eyes: when the second approver is a rubber stamp | Compliance and procedures for IT managers | S | P3 |  |
 | 106 | [`cmp-maturity-levels`](w3/cmp-maturity-levels.md) | Maturity levels: the average hides the weakest area | Compliance and procedures for IT managers | S | P3 |  |
-| 107 | [`set-cable-runs-exits`](w3/set-cable-runs-exits.md) | Cable runs, walkways and exits: an evacuation through the set | Working on a film set | M | P1 |  |
-| 108 | [`set-circuit-load`](w3/set-circuit-load.md) | Watts, volts, amps: why a circuit trips and a coiled cable gets hot | Working on a film set | S | P1 |  |
+| 107 | [`set-cable-runs-exits`](w3/set-cable-runs-exits.md) | Cable runs, walkways and exits: evacuating the set | Working on a film set | M | P1 |  |
+| 108 | [`set-circuit-load`](w3/set-circuit-load.md) | Watts, volts, amps: why a circuit trips and a cable heats | Working on a film set | S | P1 |  |
 | 109 | [`set-exclusion-zone`](w3/set-exclusion-zone.md) | Stunts, effects, weapons: the zone only specialists enter | Working on a film set | M | P1 | after `set-cable-runs-exits` |
 | 110 | [`set-fatigue-turnaround`](w3/set-fatigue-turnaround.md) | Long days, short nights: turnaround and the drive home | Working on a film set | S | P1 |  |
 | 111 | [`set-stand-tipping`](w3/set-stand-tipping.md) | Stands, sandbags and wind: when a stand tips | Working on a film set | M | P1 |  |
 | 112 | [`set-stop-for-safety`](w3/set-stop-for-safety.md) | Anyone can stop for safety: from seeing a hazard to the halt | Working on a film set | M | P1 |  |
-| 113 | [`set-call-sheet`](w3/set-call-sheet.md) | The call sheet: one day planned, and what a change ripples into | Working on a film set | M | P2 |  |
+| 113 | [`set-call-sheet`](w3/set-call-sheet.md) | The call sheet: a day's plan and what one change moves | Working on a film set | M | P2 |  |
 | 114 | [`set-calls-sequence`](w3/set-calls-sequence.md) | The calls: from "lock it up" to "moving on" | Working on a film set | M | P2 |  |
 | 115 | [`set-card-handoff`](w3/set-card-handoff.md) | Camera cards: never wiped before two checked copies | Working on a film set | S | P2 |  |
 | 116 | [`set-chain-of-command`](w3/set-chain-of-command.md) | Who decides what: the chain of command on set | Working on a film set | S | P2 | after `set-stop-for-safety` |
 | 117 | [`set-emergency-response`](w3/set-emergency-response.md) | An injury on set: the first ten minutes | Working on a film set | S | P2 | after `set-cable-runs-exits` |
 | 118 | [`set-lamp-heat`](w3/set-lamp-heat.md) | Hot lamps: burns, fire distance and the cool-down | Working on a film set | S | P2 |  |
 | 119 | [`set-radio-discipline`](w3/set-radio-discipline.md) | Radio discipline: one channel, many voices | Working on a film set | S | P2 |  |
-| 120 | [`set-risk-controls`](w3/set-risk-controls.md) | Remove the hazard before handing out gloves: the order of controls | Working on a film set | S | P2 |  |
+| 120 | [`set-risk-controls`](w3/set-risk-controls.md) | Remove the hazard first: the order of controls | Working on a film set | S | P2 |  |
 | 121 | [`set-setup-cycle`](w3/set-setup-cycle.md) | Block, light, rehearse, shoot: the order of a setup | Working on a film set | M | P2 |  |
 | 122 | [`set-who-touches-what`](w3/set-who-touches-what.md) | Departments: who touches what | Working on a film set | S | P2 | after `set-stop-for-safety` |
 | 123 | [`set-working-at-height`](w3/set-working-at-height.md) | Working above others: dropped objects and the zone below | Working on a film set | S | P2 | after `set-cable-runs-exits` |
-| 124 | [`set-boom-shadow`](w3/set-boom-shadow.md) | Boom, frame line and lamp: where sound, camera and electric meet | Working on a film set | S | P3 |  |
+| 124 | [`set-boom-shadow`](w3/set-boom-shadow.md) | Boom, frame line and lamp: sound, camera and electric meet | Working on a film set | S | P3 |  |
 | 125 | [`set-continuity`](w3/set-continuity.md) | Continuity: shooting out of story order | Working on a film set | S | P3 | after `set-call-sheet` |
 | 126 | [`set-hearing`](w3/set-hearing.md) | Noise over a shooting day: the dose adds up | Working on a film set | S | P3 | after `set-call-sheet` |
 | 127 | [`set-manual-handling`](w3/set-manual-handling.md) | Lifting and team carries | Working on a film set | S | P3 | after `set-stand-tipping` |
 | 128 | [`set-phase-balance`](w3/set-phase-balance.md) | Three phases: spreading the lamps on a generator | Working on a film set | S | P3 | after `set-circuit-load` |
-| 129 | [`set-picture-vehicles`](w3/set-picture-vehicles.md) | Picture vehicles and camera cars: stopping distance and where people stand | Working on a film set | S | P3 | after `set-exclusion-zone` |
+| 129 | [`set-picture-vehicles`](w3/set-picture-vehicles.md) | Picture vehicles and camera cars: stopping distance | Working on a film set | S | P3 | after `set-exclusion-zone` |
 | 130 | [`set-weather-lightning`](w3/set-weather-lightning.md) | Weather limits: wind and lightning | Working on a film set | S | P3 |  |
-| 131 | [`set-working-load`](w3/set-working-load.md) | Working loads and safety factors: what a hanging lamp asks of its rigging | Working on a film set | S | P3 | after `set-stand-tipping` |
+| 131 | [`set-working-load`](w3/set-working-load.md) | Working loads and safety factors in rigging | Working on a film set | S | P3 | after `set-stand-tipping` |
 | 132 | [`dns-ttl-cache`](w3/dns-ttl-cache.md) | TTL caching and the cutover | Internet and application protocols | S | P1 | after `dns-resolution` |
 | 133 | [`email-auth`](w3/email-auth.md) | SPF, DKIM and DMARC | Internet and application protocols | M | P1 | after `email-path` |
 | 134 | [`bgp-hijack`](w3/bgp-hijack.md) | BGP hijack and RPKI | Internet and application protocols | M | P2 | after `bgp-path-selection` |

@@ -673,15 +673,26 @@ SET_NOTES = ["## Film set notes (all `set-` tasks)", "",
     "made-up but plausible, and the page says so once; the physics (P = V × I, moments about the tipping edge, wind "
     "force with the square of the speed, E = m·g·h, stopping distance, decibels and a daily dose) is standard and is "
     "checked in SPEC.md with a small script.",
-    "- **One fictional production:** a made-up feature film with a made-up crew and made-up locations; never a real "
-    "production, company or person, and no real accident retold on the page (published accident reports may inform "
-    "SPEC.md).",
-    "- **Croatian terms and rules:** use the Croatian set term where one is in use and give the English in brackets "
-    "once (crews often say the English word: gaffer, grip, call sheet). The terms and the Croatian rules marked "
-    "*(check)* in catalogue §4.14 (the Croatian titles and \"Where Croatian practice matters\") are unverified: use a "
-    "plain descriptive Croatian phrase on the page instead, and copy them into `NOTES.md` under \"For the owner\" with "
-    "the source you would check. An EU directive may be named in the explanation, with its article, only where a "
-    "number on the page comes from it (the noise action values, the minimum daily rest).",
+    "- **One fictional production, real cases as references** (owner, 2026-11-08): the scenario is a made-up feature "
+    "film with a made-up crew and locations, and no real name or date appears in the model, the presets or the "
+    "captions. Where catalogue §4.14 (\"Real cases as visible references\") names a case for your entry, model the "
+    "scenario recognisably on it and name the case visibly on the page, in a \"Na temelju / Based on\" line in the "
+    "notes or foot with the public investigation or court record, so a lecturer can teach it as a hypothetical or "
+    "point to the real event; cite the source in full in SPEC.md. Only cases with a public official report or court "
+    "record; check the report's title, number and date against the document itself, and if you cannot find it, leave "
+    "the reference off and say so in `NOTES.md`.",
+    "- **Croatian terms** (owner, 2026-11-08): roles, equipment and the day use the English loanwords crews say "
+    "(gaffer, key grip, grip, boom operator, 1st AD, stand-in, call sheet, setup, wrap, picture vehicle, camera car), "
+    "written in the Croatian strings as loanwords with Croatian declension where natural (setupa, gaffera); a Croatian "
+    "gloss may appear once in the explanation. The calls are in Croatian (Tišina!, Ton!, Kamera!, Klapa!, Akcija!, "
+    "Rez!, Idemo dalje!). The exact wording of the calls and the terms marked *(check)* in catalogue §4.14 are not "
+    "settled yet: use them as listed there, and copy each one you use into `NOTES.md` under \"For the owner\".",
+    "- **The law applies to everyone** (owner, 2026-11-08): the Zakon o zaštiti na radu and the rest rules apply to "
+    "everyone on set, whatever their contract, and a page may say so (`set-stop-for-safety`, `set-fatigue-turnaround`). "
+    "Name the law's provisions without article numbers; the article numbers, the current amendments and the other "
+    "Croatian rules marked *(check)* in §4.14 stay off the page and go into `NOTES.md` with the source you would check. "
+    "An EU directive may be named in the explanation, with its article, only where a number on the page comes from it "
+    "(the noise action values, the minimum daily rest).",
     "- **Primary sources:** the EU texts on EUR-Lex (the framework directive 89/391/EEC, working time 2003/88/EC, noise "
     "2003/10/EC, manual handling 90/269/EEC, work equipment 2009/104/EC), the Croatian laws in Narodne novine, and the "
     "film and TV safety guidance published by safety regulators and industry safety committees. Cite them in SPEC.md; "
