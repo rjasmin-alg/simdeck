@@ -1,0 +1,475 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- pipeline-hazards: a short RISC-V-like program through a five-stage pipeline, one clock cycle per step: stalls,
+     forwarding (EX/MEM → EX, MEM/WB → EX), the load-use stall and the flush of a taken branch.
+     Model: sim.js, rules and numbers: SPEC.md, decisions: NOTES.md. -->
+<html lang="hr" data-sim="pipeline-hazards">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hazardi u protočnoj strukturi · simdeck</title>
+<meta name="description" content="Pet faza, takt po takt: zastoji, prosljeđivanje, load-use hazard i poništavanje nakon grananja.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "pipeline-hazards",
+  "title": {
+    "hr": "Hazardi u protočnoj strukturi",
+    "en": "Pipeline hazards"
+  },
+  "concept": {
+    "hr": "Podatkovni hazardi, zastoji, prosljeđivanje i poništavanje nakon grananja",
+    "en": "Data hazards, stalls, forwarding and the branch flush"
+  },
+  "summary": {
+    "hr": "Takt po takt kroz pet faza: kad instrukcija mora čekati, kad prosljeđivanje pomaže, kad ni ono ne može i koliko košta izvršeno grananje.",
+    "en": "Step instructions through five stages, one clock cycle at a time: when one must wait, when forwarding helps, when it cannot, and what a taken branch costs."
+  },
+  "tags": [
+    "cpu"
+  ],
+  "class": "stepper",
+  "steps": 8,
+  "entries": [
+    {
+      "preset": "independent"
+    },
+    {
+      "preset": "raw-no-fwd"
+    },
+    {
+      "preset": "raw-fwd"
+    },
+    {
+      "preset": "load-use"
+    },
+    {
+      "preset": "mixed"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="pipeline-hazards"]; colours only from kit tokens.
+   Top: the five stage boxes with the register-file lane above and the two forwarding lanes below, counts at the
+   right. Below: the pipeline diagram, rows = instructions, columns = clock cycles. */
+[data-sim="pipeline-hazards"] .ph {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem;
+  height: 100%;
+  padding: 0.7rem 1.1rem;
+  font-size: var(--fs-md);
+}
+[data-sim="pipeline-hazards"] .ph-mono, [data-sim="pipeline-hazards"] .ph code { font-family: var(--mono); }
+[data-sim="pipeline-hazards"] .ph-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.4rem; align-items: start; }
+
+/* the five stages and the lanes */
+[data-sim="pipeline-hazards"] .ph-pipe {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: 2.1rem auto 2.1rem 2.1rem;
+  column-gap: 0.7rem;
+  min-width: 0;
+}
+[data-sim="pipeline-hazards"] .ph-box {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--sw) 10%, var(--bg));
+  position: relative;
+  z-index: 1;
+}
+[data-sim="pipeline-hazards"] .ph-box-head { display: flex; align-items: baseline; gap: 0 0.5rem; flex: 1 0 auto; padding: 0.1rem 0.5rem; background: var(--sw); color: var(--on-series); }
+[data-sim="pipeline-hazards"] .ph-box-head b { font-family: var(--mono); font-size: var(--fs-lg); }
+[data-sim="pipeline-hazards"] .ph-box-sub { font-size: var(--fs-sm); line-height: 1.15; }
+[data-sim="pipeline-hazards"] .ph-box-body { display: flex; gap: 0.4rem; align-items: center; justify-content: center; min-height: 3.2rem; padding: 0.2rem 0.4rem; text-align: center; overflow-wrap: anywhere; }
+[data-sim="pipeline-hazards"] .ph-box-body code { font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="pipeline-hazards"] .ph-box-note { min-height: 1.5rem; padding: 0 0.4rem 0.2rem; font-size: var(--fs-sm); text-align: center; font-weight: 700; }
+[data-sim="pipeline-hazards"] .ph-box--slot { border-style: dashed; background: var(--bg); }
+[data-sim="pipeline-hazards"] .ph-box--slot .ph-box-body { color: var(--muted); }
+[data-sim="pipeline-hazards"] .ph-box--flush .ph-box-body code { text-decoration: line-through; text-decoration-thickness: 0.15rem; }
+[data-sim="pipeline-hazards"] .ph-empty { color: var(--muted); font-size: var(--fs-sm); }
+
+/* lanes: dashed U-shapes from the source stage's centre back to EX (forwarding) or from WB back to ID */
+[data-sim="pipeline-hazards"] .ph-arrow { position: relative; min-width: 0; font-size: var(--fs-sm); }
+[data-sim="pipeline-hazards"] .ph-arrow-line {
+  position: absolute;
+  top: calc(0.75rem - var(--reach, 0rem));
+  bottom: 0.95rem;
+  left: var(--offl);
+  right: var(--offr);
+  border: 0.22rem dashed var(--ink);
+  border-top: 0;
+}
+[data-sim="pipeline-hazards"] .ph-arrow-line::before {
+  content: '▲';
+  position: absolute;
+  left: -0.64rem;
+  top: -0.8rem;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--ink);
+}
+[data-sim="pipeline-hazards"] .ph-arrow--up .ph-arrow-line { top: 0.95rem; bottom: 0.75rem; border-top: 0.22rem dashed var(--ink); border-bottom: 0; }
+[data-sim="pipeline-hazards"] .ph-arrow--up .ph-arrow-line::before { content: '▼'; top: auto; bottom: -0.8rem; }
+[data-sim="pipeline-hazards"] .ph-arrow-label {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  padding: 0 0.4rem;
+  background: var(--bg);
+  white-space: nowrap;
+  font-weight: 700;
+  line-height: 1.2;
+}
+[data-sim="pipeline-hazards"] .ph-arrow--up .ph-arrow-label { bottom: auto; top: 0; }
+[data-sim="pipeline-hazards"] .ph-arrow--idle .ph-arrow-line { border-color: var(--line); border-width: 0.14rem; border-style: dotted; }
+[data-sim="pipeline-hazards"] .ph-arrow--idle .ph-arrow-line::before { color: var(--line); }
+[data-sim="pipeline-hazards"] .ph-arrow--idle .ph-arrow-label { font-weight: 400; color: var(--muted); }
+[data-sim="pipeline-hazards"] .ph-arrow--used .ph-arrow-label { background: var(--hl); color: var(--on-hl); border-radius: var(--radius-sm); }
+[data-sim="pipeline-hazards"] .ph-lane-off { grid-column: 3 / span 3; grid-row: 3; align-self: center; font-size: var(--fs-sm); color: var(--muted); }
+
+/* counts */
+[data-sim="pipeline-hazards"] .ph-counts { display: grid; grid-template-columns: auto auto; gap: 0.15rem 0.8rem; margin: 2.1rem 0 0; align-items: baseline; }
+[data-sim="pipeline-hazards"] .ph-counts dt { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="pipeline-hazards"] .ph-counts dd { margin: 0; font-weight: 700; font-family: var(--mono); text-align: right; }
+
+/* the diagram */
+/* two grids with the same rows: the instruction labels, and the cycle cells (which scroll sideways on a phone) */
+[data-sim="pipeline-hazards"] .ph-diag { display: flex; gap: 0.3rem; align-items: start; min-height: 0; min-width: 0; }
+[data-sim="pipeline-hazards"] .ph-labels, [data-sim="pipeline-hazards"] .ph-cells {
+  display: grid;
+  grid-template-rows: 1.6rem;
+  grid-auto-rows: 2.4rem;
+  gap: 0.3rem;
+}
+[data-sim="pipeline-hazards"] .ph-cells { grid-template-columns: repeat(var(--cols), minmax(2.6rem, 1fr)); }
+[data-sim="pipeline-hazards"] .ph-diagwrap { flex: 1; min-width: 0; position: relative; }
+[data-sim="pipeline-hazards"] .ph-dh { display: flex; justify-content: space-between; gap: 1rem; align-items: end; font-size: var(--fs-sm); color: var(--muted); padding: 0 0.3rem; }
+[data-sim="pipeline-hazards"] .ph-ch { display: grid; place-items: end center; font-size: var(--fs-sm); font-family: var(--mono); color: var(--muted); border-radius: var(--radius-sm); }
+[data-sim="pipeline-hazards"] .ph-ch.sd-changed { background: var(--hl); color: var(--on-hl); font-weight: 700; place-items: center; }
+[data-sim="pipeline-hazards"] .ph-rl { display: flex; align-items: center; gap: 0.6rem; padding: 0 0.6rem 0 0.3rem; white-space: nowrap; border-radius: var(--radius-sm); }
+[data-sim="pipeline-hazards"] .ph-rl code { font-size: var(--fs-md); }
+[data-sim="pipeline-hazards"] .ph-rl--wrong code { color: var(--muted); }
+[data-sim="pipeline-hazards"] .ph-rl--hazard { outline: 0.16rem solid var(--ink); }
+[data-sim="pipeline-hazards"] .ph-tag { font-size: var(--fs-sm); color: var(--muted); border: 0.12rem solid var(--line); border-radius: var(--radius-sm); padding: 0 0.3rem; }
+[data-sim="pipeline-hazards"] .ph-c {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="pipeline-hazards"] .ph-c--now { background: color-mix(in srgb, var(--hl) 30%, var(--bg)); }
+[data-sim="pipeline-hazards"] .ph-c--st { border: 0.16rem solid var(--sw); background: color-mix(in srgb, var(--sw) 20%, var(--bg)); color: var(--ink); }
+[data-sim="pipeline-hazards"] .ph-c--now.ph-c--st { background: color-mix(in srgb, var(--sw) 38%, var(--bg)); border-width: 0.22rem; }
+[data-sim="pipeline-hazards"] .ph-bubble {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 0.16rem solid var(--muted);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted);
+}
+[data-sim="pipeline-hazards"] .ph-c--flush {
+  border: 0.16rem solid var(--muted);
+  background-color: var(--bg);
+  background-image: linear-gradient(to top right, transparent 46%, var(--muted) 46% 54%, transparent 54%), linear-gradient(to bottom right, transparent 46%, var(--muted) 46% 54%, transparent 54%);
+  color: var(--ink);
+}
+[data-sim="pipeline-hazards"] .ph-c--flush span { background: var(--bg); padding: 0 0.2rem; border-radius: var(--radius-sm); }
+
+/* phone and short stages: stack, the diagram scrolls inside itself */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="pipeline-hazards"] .sd-stage { height: 48rem; }   /* a size container: needs a height of its own */
+  [data-sim="pipeline-hazards"] .ph { padding: 0.4rem; gap: 0.6rem; }
+  [data-sim="pipeline-hazards"] .ph-top { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="pipeline-hazards"] .ph-pipe { column-gap: 0.25rem; }
+  [data-sim="pipeline-hazards"] .ph-box-sub, [data-sim="pipeline-hazards"] .ph-box-note { display: none; }
+  [data-sim="pipeline-hazards"] .ph-box-body code { font-size: var(--fs-sm); }
+  [data-sim="pipeline-hazards"] .ph-box-head b { font-size: var(--fs-md); }
+  [data-sim="pipeline-hazards"] .ph-arrow-label { white-space: normal; text-align: center; width: max-content; max-width: 14rem; }
+  [data-sim="pipeline-hazards"] .ph-counts { margin: 0; grid-template-columns: repeat(4, auto); }
+  [data-sim="pipeline-hazards"] .ph-diagwrap { overflow-x: auto; }
+  [data-sim="pipeline-hazards"] .ph-cells { grid-template-columns: repeat(var(--cols), 2.6rem); }
+  [data-sim="pipeline-hazards"] .ph-dh > span + span { display: none; }
+  [data-sim="pipeline-hazards"] .ph-tag { display: none; }
+  [data-sim="pipeline-hazards"] .ph-rl code { font-size: var(--fs-sm); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title"></h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var STAGES = L.STAGES;
+  var SW = { IF: 'var(--c1)', ID: 'var(--c2)', EX: 'var(--c3)', MEM: 'var(--c4)', WB: 'var(--c5)' };
+
+  function isInstr(v) { return typeof v === 'number'; }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function bare(q) { return q.label ? q.text.replace(/^\s*\w+:\s*/, '') : q.text; }
+  function op(s, i) { return code(s.instrs[i].op); }
+  function reg(r) { return code('x' + r); }
+  function path(p) { return h('span', { class: 'ph-mono', translate: 'no' }, p); }
+  function dec(x) { var v = (Math.round(x * 100) / 100).toString(); return Simdeck.lang === 'hr' ? v.replace('.', ',') : v; }
+
+  // the end state of this program and setting: how many instructions complete
+  function finalOf(p) {
+    var s = L.initial(p), n = 0;
+    while (!s.finished && n < 200) { n++; s = L.step(s, n, p); }
+    return s;
+  }
+
+  // ── the five stage boxes ──
+  function box(c, st) {
+    var s = c.state, v = s.inStage[st], ev = s.last;
+    var kids = [], note = null, cls = 'ph-box', sw = SW[st];
+    if (isInstr(v)) {
+      var q = s.instrs[v];
+      kids.push(code(bare(q)));
+      if (q.flushed === s.cycle) { cls += ' ph-box--flush'; note = t('flushedNow'); }
+      else if (ev && ev.stall && st === 'ID' && ev.stall.consumer === v) note = t('held', { reg: 'x' + ev.stall.reg });
+      else if (ev && ev.stall && st === 'IF') note = t('heldIF');
+    } else if (v === 'bubble' || v === 'flushed') {
+      cls += ' ph-box--slot';
+      kids.push(h('span', { class: 'ph-bubble', 'aria-hidden': 'true' }, v === 'bubble' ? '—' : '×'), ' ',
+        h('span', null, t(v === 'bubble' ? 'slotBubble' : 'slotFlushed')));
+    } else {
+      cls += ' ph-box--slot';
+      kids.push(h('span', { class: 'ph-empty' }, t('slotEmpty')));
+    }
+    // changed: the bubble a stall puts into EX, and the slots a flush left in the cycle after it
+    var flushedJustNow = v === 'flushed' && s.instrs.some(function (q) { return q.flushed === s.cycle - 1; });
+    var changed = (ev && st === 'EX' && ev.stall) || flushedJustNow;
+    return h('div', { class: cls + (changed ? ' sd-changed' : ''), style: { '--sw': sw, gridColumn: String(STAGES.indexOf(st) + 1) } },
+      h('div', { class: 'ph-box-head' }, h('b', { translate: 'no' }, st), h('span', { class: 'ph-box-sub' }, t('st' + st))),
+      h('div', { class: 'ph-box-body' }, kids),
+      h('div', { class: 'ph-box-note' }, note));
+  }
+
+  // a lane: from the centre of column `from` back to the centre of column `to`
+  // (offl / offr: where the line ends, in % of the spanned columns; reach: how far up it extends over other lanes)
+  function arrow(from, to, row, label, used, up, offl, reach) {
+    var span = from - to + 1;
+    var centre = 50 / span;
+    return h('div', { class: 'ph-arrow ph-arrow--' + (used ? 'used' : 'idle') + (up ? ' ph-arrow--up' : ''),
+      style: { gridColumn: to + ' / span ' + span, gridRow: String(row), '--offl': (offl == null ? centre : offl) + '%', '--offr': centre + '%', '--reach': reach || '0rem' } },
+      h('div', { class: 'ph-arrow-line' }),
+      h('span', { class: 'ph-arrow-label' }, label));
+  }
+
+  function pipe(c) {
+    var s = c.state, ev = s.last, p = c.params;
+    var kids = STAGES.map(function (st) { return box(c, st); });
+    var fw = ev ? ev.forwards : [];
+    var rp = ev ? ev.regPasses : [];
+    if (rp.length) {
+      kids.push(arrow(5, 2, 1, [t('regPass'), ' · ', h('span', { translate: 'no' }, rp.map(function (r) { return 'x' + r.reg; }).join(', '))], true, true));
+    }
+    if (p.forwarding) {
+      // EX/MEM enters EX right of its centre, MEM/WB left of it, so the two lines do not overlap
+      [['EX/MEM', 4, 3, 30, null], ['MEM/WB', 5, 4, 12, '2.1rem']].forEach(function (d) {
+        var used = fw.filter(function (f) { return f.from === d[0]; });
+        var regs = used.map(function (f) { return 'x' + f.reg; }).join(', ');
+        var label = [path(d[0] + ' → EX'), ' · ', used.length ? h('span', { translate: 'no' }, regs) : t('fwdIdle')];
+        kids.push(arrow(d[1], 3, d[2], label, used.length > 0, false, d[3], d[4]));
+      });
+    } else {
+      kids.push(h('div', { class: 'ph-lane-off' }, t('fwdOff')));
+    }
+    return h('div', { class: 'ph-pipe' }, kids);
+  }
+
+  function counts(c, fin) {
+    var s = c.state;
+    var rows = [
+      [t('cntCycle'), t('cntOf', { k: s.cycle, n: c.steps })],
+      [t('cntDone'), t('cntOf', { k: s.completed, n: fin.completed })],
+      [t('cntStalls'), String(s.stalls)],
+      [t('cntFlushed'), String(s.flushes)]
+    ];
+    if (c.last) rows.push([t('cntCpi'), dec(s.cycle / s.completed)]);
+    var kids = [];
+    rows.forEach(function (r) { kids.push(h('dt', null, r[0]), h('dd', { translate: 'no' }, r[1])); });
+    return h('dl', { class: 'ph-counts' }, kids);
+  }
+
+  // ── the pipeline diagram ──
+  function diagram(c, fin) {
+    var s = c.state, N = c.steps, ev = s.last;
+    var hazard = {};
+    if (ev && ev.stall) { hazard[ev.stall.consumer] = 1; hazard[ev.stall.producer] = 1; }
+    var labels = [h('span', { class: 'ph-dh' }, h('span', null, t('colInstr')), h('span', null, t('colCycle')))];
+    var kids = [];
+    for (var k = 1; k <= N; k++) kids.push(h('span', { class: 'ph-ch' + (k === s.cycle ? ' sd-changed' : ''), translate: 'no' }, String(k)));
+    s.instrs.forEach(function (q, i) {
+      var shown = fin.instrs[i].fetched;
+      if (!shown) return;
+      var wrong = q.wrongPath;   // marked once the branch has flushed it, not before
+      labels.push(h('span', { class: 'ph-rl' + (wrong ? ' ph-rl--wrong' : '') + (hazard[i] ? ' ph-rl--hazard' : '') },
+        code(q.text), wrong ? h('span', { class: 'ph-tag' }, t('wrongPath')) : null));
+      for (var cy = 1; cy <= N; cy++) {
+        var x = cy <= s.cycle ? L.cell(q, cy) : null;
+        var now = cy === s.cycle;
+        var cls = 'ph-c' + (now ? ' ph-c--now' : '');
+        if (x === 'stall') {
+          kids.push(h('span', { class: cls + ' ph-c--stall' + (now ? ' sd-changed' : ''), 'aria-label': t('cellStall') },
+            h('span', { class: 'ph-bubble', translate: 'no' }, '—')));
+        } else if (x === 'flush') {
+          kids.push(h('span', { class: cls + ' ph-c--flush' + (now ? ' sd-changed' : ''), 'aria-label': t('cellFlush') },
+            h('span', { translate: 'no' }, '×')));
+        } else if (x) {
+          kids.push(h('span', { class: cls + ' ph-c--st' + (now && c.dir === 'forward' ? ' sd-anim-in' : ''), style: { '--sw': SW[x] }, translate: 'no' }, x));
+        } else {
+          kids.push(h('span', { class: cls }));
+        }
+      }
+    });
+    return h('div', { class: 'ph-diag' }, h('div', { class: 'ph-labels' }, labels),
+      h('div', { class: 'ph-diagwrap' }, h('div', { class: 'ph-cells', style: { '--cols': String(N) } }, kids)));
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'program', type: 'choice', label: t('program'), hint: t('programHint'), resets: true,
+        options: [['independent', t('progIndependent')], ['raw', t('progRaw')], ['load-use', t('progLoadUse')], ['mixed', t('progMixed')]] },
+      { key: 'forwarding', type: 'toggle', label: t('forwarding'), hint: t('forwardingHint') }
+    ],
+
+    presets: [
+      { id: 'independent', label: t('prIndependent'), hint: t('prIndependentHint'), params: { program: 'independent', forwarding: true } },
+      { id: 'raw-no-fwd', label: t('prRawNoFwd'), hint: t('prRawNoFwdHint'), params: { program: 'raw', forwarding: false } },
+      { id: 'raw-fwd', label: t('prRawFwd'), hint: t('prRawFwdHint'), params: { program: 'raw', forwarding: true } },
+      { id: 'load-use', label: t('prLoadUse'), hint: t('prLoadUseHint'), params: { program: 'load-use', forwarding: true } },
+      { id: 'mixed', label: t('prMixed'), hint: t('prMixedHint'), params: { program: 'mixed', forwarding: true } }
+    ],
+
+    legend: [
+      { c: 3, label: t('legStage') },
+      { shape: 'hollow', label: t('legBubble') },
+      { shape: 'bg-dead', label: t('legFlush') },
+      { shape: 'dash', label: t('legFwd') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var fin = finalOf(c.params);
+      c.stage.replaceChildren(h('div', { class: 'ph' },
+        h('div', { class: 'ph-top' }, pipe(c), counts(c, fin)),
+        diagram(c, fin)));
+      // on a phone the diagram scrolls sideways inside itself: keep the current cycle's column in view
+      var wrap = c.stage.querySelector('.ph-diagwrap'), col = c.stage.querySelector('.ph-ch.sd-changed');
+      if (wrap && col && wrap.scrollWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, col.offsetLeft + col.offsetWidth / 2 - wrap.clientWidth / 2);
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params;
+      if (c.first) {
+        var fin = finalOf(p);
+        var n = fin.instrs.filter(function (q) { return q.fetched; }).length;
+        return t('capStart', { n: t.n('instrN', n), fwd: t(p.forwarding ? 'fwdOn' : 'fwdOffWord') });
+      }
+      var ev = s.last, out = [h('b', null, t('capCycle', { n: s.cycle }))];
+      var said = 0;
+      function say(parts) { out.push(' '); out.push(h('span', null, parts)); said++; }
+      if (ev.stall) {
+        var st = ev.stall;
+        if (st.cause === 'load-use') {
+          say(t.parts('capLoadUse', { c: op(s, st.consumer), c2: op(s, st.consumer), reg: reg(st.reg), p: op(s, st.producer) }));
+        } else {
+          var when = s.inStage.WB === st.producer ? t('wbNow') : t('wbAt', { n: s.cycle + 1 });
+          say(t.parts('capNoFwd', { c: op(s, st.consumer), reg: reg(st.reg), p: op(s, st.producer), when: when }));
+        }
+        if (isInstr(s.inStage.IF)) say(t('capIFHeld'));
+      }
+      // the forward into EX first: the branch is resolved with the value it brings
+      ev.forwards.forEach(function (f) {
+        say(t.parts('capFwd', { c: op(s, f.consumer), reg: reg(f.reg), p: op(s, f.producer), path: path(f.from + ' → EX') }));
+      });
+      if (ev.flush) say(t.parts('capFlush', { b: op(s, ev.flush.branch), target: op(s, ev.flush.target) }));
+      if (ev.notTaken != null) say(t.parts('capNotTaken', { b: op(s, ev.notTaken) }));
+      ev.regPasses.forEach(function (r) {
+        say(t.parts('capRegPass', { p: op(s, r.producer), reg: reg(r.reg), c: op(s, r.consumer) }));
+      });
+      // a quiet cycle: what the hazard unit sees now (it acts next cycle), else what enters EX
+      var seen = said ? null : L.hazard(s, s.inStage, !!p.forwarding);
+      if (seen) {
+        say(t.parts('capHazardSeen', { c: op(s, s.inStage.ID), c2: op(s, s.inStage.ID), reg: reg(seen.reg), p: op(s, seen.producer) }));
+      } else if (!said && isInstr(s.inStage.EX) && ev.fetched == null && ev.completed == null) {
+        say(t.parts('capEnters', { c: op(s, s.inStage.EX) }));
+      }
+      if (!said) {
+        if (ev.fetched != null) say(t.parts('capFetch', { i: code(bare(s.instrs[ev.fetched])) }));
+        if (ev.completed != null) say(t.parts('capDone', { i: code(bare(s.instrs[ev.completed])) }));
+      }
+      if (said < 2 && (s.inStage.WB === 'bubble' || s.inStage.WB === 'flushed')) say(t('capNoneDone'));
+      if (c.last) {
+        out.push(' ', h('span', { class: 'sd-hl' }, t.parts('capEnd', {
+          cycles: t.n('cyclesN', s.cycle), n: s.completed, stalls: t.n('stallsN', s.stalls), flushed: t.n('flushedN', s.flushes)
+        })));
+      }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
