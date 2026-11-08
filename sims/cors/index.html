@@ -1,0 +1,536 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- cors: same origin and CORS. A stepper, one phase per step: the browser classifies the request, sends a preflight
+     if needed, sends the actual request, then checks the response. Left: the messages as kit view K1 (kit/sequence.js),
+     lanes page script, browser (the gate), server, and a program outside a browser. Right: the origin triples of page
+     and target, the current exchange as text with the deciding header field marked, and the server's log.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="cors">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isto ishodište i CORS · simdeck</title>
+<meta name="description" content="Šalji zahtjeve sa stranice na drugo ishodište: tko blokira odgovor, kad ide prethodni zahtjev OPTIONS i zašto * ne vrijedi uz kolačiće.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "cors",
+  "title": {
+    "hr": "Isto ishodište i CORS",
+    "en": "Same origin and CORS"
+  },
+  "concept": {
+    "hr": "Pravilo provodi preglednik, ne poslužitelj; prethodni zahtjev",
+    "en": "The browser, not the server, enforces it; preflight"
+  },
+  "summary": {
+    "hr": "Šalji zahtjeve sa stranice na drugo ishodište: tko blokira odgovor, kad ide prethodni zahtjev OPTIONS i zašto * ne vrijedi uz kolačiće.",
+    "en": "Call another origin from a page script: who blocks the response, when an OPTIONS preflight goes first, and why * does not count with cookies."
+  },
+  "tags": [
+    "http"
+  ],
+  "class": "stepper",
+  "steps": 3
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="cors"]; colours only from kit tokens.
+   Layout: two columns. Left the K1 chart, right the origins, the current exchange and the server's log.
+   Lanes: script c1, browser c4, server c6, other program c5. A body handed over is c3, an error c2; never colour
+   alone: the gate badge has its word and ✓/✕, a differing origin part has ≠ and a dashed outline. */
+[data-sim="cors"] .cr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 28rem);
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1cqw;
+  font-size: 0.9rem;
+}
+[data-sim="cors"] .cr-col { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+[data-sim="cors"] .cr-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="cors"] .cr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+}
+[data-sim="cors"] .cr-box h2 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 700; }
+[data-sim="cors"] .cr-box h3 { margin: 0.35rem 0 0.15rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="cors"] .cr-box p { margin: 0.25rem 0 0; }
+[data-sim="cors"] .cr-mono { font-family: var(--mono); }
+[data-sim="cors"] .cr-muted { color: var(--muted); }
+[data-sim="cors"] .cr-sm { font-size: var(--fs-sm); }
+
+/* origins: part | page | target */
+[data-sim="cors"] .cr-ori { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 0.15rem 0.5rem; align-items: baseline; }
+[data-sim="cors"] .cr-ori > .cr-th { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="cors"] .cr-ori > .cr-v {
+  font-family: var(--mono); padding: 0 0.3rem; border: 0.16rem solid transparent; border-radius: var(--radius-sm);
+  background: var(--bg); overflow-wrap: anywhere; line-height: 1.35;
+}
+[data-sim="cors"] .cr-ori > .cr-v[data-diff="true"] { border: 0.2rem dashed var(--c2); font-weight: 700; }
+[data-sim="cors"] .cr-ne { font-weight: 700; margin-right: 0.3rem; }
+
+/* the exchange as text */
+[data-sim="cors"] .cr-msg { margin: 0.15rem 0 0; }
+[data-sim="cors"] .cr-msg + .cr-msg { margin-top: 0.35rem; padding-top: 0.3rem; border-top: var(--line-w) dashed var(--line); }
+[data-sim="cors"] .cr-line {
+  display: block; padding: 0 0.35rem; border-radius: var(--radius-sm); font-family: var(--mono);
+  white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3;
+}
+[data-sim="cors"] .cr-line[data-k="start"] { font-weight: 700; }
+[data-sim="cors"] .cr-line[data-k="body"] { color: var(--muted); }
+[data-sim="cors"] .cr-xchg[data-pre="true"] .cr-msg { border-left: 0.3rem dashed var(--c4); padding-left: 0.3rem; }
+[data-sim="cors"] .cr-xchg[data-pre="false"] .cr-msg { border-left: 0.3rem solid var(--c4); padding-left: 0.3rem; }
+/* changed marks inside text are a yellow fill with a thin outline: the kit's halo would cover the neighbouring lines */
+[data-sim="cors"] .cr-box .sd-changed, [data-sim="cors"] .cr-card .sd-changed {
+  --ink: var(--on-hl); --muted: var(--on-hl); --bg: var(--hl);
+  background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--on-hl); outline-offset: 0; box-shadow: none;
+}
+[data-sim="cors"] .cr-verdict { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-weight: 700; }
+
+/* the gate badge: word and symbol, colour on top */
+[data-sim="cors"] .cr-gate {
+  display: inline-block; padding: 0 0.35rem; border: 0.18rem solid var(--line); border-radius: var(--radius-sm);
+  font-weight: 700; line-height: 1.35; white-space: nowrap;
+}
+[data-sim="cors"] .cr-gate[data-st="open"] { border-color: var(--c3); }
+[data-sim="cors"] .cr-gate[data-st="closed"] { border: 0.3rem double var(--c2); }
+[data-sim="cors"] .cr-gate[data-st="none"] { border-style: dotted; }
+[data-sim="cors"] .cr-sym { font-family: var(--mono); }
+
+/* the server's log */
+[data-sim="cors"] .cr-log { list-style: none; margin: 0.15rem 0 0; padding: 0; }
+[data-sim="cors"] .cr-log li { padding: 0 0.35rem; border-radius: var(--radius-sm); background: var(--bg); line-height: 1.35; overflow-wrap: anywhere; }
+[data-sim="cors"] .cr-log li + li { margin-top: 0.15rem; }
+[data-sim="cors"] .cr-tag { display: inline-block; margin-left: 0.3rem; padding: 0 0.25rem; border: 0.12rem solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+
+/* lane cards */
+[data-sim="cors"] .cr-card { margin: 0.1rem 0 0; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="cors"] .cr-card p { margin: 0; overflow-wrap: anywhere; }
+[data-sim="cors"] .cr-card p + p { margin-top: 0.2rem; }
+[data-sim="cors"] .cr-card .sd-changed { padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="cors"] .cr-err { font-weight: 700; }
+[data-sim="cors"] .cr-card .cr-url { overflow-wrap: normal; word-break: normal; }
+
+/* Six presets and up to seven controls: the presets go in two columns so the panel fits one screen (as amdahl). */
+[data-sim="cors"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="cors"] .sd-preset { line-height: 1.15; }
+
+/* The kit sets [hidden] on a control whose visible() is false, but .sd-ctl's display wins (as in http-exchange). */
+[data-sim="cors"] .sd-panel [hidden] { display: none; }
+
+/* legend swatches (the kit has line, dash and hl) */
+[data-sim="cors"] .sd-swatch[data-shape="gate"] { width: 1.6em; background: transparent; border: 0.3rem double var(--ink); border-radius: var(--radius-sm); }
+[data-sim="cors"] .sd-swatch[data-shape="diff"] { width: 1.6em; background: transparent; border: 0.2rem dashed var(--ink); border-radius: var(--radius-sm); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="cors"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="cors"] .cr { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="cors"] .cr-col { gap: 0.7rem; }
+  [data-sim="cors"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="cors"] .cr-mid > .sd-seq { flex: none; }
+  [data-sim="cors"] .cr-mid .sd-seq-list { padding-bottom: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Isto ishodište i CORS</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (URLs, header fields, methods, bodies) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'cr-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  /** An origin or URL in a narrow lane card: it may break after "://" and before a path, never inside a name. */
+  function url(u) {
+    var m = /^([a-z]+:\/\/)([^/]*)(.*)$/.exec(String(u));
+    if (!m) return data(u, 'cr-mono cr-url');
+    return h('span', { translate: 'no', class: 'cr-mono cr-url' }, m[1], h('wbr'), m[2], m[3] ? [h('wbr'), m[3]] : null);
+  }
+  function span(x) { return h('span', null, x); }
+  /** Append children the way Simdeck.h does (arrays flattened, null skipped); the DOM's append would print them. */
+  function put(el) {
+    (function add(x) {
+      if (x == null || x === false) return;
+      if (Array.isArray(x)) x.forEach(add);
+      else el.append(x instanceof Node ? x : String(x));
+    })(Array.prototype.slice.call(arguments, 1));
+    return el;
+  }
+  /** t.parts, with a placeholder node used twice cloned (appending the same node twice would move it). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (p) {
+      if (typeof p === 'string' || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function changedCls(on, c) { return on ? 'sd-changed' + anim(c) : null; }
+
+  /** The step at which each phase of this run happens (1-based), and the phase of step n. */
+  function phaseStep(p, phase) { return L.plan(p).phases.indexOf(phase) + 1; }
+  function isWrite(m) { return m === 'POST' || m === 'PUT'; }
+  function gateOf(s) {
+    if (s.kind === 'other' || s.kind === 'same') return s.n >= 1 ? 'none' : 'idle';
+    if (s.blocked) return 'closed';
+    if (s.check && s.check.ok) return 'open';
+    return 'idle';
+  }
+
+  // ── the chart (K1) ──
+
+  function rowsOf(c) {
+    var s = c.state, p = c.params, rows = [];
+    if (s.n < 1) return rows;
+    var stepOf = function (ph) { return phaseStep(p, ph); };
+    var lastAt = 0;
+    function row(r, at) { if (at !== lastAt) r.time = String(at); lastAt = at; r.changed = at === s.n; rows.push(r); return r; }
+    var tgt = s.target;
+    // (1) classify
+    if (s.kind === 'other') row({ kind: 'note', lane: 'O', text: t('clsOther'), k: 'solid' }, 1);
+    else {
+      row({ from: 'S', to: 'B', label: 'fetch()', c: 1, fields: tgt.method }, 1);
+      row({ kind: 'note', lane: 'B', text: t(s.kind === 'same' ? 'noteSame' : s.kind === 'simple' ? 'noteSimple' : 'notePreflight'), k: 'solid' }, 1);
+    }
+    var msgs = s.messages.slice();
+    // (2) preflight
+    if (s.preflight) {
+      var at = stepOf('preflight'), pq = msgs.shift(), pr = msgs.shift();
+      row({ from: 'B', to: 'V', label: pq.method + ' ' + pq.target, c: 4, line: 'dashed' }, at);
+      row({ from: 'V', to: 'B', label: pr.code + ' ' + pr.reason, c: 6, line: 'dashed' }, at);
+      if (!s.preflight.ok) {
+        row({ kind: 'note', lane: 'B', text: t('noteNotSent'), k: 'fill' }, at);
+        row({ from: 'B', to: 'S', label: span(t('chipError')), c: 2, re: { S: span(t('reNoBody')) } }, at);
+      }
+    }
+    // (3) the actual request
+    if (msgs.length) {
+      var ra = stepOf('request'), rq = msgs.shift(), rs = msgs.shift(), who = s.kind === 'other' ? 'O' : 'B';
+      row({ from: who, to: 'V', label: rq.method + ' ' + rq.target, c: s.kind === 'other' ? 5 : 4 }, ra);
+      row({ from: 'V', to: who, label: rs.code + ' ' + rs.reason, c: 6 }, ra);
+      if (s.kind === 'same') row({ from: 'B', to: 'S', label: rs.body, c: 3 }, ra);
+    }
+    // (4) the check
+    if (s.check) {
+      var ca = stepOf('check');
+      if (s.check.ok) row({ from: 'B', to: 'S', label: s.delivered, c: 3 }, ca);
+      else row({ from: 'B', to: 'S', label: span(t('chipError')), c: 2, re: { S: span(t('reNoBody')) } }, ca);
+    }
+    return rows;
+  }
+
+  function renderChart(c) {
+    var s = c.state, other = s.client === 'other';
+    var lanes = [
+      { id: 'S', mark: 'JS', c: 1, shape: 'square', name: t('laneScript'), body: scriptCard(c), state: other ? 'down' : null },
+      { id: 'B', mark: '◧', c: 4, shape: 'square', name: t('laneBrowser'), body: browserCard(c), state: other ? 'down' : null },
+      { id: 'V', mark: 'API', c: 6, name: t('laneServer'), body: serverCard(c) },
+      { id: 'O', mark: '>_', c: 5, shape: 'square', name: t('laneOther'), body: otherCard(c), state: other ? null : 'down' }
+    ];
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '3rem',
+      lanes: lanes,
+      rows: rowsOf(c),
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  function scriptCard(c) {
+    var s = c.state;
+    if (s.client === 'other') return h('div', { class: 'cr-card' }, h('p', { class: 'cr-muted' }, t('cardNotUsed')), h('p', null, ' '));
+    var got = s.delivered !== null && s.client === 'browser' ? data(s.delivered)
+      : s.blocked ? [h('span', { class: 'cr-err' }, t('cardError')), h('br'), h('span', { class: 'cr-muted' }, t('cardConsole'))]
+      : h('span', { class: 'cr-muted' }, t('cardWaiting'));
+    var fresh = c.prev && (c.prev.delivered !== s.delivered || c.prev.blocked !== s.blocked);
+    return h('div', { class: 'cr-card' },
+      h('p', null, h('span', { class: 'cr-muted' }, t('cardPage'), ' '), url(L.serialize(s.pageOrigin))),
+      h('p', { class: changedCls(fresh, c) }, h('span', { class: 'cr-muted' }, t('cardGot'), ' '), got));
+  }
+
+  function gateBadge(st) {
+    var word = { open: 'gateOpen', closed: 'gateClosed', none: 'gateNone', idle: 'gateIdle' }[st];
+    var sym = { open: '✓ ', closed: '✕ ', none: '', idle: '' }[st];
+    return h('span', { class: 'cr-gate', dataset: { st: st } }, sym ? h('span', { class: 'cr-sym', 'aria-hidden': 'true' }, sym) : null, t(word));
+  }
+
+  function browserCard(c) {
+    var s = c.state;
+    if (s.client === 'other') return h('div', { class: 'cr-card' }, h('p', { class: 'cr-muted' }, t('cardNotUsed')), h('p', null, ' '));
+    var cls = s.kind ? t({ same: 'clsSame', simple: 'clsSimple', preflight: 'clsPreflight' }[s.kind]) : '—';
+    var g = gateOf(s), gPrev = c.prev ? gateOf(c.prev) : g;
+    return h('div', { class: 'cr-card' },
+      h('p', { class: changedCls(s.phase === 'classify', c) }, cls),
+      h('p', { class: changedCls(g !== gPrev && g !== 'none', c) }, h('span', { class: 'cr-muted' }, t('gateLabel'), ' '), gateBadge(g)));
+  }
+
+  function serverCard(c) {
+    var s = c.state, n = s.server.log.length;
+    var fresh = c.prev && c.prev.server.log.length !== n;
+    return h('div', { class: 'cr-card' },
+      h('p', null, url(s.server.origin)),
+      h('p', { class: changedCls(fresh, c) }, n ? t.n('srvLog', n) : t('srvLogEmpty')));
+  }
+
+  function otherCard(c) {
+    var s = c.state;
+    if (s.client !== 'other') return h('div', { class: 'cr-card' }, h('p', { class: 'cr-muted' }, t('cardNotUsed')), h('p', null, ' '));
+    var fresh = c.prev && c.prev.delivered !== s.delivered;
+    return h('div', { class: 'cr-card' },
+      h('p', { class: 'cr-muted' }, t('noteOther')),
+      h('p', { class: changedCls(fresh, c) }, h('span', { class: 'cr-muted' }, t('cardGotOther'), ' '),
+        s.delivered !== null ? data(s.delivered) : h('span', { class: 'cr-muted' }, t('cardWaiting'))));
+  }
+
+  // ── right: the origins ──
+
+  function renderOrigins(c) {
+    var s = c.state, pg = s.pageOrigin, api = s.apiOrigin, m = s.match;
+    var box = h('section', { class: 'cr-box' }, h('h2', null, t('oriTitle')));
+    var grid = h('div', { class: 'cr-ori' },
+      h('span', { class: 'cr-th' }, t('oriPart')), h('span', { class: 'cr-th' }, t('oriPage')), h('span', { class: 'cr-th' }, t('oriTarget')));
+    [['scheme', 'oriScheme'], ['host', 'oriHost'], ['port', 'oriPort']].forEach(function (k) {
+      var diff = m ? !m[k[0]] : false;
+      grid.append(h('span', { class: 'cr-th' }, t(k[1])),
+        h('span', { class: 'cr-v', dataset: { diff: String(diff) }, translate: 'no' }, pg ? String(pg[k[0]]) : '—'),
+        h('span', { class: 'cr-v', dataset: { diff: String(diff) }, translate: 'no' }, diff ? h('span', { class: 'cr-ne', 'aria-hidden': 'true' }, '≠') : null, String(api[k[0]])));
+    });
+    put(box, grid, h('p', { class: 'cr-sm' }, t(!m ? 'oriNoPage' : m.same ? 'oriSame' : 'oriCross')));
+    return box;
+  }
+
+  // ── right: the exchange as text ──
+
+  function msgLines(m, c, marked) {
+    var marks = (marked && m.marks || []).map(function (x) { return x.toLowerCase(); });
+    return h('div', { class: 'cr-msg', translate: 'no' },
+      h('span', { class: 'cr-line', dataset: { k: 'start' } }, L.startLine(m)),
+      m.headers.map(function (f) {
+        return h('span', { class: 'cr-line' + (marks.indexOf(f[0].toLowerCase()) >= 0 ? ' sd-changed' + anim(c) : '') }, f[0] + ': ' + f[1]);
+      }),
+      m.body ? h('span', { class: 'cr-line', dataset: { k: 'body' } }, m.body) : null);
+  }
+
+  function verdict(ok, okKey, badKey) {
+    return h('p', { class: 'cr-verdict' }, gateBadge(ok ? 'open' : 'closed'), t(ok ? okKey : badKey));
+  }
+
+  function renderExchange(c) {
+    var s = c.state, box = h('section', { class: 'cr-box cr-xchg' });
+    var msgs = s.messages;
+    if (s.phase === 'start' || s.phase === 'classify') {
+      var tg = s.target, it = L.intent(c.params);
+      put(box, h('h2', null, t(s.client === 'other' ? 'laneOther' : 'msgIntent')),
+        h('div', { class: 'cr-msg', translate: 'no' },
+          h('span', { class: 'cr-line', dataset: { k: 'start' } }, tg.method + ' ' + tg.url),
+          tg.contentType ? h('span', { class: 'cr-line' + (s.phase === 'classify' && s.why && s.why.headers.length ? ' sd-changed' + anim(c) : '') }, 'Content-Type: ' + tg.contentType) : null,
+          it.body ? h('span', { class: 'cr-line', dataset: { k: 'body' } }, it.body) : null),
+        tg.credentials ? h('p', { class: 'cr-sm' }, data("credentials: 'include'"), ' (', t('fetchCredentials'), ')') : null);
+      return box;
+    }
+    var pre = s.phase === 'preflight';
+    box.dataset.pre = String(pre);
+    var pair = pre ? msgs.slice(0, 2) : msgs.slice(-2);
+    put(box, h('h2', null, t(pre ? 'msgPreflight' : 'msgActual')), msgLines(pair[0], c, false), msgLines(pair[1], c, pre || s.phase === 'check'));
+    if (pre) put(box, verdict(s.preflight.ok, 'verdictPreOk', 'verdictPreFail'));
+    else if (s.phase === 'request' && (s.kind === 'same' || s.kind === 'other')) put(box, h('p', { class: 'cr-verdict' }, gateBadge('none'), t('verdictFree')));
+    else if (s.phase === 'check') put(box, verdict(s.check.ok, 'verdictOk', 'verdictBlocked'));
+    return box;
+  }
+
+  // ── right: the server ──
+
+  function renderServer(c) {
+    var s = c.state, srv = s.server;
+    var box = h('section', { class: 'cr-box' }, h('h2', null, t('laneServer')));
+    var decl = [];
+    if (srv.acao !== null) decl.push('Access-Control-Allow-Origin: ' + srv.acao);
+    if (srv.acac) decl.push('Access-Control-Allow-Credentials: true');
+    decl.push('Access-Control-Allow-Methods: ' + srv.allowMethods.join(', '));
+    if (srv.allowHeaders.length) decl.push('Access-Control-Allow-Headers: ' + srv.allowHeaders.join(', '));
+    // what it will send, until the first answer is on screen (from then on the exchange shows it)
+    if (!s.messages.length) put(box, h('h3', null, t('srvDeclares')),
+      srv.acao === null ? h('span', { class: 'cr-line cr-muted' }, t('srvNoAcao')) : null,
+      decl.map(function (d) { return h('span', { class: 'cr-line', translate: 'no' }, d); }));
+    var before = c.prev ? c.prev.server.log.length : srv.log.length;
+    put(box, h('h3', null, t('logTitle')), srv.log.length ? h('ul', { class: 'cr-log' }, srv.log.map(function (l, i) {
+      return h('li', { class: changedCls(i >= before, c) },
+        data(l.method + ' ' + l.path + ' → ' + l.code), ' ',
+        l.origin ? data('Origin: ' + l.origin, 'cr-mono cr-sm') : h('span', { class: 'cr-sm cr-muted' }, t('logNoOrigin')),
+        l.write ? h('span', { class: 'cr-tag' }, t('logWrite')) : null);
+    })) : h('p', { class: 'cr-sm cr-muted' }, t('logEmpty')));
+    return box;
+  }
+
+  // ── captions ──
+
+  function partsDiffering(m) {
+    return ['scheme', 'host', 'port'].filter(function (k) { return !m[k]; })
+      .map(function (k) { return t({ scheme: 'partScheme', host: 'partHost', port: 'partPort' }[k]); }).join(', ');
+  }
+  function fieldName(s, name) { return name === 'content-type' ? 'Content-Type: ' + s.target.contentType : name; }
+
+  function caption(c) {
+    var s = c.state, ev = s.ev, tg = s.target, out = [];
+    var page = s.pageOrigin ? L.serialize(s.pageOrigin) : '';
+    var last = s.messages[s.messages.length - 1];
+    switch (ev.kind) {
+      case 'start':
+        out = s.client === 'other' ? parts('capStartOther', { req: B(tg.method + ' ' + tg.url) })
+          : parts('capStart', { page: B(page), req: B(tg.method + ' ' + tg.url) });
+        break;
+      case 'classify':
+        if (ev.class === 'other') out = [t('capOther')];
+        else if (ev.class === 'same') out = parts('capSame', { origin: B(page) });
+        else if (ev.class === 'simple') out = parts('capSimple', { parts: partsDiffering(s.match), method: B(tg.method) });
+        else {
+          var f = ev.headers.length ? B(fieldName(s, ev.headers[0])) : null;
+          var reason = ev.method && f ? parts('reasonBoth', { method: B(tg.method), field: f })
+            : ev.method ? parts('reasonMethod', { method: B(tg.method) }) : parts('reasonHeader', { field: f });
+          out = parts('capPreflight', { parts: partsDiffering(s.match), reason: span(reason) });
+        }
+        break;
+      case 'preflight': {
+        var v = { method: B(tg.method), origin: B(page) };
+        if (ev.ok) {
+          var what = [];
+          if (s.why.method) what = what.concat(parts('capPreOkMethod', { method: B(tg.method) }));
+          if (s.why.headers.length) what = what.concat(parts('capPreOkHeader', { field: B(s.why.headers.join(', ')) }));
+          out = parts('capPreOk', { origin: B(page), what: span(what) });
+        } else if (ev.fail === 'method') out = parts('capPreFailMethod', Object.assign(v, { allowed: B(s.server.allowMethods.join(', ')) }));
+        else if (ev.fail === 'header') out = parts('capPreFailHeader', Object.assign(v, { field: B(ev.missing) }));
+        else out = parts({ 'acao-missing': 'capPreFailAcao', 'acao-star': 'capPreFailStar', 'acac-missing': 'capPreFailAcac',
+          'acao-other': 'capPreFailOther', status: 'capPreFailStatus' }[ev.fail], v);
+        break;
+      }
+      case 'request': {
+        var code = B(last.code), body = B(last.body);
+        if (ev.class === 'same') out = parts('capFreeSame', { code: code, body: body });
+        else if (ev.class === 'other') {
+          var noAcao = !L.fieldValues(last.headers, 'Access-Control-Allow-Origin').length;
+          out = parts(noAcao ? 'capFreeOtherNoAcao' : 'capFreeOther', { code: code, body: body });
+        } else out = parts(isWrite(tg.method) ? 'capReqWrite' : 'capReq', { code: code, method: B(tg.method) });
+        break;
+      }
+      case 'check': {
+        var b = B(s.delivered || ''), o = B(page);
+        if (ev.ok) out = parts(tg.credentials ? 'capOkCred' : s.server.acao === '*' ? 'capOkStar' : 'capOkExact', { body: b, origin: o });
+        else if (ev.fail === 'acao-missing') {
+          out = [t('capBlockAcao')];
+          if (ev.write) out = out.concat(parts('capBlockAcaoWrite', { method: B(tg.method) }));
+        } else if (ev.fail === 'acao-star') out = parts('capBlockStar', { origin: o });
+        else if (ev.fail === 'acac-missing') out = [t('capBlockAcac')];
+        else out = parts('capBlockOther', { acao: B(s.server.acao) });
+        break;
+      }
+      default: out = [];
+    }
+    return out;
+  }
+
+  // ── controls ──
+
+  var M = function (m) { return [m, data(m, '')]; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'outside', type: 'toggle', label: t('outside'), resets: true },
+      { key: 'targetOrigin', type: 'choice', label: t('targetOrigin'), resets: true,
+        options: [['same', t('tgtSame')], ['host', t('tgtHost')], ['port', t('tgtPort')], ['scheme', t('tgtScheme')]] },
+      { key: 'method', type: 'choice', label: t('method'), options: L.METHODS.map(M) },
+      { key: 'jsonBody', type: 'toggle', label: t('jsonBody'), visible: function (p) { return p.method !== 'GET'; } },
+      { key: 'credentials', type: 'toggle', label: t('credentials'), visible: function (p) { return !p.outside; } },
+      { key: 'acao', type: 'choice', label: t('acao'), options: [['none', t('acaoNone')], ['star', data('*', '')], ['exact', t('acaoExact')]] },
+      // shown only where they can matter (the panel must fit one screen); the server sends them either way
+      { key: 'acac', type: 'toggle', label: t('acac'), visible: function (p) { return !p.outside && p.credentials; } },
+      { key: 'allowPut', type: 'toggle', label: t('allowPut'), visible: function (p) { return p.method === 'PUT' || (p.method !== 'GET' && p.jsonBody); } }
+    ],
+
+    presets: [
+      { id: 'same-origin', label: t('presetSame'), hint: t('presetSameHint'), params: { targetOrigin: 'same' } },
+      { id: 'simple-blocked', label: t('presetBlocked'), hint: t('presetBlockedHint'), params: {} },
+      { id: 'simple-allowed', label: t('presetAllowed'), hint: t('presetAllowedHint'), params: { acao: 'exact' } },
+      { id: 'preflight', label: t('presetPreflight'), hint: t('presetPreflightHint'), params: { method: 'PUT', jsonBody: true, acao: 'exact', allowPut: true } },
+      { id: 'credentials-star', label: t('presetStar'), hint: t('presetStarHint'), params: { credentials: true, acao: 'star', acac: true } },
+      { id: 'non-browser', label: t('presetOther'), hint: t('presetOtherHint'), params: { outside: true } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legActual') },
+      { shape: 'dash', label: t('legPreflight') },
+      { shape: 'gate', label: t('legGate') },
+      { shape: 'diff', label: t('legDiff') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'cr' },
+        h('div', { class: 'cr-col cr-mid' }, chart),
+        h('div', { class: 'cr-col' }, renderOrigins(c), renderExchange(c), renderServer(c))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
