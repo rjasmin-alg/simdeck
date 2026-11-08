@@ -72,11 +72,16 @@ roles × rights model). Rules and expected numbers: `SPEC.md`.
 
 ## For the owner
 
-- Catalogue §4.13 lists no Croatian detail *(check)* for this entry. Whether the regulation under the Zakon o
-  kibernetičkoj sigurnosti (NN 14/2024) names segregation of duties in its own words *(check; source: Narodne novine,
-  the Uredba o kibernetičkoj sigurnosti)*; not on the page.
+- Catalogue §4.13 lists no Croatian detail for this entry. Whether the regulation under the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) names segregation of duties in its own words *(open: not stated by the owner; source: Narodne novine)*; not on the
+  page.
 - Whether "deputies" belong on this page or only in `cmp-four-eyes` (they double the people needed; here they are a
   toggle, default off).
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

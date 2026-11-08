@@ -76,14 +76,19 @@ New explorer (task `docs/tasks/w3/cmp-patch-sla.md`, catalogue `cmp-patch-sla` �
 
 ## For the owner
 
-- Catalogue §4.13 lists no Croatian detail *(check)* for this entry. Whether the regulation under the Zakon o
-  kibernetičkoj sigurnosti (NN 14/2024) sets vulnerability handling deadlines or a reporting metric of its own
-  *(check; source: Narodne novine, the Uredba o kibernetičkoj sigurnosti)*; nothing of it is on the page.
+- Catalogue §4.13 lists no Croatian detail for this entry. Whether the regulation under the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) sets vulnerability handling deadlines or a reporting metric of its own *(open: not stated by the owner; source:
+  Narodne novine)*; nothing of it is on the page.
 - Whether a fix made inside a dated exception's end date should count as in time (the usual reading: it met the
   approved date; the page says so in the caption) or as late against the original deadline (83.9 % instead of
   93.7 % in preset 3).
 - Whether "systems nobody owns are never fixed" is too absolute for the audience (the alternative: fixed at a low
   rate when someone stumbles on them). It is the cleanest way to show the tail.
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

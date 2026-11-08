@@ -111,7 +111,7 @@
         'onemogućuje ostvarivanje prava ili korištenje usluge. Stranica prikazuje šest od njih. U većini slučajeva dva ' +
         'ispunjena kriterija znače procjenu; što ih je više, to je procjena izvjesnija, a ponekad je dovoljan i jedan. ' +
         'Tko odluči da procjena nije potrebna, zapisuje zašto. Zaposlenici su ranjivi jer je poslodavac u jačem ' +
-        'položaju. Nadzorno tijelo objavljuje i popis obrada za koje je procjena uvijek potrebna (članak 35. stavak ' +
+        'položaju. Nadzorno tijelo, u Hrvatskoj Agencija za zaštitu osobnih podataka (AZOP), objavljuje i popis obrada za koje je procjena uvijek potrebna (članak 35. stavak ' +
         '4.).</p>' +
         '<p>Procjena boduje rizik za ljude kao <b>vjerojatnost</b> (<i lang="en">likelihood</i>) × <b>ozbiljnost</b> ' +
         '(<i lang="en">severity</i>) (uvodna izjava 76), na istoj matrici kao registar rizika, i bira mjere: ' +
@@ -126,7 +126,9 @@
         'supervisory authority</i>) (članak 36. stavak 1.) ili mijenja rješenje. Procjena se preispituje kad se obrada ' +
         'promijeni (članak 35. stavak 11.).</p>' +
         '<p>Razine i učinci mjera su izmišljeni. Uredba ne određuje broj ljudi za velik opseg; ovdje je to cijela ' +
-        'grupa od 2.400 ljudi, a tvrtka ima 140.</p>'
+        'grupa od 2.400 ljudi, a tvrtka ima 140.</p>' +
+        '<p>U Hrvatskoj Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) dodaje nacionalna pravila, na ' +
+        'primjer o videonadzoru. Praćenje zaposlenika prema Zakonu o radu uključuje i radničko vijeće.</p>'
     },
     en: {
       stage: 'A planned project: its activities, the screening criteria with the recommendation, and the matrix of risk to people before and after measures',
@@ -230,7 +232,8 @@
         'exercising a right or using a service. The page shows six of them. In most cases two criteria met mean an ' +
         'assessment; the more are met, the more likely it is needed, and sometimes one is enough. A controller that ' +
         'decides against an assessment records why. Employees are vulnerable because the employer holds the stronger ' +
-        'position. The supervisory authority also publishes a list of processing that always needs an assessment ' +
+        'position. The supervisory authority, in Croatia the Agencija za zaštitu osobnih podataka (AZOP), also ' +
+        'publishes a list of processing that always needs an assessment ' +
         '(art. 35(4)).</p>' +
         '<p>The assessment scores the risk to people as <b>likelihood</b> × <b>severity</b> (recital 76), on the same ' +
         'matrix as the risk register, and chooses measures: <b>data minimisation</b> (art. 5(1)(c)), ' +
@@ -242,7 +245,10 @@
         'authority</b> for <b>prior consultation</b> before the processing starts (art. 36(1)), or changes the design. ' +
         'The assessment is reviewed when the processing changes (art. 35(11)).</p>' +
         '<p>The levels and the effects of the measures are made up. The regulation sets no number of people for large ' +
-        'scale; here it is the whole group of 2,400 people, against the firm\'s 140.</p>'
+        'scale; here it is the whole group of 2,400 people, against the firm\'s 140.</p>' +
+        '<p>In Croatia the Zakon o provedbi Opće uredbe o zaštiti podataka (the GDPR Implementation Act, NN 42/2018) ' +
+        'adds national rules, for example on video surveillance. Monitoring employees also involves the workers\' ' +
+        'council under the Zakon o radu (Labour Act).</p>'
     }
   };
 

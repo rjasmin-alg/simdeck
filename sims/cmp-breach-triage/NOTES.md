@@ -56,13 +56,19 @@ Unchecked in this session, marked *(check)* there:
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters" (not verified, not on the page):
+From catalogue §4.13, "Where Croatian and EU practice matters":
 
-- The supervisory authority is the Agencija za zaštitu osobnih podataka (AZOP); the page says only "nadzorno tijelo".
-- The Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) adds national rules (for example on fines for public
-  bodies) *(check whether anything in it touches breach notification or the register)*.
+- Whether anything in the Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) touches breach notification or
+  the register *(open: not stated by the owner)*. Not on the page.
 - Whether AZOP publishes its own breach-notification form or guidance that should be linked from the explanation
-  *(check)*; the page copies no official form.
+  *(open: not stated by the owner)*; the page copies no official form.
+
+## Settled
+
+- The supervisory authority is the Agencija za zaštitu osobnih podataka (AZOP): owner confirmed 2026-11-08. On the page: the explanation
+  names it beside "nadzorno tijelo / supervisory authority"; captions still say only "nadzorno tijelo".
+- The Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) adds national rules, for example on fines for public
+  bodies: owner confirmed 2026-11-08. On the page: one sentence in the explanation's "Simplified" paragraph.
 
 ## Term pairs
 

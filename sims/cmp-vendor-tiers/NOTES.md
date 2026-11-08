@@ -67,14 +67,19 @@ risk register's model, §5.24). Rules and expected numbers: `SPEC.md`.
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters" (not on the page):
+From catalogue §4.13, "Where Croatian and EU practice matters":
+
+- The split between the Hrvatska narodna banka and HANFA, and DORA art. 28(3) on the register *(open: not stated by the owner; source: the
+  HNB and HANFA sites)*. A DORA preset (register of information, concentration at the level of the financial system)
+  was not built; the catalogue calls it optional.
+- How the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and its implementing regulation phrase the supply-chain
+  measure *(open: not stated by the owner; source: Narodne novine)*. Not on the page.
+
+## Settled
 
 - Financial entities follow DORA (applying since 17 January 2025) for ICT third-party risk, with a register of ICT
-  third-party arrangements; the supervisors are the Hrvatska narodna banka and HANFA *(check the split; source: the
-  HNB and HANFA sites, and DORA art. 28(3) on the register)*. A DORA preset (register of information, concentration
-  at the level of the financial system) was not built; the catalogue calls it optional.
-- How the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and its implementing regulation phrase the supply-chain
-  measure *(check; source: Narodne novine)*.
+  third-party arrangements; the supervisors are the Hrvatska narodna banka and HANFA: owner confirmed 2026-11-08. On the page: one sentence
+  in the explanation's GDPR/NIS2/DORA paragraph.
 
 ## Term pairs
 

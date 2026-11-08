@@ -62,10 +62,16 @@ expected numbers: `SPEC.md`.
 
 ## For the owner
 
-- Catalogue §4.13 lists no Croatian detail *(check)* for this entry. DORA applies to financial entities only (since
-  17 January 2025); the page names it as the source of the risk-based change management requirement, not as a duty
-  of the fictional firm. Whether the regulation under the Zakon o kibernetičkoj sigurnosti (NN 14/2024) asks for
-  change management in its own words *(check; source: Narodne novine)*; not on the page.
+- Catalogue §4.13 lists no Croatian detail for this entry. Whether the regulation under the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) asks for change management in its own words *(open: not stated by the owner; source: Narodne novine)*; not on
+  the page.
+
+## Settled
+
+- DORA applies to financial entities only (since 17 January 2025); the page names it as the source of the risk-based
+  change management requirement, not as a duty of the fictional firm: owner confirmed 2026-11-08.
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

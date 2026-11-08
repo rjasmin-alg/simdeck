@@ -63,14 +63,17 @@ expected numbers: `SPEC.md`.
 
 ## For the owner
 
-- The supervisory authority in Croatia is the Agencija za zaštitu osobnih podataka (AZOP); the Zakon o provedbi Opće
-  uredbe o zaštiti podataka (NN 42/2018) adds national rules *(check; catalogue §4.13)*. Neither is on the page; it
-  says only "nadzorno tijelo / supervisory authority".
-- How long invoices must be kept comes from Croatian accounting and tax law *(check before any period is quoted; the
-  page gives none)*.
+- How long invoices must be kept comes from Croatian accounting and tax law *(open: not stated by the owner; the page gives no period and
+  quotes none until one is stated with its law and article)*.
 - Whether an access answer must itself search the backups, or may describe them as copies of the live data with
   their storage period (the page does the latter) *(check against EDPB 01/2022)*.
 - The term choices below.
+
+## Settled
+
+- The supervisory authority in Croatia is the Agencija za zaštitu osobnih podataka (AZOP), and the Zakon o provedbi
+  Opće uredbe o zaštiti podataka (NN 42/2018) adds national rules (catalogue §4.13): owner confirmed 2026-11-08. On the page: a short
+  "U Hrvatskoj / In Croatia" paragraph in the explanation; captions still say only "nadzorno tijelo".
 
 ## Term pairs
 

@@ -68,17 +68,23 @@ numbers: `SPEC.md`.
 
 ## For the owner
 
-- Statutory retention periods for accounting, payroll and personnel records come from several Croatian laws (Zakon o
-  računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima, and the tax rules) *(check every period before
-  one is quoted anywhere; source: Narodne novine, the consolidated texts)*. None is on the page; the foot says
-  statutory periods differ. Some personnel data may have to be kept permanently *(check)*, which would make a
-  6-year default for personnel files misleading if anyone took it as the rule.
+- Every statutory retention period for accounting, payroll and personnel records, including any from the tax rules
+  *(open: not stated by the owner; source: Narodne novine, the consolidated texts)*. None is on the page: the explanation says the page's
+  periods are made up and the foot says statutory periods differ; a period is quoted only with its law and article.
+  Whether some personnel data must be kept permanently *(open: not stated by the owner)*, which would make a 6-year default for personnel
+  files misleading if anyone took it as the rule.
 - Whether to count a once-a-year deletion as "late" (the page: yes, the months after the due date are over) or to
   define periods as "to the end of the year" so a January run is on time.
 - Whether a hold should also cover the backups that hold a touched record (out of scope now; it would add a second
   concept).
 - The settled term *obustava brisanja zbog spora* is used; for an investigation rather than a dispute the page says
   only "spor ili istraga" in the explanation.
+
+## Settled
+
+- Statutory retention periods for accounting, payroll and personnel records come from several Croatian laws (Zakon o
+  računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima): owner confirmed 2026-11-08. On the page: one paragraph in the
+  explanation naming the three laws and saying the page's periods are made up.
 
 ## Term pairs
 

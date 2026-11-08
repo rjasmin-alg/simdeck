@@ -76,13 +76,18 @@ Rules and expected numbers: `SPEC.md`.
 From catalogue §4.13, "Where Croatian and EU practice matters" (nothing there is specific to this entry; not on the
 page):
 
-- Financial entities follow DORA for ICT third-party risk, with a register of ICT third-party arrangements and
-  contract terms (art. 28–30); the supervisors are the Hrvatska narodna banka and HANFA *(check the split; source:
-  the HNB and HANFA sites)*. A DORA preset was not built.
+- The split between the Hrvatska narodna banka and HANFA *(open: not stated by the owner; source: the HNB and HANFA sites)*. A DORA preset
+  was not built.
 - How the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and its implementing regulation phrase the supply-chain and
-  cloud measures *(check; source: Narodne novine)*.
+  cloud measures *(open: not stated by the owner; source: Narodne novine)*.
 - Cloud computing service providers are themselves entities under NIS2 (Annex I, digital infrastructure) *(check;
   not on the page)*.
+
+## Settled
+
+- Financial entities follow DORA for ICT third-party risk, with a register of ICT third-party arrangements and
+  contract terms (art. 28–30); the supervisors are the Hrvatska narodna banka and HANFA: owner confirmed 2026-11-08. Not on the page; the
+  catalogue line does not name this entry.
 
 ## Term pairs
 

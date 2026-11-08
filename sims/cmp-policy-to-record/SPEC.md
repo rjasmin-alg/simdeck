@@ -173,7 +173,9 @@ quality (a record that exists but proves nothing), scope (which systems a record
   a copy)*
 - NIS2, Directive (EU) 2022/2555, art. 21(2)(a) policies on risk analysis and information system security, and
   art. 21(2)(f) policies and procedures to assess the effectiveness of cybersecurity risk-management measures
-  (EUR-Lex). *(check: the Croatian law's matching article, Zakon o kibernetičkoj sigurnosti, NN 14/2024)*
+  (EUR-Lex). The Croatian law's matching article (Zakon o kibernetičkoj sigurnosti, NN 14/2024): open, not stated by
+  the owner. ISO/IEC 27001 certification is voluntary and the law's measures cover similar ground (owner confirmed
+  2026-11-08; one sentence in the explanation).
 - Design vs operating effectiveness: the standard distinction in control audits (tests of design at a point in time
   vs tests of operating effectiveness over a period), e.g. ISA 330 (tests of controls' operating effectiveness).
   *(check: paragraph numbers not checked)*

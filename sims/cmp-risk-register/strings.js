@@ -174,7 +174,9 @@
         'postupanja koji odobrava vlasnik rizika i njegovo prihvaćanje preostalog rizika (6.1.3), ponavljanje u ' +
         'planiranim razmacima (8.2, 8.3) i pregled uprave (9.3). Opća uredba o zaštiti podataka traži sigurnost ' +
         'primjerenu riziku različite vjerojatnosti i ozbiljnosti (čl. 32. st. 1.), a NIS2 da upravljačko tijelo ' +
-        'odobri mjere upravljanja kibersigurnosnim rizicima i nadzire ih (čl. 20. st. 1.).</p>' +
+        'odobri mjere upravljanja kibersigurnosnim rizicima i nadzire ih (čl. 20. st. 1.). Certifikacija prema ' +
+        'ISO/IEC 27001 je dobrovoljna; mjere koje traži Zakon o kibernetičkoj sigurnosti (NN 14/2024) pokrivaju ' +
+        'slično područje.</p>' +
         '<p>Stranica pojednostavljuje i nije pravni savjet. Jedna kontrola po riziku, rizici su neovisni, a ' +
         'raspodjela gubitaka i najgora godina su u simulatoru očekivanog godišnjeg gubitka.</p>'
     },
@@ -346,7 +348,9 @@
         'treatment plan approved by the risk owner and their acceptance of the residual risk (6.1.3), repeating it at ' +
         'planned intervals (8.2, 8.3) and the management review (9.3). The GDPR asks for security appropriate to a ' +
         'risk of varying likelihood and severity (art. 32(1)), and NIS2 for the management body to approve the ' +
-        'cybersecurity risk-management measures and oversee them (art. 20(1)).</p>' +
+        'cybersecurity risk-management measures and oversee them (art. 20(1)). ISO/IEC 27001 certification is ' +
+        'voluntary; the measures the Croatian Zakon o kibernetičkoj sigurnosti (Cybersecurity Act, NN 14/2024) ' +
+        'requires cover similar ground.</p>' +
         '<p>The page simplifies and is not legal advice. One control per risk, the risks are independent, and the ' +
         'spread of losses and the worst year are in the expected annual loss simulator.</p>'
     }

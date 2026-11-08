@@ -73,13 +73,18 @@ the client audit; hub of the evidence-trail model, §5.24). Rules and expected n
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters" (not verified, not on the page):
+From catalogue §4.13, "Where Croatian and EU practice matters":
 
-- ISO/IEC 27001 (2022 edition) certification is voluntary; the measures the Zakon o kibernetičkoj sigurnosti
-  (NN 14/2024) requires cover similar ground *(check how the regulation under it refers to ISO/IEC 27001)*; the
-  article of the Croatian law that matches NIS2 art. 21 *(check)*.
+- How the regulation under the Zakon o kibernetičkoj sigurnosti refers to ISO/IEC 27001, and the article of the
+  Croatian law that matches NIS2 art. 21 *(open: not stated by the owner)*. Not on the page.
 - The Croatian clause titles of HRN EN ISO/IEC 27001 (e.g. "interni audit" vs "unutarnji audit" for 9.2,
   "nesukladnost" for 10.2) *(check against the HZN edition; the explanation uses "interni audit" and "nesukladnost")*.
+
+## Settled
+
+- ISO/IEC 27001 (2022 edition) certification is voluntary; the measures the Zakon o kibernetičkoj sigurnosti
+  (NN 14/2024) requires cover similar ground: owner confirmed 2026-11-08. On the page: one sentence at the end of the explanation's
+  sources paragraph.
 
 ## Term pairs
 

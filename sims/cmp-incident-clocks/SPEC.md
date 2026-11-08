@@ -200,8 +200,11 @@ content of each report; filing outside the work queue (two people in parallel).
   version: rano upozorenje, obavijest o incidentu, završno izvješće, značajan incident, "bez nepotrebne odgode, a u
   svakom slučaju u roku od 24 sata od saznanja"). *(check: the Croatian wording was confirmed through a secondary
   Croatian source quoting the directive, not read on EUR-Lex directly)*
-- Croatian law: Zakon o kibernetičkoj sigurnosti (NN 14/2024) transposes art. 23; named in the explanation only, no
-  article cited. *(check: the article number and any national difference; see NOTES.md "For the owner")*
+- Croatian law: Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it transpose art. 23;
+  the competent authorities categorise entities and notify them; the GDPR supervisory authority is AZOP; financial
+  entities follow DORA, supervised by the Hrvatska narodna banka and HANFA (owner confirmed 2026-11-08; named in the
+  explanation only, no article cited). The article number and any national difference: open, not stated by the owner
+  (NOTES.md "For the owner").
 - GDPR: Regulation (EU) 2016/679, art. 33(1) (72 hours "after having become aware", "where feasible", reasons for the
   delay), art. 33(2) and art. 34 (out of scope) (EUR-Lex; Croatian: "bez nepotrebnog odgađanja i, ako je izvedivo,
   najkasnije 72 sata nakon saznanja").
@@ -210,7 +213,7 @@ content of each report; filing outside the work queue (two people in parallel).
   data being compromised, after a short initial investigation that should begin as soon as possible. *(check: section
   and paragraph numbers not checked against the PDF)*
 - Months and hours: the model counts one calendar month to the same day number (last day of a shorter month), the
-  usual reading in EU law (Regulation (EEC, Euratom) No 1182/71, art. 3). *(check: whether 1182/71's extension of a
-  period ending on a Saturday, Sunday or holiday applies to the final report under the Croatian law; the page ignores
-  it)*
+  usual reading in EU law (Regulation (EEC, Euratom) No 1182/71, art. 3). Whether 1182/71's extension of a period
+  ending on a Saturday, Sunday or holiday applies to the final report under the Croatian law: open, not stated by the
+  owner; the page ignores it.
 - Seed: `rpo-rto` preset "found on Monday" (an outage found late); no answer from the DR instructor material is used.

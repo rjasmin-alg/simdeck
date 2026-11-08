@@ -75,11 +75,16 @@ New explorer (task `docs/tasks/w3/cmp-privileged-access.md`, catalogue `cmp-priv
 
 ## For the owner
 
-- Catalogue §4.13 lists no Croatian detail *(check)* for this entry. Whether the regulation under the Zakon o
-  kibernetičkoj sigurnosti (NN 14/2024) names privileged accounts, emergency accounts or time-limited rights in its own
-  words *(check; source: Narodne novine, the Uredba o kibernetičkoj sigurnosti)*; not on the page.
+- Catalogue §4.13 lists no Croatian detail for this entry. Whether the regulation under the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) names privileged accounts, emergency accounts or time-limited rights in its own words
+  *(open: not stated by the owner; source: Narodne novine)*; not on the page.
 - Whether "thefts only in working hours" should stay a toggle or become the default (it is the more realistic case
   and the more sobering number: 15 % instead of 3.6 %).
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

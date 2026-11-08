@@ -186,7 +186,8 @@
         '<p><b>Tri koraka, svaki sa svojim pragom.</b> <b>Evidentirati</b> uvijek: voditelj obrade dokumentira svaku ' +
         'povredu, njezine posljedice i poduzete mjere (čl. 33. st. 5.; smjernice EDPB-a dodaju i razloge kad se ne ' +
         'prijavljuje). ' +
-        '<b>Prijaviti</b> <b>nadzornom tijelu</b> (<i>supervisory authority</i>) u roku od 72 sata od saznanja, osim ' +
+        '<b>Prijaviti</b> <b>nadzornom tijelu</b> (<i>supervisory authority</i>; u Hrvatskoj je to Agencija za ' +
+        'zaštitu osobnih podataka, AZOP) u roku od 72 sata od saznanja, osim ' +
         'ako nije vjerojatno da će povreda prouzročiti rizik za prava i slobode pojedinaca (čl. 33. st. 1.; rokove ' +
         'pokazuje <i>cmp-incident-clocks</i>). <b>Obavijestiti</b> <b>ispitanike</b> (<i>data subjects</i>) bez ' +
         'nepotrebnog odgađanja kad je rizik visok (čl. 34. st. 1.).</p>' +
@@ -203,7 +204,9 @@
         'važu vrstu i osjetljivost podataka, broj ljudi, koliko ih je lako prepoznati, težinu i trajnost posljedica, ' +
         'posebno ranjive ljude (na primjer djecu) i namjeru napadača. Izostavljeni su obavijest izvršitelja obrade ' +
         'voditelju (čl. 33. st. 2.), javno priopćenje kad bi pojedinačna obavijest zahtijevala nerazmjeran napor ' +
-        '(čl. 34. st. 3. t. c) i prijava istog incidenta prema NIS2. Nije pravni savjet.</p>',
+        '(čl. 34. st. 3. t. c) i prijava istog incidenta prema NIS2. Zakon o provedbi Opće uredbe o zaštiti ' +
+        'podataka (NN 42/2018) dodaje nacionalna pravila, na primjer o kaznama za tijela javne vlasti. Nije pravni ' +
+        'savjet.</p>',
     },
     en: {
       stage: 'Triage of a personal-data breach: record, notify, inform',
@@ -370,7 +373,8 @@
         'restore that loses two days of entries is a breach, though nobody stole anything.</p>' +
         '<p><b>Three steps, each with its own threshold.</b> <b>Record</b> always: the controller documents every ' +
         'breach, its effects and the remedial action taken (art. 33(5); the EDPB adds the reasons for not notifying). ' +
-        '<b>Notify</b> the <b>supervisory authority</b> within 72 hours of becoming aware, unless the breach is ' +
+        '<b>Notify</b> the <b>supervisory authority</b> (in Croatia the Agencija za zaštitu osobnih podataka, AZOP) ' +
+        'within 72 hours of becoming aware, unless the breach is ' +
         'unlikely to result in a risk to the rights and freedoms of people (art. 33(1); the clocks are ' +
         '<i>cmp-incident-clocks</i>). <b>Inform</b> the <b>data subjects</b> without undue delay when the risk is ' +
         'high (art. 34(1)).</p>' +
@@ -387,7 +391,9 @@
         'be identified, how severe and lasting the consequences are, vulnerable people (children, for example) and ' +
         'the attacker’s intent. Left out: a processor telling the controller (art. 33(2)), a public ' +
         'communication when telling each person would take disproportionate effort (art. 34(3)(c)) and reporting ' +
-        'the same incident under NIS2. Not legal advice.</p>',
+        'the same incident under NIS2. The Zakon o provedbi Opće uredbe o zaštiti podataka (the Croatian GDPR ' +
+        'Implementation Act, NN 42/2018) adds national rules, for example on fines for public bodies. Not legal ' +
+        'advice.</p>',
     }
   };
 

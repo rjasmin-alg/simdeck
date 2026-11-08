@@ -74,20 +74,24 @@ New explorer (task `docs/tasks/w3/cmp-nis2-scope.md`, catalogue `cmp-nis2-scope`
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters". None of it is on the page; the page names only the
-Zakon o kibernetičkoj sigurnosti as the Croatian implementation (as `cmp-incident-clocks` does).
+From catalogue §4.13, "Where Croatian and EU practice matters":
 
-- The Zakon o kibernetičkoj sigurnosti (NN 14/2024) and the government regulation under it *(check the regulation's
-  name and number; source: Narodne novine)*.
-- In Croatia the competent authorities categorise entities and notify them, rather than entities deciding for
-  themselves *(check; source: the Zakon, the articles on categorisation)*. The page says only that the state keeps
-  the list (art. 3(3)).
+- The name and number of the government regulation under the Zakon o kibernetičkoj sigurnosti *(open: not stated by the owner; source:
+  Narodne novine)*.
 - Whether the Croatian law adds local and regional self-government units and education institutions (art. 2(5))
-  *(check; source: the Zakon's annexes)*. The page shows local government as out "unless national law brings it in";
+  *(open: not stated by the owner; source: the Zakon's annexes)*. The page shows local government as out "unless national law brings it in";
   if the Zakon does include them, that is already the Croatian reality and a Croatian IT manager in a municipality is
-  in scope: the owner may want a line in the explanation or a preset once this is confirmed.
-- Which body supervises which sector, and the national fine amounts and whether public bodies are fined (art. 34(7))
-  *(check; source: the Zakon)*.
+  in scope: the owner may want a line in the explanation or a preset once this is stated.
+- Which body supervises which sector, the national fine amounts and whether public bodies are fined (art. 34(7))
+  *(open: not stated by the owner; source: the Zakon)*. The page keeps the directive's minimum ceilings and says so in the foot.
+
+## Settled
+
+- NIS2 is implemented by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it, and
+  the law speaks of ključni i važni subjekti: owner confirmed 2026-11-08. On the page: the explanation's "The state has the final word"
+  paragraph.
+- In Croatia the competent authorities categorise entities and notify them, rather than entities deciding for
+  themselves: owner confirmed 2026-11-08. On the page: one sentence in the same paragraph.
 
 ## Term pairs
 

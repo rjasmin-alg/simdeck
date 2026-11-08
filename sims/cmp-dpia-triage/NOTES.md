@@ -75,16 +75,26 @@ New explorer (task `docs/tasks/w3/cmp-dpia-triage.md`, catalogue `cmp-dpia-triag
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters". None of it is on the page.
+From catalogue §4.13, "Where Croatian and EU practice matters":
 
-- The supervisory authority in Croatia is the Agencija za zaštitu osobnih podataka (AZOP); its list of processing
-  that always needs an assessment (art. 35(4)) *(check: source AZOP's website and the decision as published in
-  Narodne novine)*. The page says only that the authority publishes such a list.
+- What AZOP's list of processing that always needs an assessment (art. 35(4)) contains, and where it is published
+  *(open: not stated by the owner; source AZOP's website and the decision as published in Narodne novine)*. The page says only that the
+  authority publishes such a list.
+- Whether the camera-over-the-desks activity meets a specific national limit on video surveillance of workplaces in
+  the Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) *(open: not stated by the owner)*. The page names no limit.
+- The article of the Zakon o radu on consulting the workers' council *(open: not stated by the owner)*. The page names the law without an
+  article.
+
+## Settled
+
+- The supervisory authority in Croatia is the Agencija za zaštitu osobnih podataka (AZOP), which publishes the list of
+  processing that always needs an assessment (art. 35(4)): owner confirmed 2026-11-08. On the page: the explanation names AZOP where it
+  mentions the list.
 - The Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) adds national rules, for example on video
-  surveillance of workplaces *(check: source Narodne novine; the camera-over-the-desks activity may meet a specific
-  national limit)*.
-- Monitoring employees also involves the workers' council under the Zakon o radu *(check: source Narodne novine,
-  the article on consulting the workers' council)*. Left out of the page as a second concept.
+  surveillance: owner confirmed 2026-11-08. On the page: one sentence in the explanation's last paragraph.
+- Monitoring employees also involves the workers' council under the Zakon o radu: owner confirmed 2026-11-08. On the page: one sentence in
+  the explanation's last paragraph, as a note; the model and the criteria are unchanged (it stays out of the
+  screening, so the page keeps one concept).
 
 ## Term pairs
 

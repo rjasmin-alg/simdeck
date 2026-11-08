@@ -134,6 +134,9 @@
         '<li>Obrisan zapis ostaje u <b>sigurnosnim kopijama</b> (<i>backups</i>) dok one ne isteknu. Rok čuvanja ' +
         'kopija određuje koliko dugo; obnova iz kopije ne smije vratiti obrisano u upotrebu.</li>' +
         '</ul>' +
+        '<p>U Hrvatskoj zakonske rokove čuvanja računovodstvenih, platnih i kadrovskih zapisa određuje više zakona ' +
+        '(Zakon o računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima); rokovi na ovoj stranici su ' +
+        'izmišljeni.</p>' +
         '<p>Srodno: pravila čuvanja sigurnosnih kopija; zahtjev ispitanika za brisanje.</p>' +
         '<p>Odakle: Opća uredba o zaštiti podataka (EU) 2016/679, čl. 5. st. 1. t. (e) (ograničenje pohrane), ' +
         'čl. 17. (pravo na brisanje; st. 3. t. (e): pravni zahtjevi), čl. 30. st. 1. t. (f) (predviđeni rokovi ' +
@@ -262,6 +265,9 @@
         '<li>An erased record stays in the <b>backups</b> until they age out. The backups\' own retention decides ' +
         'how long; a restore must not bring erased data back into use.</li>' +
         '</ul>' +
+        '<p>In Croatia the statutory retention periods for accounting, payroll and personnel records come from ' +
+        'several laws (Zakon o računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima); the periods on ' +
+        'this page are made up.</p>' +
         '<p>Related: backup retention rules; a data subject\'s request for erasure.</p>' +
         '<p>Sources: General Data Protection Regulation (EU) 2016/679, art. 5(1)(e) (storage limitation), ' +
         'art. 17 (right to erasure; 17(3)(e): legal claims), art. 30(1)(f) (envisaged time limits for erasure in the ' +

@@ -60,13 +60,18 @@ evidence-trail model of `cmp-policy-to-record`, §5.24). Rules and expected numb
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters": nothing there is specific to this entry. Related and
-unverified, not on the page:
+From catalogue §4.13, "Where Croatian and EU practice matters": nothing there is specific to this entry. Related,
+not on the page:
 
 - How the regulation under the Zakon o kibernetičkoj sigurnosti (NN 14/2024) words the backup and recovery measure that
-  matches NIS2 art. 21(2)(c), and whether it sets a testing frequency *(check)*.
+  matches NIS2 art. 21(2)(c), and whether it sets a testing frequency *(open: not stated by the owner)*.
 - DORA (Regulation (EU) 2022/2554) has its own rules on backup policies and restoration testing for financial entities
   *(check the article, art. 12, before a DORA preset is considered)*.
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

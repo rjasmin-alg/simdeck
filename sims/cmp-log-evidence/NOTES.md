@@ -62,16 +62,21 @@ New stepper (task `docs/tasks/w3/cmp-log-evidence.md`, catalogue `cmp-log-eviden
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters", and this sim (not verified, not on the page):
+From catalogue §4.13, "Where Croatian and EU practice matters", and this sim (not on the page):
 
-- NIS2 is implemented by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it
-  *(check the regulation's name and number)*; whether it sets logging measures, a log retention period or clock
-  synchronisation for ključni i važni subjekti *(check)*. The page names the law once, without an article.
+- The name and number of the government regulation under the Zakon o kibernetičkoj sigurnosti *(open: not stated by the owner)*; whether it
+  sets logging measures, a log retention period or clock synchronisation for ključni i važni subjekti *(open: not stated by the owner)*.
 - Any Croatian rule on how long logs that hold personal data may or must be kept (for example from AZOP guidance or
-  sector rules) *(check)*. The page uses illustrative periods and says only that the period must be written down and
+  sector rules) *(open: not stated by the owner)*. The page uses illustrative periods and says only that the period must be written down and
   justified.
-- Whether monitoring employees' activity through logs involves the workers' council under the Zakon o radu *(check;
-  the catalogue raises it for `cmp-dpia-triage`)*. Not on the page.
+- Whether monitoring employees' activity through logs counts as the monitoring that involves the workers' council
+  under the Zakon o radu *(open: not stated by the owner)*; the general rule is settled for `cmp-dpia-triage`. Not on the page.
+
+## Settled
+
+- NIS2 is implemented by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it:
+  owner confirmed 2026-11-08. The page already named the law once, without an article; unchanged (the catalogue line does not name this
+  entry).
 
 ## Term pairs
 

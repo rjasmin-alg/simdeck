@@ -70,22 +70,29 @@ New stepper (task `docs/tasks/w3/cmp-incident-clocks.md`, catalogue `cmp-inciden
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters" (not verified, not on the page):
+From catalogue §4.13, "Where Croatian and EU practice matters" (not on the page):
 
-- NIS2 is implemented by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it
-  *(check the regulation's name and number)*; which article of the law sets the 24 h / 72 h / one month reporting and
-  whether it differs from art. 23 *(check)*.
-- The competent authorities categorise entities (ključni i važni subjekti) and notify them *(check)*; which body
-  receives incident reports for which sector (the national CSIRT or the competent authority) *(check)*. The page says
-  only "the competent CSIRT".
-- The GDPR supervisory authority is the Agencija za zaštitu osobnih podataka (AZOP); the page says only "nadzorno
-  tijelo".
-- Financial entities follow DORA for ICT incidents, with their own reporting timings, supervised by the Hrvatska
-  narodna banka and HANFA *(check the timings and the split)*. No DORA preset was built (optional in the catalogue).
+- The name and number of the government regulation under the Zakon o kibernetičkoj sigurnosti *(open: not stated by the owner)*; which
+  article of the law sets the 24 h / 72 h / one month reporting and whether it differs from art. 23 *(open: not stated by the owner)*.
+- Which body receives incident reports for which sector (the national CSIRT or the competent authority) *(open: not stated by the owner)*.
+  The page still says "the competent CSIRT or competent authority".
+- The DORA reporting timings for financial entities and the split between the Hrvatska narodna banka and HANFA
+  *(open: not stated by the owner)*. The page says only that DORA has its own timings. No DORA preset was built (optional in the catalogue).
 - Whether a final report whose month ends on a Saturday, Sunday or public holiday moves to the next working day
-  (Regulation 1182/71 art. 3(4) for EU acts; the Croatian law may say otherwise) *(check)*. The page ignores it; none
+  (Regulation 1182/71 art. 3(4) for EU acts; the Croatian law may say otherwise) *(open: not stated by the owner)*. The page ignores it; none
   of the presets' final dates falls on a weekend, but about a quarter of all param combinations do (384 of 1436
   significant ones, the reviewer's count).
+
+## Settled
+
+- NIS2 is implemented by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government regulation under it:
+  owner confirmed 2026-11-08. On the page: the explanation's NIS2 paragraph names both, without an article.
+- The competent authorities categorise entities (ključni i važni subjekti) and notify them; entities do not decide for
+  themselves: owner confirmed 2026-11-08. On the page: one sentence at the end of the NIS2 paragraph.
+- The GDPR supervisory authority is the Agencija za zaštitu osobnih podataka (AZOP): owner confirmed 2026-11-08. On the page: the GDPR
+  paragraph names it; captions still say only "nadzorno tijelo".
+- Financial entities follow DORA for ICT incidents, with their own reporting timings, supervised by the Hrvatska
+  narodna banka and HANFA: owner confirmed 2026-11-08. On the page: the "Simplified" paragraph, without timings.
 
 ## Term pairs
 

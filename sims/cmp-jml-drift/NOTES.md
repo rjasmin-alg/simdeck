@@ -71,11 +71,15 @@ New explorer (task `docs/tasks/w3/cmp-jml-drift.md`, catalogue `cmp-jml-drift` �
 
 ## For the owner
 
-- Catalogue §4.13 lists no Croatian detail *(check)* for this entry. Whether the regulation under the Zakon o
-  kibernetičkoj sigurnosti (NN 14/2024) lists access rights reviews or a review interval in its own words *(check;
-  source: Narodne novine, the Uredba o kibernetičkoj sigurnosti)*; not on the page. GDPR is not cited: least privilege
-  follows from art. 5(1)(f) and art. 32 only indirectly, and the page keeps to the two texts that name access
-  control.
+- Catalogue §4.13 lists no Croatian detail for this entry. Whether the regulation under the Zakon o kibernetičkoj
+  sigurnosti (NN 14/2024) lists access rights reviews or a review interval in its own words *(open: not stated by the owner; source:
+  Narodne novine)*; not on the page. GDPR is not cited: least privilege follows from art. 5(1)(f) and art. 32 only
+  indirectly, and the page keeps to the two texts that name access control.
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

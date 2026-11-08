@@ -189,7 +189,9 @@
         'st. 7.).</p>' +
         '<p><b>Konačnu riječ ima država.</b> Država sastavlja popis ključnih i važnih subjekata i redovito ga preispituje ' +
         '(čl. 3. st. 3.) te može obuhvatiti i lokalnu javnu upravu i obrazovne ustanove (čl. 2. st. 5.). U Hrvatskoj je ' +
-        'direktiva prenesena Zakonom o kibernetičkoj sigurnosti.</p>' +
+        'direktiva prenesena Zakonom o kibernetičkoj sigurnosti (NN 14/2024) i uredbom Vlade donesenom na temelju ' +
+        'njega; i zakon govori o ključnim i važnim subjektima. Subjekte razvrstavaju nadležna tijela i o tome ih ' +
+        'obavješćuju; subjekt to ne odlučuje sam.</p>' +
         '<p><b>Pojednostavljeno:</b> brojke povezanih i partnerskih poduzeća (grupe) se zbrajaju, a veličina se mijenja tek ' +
         'nakon dvije uzastopne godine iznad ili ispod granice; financijski subjekti slijede DORA-u (čl. 4.); nekvalificirani ' +
         'pružatelji usluga povjerenja i regionalna uprava nisu prikazani.</p>'
@@ -377,7 +379,10 @@
         'decides, above it the share. For public administration the state decides whether fines apply (art. 34(7)).</p>' +
         '<p><b>The state has the final word.</b> It draws up the list of essential and important entities and reviews it ' +
         'regularly (art. 3(3)), and may add local public administration and education institutions (art. 2(5)). In ' +
-        'Croatia the directive is implemented by the Zakon o kibernetičkoj sigurnosti (Cybersecurity Act).</p>' +
+        'Croatia the directive is implemented by the Zakon o kibernetičkoj sigurnosti (Cybersecurity Act, NN 14/2024) ' +
+        'and a government regulation under it; the law, too, speaks of essential and important entities (ključni i ' +
+        'važni subjekti). The competent authorities categorise entities and notify them; an entity does not decide ' +
+        'this itself.</p>' +
         '<p><b>Simplified:</b> the figures of linked and partner enterprises (a group) are added, and the size class ' +
         'changes only after two consecutive years over or under a ceiling; financial entities follow DORA (art. 4); ' +
         'non-qualified trust service providers and regional government are not shown.</p>'

@@ -240,8 +240,10 @@ time (named in the explanation only; `cmp-exceptions` shows acceptances that exp
   art. 24(1), EUR-Lex, in English and the official Croatian version (Opća uredba o zaštiti podataka). *(check: the
   Croatian wording "vjerojatnosti i ozbiljnosti" against EUR-Lex)*
 - NIS2, Directive (EU) 2022/2555, art. 20(1) (management bodies approve the cybersecurity risk-management measures and
-  oversee them) and art. 21(1) (appropriate and proportionate measures). *(check: the Croatian Zakon o kibernetičkoj
-  sigurnosti's article numbers are not used on the page)*
+  oversee them) and art. 21(1) (appropriate and proportionate measures). The Croatian Zakon o kibernetičkoj
+  sigurnosti's article numbers: open, not stated by the owner, and not used on the page. ISO/IEC 27001 certification
+  is voluntary and the law's measures cover similar ground (owner confirmed 2026-11-08; one sentence in the
+  explanation).
 - L. A. Cox Jr., "What's wrong with risk matrices?", Risk Analysis 28(2), 2008, 497–512: ties and reversals from
   multiplying ordinal scores.
 - The expected loss: `fin-ale-risk` (SPEC rules 1a, 2, 4), copied, not linked.

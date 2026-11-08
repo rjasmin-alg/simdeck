@@ -68,9 +68,14 @@ risk-scoring model, §5.24; the money view is `fin-ale-risk`'s expected loss, §
 
 ## For the owner
 
-From catalogue §4.13, "Where Croatian and EU practice matters": ISO/IEC 27001 (2022) certification is voluntary;
-the measures the cybersecurity law requires cover similar ground *(check how the regulation under the Zakon o
-kibernetičkoj sigurnosti, NN 14/2024, refers to ISO/IEC 27001; source: Narodne novine)*. Not on the page.
+From catalogue §4.13, "Where Croatian and EU practice matters": how the regulation under the Zakon o kibernetičkoj
+sigurnosti (NN 14/2024) refers to ISO/IEC 27001 *(open: not stated by the owner; source: Narodne novine)*. Not on the page.
+
+## Settled
+
+- ISO/IEC 27001 (2022) certification is voluntary; the measures the cybersecurity law (Zakon o kibernetičkoj
+  sigurnosti, NN 14/2024) requires cover similar ground: owner confirmed 2026-11-08. On the page: one sentence in the explanation's
+  standards paragraph.
 
 ## Term pairs
 

@@ -160,7 +160,9 @@
         '10.2 (nesukladnost); kontrole iz Dodatka A 5.1, 5.37 (dokumentirane operativne procedure), 8.13 (sigurnosne ' +
         'kopije), 5.18 (prava pristupa) i 8.8 (tehničke ranjivosti). NIS2 (Direktiva (EU) 2022/2555), čl. 21. st. 2. ' +
         'toč. (a) i (f): politike, te politike i postupci za procjenu djelotvornosti mjera. Prava revizija uzima ' +
-        'uzorak zapisa i razlikuje teže i lakše nalaze; ovdje se pregledava sve.</p>' +
+        'uzorak zapisa i razlikuje teže i lakše nalaze; ovdje se pregledava sve. Certifikacija prema ISO/IEC 27001 ' +
+        'je dobrovoljna; mjere koje traži Zakon o kibernetičkoj sigurnosti (NN 14/2024) pokrivaju slično ' +
+        'područje.</p>' +
         '<p>Pojednostavljeno, nije pravni savjet. Tvrtka, njezini zahtjevi, rok od 14 dana i učestalosti su ' +
         'izmišljeni.</p>'
     },
@@ -312,7 +314,9 @@
         '10.2 (nonconformity); Annex A controls 5.1, 5.37 (documented operating procedures), 8.13 (information ' +
         'backup), 5.18 (access rights) and 8.8 (technical vulnerabilities). NIS2 (Directive (EU) 2022/2555), ' +
         'art. 21(2)(a) and (f): policies, and policies and procedures to assess the effectiveness of the measures. A ' +
-        'real audit samples the records and grades findings as major or minor; here everything is read.</p>' +
+        'real audit samples the records and grades findings as major or minor; here everything is read. ISO/IEC ' +
+        '27001 certification is voluntary; the measures the Croatian Zakon o kibernetičkoj sigurnosti (Cybersecurity ' +
+        'Act, NN 14/2024) requires cover similar ground.</p>' +
         '<p>Simplified, not legal advice. The firm, its requirements, the 14 days and the frequencies are made up.</p>'
     }
   };

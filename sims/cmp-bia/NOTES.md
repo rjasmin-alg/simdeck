@@ -59,13 +59,18 @@ New explorer (task `docs/tasks/w3/cmp-bia.md`, catalogue `cmp-bia` §4.13). Rule
 
 ## For the owner
 
-- No Croatian-specific number is on the page. The Zakon o kibernetičkoj sigurnosti (NN 14/2024) and its regulation
-  presumably carry NIS2 art. 21's continuity measure into Croatian law *(check how the regulation words business
-  continuity and whether it requires a BIA by name; source: Narodne novine)*. Not cited on the page.
+- No Croatian-specific number is on the page. How the regulation under the Zakon o kibernetičkoj sigurnosti
+  (NN 14/2024) words NIS2 art. 21's business continuity measure, and whether it requires a BIA by name *(open: not stated by the owner;
+  source: Narodne novine)*. Not cited on the page.
 - Whether "time to notice and decide" should be a separate named term (some methods split MTD into RTO + work
   recovery time, WRT, after the restore instead). The page puts the margin before the restore; both readings give
   "RTO below MTD".
 - Whether a DORA preset (financial entity) is wanted: the BIA rule is the same, so it was left out.
+
+## Settled
+
+- NIS2 is implemented in Croatia by the Zakon o kibernetičkoj sigurnosti (NN 14/2024) and a government
+  regulation under it (catalogue §4.13): owner confirmed 2026-11-08. Not on the page; the catalogue line does not name this entry.
 
 ## Term pairs
 

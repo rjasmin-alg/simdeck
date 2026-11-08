@@ -161,7 +161,9 @@
         'rizik svakog od njih.</p>' +
         '<p>Za izvršitelja obrade osobnih podataka ugovor s pravom revizije i odredbama o drugim izvršiteljima obvezan ' +
         'je bez obzira na razinu (Opća uredba o zaštiti podataka, čl. 28.); razina određuje koliko se dubinski ' +
-        'provjerava. NIS2 obvezuje subjekte u svom opsegu; DORA vrijedi za financijski sektor.</p>' +
+        'provjerava. NIS2 obvezuje subjekte u svom opsegu; DORA vrijedi za financijski sektor. Financijski subjekti ' +
+        'od 17. siječnja 2025. po DORA-i vode i registar ugovora s pružateljima IKT usluga, a u Hrvatskoj ih ' +
+        'nadziru Hrvatska narodna banka i HANFA.</p>' +
         '<p>Rizik dobavljača je očekivani godišnji gubitak kao u registru rizika (vjerojatnost × učinak). Udjeli ' +
         'pokrivenosti i sati su izmišljeni. Srodno: registar rizika; podijeljena odgovornost u oblaku.</p>' +
         '<p>Izvori: Direktiva (EU) 2022/2555 (NIS2), čl. 21. st. 2. t. (d) (sigurnost lanca opskrbe) i st. 3.; ' +
@@ -320,7 +322,9 @@
         'whom. The joint outage is a separate scenario, on top of each one\'s own risk.</p>' +
         '<p>For a processor of personal data, a contract with audit rights and terms on sub-processors is required ' +
         'whatever the tier (GDPR art. 28); the tier sets how deeply you check it. NIS2 binds the entities in its scope; ' +
-        'DORA applies to the financial sector.</p>' +
+        'DORA applies to the financial sector. Since 17 January 2025 financial entities also keep, under DORA, a ' +
+        'register of their ICT third-party arrangements, and in Croatia they are supervised by the Hrvatska narodna ' +
+        'banka and HANFA.</p>' +
         '<p>A supplier\'s risk is the expected yearly loss, as in the risk register (likelihood × impact). The ' +
         'coverage shares and the hours are made up. Related: the risk register; shared responsibility in the ' +
         'cloud.</p>' +

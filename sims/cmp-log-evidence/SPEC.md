@@ -207,8 +207,8 @@ notification itself (`cmp-incident-clocks`); more than one drifting host or a fa
 - NIS2, Directive (EU) 2022/2555, art. 21 (cybersecurity risk-management measures, incident handling, art. 21(2)(b));
   the implementing regulation for some digital-infrastructure entities, Implementing Regulation (EU) 2024/2690, has a
   section on logging *(check: section number and whether it names clock synchronisation and retention)*. Croatian
-  law: Zakon o kibernetičkoj sigurnosti (NN 14/2024), named only *(check: which article or regulation sets logging
-  measures)*.
+  law: Zakon o kibernetičkoj sigurnosti (NN 14/2024), named only (owner confirmed 2026-11-08); which article or
+  regulation sets logging measures: open, not stated by the owner.
 - Address 203.0.113.45: RFC 5737 documentation range.
 - Seed sims: `lnx-log-path` (where a log record goes on one host), `win-ipam-audit` (correlating logs), `ntp-sync`
   (clock synchronisation); no answer from the DR instructor material is used.

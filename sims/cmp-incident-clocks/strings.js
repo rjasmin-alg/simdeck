@@ -163,14 +163,17 @@
         '(<i>triage</i>) utvrdi što se dogodilo. Kad tvrtka s razumnom sigurnošću zna da se dogodio značajan ' +
         'incident ili povreda osobnih podataka, to je <b>saznanje</b> (<i>awareness</i>), i tek tada kreću rokovi. ' +
         'Koliko je napad trajao prije otkrivanja na rokove ne utječe (pokušaj „Otkriveno u ponedjeljak“).</p>' +
-        '<p><b>NIS2</b> (Direktiva (EU) 2022/2555, čl. 23. st. 4.; u Hrvatskoj Zakon o kibernetičkoj sigurnosti): za ' +
+        '<p><b>NIS2</b> (Direktiva (EU) 2022/2555, čl. 23. st. 4.; u Hrvatskoj Zakon o kibernetičkoj sigurnosti, ' +
+        'NN 14/2024, i uredba Vlade donesena na temelju njega): za ' +
         '<b>značajan incident</b> (<i>significant incident</i>) bez nepotrebne odgode, a najkasnije 24 sata od ' +
         'saznanja, <b>rano upozorenje</b> (<i>early warning</i>); najkasnije 72 sata od saznanja ' +
         '<b>obavijest o incidentu</b> (<i>incident notification</i>) s početnom procjenom; najkasnije mjesec dana ' +
         'nakon obavijesti <b>završno izvješće</b> (<i>final report</i>). Prijave idu nadležnom CSIRT-u ili nadležnom ' +
-        'tijelu.</p>' +
+        'tijelu. Po tom zakonu nadležna tijela razvrstavaju subjekte u ključne i važne i o tome ih obavješćuju; ' +
+        'subjekt to ne odlučuje sam.</p>' +
         '<p><b>GDPR</b> (Opća uredba o zaštiti podataka, čl. 33. st. 1.): voditelj obrade <b>povredu osobnih ' +
-        'podataka</b> prijavljuje nadzornom tijelu bez nepotrebnog odgađanja i, ako je izvedivo, najkasnije 72 sata ' +
+        'podataka</b> prijavljuje nadzornom tijelu, u Hrvatskoj Agenciji za zaštitu osobnih podataka (AZOP), bez ' +
+        'nepotrebnog odgađanja i, ako je izvedivo, najkasnije 72 sata ' +
         'nakon saznanja; zakašnjela prijava navodi razloge kašnjenja. Prijava nije potrebna ako povreda vjerojatno ' +
         'neće prouzročiti rizik za ljude; tu odluku pokazuje <i>cmp-breach-triage</i>.</p>' +
         '<p><b>Što pokazuje pozornica.</b> Rokovi u satima teku kroz noći i vikende. Ako prijave šalje netko tko radi ' +
@@ -181,7 +184,8 @@
         'podataka (9/2022) traže da kratka početna istraga počne odmah, pa se trijaža koja se otegne može smatrati ' +
         'nepotrebnom odgodom. Sati rada po prijavi su izmišljeni. Izostavljeni su međuizvješće na zahtjev, izvješće o ' +
         'napretku za incident koji još traje, obavještavanje ljudi o povredi (čl. 34.) i posebna pravila za ' +
-        'financijski sektor (DORA). Nije pravni savjet.</p>',
+        'financijski sektor: DORA (Uredba (EU) 2022/2554) ima vlastite rokove prijave IKT incidenata, a financijske subjekte ' +
+        'nadziru Hrvatska narodna banka i HANFA. Nije pravni savjet.</p>',
     },
     en: {
       stage: 'Incident timeline and reporting clocks',
@@ -333,13 +337,15 @@
         'what happened. When the firm knows with reasonable certainty that a significant incident or a personal-data ' +
         'breach has occurred, that is <b>awareness</b>, and only then do the clocks start. How long the attack ran ' +
         'before detection does not change them (try “Found on Monday”).</p>' +
-        '<p><b>NIS2</b> (Directive (EU) 2022/2555, art. 23(4); in Croatia the Zakon o kibernetičkoj sigurnosti): for a ' +
+        '<p><b>NIS2</b> (Directive (EU) 2022/2555, art. 23(4); in Croatia the Zakon o kibernetičkoj sigurnosti, ' +
+        'NN 14/2024, and a government regulation under it): for a ' +
         '<b>significant incident</b>, without undue delay and in any event within 24 hours of becoming aware, an ' +
         '<b>early warning</b>; within 72 hours of becoming aware, an <b>incident notification</b> with an initial ' +
         'assessment; no later than one month after the notification, a <b>final report</b>. Reports go to the ' +
-        'competent CSIRT or competent authority.</p>' +
+        'competent CSIRT or competent authority. Under that law the competent authorities categorise entities as ' +
+        'essential or important (ključni i važni subjekti) and notify them; an entity does not decide this itself.</p>' +
         '<p><b>GDPR</b> (Regulation (EU) 2016/679, art. 33(1)): the controller notifies a <b>personal-data breach</b> ' +
-        'to the supervisory authority without undue delay and, where feasible, not later than 72 hours after becoming ' +
+        'to the supervisory authority, in Croatia the Agencija za zaštitu osobnih podataka (AZOP), without undue delay and, where feasible, not later than 72 hours after becoming ' +
         'aware of it; a late notification gives the reasons for the delay. No notification is needed when the breach ' +
         'is unlikely to result in a risk to people; that decision is <i>cmp-breach-triage</i>.</p>' +
         '<p><b>What the stage shows.</b> Hour clocks run through nights and weekends. If the person who files reports ' +
@@ -351,7 +357,8 @@
         'guidelines (9/2022) expect the short initial investigation to begin at once, so a triage that drags on can ' +
         'itself count as undue delay. The hours each report takes are made up. Left out: the intermediate report on ' +
         'request, the progress report for an incident still ongoing, telling people about a breach (art. 34) and the ' +
-        'financial sector’s own rules (DORA). Not legal advice.</p>',
+        'financial sector’s own rules: DORA (Regulation (EU) 2022/2554) has its own ICT incident reporting timings, ' +
+        'and in Croatia financial entities are supervised by the Hrvatska narodna banka and HANFA. Not legal advice.</p>',
     }
   };
 

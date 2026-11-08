@@ -164,6 +164,8 @@
         'obavijestiti (čl. 19.). Iz sigurnosnih kopija jednu osobu obično nije moguće izbrisati: podaci ostaju dok ' +
         'kopije ne isteknu, a <b>zapis o brisanju</b> bilježi da se nakon obnove moraju ponovno obrisati prije ' +
         'uporabe. Kako kopije istječu, pokazuje <i>cmp-retention-hold</i>, a rotaciju kopija <i>retention-gfs</i>.</p>' +
+        '<p><b>U Hrvatskoj.</b> Nadzorno tijelo kojem se ispitanik može obratiti je Agencija za zaštitu osobnih ' +
+        'podataka (AZOP). Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) dodaje nacionalna pravila.</p>' +
         '<p><b>Pojednostavljeno.</b> Identitet se odmah potvrđuje; svako mjesto zbilja sadrži podatke; trajanja su ' +
         'izmišljena, kao i tvrtka i ispitanik. Nije pravni savjet.</p>'
     },
@@ -316,6 +318,9 @@
         'recipients are to be told (art. 19). One person usually cannot be erased from backups: the data stay until ' +
         'the backups age out, and an <b>erasure record</b> notes that they must be erased again after a restore, ' +
         'before use. How backups age out is <i>cmp-retention-hold</i>; how they rotate is <i>retention-gfs</i>.</p>' +
+        '<p><b>In Croatia.</b> The supervisory authority a data subject can turn to is the Agencija za zaštitu ' +
+        'osobnih podataka (AZOP). The Zakon o provedbi Opće uredbe o zaštiti podataka (the GDPR Implementation Act, ' +
+        'NN 42/2018) adds national rules.</p>' +
         '<p><b>Simplified.</b> Identity is confirmed at once; every place really holds the data; the durations are ' +
         'made up, as are the firm and the data subject. Not legal advice.</p>'
     }
