@@ -609,10 +609,11 @@ CMP_NOTES = ["## Compliance notes (all `cmp-` tasks)", "",
     "Narodne novine, the European Data Protection Board's guidelines (breach notification, impact assessment "
     "criteria), and ISO/IEC 27001 by clause number only (the text is paid; never quote it). Cite them in SPEC.md.",
     "- **Deadlines, thresholds and fines:** use the EU text's values where the entry needs them (GDPR's 72 hours and "
-    "one month, NIS2's 24 hours / 72 hours / one month) with the article. Anything Croatian the catalogue marks "
-    "*(check)* in §4.13 (\"Where Croatian and EU practice matters\": bodies, national thresholds, retention periods, "
-    "fine amounts, the regulation's number) is unverified: keep it off the page and copy it into `NOTES.md` under "
-    "\"For the owner\" with the source you would check.",
+    "one month, NIS2's 24 hours / 72 hours / one month) with the article. The Croatian details in §4.13 "
+    "(\"Where Croatian and EU practice matters\": bodies, the regulation, who categorises entities, AZOP, the workers' "
+    "council, HNB and HANFA) were confirmed by the owner on 2026-11-08 and may go on the page, each with its law. A "
+    "Croatian detail not listed there (a national threshold, a retention period, a fine amount) still gets *(check)*: "
+    "keep it off the page and copy it into `NOTES.md` under \"For the owner\" with the source you would check.",
     "- **Numbers are illustrative.** Failure rates, team sizes, ticket counts and costs are made-up but plausible, and "
     "the page says so once; formulas (sampling probability, likelihood × impact, a fine ceiling as the higher of two "
     "values) are standard and checked in SPEC.md with a small script.",

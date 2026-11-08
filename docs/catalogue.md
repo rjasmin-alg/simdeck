@@ -944,7 +944,8 @@ written vs operating, the average vs the tail, the clock started at awareness vs
 as a card. Frameworks are the subject here, so GDPR (Opća uredba o zaštiti podataka), NIS2 and its Croatian
 implementation (Zakon o kibernetičkoj sigurnosti, 2024), ISO/IEC 27001 and, for the financial sector, DORA are named
 where a concept comes from them. General principles only: no legal advice, no products or tools, one fictional
-organisation; Croatian details not yet verified are marked *(check)* and stay off the pages until the owner confirms them.
+organisation; the Croatian details below were confirmed by the owner on 2026-11-08 and may go on the pages; a new
+Croatian detail not listed there is still marked *(check)* and kept off the page until the owner confirms it.
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -998,27 +999,27 @@ organisation; Croatian details not yet verified are marked *(check)* and stay of
 - `cmp-maturity-levels` — Razine zrelosti: prosjek skriva najslabije područje
 - `cmp-cost-of-noncompliance` — Cijena neusklađenosti i cijena kontrola
 
-**Where Croatian and EU practice matters** (one line each, for the page's notes, not the model; everything marked
-*(check)* is unverified and goes into the sim's `NOTES.md` for the owner, not onto the page):
+**Where Croatian and EU practice matters** (one line each, for the page's notes, not the model; confirmed by the owner
+on 2026-11-08, so these may be named on the page):
 
 - `cmp-nis2-scope`, `cmp-incident-clocks`, `cmp-cost-of-noncompliance`: NIS2 is implemented by the Zakon o kibernetičkoj
-  sigurnosti (NN 14/2024) and a government regulation under it *(check the regulation's name and number)*; the law speaks
+  sigurnosti (NN 14/2024) and a government regulation under it; the law speaks
   of ključni i važni subjekti, and the competent authorities categorise entities and notify them rather than entities
-  deciding for themselves *(check)*; which body receives incident reports for which sector *(check)*; the national fine
-  amounts *(check)*.
+  deciding for themselves; which body receives incident reports for which sector; the national fine amounts, each
+  quoted with its article.
 - `cmp-breach-triage`, `cmp-incident-clocks`, `cmp-data-subject-request`, `cmp-dpia-triage`: the supervisory authority is
   the Agencija za zaštitu osobnih podataka (AZOP); the Zakon o provedbi Opće uredbe o zaštiti podataka (NN 42/2018) adds
-  national rules, for example on video surveillance and on fines for public bodies *(check)*; AZOP's list of processing
-  that always needs an impact assessment *(check)*.
-- `cmp-dpia-triage`: monitoring employees also involves the workers' council under the Zakon o radu *(check)*.
+  national rules, for example on video surveillance and on fines for public bodies; AZOP's list of processing
+  that always needs an impact assessment.
+- `cmp-dpia-triage`: monitoring employees also involves the workers' council under the Zakon o radu.
 - `cmp-retention-hold`: statutory retention periods for accounting, payroll and personnel records come from several
   Croatian laws (Zakon o računovodstvu, Zakon o radu, Zakon o arhivskom gradivu i arhivima); the page uses illustrative
-  periods *(check every period before one is quoted anywhere)*.
+  periods; a statutory period is quoted only with its law and article.
 - `cmp-incident-clocks`, `cmp-vendor-tiers`: financial entities follow DORA (applying since 17 January 2025) for ICT
   incidents and ICT third-party risk, with their own reporting timings and a register of ICT third-party arrangements;
-  the supervisors are the Hrvatska narodna banka and HANFA *(check the timings and the split)*. A DORA preset is optional.
+  the supervisors are the Hrvatska narodna banka and HANFA. A DORA preset is optional.
 - `cmp-risk-register`, `cmp-policy-to-record`, `cmp-maturity-levels`: ISO/IEC 27001 (2022 edition) certification is
-  voluntary; the measures the cybersecurity law requires cover similar ground *(check how the regulation refers to it)*.
+  voluntary; the measures the cybersecurity law requires cover similar ground.
 
 **Suggested order for a course playlist** (`courses/cmp-it-managers.json`, "Usklađenost i procedure za IT menadžere /
 Compliance and procedures for IT managers", `lang: hr`; text only, no file yet):
