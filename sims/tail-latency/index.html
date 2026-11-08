@@ -1,0 +1,431 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Tail latency and fan-out: one server's mean and p99 against its variability, and the share of user requests that
+     meet a slow call when each fans out to N servers (task docs/tasks/w3/tail-latency.md). An explorer: the params drive
+     the stage live; the model is in sim.js (rules in SPEC.md), the words in strings.js. No kit view fits (a sorted-bar
+     sketch and a fan of calls), so the page draws its own SVG at 1:1 (no viewBox); gauges and the share bar are HTML. -->
+<html lang="hr" data-sim="tail-latency">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kašnjenje u repu i grananje poziva · simdeck</title>
+<meta name="description" content="p99 se odvaja od prosjeka; grananje poziva rep čini uobičajenim.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tail-latency",
+  "title": { "hr": "Kašnjenje u repu i grananje poziva", "en": "Tail latency and fan-out" },
+  "concept": { "hr": "p99 se odvaja od prosjeka; grananje poziva rep čini uobičajenim", "en": "p99 decouples from the mean; fan-out makes the tail common" },
+  "summary": {
+    "hr": "Varijabilnost diže 99. percentil pet puta, a prosjek tek 1,4 puta; zahtjev koji zove 100 poslužitelja spor je u 63 % slučajeva.",
+    "en": "Variability lifts the 99th percentile fivefold, the mean only 1.4 times; a request that calls 100 servers is slow 63 % of the time."
+  },
+  "tags": ["performance"],
+  "class": "explorer",
+  "entries": [{ "preset": "tail-decoupled" }, { "preset": "fanout-10" }, { "preset": "fanout-100" }, { "preset": "p999" }]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tail-latency"]; colours only from kit tokens. */
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="tail-latency"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+[data-sim="tail-latency"] .sd-explain sup { font-size: var(--fs-sm); }
+
+[data-sim="tail-latency"] .tl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 0 1.6rem;
+  height: 100%;
+  padding: 1cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="tail-latency"] .tl-side { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; min-width: 0; }
+[data-sim="tail-latency"] .tl-right { padding-left: 1.6rem; border-left: 2px solid var(--line); }
+[data-sim="tail-latency"] .tl-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.8rem; }
+[data-sim="tail-latency"] .tl-h { margin: 0; font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="tail-latency"] .tl-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="tail-latency"] .tl-plot { position: relative; flex: 1 1 auto; min-height: 14rem; }
+[data-sim="tail-latency"] .tl-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="tail-latency"] .tl-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+[data-sim="tail-latency"] .tl-plot .tl-muted { fill: var(--muted); }
+[data-sim="tail-latency"] .tl-plot .tl-big { font-size: var(--fs-md); font-weight: 700; }
+[data-sim="tail-latency"] .tl-plot .tl-tp { fill: var(--c2); }
+[data-sim="tail-latency"] .tl-axis { stroke: var(--ink); stroke-width: 3; }
+[data-sim="tail-latency"] .tl-grid { stroke: var(--line); stroke-width: 1; }
+[data-sim="tail-latency"] .tl-tick { stroke: var(--ink); stroke-width: 2; }
+[data-sim="tail-latency"] .tl-bar { fill: var(--c1); }
+[data-sim="tail-latency"] .tl-bar-slow { fill: var(--c2); }
+[data-sim="tail-latency"] .tl-mean { stroke: var(--ink); stroke-width: 4; }
+[data-sim="tail-latency"] .tl-p99 { stroke: var(--c2); stroke-width: 4; stroke-dasharray: 12 7; }
+[data-sim="tail-latency"] .tl-p999 { stroke: var(--c2); stroke-width: 3; stroke-dasharray: 3 5; }
+[data-sim="tail-latency"] .tl-off { fill: var(--ink); }
+[data-sim="tail-latency"] .tl-call { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+[data-sim="tail-latency"] .tl-call-few { stroke: var(--ink); stroke-width: 2; }
+[data-sim="tail-latency"] .tl-slowest { stroke: var(--ink); stroke-width: 6; fill: none; }
+[data-sim="tail-latency"] .tl-head-thin { fill: var(--ink); }
+[data-sim="tail-latency"] .tl-cell { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
+[data-sim="tail-latency"] .tl-cell-slow { fill: url(#tl-hatch-fan); stroke: var(--ink); stroke-width: 4; }
+[data-sim="tail-latency"] .tl-hatch-fan-line { stroke: var(--ink); stroke-width: 2; opacity: 0.6; }
+[data-sim="tail-latency"] .tl-user { fill: var(--c4); stroke: var(--ink); stroke-width: 3; }
+[data-sim="tail-latency"] .tl-plot .tl-on { fill: var(--on-series); stroke: none; font-weight: 700; }
+
+/* Gauges under the sketch. */
+[data-sim="tail-latency"] .tl-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+[data-sim="tail-latency"] .tl-gauge { padding: 0.3rem 0.8rem; border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
+[data-sim="tail-latency"] .tl-g-label { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="tail-latency"] .tl-g-val { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+[data-sim="tail-latency"] .tl-g-sub { font-size: var(--fs-sm); }
+[data-sim="tail-latency"] .tl-gauge.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="tail-latency"] .tl-gauge.sd-changed .tl-g-label { color: var(--on-hl); }
+
+/* The share of slow user requests. */
+[data-sim="tail-latency"] .tl-share { padding: 0.4rem 0.8rem; border: 2px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
+[data-sim="tail-latency"] .tl-share.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="tail-latency"] .tl-share.sd-changed .tl-g-label, [data-sim="tail-latency"] .tl-share.sd-changed .tl-note { color: var(--on-hl); }
+[data-sim="tail-latency"] .tl-share-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 1rem; }
+[data-sim="tail-latency"] .tl-bar-track { position: relative; height: 1.6rem; margin: 0.3rem 0 1.5rem; border: 2px solid var(--ink); border-radius: 0.3rem; background: var(--bg); }
+[data-sim="tail-latency"] .tl-bar-fill {
+  position: absolute; inset: 0 auto 0 0; border-right: 3px solid var(--ink);
+  background: repeating-linear-gradient(45deg, var(--c2) 0 0.35rem, var(--bg) 0.35rem 0.6rem);
+}
+[data-sim="tail-latency"] .tl-bar-q { position: absolute; top: -0.3rem; bottom: -0.3rem; width: 0; border-left: 3px solid var(--ink); }
+[data-sim="tail-latency"] .tl-bar-qlabel { position: absolute; top: 100%; margin-top: 0.15rem; font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="tail-latency"] .tl-formula { font-size: var(--fs-md); }
+[data-sim="tail-latency"] .tl-formula sup { font-size: var(--fs-sm); }
+[data-sim="tail-latency"] .tl-note { font-size: var(--fs-sm); color: var(--muted); margin: 0.2rem 0 0; }
+
+/* Legend swatches: shapes and patterns, so they read in grayscale too. */
+[data-sim="tail-latency"] .sd-swatch[data-shape='tl-mean'] { width: 0.3rem; height: 1.2em; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="tail-latency"] .sd-swatch[data-shape='tl-p99'] { width: 0.3rem; height: 1.2em; border: 0; border-radius: 0; background: repeating-linear-gradient(180deg, var(--c2) 0 0.35em, transparent 0.35em 0.55em); }
+[data-sim="tail-latency"] .sd-swatch[data-shape='tl-call'] { width: 1.8em; height: 0.12rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="tail-latency"] .sd-swatch[data-shape='tl-slowest'] { width: 1.8em; height: 0.4rem; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="tail-latency"] .sd-swatch[data-shape='tl-share'] { border-color: var(--ink); background: repeating-linear-gradient(45deg, var(--c2) 0 0.15em, var(--bg) 0.15em 0.3em); }
+
+/* Phone and portrait: the stage grows with its content; the two sides stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tail-latency"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tail-latency"] .tl { grid-template-columns: minmax(0, 1fr); gap: 1rem; height: auto; padding: 0.4rem; }
+  [data-sim="tail-latency"] .tl-right { padding-left: 0; padding-top: 1rem; border-left: 0; border-top: 2px solid var(--line); }
+  [data-sim="tail-latency"] .tl-plot { flex: 0 0 auto; height: 20rem; }
+  [data-sim="tail-latency"] .tl-right .tl-plot { height: 16rem; }
+  [data-sim="tail-latency"] .tl-g-val { font-size: var(--fs-lg); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kašnjenje u repu i grananje poziva</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  /** Time axis per ρ, fixed so a cv² change moves the markers, not the axis (SPEC.md, "Sketch"). */
+  var AXIS = { '0.1': [4, 1], '0.5': [8, 2], '0.8': [20, 5] };
+  var FEW = 24;   // up to this many calls get an arrowhead each
+
+  // ── numbers in the page's language ──
+  /** Three significant digits (0.111, 2.56, 19.6). */
+  function num(v) { return (v === 0 ? '0' : v.toPrecision(3)).replace('.', t('dec')); }
+  function short(v, digits) { return String(parseFloat(v.toFixed(digits == null ? 3 : digits))).replace('.', t('dec')); }
+  function sec(v) { return t('sec', { v: num(v) }); }
+  /** A share in percent with one decimal (63.4 %, 9.6 %, 0.1 %). */
+  function pct(v) { return t('pct', { v: short(v * 100, 1) }); }
+  /** A ratio in two significant digits (0.95, 1.4, 5). */
+  function ratio(v) { return String(parseFloat(v.toPrecision(2))).replace('.', t('dec')); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var str = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (str === null) { out.push(p); return; }
+      str.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+  /** Appends a text element and returns its measured width (the svg is in the page already). */
+  function textW(svg, el) { svg.append(el); return el.getComputedTextLength(); }
+  function hatch(id, cls, size) {
+    return s('pattern', { id: id, patternUnits: 'userSpaceOnUse', width: size, height: size, patternTransform: 'rotate(45)' },
+      s('line', { class: cls, x1: 0, y1: 0, x2: 0, y2: size }));
+  }
+  function metrics() {
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return { rem: rem, fs: Math.max(16, 0.8 * rem) };
+  }
+
+  // ── what changed with the last change: the params before it (caption) and the gauge that moved most ──
+  var lastKey = null, lastP = null, prevP = null;
+  function track(p) {
+    var key = JSON.stringify(p);
+    if (key === lastKey) return;            // a redraw of the same state (theme, resize) keeps the last change
+    prevP = lastP; lastP = p; lastKey = key;
+  }
+
+  // ── left: 100 requests sorted by time, the mean, p99 (and p99.9) ──
+  function drawSketch(box, st) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var mm = metrics(), rem = mm.rem, fs = mm.fs;
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('plotSketch') });
+    box.replaceChildren(svg);
+    var three = st.slowP === 'p999';
+    // Left margin: the rank labels; top: one label row per marker (p99.9, p99, mean); bottom: ticks and the axis title.
+    var topLbl = s('text', { x: 0, y: 0 }, t('slowest')), botLbl = s('text', { x: 0, y: 0 }, t('fastest'));
+    var lw = Math.max(textW(svg, topLbl), textW(svg, botLbl));
+    var m = { l: lw + 0.8 * rem, r: 1.2 * rem, t: (three ? 3.9 : 2.7) * fs, b: 2.9 * fs };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var ax = st.rho <= 0.1 ? AXIS['0.1'] : st.rho <= 0.5 ? AXIS['0.5'] : AXIS['0.8'], tmax = ax[0];
+    var X = function (v) { return m.l + Math.min(v, tmax) / tmax * pw; };
+    topLbl.setAttribute('x', m.l - 0.4 * rem); topLbl.setAttribute('y', m.t + 0.9 * fs); topLbl.setAttribute('text-anchor', 'end'); topLbl.setAttribute('class', 'tl-muted');
+    botLbl.setAttribute('x', m.l - 0.4 * rem); botLbl.setAttribute('y', m.t + ph); botLbl.setAttribute('text-anchor', 'end'); botLbl.setAttribute('class', 'tl-muted');
+
+    var xt = X(st.threshold);
+
+    // grid and ticks
+    for (var v = 0; v <= tmax + 1e-9; v += ax[1]) {
+      var x = X(v);
+      svg.append(s('line', { class: 'tl-grid', x1: x, x2: x, y1: m.t, y2: m.t + ph }));
+      svg.append(s('line', { class: 'tl-tick', x1: x, x2: x, y1: m.t + ph, y2: m.t + ph + 0.35 * fs }));
+      svg.append(s('text', { x: x, y: m.t + ph + 1.4 * fs, 'text-anchor': 'middle' }, t('sec', { v: short(v) })));
+    }
+    svg.append(s('text', { x: m.l + pw, y: m.t + ph + 2.6 * fs, 'text-anchor': 'end', class: 'tl-muted' }, t('axisT')));
+    svg.append(s('text', { x: m.l + 0.3 * rem, y: m.t + ph + 2.6 * fs, class: 'tl-muted' }, t('hundred')));
+
+    // the bars, fastest at the bottom; the part past the threshold in the tail colour; off the axis, an arrow
+    var times = L.sketchOf(st).times, n = times.length, bh = ph / n;
+    times.forEach(function (tv, i) {
+      var y = m.t + ph - (i + 1) * bh, hh = Math.max(1, bh - (bh > 4 ? 1 : 0));
+      var end = X(tv);
+      if (tv <= st.threshold) svg.append(s('rect', { class: 'tl-bar', x: m.l, y: y, width: end - m.l, height: hh }));
+      else {
+        svg.append(s('rect', { class: 'tl-bar', x: m.l, y: y, width: xt - m.l, height: hh }));
+        svg.append(s('rect', { class: 'tl-bar-slow', x: xt, y: y, width: Math.max(2, end - xt), height: hh }));
+      }
+      if (tv > tmax) {
+        var yc = y + hh / 2, a = 0.5 * rem;
+        svg.append(s('path', { class: 'tl-off', d: 'M' + (end + 2) + ' ' + (yc - a) + ' L' + (end + 2 + a * 1.4) + ' ' + yc + ' L' + (end + 2) + ' ' + (yc + a) + ' Z' }));
+      }
+    });
+    svg.append(s('line', { class: 'tl-axis', x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph }));
+    svg.append(s('line', { class: 'tl-axis', x1: m.l, x2: m.l, y1: m.t, y2: m.t + ph }));
+
+    // markers: a vertical line through the plot and a label row above it each (an arrow at the edge when off the axis)
+    var rows = [['mean', st.wMean, 'tl-mean', 'meanAt', '']];
+    rows.unshift(['p99', st.p99, 'tl-p99', 'p99At', 'tl-tp']);
+    if (three) rows.unshift(['p999', st.p999, 'tl-p999', 'p999At', 'tl-tp']);
+    rows.forEach(function (r, i) {
+      var off = r[1] > tmax, xx = X(r[1]), yl = (i + 1) * 1.2 * fs;
+      svg.append(s('line', { class: r[2], x1: xx, x2: xx, y1: m.t - 0.2 * fs, y2: m.t + ph }));   // from the plot's top, so no label row is crossed
+      var right = xx > m.l + 0.6 * pw;
+      var label = t(r[3], { v: sec(r[1]) }) + (off ? ' →' : '');
+      svg.append(s('text', { x: xx + (right ? -0.4 : 0.4) * rem, y: yl, 'text-anchor': right ? 'end' : 'start', class: 'tl-big ' + r[4] }, label));
+    });
+    // the slowest of the hundred: a label beside the longest bar (past p99; past p99.9 none of the 100 is)
+    var topEnd = X(times[n - 1]) + (times[n - 1] > tmax ? 1.4 * rem : 0.5 * rem), topY = m.t + Math.max(bh / 2 + 0.35 * fs, 1.1 * fs);
+    var tl = s('text', { x: topEnd, y: topY, class: 'tl-big tl-tp' }, '← ' + t('tail99'));
+    var tw = textW(svg, tl);
+    if (topEnd + tw > W) { tl.setAttribute('x', W); tl.setAttribute('text-anchor', 'end'); tl.setAttribute('y', topY + 1.3 * fs); tl.textContent = t('tail99'); }
+  }
+
+  // ── right: one user request, N calls, the slowest thick ──
+  function drawFan(box, st) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var mm = metrics(), rem = mm.rem, fs = mm.fs;
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('plotFan') });
+    box.replaceChildren(svg);
+    svg.append(s('defs', null, hatch('tl-hatch-fan', 'tl-hatch-fan-line', 8),
+      s('marker', { id: 'tl-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse' },
+        s('path', { d: 'M0 0 L10 5 L0 10 Z', class: 'tl-head-thin' })),
+      s('marker', { id: 'tl-arrow-thick', viewBox: '0 0 10 10', refX: 6, refY: 5, markerWidth: 3.2, markerHeight: 3.2, orient: 'auto' },
+        s('path', { d: 'M0 0 L10 5 L0 10 Z', class: 'tl-head-thin' }))));
+
+    // the user request box, left middle
+    var top = 1.6 * fs, bot = 1.6 * fs;
+    var userLbl = s('text', { x: 0, y: 0, class: 'tl-on' }, t('user'));
+    var uw = textW(svg, userLbl) + 1.2 * rem, uh = 2.6 * rem;
+    var ux = 0.2 * rem, uy = top + (H - top - bot - uh) / 2;
+    var userBox = s('rect', { class: 'tl-user', x: ux, y: uy, width: uw, height: uh, rx: 8 });
+    svg.insertBefore(userBox, userLbl);
+    userLbl.setAttribute('x', ux + uw / 2); userLbl.setAttribute('y', uy + uh / 2 + 0.35 * fs); userLbl.setAttribute('text-anchor', 'middle');
+
+    // the backends: a grid, column by column, cells as large as fit (at most 2.6 rem)
+    var n = st.fanout;
+    var gx0 = ux + uw + Math.max(4 * rem, 0.25 * W), gw = W - gx0 - 0.4 * rem, gh = H - top - bot;
+    var size = Math.min(2.6 * rem, gh);
+    while (size > 6 && Math.floor(gw / size) * Math.floor(gh / size) < n) size *= 0.96;
+    var rowsMax = Math.max(1, Math.floor(gh / size)), cols = Math.ceil(n / rowsMax), rows = Math.ceil(n / cols);
+    var gy0 = top + (gh - rows * size) / 2, cell = size * 0.78;
+    var cx = function (i) { return gx0 + Math.floor(i / rows) * size; };
+    var cy = function (i) { return gy0 + (i % rows) * size; };
+    var slow = Math.floor((Math.min(n, rows) - 1) / 2);   // the middle cell of the first column: its arrow crosses no cell
+    var sx = ux + uw, sy = uy + uh / 2, few = n <= FEW;
+
+    var calls = s('g');
+    for (var i = 0; i < n; i++) {
+      if (i === slow) continue;
+      calls.append(s('line', { class: few ? 'tl-call tl-call-few' : 'tl-call', x1: sx, y1: sy, x2: cx(i) - 2, y2: cy(i) + cell / 2, 'marker-end': few ? 'url(#tl-arrow)' : null }));
+    }
+    svg.append(calls);
+    for (var j = 0; j < n; j++) {
+      svg.append(s('rect', { class: j === slow ? 'tl-cell-slow' : 'tl-cell', x: cx(j), y: cy(j), width: cell, height: cell, rx: Math.min(6, cell / 4) }));
+    }
+    var ex = cx(slow) - 4, ey = cy(slow) + cell / 2;
+    svg.append(s('line', { class: 'tl-slowest', x1: sx, y1: sy, x2: ex, y2: ey, 'marker-end': 'url(#tl-arrow-thick)' }));
+    // labels: the slowest call above its arrow, the call count over the grid, "answers when the slowest arrives" below
+    var mx = (sx + ex) / 2;
+    if (n > 1) svg.append(s('text', { x: mx, y: Math.min(sy, ey) - 0.6 * fs, 'text-anchor': 'middle', class: 'tl-big' }, t('slowest')));
+    svg.append(s('text', { x: gx0, y: top - 0.5 * fs, class: 'tl-big' }, t.n('calls', n)));
+  }
+
+  // ── gauges and the share bar (HTML) ──
+  function gauge(key, label, val, sub, changed) {
+    return h('div', { class: 'tl-gauge' + (changed ? ' sd-changed' : ''), dataset: { g: key } },
+      h('div', { class: 'tl-g-label' }, label),
+      h('div', { class: 'tl-g-val' }, val),
+      h('div', { class: 'tl-g-sub' }, sub));
+  }
+  function gauges(st, moved) {
+    return [
+      gauge('wMean', t('gMean'), sec(st.wMean), t('gRatio', { k: ratio(st.ratioMean) }), moved.indexOf('wMean') >= 0),
+      gauge('p99', t('gP99'), sec(st.p99), [t('gRatio', { k: ratio(st.ratioP99) })].concat(st.slowP === 'p999' ? [' · ', t('gP999', { v: sec(st.p999) })] : []),
+        moved.indexOf('p99') >= 0)
+    ];
+  }
+  function share(box, st, moved) {
+    box.className = 'tl-share' + (moved.indexOf('pSlow') >= 0 ? ' sd-changed' : '');
+    var base = short(1 - st.q, 3);
+    var qPos = Math.max(st.q * 100, 0.4) + '%';
+    box.replaceChildren(
+      h('div', { class: 'tl-share-row' },
+        h('span', { class: 'tl-g-label' }, t('barTitle')),
+        h('span', { class: 'tl-g-val' }, pct(st.pSlow)),
+        h('span', { class: 'tl-formula', translate: 'no' }, t.parts('formula', { b: base, n: h('sup', null, String(st.fanout)), v: pct(st.pSlow) }))),
+      h('div', { class: 'tl-bar-track', role: 'img', 'aria-label': t('barTitle') + ' ' + pct(st.pSlow) },
+        h('div', { class: 'tl-bar-fill', style: { width: (st.pSlow * 100).toFixed(2) + '%' } }),
+        h('div', { class: 'tl-bar-q', style: { left: qPos } }),
+        h('div', { class: 'tl-bar-qlabel', style: { left: qPos } }, t('oneCall', { v: pct(st.q) }))),
+      h('p', { class: 'tl-note' }, t('perRequest', { v: short(st.slowCalls, 3) })),
+      h('p', { class: 'tl-note' }, t('independent')));
+  }
+
+  // ── captions: the one thing the current picture shows ──
+  function caption(c) {
+    track(c.params);
+    var st = c.state, p = c.params;
+    var b = function (x) { return h('b', null, x); };
+    switch (L.captionKey(st, p, prevP)) {
+      case 'tail': return rich('cTail', { b: String(st.cv2), kw: b(ratio(st.ratioMean)), kp: b(ratio(st.ratioP99)) });
+      case 'cv2Up': return rich('cCv2Up', { b: String(st.cv2), kw: b(ratio(st.ratioMean)), kp: b(ratio(st.ratioP99)) });
+      case 'cv2Load': return rich('cCv2Load', { b: String(st.cv2), rho: short(st.rho, 1), kw: b(ratio(st.ratioMean)), kp: b(ratio(st.ratioP99)) });
+      case 'cv2Ref': return rich('cCv2Ref', { w: b(sec(st.wMean)), p: b(sec(st.p99)), k: ratio(st.p99 / st.wMean) });
+      case 'cv2Down': return rich('cCv2Down', { kw: b(ratio(st.ratioMean)), kp: b(ratio(st.ratioP99)) });
+      case 'fanOne': return rich('cFanOne', { p: b(pct(st.pSlow)) });
+      default: return rich('cFanout', { servers: t.n('servers', st.fanout), p: b(pct(st.pSlow)), one: t(st.slowP === 'p999' ? 'oneIn1000' : 'oneIn100') });
+    }
+  }
+
+  var labels = { 'tail-decoupled': 'presetTail', 'fanout-10': 'presetFan10', 'fanout-100': 'presetFan100', 'p999': 'presetP999' };
+  var ui = null, last = null;
+
+  function build(stage) {
+    ui = {
+      leftSub: h('span', { class: 'tl-sub' }),
+      sketch: h('div', { class: 'tl-plot' }),
+      gauges: h('div', { class: 'tl-gauges' }),
+      fan: h('div', { class: 'tl-plot' }),
+      share: h('div', { class: 'tl-share' })
+    };
+    stage.replaceChildren(h('div', { class: 'tl' },
+      h('div', { class: 'tl-side tl-left' },
+        h('div', { class: 'tl-head' }, h('h2', { class: 'tl-h' }, t('leftTitle')), ui.leftSub),
+        ui.sketch, ui.gauges),
+      h('div', { class: 'tl-side tl-right' },
+        h('div', { class: 'tl-head' }, h('h2', { class: 'tl-h' }, t('rightTitle')), h('span', { class: 'tl-sub' }, t('waits'))),
+        ui.fan, ui.share)));
+    var ro = new ResizeObserver(function () { if (last) { drawSketch(ui.sketch, last); drawFan(ui.fan, last); } });
+    ro.observe(ui.sketch); ro.observe(ui.fan);
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'cv2', type: 'range', label: t('cv2'), hint: t('cv2Hint'), min: 0, max: 16, step: 1, format: function (v) { return String(v); } },
+      { key: 'rho', type: 'choice', label: t('rho'), hint: t('rhoHint'), options: [[0.1, short(0.1, 1)], [0.5, short(0.5, 1)], [0.8, short(0.8, 1)]] },
+      { key: 'fanout', type: 'range', label: t('fanout'), hint: t('fanoutHint'), min: 1, max: 200, step: 1, format: function (v) { return String(v); } },
+      { key: 'slowP', type: 'choice', label: t('slowP'), options: [['p99', t('slowP99')], ['p999', t('slowP999')]] }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'tl-mean', label: t('legendMean') },
+      { shape: 'tl-p99', label: t('legendP99') },
+      { shape: 'tl-call', label: t('legendCall') },
+      { shape: 'tl-slowest', label: t('legendSlowest') },
+      { shape: 'tl-share', label: t('legendShare') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+    render: function (c) {
+      if (!ui) build(c.stage);
+      track(c.params);
+      var moved = prevP ? L.moved(c.state, L.compute(prevP)) : [];
+      last = c.state;
+      ui.leftSub.textContent = t('leftSub', { c: t('reqs', { v: String(c.state.capacity) }), l: t('reqs', { v: short(c.state.lambda, 1) }) });
+      ui.gauges.replaceChildren.apply(ui.gauges, gauges(c.state, moved));
+      share(ui.share, c.state, moved);
+      drawSketch(ui.sketch, c.state);
+      drawFan(ui.fan, c.state);
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
