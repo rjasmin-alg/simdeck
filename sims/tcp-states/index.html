@@ -1,0 +1,536 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- TCP connection states: a stepper over the RFC 9293 state machine at both ends of one connection (task
+     docs/tasks/w3/tcp-states.md). The segments run on the kit's K1 sequence chart (kit/sequence.js); beside it the
+     state diagram of RFC 9293 Figure 5 marks where A (circle) and B (square) are and draws the transition just taken
+     thick. Presets step scripted scenarios; "Ti upravljaš" lets the student call OPEN, SEND and CLOSE at either end and
+     deliver or lose segments. The model is in sim.js, the words in strings.js, the rules in SPEC.md. -->
+<html lang="hr" data-sim="tcp-states">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP: stanja veze · simdeck</title>
+<meta name="description" content="Stanja TCP veze na objema stranama: od LISTEN i SYN-SENT preko ESTABLISHED do TIME-WAIT i CLOSED.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "tcp-states",
+  "title": {
+    "hr": "TCP: stanja veze",
+    "en": "TCP: connection states"
+  },
+  "concept": {
+    "hr": "Stanja kroz koja socket prolazi, uživo: svaka strana ima svoje",
+    "en": "The states a socket passes through, live: each end has its own"
+  },
+  "summary": {
+    "hr": "Klijent A i poslužitelj B otvaraju i zatvaraju vezu; dijagram stanja iz RFC 9293 pokazuje gdje je koja strana. Upravljaj objema stranama sam.",
+    "en": "Client A and server B open and close a connection; the RFC 9293 state diagram shows where each end is. Drive both ends yourself."
+  },
+  "tags": [
+    "tcp"
+  ],
+  "class": "stepper",
+  "steps": 12
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="tcp-states"]; colours only from kit tokens. */
+[data-sim="tcp-states"] .ts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 25rem);
+  gap: 1.2rem;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1.25rem;
+}
+[data-sim="tcp-states"] .ts-chart { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+[data-sim="tcp-states"] .ts-chart > .sd-seq { flex: 1 1 0; min-height: 0; }
+
+/* each lane card: the end's state, the next number it sends and the one it expects */
+[data-sim="tcp-states"] .ts-state {
+  justify-self: start;
+  margin: 0.2rem 0 0.35rem;
+  padding: 0.05rem 0.5rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+[data-sim="tcp-states"] .ts-state[data-closed] { border-style: dashed; color: var(--muted); }
+[data-sim="tcp-states"] .ts-kv { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 0.1rem 0.6rem; margin: 0; }
+[data-sim="tcp-states"] .ts-kv dt { font-size: var(--fs-sm); color: var(--muted); align-self: center; }
+[data-sim="tcp-states"] .ts-kv dd { margin: 0; justify-self: start; padding: 0 0.2rem; border-radius: 0.15em; font-family: var(--mono); font-weight: 700; }
+/* changed: highlighted and framed tightly (the kit's halo would cover the neighbouring rows) */
+[data-sim="tcp-states"] .ts-state.sd-changed, [data-sim="tcp-states"] .ts-kv dd.sd-changed {
+  background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); outline-offset: 0; box-shadow: none;
+}
+
+/* the state diagram of RFC 9293 Figure 5: boxes placed in % of the area, edges drawn in px after layout */
+[data-sim="tcp-states"] .ts-sd { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; min-height: 0; }
+[data-sim="tcp-states"] .ts-sd-title { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="tcp-states"] .ts-sd-area { position: relative; flex: 1 1 0; min-height: 0; margin: 1rem 0.6rem 0.4rem; }
+[data-sim="tcp-states"] .ts-edges { position: absolute; inset: 0; overflow: visible; }
+[data-sim="tcp-states"] .ts-e { fill: none; stroke: var(--line); stroke-width: 2; }
+[data-sim="tcp-states"] .ts-e-now { stroke: var(--ink); stroke-width: 6; }
+[data-sim="tcp-states"] .ts-ah { fill: var(--line); }
+[data-sim="tcp-states"] .ts-ah-now { fill: var(--ink); }
+[data-sim="tcp-states"] .ts-node {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: calc(100% * 100 / 380);
+  min-height: calc(100% * 36 / 420);
+  padding: 0.1rem 0.1rem;
+  transform: translate(-50%, -50%);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  letter-spacing: -0.03em;
+  hyphens: manual;
+}
+[data-sim="tcp-states"] .ts-node.ts-here { border: 0.25rem solid var(--ink); color: var(--ink); }
+[data-sim="tcp-states"] .ts-node.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0.1rem; }
+[data-sim="tcp-states"] .ts-mk {
+  position: absolute;
+  top: -1.05rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0.15rem solid var(--bg);
+  background: var(--sw);
+  color: var(--on-series);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="tcp-states"] .ts-mk-a { left: -0.85rem; border-radius: 50%; }
+[data-sim="tcp-states"] .ts-mk-b { right: -0.85rem; border-radius: 0.2rem; }
+
+/* six presets in two columns (as tcp-handshake), a slightly wider panel */
+[data-sim="tcp-states"] { --panel-w: minmax(17rem, 26rem); }
+[data-sim="tcp-states"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+[data-sim="tcp-states"] .sd-preset { padding: 0 0.55rem; line-height: 1.15; }
+
+/* the student's calls: one column per end, the network under them */
+[data-sim="tcp-states"] .ts-drive[hidden], [data-sim="tcp-states"] .sd-ctl[hidden] { display: none; }
+[data-sim="tcp-states"] .ts-drive-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; }
+[data-sim="tcp-states"] .ts-drive-head { display: flex; align-items: center; gap: 0.4rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="tcp-states"] .ts-drive-head .ts-mk { position: static; border: 0; }
+[data-sim="tcp-states"] .ts-drive .sd-btn { justify-content: center; padding: 0 0.4rem; }
+[data-sim="tcp-states"] .ts-drive .ts-net { grid-column: 1 / -1; }
+
+/* Phone and portrait: the stage grows with its content; the diagram goes under the chart. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="tcp-states"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="tcp-states"] .ts { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.4rem; }
+  [data-sim="tcp-states"] .ts-chart > .sd-seq { flex: none; }
+  [data-sim="tcp-states"] .ts .sd-seq-list { padding-bottom: 1.5rem; }
+  [data-sim="tcp-states"] .ts-sd-area { flex: none; height: 36rem; margin: 1rem 0.5rem 0.4rem; }
+  [data-sim="tcp-states"] .ts-node { width: calc(100% * 112 / 380); }
+  [data-sim="tcp-states"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">TCP: stanja veze</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <div class="sd-group ts-drive" role="group" aria-labelledby="ts-drive-title" data-ts-drive hidden>
+        <h2 class="sd-group-title" id="ts-drive-title" data-t="drive"></h2>
+        <div class="ts-drive-grid"></div>
+      </div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var COLOUR = { A: 1, B: 2 };
+  var OTHER = { A: 'B', B: 'A' };
+  var CALL = { listen: 'OPEN', open: 'OPEN', send: 'SEND', close: 'CLOSE' };
+  var WHY = { noConn: 'whyNoConn', exists: 'whyExists', closing: 'whyClosing', notYet: 'whyNotYet' };
+
+  function data(v) { return h('span', { translate: 'no' }, String(v)); }
+  function bold(v) { return h('b', { translate: 'no' }, String(v)); }
+
+  /** t.parts with a node used twice: the kit puts the same node in both places, so it would end up in the last one
+      only. Clone the repeats (as tcp-handshake; NOTES.md, Shared requests). */
+  function parts(key, v) {
+    var seen = [];
+    return t.parts(key, v).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+
+  // ── segments ──
+
+  /** The chip of a segment, as tcp-handshake writes it: FIN+ACK only when that ACK is the first to acknowledge the
+      peer's FIN; data has no flag chip (null: the page writes the word). */
+  function chipOf(g) {
+    if (g.flags.indexOf('RST') >= 0 || g.flags.indexOf('SYN') >= 0) return g.flags.join('+');
+    if (g.flags.indexOf('FIN') >= 0) return g.finAck ? 'FIN+ACK' : 'FIN';
+    return g.len ? null : 'ACK';
+  }
+  function fieldsOf(g) { return 'seq=' + g.seq + (g.ack !== null ? ' ack=' + g.ack : '') + (g.len ? ' len=' + g.len : ''); }
+  function segNode(g) {
+    var chip = chipOf(g);
+    return h('b', null, chip ? data(chip) : t('dataChip'), ' ', data(fieldsOf(g)));
+  }
+  function segById(s, id) { return s.chart.filter(function (r) { return r.kind === 'seg' && r.id === id; })[0]; }
+
+  // ── the K1 chart ──
+
+  function lane(k, e, pe) {
+    function ch(f) { return pe && pe[f] !== e[f] ? ' sd-changed' : ''; }
+    var open = e.state !== 'CLOSED' && e.state !== 'LISTEN';
+    return {
+      id: k, c: COLOUR[k], shape: k === 'B' ? 'square' : undefined, name: t(k === 'A' ? 'client' : 'server'),
+      state: e.state === 'CLOSED' ? 'down' : null,
+      changed: !!(pe && pe.state !== e.state),
+      body: [
+        h('div', { class: 'ts-state' + ch('state'), translate: 'no', dataset: e.state === 'CLOSED' ? { closed: 'true' } : {} }, e.state),
+        h('dl', { class: 'ts-kv' },
+          h('dt', null, t('sendsFrom')), h('dd', { class: open ? ch('sndNxt').trim() : '', translate: 'no' }, open ? String(e.sndNxt) : '–'),
+          h('dt', null, t('expects')), h('dd', { class: e.rcvNxt !== null ? ch('rcvNxt').trim() : '', translate: 'no' }, e.rcvNxt !== null && e.state !== 'CLOSED' ? String(e.rcvNxt) : '–'))
+      ]
+    };
+  }
+
+  function chart(c) {
+    var s = c.state, n = c.n, rows = [], tw = {}, twEnd = {};
+    s.chart.forEach(function (r) {
+      if (r.kind === 'note') {
+        var text = r.code === 'listen' ? t('noteListen') : r.code === 'close' ? t('noteClose') :
+          r.code === 'timeout' ? t('noteTimeout') : t('noteRejected', { call: CALL[r.call] });
+        if (r.code === 'timeout' && r.lane in tw && !(r.lane in twEnd)) twEnd[r.lane] = rows.length;
+        rows.push({ kind: 'note', lane: r.lane, text: text, k: r.code === 'rejected' ? 'fill' : 'solid', time: String(r.at), changed: r.at === n });
+        return;
+      }
+      var re = {}, chip = chipOf(r);
+      if (r.done === null) re[r.to] = t('reFlight');
+      else if (r.outcome === 'ignored') re[r.to] = t('reIgnored');
+      else if (r.outcome === 'held') re[r.to] = t('reHeld');
+      if (r.became === 'TIME-WAIT') { tw[r.to] = rows.length; delete twEnd[r.to]; }
+      rows.push({
+        from: r.from, to: r.to, c: COLOUR[r.from],
+        label: chip || h('span', null, t('dataChip')),
+        fields: fieldsOf(r),
+        weight: chip === 'ACK' ? 'thin' : undefined,
+        line: r.done === null ? 'dashed' : undefined,
+        drop: r.lost || undefined,
+        re: re,
+        time: String(r.sent) + (r.done !== null && r.done !== r.sent ? '→' + r.done : ''),
+        changed: r.sent === n || r.done === n
+      });
+    });
+    var timers = ['A', 'B'].filter(function (k) { return k in tw; }).map(function (k) {
+      return { lane: k, from: tw[k], to: twEnd[k], end: k in twEnd ? 'expired' : undefined, label: 'TIME-WAIT', side: k === 'B' ? 'r' : 'l' };
+    });
+    var pv = c.prev ? c.prev.ends : null;
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '5.2rem',
+      lanes: ['A', 'B'].map(function (k) { return lane(k, s.ends[k], pv && pv[k]); }),
+      rows: rows,
+      timers: timers,
+      empty: t('chartEmpty'),
+      earlier: function (m) { return t.n('earlier', m); }
+    });
+  }
+
+  // ── the state diagram (RFC 9293 Figure 5): coordinates in a 380 × 420 grid ──
+
+  var W = 380, H = 420;
+  var NODES = {
+    'CLOSED': [190, 30], 'LISTEN': [190, 90], 'SYN-RECEIVED': [60, 150], 'SYN-SENT': [320, 150], 'ESTABLISHED': [190, 210],
+    'FIN-WAIT-1': [60, 270], 'CLOSE-WAIT': [320, 270], 'FIN-WAIT-2': [60, 330], 'CLOSING': [190, 330], 'LAST-ACK': [320, 330],
+    'TIME-WAIT': [190, 390], 'CLOSED-2': [320, 390]
+  };
+  /** Long names may break on a phone: a soft hyphen where the RFC's own figure abbreviates. */
+  var SHOWN = { 'SYN-RECEIVED': 'SYN-RE­CEIVED', 'ESTABLISHED': 'ESTAB­LISHED', 'CLOSED-2': 'CLOSED' };
+  /** The figure's arrows as polylines from box edge to box edge; one path may carry several edges of the model. */
+  var PATHS = [
+    { ids: ['open-passive'], pts: [[175, 48], [175, 72]] },
+    { ids: ['listen-close'], pts: [[205, 72], [205, 48]] },
+    { ids: ['open-active'], pts: [[240, 24], [332, 24], [332, 132]] },
+    { ids: ['synsent-close', 'synsent-rst'], pts: [[300, 132], [300, 36], [240, 36]] },
+    { ids: ['listen-syn'], pts: [[140, 102], [92, 132]] },
+    { ids: ['synrcvd-rst'], pts: [[50, 132], [50, 84], [140, 84]] },
+    { ids: ['synsent-syn'], pts: [[270, 150], [110, 150]] },
+    { ids: ['synsent-synack'], pts: [[300, 168], [222, 192]] },
+    { ids: ['synrcvd-ack'], pts: [[80, 168], [158, 192]] },
+    { ids: ['synrcvd-close'], pts: [[30, 168], [30, 252]] },
+    { ids: ['estab-close'], pts: [[158, 228], [80, 252]] },
+    { ids: ['estab-fin'], pts: [[222, 228], [300, 252]] },
+    { ids: ['fw1-ack'], pts: [[60, 288], [60, 312]] },
+    { ids: ['fw1-fin'], pts: [[110, 264], [190, 264], [190, 312]] },
+    { ids: ['fw1-finack'], pts: [[110, 280], [125, 280], [125, 382], [140, 382]] },
+    { ids: ['fw2-fin'], pts: [[60, 348], [60, 400], [140, 400]] },
+    { ids: ['closing-ack'], pts: [[190, 348], [190, 372]] },
+    { ids: ['cw-close'], pts: [[320, 288], [320, 312]] },
+    { ids: ['lastack-ack'], pts: [[320, 348], [320, 372]] },
+    { ids: ['tw-timeout'], pts: [[240, 390], [270, 390]] }
+  ];
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  /** Where an end is drawn: CLOSED after a connection ended (the last ACK, the timeout or an RST) is the figure's
+      bottom box, as in RFC 9293 Figure 5; otherwise its state's box. */
+  function nodeOf(e) {
+    return e.state === 'CLOSED' && (e.edge === 'lastack-ack' || e.edge === 'tw-timeout' || e.edge === 'rst') ? 'CLOSED-2' : e.state;
+  }
+
+  function diagram(s, n) {
+    var at = { A: nodeOf(s.ends.A), B: nodeOf(s.ends.B) }, now = {}, entered = {};
+    ['A', 'B'].forEach(function (k) {
+      var e = s.ends[k];
+      if (e.edgeAt === n && e.edge) { now[e.edge] = true; if (e.via) now[e.via] = true; entered[at[k]] = true; }
+    });
+    var area = h('div', { class: 'ts-sd-area' });
+    var svg = svgEl('svg', { class: 'ts-edges', 'aria-hidden': 'true', focusable: 'false' });
+    area.append(svg);
+    Object.keys(NODES).forEach(function (id) {
+      var p = NODES[id], here = ['A', 'B'].filter(function (k) { return at[k] === id; });
+      area.append(h('div', {
+        class: 'ts-node' + (here.length ? ' ts-here' : '') + (entered[id] ? ' sd-changed' : ''),
+        style: { left: (p[0] / W * 100) + '%', top: (p[1] / H * 100) + '%' }, translate: 'no'
+      }, h('span', null, SHOWN[id] || id), here.map(function (k) {
+        return h('span', { class: 'ts-mk ts-mk-' + k.toLowerCase(), dataset: { c: String(COLOUR[k]) } }, k);
+      })));
+    });
+    var wrap = h('div', { class: 'ts-sd' }, h('div', { class: 'ts-sd-title' }, t('diagramTitle')), area);
+    wrap.area = area;
+    wrap.draw = function () {
+      var w = area.clientWidth, ht = area.clientHeight;
+      if (!w || !ht) return;
+      var sx = w / W, sy = ht / H;
+      svg.setAttribute('viewBox', '0 0 ' + w + ' ' + ht);
+      svg.replaceChildren();
+      var defs = svgEl('defs', {});
+      [['ts-ah', 12], ['ts-ah-now', 20]].forEach(function (m) {
+        var mk = svgEl('marker', { id: m[0], viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: String(m[1]), markerHeight: String(m[1]),
+          orient: 'auto', markerUnits: 'userSpaceOnUse' });
+        mk.append(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', class: m[0] }));
+        defs.append(mk);
+      });
+      svg.append(defs);
+      var later = [];
+      PATHS.forEach(function (p) {
+        var hot = p.ids.some(function (id) { return now[id]; });
+        var line = svgEl('polyline', {
+          points: p.pts.map(function (q) { return (q[0] * sx).toFixed(1) + ',' + (q[1] * sy).toFixed(1); }).join(' '),
+          class: 'ts-e' + (hot ? ' ts-e-now' : ''), 'marker-end': 'url(#' + (hot ? 'ts-ah-now' : 'ts-ah') + ')'
+        });
+        if (hot) later.push(line); else svg.append(line);
+      });
+      later.forEach(function (l) { svg.append(l); });
+    };
+    return wrap;
+  }
+
+  /** Redraw the arrows whenever the diagram's area changes size: on resize, and after the kit writes the caption
+      (a longer caption shrinks the stage after render). */
+  var shown = null;
+  var watch = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { if (shown) shown.draw(); }) : null;
+  if (!watch) window.addEventListener('resize', function () { if (shown) shown.draw(); });
+
+  // ── the student's calls (mode drive) ──
+
+  var driveBox = document.querySelector('[data-ts-drive]');
+  var driveButtons = [];
+  function add(code) {
+    var sim = window.simdeck, n = sim.n;
+    var why = blocked(sim.state, code, n);
+    if (why) return;
+    sim.set({ script: L.extend(sim.params, n, code) }, { preset: sim.preset });
+    sim.go(n + 1);
+  }
+  function blocked(s, code, n) {
+    if (n >= L.MAX_DRIVE) return t('dFull', { n: L.MAX_DRIVE });
+    if (L.canAdd(s, code)) return false;
+    return code === 'timeout' ? t('dNoTw') : t('dNothing');
+  }
+  function driveButton(label, code, cls) {
+    var b = h('button', { type: 'button', class: 'sd-btn' + (cls ? ' ' + cls : ''), onclick: function () { add(code); } }, h('span', null, label));
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    driveButtons.push({ el: b, code: code });
+    return b;
+  }
+  (function buildDrive() {
+    var grid = driveBox.querySelector('.ts-drive-grid');
+    ['A', 'B'].forEach(function (k) {
+      grid.append(h('div', { class: 'ts-drive-head' },
+        h('span', { class: 'ts-mk ts-mk-' + k.toLowerCase(), dataset: { c: String(COLOUR[k]) }, translate: 'no' }, k),
+        h('span', null, t(k === 'A' ? 'client' : 'server'))));
+    });
+    [['dOpenPassive', 'listen'], ['dOpenActive', 'open'], ['dSend', 'send'], ['dClose', 'close']].forEach(function (b) {
+      grid.append(driveButton(t(b[0]), 'A:' + b[1]), driveButton(t(b[0]), 'B:' + b[1]));
+    });
+    grid.append(driveButton(t('dDeliver'), 'deliver'), driveButton(t('dLose'), 'lose'), driveButton(t('dTimeout'), 'timeout', 'ts-net'));
+  })();
+  function syncDrive(c) {
+    var on = c.params.mode === 'drive';
+    driveBox.hidden = !on;
+    if (!on) return;
+    driveButtons.forEach(function (b) {
+      var why = blocked(c.state, b.code, c.n);
+      b.el.setAttribute('aria-disabled', why ? 'true' : 'false');
+      if (why) b.el.title = why; else b.el.removeAttribute('title');
+    });
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params;
+    if (c.first) return t(p.mode === 'drive' ? 'capDriveStart' : p.listen ? 'capStart' : 'capStartClosed');
+    var l = s.last, out = [t('capStep', { n: c.n }), ' '];
+    if (l.call) {
+      if (l.end === 'both') {
+        if (l.sent && l.sent.A && l.sent.B) out.push(parts('evBoth', { segA: segNode(segById(s, l.sent.A)), segB: segNode(segById(s, l.sent.B)) }));
+      } else if (!l.ok) {
+        out.push(parts('evRejected', { e: bold(l.end), call: data(CALL[l.call]), state: data(s.ends[l.end].state), why: t(WHY[l.reason]) }));
+      } else {
+        var key = { listen: 'evListen', open: 'evOpen', send: 'evSend', close: l.sent ? 'evClose' : 'evCloseQuiet' }[l.call];
+        out.push(parts(key, { e: bold(l.end), seg: l.sent ? segNode(segById(s, l.sent)) : '' }));
+      }
+    } else if (l.code === 'deliver') {
+      var g = segById(s, l.seg);
+      out.push(parts('evDeliver', { e: bold(g.to), seg: segNode(g) }));
+      if (l.what === 'reset') out.push(' ', parts('evReset', { e: bold(g.to), seg: segNode(segById(s, l.reply)) }));
+      else if (l.reply) out.push(' ', parts('evReply', { seg: segNode(segById(s, l.reply)) }));
+      else if (l.what === 'held') out.push(' ', t('evHeld'));
+      else if (l.what === 'ignored') out.push(' ', parts('evIgnored', { e: bold(g.to) }));
+      else if (l.what === 'acked') out.push(' ', t('evAcked'));
+    } else if (l.code === 'lose') {
+      var x = segById(s, l.seg);
+      out.push(parts('evLose', { seg: segNode(x), from: bold(x.from), e: bold(x.to), state: data(s.ends[x.from].state) }));
+    } else if (l.code === 'timeout') {
+      out.push(t('evTimeout'));
+    }
+    var ks = Object.keys(l.changes);
+    if (ks.length === 2 && l.changes.A.to === l.changes.B.to) {
+      out.push(' ', parts('movedBoth', { state: data(l.changes.A.to) }), ' ', t(l.code === 'timeout' ? 'm-both-timeout' : 'm-both-close'));
+    } else {
+      ks.forEach(function (k) {
+        var ch = l.changes[k];
+        if (ch.via) out.push(' ', parts('viaEstab', { e: bold(k) }));
+        out.push(' ', parts('moved', { e: bold(k), state: data(ch.to) }), ' ', parts('m-' + ch.edge, { e: bold(k), o: bold(OTHER[k]) }));
+      });
+    }
+    return out;
+  }
+
+  // ── mount ──
+
+  var scriptOnly = function (p) { return p.mode === 'script'; };
+  var closing = function (p) { return p.mode === 'script' && p.listen; };
+  var noBoth = function (p) { return p.closer === 'both' ? t('bothNo') : false; };
+
+  Simdeck.mount({
+    steps: L.stepsFor,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['script', t('modeScript')], ['drive', t('modeDrive')]] },
+      { key: 'listen', type: 'toggle', label: t('listen'), visible: scriptOnly },
+      { key: 'closer', type: 'choice', label: t('closer'), options: [['A', t('optA')], ['B', t('optB')], ['both', t('optBoth')]], visible: closing },
+      { key: 'combineFinAck', type: 'toggle', label: t('combine'), hint: t('combineHint'), visible: closing, disabled: noBoth },
+      { key: 'halfCloseData', type: 'range', label: t('halfData'), min: 0, max: 3, step: 1,
+        format: function (v) { return t('halfDataFmt', { n: v }); }, visible: closing, disabled: noBoth }
+    ],
+
+    presets: [
+      { id: 'book-open-close', label: t('presetBook'), hint: t('presetBookHint'), params: { mode: 'script', listen: true, closer: 'A' } },
+      { id: 'server-closes', label: t('presetServer'), hint: t('presetServerHint'), params: { mode: 'script', listen: true, closer: 'B' } },
+      { id: 'half-close', label: t('presetHalf'), hint: t('presetHalfHint'), params: { mode: 'script', listen: true, closer: 'A', halfCloseData: 2 } },
+      { id: 'simultaneous-close', label: t('presetSimul'), hint: t('presetSimulHint'), params: { mode: 'script', listen: true, closer: 'both' } },
+      { id: 'closed-port', label: t('presetClosed'), hint: t('presetClosedHint'), params: { mode: 'script', listen: false } },
+      { id: 'drive', label: t('presetDrive'), hint: t('presetDriveHint'), params: { mode: 'drive', script: '' } }
+    ],
+
+    legend: [
+      { c: 1, shape: 'round', label: t('legendA') },
+      { c: 2, label: t('legendB') },
+      { shape: 'line', label: t('legendSeg') },
+      { shape: 'dash', label: t('legendFlight') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chartEl = chart(c), dg = diagram(c.state, c.n);
+      c.stage.replaceChildren(h('div', { class: 'ts' }, h('div', { class: 'ts-chart' }, chartEl), dg));
+      chartEl.fit();
+      dg.draw();
+      shown = dg;
+      if (watch) { watch.disconnect(); watch.observe(dg.area); }
+      syncDrive(c);
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
