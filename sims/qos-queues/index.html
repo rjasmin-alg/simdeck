@@ -1,0 +1,498 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- QoS queues: FIFO, strict priority and weighted round robin on one congested link, with tail drop
+     (task docs/tasks/w3/qos-queues.md). An explorer: the params drive the scene, the chart and the table live; the model
+     is in sim.js (rules in SPEC.md), the words in strings.js. The chart is the catalogue's "small live chart" (§7.2),
+     drawn here in SVG at 1:1 (no kit view exists yet). -->
+<html lang="hr" data-sim="qos-queues">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redovi za kvalitetu usluge · simdeck</title>
+<meta name="description" content="Strogi prioritet i težinsko pravedno raspoređivanje na zagušenoj vezi; pun red odbacuje pridošlicu.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "qos-queues",
+  "class": "explorer",
+  "title": { "hr": "Redovi za kvalitetu usluge (QoS)", "en": "QoS queues" },
+  "concept": { "hr": "Strogi prioritet ili težinska podjela veze; pun red odbacuje pridošlicu", "en": "Strict priority vs weighted fair queuing; a full queue drops the newcomer" }
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="qos-queues"]; colours only from kit tokens. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="qos-queues"] .sd-ctl[hidden] { display: none; }
+[data-sim="qos-queues"] .sd-legend { flex: 0 1 46rem; justify-content: flex-end; }
+/* Six presets and the settings in two columns, so the panel fits at 1920×1080 without its own scroll. */
+[data-sim="qos-queues"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="qos-queues"] .sd-preset { line-height: 1.15; }
+[data-sim="qos-queues"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem 0.9rem; align-items: end; }
+[data-sim="qos-queues"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="qos-queues"] [data-sd-controls] .sd-group > :is([data-key="rVoice"], [data-key="rVideo"], [data-key="rBulk"], [data-key="C"], [data-key="wVoice"], [data-key="wVideo"], [data-key="wBulk"]) { grid-column: auto; }
+
+/* ── the stage: the scene on top, the chart and the table below ── */
+[data-sim="qos-queues"] .qq {
+  --pk: 0.95rem;          /* one packet slot */
+  --pk-gap: 0.12rem;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.4cqh;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: var(--fs-md);
+}
+[data-sim="qos-queues"] .qq-note { margin: 0 0 0.3rem; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="qos-queues"] .qq-scene {
+  display: grid;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  column-gap: 0.7rem;
+}
+[data-sim="qos-queues"] .qq-arrow { font-size: var(--fs-lg); font-weight: 700; color: var(--muted); }
+[data-sim="qos-queues"] .qq-box { border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); padding: 0.35rem 0.55rem; background: var(--panel); }
+[data-sim="qos-queues"] .qq-h { margin: 0 0 0.25rem; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+[data-sim="qos-queues"] .qq-sm { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="qos-queues"] .qq-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* sources */
+[data-sim="qos-queues"] .qq-src { display: grid; grid-template-columns: auto auto; column-gap: 0.45rem; align-items: center; padding: 0.15rem 0; }
+[data-sim="qos-queues"] .qq-src .qq-pk { --pk: 1.3rem; grid-row: span 2; }
+[data-sim="qos-queues"] .qq-src b { line-height: 1.1; white-space: nowrap; }
+[data-sim="qos-queues"] .qq-src .qq-sm { line-height: 1.1; white-space: nowrap; }
+[data-sim="qos-queues"] .qq-cls { text-align: center; }
+[data-sim="qos-queues"] .qq-cls b { display: block; }
+
+/* queues: the head is on the right, next to the scheduler; drops bounce off the tail on the left */
+[data-sim="qos-queues"] .qq-queues { display: flex; flex-direction: column; gap: 0.45rem; justify-self: center; }
+[data-sim="qos-queues"] .qq-q { display: grid; grid-template-columns: 3.4rem auto; grid-template-rows: auto auto; column-gap: 0.35rem; align-items: center; }
+[data-sim="qos-queues"] .qq-q-head { grid-column: 2; display: flex; justify-content: space-between; gap: 0.6rem; font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="qos-queues"] .qq-q-head b { color: var(--ink); }
+[data-sim="qos-queues"] .qq-drops { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; align-items: flex-end; gap: var(--pk-gap); }
+[data-sim="qos-queues"] .qq-drop { display: inline-flex; align-items: center; gap: 0.2rem; font-size: var(--fs-sm); line-height: 1; font-weight: 700; color: var(--danger); }
+[data-sim="qos-queues"] .qq-slots {
+  grid-column: 2; grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--pk));
+  gap: var(--pk-gap);
+  direction: rtl;
+  padding: 0.2rem;
+  border: var(--line-w) solid var(--ink);
+  border-left-style: dashed;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+/* one packet: a slot with the class's shape in its colour (shape + colour, so it reads in grayscale) */
+[data-sim="qos-queues"] .qq-pk { position: relative; display: inline-block; flex: none; width: var(--pk); height: var(--pk); }
+[data-sim="qos-queues"] .qq-pk::before { content: ''; position: absolute; inset: 6%; background: var(--sw); }
+[data-sim="qos-queues"] .qq-pk[data-k='voice']::before { border-radius: 50%; }
+[data-sim="qos-queues"] .qq-pk[data-k='video']::before { inset: 2% 0 8%; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="qos-queues"] .qq-pk[data-k='bulk']::before { inset: 10%; }
+[data-sim="qos-queues"] .qq-pk.qq-empty { border: 2px dashed var(--line); border-radius: 2px; }
+[data-sim="qos-queues"] .qq-pk.qq-empty::before { content: none; }
+[data-sim="qos-queues"] .qq-pk.qq-sent { outline: 3px solid var(--ink); outline-offset: 0; border-radius: 2px; }
+[data-sim="qos-queues"] .qq-pk.qq-x::before { opacity: 0.45; }
+[data-sim="qos-queues"] .qq-pk.qq-x::after {
+  content: ''; position: absolute; inset: -8%;
+  background: linear-gradient(45deg, transparent 42%, var(--danger) 42% 58%, transparent 58%),
+              linear-gradient(-45deg, transparent 42%, var(--danger) 42% 58%, transparent 58%);
+}
+
+/* scheduler and link */
+[data-sim="qos-queues"] .qq-sched { text-align: center; max-width: 11rem; }
+[data-sim="qos-queues"] .qq-sched b { display: block; line-height: 1.15; }
+[data-sim="qos-queues"] .qq-link { display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="qos-queues"] .qq-wire {
+  display: grid; grid-template-columns: repeat(10, var(--pk)); gap: var(--pk-gap);
+  padding: 0.2rem; border-top: 0.3rem solid var(--ink); border-bottom: 0.3rem solid var(--ink);
+}
+
+/* bottom: the chart and the table */
+[data-sim="qos-queues"] .qq-bottom { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.4cqw; min-height: 0; }
+[data-sim="qos-queues"] .qq-plot { position: relative; min-height: 12rem; }
+[data-sim="qos-queues"] .qq-plot svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="qos-queues"] .qq-plot text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--muted); }
+[data-sim="qos-queues"] .qq-plot .qq-t { fill: var(--ink); font-weight: 700; }
+[data-sim="qos-queues"] .qq-grid { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
+[data-sim="qos-queues"] .qq-axis { stroke: var(--ink); stroke-width: var(--line-w); }
+[data-sim="qos-queues"] .qq-zero { stroke: var(--ink); stroke-width: 3; }
+[data-sim="qos-queues"] .qq-cap { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 9 5; }
+[data-sim="qos-queues"] .qq-bar { fill: var(--sw); stroke: var(--bg); stroke-width: 2; }
+[data-sim="qos-queues"] .qq-bar-drop { fill: var(--sw); fill-opacity: 0.55; stroke: var(--bg); stroke-width: 2; }
+[data-sim="qos-queues"] .qq-dot { fill: var(--bg); opacity: 0.75; }
+[data-sim="qos-queues"] .qq-plot .qq-halo { paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+[data-sim="qos-queues"] .qq-hatch-line { stroke: var(--ink); stroke-width: 2.5; opacity: 0.45; }
+[data-sim="qos-queues"] .qq-warm { fill: var(--muted); opacity: 0.12; }
+[data-sim="qos-queues"] .qq-mark { fill: var(--sw); stroke: var(--ink); stroke-width: 1.5; }
+
+[data-sim="qos-queues"] .qq-tab { align-self: start; border-collapse: collapse; font-size: var(--fs-md); }
+[data-sim="qos-queues"] .qq-tab th { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; text-align: right; vertical-align: bottom; line-height: 1.15; padding: 0 0.5rem 0.3rem; max-width: 6.5rem; }
+[data-sim="qos-queues"] .qq-tab th:first-child { text-align: left; }
+[data-sim="qos-queues"] .qq-tab td { padding: 0.28rem 0.5rem; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; border-top: 1px solid var(--line); }
+[data-sim="qos-queues"] .qq-tab td:first-child { text-align: left; font-family: var(--sans); font-weight: 700; }
+[data-sim="qos-queues"] .qq-tabwrap { min-width: 0; max-width: 100%; overflow-x: auto; }
+[data-sim="qos-queues"] .qq-name { display: inline-flex; align-items: center; gap: 0.4rem; }
+[data-sim="qos-queues"] .qq-name .qq-pk { --pk: 1.05rem; }
+[data-sim="qos-queues"] .qq-tab tr.qq-total td { border-top: var(--line-w) solid var(--ink); }
+[data-sim="qos-queues"] .qq-tab td.qq-chg { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 0 0 2px var(--ink); }
+[data-sim="qos-queues"] .qq-tab caption { caption-side: bottom; text-align: left; padding-top: 0.3rem; color: var(--muted); font-size: var(--fs-sm); }
+
+/* Legend swatches: the class shapes, the sent outline, an empty slot, the drop cross. */
+[data-sim="qos-queues"] .sd-swatch[data-shape^='qq-'] { position: relative; border: 0; border-radius: 0; background: transparent; }
+[data-sim="qos-queues"] .sd-swatch[data-shape^='qq-']::before { content: ''; position: absolute; inset: 6%; background: var(--sw); }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-voice']::before { border-radius: 50%; }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-video']::before { inset: 2% 0 8%; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-bulk']::before { inset: 10%; }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-sent'] { outline: 3px solid var(--ink); outline-offset: -3px; }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-sent']::before { inset: 22%; border-radius: 50%; background: var(--muted); }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-slot'] { border: 2px dashed var(--line); }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-slot']::before { content: none; }
+[data-sim="qos-queues"] .sd-swatch[data-shape='qq-drop']::before {
+  inset: 0;
+  background: linear-gradient(45deg, transparent 40%, var(--danger) 40% 60%, transparent 60%),
+              linear-gradient(-45deg, transparent 40%, var(--danger) 40% 60%, transparent 60%);
+}
+
+/* Phone and portrait: the stage grows with its content; the scene stacks; the chart gets a fixed height. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="qos-queues"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="qos-queues"] .qq { --pk: 0.85rem; --pk-gap: 0.1rem; height: auto; gap: 0.8rem; padding: 0.6rem; }
+  [data-sim="qos-queues"] .qq-scene { grid-template-columns: minmax(0, 1fr); row-gap: 0.3rem; justify-items: start; }
+  [data-sim="qos-queues"] .qq-arrow { transform: rotate(90deg); justify-self: center; }
+  [data-sim="qos-queues"] .qq-queues { justify-self: start; max-width: 100%; }
+  [data-sim="qos-queues"] .qq-q { grid-template-columns: 2.8rem auto; }
+  [data-sim="qos-queues"] .qq-slots { grid-template-columns: repeat(min(var(--cols), 10), var(--pk)); }
+  [data-sim="qos-queues"] .qq-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="qos-queues"] .qq-plot { height: 18rem; }
+  [data-sim="qos-queues"] .qq-tab { font-size: var(--fs-sm); }
+  [data-sim="qos-queues"] .qq-tab th, [data-sim="qos-queues"] .qq-tab td { padding-left: 0.12rem; padding-right: 0.12rem; }
+  [data-sim="qos-queues"] .qq-tab td { white-space: normal; }
+  [data-sim="qos-queues"] .qq-tab th { max-width: none; }
+  /* The offered rates are in the sources box; the phone table keeps delivered, dropped and delay. */
+  [data-sim="qos-queues"] .qq-tab :is(th, td):nth-child(2) { display: none; }
+  [data-sim="qos-queues"] [data-sd-controls] .sd-group { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="qos-queues"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1 !important; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Redovi za kvalitetu usluge (QoS)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var KEYS = ['voice', 'video', 'bulk'];
+  var NAMES = [t('nameVoice'), t('nameVideo'), t('nameBulk')];
+  var DSCP = ['EF', 'AF41', 'DF'];
+  var sim = null;
+
+  // Numbers in the page's language: a decimal comma in Croatian; at most two decimals, no trailing zeros.
+  function num(x, d) {
+    var s = (+x).toFixed(d == null ? 2 : d);
+    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function pct(x) { return t('pct', { p: Math.round(x) }); }
+  /** "5 ticks", "5,67 takta": decimals take the 2–4 form in Croatian and the plural in English. */
+  function ticks(d) {
+    var r = Math.round(d * 100) / 100;
+    return r % 1 ? t.n('ticks', 2, { n: num(r) }) : t.n('ticks', r);
+  }
+  function rate(v) { return t('perTick', { v: num(v, 1) }); }
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+  function pk(c, extra) { return h('span', { class: 'qq-pk' + (extra ? ' ' + extra : ''), dataset: { k: KEYS[c], c: String(c + 1) }, 'aria-hidden': 'true' }); }
+
+  var labels = {
+    'fifo-congested': 'presetFifo', 'priority': 'presetPq', 'starvation': 'presetStarve', 'weighted': 'presetWrr',
+    'bufferbloat': 'presetBloat', 'uncongested': 'presetCalm'
+  };
+
+  // ── the scene: sources → classifier → queues → scheduler → link, at the last tick ──
+  function scene(st, p) {
+    var snap = st.snapshot, rates = [p.rVoice, p.rVideo, p.rBulk], weights = [p.wVoice, p.wVideo, p.wBulk];
+    var arrow = function () { return h('span', { class: 'qq-arrow', 'aria-hidden': 'true' }, '→'); };
+    var sources = h('div', { class: 'qq-box' }, h('p', { class: 'qq-h' }, t('sources')),
+      KEYS.map(function (k, c) {
+        return h('div', { class: 'qq-src' }, pk(c), h('b', null, NAMES[c]),
+          h('span', { class: 'qq-sm' }, h('span', { translate: 'no' }, DSCP[c]), ' · ', rate(rates[c])));
+      }));
+    var cls = h('div', { class: 'qq-box qq-cls' }, h('b', null, t('classifier')),
+      h('span', { class: 'qq-sm' }, t('classifierBy'), ' ', h('span', { translate: 'no' }, 'DSCP')));
+
+    var cols = Math.min(p.limit, 20);
+    var queues = h('div', { class: 'qq-queues' }, snap.queues.map(function (q, qi) {
+      var head = p.sched === 'fifo'
+        ? [h('b', null, t('sharedQueue')), h('span', { class: 'qq-mono' }, q.length + '/' + p.limit)]
+        : [h('span', null, h('b', null, NAMES[qi]), ' · ', p.sched === 'pq' ? t('prio', { n: qi + 1 }) : t('weight', { w: weights[qi] })),
+           h('span', { class: 'qq-mono' }, q.length + '/' + p.limit)];
+      var slots = [];
+      for (var i = 0; i < p.limit; i++) slots.push(i < q.length ? pk(q[i], i < snap.sentFrom[qi] ? 'qq-sent' : '') : h('span', { class: 'qq-pk qq-empty' }));
+      // this tick's drops at this queue, per class
+      var dropped = [0, 0, 0];
+      snap.dropped.forEach(function (c) { if (p.sched === 'fifo' || c === qi) dropped[c]++; });
+      var drops = dropped.map(function (n, c) { return n ? h('span', { class: 'qq-drop' }, pk(c, 'qq-x'), String(n)) : null; });
+      return h('div', { class: 'qq-q' },
+        h('div', { class: 'qq-q-head' }, head),
+        h('div', { class: 'qq-drops', 'aria-label': t('dropped') }, drops),
+        h('div', { class: 'qq-slots', style: { '--cols': cols } }, slots));
+    }));
+
+    var how = p.sched === 'fifo' ? [t('schedFifoName'), t('schedFifoHow')]
+      : p.sched === 'pq' ? [t('schedPqName'), t('schedPqHow')]
+      : [t('schedWrrName'), t('schedWrrHow', { w: weights.join(' : ') })];
+    var sched = h('div', { class: 'qq-box qq-sched' }, h('p', { class: 'qq-h' }, t('scheduler')), h('b', null, how[0]), h('span', { class: 'qq-sm' }, how[1]));
+
+    var wire = [];
+    for (var j = 0; j < p.C; j++) wire.push(j < snap.sent.length ? pk(snap.sent[j]) : h('span', { class: 'qq-pk qq-empty' }));
+    var link = h('div', { class: 'qq-link' }, h('p', { class: 'qq-h' }, t('link')),
+      h('span', { class: 'qq-sm qq-mono' }, t('linkCap', { c: p.C })), h('div', { class: 'qq-wire' }, wire));
+
+    return h('div', null, h('p', { class: 'qq-note' }, t('lastTick', { t: snap.t })),
+      h('div', { class: 'qq-scene' }, sources, arrow(), cls, arrow(), queues, arrow(), sched, arrow(), link));
+  }
+
+  // ── the chart: delivered (up) and dropped (down) per class, mean per tick in bins of 10 ticks ──
+  var BIN = 10;
+  function bins(series) {
+    var out = [];
+    for (var b = 0; b * BIN < series.length; b++) {
+      var m = [0, 0, 0];
+      for (var i = b * BIN; i < Math.min(series.length, (b + 1) * BIN); i++) for (var c = 0; c < 3; c++) m[c] += series[i][c] / BIN;
+      out.push(m);
+    }
+    return out;
+  }
+  function markPath(k, x, y, r) {
+    if (k === 'voice') return 'M' + (x - r) + ' ' + y + ' a' + r + ' ' + r + ' 0 1 0 ' + (2 * r) + ' 0 a' + r + ' ' + r + ' 0 1 0 ' + (-2 * r) + ' 0 Z';
+    if (k === 'video') return 'M' + x + ' ' + (y - r) + ' L' + (x + r) + ' ' + (y + 0.8 * r) + ' L' + (x - r) + ' ' + (y + 0.8 * r) + ' Z';
+    return 'M' + (x - 0.85 * r) + ' ' + (y - 0.85 * r) + ' h' + (1.7 * r) + ' v' + (1.7 * r) + ' h' + (-1.7 * r) + ' Z';
+  }
+  function drawChart(box, st, p) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var fs = Math.max(16, 0.8 * rem);
+    var up = bins(st.series.delivered), down = bins(st.series.dropped);
+    var sumOf = function (m) { return m[0] + m[1] + m[2]; };
+    var top = Math.max(p.C, Math.max.apply(null, up.map(sumOf))) * 1.12;
+    var bottom = Math.max(2, Math.max.apply(null, down.map(sumOf)) * 1.05);
+    var pad = { l: 2.6 * rem, r: 2.2 * rem, t: 1.9 * fs, b: 1.9 * fs };
+    var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+    var Y = function (v) { return pad.t + ch * (top - v) / (top + bottom); };
+    var nb = up.length, bw = cw / nb;
+    var X = function (tk) { return pad.l + (tk / L.T) * cw; };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('chartLabel') });
+    svg.append(s('defs', null,
+      s('pattern', { id: 'qq-hatch', patternUnits: 'userSpaceOnUse', width: 9, height: 9, patternTransform: 'rotate(45)' },
+        s('line', { class: 'qq-hatch-line', x1: 0, y1: 0, x2: 0, y2: 9 })),
+      s('pattern', { id: 'qq-dots', patternUnits: 'userSpaceOnUse', width: 8, height: 8 },
+        s('circle', { class: 'qq-dot', cx: 4, cy: 4, r: 1.6 }))));
+    // ticks 0–99: the queues fill (not in the table)
+    svg.append(s('rect', { class: 'qq-warm', x: X(0), y: pad.t, width: X(L.FROM) - X(0), height: ch }));
+    // grid: steps of 5 (or 2 for small ranges)
+    var step = top + bottom > 30 ? 10 : top + bottom > 12 ? 5 : 2;
+    for (var v = -Math.floor(bottom / step) * step; v <= top; v += step) {
+      svg.append(s('line', { class: 'qq-grid', x1: pad.l, x2: pad.l + cw, y1: Y(v), y2: Y(v) }));
+      svg.append(s('text', { x: pad.l - 0.35 * rem, y: Y(v) + 0.35 * fs, 'text-anchor': 'end' }, String(Math.abs(v))));
+    }
+    for (var tk = 0; tk <= L.T; tk += 100) {
+      svg.append(s('text', { x: X(tk), y: pad.t + ch + 1.2 * fs, 'text-anchor': tk === L.T ? 'end' : 'middle' }, String(tk)));
+    }
+    // bars
+    for (var b = 0; b < nb; b++) {
+      var x0 = pad.l + b * bw + 1, w = Math.max(1, bw - 2), yUp = 0, yDn = 0;
+      for (var c = 0; c < 3; c++) {
+        if (up[b][c] > 0) {
+          svg.append(s('rect', { class: 'qq-bar', 'data-c': c + 1, x: x0, y: Y(yUp + up[b][c]), width: w, height: Y(yUp) - Y(yUp + up[b][c]) }));
+          if (c === 1) svg.append(s('rect', { x: x0, y: Y(yUp + up[b][c]), width: w, height: Y(yUp) - Y(yUp + up[b][c]), fill: 'url(#qq-dots)' }));
+          yUp += up[b][c];
+        }
+        if (down[b][c] > 0) {
+          var y1 = Y(-yDn), y2 = Y(-(yDn + down[b][c]));
+          svg.append(s('rect', { class: 'qq-bar-drop', 'data-c': c + 1, x: x0, y: y1, width: w, height: y2 - y1 }));
+          svg.append(s('rect', { x: x0, y: y1, width: w, height: y2 - y1, fill: 'url(#qq-hatch)' }));
+          yDn += down[b][c];
+        }
+      }
+    }
+    // shape marks right of the last bar, at the middle of each class's segment (when it is tall enough)
+    var last = up[nb - 1], lastDn = down[nb - 1], acc = 0, accD = 0, mx = pad.l + cw + 0.75 * rem, r = 0.42 * rem;
+    for (var k = 0; k < 3; k++) {
+      if (Y(acc) - Y(acc + last[k]) >= 1.6 * r) svg.append(s('path', { class: 'qq-mark', 'data-c': k + 1, d: markPath(KEYS[k], mx, Y(acc + last[k] / 2), r) }));
+      if (Y(-(accD + lastDn[k])) - Y(-accD) >= 1.6 * r) svg.append(s('path', { class: 'qq-mark', 'data-c': k + 1, d: markPath(KEYS[k], mx, Y(-(accD + lastDn[k] / 2)), r) }));
+      acc += last[k]; accD += lastDn[k];
+    }
+    // axes, zero line, capacity
+    svg.append(s('line', { class: 'qq-axis', x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ch }));
+    svg.append(s('line', { class: 'qq-zero', x1: pad.l, x2: pad.l + cw, y1: Y(0), y2: Y(0) }));
+    svg.append(s('line', { class: 'qq-cap', x1: pad.l, x2: pad.l + cw, y1: Y(p.C), y2: Y(p.C) }));
+    svg.append(s('text', { class: 'qq-t qq-halo', x: pad.l + cw, y: Y(p.C) - 0.3 * fs, 'text-anchor': 'end' }, t('capLine', { c: p.C })));
+    svg.append(s('text', { class: 'qq-t', x: pad.l - 0.35 * rem, y: pad.t - 0.6 * fs }, t('axisY')));
+    if (X(L.FROM) - X(0) > t('warmup').length * 0.5 * fs + 8) svg.append(s('text', { class: 'qq-halo', x: X(L.FROM / 2), y: pad.t + 1.1 * fs, 'text-anchor': 'middle' }, t('warmup')));
+    svg.append(s('text', { class: 'qq-t qq-halo', x: X(L.FROM) + 0.4 * rem, y: Y(0) - 0.35 * fs }, t('up')));
+    svg.append(s('text', { class: 'qq-t qq-halo', x: X(L.FROM) + 0.4 * rem, y: Y(0) + 1.05 * fs }, t('down')));
+    svg.append(s('text', { x: pad.l + cw / 2, y: pad.t + ch + 1.2 * fs, 'text-anchor': 'middle' }, t('axisX')));
+    box.replaceChildren(svg);
+  }
+
+  // ── the table, with "changed" marks on the cells a param move changed ──
+  var lastSig = null, lastVals = {}, changed = {};
+  function tableCells(st) {
+    var rows = st.totals.map(function (o) {
+      return [num(o.offeredRate), num(o.deliveredRate), num(o.droppedRate) + ' (' + pct(o.dropPct) + ')', o.delay == null ? '—' : num(o.delay)];
+    });
+    var a = st.all;
+    rows.push([num(a.offeredRate), num(a.deliveredRate), num(a.dropped / (L.T - L.FROM)) + ' (' + pct(a.dropPct) + ')', '']);
+    return rows;
+  }
+  function track(rows, params) {
+    var sig = JSON.stringify(params);
+    if (sig === lastSig) return;
+    var fresh = lastSig !== null;
+    changed = {};
+    rows.forEach(function (r, i) { r.forEach(function (v, j) { var k = i + ':' + j; if (fresh && lastVals[k] !== v) changed[k] = true; lastVals[k] = v; }); });
+    lastSig = sig;
+  }
+  function table(st, p) {
+    var rows = tableCells(st);
+    track(rows, p);
+    var cell = function (i, j, v) { return h('td', { class: changed[i + ':' + j] ? 'qq-chg' : null }, v); };
+    return h('div', { class: 'qq-tabwrap' }, h('table', { class: 'qq-tab' },
+      h('caption', null, t('tableNote')),
+      h('thead', null, h('tr', null, h('th', null, t('colClass')), h('th', null, t('colOffered')), h('th', null, t('colDelivered')),
+        h('th', null, t('colDropped')), h('th', null, t('colDelay')))),
+      h('tbody', null, rows.map(function (r, i) {
+        var name = i < 3 ? h('span', { class: 'qq-name' }, pk(i), NAMES[i]) : t('total');
+        return h('tr', { class: i === 3 ? 'qq-total' : null }, h('td', null, name), r.map(function (v, j) { return cell(i, j, v); }));
+      }))));
+  }
+
+  // ── captions: the one thing the current picture shows ──
+  function caption(c) {
+    var st = c.state, p = c.params, T = st.totals, A = st.all;
+    var b = function (x) { return h('b', null, x); };
+    var delays = T.map(function (o) { return o.delay; }).filter(function (d) { return d != null; });
+    var maxDelay = delays.length ? Math.max.apply(null, delays) : 0;
+    var dr = function (i) { return num(T[i].deliveredRate); }, of = function (i) { return num(T[i].offeredRate); };
+    if (A.dropped === 0 && maxDelay < 0.005) {
+      return t.parts('captionCalm', { o: num(A.offeredRate, 1), c: p.C, same: b(t('captionCalmSame')) });
+    }
+    // Overload with no drops yet: the queues are still growing (a long queue takes a while to fill).
+    if (A.dropped === 0 && A.offeredRate > p.C) return t.parts('captionFilling', { o: num(A.offeredRate, 1), c: p.C, d: b(ticks(maxDelay)) });
+    // Below C and still dropping: one tick's arrivals overflow a queue before the link sends (SPEC rule 6).
+    if (A.dropped > 0 && A.offeredRate <= p.C) return t.parts('captionBurstDrop', { o: num(A.offeredRate, 1), c: p.C, limit: b(String(p.limit)) });
+    if (A.dropped === 0) return t.parts('captionBurst', { d: b(ticks(maxDelay)) });
+    if (p.sched === 'fifo') {
+      var v = p.rVoice > 0 ? '' : 'NoVoice';
+      if (p.limit > 20) return t.parts('captionBloat' + v, { limit: p.limit, d: b(ticks(maxDelay)) });
+      return t.parts('captionFifo' + v, { pct: b(pct(A.dropPct)), d: ticks(maxDelay) });
+    }
+    if (p.sched === 'pq') {
+      var lost = T.map(function (o) { return o.dropped > 0; });
+      if (p.rVoice > p.C && p.rVideo + p.rBulk > 0 && T[1].delivered + T[2].delivered === 0) return t.parts('captionStarveVoice', { v: num(p.rVoice, 1), c: p.C, nothing: b(t('nothing')) });
+      if (p.rVoice + p.rVideo > p.C && p.rBulk > 0 && T[2].delivered === 0) return t.parts('captionStarveBulk', { o: num(p.rVoice + p.rVideo, 1), c: p.C, nothing: b(t('nothing')) });
+      if (!lost[0] && !lost[1] && lost[2] && (T[0].delay || 0) < 0.05 && (T[1].delay || 0) < 0.05) {
+        return t.parts('captionPq', { d: b(dr(2)), o: of(2) });
+      }
+      return t.parts('captionPqOther', { a: dr(0), ao: of(0), b: dr(1), bo: of(1), x: dr(2), xo: of(2) });
+    }
+    return t.parts('captionWrr', { w: b([p.wVoice, p.wVideo, p.wBulk].join(' : ')), a: b(dr(0)), ao: of(0), b: b(dr(1)), bo: of(1), x: b(dr(2)), xo: of(2) });
+  }
+
+  var plain = function (v) { return num(v, 1); };
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'sched', type: 'choice', label: t('sched'), options: [['fifo', t('schedFifo')], ['pq', t('schedPq')], ['wrr', t('schedWrr')]] },
+      { key: 'rVoice', type: 'range', label: t('rVoice'), min: 0, max: 12, step: 0.5, format: plain },
+      { key: 'rVideo', type: 'range', label: t('rVideo'), min: 0, max: 12, step: 0.5, format: plain },
+      { key: 'rBulk', type: 'range', label: t('rBulk'), min: 0, max: 12, step: 0.5, format: plain },
+      { key: 'C', type: 'range', label: t('C'), min: 5, max: 20, step: 1 },
+      { key: 'limit', type: 'choice', label: t('limit'), options: [[10, '10'], [20, '20'], [60, '60']] },
+      { key: 'wVoice', type: 'range', label: t('wVoice'), min: 1, max: 8, step: 1, visible: function (q) { return q.sched === 'wrr'; } },
+      { key: 'wVideo', type: 'range', label: t('wVideo'), min: 1, max: 8, step: 1, visible: function (q) { return q.sched === 'wrr'; } },
+      { key: 'wBulk', type: 'range', label: t('wBulk'), min: 1, max: 8, step: 1, visible: function (q) { return q.sched === 'wrr'; } },
+      { key: 'seed', type: 'range', label: t('seed'), min: 1, max: 9, step: 1 }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'qq-voice', c: 1, label: t('legendVoice') },
+      { shape: 'qq-video', c: 2, label: t('legendVideo') },
+      { shape: 'qq-bulk', c: 3, label: t('legendBulk') },
+      { shape: 'qq-sent', label: t('legendSent') },
+      { shape: 'qq-slot', label: t('legendSlot') },
+      { shape: 'qq-drop', label: t('legendDrop') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var st = c.state, p = c.params;
+      var plot = h('div', { class: 'qq-plot' });
+      c.stage.replaceChildren(h('div', { class: 'qq' }, scene(st, p), h('div', { class: 'qq-bottom' }, plot, table(st, p))));
+      drawChart(plot, st, p);
+    },
+
+    caption: caption
+  });
+
+  // The chart is drawn in pixels (text at 1:1), so it is redrawn when the stage changes size.
+  if (typeof ResizeObserver === 'function') {
+    var lastSize = '';
+    new ResizeObserver(function (es) {
+      var r = es[0].contentRect, key = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (key !== lastSize) { lastSize = key; sim.render(); }
+    }).observe(document.querySelector('[data-sd-stage]'));
+  }
+})();
+</script>
+</body>
+</html>
