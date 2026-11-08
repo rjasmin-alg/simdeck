@@ -112,7 +112,7 @@ test('search: live, in both languages, folded; Enter opens the first hit; a pres
   const { ctx, page, errors } = await open();
   await page.goto(home());
   const all = (await visibleIds(page)).length;
-  await page.keyboard.type('prijevod');
+  await page.keyboard.type('maskarada');  // folded: matches nat's alias "IP maškarada" only ("prijevod" also finds cgnat since 2026-11-08)
   assert.deepEqual(await visibleIds(page), ['nat']);
   assert.match(await page.textContent('#shown'), new RegExp(`^1 / ${all}$`));
   assert.equal(await page.locator('.topic:not([hidden])').count(), 1, 'empty shelves are hidden');
