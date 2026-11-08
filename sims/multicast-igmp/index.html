@@ -1,0 +1,523 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- multicast-igmp: router R (the IGMP querier; the 239.1.1.1 stream arrives through it) on switch port 5, hosts H1–H4
+     on ports 1–4, one VLAN. A stepper: one scripted event per step (join, leave, query, time jump), its IGMP messages
+     and the table changes, then one frame of the stream. Kit view K2 draws the network with a "stream" meter in each
+     host card; beside it the clock and R's groups, the switch's snooping table and the group address → MAC mapping.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="multicast-igmp">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multicast i prisluškivanje IGMP-a · simdeck</title>
+<meta name="description" content="Računala ulaze u skupinu 239.1.1.1 i izlaze iz nje. Bez prisluškivanja preklopnik tok preplavljuje, s njim ga šalje samo članovima.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "multicast-igmp",
+  "title": {
+    "hr": "Multicast i prisluškivanje IGMP-a",
+    "en": "Multicast and IGMP snooping"
+  },
+  "concept": {
+    "hr": "Članstvo u skupini; prisluškivanje IGMP-a drži tok dalje od drugih priključaka",
+    "en": "Joins, and IGMP snooping keeps the stream off other ports"
+  },
+  "summary": {
+    "hr": "Računala ulaze u skupinu 239.1.1.1 i izlaze iz nje. Bez prisluškivanja preklopnik tok preplavljuje, s njim ga šalje samo članovima.",
+    "en": "Hosts join and leave 239.1.1.1. Without snooping the switch floods the stream; with it, only member ports get it, until a Leave or a timeout."
+  },
+  "tags": [
+    "multicast"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="multicast-igmp"]; colours only from kit tokens.
+   Message kinds carry colour and shape: stream c1 filled circle, report c2 ▲, leave c3 △, query c4 ◆. Ports that get
+   the stream are solid links, ports kept off it dashed. */
+[data-sim="multicast-igmp"] .sd-ctl[hidden] { display: none; }
+[data-sim="multicast-igmp"] .mi {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 27rem;
+  gap: 1.2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="multicast-igmp"] .mi-side { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+[data-sim="multicast-igmp"] .mi-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.3rem 0.6rem 0.4rem;
+  min-width: 0;
+}
+[data-sim="multicast-igmp"] .mi-box h2 { margin: 0 0 0.2rem; font-size: 1em; font-weight: 700; }
+[data-sim="multicast-igmp"] .mi-muted { color: var(--muted); font-size: var(--fs-sm); margin: 0; }
+[data-sim="multicast-igmp"] .mi-mono { font-family: var(--mono); }
+
+/* clock and router */
+[data-sim="multicast-igmp"] .mi-clock { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+[data-sim="multicast-igmp"] .mi-clock b { font-family: var(--mono); font-size: 1.4em; }
+[data-sim="multicast-igmp"] .mi-clock b.sd-changed { background: var(--hl); color: var(--on-hl); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+
+/* tables */
+[data-sim="multicast-igmp"] .mi-tab { width: 100%; border-collapse: separate; border-spacing: 0 0.1rem; font-size: var(--fs-sm); }
+[data-sim="multicast-igmp"] .mi-tab th { text-align: left; font-weight: 700; color: var(--muted); padding: 0 0.4rem; white-space: nowrap; }
+[data-sim="multicast-igmp"] .mi-tab td { padding: 0.05rem 0.4rem; white-space: nowrap; border-top: 3px solid transparent; border-bottom: 3px solid transparent; }
+[data-sim="multicast-igmp"] .mi-tab td:first-child { font-family: var(--mono); font-weight: 700; border-left: 0.45rem solid var(--c1); background: color-mix(in srgb, var(--c1) 12%, var(--bg)); }
+[data-sim="multicast-igmp"] .mi-tab td small { display: block; font-weight: 400; color: var(--muted); }
+[data-sim="multicast-igmp"] .mi-tab tr[data-other] td:first-child { border-left-style: dashed; border-left-color: var(--c5); background: color-mix(in srgb, var(--c5) 12%, var(--bg)); }
+[data-sim="multicast-igmp"] .mi-tab tr[data-changed] td { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="multicast-igmp"] .mi-tab tr[data-changed] td small { color: var(--on-hl); }
+[data-sim="multicast-igmp"] .mi-tab tr[data-gone] td { text-decoration: line-through; }
+[data-sim="multicast-igmp"] .mi-tab .mi-leave { font-weight: 700; }
+
+/* group address → MAC, bit by bit */
+[data-sim="multicast-igmp"] .mi-bits { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.5rem; row-gap: 0.1rem; align-items: baseline; font-size: var(--fs-sm); }
+[data-sim="multicast-igmp"] .mi-bits > b { font-family: var(--mono); white-space: nowrap; }
+[data-sim="multicast-igmp"] .mi-bitrow { font-family: var(--mono); white-space: nowrap; letter-spacing: -0.02em; }
+[data-sim="multicast-igmp"] .mi-pre { color: var(--muted); }
+[data-sim="multicast-igmp"] .mi-lost { padding: 0 0.1rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); text-decoration: line-through; }
+[data-sim="multicast-igmp"] .mi-low { padding: 0 0.1rem; border: var(--line-w) solid var(--c1); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="multicast-igmp"] .mi-gbit { padding: 0 0.1rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="multicast-igmp"] .mi-notes { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; margin-top: 0.2rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="multicast-igmp"] .mi-notes span::before { content: ''; display: inline-block; width: 0.9em; height: 0.7em; margin-right: 0.3em; border-radius: 0.15rem; }
+[data-sim="multicast-igmp"] .mi-notes .mi-n-low::before { border: var(--line-w) solid var(--c1); }
+[data-sim="multicast-igmp"] .mi-notes .mi-n-lost::before { border: var(--line-w) dashed var(--danger); }
+[data-sim="multicast-igmp"] .mi-notes .mi-n-gbit::before { border: var(--line-w) solid var(--ink); }
+
+/* the stream meter in each host card: one cell per step */
+[data-sim="multicast-igmp"] .mi-meter { grid-column: 1 / -1; display: grid; gap: 0.1rem; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="multicast-igmp"] .mi-cells { display: flex; gap: 0.2rem; }
+[data-sim="multicast-igmp"] .mi-cell { display: inline-grid; place-items: center; width: 1rem; height: 1rem; border: var(--line-w) solid var(--muted); border-radius: 50%; line-height: 1; font-weight: 700; font-size: 0.75em; }
+[data-sim="multicast-igmp"] .mi-cell[data-how='use'] { background: var(--c1); border-color: var(--c1); }
+[data-sim="multicast-igmp"] .mi-cell[data-how='nic'],
+[data-sim="multicast-igmp"] .mi-cell[data-how='ip'],
+[data-sim="multicast-igmp"] .mi-cell[data-how='down'] { border: var(--line-w) dashed var(--c1); color: var(--ink); }
+[data-sim="multicast-igmp"] .mi-cell[data-how='nic']::after,
+[data-sim="multicast-igmp"] .mi-cell[data-how='ip']::after,
+[data-sim="multicast-igmp"] .mi-cell[data-how='down']::after { content: '✕'; }
+[data-sim="multicast-igmp"] .mi-cell[data-how='later'] { border-style: dotted; opacity: 0.5; }
+[data-sim="multicast-igmp"] .mi-cell[data-now] { outline: 3px solid var(--ink); outline-offset: 1px; }
+[data-sim="multicast-igmp"] .mi-count { color: var(--muted); white-space: nowrap; }
+
+/* symbol chips on the links */
+[data-sim="multicast-igmp"] .sd-topo-chip { min-width: 1.7rem; text-align: center; padding: 0 0.35rem; }
+[data-sim="multicast-igmp"] .sd-topo-card .sd-topo-role,
+[data-sim="multicast-igmp"] .sd-topo-card .sd-topo-addr { grid-column: 1 / -1; white-space: nowrap; }
+
+/* legend swatches */
+[data-sim="multicast-igmp"] .sd-swatch[data-shape^='mi-'] { position: relative; background: var(--bg); border-color: transparent; }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape^='mi-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--sw); }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-stream'] { --sw: var(--c1); }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-stream']::after { content: '●'; }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-report'] { --sw: var(--c2); }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-report']::after { content: '▲'; }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-leave'] { --sw: var(--c3); }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-leave']::after { content: '△'; }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-query'] { --sw: var(--c4); }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-query']::after { content: '◆'; }
+[data-sim="multicast-igmp"] .sd-swatch[data-shape='mi-off'] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--muted) 0 0.3em, transparent 0.3em 0.48em); }
+
+/* Phone and portrait: the stage grows with its content; the drawing becomes the kit's list, the boxes stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="multicast-igmp"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="multicast-igmp"] .mi { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="multicast-igmp"] .mi-tabwrap, [data-sim="multicast-igmp"] .mi-bitswrap { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Multicast i prisluškivanje IGMP-a</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HOSTS = Object.keys(L.SCENE.hosts);
+  var RP = L.ROUTER_PORT;
+  var G = L.STREAM;
+  /** Symbols on the chips: the legend pairs each with its colour and name. */
+  var SYM = { stream: '●', report: '▲', leave: '△', gq: '◆', gsq: '◆' };
+  var COLOR = { stream: 1, report: 2, leave: 3, gq: 4, gsq: 4 };
+  var CAP_START = { h1: 'capStartH1', h1h3: 'capStartH1h3', leave: 'capStartLeave', silent: 'capStartSilent', overlap: 'capStartOverlap' };
+
+  /** Data (addresses, ports, host ids) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls == null ? 'mi-mono' : cls || null }, String(text)); }
+  function b(text) { return h('b', null, data(text, '')); }
+  /** "1, 2 i 3": data joined with the language's "and". */
+  function listOf(items) {
+    var out = [];
+    items.forEach(function (x, i) {
+      if (i) out.push(i === items.length - 1 ? t('and') : ', ');
+      out.push(String(x));
+    });
+    return data(out.join(''), '');
+  }
+  /** t.parts with *text* set in italics (English protocol terms on the Croatian page). */
+  function parts(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null || s.indexOf('*') < 0) { out.push(p); return; }
+      s.split(/(\*[^*]+\*)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) out.push(h('em', { lang: 'en' }, bit.slice(1, -1)));
+        else out.push(bit);
+      });
+    });
+    return out;
+  }
+  function nparts(key, n, vars) { return parts(key, Object.assign({ n: n }, vars)); }
+  function ev(s, code) { return s.events.filter(function (e) { return e.code === code; }); }
+  function scriptName(p) { return L.SCRIPTS[p.script] ? p.script : L.defaults.script; }
+  /** Ports the switch would send the stream to now (solid links), whether or not R forwards it this step. */
+  function wouldGet(s, p) { return L.dataPorts(s, L.SCENE, p, G, RP).filter(function (x) { return x !== RP; }); }
+
+  // ── topology (kit view K2) ──
+
+  function meter(c, host) {
+    var s = c.state, hist = s.history[host];
+    var cells = [];
+    for (var i = 0; i < c.steps; i++) {
+      var how = i < hist.length ? hist[i] : 'later';
+      cells.push(h('span', { class: 'mi-cell', dataset: i === hist.length - 1 ? { how: how, now: '1' } : { how: how } }));
+    }
+    return h('div', { class: 'mi-meter' }, h('span', { class: 'mi-cells' }, cells),
+      h('span', { class: 'mi-count' }, t('meterCount', { r: s.received[host], u: s.used[host] })));
+  }
+
+  function hostBadges(s, host) {
+    var out = [];
+    s.inFlight.forEach(function (m) {
+      if (m.from !== host) return;
+      out.push({ text: t(m.type === 'leave' ? 'bLeave' : 'bReport'), k: 'fill' });
+    });
+    ev(s, 'rx').forEach(function (e) {
+      if (e.host !== host) return;
+      var key = { use: 'bUse', nic: 'bNic', ip: 'bIp', down: 'bDown' }[e.how];
+      out.push({ text: t(key), k: e.how === 'use' ? 'solid' : e.how === 'ip' ? 'dashed' : 'muted' });
+    });
+    return out;
+  }
+
+  function renderTopo(c) {
+    var s = c.state, p = c.params;
+    var now = wouldGet(s, p), before = c.prev ? wouldGet(c.prev, p) : now;
+    var sent = s.inFlight.some(function (m) { return m.type === 'stream'; });
+    var nodes = [
+      { id: 'src', kind: 'cloud', col: 0, row: 0, span: 2, name: t('source'), align: 'center' },
+      { id: 'R', kind: 'router', col: 3, row: 0, span: 2, c: 8, lines: [{ text: t('roleRouter'), kind: 'role' }],
+        badges: [] },
+      { id: 'SW', kind: 'switch', col: 2, row: 2, span: 4, c: 8,
+        lines: [{ text: t(p.snooping ? 'snoopOn' : 'snoopOff'), kind: 'role' }], badges: [] }
+    ];
+    var rq = s.inFlight.filter(function (m) { return m.from === 'R' && m.type !== 'stream'; });
+    if (rq.length) nodes[1].badges.push({ text: t('bQuery'), k: 'fill' });
+    if (s.router.groups[G] != null) nodes[1].badges.push({ text: t('bFwd'), k: 'solid' });
+    else nodes[1].badges.push({ text: t('bNoFwd'), k: 'muted' });
+    if (sent) nodes[2].badges.push({ text: t(p.snooping ? 'bFilter' : 'bFlood'), k: p.snooping ? 'solid' : 'dashed' });
+    HOSTS.forEach(function (id, i) {
+      var groups = s.members[id];
+      var down = s.down.indexOf(id) >= 0;
+      var port = L.SCENE.hosts[id];
+      nodes.push({ id: id, kind: 'host', col: 2 * i, row: 4, span: 2, c: groups.indexOf(G) >= 0 ? 1 : groups.length ? 5 : 8,
+        lines: [groups.length ? { text: groups.join(', '), kind: 'addr' } : { text: t('notMember'), kind: 'role' },
+          down ? { text: t('hung'), kind: 'role' } : null],
+        state: down ? 'down' : hostBadges(s, id).some(function (x) { return x.k === 'fill'; }) ? 'active' : null,
+        changed: (now.indexOf(port) >= 0) !== (before.indexOf(port) >= 0),
+        badges: hostBadges(s, id), extra: meter(c, id) });
+    });
+
+    var links = [{ id: 'up', a: 'src', b: 'R', active: true },
+      { id: 'r', a: 'R', b: 'SW', active: sent, ends: { b: data(RP, '') } }];
+    HOSTS.forEach(function (id) {
+      var port = L.SCENE.hosts[id];
+      var gets = now.indexOf(port) >= 0;
+      links.push({ id: id, a: id, b: 'SW', active: sent && s.fwd.indexOf(port) >= 0, state: gets ? 'up' : 'off',
+        ends: { b: data(port, '') } });
+    });
+
+    var packets = [];
+    var chip = function (from, to, type, at) { packets.push({ from: from, to: to, label: SYM[type], c: COLOR[type], at: at }); };
+    // IGMP: host → switch → its ports; router → switch → its ports. One chip per link and kind.
+    var seen = {};
+    var once = function (from, to, type, at) { var k = from + '>' + to + ':' + type; if (!seen[k]) { seen[k] = 1; chip(from, to, type, at); } };
+    var nodeOf = function (port) { return port === RP ? 'R' : HOSTS.filter(function (x) { return L.SCENE.hosts[x] === port; })[0]; };
+    s.inFlight.forEach(function (m) {
+      if (m.type === 'stream') return;
+      var down = m.from === 'R';
+      if (down) once('R', 'SW', m.type, 0.35);
+      else once(m.from, 'SW', m.type, 0.5);
+      m.to.forEach(function (port) { once('SW', nodeOf(port), m.type, port === RP ? 0.5 : 0.35); });
+    });
+    // the stream: always from upstream to R; on into the LAN only while R knows a member
+    once('src', 'R', 'stream', 0.5);
+    s.inFlight.forEach(function (m) {
+      if (m.type !== 'stream') return;
+      once('R', 'SW', 'stream', 0.75);
+      m.to.forEach(function (port) { once('SW', nodeOf(port), 'stream', 0.75); });
+    });
+    return Simdeck.topology({ cols: 8, rows: ['auto', 'minmax(4.4rem, 1fr)', 'auto', 'minmax(3.4rem, 1fr)', 'auto'],
+      dir: c.dir, nodes: nodes, links: links, packets: packets });
+  }
+
+  // ── side boxes ──
+
+  function renderClock(c) {
+    var s = c.state, changed = c.prev && c.prev.clock !== s.clock;
+    var rows = Object.keys(s.router.groups).map(function (g) {
+      return h('tr', null, h('td', null, data(g, '')), h('td', null, data(t('timerAt', { t: s.router.groups[g] }), '')));
+    });
+    var pend = s.router.pendingQuery;
+    return h('section', { class: 'mi-box' },
+      h('div', { class: 'mi-clock' }, h('h2', null, t('clock')),
+        h('b', { class: changed ? 'sd-changed' : null, translate: 'no' }, t('clockVal', { t: s.clock }))),
+      h('h2', null, t('routerTitle')),
+      rows.length ? h('table', { class: 'mi-tab' }, h('tbody', null, rows)) : h('p', { class: 'mi-muted' }, t('routerEmpty')),
+      pend ? h('p', { class: 'mi-muted' }, t.n('routerPending', pend.left), ': ', data(pend.group, '')) : null);
+  }
+
+  function renderTable(c) {
+    var s = c.state, p = c.params, prev = c.prev;
+    var box = h('section', { class: 'mi-box' }, h('h2', null, t('tableTitle')));
+    if (!p.snooping) { box.append(h('p', { class: 'mi-muted' }, t('tableOff'))); return box; }
+    var byMac = p.keyBy === 'mac';
+    var rows = [];
+    var keys = Object.keys(s.table);
+    // ports removed in this step stay one step, struck through
+    var gone = ev(s, 'expire-port');
+    gone.forEach(function (e) { if (keys.indexOf(e.key) < 0) keys.push(e.key); });
+    keys.forEach(function (key) {
+      var e = s.table[key] || { groups: prev && prev.table[key] ? prev.table[key].groups : [], ports: {}, leaving: [] };
+      var ports = Object.keys(e.ports).map(Number);
+      gone.forEach(function (x) { if (x.key === key && ports.indexOf(x.port) < 0) ports.push(x.port); });
+      ports.sort(function (a, z) { return a - z; });
+      ports.forEach(function (port) {
+        var isGone = e.ports[port] == null;
+        var changed = s.events.some(function (x) { return x.key === key && x.port === port; });
+        var first = byMac ? h('td', null, data(key, ''), h('small', { translate: 'no' }, e.groups.join(', '))) : h('td', null, data(key, ''));
+        var other = e.groups.indexOf(G) < 0;
+        var timer = isGone ? data('—', '') : h('span', null, data(t('timerAt', { t: e.ports[port] }), ''),
+          e.leaving.indexOf(port) >= 0 ? h('small', { class: 'mi-leave' }, t('timerLeave')) : null);
+        var ds = {};
+        if (changed) ds.changed = '1';
+        if (isGone) ds.gone = '1';
+        if (other) ds.other = '1';
+        rows.push(h('tr', { dataset: ds }, first, h('td', null, data(port, '')), h('td', null, timer)));
+      });
+    });
+    if (!rows.length) { box.append(h('p', { class: 'mi-muted' }, t('tableEmpty'))); return box; }
+    box.append(h('div', { class: 'mi-tabwrap' }, h('table', { class: 'mi-tab' },
+      h('thead', null, h('tr', null, h('th', null, t(byMac ? 'colMac' : 'colGroup')), h('th', null, t('colPort')), h('th', null, t('colTimer')))),
+      h('tbody', null, rows))));
+    return box;
+  }
+
+  function bitsLine(ip) {
+    var bits = L.bitsOf(ip);
+    var low = bits.slice(9);
+    var dotted = low.slice(0, 7) + '.' + low.slice(7, 15) + '.' + low.slice(15);
+    return h('span', { class: 'mi-bitrow', translate: 'no' },
+      h('span', { class: 'mi-pre' }, bits.slice(0, 4)), ' ', h('span', { class: 'mi-lost' }, bits.slice(4, 9)), ' ',
+      h('span', { class: 'mi-low' }, dotted));
+  }
+  function renderMac(c) {
+    var s = c.state;
+    var groups = [G];
+    HOSTS.forEach(function (x) { s.members[x].forEach(function (g) { if (groups.indexOf(g) < 0) groups.push(g); }); });
+    var rows = [];
+    groups.forEach(function (g) {
+      rows.push(b(g), bitsLine(g));
+    });
+    var mac = L.groupMac(G);
+    var lowBits = L.bitsOf(G).slice(9);
+    rows.push(b('MAC'), h('span', { class: 'mi-bitrow', translate: 'no' },
+      h('span', { class: 'mi-pre' }, '01-00-5E'), ' 0 ',
+      h('span', { class: 'mi-low' }, lowBits.slice(0, 7) + '.' + lowBits.slice(7, 15) + '.' + lowBits.slice(15))));
+    rows.push(h('span'), h('b', { class: 'mi-bitrow', translate: 'no' }, '= ' + mac));
+    rows.push(b('01'), h('span', { class: 'mi-bitrow', translate: 'no' }, '0000 000', h('span', { class: 'mi-gbit' }, '1')));
+    return h('section', { class: 'mi-box' }, h('h2', null, t('macTitle')),
+      h('div', { class: 'mi-bitswrap' }, h('div', { class: 'mi-bits' }, rows)),
+      h('div', { class: 'mi-notes' }, h('span', { class: 'mi-n-low' }, t('macCopied')), h('span', { class: 'mi-n-lost' }, t('macLost')),
+        h('span', { class: 'mi-n-gbit' }, t('macGroupBit'))));
+  }
+
+  // ── captions ──
+
+  function sentences(c) {
+    var s = c.state, p = c.params, prev = c.prev;
+    var out = [];
+    var say = function (x) { out.push(x); };
+    var head = s.events[0];
+    var refreshOf = function (port) { return s.events.filter(function (e) { return (e.code === 'refresh' || e.code === 'add-port') && e.port === port; })[0]; };
+    var answers = function (cause) {
+      ev(s, 'report').filter(function (e) { return e.cause === cause; }).forEach(function (e) {
+        var r = refreshOf(e.port);
+        if (p.snooping && r) say(parts('cAnswer', { h: b(e.host), g: data(e.group, ''), port: data(e.port, ''), until: data(r.until, '') }));
+        else say(parts('cAnswerNoSnoop', { h: b(e.host), g: data(e.group, '') }));
+      });
+      var quiet = ev(s, 'no-answer').map(function (e) { return e.port; });
+      if (quiet.length) say(parts(quiet.length > 1 ? 'cNoAnswerMany' : 'cNoAnswer', { ports: listOf(quiet) }));
+    };
+    if (head.do === 'tick') say(parts('cTick'));
+    else if (head.do === 'wait') say(parts('cWait'));
+    else if (head.do === 'silent') say(parts('cSilent', { h: b(head.host) }));
+    else if (head.do === 'join') {
+      var r = ev(s, 'report')[0];
+      say(parts('cJoin', { h: b(head.host), g: data(head.group, '') }));
+      if (p.snooping) {
+        say(parts('cReportUp', { port: data(RP, '') }));
+        var add = ev(s, 'add-port')[0];
+        if (add) {
+          var others = s.table[add.key].groups.filter(function (g) { return g !== head.group; });
+          if (others.length) say(parts('cAddMac', { port: b(add.port), mac: data(add.key, ''), other: data(others.join(', '), '') }));
+          else say(parts('cAdd', { port: b(add.port), g: data(head.group, '') }));
+        }
+      } else say(parts('cReportFlood', { ports: listOf(r.to) }));
+      if (ev(s, 'router-add').length) say(parts('cRouterAdd', { g: data(head.group, '') }));
+    } else if (head.do === 'leave') {
+      var l = ev(s, 'leave')[0];
+      say(parts('cLeave', { h: b(head.host) }));
+      var sh = ev(s, 'shorten')[0];
+      if (p.snooping && sh) say(parts('cLeaveSnoop', { port: b(sh.port), until: data(sh.until, '') }));
+      else if (!p.snooping) say(parts('cLeaveFlood', { ports: listOf(l.to) }));
+    } else if (head.do === 'gsq') {
+      var q = ev(s, 'gsq')[0];
+      if (q) {
+        say(parts('cGsq', { k: data(q.n, ''), g: data(q.group, ''), ports: listOf(q.to) }));
+        answers('gsq');
+      }
+    } else if (head.do === 'query') {
+      say(parts('cGq'));
+      answers('gq');
+    }
+    ev(s, 'expire-port').forEach(function (e) {
+      var g = (prev && prev.table[e.key] ? prev.table[e.key].groups : [e.key]).join(', ');
+      say(parts(e.after === 'leave' ? 'cExpireLeave' : 'cExpireGmi', { port: b(e.port), g: data(g, '') }));
+    });
+    var rexp = ev(s, 'router-expire');
+    rexp.forEach(function (e) { say(parts('cRouterExpire', { g: data(e.group, '') })); });
+    // the stream
+    var st = ev(s, 'stream')[0];
+    if (!st) {
+      if (!rexp.length) say(parts('cNoStream', { g: data(G, '') }));
+      return out;
+    }
+    var prevFwd = prev ? prev.fwd : [];
+    var changed = prev && ev(prev, 'stream').length && prevFwd.join() !== st.to.join();
+    if (changed) say(nparts('cStreamNow', st.to.length, { ports: listOf(st.to) }));
+    else say(nparts(p.snooping ? 'cStreamSnoop' : 'cStreamFlood', st.copies, { ports: listOf(st.to) }));
+    if (ev(s, 'expire-port').length) {
+      ev(s, 'rx').filter(function (e) { return e.how === 'use'; }).forEach(function (e) { say(parts('cKeeps', { h: b(e.host) })); });
+    }
+    var nic = ev(s, 'rx').filter(function (e) { return e.how === 'nic'; }).map(function (e) { return e.host; });
+    if (nic.length) say(nparts('cNic', nic.length, { hosts: listOf(nic) }));
+    ev(s, 'rx').filter(function (e) { return e.how === 'ip'; }).forEach(function (e) {
+      var mine = s.members[e.host].filter(function (g) { return L.groupMac(g) === L.groupMac(G); });
+      say(parts('cIp', { h: b(e.host), other: data(mine.join(', '), ''), g: data(G, '') }));
+    });
+    ev(s, 'rx').filter(function (e) { return e.how === 'down'; }).forEach(function (e) { say(parts('cDown', { h: b(e.host) })); });
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'snooping', type: 'toggle', label: t('snooping'), hint: t('snoopingHint'), resets: true },
+      { key: 'keyBy', type: 'choice', label: t('keyBy'), resets: true, visible: function (p) { return p.snooping; },
+        options: [['ip', t('keyIp')], ['mac', t('keyMac')]] },
+      { key: 'script', type: 'select', label: t('script'), resets: true,
+        options: [['h1', t('scH1')], ['h1h3', t('scH1h3')], ['leave', t('scLeave')], ['silent', t('scSilent')], ['overlap', t('scOverlap')]] }
+    ],
+
+    presets: [
+      { id: 'flood', label: t('presetFlood'), hint: t('presetFloodHint'), params: { snooping: false, keyBy: 'ip', script: 'h1' } },
+      { id: 'snoop', label: t('presetSnoop'), hint: t('presetSnoopHint'), params: { snooping: true, keyBy: 'ip', script: 'h1h3' } },
+      { id: 'leave', label: t('presetLeave'), hint: t('presetLeaveHint'), params: { snooping: true, keyBy: 'ip', script: 'leave' } },
+      { id: 'silent', label: t('presetSilent'), hint: t('presetSilentHint'), params: { snooping: true, keyBy: 'ip', script: 'silent' } },
+      { id: 'mac-overlap', label: t('presetOverlap'), hint: t('presetOverlapHint'), params: { snooping: true, keyBy: 'mac', script: 'overlap' } }
+    ],
+
+    legend: [
+      { shape: 'mi-stream', label: t('legStream') },
+      { shape: 'mi-report', label: t('legReport') },
+      { shape: 'mi-leave', label: t('legLeave') },
+      { shape: 'mi-query', label: t('legQuery') },
+      { shape: 'line', label: t('legMember') },
+      { shape: 'mi-off', label: t('legNon') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'mi' },
+        renderTopo(c),
+        h('div', { class: 'mi-side' }, renderClock(c), renderTable(c), renderMac(c))));
+    },
+
+    caption: function (c) {
+      var s = c.state;
+      if (c.n === 0) {
+        var key = CAP_START[scriptName(c.params)];
+        return parts(key, { mac: data(L.groupMac(G), '') });
+      }
+      var out = parts('capStep', { n: data(c.n, ''), t: data(s.clock, '') });
+      sentences(c).forEach(function (x) { out.push(' '); out = out.concat(x); });
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
