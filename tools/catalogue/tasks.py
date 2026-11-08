@@ -158,6 +158,12 @@ BUILDS_ON = {
     "cmp-exceptions": "cmp-risk-register", "cmp-cost-of-noncompliance": "fin-ale-risk",
     "cmp-breach-triage": "cmp-incident-clocks", "cmp-audit-sampling": "cmp-policy-to-record",
     "cmp-restore-evidence": "cmp-policy-to-record", "cmp-data-subject-request": "cmp-retention-hold",
+    # film set (§4.14): crew and chain, floor plan, forces and moments, shooting day and electrical load are shared, §5.25
+    "set-chain-of-command": "set-stop-for-safety", "set-who-touches-what": "set-stop-for-safety",
+    "set-exclusion-zone": "set-cable-runs-exits", "set-emergency-response": "set-cable-runs-exits",
+    "set-working-at-height": "set-cable-runs-exits", "set-picture-vehicles": "set-exclusion-zone",
+    "set-working-load": "set-stand-tipping", "set-manual-handling": "set-stand-tipping",
+    "set-continuity": "set-call-sheet", "set-hearing": "set-call-sheet", "set-phase-balance": "set-circuit-load",
 }
 
 # ---------------------------------------------------------------- sim folder ids
@@ -207,7 +213,7 @@ def topic_of(cid, area):
         "win": "windows-admin", "sto": "storage", "dr": "storage", "ha": "distributed", "perf": "distributed",
         "arh": "architecture", "os": "os", "ossim": "os", "aut": "theory", "ham": "radio", "kk": "radio",
         "50ohm": "radio", "tool": "classroom", "app": "distributed", "fin": "finance",
-        "cmp": "compliance",
+        "cmp": "compliance", "set": "film-set",
     }.get(pre, "networks")
 
 
@@ -312,7 +318,20 @@ TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"], "ham-multiple-access": ["modul
     "cmp-bia": ["disaster-recovery", "risk"], "cmp-restore-evidence": ["backup", "audit", "disaster-recovery"],
     "cmp-vendor-tiers": ["risk", "governance"], "cmp-shared-responsibility": ["governance", "risk"],
     "cmp-exceptions": ["governance", "risk"], "cmp-maturity-levels": ["governance"],
-    "cmp-cost-of-noncompliance": ["risk", "governance"]}
+    "cmp-cost-of-noncompliance": ["risk", "governance"],
+    "set-stop-for-safety": ["set-safety", "set-roles"], "set-circuit-load": ["electrical-safety", "fire-safety"],
+    "set-stand-tipping": ["rigging", "set-safety"], "set-cable-runs-exits": ["fire-safety", "set-safety"],
+    "set-exclusion-zone": ["specialist-hazards", "set-safety"], "set-fatigue-turnaround": ["occupational-health"],
+    "set-chain-of-command": ["set-roles"], "set-who-touches-what": ["set-roles"],
+    "set-calls-sequence": ["set-procedure"], "set-setup-cycle": ["set-procedure", "set-roles"],
+    "set-radio-discipline": ["set-procedure"], "set-call-sheet": ["set-procedure"],
+    "set-card-handoff": ["set-procedure", "backup"], "set-risk-controls": ["set-safety", "risk"],
+    "set-emergency-response": ["set-safety"], "set-working-at-height": ["working-at-height"],
+    "set-lamp-heat": ["fire-safety", "electrical-safety"], "set-continuity": ["set-procedure"],
+    "set-working-load": ["rigging"], "set-picture-vehicles": ["specialist-hazards"],
+    "set-manual-handling": ["occupational-health"], "set-phase-balance": ["electrical-safety"],
+    "set-hearing": ["occupational-health"], "set-weather-lightning": ["set-safety", "occupational-health"],
+    "set-boom-shadow": ["set-roles", "set-procedure"]}
 
 
 def tags_of(cid):
@@ -341,7 +360,7 @@ ADOPT_COURSES = {
 
 def level_of(courses):
     """sim.json level from the courses: intro courses first, then advanced ones (owner may override)."""
-    if re.search(r"\b(FIN|CMP)\b", courses):
+    if re.search(r"\b(FIN|CMP|SET)\b", courses):
         return "intro"
     if re.search(r"\b(URM|UL|WIN1|AUT)\b", courses):
         return "intro"
@@ -634,6 +653,47 @@ CMP_NOTES = ["## Compliance notes (all `cmp-` tasks)", "",
     "(catalogue §4.13 has the proposed `compliance` area).", ""]
 
 
+SET_NOTES = ["## Film set notes (all `set-` tasks)", "",
+    "- **Who it is for:** people learning to work on a film set (trainees, new crew, day players, film students), "
+    "taught by a colleague who trains film crews; they know neither the equipment nor the jobs. Each page puts one "
+    "practice in motion and shows one contrast (with and without the practice, the right and the wrong order, under "
+    "and over the limit); make that contrast the stage, not the rule. Not a quiz and not a slideshow.",
+    "- **The set has the final word.** Every page says once, in the explanation and in a line the learner sees, that "
+    "it simplifies, that its numbers are illustrative and that the production's safety briefing and the department "
+    "head have the final word. A safety rule appears as the reason behind a practice (what goes wrong without it), "
+    "never as a regulation to obey because the page says so; nothing on the page reads as \"do this and you are "
+    "safe\".",
+    "- **Specialist work from outside.** Connecting power (tie-ins and distribution), rigging, stunts, special effects "
+    "and pyrotechnics, weapons, precision driving and operating lifts are shown as what the specialist controls and why "
+    "everyone else stays out, never as steps someone could follow: no wiring, no rigging method, no charge or quantity, "
+    "no weapon handling, no driving technique.",
+    "- **Concepts, not tools** (COMMON.md §1): no brand or model of lamp, stand, radio, lift, camera, card or vehicle; "
+    "say \"a 2 kW lamp\", \"a stand\", \"a lift\", \"a handheld radio\".",
+    "- **Numbers are illustrative.** Wattages, wind speeds, weights, distances, hours, temperatures and decibels are "
+    "made-up but plausible, and the page says so once; the physics (P = V × I, moments about the tipping edge, wind "
+    "force with the square of the speed, E = m·g·h, stopping distance, decibels and a daily dose) is standard and is "
+    "checked in SPEC.md with a small script.",
+    "- **One fictional production:** a made-up feature film with a made-up crew and made-up locations; never a real "
+    "production, company or person, and no real accident retold on the page (published accident reports may inform "
+    "SPEC.md).",
+    "- **Croatian terms and rules:** use the Croatian set term where one is in use and give the English in brackets "
+    "once (crews often say the English word: gaffer, grip, call sheet). The terms and the Croatian rules marked "
+    "*(check)* in catalogue §4.14 (the Croatian titles and \"Where Croatian practice matters\") are unverified: use a "
+    "plain descriptive Croatian phrase on the page instead, and copy them into `NOTES.md` under \"For the owner\" with "
+    "the source you would check. An EU directive may be named in the explanation, with its article, only where a "
+    "number on the page comes from it (the noise action values, the minimum daily rest).",
+    "- **Primary sources:** the EU texts on EUR-Lex (the framework directive 89/391/EEC, working time 2003/88/EC, noise "
+    "2003/10/EC, manual handling 90/269/EEC, work equipment 2009/104/EC), the Croatian laws in Narodne novine, and the "
+    "film and TV safety guidance published by safety regulators and industry safety committees. Cite them in SPEC.md; "
+    "do not copy their text or figures onto the page.",
+    "- **Shared models (catalogue §5.25):** keep the crew and chain, the floor plan, the forces and moments, the "
+    "shooting day or the electrical load in its own module file inside your sim folder, pure and tested, so the "
+    "coordinator can promote it to `models/` later. When the entry builds on another sim, copy its module "
+    "(COMMON.md §6).",
+    "- **Learn tree:** the `npm run check` warning \"in no leaf yet\" is expected; suggest a leaf in your report "
+    "(catalogue §4.14 has the proposed `film-set` area).", ""]
+
+
 def render(cid, r, wave, group, by_id, sids, clusters):
     sid = sids[cid]
     kind = "adopt" if wave == "1" else "build"
@@ -714,6 +774,10 @@ def render(cid, r, wave, group, by_id, sids, clusters):
     if cid.startswith("cmp-"):
         srcs.append("The primary texts under \"Compliance notes\" below (EUR-Lex, Narodne novine, the EDPB's guidelines); "
                     "mark every number and rule you could not check with *(check)* and list it in `NOTES.md`.")
+    if cid.startswith("set-"):
+        srcs.append("The primary texts under \"Film set notes\" below (EUR-Lex, Narodne novine, published film and TV "
+                    "safety guidance); mark every number and rule you could not check with *(check)* and list it in "
+                    "`NOTES.md`.")
     lines += ["## Sources", ""]
     lines += [f"- {s}" for s in srcs] if srcs else ["- No local course material. Use the vendor's documentation and "
                                                    "standard textbooks; mark every number and rule you could not check "
@@ -726,6 +790,8 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         lines += FIN_NOTES
     if cid.startswith("cmp-"):
         lines += CMP_NOTES
+    if cid.startswith("set-"):
+        lines += SET_NOTES
     if clusters.get(cid):
         lines += ["## Overlaps (catalogue §5)", ""]
         for num, name, rec in clusters[cid]:
@@ -815,7 +881,9 @@ VIEW_OVERRIDE = {"net-osi-tcpip-map": None, "sec-digital-signature": None, "win-
                  "win-dhcp-superscope": None,
                  "win-ntfs-mft": "K3 block grid", "win-dhcp-scope-options": "K4 rule table", "win-dns-policies": "K4 rule table", "win-ipam-address-plan": "K3 block grid", "win-ipam-utilisation": None, "win-ipam-discovery": None, "net-tcp-congestion": None, "perf-utilisation-latency": None,
                  # compliance pages draw their own (a matrix, a timeline), not the rule table or the block grid
-                 "cmp-privileged-access": None, "cmp-retention-hold": None}
+                 "cmp-privileged-access": None, "cmp-retention-hold": None,
+                 # the calls are a handshake between departments: lanes per department, one arrow per call
+                 "set-calls-sequence": "K1 message sequence chart"}
 
 
 def view_for(cid):
@@ -874,7 +942,7 @@ def write_index(tasks, by_id, sids):
               "- The 50ohm maps (`maidenhead`, `aprs_map`, `hamnet_map`): they need live map tiles or external "
               "services, which the build refuses. Revisit if the owner wants online-only pages.", "",
               "## Catalogue id → sim folder", "",
-              "Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-` and `cmp-`; a few names are overridden for "
+              "Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-`, `cmp-` and `set-`; a few names are overridden for "
               "clarity (`tasks.py` `SIM_ID_OVERRIDE`).", "",
               "| Catalogue id | Sim folder |", "|---|---|"]
     for cid, r, w, g in sorted(tasks, key=lambda t: t[0]):
