@@ -355,3 +355,168 @@ test('every preset in the page is valid for the model, and meta.steps is the def
   assert.ok(keys.length > 0, 'found preset params');
   for (const k of keys) assert.ok(k in logic.defaults, `preset param ${k} is a model param`);
 });
+
+// ── ACME renewal (story 'acme', presets acme-*; task acme-renewal, SPEC.md "ACME renewal") ──
+
+const AC = logic.ACME;
+const H = (day, hour) => day * 24 + hour;
+const acmeAll = (p) => all(p).map((s) => s.acme);
+const acmeKinds = (p) => acmeAll(p).map((a) => a.kind);
+const env = (over) => Object.assign({ challenge: 'http-01', port80Open: true, dnsWritable: true, machineOff: false }, over);
+const firstRun = (tl, action) => tl.runs.find((r) => r.action === action);
+
+test('acme tie-break: exactly one third left is "not yet"; one hour less is due (integer test, no rounding)', () => {
+  const c = { notBeforeH: 0, notAfterH: 2160 };
+  assert.equal(logic.acmeDue(c, 1440), false); // 720 h of 2160 left: exactly a third
+  assert.equal(logic.acmeDue(c, 1441), true);
+  assert.equal(logic.acmeDue(c, 1439), false);
+  // a lifetime not divisible by 3: 100 h, due when 3·left < 100, i.e. from 33 h left (t = 67)
+  const d = { notBeforeH: 0, notAfterH: 100 };
+  assert.equal(logic.acmeDue(d, 66), false);
+  assert.equal(logic.acmeDue(d, 67), true);
+});
+
+test('acme tie-break: on the timeline day 60 03:00 is the tie (exactly 30 d left), the renewal is the next run, 15:00', () => {
+  const tl = logic.acmeTimeline(env());
+  assert.equal(firstRun(tl, 'tie').t, H(60, 3));
+  assert.equal(firstRun(tl, 'renewed').t, H(60, 15));
+  assert.equal(firstRun(tl, 'renewed').day, 60);
+});
+
+test('acme tie-break: a missed run is caught up once at boot, however many were missed; none run while off', () => {
+  const runs = logic.acmeRuns(env({ machineOff: true }), AC.END_H);
+  assert.deepEqual(runs.filter((r) => r.catchUp).map((r) => r.t), [AC.BOOT_H]);
+  assert.equal(runs.filter((r) => r.t >= AC.OFF_FROM_H && r.t < AC.BOOT_H).length, 0);
+  // no catch-up when nothing was missed (machine on), and the scheduled runs keep going after boot
+  assert.equal(logic.acmeRuns(env(), AC.END_H).filter((r) => r.catchUp).length, 0);
+  assert.ok(runs.some((r) => r.t === H(62, 15) && !r.catchUp));
+});
+
+test('acme rule 1: a 90-day certificate is renewed from day 60; the next one from day 120 (day 121 by the tie-break)', () => {
+  const tl = logic.acmeTimeline(env());
+  const renewals = tl.runs.filter((r) => r.action === 'renewed').map((r) => r.t);
+  assert.deepEqual(renewals, [H(60, 15), H(121, 3)]);
+  assert.deepEqual(tl.certs.slice(0, 2), [{ notBeforeH: H(0, 3), notAfterH: H(90, 3) }, { notBeforeH: H(60, 15), notAfterH: H(150, 15) }]);
+});
+
+test('acme rule 2 and 6: the timer runs twice a day (00:00 and 12:00 + the fixed delay); every run before the window is a no-op', () => {
+  const tl = logic.acmeTimeline(env());
+  assert.deepEqual(tl.runs.slice(0, 3).map((r) => r.t), [H(0, 3), H(0, 15), H(1, 3)]);
+  assert.equal(tl.runs[0].action, 'issue');
+  const before = tl.runs.filter((r) => r.t > H(0, 3) && r.t < H(60, 3));
+  assert.equal(before.length, 119);
+  assert.ok(before.every((r) => r.action === 'noop'));
+  // the client asks; the CA never starts a renewal (every exchange begins with the client's order)
+  for (const ch of ['http-01', 'dns-01']) assert.deepEqual(logic.acmeExchange(ch, env()).rows[0], { from: 'A', to: 'CA', msg: 'newOrder' });
+});
+
+test('acme rule 3: HTTP-01 is fetched by the CA on port 80; port 80 closed → the fetch is dropped, invalid, no proof', () => {
+  const ok = logic.acmeExchange('http-01', env());
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.rows.map((r) => r.msg), ['newOrder', 'challenge', 'file', 'ready', 'fetch80', 'proof', 'valid']);
+  assert.deepEqual(ok.rows[4], { from: 'CA', to: 'W', msg: 'fetch80', ok: true });
+  const closed = logic.acmeExchange('http-01', env({ port80Open: false }));
+  assert.equal(closed.ok, false);
+  assert.deepEqual(closed.rows.map((r) => r.msg + (r.ok === false ? '!' : '')), ['newOrder', 'challenge', 'file', 'ready', 'fetch80!', 'invalid']);
+  // the TXT switch does not matter to HTTP-01
+  assert.equal(logic.challengePasses('http-01', { port80Open: true, dnsWritable: false }), true);
+});
+
+test('acme rule 4: DNS-01 needs a TXT record and nothing listening; a wildcard name can only use DNS-01', () => {
+  const ok = logic.acmeExchange('dns-01', env({ port80Open: false }));
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.rows.map((r) => r.msg), ['newOrder', 'challenge', 'txt', 'ready', 'queryTxt', 'proof', 'valid']);
+  assert.ok(ok.rows.every((r) => r.to !== 'W' && r.from !== 'W'), 'DNS-01 never touches port 80');
+  const ro = logic.acmeExchange('dns-01', env({ dnsWritable: false }));
+  assert.equal(ro.ok, false);
+  assert.deepEqual(ro.rows.map((r) => r.msg + (r.ok === false ? '!' : '')), ['newOrder', 'challenge', 'txt!', 'ready', 'queryTxt', 'noTxt', 'invalid']);
+  assert.equal(logic.challengeAllowed('*.example.com', 'http-01'), false);
+  assert.equal(logic.challengeAllowed('*.example.com', 'dns-01'), true);
+  assert.equal(logic.challengeAllowed('www.example.com', 'http-01'), true);
+});
+
+test('acme rule 5: a failed challenge keeps the old certificate; every run retries, past notAfter too; then expired (host rule 6)', () => {
+  const tl = logic.acmeTimeline(env({ port80Open: false }));
+  assert.equal(tl.certs.length, 1);
+  const fails = tl.runs.filter((r) => r.action === 'failed');
+  assert.equal(fails[0].t, H(60, 15));
+  assert.equal(fails.filter((r) => r.t <= H(90, 3)).length, 60);
+  assert.ok(tl.runs.filter((r) => r.t >= H(60, 15)).every((r) => r.action === 'failed'));
+  // the client's check (whole days, inclusive window): still valid on day 90, expired on day 91, fix on the server
+  const c = tl.certs[0];
+  assert.equal(logic.acmeCheck(c, 90, 0).result.exit, 0);
+  const r91 = logic.acmeCheck(c, 91, 0).result;
+  assert.deepEqual([r91.exit, r91.reason, r91.alert, r91.fix, r91.certId], [60, 'expired', 'certificate_expired', 'server', 'acme']);
+  // the client's clock still counts (host rule 6): one day slow on day 91, it still accepts the old certificate
+  assert.equal(logic.acmeCheck(c, 91, -1).result.exit, 0);
+});
+
+test('acme-healthy: issue, day 30 no-op, day 60 tie, challenge, new certificate, day 91 exit 0 — 5 steps', () => {
+  const p = presetParams('acme-healthy');
+  assert.equal(steps(p), 5);
+  assert.deepEqual(acmeKinds(p), ['issue', 'noop', 'tie', 'challenge', 'cert', 'check']);
+  const a = acmeAll(p);
+  assert.deepEqual(a.map((x) => x.t), [H(0, 3), H(30, 3), H(60, 3), H(60, 15), H(60, 15), H(91, 3)]);
+  assert.equal(a[1].run.leftH, 60 * 24);
+  assert.equal(a[3].served, 0, 'the new certificate appears with the next step');
+  assert.equal(a[4].served, 1);
+  assert.equal(a[4].certs[1].notAfterH, H(150, 15));
+  assert.deepEqual(a[4].exchange.rows.slice(-2).map((r) => r.msg), ['finalize', 'certificate']);
+  assert.equal(a[5].client.result.exit, 0);
+  assert.equal(a[5].client.nowIso, '2026-12-05');
+});
+
+test('acme-port80-closed: HTTP-01 fails from day 60; the page still works on day 61; 60 failures by notAfter; day 91 exit 60 — 6 steps', () => {
+  const p = presetParams('acme-port80-closed');
+  assert.equal(steps(p), 6);
+  assert.deepEqual(acmeKinds(p), ['issue', 'noop', 'tie', 'challenge', 'retry', 'last', 'check']);
+  const a = acmeAll(p);
+  assert.equal(a[3].run.action, 'failed');
+  assert.equal(a[3].exchange.ok, false);
+  assert.equal(a[4].client.day, 61);
+  assert.equal(a[4].client.result.exit, 0);
+  assert.deepEqual([a[5].t, a[5].failures, a[5].run.leftH], [H(90, 3), 60, 0]);
+  assert.equal(a[6].failures, 62);
+  assert.deepEqual([a[6].client.result.exit, a[6].client.result.reason], [60, 'expired']);
+  assert.ok(a.every((x) => x.served === 0));
+});
+
+test('acme-dns01: port 80 closed, DNS-01 renews on day 60 — 5 steps', () => {
+  const p = presetParams('acme-dns01');
+  assert.equal(p.port80Open, false);
+  assert.equal(steps(p), 5);
+  assert.deepEqual(acmeKinds(p), ['issue', 'noop', 'tie', 'challenge', 'cert', 'check']);
+  const a = acmeAll(p);
+  assert.equal(a[3].exchange.ok, true);
+  assert.equal(a[3].exchange.rows[2].msg, 'txt');
+  assert.equal(a[5].client.result.exit, 0);
+});
+
+test('acme-machine-off: off on days 59–62, the missed run caught up at boot on day 62 08:00 and renewed — 5 steps', () => {
+  const p = presetParams('acme-machine-off');
+  assert.equal(steps(p), 5);
+  assert.deepEqual(acmeKinds(p), ['issue', 'noop', 'off', 'challenge', 'cert', 'check']);
+  const a = acmeAll(p);
+  assert.equal(a[2].t, H(59, 0));
+  assert.deepEqual([a[3].run.t, a[3].run.catchUp, a[3].run.action], [H(62, 8), true, 'renewed']);
+  assert.equal(a[4].certs[1].notAfterH, H(152, 8));
+  assert.equal(a[5].client.result.exit, 0);
+  assert.deepEqual([a[3].offFrom, a[3].bootAt], [AC.OFF_FROM_H, AC.BOOT_H]);
+});
+
+test('acme: every setting stays within 20 steps; states are JSON-safe; the chain stories ignore the acme settings', () => {
+  for (const acmeChallenge of ['http-01', 'dns-01'])
+    for (const port80Open of [true, false])
+      for (const dnsWritable of [true, false])
+        for (const machineOff of [true, false])
+          for (const clockOffsetDays of [-400, 0, 800]) {
+            const p = P({ story: 'acme', acmeChallenge, port80Open, dnsWritable, machineOff, clockOffsetDays });
+            const n = steps(p);
+            assert.ok(n >= 5 && n <= 20, `${acmeChallenge} ${port80Open} ${dnsWritable} ${machineOff}: ${n}`);
+            for (let i = 0; i <= n; i++) { const s = at(p, i); assert.deepEqual(JSON.parse(JSON.stringify(s)), s); }
+          }
+  const book = P({});
+  const bookAcme = P({ acmeChallenge: 'dns-01', port80Open: false, dnsWritable: false, machineOff: true });
+  assert.equal(steps(bookAcme), steps(book));
+  assert.deepEqual(end(bookAcme), end(book));
+});

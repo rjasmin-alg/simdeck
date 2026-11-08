@@ -210,5 +210,80 @@ Clock range at the book's date: −400 → 2025-08-01 (`www1.crt` not yet valid:
   invented anyway); p4-commit's
   `notBefore` (2024-12-01) is invented.
 - The client's messages are shown as the book prints them (data, untranslated); no tool is named.
-- Revocation (CRL/OCSP: `sec-pki-revocation`; the estate's CRL date 2026-11-12 belongs there), ACME renewal and
-  certificate creation are out of scope.
+- Revocation (CRL/OCSP: `sec-pki-revocation`; the estate's CRL date 2026-11-12 belongs there) and certificate
+  creation are out of scope. ACME renewal is the preset story below.
+
+## ACME renewal (story `acme`, presets `acme-*`)
+
+Task `docs/tasks/w3/acme-renewal.md` (catalogue `inet-acme-renewal`, overlap §5.5: "Revocation and ACME extend the
+chain page"). One concept: **HTTP-01 vs DNS-01 challenge, 90-day automation.** The student steps a renewal and breaks
+port 80. The chain stories above are unchanged; this story adds a day timeline with a renewal agent, the challenge as
+kit view K1, and at the end the host's own check (`validate()`) of the certificate the server sends.
+
+### Sources
+
+- **[UL21-acme]** `uvod-u-linux/book/chapters/21-web-posluzitelji.md`, "TLS i certifikati": the HTTP-01 challenge (the
+  CA gives a token, the client puts a file at `/.well-known/acme-challenge/<token>` on the web server, **only on port
+  80**, the CA must reach the server from outside); ACME per RFC 8555; the renewal timer shipped with the package:
+  `OnCalendar=*-*-* 00/12:00:00`, `RandomizedDelaySec=12hours`, `Persistent=true` ("a missed run is caught up at the
+  next start"), enabled on install; "the program knows how to renew, the package decides when it is asked"; renew
+  when **less than a third** of the lifetime is left (client ≥ 4.0.0; older docs: 30 days); "renew may run as often as
+  you like, it usually does nothing".
+- **[8555]** RFC 8555 §7.4 (order, finalize, certificate), §8.3 (HTTP-01: the CA fetches the key authorization over
+  HTTP on port 80), §8.4 (DNS-01: a TXT record at `_acme-challenge.<name>`) *(check: section numbers from the task and
+  memory, not re-read)*.
+- CA documentation "Challenge Types" (as cited in UL21): 90-day certificates; wildcard names only with DNS-01 *(check)*.
+
+### Model (`sim.js`, ACME block; pure, hours since day 0 00:00)
+
+- **Schedule** (rule 6): runs at 00:00 and 12:00 every day plus the timer's delay, **fixed at 3 h** (the task: a fixed
+  offset, not randomness), so 03:00 and 15:00. The first run (day 0, 03:00) issues the first certificate (how is out of
+  scope). With `machineOff` the machine is off from day 59 00:00 to day 62 08:00: the triggers in between are missed,
+  and **one** catch-up run starts at boot (rule 6, `Persistent`); scheduled runs continue after it.
+- **Rule 1** (`acmeDue`): renew when `3 · (notAfter − t) < notAfter − notBefore`: less than a third left, in integers.
+  **Tie-break: exactly a third left is "not yet".** A certificate issued at day 0 03:00 has notAfter day 90 03:00; at
+  day 60 03:00 exactly 720 h of 2160 are left → the run is a no-op (`tie`); the 15:00 run renews. The next renewal is
+  day 121 03:00 (day 120 15:00 is the tie again).
+- **Rule 2:** a run that is not due does nothing (`noop`); 119 runs between day 0 15:00 and day 59 15:00 do nothing.
+- **Rule 3, HTTP-01** (`acmeExchange`): `newOrder` (client → CA), `challenge` (token), the file written to the web
+  server (local, dotted), `ready`, `GET :80` (CA → web server, **from outside, port 80**), `200 OK` with the proof,
+  `valid`. Port 80 closed → the GET is dropped, no proof, `invalid`.
+- **Rule 4, DNS-01:** `TXT` (client → DNS, publish at `_acme-challenge`), `ready`, `TXT?` (CA → DNS), the TXT answer,
+  `valid`; the web server is not involved, port 80 may be closed. "Client can write a TXT record" off → the publish is
+  refused, the CA finds no record, `invalid`. A wildcard name allows only DNS-01 (`challengeAllowed`; in the model and
+  tests, no preset).
+- **Rule 5:** a failed challenge keeps the old certificate; every following run tries again, after `notAfter` too.
+  The client's check then uses the host's `validate()` on whole days (day 0 = 2026-09-05, the book's date; the public
+  chain `Example Issuing CA 1` → `Example Root CA` in the store): inclusive window, so the first certificate is still
+  valid on day 90 and **expired on day 91** → exit 60 "certificate has expired", `certificate_expired`, fix on the
+  server (host rules 6 and 9). The host's clock offset applies to this check.
+- After a valid challenge: `finalize` (the CSR) and `certificate`; the new one runs 90 days from that run.
+
+### Steps (one per event; `acmeFrames`)
+
+issue (step 0) → day 30 03:00 no-op → [machineOff: day 59 00:00 off] → [the tie run, if it ran] → the first due run
+(challenge, valid or invalid; at boot it is the catch-up) → valid: **cert** (finalize, new certificate) → **check** on
+day 91; invalid: **retry** (the next run, and the client's check that day: still exit 0) → **last** run at or before
+notAfter (the count of failures) → **check** on day 91.
+
+### Presets and expected numbers (checked with a node script, asserted in `sim.test.js`)
+
+| preset | params | steps | outcome |
+|---|---|---|---|
+| `acme-healthy` | HTTP-01, port 80 open | **5** | tie d60 03:00; renewed d60 15:00 (29 d 12 h left); new notAfter **d150 15:00**; day 91 exit **0** |
+| `acme-port80-closed` | HTTP-01, port 80 closed | **6** | fails from d60 15:00; d61 03:00 fails again, client exit 0; d90 03:00 (0 h left) **60** failures; d91 03:00 62, client exit **60** expired, fix server |
+| `acme-dns01` | DNS-01, port 80 closed, TXT writable | **5** | as healthy, via a TXT record |
+| `acme-machine-off` | HTTP-01, off d59 00:00 – d62 08:00 | **5** | the d60 runs are missed (no tie step); catch-up at boot **d62 08:00** (27 d 19 h left) renews; notAfter **d152 08:00**; day 91 exit 0 |
+
+Every combination of the four settings gives 5 or 6 steps. The task's step lists: healthy 5 and port80-closed 6
+as given; the "issue" item is step 0 and the tie run is the extra step (NOTES.md, Deviations).
+
+### Simplifications
+
+- The timer's random delay is a fixed 3 h; the catch-up run starts at boot with no delay *(check whether the random
+  delay also applies to the catch-up run)*.
+- One certificate name (`www.example.com`), the host's invented public chain; account keys, orders and authorizations
+  in detail, rate limits, revocation and the web server's reload after renewal are out of scope (the caption and the
+  explanation say the reload is assumed).
+- The client's check counts whole days (the host's model), the agent counts hours; the check runs only on days where
+  both agree (61 and 91).

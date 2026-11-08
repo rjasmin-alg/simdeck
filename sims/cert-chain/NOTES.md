@@ -136,3 +136,93 @@ authority*, *self-signed certificate*, *validity period*, *TLS alert*, *exit sta
 ## Time
 
 Start 2026-10-14 17:16, done 17:55 (CEST): about 40 minutes, one session, including the fresh review.
+
+## ACME renewal presets (task `acme-renewal`)
+
+Preset task `docs/tasks/w3/acme-renewal.md` (wave 3, catalogue `inet-acme-renewal`): story `acme` and presets
+`acme-healthy`, `acme-port80-closed`, `acme-dns01`, `acme-machine-off`; entry `acme-healthy`. Rules and numbers:
+`SPEC.md`, "ACME renewal".
+
+### Decisions
+
+- **Extended the host model additively** instead of stopping with a shared request. The task allows that only if the
+  host "cannot express it without changes"; it cannot (no day timeline, no agent, no challenge), but the way earlier
+  preset tasks did it on main (quorum fencing, WSUS rings, DNS split brain) is an opt-in story in the host's own
+  `sim.js`, with the host's stories unchanged. Done so: the `acme*` params are read only by the `acme` story; a test
+  checks that the book's sequence gives the same states with them set. The host's `validate()` is reused for the web
+  client's check (`acmeCheck`), as the host's header comment invited ("a later page … ACME renewal can reuse them").
+- **Time in hours** for the agent (a renewal has a time of day), whole days for the client's check (the host's model).
+  The checks run on days 61 and 91 only, where both agree (SPEC.md, Simplifications).
+- **The tie-break is visible**: the first certificate is issued by the first run (03:00), so its notAfter is 03:00 and
+  the day-60 03:00 run lands on exactly a third; the page shows it as its own step ("exactly a third: not yet").
+  This is also how "renewal from day 60" and "exactly a third is not yet" (both in the task) hold together.
+- **Fixed delay 3 h** (runs at 03:00 and 15:00), so the delay exists on the page without randomness.
+- **Kit view K1** (`kit/sequence.js`, exists now) draws the challenge: four lanes (ACME client, web server port 80, DNS,
+  the CA); the lane a challenge does not use says "not involved", so HTTP-01 and DNS-01 differ visibly. The file the
+  client writes to its own web server is a dotted arrow (local); the CA's `GET :80` is dropped with ✕ and "port 80
+  closed" when the port is closed; a refused TXT publish is ✕ at DNS. The chart has no time column (the time is in the
+  timeline's heading).
+- **Timeline**: one tick per day (the day's most telling run: renewed > failed > no-op), short muted = nothing to do,
+  taller red = failed (✗ over the first), full green = a new certificate (✓); the last third of each certificate hatched;
+  notAfter lines; machine-off span dotted; "now" cursor. Shape and marks carry the meaning in grayscale.
+- **Right column**: the ACME client (timer, catch-up, rule, this run's verdict with time left, failures in the log),
+  the certificate the server sends, and on check days the host's compact result (exit status, message, alert, fix).
+- **Mode switch** as in `dns-secondary-expiry`: `render` sets `data-cc-mode="acme"` on `<html>`; CSS shows the ACME
+  legend items, the ACME explanation, and the examples 1 (way back) + 6–9; the chain page shows its five and "ACME
+  renewal" (the way in). Keys 1–9 reach all nine. The chain page's host-only controls hide in the ACME story and the
+  ACME controls in the chain stories. The client's clock offset (and key D) stays: it moves the web client's check.
+- **Presets in two columns** (`.sd-presets`): six visible examples made the panel 47 px too tall at 1920×1080.
+- **Captions**: the task's port-80 caption is used, with "one third is left" made "less than one third is left" (at the
+  15:00 run it is less; at exactly a third the client does nothing, by the tie-break).
+- Misconceptions on the page: "the CA renews for me" (issue caption and explanation: a timer on your machine),
+  "HTTPS only needs port 443" (port-80 preset, explanation), "30 days before expiry" (explanation: older docs).
+  The web server's reload is mentioned (cert caption, explanation), not modelled.
+
+### Deviations from the task
+
+- **Step lists.** healthy and dns01 are 5 steps and port80-closed 6, as the task says, but made of different items: the
+  task's "issue" is step 0, and the tie run (day 60 03:00) is a step of its own. port80-closed: tie, fail (d60 15:00),
+  retry with the client still at exit 0 (d61), last run at notAfter with 60 failures (d90 03:00), expired (d91). The
+  task's "nobody reads the log" is the failure count in the client's box and the captions.
+- **machine-off** is 5 steps as the task says (issue, d30, off, catch-up at boot d62 08:00, new certificate, check d91);
+  the renewal lands on day 62 and the new notAfter is **day 152 08:00**, not 150.
+- **No "random delay" control**: the delay is the fixed 3 h the task asks for; nothing to set.
+- **Wildcard needs DNS-01**: in the model (`challengeAllowed`) and tests, and in the explanation; no preset (the page has
+  one name).
+
+### Sources
+
+As in SPEC.md, "ACME renewal": UL ch21 "TLS i certifikati" (the HTTP-01 paragraph, the timer unit, "program zna
+obnoviti certifikat, a paket odlučuje kada ga se pita", the one-third rule and its footnote [40]); RFC 8555 §7.4, §8.3,
+§8.4 *(check: not re-read)*; CA documentation "Challenge Types" (90 days, wildcard and DNS-01) *(check)*.
+`napredna-linux-administracija/meta/toc.md` T50 has no written chapter yet; nothing taken from it.
+
+### Checks
+
+- Numbers printed from the model before the page (node script over the four presets and every combination of the
+  settings: 5 or 6 steps), then asserted in `sim.test.js`: 13 new tests, three tie-breaks first (exactly a third, the
+  day-60 tie run, one catch-up at boot), then rules 1–6 and the four presets, then all settings within 20 steps,
+  JSON-safe, and the chain stories unchanged by the acme settings.
+- **24 mutations** of the ACME model, one at a time (≤ for <, a 30-day rule, port 80 or TXT ignored, any challenge for
+  a wildcard, no catch-up, two catch-ups, the off span ignored, delay 0, one run a day, renewal despite a failed
+  challenge, no retries after notAfter, the fetch always reaching, DNS-01 via the web server, the new certificate shown
+  before finalize, notAfter rounded up, the clock offset ignored, an 89-day lifetime, no tie step, no check on the retry
+  day, the check on day 90, a later boot, the CA starting the exchange, no proof row): **all 24 fail a test**.
+- `npm run gate -- cert-chain`: pass (the default page: one screen, words, keys, both languages, phone, motion). The
+  gate does not step the ACME presets, so a local Playwright script opened every step of the four presets at
+  1920×1080 (hr light, en light and dark), checked fit (no page or stage scroll), console and the gate's word probe,
+  and took a grayscale shot of each preset's last step and a 375×812 shot: no problems. Screenshots reviewed; fixed
+  from them: the legend wrapping the title in Croatian (shorter labels), the right column overflowing (compact result,
+  one timer line), the chart's time column (dropped), the run box marked changed on every step, the phone stage
+  collapsing the chart.
+- Not done: a fresh reviewer (the definition of done asks it of new sims; this is a preset).
+
+### Term pairs
+
+*ACME* — ACME (protocol name, no Croatian); *challenge* — izazov (UL ch21: "izazov HTTP-01"); *token* — oznaka (UL ch21);
+*renewal* — obnavljanje. Not in `kit/glossary.js`; written out in both tables. *timer* — mjerač vremena and *certificate
+authority* are in the glossary.
+
+### Time
+
+Start 2026-11-08 22:46, done 23:05 (CET): about 19 minutes, one session, including the checks.

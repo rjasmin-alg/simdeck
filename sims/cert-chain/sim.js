@@ -278,19 +278,192 @@
     };
   }
 
+  // ── ACME renewal (story 'acme', presets acme-*; task acme-renewal, SPEC.md "ACME renewal") ──
+  // A 90-day certificate renewed by an ACME client that a timer starts twice a day. Time is in hours since day 0 00:00
+  // (a renewal happens at a time of day); the client's check at the end reuses validate() on whole days.
+
+  var ACME = {
+    NAME: 'www.example.com',
+    LIFETIME_H: 90 * 24,     // 90-day certificates (CA documentation)
+    RUN_H: [0, 12],          // the package's timer: 00:00 and 12:00 every day (UL ch21)
+    DELAY_H: 3,              // its random delay of up to 12 h, fixed here (task: a fixed offset, not randomness)
+    OFF_FROM_H: 59 * 24,     // machineOff: the server is off from day 59 00:00 …
+    BOOT_H: 62 * 24 + 8,     // … until it boots on day 62 08:00
+    END_H: 156 * 24,         // the timeline runs to day 155 (past the renewed certificate's notAfter, day 150 or 152)
+    DAY0: BOOK_DAY,          // day 0 as a date, for the client's check (pubint and pubroot are valid around it)
+    CHECK_DAY: 91            // the day after the first certificate's notAfter
+  };
+
+  /** Rule 1: renew when LESS than one third of the lifetime is left; exactly one third is "not yet" (integer test). */
+  function acmeDue(c, t) { return 3 * (c.notAfterH - t) < c.notAfterH - c.notBeforeH; }
+
+  /** Rules 3–4: what the challenge needs. HTTP-01: the CA fetches a file on port 80 from outside; DNS-01: a TXT record. */
+  function challengePasses(type, env) { return type === 'dns-01' ? !!env.dnsWritable : !!env.port80Open; }
+
+  /** Rule 4: a wildcard name can only be proved with DNS-01 (CA documentation). */
+  function challengeAllowed(name, type) { return type === 'dns-01' || name.slice(0, 2) !== '*.'; }
+
+  /**
+   * The timer's runs up to endH: { t, catchUp }. A trigger while the machine is off is missed; at boot a missed trigger
+   * runs once at once (catch-up, the timer's "persistent" setting, UL ch21). The first run (day 0) issues the certificate.
+   */
+  function acmeRuns(env, endH) {
+    var out = [], missed = false;
+    for (var day = 0; day * 24 <= endH; day++) {
+      for (var i = 0; i < ACME.RUN_H.length; i++) {
+        var t = day * 24 + ACME.RUN_H[i] + ACME.DELAY_H;
+        if (t > endH) continue;
+        if (env.machineOff && t >= ACME.OFF_FROM_H && t < ACME.BOOT_H) { missed = true; continue; }
+        if (env.machineOff && missed && t >= ACME.BOOT_H) { out.push({ t: ACME.BOOT_H, catchUp: true }); missed = false; }
+        out.push({ t: t, catchUp: false });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Every run and what it did (rules 1, 2, 5): action 'issue' | 'noop' | 'tie' | 'renewed' | 'failed'. A failed challenge
+   * keeps the old certificate; the next run tries again, also after notAfter. certs: [{ notBeforeH, notAfterH }].
+   */
+  function acmeTimeline(env) {
+    var certs = [], runs = [];
+    acmeRuns(env, ACME.END_H).forEach(function (r) {
+      var run = { t: r.t, day: Math.floor(r.t / 24), catchUp: r.catchUp, cert: certs.length - 1 };
+      if (!certs.length) {
+        run.action = 'issue';
+        certs.push({ notBeforeH: r.t, notAfterH: r.t + ACME.LIFETIME_H });
+        run.cert = 0;
+      } else {
+        var c = certs[certs.length - 1];
+        run.leftH = c.notAfterH - r.t;
+        if (!acmeDue(c, r.t)) run.action = 3 * run.leftH === c.notAfterH - c.notBeforeH ? 'tie' : 'noop';
+        else if (challengePasses(env.challenge, env)) {
+          run.action = 'renewed';
+          certs.push({ notBeforeH: r.t, notAfterH: r.t + ACME.LIFETIME_H });
+          run.cert = certs.length - 1;
+        } else run.action = 'failed';
+      }
+      runs.push(run);
+    });
+    return { runs: runs, certs: certs };
+  }
+
+  /**
+   * The challenge as messages between the ACME client (A), the web server on port 80 (W), DNS (D) and the CA
+   * (RFC 8555 §7.4, §8.3, §8.4, simplified). ok: the CA saw the proof; a refused publish or a dropped fetch fails it.
+   */
+  function acmeExchange(type, env) {
+    var http = type !== 'dns-01';
+    var pass = challengePasses(type, env);
+    var rows = [
+      { from: 'A', to: 'CA', msg: 'newOrder' },
+      { from: 'CA', to: 'A', msg: 'challenge' },
+      http ? { from: 'A', to: 'W', msg: 'file', ok: true } : { from: 'A', to: 'D', msg: 'txt', ok: !!env.dnsWritable },
+      { from: 'A', to: 'CA', msg: 'ready' },
+      http ? { from: 'CA', to: 'W', msg: 'fetch80', ok: !!env.port80Open } : { from: 'CA', to: 'D', msg: 'queryTxt', ok: true }
+    ];
+    if (http && env.port80Open) rows.push({ from: 'W', to: 'CA', msg: 'proof' });
+    if (!http) rows.push({ from: 'D', to: 'CA', msg: env.dnsWritable ? 'proof' : 'noTxt' });
+    rows.push({ from: 'CA', to: 'A', msg: pass ? 'valid' : 'invalid' });
+    return { ok: pass, rows: rows };
+  }
+  /** After a valid challenge: the certificate request and the new certificate. */
+  var ACME_ISSUE = [{ from: 'A', to: 'CA', msg: 'finalize' }, { from: 'CA', to: 'A', msg: 'certificate' }];
+
+  /** What the student steps through: one frame per event worth a step (SPEC.md, "ACME renewal", Steps). */
+  function acmeFrames(env) {
+    var tl = acmeTimeline(env);
+    var runs = tl.runs;
+    var idx = function (pred) { for (var i = 0; i < runs.length; i++) if (pred(runs[i])) return i; return -1; };
+    var out = [{ kind: 'issue', run: 0, t: runs[0].t }];
+    var noop = idx(function (r) { return r.day === 30; });
+    out.push({ kind: 'noop', run: noop, t: runs[noop].t });
+    if (env.machineOff) out.push({ kind: 'off', run: idx(function (r) { return r.t >= ACME.OFF_FROM_H; }) - 1, t: ACME.OFF_FROM_H });
+    var first = idx(function (r) { return r.action === 'renewed' || r.action === 'failed'; });
+    var tie = idx(function (r) { return r.action === 'tie'; });
+    if (tie >= 0 && tie < first) out.push({ kind: 'tie', run: tie, t: runs[tie].t });
+    out.push({ kind: 'challenge', run: first, t: runs[first].t });
+    if (runs[first].action === 'renewed') {
+      out.push({ kind: 'cert', run: first, t: runs[first].t });
+    } else {
+      out.push({ kind: 'retry', run: first + 1, t: runs[first + 1].t, check: runs[first + 1].day });
+      var na = tl.certs[0].notAfterH;
+      var last = idx(function (r) { return r.t > na; }) - 1;
+      out.push({ kind: 'last', run: last, t: runs[last].t });
+    }
+    var chk = idx(function (r) { return r.day === ACME.CHECK_DAY; });
+    out.push({ kind: 'check', run: chk, t: runs[chk].t, check: ACME.CHECK_DAY });
+    return { frames: out, timeline: tl };
+  }
+
+  function acmeEnv(p) {
+    return { challenge: p.acmeChallenge, port80Open: p.port80Open, dnsWritable: p.dnsWritable, machineOff: p.machineOff };
+  }
+
+  /** The client's check of the certificate served on a day (whole days, the host's validate(); clock offset applied). */
+  function acmeCheck(c, day, offset) {
+    var leaf = { file: 'www.example.com.crt', subject: 'CN=' + ACME.NAME, issuer: PUB_INT,
+      notBefore: ACME.DAY0 + Math.floor(c.notBeforeH / 24), notAfter: ACME.DAY0 + Math.floor(c.notAfterH / 24), selfSigned: false, sigOk: true };
+    var certs = { acme: leaf, pubint: CERTS.pubint, pubroot: CERTS.pubroot };
+    var trueDay = ACME.DAY0 + day;
+    var r = validate({ open443: true, sends: ['acme', 'pubint'], store: ['pubroot'], certs: certs, now: trueDay + offset, trueDay: trueDay });
+    return { day: day, now: trueDay + offset, nowIso: isoOf(trueDay + offset), trueIso: isoOf(trueDay), offset: offset,
+      leaf: leaf, checks: r.checks, result: r.result };
+  }
+
+  function acmeStateAt(p, n) {
+    var env = acmeEnv(p);
+    var af = acmeFrames(env);
+    var fr = af.frames;
+    var f = fr[Math.max(0, Math.min(n, fr.length - 1))];
+    var runs = af.timeline.runs;
+    var run = runs[f.run];
+    // the certificate served at this frame: the newest one issued up to now; the new one appears with the 'cert' frame
+    var served = f.kind === 'challenge' && run.action === 'renewed' ? run.cert - 1 : run.cert;
+    var shownRuns = runs.filter(function (r) { return r.t <= f.t; }).map(function (r) {
+      return { t: r.t, day: r.day, action: r.action, catchUp: r.catchUp, cert: r.cert };
+    });
+    var failures = shownRuns.filter(function (r) { return r.action === 'failed'; }).length;
+    var exchange = null;
+    if (f.kind === 'challenge' || f.kind === 'cert' || f.kind === 'retry' || f.kind === 'last' || (f.kind === 'check' && run.action === 'failed')) {
+      var ex = acmeExchange(env.challenge, env);
+      exchange = { ok: ex.ok, rows: f.kind === 'cert' ? ex.rows.concat(ACME_ISSUE) : ex.rows, fresh: f.kind === 'cert' ? ex.rows.length : 0 };
+    }
+    var checkDay = f.check != null ? f.check : null;
+    return {
+      story: 'acme', scene: 0, scenes: 1, event: null, changed: [], sceneStart: false, offset: p.clockOffsetDays,
+      acme: {
+        kind: f.kind, t: f.t, day: Math.floor(f.t / 24), hour: f.t % 24, challenge: env.challenge,
+        port80Open: !!env.port80Open, dnsWritable: !!env.dnsWritable, machineOff: !!env.machineOff,
+        run: { t: run.t, day: run.day, action: run.action, catchUp: run.catchUp, leftH: run.leftH == null ? null : run.leftH },
+        runs: shownRuns, failures: failures,
+        certs: af.timeline.certs.slice(0, served + 1).map(function (c) { return { notBeforeH: c.notBeforeH, notAfterH: c.notAfterH }; }),
+        served: served,
+        exchange: exchange,
+        offFrom: env.machineOff && f.t >= ACME.OFF_FROM_H ? ACME.OFF_FROM_H : null,
+        bootAt: env.machineOff && f.t >= ACME.BOOT_H ? ACME.BOOT_H : null,
+        client: checkDay == null ? null : acmeCheck(af.timeline.certs[served], checkDay, p.clockOffsetDays)
+      }
+    };
+  }
+
   var logic = {
-    /** Parameter defaults: the page opens on the book's sequence (UL ch21), whose first state is its first fault. */
-    defaults: { story: 'book', https443Open: false, serverCert: 'self', sendIntermediate: false, anchorInStore: false, clockOffsetDays: 0 },
+    /** Parameter defaults: the page opens on the book's sequence (UL ch21), whose first state is its first fault.
+        The acme* params belong to the ACME story only. */
+    defaults: { story: 'book', https443Open: false, serverCert: 'self', sendIntermediate: false, anchorInStore: false, clockOffsetDays: 0,
+      acmeChallenge: 'http-01', port80Open: true, dnsWritable: true, machineOff: false },
 
-    /** Steps depend on the story and on what fails where: one per check (clocks: one per date). */
-    steps: function (p) { return frames(p).length - 1; },
+    /** Steps depend on the story and on what fails where: one per check (clocks: one per date; acme: one per event). */
+    steps: function (p) { return (p.story === 'acme' ? acmeFrames(acmeEnv(p)).frames : frames(p)).length - 1; },
 
-    initial: function (p) { return stateAt(p, 0); },
-    step: function (s, n, p) { return stateAt(p, n); },
+    initial: function (p) { return p.story === 'acme' ? acmeStateAt(p, 0) : stateAt(p, 0); },
+    step: function (s, n, p) { return p.story === 'acme' ? acmeStateAt(p, n) : stateAt(p, n); },
 
     // pure helpers, for the page and the tests
     validate: validate, scenes: scenes, frames: frames, sendsOf: sendsOf, within: within,
-    dayOf: dayOf, isoOf: isoOf, CERTS: CERTS, BOOK_DAY: BOOK_DAY, SCAN_DAYS: SCAN_DAYS, OFFSET_MIN: -400, OFFSET_MAX: 800
+    dayOf: dayOf, isoOf: isoOf, CERTS: CERTS, BOOK_DAY: BOOK_DAY, SCAN_DAYS: SCAN_DAYS, OFFSET_MIN: -400, OFFSET_MAX: 800,
+    acmeDue: acmeDue, challengePasses: challengePasses, challengeAllowed: challengeAllowed, acmeRuns: acmeRuns,
+    acmeTimeline: acmeTimeline, acmeExchange: acmeExchange, acmeFrames: acmeFrames, acmeCheck: acmeCheck, ACME: ACME
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;
