@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **355 of 469 entries are live**, 97 w3, 6 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **359 of 469 entries are live**, 97 w3, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 w3 · queued, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -350,7 +350,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
-| §4.10 Radio and crisis communications | 17 | 7 | 4 w3, 6 w3 · queued |
+| §4.10 Radio and crisis communications | 17 | 11 | 4 w3, 2 w3 · queued |
 | §4.11 Reference posters and classroom tools | 6 | 6 | – |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
@@ -805,17 +805,17 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | `ham-swr` | live | SWR and standing waves | mismatch reflects power; standing wave on the line | change load impedance, watch the wave | expl | M | P3 | HAM | 50ohm `swr*` |  |
 | `ham-ionosphere-muf` | w3 | Ionosphere, MUF and the dead zone | layers by day and night, skip distance, the zone nobody hears | change time of day and frequency | expl | M | P3 | HAM | 50ohm `ionosphaere*`, `muf_luf_*`; near `50ohm-skip-distance` |  |
 | `ham-fec-hamming` | live in `crc-error-detection` | Hamming code | correcting one bit error with parity bits | flip bits, decode | step | S | P3 | HAM, URM | 50ohm `fehlerkorrektur` → §5.13 |  |
-| `ham-multiple-access` | w3 · queued | FDMA, TDMA, CDMA | three ways to share a channel | add users to each scheme | expl | S | P3 | HAM, URM | 50ohm `vielfachzugriff` |  |
+| `ham-multiple-access` | live | FDMA, TDMA, CDMA | three ways to share a channel | add users to each scheme | expl | S | P3 | HAM, URM | 50ohm `vielfachzugriff` |  |
 | `ham-qam-ofdm` | w3 · queued | QAM and OFDM | constellation size vs noise; subcarriers | change order and SNR, watch errors | expl | M | P3 | HAM, URM | 50ohm `qam`, `ofdm`; extends `50ohm-qpsk` |  |
 | `ham-shannon` | w3 · queued | Shannon–Hartley | capacity from bandwidth and SNR | sliders for B and SNR | expl | S | P3 | HAM, URM | 50ohm `shannon_hartley_gesetzt` |  |
-| `ham-packet-aprs` | w3 · queued | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` |  |
+| `ham-packet-aprs` | live | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` |  |
 | `ham-fft-waterfall` | live | FFT and the waterfall | sample rate sets the span, FFT size sets the resolution | change sample rate and FFT size | expl | M | P3 | HAM | HamMonitor `DESIGN.md` |  |
 | `ham-ctcss` | live | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
-| `ham-lora-css` | w3 · queued | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
+| `ham-lora-css` | live | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
 | `ham-fsk-psk-ask` | live | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) |  |
 | `ham-adsb-frame` | w3 | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) |  |
 | `kk-directed-net` | live | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides |  |
-| `kk-priority-traffic` | w3 · queued | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
+| `kk-priority-traffic` | live | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
 | `kk-backup-ncs` | live | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
 | `kk-gateway-tiers` | w3 | Multi-tier relay through a gateway | local nets, gateways and delay to the coordination level | send a message from field to HQ | step | M | P3 | KK | KK2 slides |  |
 
