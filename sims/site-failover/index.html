@@ -1,0 +1,541 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- site-failover: DNS / global load balancing moves users; what does not follow (sessions, licences bound to a
+     machine). Rules and numbers: SPEC.md. -->
+<html lang="hr" data-sim="site-failover">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prebacivanje na pričuvnu lokaciju · simdeck</title>
+<meta name="description" content="Lokacija A pada, DNS zapis se mijenja na B, korisnici prelaze tek kad im istekne TTL; sjednice i licencija vezana uz stroj ostaju iza.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "site-failover",
+  "title": {
+    "hr": "Prebacivanje na pričuvnu lokaciju",
+    "en": "Site failover"
+  },
+  "concept": {
+    "hr": "DNS seli korisnike; sjednice i licencije vezane uz stroj ostaju iza",
+    "en": "DNS/GSLB moves users; sessions and machine-bound licences stay behind"
+  },
+  "summary": {
+    "hr": "Lokacija A pada, zapis se mijenja na B, korisnici prelaze tek kad im istekne TTL. Sjednice i licencija vezana uz stroj ne prelaze; povratak traži kopiju B → A.",
+    "en": "Site A fails, the record moves to B, users follow only as their TTL expires. Sessions and a machine-bound licence stay behind; failing back needs a copy B → A."
+  },
+  "tags": [
+    "disaster-recovery",
+    "fault-tolerance"
+  ],
+  "class": "stepper",
+  "steps": 10
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="site-failover"]; colours only from kit tokens.
+   Layout, top to bottom: clock, DNS record and health check; six users; the two sites; the timeline. */
+[data-sim="site-failover"] .sf {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 0.8cqh;
+  height: 100%;
+  padding: 1cqh 1.4cqw;
+  font-size: 1rem;
+}
+[data-sim="site-failover"] .sf-box {
+  min-width: 0; padding: 0.35rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="site-failover"] .sf-k { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="site-failover"] .sf-mono { font-family: var(--mono); white-space: nowrap; }
+[data-sim="site-failover"] .sd-changed { outline: 0.25rem solid var(--hl); outline-offset: 0.1rem; }
+
+/* top row */
+[data-sim="site-failover"] .sf-top { display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr); gap: 1cqw; align-items: stretch; }
+[data-sim="site-failover"] .sf-clock { display: flex; flex-direction: column; justify-content: center; min-width: 9rem; }
+[data-sim="site-failover"] .sf-clock b { font-size: var(--fs-xl); font-family: var(--mono); white-space: nowrap; }
+[data-sim="site-failover"] .sf-rec { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; font-size: 1rem; }
+[data-sim="site-failover"] .sf-rec .sf-addr { padding: 0 0.4rem; border: 0.15rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="site-failover"] .sf-rec .sf-addr.sd-hl { color: var(--on-hl); }
+[data-sim="site-failover"] .sf-marks { display: inline-flex; gap: 0.3rem; vertical-align: middle; }
+[data-sim="site-failover"] .sf-mark {
+  display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 0.15rem dashed var(--line); border-radius: 50%;
+  font-weight: 700; line-height: 1;
+}
+[data-sim="site-failover"] .sf-mark[data-v="fail"] { border: 0.15rem solid var(--danger); color: var(--danger); }
+[data-sim="site-failover"] .sf-mark[data-v="ok"] { border: 0.15rem solid var(--ok); color: var(--ok); }
+[data-sim="site-failover"] .sf-health-row { display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; align-items: center; }
+
+/* users */
+[data-sim="site-failover"] .sf-users { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.8cqw; }
+[data-sim="site-failover"] .sf-user {
+  display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; padding: 0.35rem 0.5rem;
+  border: var(--line-w) solid var(--ink); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="site-failover"] .sf-user[data-ok="0"] { border-style: dashed; border-color: var(--danger); }
+[data-sim="site-failover"] .sf-uhead { display: flex; align-items: center; gap: 0.3rem; font-weight: 700; }
+[data-sim="site-failover"] .sf-left { margin-left: auto; font-family: var(--mono); font-size: var(--fs-sm); font-weight: 400; white-space: nowrap; }
+[data-sim="site-failover"] .sf-badge {
+  display: inline-grid; place-items: center; min-width: 1.6em; height: 1.6em; border-radius: 50%;
+  background: var(--sw); color: var(--on-series); font-weight: 700;
+}
+[data-sim="site-failover"] .sf-pill {
+  align-self: stretch; min-width: 0; text-align: center;
+  padding: 0 0.3rem; border: 0.15rem solid var(--ink); border-radius: 1em; font-family: var(--mono); font-weight: 700; white-space: nowrap; line-height: 1.35;
+}
+[data-sim="site-failover"] .sf-pill[data-site="B"] { border-style: double; border-width: 0.25rem; }
+[data-sim="site-failover"] .sf-line { display: flex; align-items: flex-start; gap: 0.3rem; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="site-failover"] .sf-line > svg { flex: none; width: 1.1em; height: 1.1em; margin-top: 0.05em; }
+[data-sim="site-failover"] .sf-bad { color: var(--danger); font-weight: 700; }
+[data-sim="site-failover"] .sf-good { color: var(--ok); font-weight: 700; }
+[data-sim="site-failover"] .sf-warn { color: var(--warn); font-weight: 700; }
+
+/* sites */
+[data-sim="site-failover"] .sf-sites { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.45fr) minmax(0, 1fr); gap: 1cqw; align-items: center; }
+[data-sim="site-failover"] .sf-site {
+  position: relative; display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; padding: 0.5rem 0.9rem;
+  border: 0.25rem solid var(--ink); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="site-failover"] .sf-site[data-up="0"] {
+  border-style: dashed; border-color: var(--danger);
+  background:
+    linear-gradient(to top right, transparent calc(50% - 0.12rem), var(--danger) calc(50% - 0.12rem), var(--danger) calc(50% + 0.12rem), transparent calc(50% + 0.12rem)),
+    linear-gradient(to bottom right, transparent calc(50% - 0.12rem), var(--danger) calc(50% - 0.12rem), var(--danger) calc(50% + 0.12rem), transparent calc(50% + 0.12rem)),
+    var(--panel);
+}
+[data-sim="site-failover"] .sf-site[data-up="0"] .sf-parts { opacity: 0.85; }
+[data-sim="site-failover"] .sf-shead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
+[data-sim="site-failover"] .sf-shead b { font-size: var(--fs-lg); }
+[data-sim="site-failover"] .sf-status { padding: 0 0.45rem; border: 0.15rem solid currentColor; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="site-failover"] .sf-parts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.1rem 0.8rem; align-items: baseline; margin: 0; }
+[data-sim="site-failover"] .sf-parts dt { display: flex; align-items: center; gap: 0.3rem; color: var(--muted); }
+[data-sim="site-failover"] .sf-parts dt svg { width: 1.1em; height: 1.1em; }
+[data-sim="site-failover"] .sf-parts dd { margin: 0; min-width: 0; }
+[data-sim="site-failover"] .sf-ro { margin-left: 0.4rem; padding: 0 0.4rem; border: 0.15rem dashed var(--warn); border-radius: var(--radius-sm); color: var(--warn); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="site-failover"] .sf-link { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; text-align: center; font-size: var(--fs-sm); }
+[data-sim="site-failover"] .sf-arrow { width: 100%; height: 1.4rem; }
+[data-sim="site-failover"] .sf-arrow line { stroke: var(--ink); stroke-width: 4; }
+[data-sim="site-failover"] .sf-arrow[data-off] line { stroke: var(--line); stroke-dasharray: 8 6; }
+[data-sim="site-failover"] .sf-arrow path { fill: var(--ink); }
+[data-sim="site-failover"] .sf-arrow[data-off] path { fill: var(--line); }
+
+/* timeline */
+[data-sim="site-failover"] .sf-time { display: flex; flex-direction: column; gap: 0.25rem; }
+[data-sim="site-failover"] .sf-ticks { position: relative; height: 1.7rem; }
+[data-sim="site-failover"] .sf-tick {
+  position: absolute; transform: translateX(-50%); padding: 0 0.35rem; border: 0.15rem solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; line-height: 1.3;
+}
+[data-sim="site-failover"] .sf-tick[data-edge="end"] { transform: translateX(-100%); }
+[data-sim="site-failover"] .sf-tick[data-edge="start"] { transform: none; }
+[data-sim="site-failover"] .sf-tick[data-row="0"] { bottom: 0; }
+[data-sim="site-failover"] .sf-tick[data-row="1"] { bottom: 1.5rem; }
+[data-sim="site-failover"] .sf-tick[data-row="2"] { bottom: 3rem; }
+[data-sim="site-failover"] .sf-tick[data-row="3"] { bottom: 4.5rem; }
+[data-sim="site-failover"] .sf-tick.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="site-failover"] .sf-bar { position: relative; height: 1.6rem; border: var(--line-w) solid var(--ink); background: var(--bg); }
+[data-sim="site-failover"] .sf-seg { position: absolute; top: 0; bottom: 0; }
+[data-sim="site-failover"] .sf-seg[data-p="detect"], [data-sim="site-failover"] .sf-sw[data-p="detect"] {
+  background: repeating-linear-gradient(90deg, var(--c3) 0 0.2rem, var(--bg) 0.2rem 0.45rem);
+}
+[data-sim="site-failover"] .sf-seg[data-p="decide"], [data-sim="site-failover"] .sf-sw[data-p="decide"] {
+  background: repeating-linear-gradient(45deg, var(--c4) 0 0.2rem, var(--bg) 0.2rem 0.5rem);
+}
+[data-sim="site-failover"] .sf-seg[data-p="caches"], [data-sim="site-failover"] .sf-sw[data-p="caches"] { background: var(--c1); }
+[data-sim="site-failover"] .sf-seg[data-p="copy"], [data-sim="site-failover"] .sf-sw[data-p="copy"] {
+  background: repeating-linear-gradient(0deg, var(--c3) 0 0.2rem, var(--bg) 0.2rem 0.45rem);
+}
+[data-sim="site-failover"] .sf-seg[data-p="nocopy"], [data-sim="site-failover"] .sf-sw[data-p="nocopy"] { background: var(--bg); border-right: 0.2rem dashed var(--danger); }
+[data-sim="site-failover"] .sf-seg[data-past="0"] { opacity: 0.3; }
+[data-sim="site-failover"] .sf-now { position: absolute; top: -0.5rem; bottom: -0.5rem; width: 0.3rem; margin-left: -0.15rem; background: var(--danger); }
+[data-sim="site-failover"] .sf-chg { position: absolute; top: -0.35rem; bottom: -0.35rem; width: 0; border-left: 0.2rem dashed var(--ink); }
+[data-sim="site-failover"] .sf-axis { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="site-failover"] .sf-phl { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; font-size: var(--fs-sm); align-items: center; }
+[data-sim="site-failover"] .sf-phl > span { display: inline-flex; align-items: center; gap: 0.35rem; }
+[data-sim="site-failover"] .sf-sw { display: inline-block; width: 1.6rem; height: 0.9rem; border: 0.15rem solid var(--ink); }
+
+/* legend swatches the kit lacks: site down (crossed), cache pill, session key, licence lock, replication arrow */
+[data-sim="site-failover"] .sd-swatch[data-shape^="sf-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-up"] { border-width: 0.2rem; background: var(--panel); }
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-down"] {
+  border-style: dashed; border-color: var(--danger);
+  background: linear-gradient(to top right, transparent 44%, var(--danger) 44% 56%, transparent 56%), linear-gradient(to bottom right, transparent 44%, var(--danger) 44% 56%, transparent 56%);
+}
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-pill"] { width: 1.8em; border-radius: 1em; }
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-key"],
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-lock"],
+[data-sim="site-failover"] .sd-swatch[data-shape="sf-repl"] { border: 0; background: transparent; display: inline-grid; place-items: center; }
+[data-sim="site-failover"] .sd-swatch svg { width: 100%; height: 100%; }
+[data-sim="site-failover"] .sf-ico { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="site-failover"] .sf-ico .sf-x { stroke: var(--danger); stroke-width: 3; }
+
+[data-sim="site-failover"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.2rem; }
+[data-sim="site-failover"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: users two by three, sites stacked, the stage grows; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="site-failover"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="site-failover"] .sf { height: auto; gap: 0.8rem; padding: 0.5rem; }
+  [data-sim="site-failover"] .sf-top { grid-template-columns: 1fr; }
+  [data-sim="site-failover"] .sf-users { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  [data-sim="site-failover"] .sf-sites { grid-template-columns: 1fr; }
+  [data-sim="site-failover"] .sf-link .sf-arrow { width: 4rem; height: 2rem; transform: rotate(90deg); }
+  [data-sim="site-failover"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prebacivanje na pričuvnu lokaciju</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var NS = 'http://www.w3.org/2000/svg';
+  var USER_C = [1, 2, 3, 4, 5, 6];
+
+  // ── small helpers ──
+
+  function svg(tag, attrs, kids) {
+    var el = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    (kids || []).forEach(function (k) { el.append(k); });
+    return el;
+  }
+  /** A key (session) or lock (licence) icon; crossed draws a red stroke over it. */
+  function icon(name, crossed) {
+    var parts = name === 'key'
+      ? [svg('circle', { cx: 7, cy: 12, r: 4 }), svg('path', { d: 'M11 12h10M17 12v4M20 12v3' })]
+      : [svg('rect', { x: 5, y: 11, width: 14, height: 10, rx: 2 }), svg('path', { d: 'M8 11V8a4 4 0 0 1 8 0v3' })];
+    if (crossed) parts.push(svg('path', { class: 'sf-x', d: 'M3 21L21 3' }));
+    return svg('svg', { class: 'sf-ico', viewBox: '0 0 24 24', 'aria-hidden': 'true' }, parts);
+  }
+  function arrowSvg(off, back) {
+    var a = svg('svg', { class: 'sf-arrow', viewBox: '0 0 100 20', preserveAspectRatio: 'none', 'aria-hidden': 'true' }, [
+      svg('line', back ? { x1: 92, y1: 10, x2: 12, y2: 10 } : { x1: 8, y1: 10, x2: 88, y2: 10 }),
+      svg('path', { d: back ? 'M0 10L14 2V18Z' : 'M100 10L86 2V18Z' })
+    ]);
+    if (off) a.setAttribute('data-off', '');
+    return a;
+  }
+  function dur(sec) {
+    if (sec < 600) return t('secs', { n: sec });
+    var hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60, out = [];
+    if (hh) out.push(t('hours', { n: hh }));
+    if (mm) out.push(t('mins', { n: mm }));
+    if (ss) out.push(t('secs', { n: ss }));
+    return out.join(' ');
+  }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function clockOf(p, sec) {
+    var x = ((p.clockMin * 60 + sec) % 86400 + 86400) % 86400;
+    var s = two(Math.floor(x / 3600)) + ':' + two(Math.floor(x / 60) % 60);
+    return x % 60 ? s + ':' + two(x % 60) : s;
+  }
+  /** A time as the page shows it: the clock when the preset has one, else seconds from t = 0. */
+  function when(p, sec) { return p.clockMin >= 0 ? clockOf(p, sec) : dur(sec); }
+  function siteName(x) { return t(x === 'A' ? 'siteA' : 'siteB'); }
+  function idList(ids) {
+    if (ids.length < 2) return String(ids[0]);
+    return ids.slice(0, -1).join(', ') + t('and') + ids[ids.length - 1];
+  }
+  function sessionsAt(s, site) {
+    return s.sites[site].up ? s.users.filter(function (u) { return u.session === site; }).length : 0;
+  }
+
+  // ── stage parts ──
+
+  function topRow(c) {
+    var p = c.params, s = c.state, prev = c.prev;
+    var recChanged = prev && prev.record.addr !== s.record.addr;
+    var clock = h('div', { class: 'sf-box sf-clock' },
+      h('span', { class: 'sf-k' }, t('clock')),
+      h('b', { translate: 'no' }, when(p, s.t)),
+      p.clockMin >= 0 ? h('span', { class: 'sf-k', translate: 'no' }, '+' + dur(s.t)) : null);
+    var dns = h('div', { class: 'sf-box' + (recChanged ? ' sd-changed' : '') },
+      h('div', { class: 'sf-k' }, t('dnsTitle') + ' · ' + (s.record.changedAt === null ? t('notChanged') : t('changedAt', { t: when(p, s.record.changedAt) }))),
+      h('div', { class: 'sf-rec' },
+        h('span', { class: 'sf-mono', translate: 'no' }, L.NAME + '  A'),
+        h('span', { class: 'sf-mono sf-addr' + (recChanged ? ' sd-hl' : ''), translate: 'no' }, L.ADDR[s.record.addr]),
+        h('span', { class: 'sf-mono', translate: 'no' }, 'TTL ' + p.ttl)),
+      null);
+    var health;
+    if (s.scenario === 'failback') {
+      health = h('div', { class: 'sf-box' },
+        h('div', { class: 'sf-k' }, t('healthTitle')),
+        h('div', { class: 'sf-health-row' }, s.sites.A.up
+          ? [h('span', { class: 'sf-mark', dataset: { v: 'ok' }, 'aria-hidden': 'true' }, '✓'), h('span', null, t('healthOk'))]
+          : [h('span', { class: 'sf-mark', dataset: { v: 'fail' }, 'aria-hidden': 'true' }, '✗'), h('span', { class: 'sf-bad' }, t('down'))]));
+    } else {
+      var marks = [];
+      for (var k = 1; k <= p.threshold; k++) {
+        var f = k <= s.health.fails;
+        marks.push(h('span', { class: 'sf-mark' + (f && prev && k > prev.health.fails ? ' sd-changed' : ''), dataset: { v: f ? 'fail' : '' }, 'aria-hidden': 'true' }, f ? '✗' : ''));
+      }
+      health = h('div', { class: 'sf-box' },
+        h('div', { class: 'sf-k' }, t('healthTitle')),
+        h('div', { class: 'sf-health-row' },
+          h('span', { class: 'sf-marks' }, marks),
+          h('span', { translate: 'no', class: 'sf-mono' }, s.health.fails + '/' + p.threshold),
+          h('span', null, t('healthEvery', { t: dur(p.checkInterval) }))),
+        h('div', { class: 'sf-k' }, p.auto ? t('healthAuto', { n: p.threshold }) : t('healthManual')));
+    }
+    return h('div', { class: 'sf-top' }, clock, dns, health);
+  }
+
+  function userCard(c, u, i) {
+    var s = c.state, prev = c.prev;
+    var pu = prev ? prev.users[i] : null;
+    var moved = s.switched.indexOf(u.id) >= 0;
+    var asked = s.renewed.indexOf(u.id) >= 0;
+    var ok = L.reaches(s, u);
+    var ro = ok && s.sites[u.addr].readOnly;
+    var left = Math.max(0, u.exp - s.t);
+    var reach = ok
+      ? h('div', { class: 'sf-line' }, h('span', { class: ro ? 'sf-warn' : 'sf-good', 'aria-hidden': 'true' }, ro ? '!' : '✓'),
+          h('span', null, t(ro ? 'reachRo' : 'reachOk', { site: u.addr })))
+      : h('div', { class: 'sf-line' }, h('span', { class: 'sf-bad', 'aria-hidden': 'true' }, '✗'),
+          h('span', { class: 'sf-bad' }, t('reachFail', { site: u.addr })));
+    var sessLine;
+    if (moved) sessLine = h('div', { class: 'sf-line' }, icon('key', true), h('span', { class: 'sf-bad' }, t('sessionLost')));
+    else if (!s.sites[u.session].up) sessLine = h('div', { class: 'sf-line' }, icon('key', true), h('span', null, t('sessionDead', { site: u.session })));
+    else sessLine = h('div', { class: 'sf-line' }, icon('key', false), h('span', null, t('session', { site: u.session })));
+    var notes = [];
+    if (asked) notes.push(h('div', { class: 'sf-line sf-k' }, t('askedAgain')));
+    if (ok && !L.licenceWorks(s, u.addr)) notes.push(h('div', { class: 'sf-line' }, icon('lock', true), h('span', { class: 'sf-bad' }, t('licBlocked'))));
+    if (u.lostData && ok) notes.push(h('div', { class: 'sf-line sf-bad' }, t('userDataOld')));
+    return h('div', {
+      class: 'sf-user' + (moved ? ' sd-changed' : '') + (moved && c.dir === 'forward' ? ' sd-anim-in' : ''),
+      dataset: { ok: ok ? '1' : '0', site: u.addr }, 'aria-label': t('user', { n: u.id })
+    },
+      h('div', { class: 'sf-uhead' }, h('span', { class: 'sf-badge', dataset: { c: String(USER_C[i]) }, title: t('user', { n: u.id }) }, String(u.id)),
+        h('span', { class: 'sf-left', translate: 'no' }, 'TTL ' + left + ' s')),
+      h('div', { class: 'sf-pill' + (pu && pu.addr !== u.addr ? ' sd-hl' : ''), dataset: { site: u.addr }, translate: 'no' }, L.ADDR[u.addr]),
+      reach, sessLine, notes);
+  }
+
+  function siteCard(c, site) {
+    var s = c.state, p = c.params, st = s.sites[site], prev = c.prev;
+    var changed = prev && (prev.sites[site].up !== st.up || prev.sites[site].data !== st.data || prev.sites[site].readOnly !== st.readOnly);
+    var dataText = { current: t('dataCurrent'), replica: t('dataReplica', { lag: dur(s.replicaLagS) }), old: t('dataOld'), none: t('dataNone') }[st.data];
+    var licText, licOk = L.licenceWorks(s, site);
+    if (!st.up) licText = h('span', { class: 'sf-bad' }, t('licDown'));
+    else if (s.licence.movable) licText = h('span', null, t('licFree') + ': ', h('span', { class: 'sf-good' }, t('licWorks')));
+    else if (licOk) licText = h('span', null, t('licBound') + ': ', h('span', { class: 'sf-good' }, t('licWorks')));
+    else licText = h('span', null, t('licBound') + ': ', h('span', { class: 'sf-bad' }, t('licNoStart')));
+    return h('div', { class: 'sf-site' + (changed ? ' sd-changed' : ''), dataset: { up: st.up ? '1' : '0' } },
+      h('div', { class: 'sf-shead' },
+        h('b', null, siteName(site)),
+        h('span', { class: 'sf-k' }, t(site === 'A' ? 'rolePrimary' : 'roleStandby')),
+        h('span', { class: 'sf-mono', translate: 'no' }, L.ADDR[site]),
+        h('span', { class: 'sf-status ' + (st.up ? 'sf-good' : 'sf-bad') }, (st.up ? '✓ ' : '✗ ') + t(st.up ? 'up' : 'down'))),
+      h('dl', { class: 'sf-parts' },
+        h('dt', null, t('partApp')), h('dd', null, h('span', { class: st.up ? '' : 'sf-bad' }, t(st.up ? 'appRuns' : 'appDown'))),
+        h('dt', null, icon('key', false), t('partSessions')), h('dd', { translate: 'no' }, String(sessionsAt(s, site))),
+        h('dt', null, t('partData')), h('dd', null, dataText, st.readOnly ? h('span', { class: 'sf-ro' }, t('readOnly')) : null),
+        h('dt', null, icon('lock', st.up && !licOk), t('partLicence')), h('dd', null, licText)));
+  }
+
+  function linkBetween(c) {
+    var s = c.state, prev = c.prev, kids = [];
+    if (s.scenario === 'failback') {
+      var copied = s.event.code !== 'start' && s.event.code !== 'return' && c.params.copyBack;
+      var skipped = s.event.code !== 'start' && s.event.code !== 'return' && !c.params.copyBack;
+      kids.push(arrowSvg(!copied, true));
+      kids.push(h('span', { class: copied ? '' : skipped ? 'sf-bad' : 'sf-k' }, copied ? t('copyBA') : skipped ? t('copySkipped') : t('replStopped')));
+    } else {
+      var live = s.sites.A.up;
+      kids.push(arrowSvg(!live, false));
+      kids.push(h('span', { class: live ? '' : 'sf-k' }, live ? t('replAB', { lag: dur(s.replicaLagS) }) : t('replStopped')));
+      if (s.lostWritesS > 0) kids.push(h('span', { class: 'sf-bad' + (prev && !prev.lostWritesS ? ' sd-hl' : '') }, t('lostWrites', { lag: dur(s.lostWritesS) })));
+    }
+    return h('div', { class: 'sf-link' }, kids);
+  }
+
+  function timeline(c) {
+    var s = c.state, p = c.params, end = s.end;
+    function pct(x) { return (100 * Math.max(0, Math.min(end, x)) / end) + '%'; }
+    var bar = h('div', { class: 'sf-bar', role: 'img', 'aria-label': t('timeline') });
+    s.phases.forEach(function (ph) {
+      if (ph.to <= ph.from) return;
+      bar.append(h('div', { class: 'sf-seg', dataset: { p: ph.id, past: s.t > ph.from || (s.t === ph.from && s.event.code !== 'start' && ph.from > 0) ? '1' : '0' },
+        style: { left: pct(ph.from), width: 'calc(' + pct(ph.to) + ' - ' + pct(ph.from) + ')' } }));
+    });
+    if (s.record.changedAt !== null) bar.append(h('div', { class: 'sf-chg', style: { left: pct(s.record.changedAt) }, title: t('changeMark') }));
+    bar.append(h('div', { class: 'sf-now', style: { left: pct(s.t) } }));
+    // users who moved so far, grouped by second, on two rows so neighbours do not overlap
+    var groups = {};
+    s.users.forEach(function (u) { if (u.movedAt !== null) (groups[u.movedAt] = groups[u.movedAt] || []).push(u.id); });
+    var times = Object.keys(groups).map(Number).sort(function (a, b) { return a - b; });
+    // place each label on the lowest of four rows where it does not touch the previous one (widths estimated in rem)
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    var barW = Math.max(1, c.stage.clientWidth - 3 * rem);
+    var rowEnd = [-Infinity, -Infinity, -Infinity, -Infinity], used = 1;
+    var ticks = h('div', { class: 'sf-ticks' }, times.map(function (tm) {
+      var fresh = groups[tm].some(function (id) { return s.switched.indexOf(id) >= 0; });
+      var edge = tm / end > 0.92 ? 'end' : tm / end < 0.08 ? 'start' : 'mid';   // keep the label inside the bar
+      var label = '→' + groups[tm].join(',');
+      var w = (label.length * 0.62 + 1.2) * rem, x = barW * tm / end;
+      var from = edge === 'end' ? x - w : edge === 'start' ? x : x - w / 2;
+      var row = 0;
+      while (row < 3 && rowEnd[row] > from - 0.3 * rem) row++;
+      if (rowEnd[row] > from - 0.3 * rem) row = rowEnd.indexOf(Math.min.apply(null, rowEnd));
+      rowEnd[row] = from + w;
+      used = Math.max(used, row + 1);
+      return h('span', { class: 'sf-tick' + (fresh ? ' sd-changed' : ''), dataset: { row: String(row), edge: edge }, style: { left: pct(tm) },
+        'aria-label': t('moveMark', { n: groups[tm].join(', '), t: when(p, tm) }) }, label);
+    }));
+    ticks.style.height = (used * 1.5 + 0.2) + 'rem';
+    var names = { detect: 'phDetect', decide: 'phDecide', caches: 'phCaches', copy: 'phCopy', nocopy: 'phNoCopy' };
+    var phl = h('div', { class: 'sf-phl' }, s.phases.filter(function (ph) { return ph.to > ph.from; }).map(function (ph) {
+      return h('span', null, h('span', { class: 'sf-sw', dataset: { p: ph.id }, 'aria-hidden': 'true' }), t(names[ph.id]) + ' ' + dur(ph.to - ph.from));
+    }), h('span', null, h('b', null, t('worstCase', { t: when(p, end) }))));
+    return h('div', { class: 'sf-time' }, ticks, bar,
+      h('div', { class: 'sf-axis', translate: 'no' }, h('span', null, when(p, 0)), h('span', null, when(p, end))), phl);
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.event, b = function (x) { return h('b', null, x); };
+    var T = b(when(p, s.t));
+    var out;
+    switch (ev.code) {
+      case 'start':
+        return s.scenario === 'failback' ? t.parts('capStartBack', {}) : t.parts('capStart', { ttl: b(dur(p.ttl)) });
+      case 'fail':
+        return t.parts('capFail', { t: T });
+      case 'check':
+        out = t.parts(ev.k === p.threshold ? 'capCheckLast' : 'capCheck', { k: ev.k, thr: p.threshold, t: T });
+        break;
+      case 'change':
+        if (s.scenario === 'failback') return t.parts(p.copyBack ? 'capChangeBack' : 'capChangeBackNoCopy', { t: T });
+        var ls = L.longestStale(s);
+        if (!ls) return t.parts('capFail', { t: T });   // cannot happen: at the change every cache still holds A
+        out = t.parts(p.auto ? 'capChange' : 'capChangeManual', { t: T, id: b(String(ls.id)), left: h('span', { class: 'sd-hl' }, dur(ls.left)), decide: dur(s.tc) });
+        if (s.renewed.length) out.push(' ', t.n('capRenewedBefore', s.renewed.length, { ids: idList(s.renewed) }));
+        return out;
+      case 'return':
+        return t.parts(p.copyBack ? 'capReturnCopy' : 'capReturn', { t: T });
+      case 'copy':
+        return p.copyBack ? t.parts('capCopy', { t: T }) : t.parts('capCopySkipped', {});
+      case 'window':
+        var target = s.record.addr, old = target === 'A' ? 'B' : 'A';
+        out = s.switched.length
+          ? t.parts('capWindow', { n: s.switched.length, t: T, ids: b(idList(s.switched)), site: target, old: old })
+          : t.parts('capWindowEmpty', { t: T });
+        var waiting = s.users.filter(function (u) { return u.addr !== target; }).length;
+        if (waiting) out.push(' ', t.n('capWaiting', waiting, { site: old }));
+        if (s.scenario === 'failover' && s.switched.length && !L.licenceWorks(s, 'B')) out.push(' ', t('capLicence'));
+        return out;
+      case 'summary':
+        var st = L.stats(s);
+        if (s.scenario === 'failback') {
+          return t.parts(p.copyBack ? 'capSummaryBack' : 'capSummaryBackNoCopy', { last: b(dur(st.last)), worst: dur(st.worst) });
+        }
+        out = t.parts('capSummary', { last: b(dur(st.last)), worst: dur(st.worst), lag: dur(s.lostWritesS) });
+        if (!L.licenceWorks(s, 'B')) out.push(' ', t('capSummaryLic', { days: L.REHOST_DAYS }));
+        return out;
+    }
+    if (s.renewed.length) out.push(' ', t.n('capRenewed', s.renewed.length, { ids: idList(s.renewed) }));
+    return out;
+  }
+
+  var failover = function (p) { return p.scenario !== 'failback'; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'ttl', type: 'choice', label: t('ttl'), options: [[60, t('secs', { n: 60 })], [300, t('secs', { n: 300 })], [3600, t('secs', { n: 3600 })]] },
+      { key: 'checkInterval', type: 'choice', label: t('checkInterval'), visible: failover, options: [[10, t('secs', { n: 10 })], [30, t('secs', { n: 30 })]] },
+      { key: 'threshold', type: 'choice', label: t('threshold'), visible: failover, options: [[1, '1'], [3, '3']] },
+      { key: 'auto', type: 'toggle', label: t('auto'), visible: failover },
+      { key: 'decideMin', type: 'range', label: t('decideMin'), min: 5, max: 120, step: 5, format: function (v) { return t('mins', { n: v }); },
+        visible: function (p) { return failover(p) && !p.auto; } },
+      { key: 'licenceBound', type: 'toggle', label: t('licenceBound') },
+      { key: 'copyBack', type: 'toggle', label: t('copyBack'), visible: function (p) { return !failover(p); } }
+    ],
+
+    presets: [
+      { id: 'auto-failover', label: t('presetAuto'), hint: t('presetAutoHint'), params: { scenario: 'failover' } },
+      { id: 'manual-dns', label: t('presetManual'), hint: t('presetManualHint'), params: { scenario: 'failover', auto: false, clockMin: 845 } },
+      { id: 'long-ttl', label: t('presetLong'), hint: t('presetLongHint'), params: { scenario: 'failover', ttl: 3600 } },
+      { id: 'licence-stays', label: t('presetLicence'), hint: t('presetLicenceHint'), params: { scenario: 'failover', clockMin: 845, ttl: 60, threshold: 1 } },
+      { id: 'failback', label: t('presetBack'), hint: t('presetBackHint'), params: { scenario: 'failback' } }
+    ],
+
+    legend: [
+      { shape: 'sf-up', label: t('legendUp') },
+      { shape: 'sf-down', label: t('legendDown') },
+      { shape: 'sf-pill', label: t('legendCache') },
+      { shape: 'sf-key', label: t('legendKey') },
+      { shape: 'sf-lock', label: t('legendLock') },
+      { shape: 'sf-repl', label: t('legendRepl') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      c.stage.replaceChildren(h('div', { class: 'sf', dataset: { scn: s.scenario } },
+        topRow(c),
+        h('div', { class: 'sf-users' }, s.users.map(function (u, i) { return userCard(c, u, i); })),
+        h('div', { class: 'sf-sites' }, siteCard(c, 'A'), linkBetween(c), siteCard(c, 'B')),
+        timeline(c)));
+    },
+
+    caption: caption
+  });
+
+  // the legend's icon swatches (the kit draws empty swatches with data-shape; the page fills them)
+  var fill = { 'sf-key': function () { return icon('key', true); }, 'sf-lock': function () { return icon('lock', false); }, 'sf-repl': function () { return arrowSvg(false, false); } };
+  document.querySelectorAll('[data-sd-legend] .sd-swatch').forEach(function (sw) {
+    var f = fill[sw.dataset.shape];
+    if (f) sw.replaceChildren(f());
+  });
+})();
+</script>
+</body>
+</html>
