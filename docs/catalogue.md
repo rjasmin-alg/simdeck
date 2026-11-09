@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **333 of 469 entries are live**, 109 w3, 15 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 wip.
+**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **338 of 469 entries are live**, 109 w3, 10 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -346,11 +346,11 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.5 IPAM | 5 | 3 | 2 w3 |
 | §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
-| §4.6 Storage, backup and disaster recovery | 22 | 16 | 3 w3, 3 w3 · queued |
+| §4.6 Storage, backup and disaster recovery | 22 | 19 | 3 w3 |
 | §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
-| §4.10 Radio and crisis communications | 17 | 1 | 4 w3, 12 w3 · queued |
+| §4.10 Radio and crisis communications | 17 | 3 | 4 w3, 10 w3 · queued |
 | §4.11 Reference posters and classroom tools | 6 | 5 | 1 wip |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
@@ -733,11 +733,11 @@ instead of repeating them.
 | `sto-retention-gfs` | live | Retention: grandfather-father-son | how many copies a schedule keeps and how far back you can go | set daily/weekly/monthly counts, run a year | expl | S | P2 | DR, UL | UL ch23 Example 6 → §5.3 |  |
 | `sto-restore-drill` | live | The backup that lies | backups report OK; only a test restore shows they're empty | run the job for weeks, then restore | step | S | P2 | DR, UL | DR S8, UL ch23 (`provjera-arhive-i-proba-oporavka.svg`) → §5.3 |  |
 | `sto-backup-window` | live | Backup window and offsite seeding | data size vs bandwidth vs window; why the first offsite copy goes by truck | sliders for size, change rate, link speed | expl | S | P2 | DR | NLA T28 |  |
-| `sto-cow-vs-row` | w3 · queued | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 |  |
+| `sto-cow-vs-row` | live in `lnx-cow-filesystem` | Copy-on-write vs redirect-on-write | where the old and the new block end up; the write penalty | write to a snapshotted volume in both modes | step | S | P3 | DR, NLA | → §5.2 |  |
 | `sto-write-cache` | live | Write-back vs write-through | write-back is fast until the power fails; battery-backed cache | write, cut power with each setting | step | S | P2 | DR, NLA | write-back durability (the scoping note's §5 "no write cache" is a performance tier: a separate idea) |  |
 | `sto-ssd-internals` | live | Inside an SSD | FTL, erase blocks, write amplification, TRIM, wear | write and overwrite, see erase cycles | step | M | P2 | OS, NLA | `ossim-disk-scheduling` hdd-vs-ssd |  |
 | `sto-iops-latency` | live | IOPS, throughput and latency | queue depth and block size trade them off | sliders for block size, queue depth, device | expl | S | P2 | NLA, DR | NLA T27 |  |
-| `sto-nas-vs-san` | w3 · queued | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | step | S | P3 | NLA | NLA T25 |  |
+| `sto-nas-vs-san` | live | File vs block storage | NAS (NFS/SMB) vs SAN (iSCSI/FC): who owns the filesystem | mount both, connect two clients | step | S | P3 | NLA | NLA T25 |  |
 | `sto-ec-vs-replication` | live | Erasure coding vs replication | overhead vs failures tolerated vs rebuild cost (k+m) | choose k, m, replicas; fail disks | expl | S | P2 | NLA, DR | cephsim → §5.7 |  |
 | `sto-ceph-min-size` | live | size and min_size | `size=2 min_size=2` blocks I/O on one failure; 3/2 doesn't | fail OSDs under each setting, try to write | step | S | P2 | NLA, DR | cephsim, faultline `sizeTwo`, scoping §5, DR S2/P05 → §5.7 |  |
 | `sto-ceph-down-out` | live | down vs out | down is degraded and nothing moves; out triggers rebalancing after a timer | stop an OSD, let time pass | step | S | P2 | NLA, DR | cephsim |  |
@@ -745,7 +745,7 @@ instead of repeating them.
 | `sto-smallest-disk-caps` | live | One small or full disk caps the pool | the fullest OSD sets MAX AVAIL; uneven hosts fill first | add mismatched disks, fill the pool | expl | S | P2 | NLA, DR | cephsim, scoping note §5 |  |
 | `sto-sync-async-replication` | live in `db-replication` | Synchronous vs asynchronous replication | RPO 0 at the cost of latency vs lag and data loss on failover | write, fail the primary at different moments | step | S | P2 | DR, NLA | → §5.7 (with `ha-db-replication`) |  |
 | `dr-rpo-rto` | live | RPO and RTO | how much data and how much time you lose, on one timeline | place backups and an incident, measure loss | expl | S | P2 | DR | DR scenarios |  |
-| `dr-site-failover` | w3 · queued | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 |  |
+| `dr-site-failover` | live | Site failover | DNS/GSLB moves users; what doesn't follow (sessions, IP-bound licences) | lose a site, fail over, fail back | step | M | P3 | DR | DR S1, S12, S14 |  |
 | `dr-correlated-failure` | w3 | One power strip under three replicas | redundancy that shares one hidden dependency | add dependencies, fail the PDU | step | S | P3 | DR | faultline `onePdu`: a preset on the imported faultline |  |
 | `dr-alert-to-nobody` | w3 | The alert that reaches nobody | the alert path depends on the system that failed | fail the site, follow the alert | step | S | P3 | DR | DR S1 |  |
 
@@ -810,13 +810,13 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | `ham-shannon` | w3 · queued | Shannon–Hartley | capacity from bandwidth and SNR | sliders for B and SNR | expl | S | P3 | HAM, URM | 50ohm `shannon_hartley_gesetzt` |  |
 | `ham-packet-aprs` | w3 · queued | Packet radio and APRS | CSMA on a shared channel, digipeaters, path aliases | send beacons through digipeaters | step | M | P3 | HAM | 50ohm `paketvermittelte_netzwerke` |  |
 | `ham-fft-waterfall` | w3 · queued | FFT and the waterfall | sample rate sets the span, FFT size sets the resolution | change sample rate and FFT size | expl | M | P3 | HAM | HamMonitor `DESIGN.md` |  |
-| `ham-ctcss` | w3 · queued | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
+| `ham-ctcss` | live | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
 | `ham-lora-css` | w3 · queued | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
 | `ham-fsk-psk-ask` | w3 · queued | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) |  |
 | `ham-adsb-frame` | w3 | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) |  |
 | `kk-directed-net` | w3 · queued | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides |  |
 | `kk-priority-traffic` | w3 · queued | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
-| `kk-backup-ncs` | w3 · queued | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
+| `kk-backup-ncs` | live | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
 | `kk-gateway-tiers` | w3 | Multi-tier relay through a gateway | local nets, gateways and delay to the coordination level | send a message from field to HQ | step | M | P3 | KK | KK2 slides |  |
 
 ### 4.11 Reference posters and classroom tools
