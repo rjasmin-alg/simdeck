@@ -1,0 +1,598 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Packet radio and APRS: a stepper, one time slot per step. Beacons on one shared channel, digipeaters that answer
+     the path aliases WIDE1-1 and WIDEn-N, duplicate suppression, and carrier sense that cannot help hidden stations.
+     The model is in sim.js (rules: SPEC.md), the words in strings.js. -->
+<html lang="hr" data-sim="packet-aprs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Packet radio i APRS · simdeck</title>
+<meta name="description" content="Svjetionik kroz digipeatere odsječak po odsječak: WIDE1-1 i WIDEn-N, umetnuti pozivni znakovi, duplikati, sudari i skrivene stanice koje CSMA ne spašava.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "packet-aprs",
+  "title": {
+    "hr": "Packet radio i APRS",
+    "en": "Packet radio and APRS"
+  },
+  "concept": {
+    "hr": "Jedan zajednički kanal: osluškivanje, digipeateri i put WIDEn-N",
+    "en": "One shared channel: carrier sense, digipeaters and WIDEn-N path aliases"
+  },
+  "summary": {
+    "hr": "Svjetionik kroz digipeatere odsječak po odsječak: WIDE1-1 i WIDEn-N, umetnuti pozivni znakovi, duplikati, sudari i skrivene stanice koje CSMA ne spašava.",
+    "en": "A beacon through digipeaters slot by slot: WIDE1-1 and WIDEn-N, inserted call signs, duplicates, collisions and hidden stations that CSMA cannot save."
+  },
+  "tags": [
+    "radio-networks"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="packet-aprs"]; colours only from kit tokens. */
+[data-sim="packet-aprs"] .pa {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.8cqh;
+  height: 100%;
+  padding: 1.2cqh 1.5cqw;
+}
+
+/* the map: a 100 × 44 box; circles, links and rings in one SVG stretched to the box, labels in HTML */
+[data-sim="packet-aprs"] .pa-mapwrap { flex: 1 1 0; min-height: 0; container-type: size; display: grid; place-items: center; }
+[data-sim="packet-aprs"] .pa-map {
+  position: relative;
+  width: min(100cqw, calc(100cqh * 100 / 44));
+  aspect-ratio: 100 / 44;
+}
+[data-sim="packet-aprs"] .pa-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+[data-sim="packet-aprs"] .pa-range { fill: none; stroke: var(--sw); stroke-width: 1.5px; stroke-dasharray: 3 5; opacity: 0.55; }
+[data-sim="packet-aprs"] .pa-range.pa-on { fill: color-mix(in srgb, var(--sw) 10%, transparent); stroke-width: 3px; stroke-dasharray: none; opacity: 1; }
+[data-sim="packet-aprs"] .pa-link { stroke: var(--line); stroke-width: 3px; }
+[data-sim="packet-aprs"] .pa-link.pa-on { stroke: var(--sw); stroke-width: 6px; }
+[data-sim="packet-aprs"] .pa-ring {
+  fill: none;
+  stroke: var(--sw);
+  stroke-width: 3px;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0.7;
+  animation: pa-ring 1.6s ease-out infinite;
+}
+[data-sim="packet-aprs"] .pa-ring.pa-r2 { animation-delay: 0.8s; opacity: 0.35; }
+@keyframes pa-ring { from { transform: scale(0.15); opacity: 0.9; } to { transform: scale(1); opacity: 0; } }
+
+[data-sim="packet-aprs"] .pa-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translate(-50%, -1.3rem);
+  pointer-events: none;
+}
+[data-sim="packet-aprs"] .pa-shape { width: 2.6rem; height: 2.6rem; overflow: visible; }
+[data-sim="packet-aprs"] .pa-shape * { fill: var(--panel); stroke: var(--sw); stroke-width: 2.6; stroke-linejoin: round; }
+[data-sim="packet-aprs"] .pa-node.pa-tx .pa-shape * { fill: var(--sw); stroke: var(--ink); }
+[data-sim="packet-aprs"] .pa-id {
+  margin-top: 0.1rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1.15;
+}
+[data-sim="packet-aprs"] .pa-badge {
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+[data-sim="packet-aprs"] .pa-badge.pa-bad { border-color: var(--danger); color: var(--danger); border-width: 0.2rem; }
+[data-sim="packet-aprs"] .pa-badge.pa-good { border-color: var(--ok); }
+[data-sim="packet-aprs"] .pa-badge.pa-dupe { border-style: dashed; text-decoration: line-through; }
+[data-sim="packet-aprs"] .pa-badge.pa-quiet { border-style: dotted; color: var(--muted); }
+
+/* the packet card: the frame in text form, path elements marked used (*, bold) or unused */
+[data-sim="packet-aprs"] .pa-cards { display: flex; flex-direction: column; gap: 0.4rem; min-height: calc(var(--rows) * 2.6rem + (var(--rows) - 1) * 0.4rem); justify-content: center; }
+[data-sim="packet-aprs"] .pa-card {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
+  padding: 0.2rem 0.9rem;
+  min-height: 2.6rem;
+  box-sizing: border-box;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.5rem solid var(--sw, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="packet-aprs"] .pa-card.pa-old { border-left-style: dotted; color: var(--muted); }
+[data-sim="packet-aprs"] .pa-card-h { font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="packet-aprs"] .pa-frame { font-family: var(--mono); font-size: 1.25rem; overflow-wrap: anywhere; }
+[data-sim="packet-aprs"] .pa-el { padding: 0 0.1rem; border-radius: var(--radius-sm); }
+[data-sim="packet-aprs"] .pa-el.pa-used { font-weight: 700; text-decoration: underline; text-decoration-thickness: 0.15rem; text-underline-offset: 0.2rem; }
+[data-sim="packet-aprs"] .pa-el.pa-unused { color: var(--muted); }
+[data-sim="packet-aprs"] .pa-el.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-width: 0.15rem; outline-offset: 0; }
+[data-sim="packet-aprs"] .pa-card.pa-old .pa-el.pa-unused { color: inherit; }
+
+/* the time strip: one column per slot, each transmission a bar over its 2 slots */
+[data-sim="packet-aprs"] .pa-strip {
+  display: grid;
+  grid-template-columns: auto repeat(var(--slots), minmax(0, 1fr));
+  gap: 0.2rem;
+  align-items: stretch;
+}
+[data-sim="packet-aprs"] .pa-rowlabel { align-self: center; padding-right: 0.5rem; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="packet-aprs"] .pa-tick { text-align: center; font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="packet-aprs"] .pa-tick.pa-now { color: var(--ink); font-weight: 700; border-bottom: 0.25rem solid var(--hl); }
+[data-sim="packet-aprs"] .pa-cell { min-height: 2.2rem; border: var(--line-w) dotted var(--line); border-radius: var(--radius-sm); }
+[data-sim="packet-aprs"] .pa-cell.pa-past { border-style: solid; border-color: transparent; background: color-mix(in srgb, var(--line) 25%, transparent); }
+[data-sim="packet-aprs"] .pa-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+  border: var(--line-w) solid var(--sw);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 1;
+}
+[data-sim="packet-aprs"] .pa-bar.pa-lost { outline: 0.2rem dashed var(--danger); outline-offset: -0.4rem; }
+[data-sim="packet-aprs"] .pa-clash {
+  display: grid;
+  place-items: center;
+  min-height: 1.8rem;
+  border: 0.2rem solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-weight: 700;
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.55em),
+    repeating-linear-gradient(-45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.55em);
+}
+
+/* facts */
+[data-sim="packet-aprs"] .pa-facts { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; justify-content: center; }
+[data-sim="packet-aprs"] .pa-box {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.8rem;
+  border: var(--line-w) solid var(--line);
+  border-left: 0.4rem solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--fs-md);
+}
+[data-sim="packet-aprs"] .pa-box b { font-family: var(--mono); font-size: 1.25rem; }
+[data-sim="packet-aprs"] .pa-box.pa-bad { border-left-color: var(--danger); }
+[data-sim="packet-aprs"] .pa-box.pa-good { border-left-color: var(--ok); }
+
+/* legend swatches: station shapes, transmitting, collision, duplicate, used element */
+[data-sim="packet-aprs"] .sd-swatch[data-shape='tri'] { border: 0; background: var(--sw); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-sim="packet-aprs"] .sd-swatch[data-shape='small'] { width: 0.8em; height: 0.8em; background: var(--panel); border-color: var(--sw); border-width: 0.18rem; }
+[data-sim="packet-aprs"] .sd-swatch[data-shape='big'] { background: var(--panel); border-color: var(--sw); border-width: 0.18rem; }
+[data-sim="packet-aprs"] .sd-swatch[data-shape='diamond'] { width: 0.85em; height: 0.85em; background: var(--panel); border-color: var(--sw); border-width: 0.18rem; transform: rotate(45deg); }
+[data-sim="packet-aprs"] .sd-swatch[data-shape='tx'] { border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 0.15rem var(--bg), 0 0 0 0.3rem var(--ink); }
+[data-sim="packet-aprs"] .sd-swatch[data-shape='cross'] {
+  border: 0.18rem solid var(--danger);
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.25em, var(--danger) 0.25em 0.38em),
+    repeating-linear-gradient(-45deg, transparent 0 0.25em, var(--danger) 0.25em 0.38em);
+}
+[data-sim="packet-aprs"] .sd-swatch[data-shape='dupe'] {
+  border-style: dashed;
+  background: linear-gradient(to top right, transparent calc(50% - 0.1rem), var(--ink) calc(50% - 0.1rem) calc(50% + 0.1rem), transparent calc(50% + 0.1rem)), var(--panel);
+}
+[data-sim="packet-aprs"] .sd-swatch[data-shape='used'] { background: var(--panel); border-width: 0 0 0.25rem; border-radius: 0; }
+
+/* Settings: the path choice wraps in two rows */
+[data-sim="packet-aprs"] .pa-note { color: var(--danger); font-weight: 700; }
+[data-sim="packet-aprs"] .pa-credit { font-size: var(--fs-sm); color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="packet-aprs"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="packet-aprs"] .pa { height: auto; gap: 0.8rem; padding: 0.5rem 0.3rem; }
+  [data-sim="packet-aprs"] .pa-mapwrap { flex: none; container-type: normal; display: block; }
+  [data-sim="packet-aprs"] .pa-map { width: 100%; margin: 0.6rem 0 1.6rem; }
+  [data-sim="packet-aprs"] .pa-node { transform: translate(-50%, -0.8rem); }
+  [data-sim="packet-aprs"] .pa-cards { min-height: 0; }
+  [data-sim="packet-aprs"] .pa-shape { width: 1.6rem; height: 1.6rem; }
+  [data-sim="packet-aprs"] .pa-badge { display: none; }
+  [data-sim="packet-aprs"] .pa-frame { font-size: 1rem; }
+  [data-sim="packet-aprs"] .pa-strip { gap: 1px; }
+  [data-sim="packet-aprs"] .pa-tick span { display: none; }
+  [data-sim="packet-aprs"] .pa-tick.pa-now span { display: inline; }
+  [data-sim="packet-aprs"] .pa-bar span { display: none; }
+  [data-sim="packet-aprs"] .pa-cell, [data-sim="packet-aprs"] .pa-bar { min-height: 1.4rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Packet radio i APRS</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var W = 100, H = 44;
+
+  var COLOR = { T1: '1', T2: '2', D1: '3', D2: '4', D3: '5', D4: '6', D5: '7', R: '8' };
+  var KIND = { tracker: 'kindTracker', 'fill-in': 'kindFillIn', wide: 'kindWide', igate: 'kindIgate' };
+  var note = null; // a word from the beacon button when it could not act, shown once in the caption
+
+  function data(text) { return h('b', { translate: 'no' }, String(text)); }
+  function s(tag, attrs) {
+    var el = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function byId(st) { var m = {}; st.stations.forEach(function (x) { m[x.id] = x; }); return m; }
+  function eventsAt(st, n) { return st.log.filter(function (e) { return e.slot === n; }); }
+  function list(ids) { return ids.join(t('and')); }
+  function pathText(path) { return path.map(L.elText).join(','); }
+
+  function shape(kind) {
+    var g = s('svg', { viewBox: '0 0 20 20', class: 'pa-shape', 'aria-hidden': 'true' });
+    if (kind === 'tracker') g.append(s('polygon', { points: '10,1.5 18.5,18 1.5,18' }));
+    else if (kind === 'fill-in') g.append(s('rect', { x: 4.5, y: 4.5, width: 11, height: 11 }));
+    else if (kind === 'wide') g.append(s('rect', { x: 1.5, y: 1.5, width: 17, height: 17 }));
+    else g.append(s('polygon', { points: '10,1 19,10 10,19 1,10' }));
+    return g;
+  }
+
+  // the badge a station wears in this slot: the most telling of its events
+  var BADGE = [
+    ['deliver', 'bDeliver', 'pa-good', '✓ '], ['queue', 'bQueue', 'pa-good', '↻ '], ['collision', 'bCollision', 'pa-bad', '✕ '],
+    ['dupe', 'bDupe', 'pa-dupe', ''], ['busy', 'bBusy', 'pa-quiet', ''], ['skip', 'bSkip', 'pa-quiet', '– '], ['defer', 'bDefer', 'pa-quiet', '… ']
+  ];
+  function badgeFor(evs, id) {
+    for (var i = 0; i < BADGE.length; i++) {
+      var b = BADGE[i];
+      if (evs.some(function (e) { return e.station === id && e.event === b[0]; })) return h('span', { class: 'pa-badge ' + b[2] }, b[3] + t(b[1]));
+    }
+    return null;
+  }
+
+  function frameEl(pkt, fresh) {
+    var parts = [pkt.src + '>' + pkt.dest];
+    pkt.path.forEach(function (e, i) {
+      parts.push(',');
+      var changed = fresh && pkt.changed.indexOf(i) >= 0;
+      parts.push(h('span', { class: 'pa-el ' + (e.used ? 'pa-used' : 'pa-unused') + (changed ? ' sd-changed' : '') }, L.elText(e)));
+    });
+    parts.push(':' + pkt.info);
+    return h('span', { class: 'pa-frame', translate: 'no' }, parts);
+  }
+
+  function renderMap(st, n) {
+    var sta = byId(st);
+    var slot = st.timeline[n - 1];
+    var tx = slot ? slot.air.map(function (a) { return a.station; }) : [];
+    var evs = eventsAt(st, n);
+    var svg = s('svg', { class: 'pa-svg', viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    st.stations.forEach(function (x) {
+      if (x.kind === 'igate') return;
+      var c = s('circle', { cx: x.x, cy: x.y, r: x.range, class: 'pa-range' + (tx.indexOf(x.id) >= 0 ? ' pa-on' : ''), 'vector-effect': 'non-scaling-stroke' });
+      c.dataset.c = COLOR[x.id];
+      svg.append(c);
+    });
+    for (var i = 0; i < st.stations.length; i++) {
+      for (var j = i + 1; j < st.stations.length; j++) {
+        var a = st.stations[i], b = st.stations[j];
+        if (!L.inRange(a, b)) continue;
+        var on = tx.indexOf(a.id) >= 0 ? a : tx.indexOf(b.id) >= 0 ? b : null;
+        var line = s('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'pa-link' + (on ? ' pa-on' : ''), 'vector-effect': 'non-scaling-stroke' });
+        if (on) line.dataset.c = COLOR[on.id];
+        svg.append(line);
+      }
+    }
+    tx.forEach(function (id) {
+      var x = sta[id];
+      ['pa-ring', 'pa-ring pa-r2'].forEach(function (cls) {
+        var r = s('circle', { cx: x.x, cy: x.y, r: x.range * 0.55, class: cls, 'vector-effect': 'non-scaling-stroke' });
+        r.dataset.c = COLOR[id];
+        svg.append(r);
+      });
+    });
+    var nodes = st.stations.map(function (x) {
+      var on = tx.indexOf(x.id) >= 0;
+      return h('div', {
+        class: 'pa-node' + (on ? ' pa-tx' : ''), dataset: { c: COLOR[x.id] },
+        style: { left: (x.x / W * 100) + '%', top: (x.y / H * 100) + '%' },
+        'aria-label': x.id + ', ' + t(KIND[x.kind])
+      }, shape(x.kind), h('span', { class: 'pa-id', translate: 'no' }, x.id), badgeFor(evs, x.id));
+    });
+    return h('div', { class: 'pa-map' }, svg, nodes);
+  }
+
+  function renderCards(st, n, rows) {
+    var slot = st.timeline[n - 1];
+    var air = slot ? slot.air : [];
+    var box = function (kids) { return h('div', { class: 'pa-cards', style: { '--rows': String(rows) } }, kids); };
+    if (air.length) {
+      return box(air.map(function (a) {
+        var pkt = st.packets[a.pktId - 1];
+        return h('div', { class: 'pa-card', dataset: { c: COLOR[a.station] } },
+          h('span', { class: 'pa-card-h' }, t('cardTitle'), ' · ', t('cardFrom', { who: a.station, a: a.start, b: a.start + L.AIRTIME - 1 })),
+          frameEl(pkt, a.start === n && pkt.from !== pkt.src));
+      }));
+    }
+    var last = null;
+    st.timeline.forEach(function (sl) { sl.air.forEach(function (a) { last = a; }); });
+    if (!last) return box(h('div', { class: 'pa-card pa-old' }, h('span', { class: 'pa-card-h' }, t('cardNone'))));
+    return box(h('div', { class: 'pa-card pa-old', dataset: { c: COLOR[last.station] } },
+      h('span', { class: 'pa-card-h' }, t('cardLast'), ' · ', t('cardFrom', { who: last.station, a: last.start, b: last.start + L.AIRTIME - 1 })),
+      frameEl(st.packets[last.pktId - 1], false)));
+  }
+
+  function renderStrip(st, n, total, rm) {
+    var cells = [h('div', { class: 'pa-rowlabel', style: { gridRow: '1', gridColumn: '1' } }, t('slotLabel'))];
+    for (var k = 1; k <= total; k++) {
+      cells.push(h('div', { class: 'pa-tick' + (k === n ? ' pa-now' : ''), style: { gridRow: '1', gridColumn: String(k + 1) }, translate: 'no' }, h('span', null, String(k))));
+    }
+    var bars = lanesOf(st.timeline).bars;
+    var nl = Math.max(lanesOf(st.timeline).count, rm.lanes);
+    var lost = lostPackets(st);
+    for (var l = 0; l < nl; l++) {
+      var row = l + 2;
+      cells.push(h('div', { class: 'pa-rowlabel', style: { gridRow: String(row), gridColumn: '1' } }, l === 0 ? t('stripLabel') : ''));
+      for (k = 1; k <= total; k++) cells.push(h('div', { class: 'pa-cell' + (k <= n ? ' pa-past' : ''), style: { gridRow: String(row), gridColumn: String(k + 1) } }));
+    }
+    bars.forEach(function (b) {
+      var len = Math.min(L.AIRTIME, n - b.a.start + 1);
+      var showLost = lost.indexOf(b.a.pktId) >= 0 && b.a.start + L.AIRTIME - 1 <= n;
+      cells.push(h('div', {
+        class: 'pa-bar sd-soft' + (showLost ? ' pa-lost' : '') + (b.a.start === n ? ' sd-anim-in' : ''), dataset: { c: COLOR[b.a.station] },
+        style: { gridRow: String(b.lane + 2), gridColumn: (b.a.start + 1) + ' / span ' + len }, translate: 'no'
+      }, h('span', null, b.a.station)));
+    });
+    var crow = nl + 2;
+    if (rm.clash) cells.push(h('div', { class: 'pa-rowlabel', style: { gridRow: String(crow), gridColumn: '1', minHeight: '1.8rem' } }));
+    st.timeline.forEach(function (sl) {
+      if (sl.clash) cells.push(h('div', { class: 'pa-clash', style: { gridRow: String(crow), gridColumn: String(sl.slot + 1) }, 'aria-hidden': 'true' }, '✕'));
+    });
+    return h('div', { class: 'pa-strip', style: { '--slots': String(total) } }, cells);
+  }
+
+  // packets lost in collisions: a collision somewhere and no listener that received them
+  function lostPackets(st) {
+    var hit = [], got = {};
+    st.log.forEach(function (e) {
+      if (e.event === 'rx') got[e.pktId] = true;
+      if (e.event === 'collision' && hit.indexOf(e.pktId) < 0) hit.push(e.pktId);
+    });
+    return hit.filter(function (id) { return !got[id]; });
+  }
+
+  function renderFacts(st, n, total) {
+    var busy = st.timeline.filter(function (sl) { return sl.air.length; }).length;
+    var txs = st.log.filter(function (e) { return e.event === 'tx'; }).length;
+    var beacons = st.packets.filter(function (p) { return p.parent === 0; }).length;
+    var lost = lostPackets(st).length;
+    return h('div', { class: 'pa-facts' },
+      h('div', { class: 'pa-box' }, t('factBusy'), data(busy + ' / ' + n)),
+      h('div', { class: 'pa-box' }, t('factTx'), data(txs)),
+      h('div', { class: 'pa-box' + (st.delivered.length ? ' pa-good' : '') }, t('factDelivered'), data(st.delivered.length + ' / ' + beacons)),
+      h('div', { class: 'pa-box' + (lost ? ' pa-bad' : '') }, t('factLost'), data(lost)));
+  }
+
+  // the whole run for these params: how many cards and strip lanes to reserve, so the layout holds still
+  var cache = { key: null, room: null };
+  function room(p) {
+    var key = JSON.stringify(p);
+    if (cache.key !== key) {
+      var tl = L.run(p)[L.MAX_SLOTS].timeline;
+      cache = { key: key, room: {
+        lanes: lanesOf(tl).count,
+        clash: tl.some(function (sl) { return sl.clash; })
+      } };
+    }
+    return cache.room;
+  }
+  // lanes: a transmission keeps its lane for both slots
+  function lanesOf(timeline) {
+    var lanes = [], bars = [];
+    timeline.forEach(function (sl) {
+      sl.air.forEach(function (a) {
+        if (a.start !== sl.slot) return;
+        var lane = 0;
+        while (lanes[lane] != null && lanes[lane] >= a.start) lane++;
+        lanes[lane] = a.start + L.AIRTIME - 1;
+        bars.push({ a: a, lane: lane });
+      });
+    });
+    return { count: Math.max(1, lanes.length), bars: bars };
+  }
+
+  function beaconButton(sim) {
+    var extra = L.extraOf(sim.params);
+    var slot = sim.n + 1;
+    if (extra.length >= L.MAX_EXTRA || slot > L.MAX_SLOTS - L.AIRTIME) { note = 'beaconFull'; sim.render(); return; }
+    extra.push(slot);
+    extra.sort(function (a, b) { return a - b; });
+    sim.set({ extra: extra.join('.') });
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'topology', type: 'select', label: t('topology'), resets: true, options: [
+        ['two-hops', t('topoTwoHops')], ['two-wides', t('topoTwoWides')], ['wide7', t('topoWide7')], ['csma', t('topoCsma')], ['hidden', t('topoHidden')]] },
+      { key: 'path', type: 'select', label: t('path'), options: [
+        ['w1w2', t('pathW1W2')], ['w22', t('pathW22')], ['w77', t('pathW77')], ['none', t('pathNone')]] },
+      { key: 'csma', type: 'toggle', label: t('csma') },
+      { type: 'button', label: t('beacon'), hint: t('beaconHint'), key: 't', run: beaconButton }
+    ],
+
+    presets: [
+      { id: 'two-hops', label: t('presetTwoHops'), hint: t('presetTwoHopsHint'), params: { topology: 'two-hops' } },
+      { id: 'two-wides', label: t('presetTwoWides'), hint: t('presetTwoWidesHint'), params: { topology: 'two-wides' } },
+      { id: 'wide7', label: t('presetWide7'), hint: t('presetWide7Hint'), params: { topology: 'wide7', path: 'w77' } },
+      { id: 'csma', label: t('presetCsma'), hint: t('presetCsmaHint'), params: { topology: 'csma' } },
+      { id: 'hidden', label: t('presetHidden'), hint: t('presetHiddenHint'), params: { topology: 'hidden' } }
+    ],
+
+    legend: [
+      { c: 1, shape: 'tri', label: t('legTracker') },
+      { c: 3, shape: 'small', label: t('legFillIn') },
+      { c: 4, shape: 'big', label: t('legWide') },
+      { c: 8, shape: 'diamond', label: t('legIgate') },
+      { shape: 'tx', label: t('legTx') },
+      { shape: 'cross', label: t('legCollision') },
+      { shape: 'dupe', label: t('legDupe') },
+      { shape: 'used', label: t('legUsed') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var st = c.state, n = st.slot, rm = room(c.params);
+      c.stage.replaceChildren(h('div', { class: 'pa' },
+        h('div', { class: 'pa-mapwrap' }, renderMap(st, n)), renderCards(st, n, rm.lanes), renderStrip(st, n, c.steps, rm), renderFacts(st, n, c.steps)));
+    },
+
+    caption: function (c) {
+      var st = c.state, p = c.params, n = st.slot;
+      var out = [];
+      function add(key, vars) { if (out.length) out.push(' '); out = out.concat(t.parts(key, vars || {})); }
+      if (n === 0) {
+        var intro = { 'two-hops': 'introTwoHops', 'two-wides': 'introTwoWides', wide7: 'introWide7', csma: 'introCsma', hidden: 'introHidden' }[p.topology];
+        var path = L.pathOf(p.path);
+        add('captionStart', { intro: t(intro), path: path.length ? data(pathText(path)) : t('pathNone'), csma: t(p.csma ? 'csmaOn' : 'csmaOff') });
+      } else {
+        var evs = eventsAt(st, n);
+        var pk = function (id) { return st.packets[id - 1]; };
+        var sta = byId(st);
+        var txs = evs.filter(function (e) { return e.event === 'tx'; });
+        if (txs.length > 1) {
+          add('evTxSame', { list: data(list(txs.map(function (e) { return e.station; }))) });
+          var hear = txs.some(function (a) { return txs.some(function (b) { return L.inRange(sta[a.station], sta[b.station]); }); });
+          if (hear) add('evTxSameHear');
+        }
+        else if (txs.length === 1) {
+          var p1 = pk(txs[0].pktId);
+          if (p1.from === p1.src) add('evTx', { who: data(txs[0].station), n: data(p1.seq) });
+          else add('evTxDigi', { who: data(txs[0].station) });
+        }
+        evs.filter(function (e) { return e.event === 'defer'; }).forEach(function (e) { add('evDefer', { who: data(e.station), by: data(e.by) }); });
+        // collisions grouped by receiver
+        var seen = {};
+        evs.forEach(function (e) {
+          if (e.event === 'busy') add('evBusy', { who: data(e.station), from: data(e.from) });
+          if (e.event !== 'collision' || seen[e.station]) return;
+          seen[e.station] = true;
+          var who = [];
+          evs.forEach(function (x) {
+            if (x.event === 'collision' && x.station === e.station) [x.from].concat(x.with).forEach(function (w) { if (who.indexOf(w) < 0) who.push(w); });
+          });
+          who.sort();
+          add('evCollision', { at: data(e.station), list: data(list(who)) });
+        });
+        evs.forEach(function (e) {
+          var pkt = pk(e.pktId);
+          if (e.event === 'queue') {
+            var parent = pk(e.parent), el = parent.path[e.el], nw = pkt.path[pkt.changed[pkt.changed.length - 1]];
+            var kind = h('em', null, t(KIND[sta[e.station].kind]));
+            var v = { who: data(e.station), kind: kind, el: data(L.elText(el)), el2: data(L.elText(el)), elNew: data(L.elText(nw)) };
+            if (nw.used) {
+              add('evQueueUsed', v);
+              var rest = pkt.path.filter(function (x) { return !x.used; });
+              if (rest.length) add('evQueueNext', { rest: data(pathText(rest)) });
+              else add('evQueueLast');
+            } else add('evQueueDec', v);
+          } else if (e.event === 'skip') {
+            if (!pkt.path.length) add('evSkipEmpty', { who: data(e.station) });
+            else if (e.el < 0) add('evSkipDone', { who: data(e.station) });
+            else add('evSkipFill', { who: data(e.station), el: data(L.elText(pkt.path[e.el])) });
+          } else if (e.event === 'dupe') {
+            add(e.why === 'sent' ? 'evDupeSent' : 'evDupeHeard', { who: data(e.station), from: data(e.from) });
+          } else if (e.event === 'deliver') {
+            if (pkt.from === pkt.src) add('evDeliverDirect', { who: data(e.station), from: data(pkt.src) });
+            else add('evDeliver', { who: data(e.station), path: data(pathText(pkt.path)) });
+          }
+        });
+        if (!out.length) {
+          var slot = st.timeline[n - 1];
+          var still = slot ? slot.air.filter(function (a) { return a.start < n; }).map(function (a) { return a.station; }) : [];
+          if (still.length) add('evOnAir', { list: data(list(still)), n: still.length });
+          else add('evQuiet');
+        }
+        if (c.last) {
+          var beacons = st.packets.filter(function (x) { return x.parent === 0; }).length;
+          var busy = st.timeline.filter(function (sl) { return sl.air.length; }).length;
+          add('captionEnd', { delivered: t.n('nPackets', st.delivered.length, { m: beacons }), busy: t.n('nSlots', busy) });
+          if (L.cut(st)) add('captionCut');
+        }
+      }
+      if (note) { add(note); out[out.length - 1] = h('span', { class: 'pa-note' }, out[out.length - 1]); note = null; }
+      return out;
+    }
+  });
+})();
+</script>
+</body>
+</html>
