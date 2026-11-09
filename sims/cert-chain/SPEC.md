@@ -210,8 +210,7 @@ Clock range at the book's date: −400 → 2025-08-01 (`www1.crt` not yet valid:
   invented anyway); p4-commit's
   `notBefore` (2024-12-01) is invented.
 - The client's messages are shown as the book prints them (data, untranslated); no tool is named.
-- Revocation (CRL/OCSP: `sec-pki-revocation`; the estate's CRL date 2026-11-12 belongs there) and certificate
-  creation are out of scope. ACME renewal is the preset story below.
+- Certificate creation is out of scope. ACME renewal and revocation (CRL/OCSP) are the preset stories below.
 
 ## ACME renewal (story `acme`, presets `acme-*`)
 
@@ -287,3 +286,101 @@ as given; the "issue" item is step 0 and the tie run is the extra step (NOTES.md
   explanation say the reload is assumed).
 - The client's check counts whole days (the host's model), the agent counts hours; the check runs only on days where
   both agree (61 and 91).
+
+## Revocation: CRL vs OCSP (story `revoke`, presets `revoked-unchecked` … `stapled`)
+
+Task `docs/tasks/w3/pki-revocation.md` (catalogue `sec-pki-revocation`, overlap §5.5: "Revocation and ACME extend the
+chain page"). One concept: **how a revoked certificate is (or isn't) noticed; stapling.** The student revokes, then
+connects with different checks. The chain stories and the ACME story are unchanged; this story reuses the host's
+`validate()` for the chain and adds a revocation check and a verdict after it.
+
+### Sources
+
+- **[5280-rev]** RFC 5280 §3.3 (revocation: a certificate may be revoked before its validity period ends; CRLs) and §5
+  (CRL: a signed list of revoked serial numbers, `thisUpdate`, `nextUpdate`; a CRL may be issued before `nextUpdate`)
+  *(check: from the RFC as remembered, not re-read for this task)*.
+- **[6960]** RFC 6960 (OCSP: a query about one certificate, a signed answer `good` / `revoked` / `unknown`) *(check)*.
+- **[6066]** RFC 6066 §8, Certificate Status Request (OCSP stapling: the server sends the status in the handshake)
+  *(check)*. RFC 8446 §6.2 for the alerts `certificate_revoked`, `certificate_unknown` *(check)*.
+- `napredna-linux-administracija/meta/toc.md` T50 „PKI u kući — vlastito tijelo, izdavanje, opoziv, obnavljanje po
+  mjerilu": the course term *opoziv*; chapters not written, so nothing else is taken from it. The story uses UL ch21's
+  own lab CA and `www1.crt` (host certificates), which is exactly T50's "own authority".
+- Nothing from `dr-lecture-estate` (its `hq-vpn01` CRL is a student scenario; its dates are deliberately not used).
+
+### Model (`sim.js`, revocation block; pure, whole days)
+
+Fixed data (invented, `REV`): the client connects on **2026-10-21**; the lab CA revokes `www1.crt` (serial **1003**) on
+**2026-10-19**; serial `0FA2` was revoked on 2026-10-02 so no list is empty. The CA issues a weekly CRL on 2026-10-15
+(`nextUpdate` 2026-10-22) and, at a revocation, an extra one at once: 2026-10-19 (`nextUpdate` 2026-10-26). The
+server's stapled response was fetched on 2026-10-21. The client's store holds the public root and the lab CA; the
+chain is `www1.crt` → lab CA (4 checks: connect, issuer from the store, validity, anchor). The client's clock is
+`2026-10-21 + clockOffsetDays`, as in the host.
+
+Rules, with their sources:
+
+1. **Revocation is separate from expiry** [5280-rev §3.3]: on 2026-10-21 `www1.crt` is revoked and still valid
+   (2026-09-05 … 2027-09-05, 319 days left). The certificate does not change; the revocation lives at the CA.
+2. **`none`**: the client does not ask, so a revoked certificate is accepted (status `unchecked`, verdict `valid`,
+   exit 0) [5280-rev; outcome derived].
+3. **CRL** [5280-rev §5]: a list contains every serial revoked on or before its `thisUpdate`. `crlFresh` on: the
+   client fetches the CA's latest list now (needs the CA's server reachable). Off: it holds the 2026-10-15 list and
+   uses it while that list's `nextUpdate` has not passed **at the client's clock** (inclusive); after that it fetches
+   the latest list. A list whose `nextUpdate` has passed decides nothing (status `unknown`). Serial on the list →
+   `revoked`, else `good`. So a stale list misses a revocation made after its `thisUpdate`.
+4. **OCSP** [6960]: the client asks about one serial and gets `good` / `revoked` (revoked on or before the true date)
+   / `unknown` (a serial the CA never issued; model and tests only). Responder unreachable → `unknown`.
+5. **Unknown status**: accepted (verdict `unknown-soft-fail`, exit 0) unless the client hard-fails (verdict
+   `unknown-hard-fail`, exit 60, alert `certificate_unknown`). Soft-fail is behavioural *(check per client)*.
+6. **Stapled** [6066 §8]: the server sends the CA-signed response in the handshake; the client contacts nobody, so
+   `responderReachable` changes nothing and the status is never unknown.
+7. **Verdict**: `revoked` → reject, exit 60, message "certificate revoked", alert `certificate_revoked`, fix on the
+   server (a new key and certificate). Unknown + hard-fail → exit 60, "unable to get certificate CRL" (CRL) or
+   "certificate status unknown" (OCSP, a generic wording, not a quoted client message), no fix side. *(check: real
+   clients may use other exit statuses and messages for these.)*
+
+**Tie-break: expiry before revocation.** The chain is validated first with the host's `validate()`; if it fails
+(expired, not yet valid, …) that is the result and revocation is never checked (no revocation steps). Test: clock
++320 (2027-09-06) with every check → `expired`, 3 steps; +319 (the notAfter day, inclusive) → OCSP `revoked`.
+
+### Params (revocation story only)
+
+| key | control | values | default | shown when |
+|---|---|---|---|---|
+| `revocationCheck` | choice | `none`, `crl`, `ocsp`, `stapled` | `none` | always |
+| `revokeServerCert` | toggle | | off | always |
+| `responderReachable` | toggle | the CA's revocation server (CRL fetch and OCSP) | on | check ≠ none |
+| `crlFresh` | toggle | | on | check = crl |
+| `hardFail` | toggle | reject an unknown status | off | check = crl or ocsp |
+
+`hardFail` is not in the task's list; it makes the task's verdict `unknown-hard-fail` reachable (NOTES.md, Deviations).
+
+### Steps (`revFrames`)
+
+Step 0 the scene (the CA's record, its lists, the responder, the client's check mode); one step per chain check (4);
+then **lookup** (the revocation check: the list used, the OCSP query and answer, or the stapled response) and
+**verdict**. **6 steps** for every preset; a failing chain stops at its failure (2–3 steps). Every setting stays
+within 20.
+
+### Presets and expected numbers (checked with a node script, asserted in `sim.test.js`)
+
+| preset | params | lookup | verdict |
+|---|---|---|---|
+| `revoked-unchecked` | revoked, none | not asked | **valid**, exit 0 (the revocation goes unnoticed) |
+| `crl-catches` | revoked, CRL, fresh | list 2026-10-19 … 10-26 with 0FA2, **1003** | **revoked**, exit 60 `certificate_revoked` |
+| `stale-crl` | revoked, CRL, not fresh | held list 2026-10-15 … 10-22 with 0FA2 only | **valid**, exit 0 (a miss) |
+| `ocsp-good` | not revoked, OCSP, reachable | `good` | **valid**, exit 0 |
+| `ocsp-blocked` | revoked, OCSP, unreachable | no answer → `unknown` | **unknown-soft-fail**, exit 0 |
+| `stapled` | revoked, stapled, unreachable | stapled `revoked` | **revoked**, exit 60 |
+
+Clock: `stale-crl` at +1 (2026-10-22) still uses the held list; at +2 it fetches the latest and rejects; at +6
+(2026-10-27) even the latest list is out of date → unknown, soft-fail.
+
+### Simplifications
+
+- Whole days; real CRLs and OCSP responses carry times. OCSP responses (queried or stapled) are taken as current:
+  their own validity windows are not drawn or checked. A stapled response from before a revocation (still within its
+  window) would say `good`; not modelled.
+- Only the leaf is checked for revocation (the lab CA is the anchor); intermediates would be checked the same way.
+- The server always staples when the check is `stapled`; a fake server that leaves the staple out, and Must-Staple,
+  are mentioned in the explanation only. CRLSets/OneCRL push lists and short-lived certificates are out of scope.
+- A CRL whose `thisUpdate` lies in the client's future is not rejected (rule 3 uses `nextUpdate` only).

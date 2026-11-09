@@ -520,3 +520,191 @@ test('acme: every setting stays within 20 steps; states are JSON-safe; the chain
   assert.equal(steps(bookAcme), steps(book));
   assert.deepEqual(end(bookAcme), end(book));
 });
+
+// ── Revocation: CRL vs OCSP (story 'revoke', presets revoked-unchecked … stapled; task pki-revocation,
+// SPEC.md "Revocation") ──
+
+const RV = logic.REV;
+const RP = (over) => P(Object.assign({ story: 'revoke' }, over));
+const run = (over) => logic.revRun(RP(over));
+const phases = (p) => all(p).map((s) => s.rev.phase);
+const lastRev = (p) => end(p).rev;
+
+test('revocation tie-break: revoked AND expired → expiry is reported, revocation never checked (every check)', () => {
+  const expiredAt = C.www1.notAfter - RV.DAY + 1; // the client's clock one day past www1.crt's notAfter
+  assert.equal(expiredAt, 320);
+  for (const revocationCheck of ['none', 'crl', 'ocsp', 'stapled']) {
+    const p = RP({ revocationCheck, revokeServerCert: true, clockOffsetDays: expiredAt });
+    const r = logic.revRun(p);
+    assert.equal(r.lookup, null, revocationCheck);
+    assert.equal(r.result.verdict, 'chain');
+    assert.equal(r.result.reason, 'expired');
+    assert.equal(r.result.alert, 'certificate_expired');
+    assert.equal(steps(p), 3, 'connect, issuer, validity ✗: no revocation steps');
+    assert.ok(phases(p).every((x) => x === 'chain'));
+    assert.equal(lastRev(p).result.reason, 'expired');
+  }
+  // one day earlier (the notAfter day itself, inclusive) the chain holds and the revocation decides
+  assert.equal(run({ revocationCheck: 'ocsp', revokeServerCert: true, clockOffsetDays: expiredAt - 1 }).result.verdict, 'revoked');
+});
+
+test('revocation tie-break: a not-yet-valid chain is reported before revocation too', () => {
+  const r = run({ revocationCheck: 'ocsp', revokeServerCert: true, clockOffsetDays: C.www1.notBefore - RV.DAY - 1 });
+  assert.equal(r.result.reason, 'not-yet-valid');
+  assert.equal(r.lookup, null);
+});
+
+test('revocation rule 1: a revoked certificate is still within its validity dates; revocation lives at the CA, not in the certificate', () => {
+  const p = RP({ revocationCheck: 'none', revokeServerCert: true });
+  const s = end(p);
+  assert.ok(logic.within(C.www1, RV.REVOKED_AT) && logic.within(C.www1, RV.DAY));
+  const val = s.connections[0].checks.find((k) => k.kind === 'validity');
+  assert.ok(val.ok, 'the date check passes');
+  assert.deepEqual(s.certs.www1, C.www1, 'the certificate is the same certificate');
+  assert.equal(s.rev.revoked, true);
+  assert.equal(s.rev.revokedAt, D('2026-10-19'));
+  assert.ok(RV.REVOKED_AT < C.www1.notAfter);
+});
+
+test('revocation rule 2: no check → a revoked certificate is accepted, whatever the other settings', () => {
+  for (const responderReachable of [true, false])
+    for (const crlFresh of [true, false])
+      for (const hardFail of [true, false]) {
+        const r = run({ revocationCheck: 'none', revokeServerCert: true, responderReachable, crlFresh, hardFail });
+        assert.equal(r.lookup.status, 'unchecked');
+        assert.equal(r.lookup.source, 'none');
+        assert.equal(r.result.verdict, 'valid');
+        assert.equal(r.result.accepted, true);
+        assert.equal(r.result.exit, 0);
+      }
+});
+
+test('revocation rule 3: the CA\'s lists — a weekly one, an extra one at the revocation; a serial is on a list issued on or after its revocation', () => {
+  const lists = logic.crlsIssued(true, RV.DAY);
+  assert.deepEqual(lists.map((l) => [logic.isoOf(l.thisUpdate), logic.isoOf(l.nextUpdate), l.serials]),
+    [['2026-10-15', '2026-10-22', ['0FA2']], ['2026-10-19', '2026-10-26', ['0FA2', '1003']]]);
+  assert.equal(logic.crlsIssued(false, RV.DAY).length, 1, 'no revocation, no extra list');
+  assert.equal(logic.crlsIssued(true, RV.REVOKED_AT - 1).length, 1, 'the extra list exists from the revocation day');
+  assert.ok(logic.crlsIssued(true, RV.REVOKED_AT)[1].serials.includes(RV.SERIAL), 'revoked on the issuing day: on the list');
+});
+
+test('revocation rule 3: CRL — fresh list rejects, the list from before misses it while its nextUpdate has not passed', () => {
+  const fresh = run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: true });
+  assert.equal(fresh.lookup.source, 'crl-fetched');
+  assert.equal(fresh.lookup.crl.thisUpdate, RV.REVOKED_AT);
+  assert.equal(fresh.lookup.status, 'revoked');
+  assert.equal(fresh.result.verdict, 'revoked');
+  const stale = run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: false });
+  assert.equal(stale.lookup.source, 'crl-cached');
+  assert.equal(stale.lookup.crl.thisUpdate, D('2026-10-15'));
+  assert.equal(stale.lookup.status, 'good');
+  assert.equal(stale.result.verdict, 'valid', 'accepted: a miss');
+  // the boundary: on nextUpdate (2026-10-22, inclusive) the cached list still counts; the day after, the client fetches
+  const onNext = run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: false, clockOffsetDays: 1 });
+  assert.equal(onNext.lookup.source, 'crl-cached');
+  assert.equal(onNext.result.verdict, 'valid');
+  const past = run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: false, clockOffsetDays: 2 });
+  assert.equal(past.lookup.source, 'crl-fetched');
+  assert.equal(past.lookup.refetch, true);
+  assert.equal(past.result.verdict, 'revoked');
+  // a fetch that cannot reach the CA, and a latest list past its own nextUpdate, decide nothing: unknown
+  assert.equal(run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: true, responderReachable: false }).lookup.why, 'unreachable');
+  assert.equal(run({ revocationCheck: 'crl', revokeServerCert: true, crlFresh: false, responderReachable: false }).result.verdict, 'valid',
+    'the cached list needs no fetch');
+  assert.equal(run({ revocationCheck: 'crl', revokeServerCert: true, clockOffsetDays: 5 }).result.verdict, 'revoked', '10-26: last day');
+  const old = run({ revocationCheck: 'crl', revokeServerCert: true, clockOffsetDays: 6 });
+  assert.equal(old.lookup.why, 'crl-out-of-date');
+  assert.equal(old.lookup.status, 'unknown');
+  assert.equal(old.result.verdict, 'unknown-soft-fail');
+  assert.equal(run({ revocationCheck: 'crl', revokeServerCert: false }).result.verdict, 'valid');
+});
+
+test('revocation rule 4: OCSP — good / revoked / unknown; unreachable → soft-fail accepts, hard-fail rejects', () => {
+  assert.equal(logic.ocspAnswer(true, RV.SERIAL, RV.DAY), 'revoked');
+  assert.equal(logic.ocspAnswer(false, RV.SERIAL, RV.DAY), 'good');
+  assert.equal(logic.ocspAnswer(true, RV.SERIAL, RV.REVOKED_AT - 1), 'good', 'before the revocation');
+  assert.equal(logic.ocspAnswer(true, '0FA2', RV.DAY), 'revoked');
+  assert.equal(logic.ocspAnswer(true, 'BEEF', RV.DAY), 'unknown', 'a serial the CA never issued');
+  assert.equal(run({ revocationCheck: 'ocsp', revokeServerCert: true }).result.verdict, 'revoked');
+  const soft = run({ revocationCheck: 'ocsp', revokeServerCert: true, responderReachable: false });
+  assert.equal(soft.lookup.status, 'unknown');
+  assert.equal(soft.result.verdict, 'unknown-soft-fail');
+  assert.equal(soft.result.accepted, true);
+  assert.equal(soft.result.exit, 0);
+  const hard = run({ revocationCheck: 'ocsp', revokeServerCert: true, responderReachable: false, hardFail: true });
+  assert.deepEqual([hard.result.verdict, hard.result.exit, hard.result.alert, hard.result.reason, hard.result.fix],
+    ['unknown-hard-fail', 60, 'certificate_unknown', 'status-unknown', null]);
+  assert.equal(run({ revocationCheck: 'crl', revokeServerCert: true, responderReachable: false, hardFail: true }).result.reason, 'crl-unavailable');
+  const ok = run({ revocationCheck: 'ocsp', revokeServerCert: false, responderReachable: false, hardFail: true });
+  assert.equal(ok.result.verdict, 'unknown-hard-fail', 'hard-fail rejects a good certificate too when nobody answers');
+});
+
+test('revocation rule 5: a stapled response decides without the responder; blocking it changes nothing', () => {
+  for (const responderReachable of [true, false])
+    for (const hardFail of [true, false]) {
+      const r = run({ revocationCheck: 'stapled', revokeServerCert: true, responderReachable, hardFail });
+      assert.equal(r.lookup.source, 'staple');
+      assert.deepEqual([r.result.verdict, r.result.exit, r.result.alert, r.result.fix], ['revoked', 60, 'certificate_revoked', 'server']);
+      assert.equal(run({ revocationCheck: 'stapled', revokeServerCert: false, responderReachable, hardFail }).result.verdict, 'valid');
+    }
+  const s = end(RP({ revocationCheck: 'stapled', revokeServerCert: true }));
+  assert.deepEqual(s.rev.staple, { at: RV.STAPLE_AT, status: 'revoked' });
+  assert.equal(at(RP({ revocationCheck: 'ocsp' }), 0).rev.staple, null, 'only a stapling server attaches one');
+});
+
+test('revocation steps: chain checks, then the revocation check, then the verdict; nothing revealed early', () => {
+  const p = RP({ revocationCheck: 'crl', revokeServerCert: true });
+  assert.equal(steps(p), 6);
+  assert.deepEqual(phases(p), ['chain', 'chain', 'chain', 'chain', 'chain', 'lookup', 'verdict']);
+  const ss = all(p);
+  assert.deepEqual(ss[4].connections[0].checks.map((k) => k.kind), ['connect', 'issuer', 'validity', 'anchor']);
+  assert.equal(ss[4].connections[0].checks[1].from, 'store', 'the lab CA is the client\'s anchor');
+  for (let n = 0; n <= 4; n++) { assert.equal(ss[n].rev.lookup, null); assert.equal(ss[n].rev.result, null); }
+  assert.equal(ss[5].rev.lookup.status, 'revoked');
+  assert.equal(ss[5].rev.result, null);
+  assert.equal(ss[6].rev.result.verdict, 'revoked');
+  assert.deepEqual(ss.map((s) => s.connections[0].newCheck), [-1, 0, 1, 2, 3, -1, -1]);
+  assert.equal(ss[0].nowIso, '2026-10-21');
+});
+
+test('revocation presets: the six outcomes, 6 steps each', () => {
+  const want = {
+    'revoked-unchecked': ['none', 'unchecked', 'valid', 0],
+    'crl-catches': ['crl-fetched', 'revoked', 'revoked', 60],
+    'stale-crl': ['crl-cached', 'good', 'valid', 0],
+    'ocsp-good': ['ocsp', 'good', 'valid', 0],
+    'ocsp-blocked': ['ocsp', 'unknown', 'unknown-soft-fail', 0],
+    stapled: ['staple', 'revoked', 'revoked', 60]
+  };
+  for (const [id, w] of Object.entries(want)) {
+    const p = presetParams(id);
+    assert.equal(p.story, 'revoke', id);
+    assert.equal(steps(p), 6, id);
+    const rv = lastRev(p);
+    assert.deepEqual([rv.lookup.source, rv.lookup.status, rv.result.verdict, rv.result.exit], w, id);
+  }
+  assert.equal(presetParams('ocsp-good').revokeServerCert, false);
+  assert.equal(presetParams('stapled').responderReachable, false, 'stapled: the responder blocked, as in ocsp-blocked');
+  assert.equal(lastRev(presetParams('revoked-unchecked')).revoked, true);
+});
+
+test('revocation: every setting stays within 20 steps; states are JSON-safe; the other stories ignore the revocation settings', () => {
+  for (const revocationCheck of ['none', 'crl', 'ocsp', 'stapled'])
+    for (const revokeServerCert of [true, false])
+      for (const responderReachable of [true, false])
+        for (const crlFresh of [true, false])
+          for (const hardFail of [true, false])
+            for (const clockOffsetDays of [-400, -47, 0, 2, 6, 320, 800]) {
+              const p = RP({ revocationCheck, revokeServerCert, responderReachable, crlFresh, hardFail, clockOffsetDays });
+              const n = steps(p);
+              assert.ok(n >= 2 && n <= 20, `${revocationCheck} ${clockOffsetDays}: ${n}`);
+              for (let i = 0; i <= n; i++) { const s = at(p, i); assert.deepEqual(JSON.parse(JSON.stringify(s)), s); }
+            }
+  const revSet = { revocationCheck: 'stapled', revokeServerCert: true, responderReachable: false, crlFresh: false, hardFail: true };
+  for (const story of ['book', 'intermediate', 'clocks', 'one', 'acme']) {
+    const base = P({ story });
+    const withRev = P(Object.assign({ story }, revSet));
+    assert.equal(steps(withRev), steps(base), story);
+    assert.deepEqual(end(withRev), end(base), story);
+  }
+});

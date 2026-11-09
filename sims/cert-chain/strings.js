@@ -237,6 +237,113 @@
       acCapCheckFail: '{at}: stari certifikat istekao je jučer. Klijent: certificate has expired (izlazni status {exit}). Mjerač i dalje pokušava; popravak je na poslužitelju: otvoriti port 80 izvana ili prijeći na izazov DNS-01.',
       acCapCheckOther: '{at}: klijent provjerava certifikat koji poslužitelj šalje: izlazni status {exit}.',
 
+      // ── Revocation: CRL vs OCSP (story 'revoke', presets revoked-unchecked … stapled; task pki-revocation) ──
+      // Terms not in the glossary (NOTES.md, Term pairs): opoziv, popis opozvanih certifikata (CRL), OCSP, prilaganje
+      // statusa, meki neuspjeh, serijski broj, poslužitelj za opoziv. OCSP's good / revoked / unknown are data.
+      presetRevoke: 'Opoziv: bez provjere',
+      presetRevokeHint: 'Opozvan 2026-10-19; klijent ne pita',
+      presetCrl: 'CRL uhvati opoziv',
+      presetCrlHint: 'Svjež popis opozvanih: veza odbijena',
+      presetStaleCrl: 'Zastarjeli CRL',
+      presetStaleCrlHint: 'Popis od prije opoziva: promašaj',
+      presetOcspGood: 'OCSP: good',
+      presetOcspGoodHint: 'Nije opozvan; poslužitelj za opoziv odgovara',
+      presetOcspBlocked: 'OCSP blokiran',
+      presetOcspBlockedHint: 'Nema odgovora: meki neuspjeh, veza prolazi',
+      presetStapled: 'Priloženi OCSP',
+      presetStapledHint: 'Odgovor stiže u rukovanju',
+      revocationCheck: 'Provjera opoziva',
+      rcNone: 'nema',
+      rcCrl: 'CRL',
+      rcOcsp: 'OCSP',
+      rcStapled: 'priloženi',
+      revokeServerCert: 'Tijelo je opozvalo www1.crt',
+      responderReachable: 'Upiti o opozivu prolaze',
+      crlFresh: 'Klijent dohvaća svjež CRL',
+      hardFail: 'Nepoznat status: odbij',
+
+      lgRevoked: 'opozvan',
+      lgCrl: 'CRL',
+      lgOcsp: 'upit OCSP',
+      lgVerdict: 'ishod ✓ ? ✗',
+      lgStaple: 'priloženi',
+
+      rvCa: 'Lab. tijelo',
+      rvCaNote: 'izdaje i opoziva',
+      rvRevokedOn: 'opozvan {date}',
+      rvNotRevoked: 'nije opozvan',
+      rvRevokedBadge: 'opozvan',
+      rvSerial: 'serijski broj',
+      rvCrlTitle: 'Popis opozvanih (CRL)',
+      rvCrlNone: 'prazno',
+      rvCrlUsed: '← klijent',
+      rvOcspTitle: 'Poslužitelj za opoziv (OCSP)',
+      rvReachable: 'dostupan',
+      rvBlocked: 'blokiran',
+      rvQuery: 'upit: {s}?',
+      rvAnswer: 'odgovor, potpisalo tijelo:',
+      rvNoAnswer: 'upit ne prolazi: nema odgovora',
+      rvStaple: 'Priloženi odgovor OCSP',
+      rvStapleNote: 'potpisalo tijelo {date}; šalje se u rukovanju',
+      rvClientMode: 'Provjera opoziva:',
+      rvSoftPolicy: 'nepoznat status: prihvaća (meki neuspjeh)',
+      rvHardPolicy: 'nepoznat status: odbija',
+      rvVerdictValid: 'prihvaćeno',
+      rvVerdictSoft: 'prihvaćeno bez statusa (meki neuspjeh)',
+      rvVerdictRevoked: 'odbijeno: opozvan',
+      rvVerdictHard: 'odbijeno: status nepoznat',
+      rvTruthRevoked: 'a certifikat je opozvan',
+      rvFixRevoked: 'popravak: na poslužitelju, novi ključ i certifikat',
+      chkRevNone: 'Opoziv: klijent ne pita',
+      chkRevCrl: 'Popis od {from}: {s} {on}',
+      chkOnList: 'je na njemu',
+      chkNotOnList: 'nije na njemu',
+      chkRevCrlOld: 'Popis vrijedio do {to}: status nepoznat',
+      chkRevUnreach: 'Poslužitelj za opoziv ne odgovara: status nepoznat',
+      chkRevOcsp: 'OCSP za {s}: {status}',
+      chkRevStaple: 'Priloženi odgovor za {s}: {status}',
+
+      rvCapStart: '{date}: tijelo je opozvalo www1.crt (serijski broj {s}), iako vrijedi do {to}. Klijent se spaja {now}; provjera opoziva: {mode}. Pritisni →.',
+      rvCapStartOk: 'Tijelo nije opozvalo www1.crt (serijski broj {s}). Klijent se spaja {now}; provjera opoziva: {mode}. Pritisni →.',
+      rvCapStillValid: 'Opoziv ne mijenja datume: certifikat je i dalje unutar roka valjanosti.',
+      rvCapChainOk: '{cn} je u klijentovu spremištu: lanac je valjan. Prije odluke ostaje opoziv.',
+      rvCapExpiryFirst: 'Do opoziva se ni ne dolazi: istek se provjerava prvi.',
+      rvCapNone: 'Klijent ne provjerava opoziv: ne pita ni popis ni poslužitelj za opoziv.',
+      rvCapRefetch: 'Klijentov popis vrijedio je do {to}, a na njegov datum {date} to je prošlo, pa dohvaća novi.',
+      rvCapCrlFetched: 'Klijent dohvaća popis opozvanih koji je tijelo potpisalo {from} (vrijedi do {to}): serijski broj {s} {on}.',
+      rvCapCrlCached: 'Klijent već ima popis od {from}, koji vrijedi do {to}, pa ne dohvaća novi: serijski broj {s} {on}.',
+      rvCapCrlMissNote: 'Opoziv od {rev} kasniji je od tog popisa.',
+      rvCapCrlUnreach: 'Klijent treba popis, ali poslužitelj za opoziv ne odgovara: status je nepoznat.',
+      rvCapCrlOld: 'Najnoviji popis vrijedi do {to}, a klijentov je datum {date}: popis je zastario i ništa ne odlučuje, status je nepoznat.',
+      rvCapOcsp: 'Klijent pita poslužitelj za opoziv o serijskom broju {s} i dobiva odgovor koji je potpisalo tijelo: {status}.',
+      rvCapOcspUnreach: 'Klijent pita poslužitelj za opoziv, ali upit ne prolazi (blokiran): odgovora nema, status je nepoznat.',
+      rvCapStaple: 'Poslužitelj je u rukovanju priložio odgovor OCSP koji je tijelo potpisalo {date}: {status}. Klijent ne mora nikoga pitati.',
+      rvCapStapleBlocked: 'Poslužitelj za opoziv je blokiran, ali to sada ništa ne mijenja.',
+      rvCapUncheckedRevoked: 'Certifikat je opozvan, ali klijent ne provjerava opoziv — veza se ipak uspostavlja (izlazni status {exit}).',
+      rvCapUncheckedOk: 'Klijent ne provjerava opoziv; certifikat nije opozvan, pa je ovaj put svejedno (izlazni status {exit}).',
+      rvCapMiss: 'Klijent prihvaća vezu (izlazni status {exit}): certifikat je opozvan, ali popis koji klijent drži to još ne zna. Zastarjeli popis propušta nedavni opoziv.',
+      rvCapGood: 'Status {status}: klijent prihvaća vezu (izlazni status {exit}).',
+      rvCapSoft: 'Status je nepoznat, a klijent tada ipak prihvaća vezu (meki neuspjeh, izlazni status {exit}).',
+      rvCapSoftRevoked: 'Certifikat je opozvan: tko blokira poslužitelj za opoziv, tako skriva opoziv.',
+      rvCapHard: 'Status je nepoznat, a klijent je postavljen da tada odbija (izlazni status {exit}, upozorenje {alert}). Sigurnije, ali svaki ispad poslužitelja za opoziv ruši i veze.',
+      rvCapRevoked: 'Klijent odbija vezu: {msg} (izlazni status {exit}, upozorenje {alert}). Popravak je na poslužitelju: novi ključ i novi certifikat.',
+      rvCapStapled: 'Klijent odbija vezu (izlazni status {exit}, upozorenje {alert}). OCSP odgovor je priložen u rukovanju: blokiranje poslužitelja za opoziv više ne pomaže napadaču.',
+
+      explainRev: '<p><em lang="en">Revocation</em> (opoziv): tijelo proglašava certifikat nevažećim prije njegova notAfter, npr. ' +
+        'kad je ključ procurio. Sam certifikat se ne mijenja i datumi mu i dalje vrijede; opoziv i istek su dvije različite stvari. ' +
+        'Klijent za opoziv sazna samo ako pita, a mnogi ne pitaju: tada opozvan certifikat i dalje prolazi.</p>' +
+        '<p><b>CRL</b>, <em lang="en">certificate revocation list</em> (popis opozvanih certifikata): potpisan popis serijskih brojeva s ' +
+        'datumima <span translate="no">thisUpdate</span> i <span translate="no">nextUpdate</span>. Klijent ga čuva dok ne prođe ' +
+        '<span translate="no">nextUpdate</span>, pa opoziv nakon izdavanja popisa propušta dok ne dobije noviji.</p>' +
+        '<p><b>OCSP</b>: klijent pita <em lang="en">responder</em> (poslužitelj za opoziv) o jednom serijskom broju i dobiva potpisan ' +
+        'odgovor <span translate="no">good</span>, <span translate="no">revoked</span> ili <span translate="no">unknown</span>. Kad odgovora ' +
+        'nema, većina klijenata vezu ipak prihvaća, <em lang="en">soft-fail</em> (meki neuspjeh), pa napadač koji blokira poslužitelj za ' +
+        'opoziv skriva opoziv. Odbijanje (<em lang="en">hard-fail</em>) je sigurnije, ali svaki ispad tog poslužitelja ruši veze. ' +
+        'OCSP zato nije samo bolji CRL.</p>' +
+        '<p><em lang="en">OCSP stapling</em> (prilaganje statusa): poslužitelj sam pribavi potpisan odgovor i priloži ga u rukovanju, ' +
+        'pa klijent nikoga ne mora pitati, a blokiranje poslužitelja za opoziv ništa ne mijenja. Lažni poslužitelj može prilog ' +
+        'izostaviti; to zatvara tek certifikat koji prilog zahtijeva (<em lang="en">Must-Staple</em>).</p>',
+
       explainAcme: '<p>ACME je protokol kojim [[certificate authority]] i podnositelj zahtjeva automatiziraju provjeru i izdavanje. ' +
         'Prije potpisa tijelo traži dokaz da podnositelj zastupa ime. <b>Izazov HTTP-01:</b> tijelo daje oznaku, klijent postavlja ' +
         'datoteku na <span translate="no">/.well-known/acme-challenge/</span>, a tijelo je izvana dohvaća, i to samo na <b>portu 80</b>. ' +
@@ -480,6 +587,111 @@
       acCapCheckOk: '{at}: the client checks the certificate the server sends. The new one is valid until {to}, exit status {exit}. The old one would have expired yesterday.',
       acCapCheckFail: '{at}: the old certificate expired yesterday. The client: certificate has expired (exit status {exit}). The timer keeps trying; the fix is on the server: open port 80 to the outside or switch to the DNS-01 challenge.',
       acCapCheckOther: '{at}: the client checks the certificate the server sends: exit status {exit}.',
+
+      // ── Revocation: CRL vs OCSP (story 'revoke'; task pki-revocation) ──
+      presetRevoke: 'Revocation: no check',
+      presetRevokeHint: 'Revoked on 2026-10-19; the client never asks',
+      presetCrl: 'A CRL catches it',
+      presetCrlHint: 'A fresh revocation list: rejected',
+      presetStaleCrl: 'Stale CRL',
+      presetStaleCrlHint: 'A list from before the revocation: missed',
+      presetOcspGood: 'OCSP: good',
+      presetOcspGoodHint: 'Not revoked; the responder answers',
+      presetOcspBlocked: 'OCSP blocked',
+      presetOcspBlockedHint: 'No answer: soft-fail, accepted',
+      presetStapled: 'Stapled OCSP',
+      presetStapledHint: 'The response comes with the handshake',
+      revocationCheck: 'Revocation check',
+      rcNone: 'none',
+      rcCrl: 'CRL',
+      rcOcsp: 'OCSP',
+      rcStapled: 'stapled',
+      revokeServerCert: 'The CA revoked www1.crt',
+      responderReachable: 'Revocation queries get through',
+      crlFresh: 'Client fetches a fresh CRL',
+      hardFail: 'Unknown status: reject',
+
+      lgRevoked: 'revoked',
+      lgCrl: 'CRL',
+      lgOcsp: 'OCSP query',
+      lgVerdict: 'outcome ✓ ? ✗',
+      lgStaple: 'stapled',
+
+      rvCa: 'Lab CA',
+      rvCaNote: 'issues and revokes',
+      rvRevokedOn: 'revoked on {date}',
+      rvNotRevoked: 'not revoked',
+      rvRevokedBadge: 'revoked',
+      rvSerial: 'serial number',
+      rvCrlTitle: 'Revocation list (CRL)',
+      rvCrlNone: 'empty',
+      rvCrlUsed: '← client',
+      rvOcspTitle: 'OCSP responder',
+      rvReachable: 'reachable',
+      rvBlocked: 'blocked',
+      rvQuery: 'query: {s}?',
+      rvAnswer: 'answer, signed by the CA:',
+      rvNoAnswer: 'the query does not get through: no answer',
+      rvStaple: 'Stapled OCSP response',
+      rvStapleNote: 'signed by the CA on {date}; sent in the handshake',
+      rvClientMode: 'Revocation check:',
+      rvSoftPolicy: 'unknown status: accepts (soft-fail)',
+      rvHardPolicy: 'unknown status: rejects',
+      rvVerdictValid: 'accepted',
+      rvVerdictSoft: 'accepted without a status (soft-fail)',
+      rvVerdictRevoked: 'rejected: revoked',
+      rvVerdictHard: 'rejected: status unknown',
+      rvTruthRevoked: 'yet the certificate is revoked',
+      rvFixRevoked: 'fix: on the server, a new key and certificate',
+      chkRevNone: 'Revocation: the client does not ask',
+      chkRevCrl: 'List of {from}: {s} {on}',
+      chkOnList: 'is on it',
+      chkNotOnList: 'is not on it',
+      chkRevCrlOld: 'List valid until {to}: status unknown',
+      chkRevUnreach: 'No answer from the revocation server: status unknown',
+      chkRevOcsp: 'OCSP for {s}: {status}',
+      chkRevStaple: 'Stapled response for {s}: {status}',
+
+      rvCapStart: '{date}: the CA revoked www1.crt (serial number {s}), although it is valid until {to}. The client connects on {now}; revocation check: {mode}. Press →.',
+      rvCapStartOk: 'The CA has not revoked www1.crt (serial number {s}). The client connects on {now}; revocation check: {mode}. Press →.',
+      rvCapStillValid: 'Revocation does not change the dates: the certificate is still within its validity period.',
+      rvCapChainOk: '{cn} is in the client\'s store: the chain is valid. Revocation is left before the decision.',
+      rvCapExpiryFirst: 'Revocation is never reached: expiry is checked first.',
+      rvCapNone: 'The client does not check revocation: it asks neither a list nor the responder.',
+      rvCapRefetch: 'The client\'s list was valid until {to}; at its date {date} that has passed, so it fetches a new one.',
+      rvCapCrlFetched: 'The client fetches the revocation list the CA signed on {from} (valid until {to}): serial number {s} {on}.',
+      rvCapCrlCached: 'The client already holds the list of {from}, valid until {to}, so it fetches no new one: serial number {s} {on}.',
+      rvCapCrlMissNote: 'The revocation on {rev} came after that list.',
+      rvCapCrlUnreach: 'The client needs a list, but the CA\'s revocation server does not answer: the status is unknown.',
+      rvCapCrlOld: 'The latest list is valid until {to}, and the client\'s date is {date}: the list is out of date and decides nothing, the status is unknown.',
+      rvCapOcsp: 'The client asks the responder about serial number {s} and gets an answer signed by the CA: {status}.',
+      rvCapOcspUnreach: 'The client asks the responder, but the query does not get through (blocked): no answer, the status is unknown.',
+      rvCapStaple: 'The server stapled an OCSP response the CA signed on {date} into the handshake: {status}. The client need not ask anyone.',
+      rvCapStapleBlocked: 'The responder is blocked, but that changes nothing now.',
+      rvCapUncheckedRevoked: 'The certificate is revoked, but the client does not check revocation — the connection is established anyway (exit status {exit}).',
+      rvCapUncheckedOk: 'The client does not check revocation; the certificate is not revoked, so this time it makes no difference (exit status {exit}).',
+      rvCapMiss: 'The client accepts the connection (exit status {exit}): the certificate is revoked, but the list the client holds does not know it yet. A stale list misses a recent revocation.',
+      rvCapGood: 'Status {status}: the client accepts the connection (exit status {exit}).',
+      rvCapSoft: 'The status is unknown, and the client accepts the connection anyway (soft-fail, exit status {exit}).',
+      rvCapSoftRevoked: 'The certificate is revoked: whoever blocks the responder hides the revocation this way.',
+      rvCapHard: 'The status is unknown, and the client is set to reject then (exit status {exit}, alert {alert}). Safer, but every outage of the responder breaks connections too.',
+      rvCapRevoked: 'The client rejects the connection: {msg} (exit status {exit}, alert {alert}). The fix is on the server: a new key and a new certificate.',
+      rvCapStapled: 'The client rejects the connection (exit status {exit}, alert {alert}). The OCSP response is stapled into the handshake: blocking the responder no longer helps the attacker.',
+
+      explainRev: '<p><em>Revocation</em>: the CA declares a certificate invalid before its notAfter, for instance when its key ' +
+        'leaked. The certificate itself does not change and its dates still hold; revocation and expiry are two different things. ' +
+        'The client learns of a revocation only if it asks, and many do not: then a revoked certificate still gets through.</p>' +
+        '<p><b>CRL</b>, <em>certificate revocation list</em>: a signed list of serial numbers with the dates ' +
+        '<span translate="no">thisUpdate</span> and <span translate="no">nextUpdate</span>. The client keeps it until ' +
+        '<span translate="no">nextUpdate</span> passes, so it misses a revocation made after the list was issued until it gets a newer one.</p>' +
+        '<p><b>OCSP</b>: the client asks the <em>responder</em> about one serial number and gets a signed answer, ' +
+        '<span translate="no">good</span>, <span translate="no">revoked</span> or <span translate="no">unknown</span>. When no answer comes, ' +
+        'most clients accept the connection anyway (<em>soft-fail</em>), so an attacker who blocks the responder hides the revocation. ' +
+        'Rejecting instead (<em>hard-fail</em>) is safer, but every outage of the responder breaks connections. So OCSP is not simply ' +
+        'a better CRL.</p>' +
+        '<p><em>OCSP stapling</em>: the server fetches the signed answer itself and attaches it to the handshake, so the client need ' +
+        'not ask anyone, and blocking the responder changes nothing. A fake server can leave the staple out; only a certificate ' +
+        'that demands a staple (<em>Must-Staple</em>) closes that.</p>',
 
       explainAcme: '<p>ACME is the protocol with which a [[certificate authority]] and an applicant automate the check and the ' +
         'issue. Before it signs, the CA wants proof that the applicant controls the name. <b>HTTP-01 challenge:</b> the CA gives a ' +

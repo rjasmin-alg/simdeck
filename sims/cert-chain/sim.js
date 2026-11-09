@@ -447,23 +447,173 @@
     };
   }
 
+  // ── Revocation: CRL vs OCSP (story 'revoke', presets revoked-unchecked … stapled; task pki-revocation, SPEC.md
+  // "Revocation") ──
+  // The lab CA (UL ch21's own CA; NLA T50 "PKI at home") revokes www1.crt long before it expires. The client validates
+  // the chain with validate() above, then asks about revocation one way: not at all, a CRL, OCSP, or the OCSP response
+  // the server staples into the handshake. Whole days, like the host.
+
+  var REV = {
+    DAY: dayOf('2026-10-21'),         // the client connects (the true date)
+    REVOKED_AT: dayOf('2026-10-19'),  // the CA revokes www1.crt (say its key leaked)
+    SERIAL: '1003',                   // www1.crt's serial number (invented)
+    EARLIER: [{ serial: '0FA2', at: dayOf('2026-10-02') }], // revoked before, so no list is empty (invented)
+    CRL_FIRST: dayOf('2026-10-15'),   // the CA's scheduled list: thisUpdate …
+    CRL_DAYS: 7,                      // … nextUpdate a week later; a revocation issues an extra list at once
+    STAPLE_AT: dayOf('2026-10-21'),   // the server fetched the response it staples on the day of the connection
+    HOST: 'www1.lab.example:443'
+  };
+
+  /** Every revocation the CA has recorded: [{ serial, at }]. */
+  function revocations(revoked) {
+    return REV.EARLIER.concat(revoked ? [{ serial: REV.SERIAL, at: REV.REVOKED_AT }] : []);
+  }
+
+  /** A CRL issued on a day: the serials revoked by then (RFC 5280 §5), with its window. */
+  function crlOn(revs, day) {
+    return { thisUpdate: day, nextUpdate: day + REV.CRL_DAYS,
+      serials: revs.filter(function (r) { return r.at <= day; }).map(function (r) { return r.serial; }) };
+  }
+
+  /** The lists the CA has issued up to a day, oldest first: the scheduled one, and one at each later revocation. */
+  function crlsIssued(revoked, day) {
+    var revs = revocations(revoked);
+    var out = [crlOn(revs, REV.CRL_FIRST)];
+    revs.forEach(function (r) { if (r.at > REV.CRL_FIRST && r.at <= day) out.push(crlOn(revs, r.at)); });
+    return out;
+  }
+
+  /** The OCSP responder's answer about one serial on a day (RFC 6960): good, revoked, or unknown (not one of its own). */
+  function ocspAnswer(revoked, serial, day) {
+    if (serial !== REV.SERIAL && !REV.EARLIER.some(function (r) { return r.serial === serial; })) return 'unknown';
+    return revocations(revoked).some(function (r) { return r.serial === serial && r.at <= day; }) ? 'revoked' : 'good';
+  }
+
+  /**
+   * The client's revocation check (rules 2–5). in: { check: 'none'|'crl'|'ocsp'|'stapled', revoked, serial, now (the
+   * client's clock), trueDay, reachable, crlFresh }. → { status: 'unchecked'|'good'|'revoked'|'unknown',
+   *   source: 'none'|'crl-cached'|'crl-fetched'|'ocsp'|'staple', crl, refetch, why: null|'unreachable'|'crl-out-of-date' }
+   * CRL: crlFresh = the client fetches the CA's latest list now; off = it holds the list from before, and uses it while
+   * that list's nextUpdate has not passed at its clock (then it fetches). A list past its nextUpdate decides nothing.
+   */
+  function revocationStatus(o) {
+    var serial = o.serial || REV.SERIAL;
+    var out = { status: 'unchecked', source: 'none', crl: null, refetch: false, why: null };
+    if (o.check === 'crl') {
+      var lists = crlsIssued(o.revoked, o.trueDay);
+      var cached = lists[0];
+      if (!o.crlFresh && o.now <= cached.nextUpdate) { out.source = 'crl-cached'; out.crl = cached; }
+      else {
+        out.source = 'crl-fetched';
+        out.refetch = !o.crlFresh;
+        if (!o.reachable) { out.status = 'unknown'; out.why = 'unreachable'; return out; }
+        out.crl = lists[lists.length - 1];
+      }
+      if (o.now > out.crl.nextUpdate) { out.status = 'unknown'; out.why = 'crl-out-of-date'; return out; }
+      out.status = out.crl.serials.indexOf(serial) >= 0 ? 'revoked' : 'good';
+      return out;
+    }
+    if (o.check === 'ocsp') {
+      out.source = 'ocsp';
+      if (!o.reachable) { out.status = 'unknown'; out.why = 'unreachable'; return out; }
+      out.status = ocspAnswer(o.revoked, serial, o.trueDay);
+      return out;
+    }
+    if (o.check === 'stapled') {
+      // the server asked the responder earlier and sends the CA-signed answer itself: the client needs no fetch
+      out.source = 'staple';
+      out.status = ocspAnswer(o.revoked, serial, REV.STAPLE_AT);
+      return out;
+    }
+    return out; // none: the client does not ask (rule 2)
+  }
+
+  /** Status → verdict. An unknown status is accepted (soft-fail) unless the client is set to hard-fail. */
+  function revVerdict(status, check, hardFail) {
+    if (status === 'revoked') return { verdict: 'revoked', accepted: false, exit: 60, reason: 'revoked', alert: 'certificate_revoked', fix: 'server' };
+    if (status === 'unknown') {
+      if (!hardFail) return { verdict: 'unknown-soft-fail', accepted: true, exit: 0, reason: null, alert: null, fix: null };
+      return { verdict: 'unknown-hard-fail', accepted: false, exit: 60, reason: check === 'crl' ? 'crl-unavailable' : 'status-unknown',
+        alert: 'certificate_unknown', fix: null };
+    }
+    return { verdict: 'valid', accepted: true, exit: 0, reason: null, alert: null, fix: null };
+  }
+
+  /** The whole run: chain first (validate(), so expiry is reported before revocation), then revocation, then verdict. */
+  function revRun(p) {
+    var now = REV.DAY + p.clockOffsetDays;
+    var chain = validate({ open443: true, sends: ['www1'], store: ['pubroot', 'labca'], certs: CERTS, now: now, trueDay: REV.DAY });
+    var lookup = revocationStatus({ check: p.revocationCheck, revoked: p.revokeServerCert, now: now, trueDay: REV.DAY,
+      reachable: p.responderReachable, crlFresh: p.crlFresh });
+    var result;
+    if (chain.result.exit !== 0) result = Object.assign({ verdict: 'chain', accepted: false }, chain.result);
+    else result = revVerdict(lookup.status, p.revocationCheck, p.hardFail);
+    return { now: now, chain: chain, lookup: chain.result.exit !== 0 ? null : lookup, result: result };
+  }
+
+  /** Frames: step 0 the scene, one per chain check, then (if the chain holds) the revocation check and the verdict. */
+  function revFrames(p) {
+    var r = revRun(p);
+    var k = r.chain.checks.length;
+    var out = [];
+    for (var i = 0; i <= k; i++) out.push({ shown: i, phase: 'chain' });
+    if (r.lookup) { out.push({ shown: k, phase: 'lookup' }); out.push({ shown: k, phase: 'verdict' }); }
+    return out;
+  }
+
+  function revStateAt(p, n) {
+    var r = revRun(p);
+    var fr = revFrames(p);
+    var f = fr[Math.max(0, Math.min(n, fr.length - 1))];
+    var k = r.chain.checks.length;
+    var chainDone = f.shown === k;
+    var done = f.phase === 'verdict' || (!r.lookup && chainDone);
+    var store = ['pubroot', 'labca'];
+    var certs = {};
+    store.concat(['www1']).forEach(function (id) { certs[id] = Object.assign({}, CERTS[id]); });
+    var check = p.revocationCheck;
+    return {
+      story: 'revoke', scene: 0, scenes: 1, event: null, changed: [], sceneStart: false,
+      now: r.now, trueDay: REV.DAY, offset: p.clockOffsetDays, nowIso: isoOf(r.now), trueIso: isoOf(REV.DAY),
+      store: store, certs: certs,
+      connections: [{ endpoints: [REV.HOST], listening443: true, serverSends: ['www1'],
+        checks: r.chain.checks.slice(0, f.shown), total: k, result: chainDone ? r.chain.result : null,
+        newCheck: n > 0 && f.phase === 'chain' && f.shown > 0 ? f.shown - 1 : -1 }],
+      history: [null],
+      rev: {
+        phase: f.phase, check: check, serial: REV.SERIAL, revoked: !!p.revokeServerCert,
+        revokedAt: p.revokeServerCert ? REV.REVOKED_AT : null, reachable: !!p.responderReachable,
+        crlFresh: !!p.crlFresh, hardFail: !!p.hardFail,
+        crls: crlsIssued(p.revokeServerCert, REV.DAY),
+        staple: check === 'stapled' ? { at: REV.STAPLE_AT, status: ocspAnswer(p.revokeServerCert, REV.SERIAL, REV.STAPLE_AT) } : null,
+        lookup: f.phase === 'chain' ? null : r.lookup,
+        result: done ? r.result : null
+      }
+    };
+  }
+
   var logic = {
     /** Parameter defaults: the page opens on the book's sequence (UL ch21), whose first state is its first fault.
-        The acme* params belong to the ACME story only. */
+        The acme* params belong to the ACME story only, the revocation ones to the revocation story only. */
     defaults: { story: 'book', https443Open: false, serverCert: 'self', sendIntermediate: false, anchorInStore: false, clockOffsetDays: 0,
-      acmeChallenge: 'http-01', port80Open: true, dnsWritable: true, machineOff: false },
+      acmeChallenge: 'http-01', port80Open: true, dnsWritable: true, machineOff: false,
+      revocationCheck: 'none', revokeServerCert: false, responderReachable: true, crlFresh: true, hardFail: false },
 
     /** Steps depend on the story and on what fails where: one per check (clocks: one per date; acme: one per event). */
-    steps: function (p) { return (p.story === 'acme' ? acmeFrames(acmeEnv(p)).frames : frames(p)).length - 1; },
+    steps: function (p) {
+      return (p.story === 'acme' ? acmeFrames(acmeEnv(p)).frames : p.story === 'revoke' ? revFrames(p) : frames(p)).length - 1;
+    },
 
-    initial: function (p) { return p.story === 'acme' ? acmeStateAt(p, 0) : stateAt(p, 0); },
-    step: function (s, n, p) { return p.story === 'acme' ? acmeStateAt(p, n) : stateAt(p, n); },
+    initial: function (p) { return p.story === 'acme' ? acmeStateAt(p, 0) : p.story === 'revoke' ? revStateAt(p, 0) : stateAt(p, 0); },
+    step: function (s, n, p) { return p.story === 'acme' ? acmeStateAt(p, n) : p.story === 'revoke' ? revStateAt(p, n) : stateAt(p, n); },
 
     // pure helpers, for the page and the tests
     validate: validate, scenes: scenes, frames: frames, sendsOf: sendsOf, within: within,
     dayOf: dayOf, isoOf: isoOf, CERTS: CERTS, BOOK_DAY: BOOK_DAY, SCAN_DAYS: SCAN_DAYS, OFFSET_MIN: -400, OFFSET_MAX: 800,
     acmeDue: acmeDue, challengePasses: challengePasses, challengeAllowed: challengeAllowed, acmeRuns: acmeRuns,
-    acmeTimeline: acmeTimeline, acmeExchange: acmeExchange, acmeFrames: acmeFrames, acmeCheck: acmeCheck, ACME: ACME
+    acmeTimeline: acmeTimeline, acmeExchange: acmeExchange, acmeFrames: acmeFrames, acmeCheck: acmeCheck, ACME: ACME,
+    crlsIssued: crlsIssued, ocspAnswer: ocspAnswer, revocationStatus: revocationStatus, revVerdict: revVerdict,
+    revRun: revRun, revFrames: revFrames, REV: REV
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;

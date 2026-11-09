@@ -226,3 +226,96 @@ authority* are in the glossary.
 ### Time
 
 Start 2026-11-08 22:46, done 23:05 (CET): about 19 minutes, one session, including the checks.
+
+## Revocation presets (task `pki-revocation`)
+
+Preset task `docs/tasks/w3/pki-revocation.md` (wave 3, catalogue `sec-pki-revocation`): story `revoke` and presets
+`revoked-unchecked`, `crl-catches`, `stale-crl`, `ocsp-good`, `ocsp-blocked`, `stapled`; entry `revoked-unchecked`.
+Rules and numbers: `SPEC.md`, "Revocation: CRL vs OCSP".
+
+### Decisions
+
+- **Extended the host model additively**, as the ACME preset did, instead of stopping with a shared request: the task
+  allows that only if the host "cannot express it without changes", and it cannot (no revocation state, no CA side,
+  no verdict after the chain). An opt-in story `revoke` in the host's `sim.js`; the chain is the host's `validate()`
+  unchanged, so expiry is checked first (the task's tie-break) for free. A test checks that every other story gives
+  the same states with the revocation params set.
+- **The lab CA and `www1.crt`** (UL ch21, already in the host) are the chain: NLA T50 is "PKI u kući — vlastito tijelo",
+  your own CA, and the anchor is already the student's own. 4 chain checks + lookup + verdict = 6 steps.
+- **Dates 2026-10-15 … 10-26**, not the estate's 2026-11-12 CRL date: that CRL is a student scenario (hq-vpn01) and
+  the page must not hint at it.
+- **"Fresh"** means the client fetches the CA's latest list now; "not fresh" means it holds the list from before the
+  revocation and keeps using it while its `nextUpdate` has not passed at its clock. So the clock offset (key D)
+  matters: two days ahead, the held list is out of date and the client fetches the new one and rejects.
+- **`responderReachable` covers the CA's revocation server for both CRL fetches and OCSP** (labelled "Upiti o
+  opozivu prolaze" / "Revocation queries get through"). With a held list no fetch is needed, so blocking does not
+  matter there either.
+- **Layout**: three columns, server (the card with a crossed-seal "revoked" badge and its subject struck through, and
+  the stapled response attached below it) | the lab CA (its record of serial 1003, reachable/blocked, its lists with
+  the one the client used marked "← klijent" and 1003 boxed, the OCSP responder with the query and answer) | client
+  (clock, its check mode and soft/hard policy, the store). Below: the checks (chain + one revocation row: ✓ good,
+  ✗ revoked, ? unknown, – not asked) and the verdict box (solid ok / dashed warn for soft-fail / double danger; the
+  word and ✓ ? ✗ too; "yet the certificate is revoked" when an accepted certificate is revoked).
+- **Controls appear only where they act** (`visible`, not `disabled`): with the disabled-reason lines the panel was
+  up to 123 px too tall at 1920×1080 in Croatian.
+- **Legend in the revocation story** (six, so the header keeps one line): revoked, CRL, OCSP query, stapled, outcome
+  ✓ ? ✗ (one swatch with the three verdict colours), changed. Leaf and anchor are left out there: the cards carry
+  their role as a word badge.
+- **Presets**: the chain page shows a seventh button, "Opoziv: bez provjere" (the way in, like "Obnavljanje ACME");
+  the revocation story shows the way back and its six. `.sd-preset { line-height: 1.15 }` (as in other sims) keeps
+  the chain page's panel on one screen with the seventh button (it was 16 px over). Keys 1–9 reach presets 1–9 only,
+  so the six revocation presets have no number key (the kit's limit); they are reached by clicking.
+- **Misconceptions** on the page: expiry = revocation (validity caption "Opoziv ne mijenja datume", the card's clock
+  line still "još 319 dana"); a revoked certificate always fails (`revoked-unchecked`, `stale-crl`, `ocsp-blocked`);
+  OCSP strictly better than CRL (soft-fail in `ocsp-blocked`, the explanation; stapling fixes it).
+
+### Deviations from the task
+
+- **Added a `hardFail` toggle** (not in the task's params), shown for CRL and OCSP: without it the task's verdict
+  `unknown-hard-fail` cannot occur. No preset uses it.
+- **Task captions**: both are used as given, the stapled one after "Klijent odbija vezu (izlazni status 60,
+  upozorenje certificate_revoked)." and the unchecked one with "(izlazni status 0)" appended.
+- **Steps** "host chain steps + 2": the host chain here is 4 checks (the lab chain), so 6 steps per preset.
+- **Exit status 60 and the messages** for a revoked certificate and a hard-fail are the host's convention; real
+  clients may differ (SPEC.md, rule 7, *(check)*).
+- Task topic/tags/level (`security` / `tls` / `advanced`) cannot be set on a preset entry; the host is `internet`,
+  `tls`, `intro`. Reported.
+
+### Sources
+
+As in SPEC.md, "Revocation": RFC 5280 §3.3 and §5, RFC 6960, RFC 6066 §8, RFC 8446 §6.2 *(check: not re-read for this
+task)*; NLA `meta/toc.md` T50 (term *opoziv*; chapters not written yet). Dates and serial numbers invented.
+
+### Checks
+
+- Numbers printed from the model before the page (node script over the six presets, the clock offsets −50, 1, 2, 5,
+  6, 319, 320 and each check unreachable with soft and hard fail), then asserted in `sim.test.js`: 11 new tests,
+  two tie-breaks first (expired and not-yet-valid before revocation), then rules 1–5, the steps and reveal, the six
+  presets, every setting within 20 steps and JSON-safe, the other stories unchanged by the revocation settings.
+- **28 mutations** of the revocation model, one at a time (revocation before expiry, lookup kept on a chain failure,
+  `none` asking anyway, the held list's `nextUpdate` exclusive or read at the true date, `crlFresh` ignored, a serial
+  only on lists after its revocation day, out-of-date lists accepted, CRL fetch and OCSP ignoring reachability, the
+  staple needing the responder, soft-fail rejecting, `hardFail` ignored, OCSP ignoring the revocation date, no
+  `unknown` answer, no extra list at a revocation, no lookup step, result or lookup revealed early, the alert, the fix
+  side, a staple from before the revocation, a staple without stapling, the unknown reason, the client's clock ignored,
+  `newCheck` in the lookup step, the revocation a day later, the lab CA missing from the store): **all 28 fail a test**.
+- `npm run gate -- cert-chain`: pass (67 browser checks on the default page). The gate does not step the revocation
+  presets, so a local Playwright script opened every step of the six presets at 1920×1080 (hr light, en light and
+  dark): no page, stage or panel scroll, smallest text 16 px, a caption on every step, no console errors; grayscale
+  shots of `ocsp-blocked` and `crl-catches` and 375×812 shots of `stapled` and `stale-crl` (no sideways scroll). The
+  chain and ACME modes rechecked (their presets, fit). Screenshots reviewed; fixed from them: the panel overflow
+  (controls hidden instead of disabled), the legend wrapping the header (six items, short labels), the toggle label
+  wrapping ("Poslužitelj za opoziv dostupan" → "Upiti o opozivu prolaze").
+- Not done: a fresh reviewer (the definition of done asks it of new sims; this is a preset).
+
+### Term pairs
+
+Not in `kit/glossary.js`; written out in both tables (Croatian explanation: English in italics, Croatian in brackets):
+*revocation* — opoziv (NLA T50); *certificate revocation list* (CRL) — popis opozvanih certifikata; *OCSP* — OCSP
+(protokol statusa certifikata) *(check)*; *OCSP stapling* — prilaganje statusa *(check)*; *soft-fail* — meki neuspjeh
+*(check)*; *hard-fail* — (no Croatian term used; "odbija" on the page); *serial number* — serijski broj; *responder* —
+poslužitelj za opoziv *(check)*.
+
+### Time
+
+Start 2026-11-09 04:43, done 05:00 (CET): about 17 minutes, one session, including the checks.
