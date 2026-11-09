@@ -1,0 +1,465 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- ipsec-ike: two IPsec peers bring up IKEv2 (IKE_SA_INIT with Diffie–Hellman, IKE_AUTH with the first Child SA and its
+     traffic selectors), a packet crosses as ESP in tunnel or transport mode, and the SA pair is rekeyed. A stepper.
+     Drawn with kit view K1 (message sequence chart, kit/sequence.js): four lanes, Host A, GW-A, GW-B, Host B; the cards
+     of the two IPsec peers hold the IKE SA box (control) and the ESP SA box (data, one SPI per direction). Under it the
+     sender's SPD as kit view K4 (rule table, kit/ruletable.js, most specific wins) and the packet view: the original
+     packet and the same packet wrapped by ESP, in columns, so the header added (tunnel) or kept (transport) lines up.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="ipsec-ike">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPsec i IKE: tunel između dviju lokacija · simdeck</title>
+<meta name="description" content="Korak po korak: IKE uspostavlja ključeve i par SA-ova, ESP nosi paket u tunelskom ili transportnom načinu, selektori biraju promet.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "ipsec-ike",
+  "title": {
+    "hr": "IPsec i IKE: tunel između dviju lokacija",
+    "en": "IPsec and IKE: a site-to-site tunnel"
+  },
+  "concept": {
+    "hr": "Dvije razmjene IKE-a, tunelski i transportni način, ESP",
+    "en": "IKE's two exchanges, tunnel vs transport mode, ESP"
+  },
+  "summary": {
+    "hr": "Korak po korak: IKE uspostavlja ključeve i par SA-ova, ESP nosi paket u tunelskom ili transportnom načinu, selektori biraju promet.",
+    "en": "Step by step: IKE sets up keys and an SA pair, ESP carries a packet in tunnel or transport mode, selectors pick the traffic."
+  },
+  "tags": [
+    "vpn"
+  ],
+  "class": "stepper",
+  "steps": 8
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="ipsec-ike"]; colours only from kit tokens.
+   Layout: the K1 chart on top; under it the SPD (K4) on the left and the packet view on the right. */
+[data-sim="ipsec-ike"] .ik {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1cqh 1cqw;
+  height: 100%;
+  padding: 1cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="ipsec-ike"] .ik > .sd-seq { min-height: 0; }
+[data-sim="ipsec-ike"] .ik-bottom { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.8rem; min-height: 0; align-items: start; }
+[data-sim="ipsec-ike"] .ik-mono { font-family: var(--mono); }
+[data-sim="ipsec-ike"] .ik-muted { color: var(--muted); }
+[data-sim="ipsec-ike"] .ik-hl { padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="ipsec-ike"] .ik-hl.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="ipsec-ike"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ipsec-ike"] .sd-panel [hidden] { display: none; }
+
+/* lane cards */
+[data-sim="ipsec-ike"] .ik-card { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.25rem; font-size: var(--fs-sm); }
+[data-sim="ipsec-ike"] .ik-addr { display: flex; gap: 0.4rem; align-items: baseline; }
+[data-sim="ipsec-ike"] .ik-box { border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); padding: 0.05rem 0.35rem 0.1rem; background: var(--bg); }
+[data-sim="ipsec-ike"] .ik-box[data-k="ike"] { border: 0.2rem double var(--ink); }
+[data-sim="ipsec-ike"] .ik-box.sd-changed { outline: 0; box-shadow: 0 0 0 0.2rem var(--hl); }
+[data-sim="ipsec-ike"] .ik-box > b { margin-right: 0.35rem; }
+[data-sim="ipsec-ike"] .ik-line { display: flex; flex-wrap: wrap; gap: 0.1rem 0.35rem; align-items: center; }
+[data-sim="ipsec-ike"] .ik-plain { border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); padding: 0.1rem 0.35rem; color: var(--muted); min-height: 3.1em; }
+[data-sim="ipsec-ike"] .ik-spi { display: inline-block; padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); line-height: 1.35; }
+[data-sim="ipsec-ike"] .ik-spi.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0; box-shadow: none; border-width: 0.15rem; }
+[data-sim="ipsec-ike"] .ik-spi[data-state="old"] { border-style: dashed; color: var(--muted); }
+[data-sim="ipsec-ike"] .ik-spi[data-state="deleted"] { border-style: dashed; color: var(--muted); text-decoration: line-through; }
+[data-sim="ipsec-ike"] .ik-none { color: var(--muted); }
+@media (min-width: 901px) and (min-aspect-ratio: 1/1) { [data-sim="ipsec-ike"] .sd-seq { --sd-seq-row: 2.35rem; } }
+
+/* SPD table (K4): compact */
+[data-sim="ipsec-ike"] .ik-bottom .sd-rt { padding: 0.35rem 0.6rem 0.45rem; }
+[data-sim="ipsec-ike"] .ik-bottom .sd-rt-title { margin-bottom: 0.2rem; }
+[data-sim="ipsec-ike"] .ik-bottom .sd-rt-table td { padding-top: 0.1rem; padding-bottom: 0.1rem; }
+
+/* packet view: label column, then the packet's parts in columns; brackets under them */
+[data-sim="ipsec-ike"] .ik-pk { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.35rem 0.6rem 0.45rem; min-width: 0; }
+[data-sim="ipsec-ike"] .ik-pk h2 { margin: 0 0 0.25rem; font-size: 1em; font-weight: 700; }
+[data-sim="ipsec-ike"] .ik-grid { display: grid; justify-content: start; gap: 0.2rem 0.15rem; align-items: stretch; font-size: var(--fs-sm); }
+[data-sim="ipsec-ike"] .ik-rowlabel { align-self: center; color: var(--muted); padding-right: 0.3rem; line-height: 1.2; }
+[data-sim="ipsec-ike"] .ik-blk { min-width: 0; padding: 0.05rem 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); line-height: 1.25; }
+[data-sim="ipsec-ike"] .ik-blk b { display: block; font-family: var(--mono); }
+[data-sim="ipsec-ike"] .ik-blk span { display: block; white-space: nowrap; }
+[data-sim="ipsec-ike"] .ik-blk[data-k="outer"] { border-width: 0.2rem; }
+[data-sim="ipsec-ike"] .ik-blk[data-k="esp"], [data-sim="ipsec-ike"] .ik-blk[data-k="icv"] { border-style: double; border-width: 0.2rem; }
+[data-sim="ipsec-ike"] .ik-enc { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 22%, transparent) 0.35em 0.5em); }
+[data-sim="ipsec-ike"] .ik-blk.sd-changed { outline: 0; box-shadow: 0 0 0 0.18rem var(--hl); }
+[data-sim="ipsec-ike"] .ik-br { text-align: center; border: var(--line-w) solid var(--ink); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); line-height: 1.2; padding-bottom: 0.05rem; }
+[data-sim="ipsec-ike"] .ik-br[data-k="auth"] { border-style: double; border-width: 0 0.2rem 0.2rem; }
+[data-sim="ipsec-ike"] .ik-strip { display: flex; flex-wrap: wrap; gap: 0.15rem; align-items: stretch; }
+[data-sim="ipsec-ike"] .ik-strip .ik-blk { flex: 0 1 auto; }
+[data-sim="ipsec-ike"] .ik-sk { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: center; padding: 0.05rem 0.35rem; border: 0.2rem double var(--ink); border-radius: var(--radius-sm); }
+[data-sim="ipsec-ike"] .ik-sk > b { font-family: var(--mono); }
+[data-sim="ipsec-ike"] .ik-sk .ik-pl { padding: 0 0.25rem; background: var(--bg); border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); font-family: var(--mono); }
+[data-sim="ipsec-ike"] .ik-iketab { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.4rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="ipsec-ike"] .ik-verdict { margin: 0.3rem 0 0; font-weight: 700; }
+[data-sim="ipsec-ike"] .ik-verdict[data-ok="true"] { color: var(--ok); }
+[data-sim="ipsec-ike"] .ik-verdict[data-ok="false"] { color: var(--danger); }
+
+/* legend swatches of this page */
+[data-sim="ipsec-ike"] .sd-swatch[data-shape^="ik-"] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-ike"] { border: 0.2em double var(--ink); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-esp"]::after { content: '→'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; color: var(--ink); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-enc"] { background-image: repeating-linear-gradient(45deg, transparent 0 0.15em, var(--ink) 0.15em 0.24em); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-tun"] { border-width: 0.18em; }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-tun"]::after { content: ''; position: absolute; inset: 22%; border: 0.08em solid var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.1em, var(--ink) 0.1em 0.17em); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-tra"]::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 55%; border-left: 0.1em solid var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.1em, var(--ink) 0.1em 0.17em); }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-ok"] { border: 0; background: transparent; }
+[data-sim="ipsec-ike"] .sd-swatch[data-shape="ik-ok"]::after { content: '✓✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--ink); letter-spacing: -0.05em; }
+
+/* Phone and portrait: the stage grows with its content; the SPD and the packet go under the chart. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="ipsec-ike"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="ipsec-ike"] .ik { height: auto; grid-template-rows: auto; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="ipsec-ike"] .ik-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="ipsec-ike"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="ipsec-ike"] .ik-pk { overflow-x: auto; }
+  [data-sim="ipsec-ike"] .ik-grid { min-width: 0; }
+  [data-sim="ipsec-ike"] .ik-blk span { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">IPsec i IKE: tunel između dviju lokacija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { HA: '3', GA: '1', GB: '2', HB: '4' };
+  var DH = L.DH;
+  var SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+
+  /** Data (addresses, SPIs, message and payload names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'ik-mono' : cls || null }, String(text)); }
+  function has(s, id) { return s.changed.indexOf(id) >= 0; }
+  function chg(on) { return on ? ' sd-changed' : ''; }
+  function sup(n) { return String(n).split('').map(function (d) { return SUP[d]; }).join(''); }
+  function formula(base, e, val) { return data(base + sup(e) + ' mod ' + DH.p + ' = ' + val); }
+  function laneName(s, lane) {
+    if (lane === 'HA') return t('laneHostA');
+    if (lane === 'HB') return t('laneHostB');
+    if (s.mode === 'transport') return t(lane === 'GA' ? 'laneRouterA' : 'laneRouterB');
+    return t(lane === 'GA' ? 'gwA' : 'gwB');
+  }
+  /** After "kod" (at) Croatian takes the genitive: "kod računala A"; the gateways' names do not change. */
+  function laneGen(s, lane) { return lane === 'HA' ? t('genHostA') : lane === 'HB' ? t('genHostB') : laneName(s, lane); }
+  function peerOf(s, lane) { return lane === s.peers.A ? 'A' : lane === s.peers.B ? 'B' : null; }
+
+  // ── lane cards ──
+  function spiChip(s, sa) {
+    return h('span', { class: 'ik-spi' + chg(has(s, 'sa.' + sa.spi)), dataset: { state: sa.state }, translate: 'no' }, sa.spi);
+  }
+  function card(s, lane) {
+    var who = peerOf(s, lane);
+    var addr = h('div', { class: 'ik-addr' }, h('span', { class: 'ik-muted' }, t('kAddr')), data(L.laneAddr(s.mode, lane)));
+    if (!who) return h('div', { class: 'ik-card' }, addr, h('div', { class: 'ik-plain' }, t(lane === 'HA' || lane === 'HB' ? 'plainHost' : 'plainRouter')));
+    var ike = s.ikeSA;
+    var ikeText = ike.state === 'none' ? h('span', { class: 'ik-none' }, t('ikeNone'))
+      : ike.state === 'keyed' ? h('span', null, t('ikeKeyed'))
+      : h('span', null, '✓ ', t(ike.authMethod === 'cert' ? 'authCert' : 'authPsk'));
+    var outs = s.childSAs.filter(function (x) { return x.from === who; });
+    var ins = s.childSAs.filter(function (x) { return x.to === who; });
+    function line(label, list) {
+      return h('div', { class: 'ik-line' }, h('span', { class: 'ik-muted' }, t(label)),
+        list.length ? list.map(function (x) { return spiChip(s, x); }) : h('span', { class: 'ik-none' }, t('none')));
+    }
+    return h('div', { class: 'ik-card' }, addr,
+      h('div', { class: 'ik-box' + chg(has(s, 'ikeSA')), dataset: { k: 'ike' } }, h('b', null, t('kIke')), ikeText),
+      h('div', { class: 'ik-box' + chg(has(s, 'childSAs') && s.phase === 'auth'), dataset: { k: 'esp' } }, line('kOut', outs), line('kIn', ins)));
+  }
+
+  // ── chart rows ──
+  function noteText(r, s) {
+    switch (r.what) {
+      case 'born': return h('span', null, t('noteBorn'), ' → ', data(r.dst));
+      case 'match':
+        var act = t(r.action === 'protect' ? 'actProtect' : r.action === 'discard' ? 'actDiscard' : 'actBypass');
+        return h('span', null, t.parts('noteMatch', { act: act }), r.sa ? [' → ', data(r.sa)] : null);
+      case 'decrypted': return t('noteDecrypted');
+      case 'noSA': return t('noteNoSA');
+      case 'authFail': return t('noteAuthFail');
+      case 'tsFail': return t('noteTsFail');
+      case 'delivered': return t('noteDelivered');
+      case 'discarded': return t('noteDiscarded');
+      case 'bypassed': return t('noteBypassed');
+      case 'lifetime': return t('noteLifetime');
+      case 'soft': return t('noteSoft');
+    }
+    return '';
+  }
+  function chart(c) {
+    var s = c.state, shown = {};
+    var rows = s.rows.map(function (r) {
+      var changed = r.step === c.n;
+      var time = shown[r.step] ? null : String(r.step);
+      shown[r.step] = true;
+      if (r.kind === 'note') {
+        var bad = ['discarded', 'noSA', 'authFail', 'tsFail'].indexOf(r.what) >= 0;
+        var good = ['decrypted', 'delivered'].indexOf(r.what) >= 0;
+        return { kind: 'note', lane: r.lane, text: noteText(r, s), k: bad ? 'fill' : good ? 'solid' : null, time: time, changed: changed };
+      }
+      var fields = null, re = {};
+      if (r.ke != null) fields = (r.from === s.peers.A ? 'KEi ' : 'KEr ') + r.ke;
+      else if (r.esp) fields = 'SPI ' + r.spi + ' · seq ' + r.seq;
+      else if (r.del) fields = 'D ' + r.del;
+      else if (r.plain) fields = r.src + ' → ' + r.dst;
+      return { from: r.from, to: r.to, label: r.msg, c: COLOUR[r.from], fields: fields, lock: !!r.lock,
+        line: r.plain ? 'dashed' : null, re: re, place: s.mode === 'transport' && (r.ike || r.esp) ? 'mid' : null, time: time, changed: changed };
+    });
+    return Simdeck.sequence({
+      dir: c.dir,
+      lanes: L.LANES.map(function (lane) {
+        var peer = peerOf(s, lane);
+        return { id: lane, mark: null, c: COLOUR[lane], shape: lane === 'HA' || lane === 'HB' ? 'square' : null,
+          name: laneName(s, lane), tags: peer ? h('span', { class: 'ik-muted' }, t('tagPeer')) : null, body: card(s, lane) };
+      }),
+      rows: rows,
+      timeWidth: '2.2rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── SPD (K4, most specific) ──
+  function actWord(a) { return t(a === 'protect' ? 'actProtect' : a === 'discard' ? 'actDiscard' : 'actBypass'); }
+  function spdTable(c) {
+    var s = c.state, lk = s.lookup;
+    var rows = s.spd.map(function (e, i) {
+      var action = actWord(e.action);
+      return { no: i + 1, cells: { dst: e.dst }, action: action, rank: Number(e.dst.split('/')[1]) * 100 + Number(e.src.split('/')[1]),
+        hit: lk ? lk.hits[i] : null };
+    });
+    var who = laneGen(s, s.peers.A);
+    return Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'specific',
+      title: h('span', { class: 'ik-hl' + chg(has(s, 'spd')) }, t.parts('spdTitle', { who: who, src: data(s.spd[0].src) })),
+      columns: [{ key: 'dst', label: t('colDst') }],
+      actionLabel: t('colAction'),
+      markLabel: lk ? data('→ ' + lk.dst) : t('markIdle'),
+      rows: rows,
+      implicit: { text: t('implicitAny'), action: actWord('bypass') },
+      at: lk ? 'all' : -1,
+      done: !!lk,
+      outcome: function (i) {
+        var a = i >= s.spd.length ? 'bypass' : s.spd[i].action;
+        if (a === 'protect') return h('span', { class: 'sd-rt-verdict', dataset: { ok: 'true' } }, '✓ ', t.parts('outProtect', { spi: data(lk.sa || '–') }));
+        return Simdeck.ruleTable.verdict(a === 'bypass', t(a === 'discard' ? 'outDiscard' : 'outBypass'));
+      },
+      words: { win: t('wWin'), beaten: t('wBeaten') },
+      changed: false
+    });
+  }
+
+  // ── packet view ──
+  function blk(k, name, val, opts) {
+    opts = opts || {};
+    return h('div', { class: 'ik-blk' + (opts.enc ? ' ik-enc' : '') + chg(opts.changed), dataset: { k: k }, style: opts.col ? { gridColumn: String(opts.col) } : null },
+      h('b', { translate: 'no' }, name), val == null ? null : [].concat(val).map(function (v) { return h('span', null, v); }));
+  }
+  function ipVal(src, dst) { return [data(src, ''), data('→ ' + dst, '')]; }
+  /** The original packet and the ESP packet in one grid of columns: tunnel 7 parts, transport 6. */
+  function espGrid(s, p, showOriginal, showWire) {
+    var tunnel = p.mode === 'tunnel' || (p.kind === 'plain' && s.mode === 'tunnel');
+    var C = tunnel
+      ? { outer: 2, esp: 3, ip: 4, tcp: 5, data: 6, trailer: 7, icv: 8, n: 8 }
+      : { outer: 2, esp: 3, ip: 2, tcp: 4, data: 5, trailer: 6, icv: 7, n: 7 };
+    var cols = 'repeat(' + C.n + ', auto)';
+    var items = [], r = 1;
+    var wireChanged = has(s, 'packet') && p.kind === 'esp';
+    function at(el, row) { el.style.gridRow = String(row); return el; }
+    if (showOriginal) {
+      items.push(at(h('div', { class: 'ik-rowlabel', style: { gridColumn: '1' } }, t(p.delivered && p.kind === 'esp' ? 'pkDelivered' : 'pkOriginal')), r));
+      items.push(at(blk('ip', 'IP', ipVal(p.innerSrc, p.innerDst), { col: C.ip }), r));
+      items.push(at(blk('tcp', 'TCP', null, { col: C.tcp }), r));
+      items.push(at(blk('data', '…', t('pkData'), { col: C.data }), r));
+      r++;
+    }
+    if (showWire) {
+      items.push(at(h('div', { class: 'ik-rowlabel', style: { gridColumn: '1' } }, t('pkWire')), r));
+      items.push(at(blk('outer', 'IP · 50', ipVal(p.outerSrc, p.outerDst), { col: C.outer, changed: wireChanged }), r));
+      items.push(at(blk('esp', 'ESP', [data('SPI ' + p.spi, ''), data('seq ' + p.seq, '')], { col: C.esp, changed: wireChanged }), r));
+      if (tunnel) items.push(at(blk('ip', 'IP', ipVal(p.innerSrc, p.innerDst), { col: C.ip, enc: true }), r));
+      items.push(at(blk('tcp', 'TCP', null, { col: C.tcp, enc: true }), r));
+      items.push(at(blk('data', '…', t('pkData'), { col: C.data, enc: true }), r));
+      items.push(at(blk('trailer', t('pkTrailer'), t('pkNext', { n: p.next }), { col: C.trailer, enc: true }), r));
+      items.push(at(blk('icv', 'ICV', null, { col: C.icv }), r));
+      r++;
+      var encFrom = tunnel ? C.ip : C.tcp;
+      items.push(at(h('div', { class: 'ik-br', dataset: { k: 'enc' }, style: { gridColumn: encFrom + ' / ' + C.icv } }, t('pkEncrypted')), r++));
+      items.push(at(h('div', { class: 'ik-br', dataset: { k: 'auth' }, style: { gridColumn: C.esp + ' / ' + C.icv } }, t('pkAuthenticated')), r++));
+    }
+    return h('div', { class: 'ik-grid', style: { gridTemplateColumns: cols } }, items);
+  }
+  function ikeStrip(s, m) {
+    var src = L.ADDR[s.peers[m.from]], dst = L.ADDR[s.peers[m.to]];
+    var parts = [blk('outer', 'IP', ipVal(src, dst)), blk('udp', 'UDP', data(String(m.port), '')), blk('hdr', m.exchange, null)];
+    m.clear.forEach(function (pl) {
+      var v = pl === 'KEi' || pl === 'KEr' ? formula(DH.g, pl === 'KEi' ? DH.a : DH.b, m.ke) : null;
+      parts.push(blk('pl', pl, v));
+    });
+    if (m.sk.length) {
+      parts.push(h('div', { class: 'ik-sk ik-enc' }, h('b', { translate: 'no' }, 'SK {'),
+        m.sk.map(function (pl) {
+          var text = pl === 'D' && m.del ? 'D ' + m.del : pl === 'N(REKEY_SA)' && m.rekeys ? pl + ' ' + m.rekeys : pl;
+          return h('span', { class: 'ik-pl', translate: 'no' }, text);
+        }),
+        h('b', { translate: 'no' }, '}')));
+    }
+    return h('div', { class: 'ik-strip' }, parts);
+  }
+  function packet(c) {
+    var s = c.state, p = s.packet, body = [];
+    if (s.ike.length) {
+      body.push(h('div', { class: 'ik-iketab' },
+        h('span', { class: 'ik-rowlabel' }, t('pkRequest')), ikeStrip(s, s.ike[0]),
+        h('span', { class: 'ik-rowlabel' }, t('pkResponse')), ikeStrip(s, s.ike[1])));
+      if (s.ike[0].sk.length) body.push(h('p', { class: 'ik-verdict ik-muted' }, h('span', { class: 'ik-sk ik-enc', style: { display: 'inline-flex' } }, 'SK'), ' ', t('pkSk')));
+      else body.push(h('p', { class: 'ik-verdict ik-muted' }, t('pkDhBoth'), ': ', formula(s.ikeSA.dh.KEr, DH.a, s.ikeSA.dh.sA), ' · ', formula(s.ikeSA.dh.KEi, DH.b, s.ikeSA.dh.sB)));
+    } else if (!p) {
+      body.push(h('p', { class: 'ik-muted', style: { margin: 0 } }, t('pkNone')));
+    } else if (p.kind === 'plain') {
+      body.push(espGrid(s, p, true, false));
+      if (s.lookup && s.lookup.action === 'protect') body.push(h('p', { class: 'ik-verdict', dataset: { ok: 'true' } }, t.parts('pkVerdictProtect', { spi: data(s.lookup.sa) })));
+      if (p.dropped) body.push(h('p', { class: 'ik-verdict', dataset: { ok: 'false' } }, t.parts('pkVerdictDiscard', { who: laneGen(s, s.peers.A) })));
+    } else {
+      var phase = s.phase;
+      var showOrig = phase !== 'receive';
+      body.push(espGrid(s, p, showOrig, true));
+      if (phase === 'receive' && s.check) body.push(h('p', { class: 'ik-verdict', dataset: { ok: String(!!s.check.authOk) } }, t.parts('pkVerdictRecv', { spi: data(p.spi) })));
+      if ((phase === 'deliver' || phase === 'reply') && p.delivered) body.push(h('p', { class: 'ik-verdict', dataset: { ok: 'true' } }, t.parts('pkVerdictDeliver', { dst: data(p.innerDst) })));
+    }
+    var title = s.ike.length || !p ? t('pkTitle') : t(s.mode === 'tunnel' ? 'pkTitleTunnel' : 'pkTitleTransport');
+    return h('section', { class: 'ik-pk' }, h('h2', null, h('span', { class: 'ik-hl' + chg(has(s, 'packet') || has(s, 'ike')) }, title)), body);
+  }
+
+  function render(c) {
+    var ch = chart(c);
+    c.stage.replaceChildren(h('div', { class: 'ik' }, ch, h('div', { class: 'ik-bottom' }, spdTable(c), packet(c))));
+    ch.fit();
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = s.packet, q = L.norm(c.params);
+    var tunnel = s.mode === 'tunnel';
+    var who = laneName(s, s.peers.A), whoB = laneName(s, s.peers.B);
+    var ts = s.selectors || L.selectorsFor(s.mode);
+    switch (s.phase) {
+      case 'start':
+        if (q.action === 'bring-up') return t(tunnel ? 'capStartTunnel' : 'capStartTransport');
+        return t(tunnel ? 'capStartUp' : 'capStartUpTransport');
+      case 'init':
+        var dh = s.ikeSA.dh;
+        return t.parts('capInit', { peers: h('span', null, t.parts(tunnel ? 'peersTunnel' : 'peersTransport', tunnel ? { a: data('GW-A'), b: data('GW-B') } : { a: data(L.ADDR.HA), b: data(L.ADDR.HB) })),
+          kei: formula(DH.g, DH.a, dh.KEi), ker: formula(DH.g, DH.b, dh.KEr), s: data(dh.sA) });
+      case 'auth': return t.parts('capAuth', { how: t(q.auth === 'cert' ? 'howCert' : 'howPsk'), tsi: data(ts.local), tsr: data(ts.remote) });
+      case 'send': return t.parts(tunnel ? 'capSendTunnel' : 'capSendTransport', { dst: data(p.innerDst) });
+      case 'match':
+        if (s.lookup.action === 'protect') return t.parts('capMatchProtect', { who: who, dst: data(p.innerDst), tsr: data(ts.remote), spi: data(s.lookup.sa) });
+        return t.parts('capMatchDiscard', { who: who, dst: data(p.innerDst), tsr: data(ts.remote) });
+      case 'policy': return t.parts('capPolicy', { who: laneGen(s, s.peers.A) });
+      case 'wrap': return t.parts(tunnel ? 'capWrapTunnel' : 'capWrapTransport', { spi: data(p.spi), seq: data(p.seq), src: data(p.outerSrc), dst: data(p.outerDst) });
+      case 'receive': return t.parts('capReceive', { who: whoB, spi: data(p.spi) });
+      case 'deliver': return t.parts(tunnel ? 'capDeliverTunnel' : 'capDeliverTransport', { tsi: data(ts.local), tsr: data(ts.remote), dst: data(p.innerDst) });
+      case 'lifetime': return t('capLifetime');
+      case 'traffic': return t.parts('capTraffic', { spi: data(p.spi), seq: data(p.seq) });
+      case 'soft': return t.parts('capSoft', { who: who });
+      case 'ccs': return t.parts('capCcs', { b: data(L.SPI[2].B), a: data(L.SPI[2].A) });
+      case 'moved': return t.parts('capMoved', { spi: data(p.spi), seq: data(p.seq) });
+      case 'delete': return t.parts('capDelete', { a: data(L.SPI[1].A), b: data(L.SPI[1].B) });
+      case 'reply': return t.parts('capReply', { who: whoB, spi: data(p.spi) });
+    }
+    return '';
+  }
+
+  var notRekey = function (p) { return p.action === 'rekey' ? t('notRekey') : false; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), resets: true, options: [['tunnel', t('modeTunnel')], ['transport', t('modeTransport')]] },
+      { key: 'auth', type: 'choice', label: t('auth'), resets: true, options: [['psk', t('authPsk')], ['cert', t('authCert')]] },
+      { key: 'action', type: 'choice', label: t('action'), resets: true,
+        options: [['bring-up', t('actBringUp')], ['send', t('actSend')], ['rekey', t('actRekey')]] },
+      { key: 'selectorMatch', type: 'toggle', label: t('selectorMatch'), hint: t('selectorMatchHint'), resets: true, disabled: notRekey }
+    ],
+
+    presets: [
+      { id: 'site-to-site', label: t('presetS2s'), params: { mode: 'tunnel', action: 'bring-up', selectorMatch: true }, hint: t('presetS2sHint') },
+      { id: 'transport', label: t('presetTransport'), params: { mode: 'transport', action: 'bring-up', selectorMatch: true }, hint: t('presetTransportHint') },
+      { id: 'no-selector', label: t('presetNoSel'), params: { mode: 'tunnel', action: 'bring-up', selectorMatch: false }, hint: t('presetNoSelHint') },
+      { id: 'rekey', label: t('presetRekey'), params: { mode: 'tunnel', action: 'rekey', selectorMatch: true }, hint: t('presetRekeyHint') }
+    ],
+
+    legend: [
+      { shape: 'ik-ike', label: t('legIke') },
+      { shape: 'ik-esp', label: t('legEsp') },
+      { shape: 'ik-enc', label: t('legEnc') },
+      { shape: 'ik-tun', label: t('legTunnel') },
+      { shape: 'ik-tra', label: t('legTransport') },
+      { shape: 'ik-ok', label: t('legOk') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
