@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **324 of 457 entries are live**, 97 w3, 25 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **324 of 469 entries are live**, 109 w3, 25 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -355,6 +355,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 0 | 25 w3 |
+| §4.15 Antennas and radiation | 12 | 0 | 12 w3 |
 
 <!-- status:end -->
 
