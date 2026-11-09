@@ -1,0 +1,527 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- xss: cross-site scripting. A stepper: an attacker's comment (stored) or crafted link (reflected) travels to the
+     server and into the page another visitor's browser parses. Left: the messages as kit view K1 (kit/sequence.js),
+     lanes attacker, server, victim's browser. Right: the comment form or search box (a text field of the page's own),
+     the saved comments or the link, the response as text and the page tree the browser builds, and the browser's log.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="xss">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skriptiranje među stranicama (XSS) · simdeck</title>
+<meta name="description" content="Objavi komentar sa skriptom i prati ga do preglednika drugog posjetitelja: bez kodiranja izlaza postaje čvor stranice i krade kolačić; kodiran ostaje tekst.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "xss",
+  "title": {
+    "hr": "Skriptiranje među stranicama (XSS)",
+    "en": "Cross-site scripting (XSS)"
+  },
+  "concept": {
+    "hr": "Pohranjeni i reflektirani XSS; kodiranje izlaza",
+    "en": "Stored vs reflected XSS; output encoding"
+  },
+  "summary": {
+    "hr": "Objavi komentar sa skriptom i prati ga do preglednika drugog posjetitelja: bez kodiranja izlaza postaje čvor stranice i krade kolačić; kodiran ostaje tekst.",
+    "en": "Post a comment with a script and follow it into another visitor's browser: unencoded it becomes a page node and steals the cookie; encoded, it is text."
+  },
+  "tags": [
+    "attacks"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="xss"]; colours only from kit tokens.
+   Lanes: attacker c2, server c6, victim c1. The input is tinted c4 with a dashed underline (grayscale keeps the
+   dashes); a node built from the input has a thick ink outline; literal text from the input is plain, in quotes;
+   code that ran has ▶; the cookie leaving is a pill with a double danger border. */
+[data-sim="xss"] .xs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 33rem);
+  gap: 1.1cqw;
+  height: 100%;
+  padding: 1.2cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="xss"] .xs-col { display: flex; flex-direction: column; gap: 0.9cqh; min-height: 0; }
+[data-sim="xss"] .xs-mid { flex: 1 1 0; }
+[data-sim="xss"] .xs-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="xss"] .xs-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.65rem 0.45rem;
+  min-width: 0;
+}
+[data-sim="xss"] .xs-box h2 { margin: 0 0 0.25rem; font-size: 0.95rem; font-weight: 700; display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+[data-sim="xss"] .xs-box h2 span { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="xss"] .xs-mono { font-family: var(--mono); }
+[data-sim="xss"] .xs-muted { color: var(--muted); }
+[data-sim="xss"] .xs-sm { font-size: var(--fs-sm); }
+[data-sim="xss"] .xs-card p { margin: 0.15rem 0 0; line-height: 1.25; }
+
+/* the input: tint + dashed underline */
+[data-sim="xss"] .xs-in {
+  background: color-mix(in srgb, var(--c4) 20%, var(--bg));
+  text-decoration: underline dashed var(--c4);
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.18em;
+  border-radius: 0.15em;
+}
+
+/* the form */
+[data-sim="xss"] .xs-form { display: flex; align-items: center; gap: 0.5rem; }
+[data-sim="xss"] .xs-form label { font-weight: 700; white-space: nowrap; }
+[data-sim="xss"] .xs-field {
+  flex: 1 1 auto; min-width: 0;
+  font: inherit; font-family: var(--mono); font-size: max(16px, 0.9rem);
+  color: var(--ink); background: color-mix(in srgb, var(--c4) 14%, var(--bg));
+  border: 0.16rem dashed var(--c4); border-radius: var(--radius-sm);
+  padding: 0.15rem 0.4rem;
+}
+[data-sim="xss"] .xs-field:focus-visible { outline: 0.2rem solid var(--focus, var(--ink)); outline-offset: 0.1rem; }
+[data-sim="xss"] .xs-store { list-style: none; margin: 0.3rem 0 0; padding: 0; display: grid; gap: 0.1rem; }
+[data-sim="xss"] .xs-store li { display: flex; gap: 0.5rem; align-items: baseline; min-width: 0; padding: 0 0.25rem; border-radius: var(--radius-sm); }
+[data-sim="xss"] .xs-store .xs-who { color: var(--muted); white-space: nowrap; }
+[data-sim="xss"] .xs-store .xs-body { font-family: var(--mono); overflow-wrap: anywhere; min-width: 0; }
+[data-sim="xss"] .xs-bad { font-weight: 700; color: var(--danger); white-space: nowrap; font-size: var(--fs-sm); }
+[data-sim="xss"] .xs-link { margin: 0.3rem 0 0; font-family: var(--mono); overflow-wrap: anywhere; }
+[data-sim="xss"] .xs-reach { margin: 0.3rem 0 0; font-size: var(--fs-sm); }
+[data-sim="xss"] .xs-reach[data-r="every"] { font-weight: 700; }
+
+/* the two panes */
+[data-sim="xss"] .xs-code { margin: 0; font-family: var(--mono); font-size: max(16px, 0.9rem); line-height: 1.35; }
+[data-sim="xss"] .xs-code > div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="xss"] .xs-code .xs-sub { font-family: var(--sans); font-style: italic; color: var(--muted); }
+[data-sim="xss"] .xs-tree > div { display: flex; align-items: baseline; gap: 0.35rem; }
+[data-sim="xss"] .xs-tree .xs-ind { white-space: pre; color: var(--muted); }
+[data-sim="xss"] .xs-node { white-space: nowrap; padding: 0 0.25rem; border: 0.12rem solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="xss"] .xs-node[data-live="true"] { border: 0.24rem solid var(--ink); font-weight: 700; background: color-mix(in srgb, var(--c4) 20%, var(--bg)); }
+[data-sim="xss"] .xs-txt { overflow-wrap: anywhere; }
+[data-sim="xss"] .xs-mark { font-weight: 700; font-family: var(--sans); white-space: nowrap; }
+[data-sim="xss"] .xs-mark[data-m="ran"] { color: var(--danger); }
+[data-sim="xss"] .xs-mark[data-m="csp"] { color: var(--ok); }
+[data-sim="xss"] .xs-mark[data-m="armed"] { color: var(--warn); }
+[data-sim="xss"] .xs-fixhead { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.3rem; border: 0.16rem solid var(--ok); border-radius: var(--radius-sm); }
+
+/* the log */
+[data-sim="xss"] .xs-log { margin: 0; padding: 0; list-style: none; font-size: max(16px, 0.85rem); }
+[data-sim="xss"] .xs-log li { padding: 0 0.25rem; border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+[data-sim="xss"] .xs-log li[data-code="ran"] { font-weight: 700; color: var(--danger); }
+[data-sim="xss"] .xs-log li[data-code="sent"] { font-weight: 700; }
+[data-sim="xss"] .xs-cookie { display: inline-block; padding: 0 0.35rem; border: 0.28rem double var(--danger); border-radius: 1em; font-family: var(--mono); font-weight: 700; background: var(--bg); color: var(--ink); }
+[data-sim="xss"] .xs-cookie[data-safe="true"] { border: 0.14rem solid var(--line); font-weight: 400; }
+[data-sim="xss"] .xs-flag { display: inline-block; padding: 0 0.3rem; border: 0.14rem solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="xss"] .xs-flag[data-on="false"] { border-style: dotted; color: var(--muted); }
+
+/* the kit's changed mark inside text: a fill with a thin outline (the halo would cover the neighbouring lines) */
+[data-sim="xss"] .xs-hl { background: var(--hl); color: var(--on-hl); outline: 0.14rem solid var(--on-hl); }
+[data-sim="xss"] .xs-hl .xs-in { background: transparent; }
+
+/* five presets and five controls: the presets in two columns so the panel fits one screen */
+[data-sim="xss"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="xss"] .sd-preset { line-height: 1.15; }
+
+/* legend swatches */
+[data-sim="xss"] .sd-swatch[data-shape="xs-in"] { background: color-mix(in srgb, var(--c4) 22%, var(--bg)); border: 0; border-bottom: 0.2rem dashed var(--c4); border-radius: 0; }
+[data-sim="xss"] .sd-swatch[data-shape="xs-live"] { background: color-mix(in srgb, var(--c4) 20%, var(--bg)); border: 0.24rem solid var(--ink); }
+[data-sim="xss"] .sd-swatch[data-shape="xs-text"] { width: auto; height: auto; border: 0; background: transparent; font-family: var(--mono); line-height: 1; }
+[data-sim="xss"] .sd-swatch[data-shape="xs-text"]::before { content: '"a"'; }
+[data-sim="xss"] .sd-swatch[data-shape="xs-ran"] { width: auto; height: auto; border: 0; background: transparent; color: var(--danger); font-weight: 700; line-height: 1; }
+[data-sim="xss"] .sd-swatch[data-shape="xs-ran"]::before { content: '▶'; }
+[data-sim="xss"] .sd-swatch[data-shape="xs-cookie"] { width: 1.6em; background: var(--bg); border: 0.26rem double var(--danger); border-radius: 1em; }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="xss"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="xss"] .xs { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="xss"] .xs-col { gap: 0.7rem; }
+  [data-sim="xss"] .xs-mid, [data-sim="xss"] .xs-mid > .sd-seq { flex: none; }
+  [data-sim="xss"] .xs-mid .sd-seq-list { padding-bottom: 1.5rem; }
+  [data-sim="xss"] .xs-form { flex-wrap: wrap; }
+  [data-sim="xss"] .xs-store li { flex-wrap: wrap; }
+  [data-sim="xss"] .xs-tree > div { flex-wrap: wrap; }
+  /* a note on the victim's lane (the rightmost) grows to the left of its lifeline, on one line, inside the chart */
+  [data-sim="xss"] .sd-seq-note:has(> .xs-nv) { transform: translateX(calc(-100% + 0.6rem)); white-space: nowrap; max-width: none; }
+  [data-sim="xss"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Skriptiranje među stranicama (XSS)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var sim = null;
+
+  /** Data (HTML, paths, cookies, host names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'xs-mono' : cls || null }, String(text)); }
+  function inp(text) { return h('span', { translate: 'no', class: 'xs-mono xs-in' }, String(text)); }
+  function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function fresh(c, key) { return c.state.changed.indexOf(key) >= 0; }
+  function put(el, items) {
+    var out = [];
+    (function walk(x) { if (Array.isArray(x)) x.forEach(walk); else if (x !== null && x !== undefined) out.push(x); })(items);
+    el.replaceChildren.apply(el, out);
+  }
+  function encName(e) { return t(e === 'none' ? 'encNone' : e === 'htmlEncode' ? 'encHtml' : 'encText'); }
+  function cookieChip(safe) { return h('span', { class: 'xs-cookie', dataset: { safe: String(!!safe) }, translate: 'no' }, L.SID); }
+  function flag(on, label) { return h('span', { class: 'xs-flag', dataset: { on: String(!!on) } }, label, ' ', t(on ? 'on' : 'off')); }
+  function whatOf(r) {
+    if (r.how === 'script') return t('whatScript');
+    if (r.how === 'url') return t('whatUrl', { tag: r.tag });
+    return t('whatHandler', { event: r.event, tag: r.tag });
+  }
+
+  // ── the chart (K1) ──
+
+  var NOTE_KEY = { ran: 'noteRan', csp: 'noteCsp', armed: 'noteArmed', markup: 'noteMarkup', text: 'noteText',
+    'cookie-empty': 'noteCookieEmpty', read: 'noteRead', fix: 'noteFix', reflect: 'noteReflect' };
+
+  function renderChart(c) {
+    var s = c.state;
+    var rows = s.events.map(function (e) {
+      var changed = e.n === c.n;
+      var time = String(e.n);
+      if (e.kind === 'note') {
+        var text = e.what === 'saved' ? t('noteSaved', { id: e.id }) : t(NOTE_KEY[e.what]);
+        var k = e.what === 'ran' ? 'fill' : 'solid';
+        return { kind: 'note', lane: e.lane, text: h('span', { class: e.lane === 'V' ? 'xs-nv' : null }, text), k: k, time: time, changed: changed };
+      }
+      if (e.what === 'post') return { from: 'A', to: 'S', c: 2, label: e.line, fields: inp(trunc(e.data, 26)), time: time, changed: changed };
+      if (e.what === 'link') return { from: 'A', to: 'V', c: 2, label: h('span', null, t('rowLink')), fields: h('span', null, data(e.line), inp(trunc(e.data, 22))), time: time, changed: changed };
+      if (e.what === 'get-q') return { from: 'V', to: 'S', c: 1, label: e.line, fields: inp(trunc(e.data, 22)), time: time, changed: changed };
+      if (e.what === 'get') return { from: 'V', to: 'S', c: 1, label: e.line, fields: data('Cookie: ' + L.SID), time: time, changed: changed };
+      if (e.what === 'response') return { from: 'S', to: 'V', c: 6, label: e.line, fields: e.csp ? data("CSP: script-src 'self'") : h('span', null, t('fieldsHtml')), time: time, changed: changed };
+      // exfil: the cookie leaves the victim's browser
+      return { from: 'V', to: 'A', c: 2, label: 'GET ' + L.EVIL, place: 'mid', fields: cookieChip(false), time: time, changed: changed };
+    });
+    var p = c.params;
+    var lanes = [
+      { id: 'A', mark: t('markA'), c: 2, shape: 'square', name: t('laneA'), tags: data(L.EVIL, 'xs-mono xs-sm'),
+        body: h('div', { class: 'xs-card' }, h('p', { class: fresh(c, 'attacker') ? 'sd-changed' + anim(c) : null },
+          h('span', { class: 'xs-muted' }, t('aHas'), ' '), s.attackerHas ? cookieChip(false) : t('aNothing'))) },
+      { id: 'S', mark: t('markS'), c: 6, name: t('laneS'),
+        body: h('div', { class: 'xs-card' },
+          h('p', null, h('span', { class: 'xs-muted' }, t('sOutput'), ' '), h('b', null, encName(p.encoding))),
+          h('p', { class: fresh(c, 'store') ? 'sd-changed' + anim(c) : null }, p.kind === 'stored' ? t.n('sComments', s.stored.length) : t('sSavesNothing'))) },
+      { id: 'V', mark: t('markV'), c: 1, name: t('laneV'),
+        body: h('div', { class: 'xs-card' },
+          h('p', null, h('span', { class: 'xs-muted' }, t('vCookie'), ' '), cookieChip(true), ' ', p.httpOnly ? data('HttpOnly', 'xs-flag') : null),
+          h('p', { class: fresh(c, 'cookie') ? 'sd-changed' + anim(c) : null }, h('span', { class: 'xs-muted' }, t('vReads'), ' '),
+            s.cookieRead === null ? '—' : s.cookieRead === '' ? h('b', null, t('vEmpty')) : data(s.cookieRead))) }
+    ];
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '2.6rem',
+      lanes: lanes,
+      rows: rows,
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  // ── right: the form and the store or link ──
+
+  var ui = null;
+
+  function build(stage) {
+    var field = h('input', { id: 'xs-field', type: 'text', class: 'xs-field', maxlength: '60', spellcheck: 'false',
+      autocomplete: 'off', autocapitalize: 'off', translate: 'no', title: t('fieldHint') });
+    field.addEventListener('input', function () { if (sim) sim.set({ comment: field.value, payload: 'own' }); });
+    var label = h('label', { for: 'xs-field' });
+    var formTitle = h('h2');
+    var below = h('div');
+    var form = h('section', { class: 'xs-box' }, formTitle, h('div', { class: 'xs-form' }, label, field), below);
+    var textBox = h('section', { class: 'xs-box' });
+    var treeBox = h('section', { class: 'xs-box' });
+    var logBox = h('section', { class: 'xs-box' });
+    var mid = h('div', { class: 'xs-col xs-mid' });
+    var root = h('div', { class: 'xs' }, h('div', { class: 'xs-col' }, mid, logBox), h('div', { class: 'xs-col' }, form, textBox, treeBox));
+    stage.replaceChildren(root);
+    return { root: root, mid: mid, field: field, label: label, formTitle: formTitle, below: below, textBox: textBox, treeBox: treeBox, logBox: logBox };
+  }
+
+  function fillForm(c) {
+    var s = c.state, p = c.params, stored = p.kind === 'stored';
+    put(ui.formTitle, t(stored ? 'formStored' : 'formReflected'));
+    put(ui.label, t(stored ? 'fieldLabelStored' : 'fieldLabelReflected'));
+    if (document.activeElement !== ui.field && ui.field.value !== s.input) ui.field.value = s.input;
+    var items = [];
+    if (stored) {
+      items.push(h('div', { class: 'xs-sm xs-muted' }, t('storeTitle')));
+      items.push(h('ul', { class: 'xs-store' }, s.stored.map(function (cm) {
+        var mine = cm.author === L.ATTACKER;
+        return h('li', { class: mine && fresh(c, 'store') ? 'xs-hl' + anim(c) : null },
+          data('#' + cm.id, 'xs-who'), data(cm.author, 'xs-who'),
+          mine ? inp(cm.body === '' ? ' ' : cm.body) : data(cm.body, 'xs-body'),
+          cm.bad ? h('span', { class: 'xs-bad' }, t('markupMark')) : null);
+      })));
+    } else {
+      items.push(h('div', { class: 'xs-sm xs-muted' }, t('linkTitle')));
+      items.push(h('p', { class: 'xs-link' + (fresh(c, 'input') ? ' xs-hl' + anim(c) : '') }, s.link ? [data(L.SEARCH), inp(s.input)] : '—'));
+    }
+    var reach = s.reach;
+    if (!reach) items.push(h('p', { class: 'xs-reach xs-muted' }, t('reachNone')));
+    else items.push(h('p', { class: 'xs-reach' + (fresh(c, 'reach') || fresh(c, 'store') ? ' xs-hl' + anim(c) : ''), dataset: { r: reach.other ? 'every' : 'link' } },
+      t.parts(reach.other ? 'reachEvery' : 'reachLink', { path: data(L.PAGE) })));
+    put(ui.below, items);
+  }
+
+  // ── right: the response as text and the tree ──
+
+  function textLines(r, hl) {
+    var out = r.asText.lines.map(function (line) {
+      var hasIn = line.some(function (sg) { return sg.input; });
+      return h('div', { class: hasIn && hl ? 'xs-hl' : null }, line.map(function (sg) { return sg.input ? inp(sg.s) : data(sg.s, null); }));
+    });
+    if (r.asText.data.length) {
+      out.push(h('div', { class: 'xs-sub' }, t('dataLine')));
+      r.asText.data.forEach(function (d) {
+        out.push(h('div', { class: d.input && hl ? 'xs-hl' : null }, data(d.slot + '.textContent = ', null), d.input ? inp(JSON.stringify(d.value)) : data(JSON.stringify(d.value), null)));
+      });
+    }
+    return out;
+  }
+
+  function attrText(el) {
+    var id = null, rest = [];
+    el.attrs.forEach(function (a) { if (a[0] === 'id' && !el.input) id = a[1]; else rest.push(a[1] === '' ? a[0] : a[0] + '=' + a[1]); });
+    return el.tag + (id ? '#' + id : '') + (rest.length ? ' ' + rest.join(' ') : '');
+  }
+
+  function treeLines(c, nodes, runs) {
+    var s = c.state, out = [], idx = -1; // idx: the element's place in document order, as the model's runs record it
+    function markFor(el, at) {
+      if (!el.input || !runs) return null;
+      var mine = runs.filter(function (r) { return r.idx === at && r.input; });
+      if (!mine.length) return null;
+      var r = mine[0];
+      var m = r.auto && !r.blocked ? 'ran' : r.auto ? 'csp' : 'armed';
+      return h('span', { class: 'xs-mark', dataset: { m: m } }, m === 'ran' ? '▶' : m === 'csp' ? '⛔' : '◇');
+    }
+    function textNode(x) {
+      var q = '"' + x.text + '"';
+      return x.input ? h('span', { class: 'xs-txt' }, inp(q)) : data(q, 'xs-mono xs-txt');
+    }
+    function textRow(ind, x) {
+      return h('div', { class: x.input && fresh(c, 'tree') ? 'xs-hl' : null }, ind, textNode(x));
+    }
+    function walk(list, depth) {
+      list.forEach(function (x) {
+        if (x.t === 'text' && !x.text.trim()) return;
+        var ind = h('span', { class: 'xs-ind', 'aria-hidden': 'true' }, depth ? new Array(depth).join('  ') + '└ ' : '');
+        if (x.t === 'text') { out.push(textRow(ind, x)); return; }
+        var kids = x.kids.filter(function (k) { return k.t !== 'text' || k.text.trim(); });
+        var inline = kids.length === 1 && kids[0].t === 'text';
+        var node = h('span', { class: 'xs-node xs-mono', dataset: { live: String(!!x.input) }, translate: 'no' }, attrText(x));
+        var hl = (x.input || (inline && kids[0].input)) && fresh(c, 'tree');
+        idx++;
+        out.push(h('div', { class: hl ? 'xs-hl' : null }, ind, node, inline ? textNode(kids[0]) : null, markFor(x, idx)));
+        if (!inline) walk(kids, depth + 1);
+      });
+    }
+    walk(nodes, 0);
+    return out;
+  }
+
+  function fillPanes(c) {
+    var s = c.state, r = s.fix || s.rendered, isFix = !!s.fix;
+    var head = function (title, sub) {
+      return h('h2', null, t(title), isFix ? h('span', { class: 'xs-fixhead' + (fresh(c, 'text') ? anim(c) : '') }, t('fixTitle')) : h('span', null, t(sub)));
+    };
+    if (!r) {
+      put(ui.textBox, [head('textTitle', 'textSub'), h('p', { class: 'xs-muted xs-sm' }, t('paneEmpty'))]);
+      put(ui.treeBox, [head('treeTitle', 'treeSub'), h('p', { class: 'xs-muted xs-sm' }, t('paneEmpty'))]);
+      return;
+    }
+    put(ui.textBox, [head('textTitle', 'textSub'), h('div', { class: 'xs-code' }, textLines(r, fresh(c, 'text')))]);
+    var runs = isFix ? [] : (s.phase === 'response' ? null : s.runs);
+    put(ui.treeBox, [head('treeTitle', 'treeSub'), h('div', { class: 'xs-code xs-tree' }, treeLines(c, r.nodes, runs))]);
+  }
+
+  function logText(l) {
+    var what = l.how ? whatOf(l) : '';
+    switch (l.code) {
+      case 'ran': return t.parts('logRan', { what: what, code: data(l.src) });
+      case 'csp': return t.parts('logCsp', { what: what, code: data(l.src) });
+      case 'armed': return t.parts('logArmed', { what: what, code: data(l.src) });
+      case 'markup': return t.parts('logMarkup', { tags: data(l.tags.map(function (x) { return '<' + x + '>'; }).join(' ')) });
+      case 'text': return t('logText');
+      case 'sent': return t.parts('logSent', { sid: cookieChip(false), host: data(L.EVIL) });
+      case 'read': return t.parts('logRead', { sid: data(l.value) });
+      case 'cookie-empty': return t('logCookieEmpty');
+      case 'nothing-ran': return t('logNothingRan');
+      case 'ran-no-cookie': return t('logRanNoCookie');
+      default: return t('logFix');
+    }
+  }
+
+  function fillLog(c) {
+    var s = c.state, p = c.params;
+    var flags = h('span', null, flag(p.csp, 'CSP'));
+    var items = s.log.length ? h('ul', { class: 'xs-log' }, s.log.map(function (l) {
+      return h('li', { class: l.n === c.n ? 'xs-hl' + anim(c) : null, dataset: { code: l.code } }, logText(l));
+    })) : h('p', { class: 'xs-muted xs-sm' }, t('logEmpty'));
+    put(ui.logBox, [h('h2', null, t('logTitle'), flags), items]);
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = c.params;
+    switch (s.phase) {
+      case 'start': return t.parts(p.kind === 'stored' ? 'capStart' : 'capStartRefl', { input: inp(s.input === '' ? ' ' : s.input) });
+      case 'post': return t.parts('capPost', { req: data('POST ' + L.PAGE) });
+      case 'link': return t('capLink');
+      case 'store': return t.parts('capStore', { id: data(s.stored[s.stored.length - 1].id, '') });
+      case 'click': return t('capClick');
+      case 'open': return t('capOpen');
+      case 'reflect': return t('capReflect');
+      case 'response': {
+        var parts = p.encoding === 'none' ? [t('capRespNone')] : p.encoding === 'htmlEncode' ? [t('capRespHtml')]
+          : t.parts('capRespText', { slot: data(p.kind === 'stored' ? 'c3' : 'q') });
+        if (p.csp) parts.push(' ', t('capCspHeader'));
+        return parts;
+      }
+      case 'run': {
+        var more;
+        if (s.note === 'ran') {
+          var ran = s.runs.filter(function (r) { return r.auto && !r.blocked; });
+          var byScript = ran.some(function (r) { return r.how === 'script'; });
+          var onerror = ran.some(function (r) { return r.event === 'onerror'; });
+          more = byScript ? t('capRan')
+            : [onerror ? t('capRanImg') : t.parts('capRanHandler', { event: data(ran[0].event) }), ' ', t('capRan')];
+        } else if (s.note === 'csp') more = t('capCsp');
+        else if (s.note === 'armed') more = t('capArmed');
+        else more = t('capMarkup');
+        return [h('span', { class: 'sd-hl' }, t(p.kind === 'stored' ? 'capRanLead' : 'capRanLeadRefl')), ' ', more];
+      }
+      case 'text': {
+        var key = p.encoding === 'htmlEncode' ? 'capTextHtml' : p.encoding === 'textContent' ? 'capTextContent' : 'capTextPlain';
+        return h('span', { class: p.encoding === 'none' ? null : 'sd-hl' }, t(key));
+      }
+      case 'exfil':
+        if (s.note === 'stolen') return t.parts('capStolen', { sid: cookieChip(false), host: data(L.EVIL) });
+        if (s.note === 'httponly') return t('capHttpOnly');
+        if (s.note === 'read') return t.parts('capRead', { sid: data(L.SID) });
+        return t(s.note === 'nothing-ran' ? 'capNothingRan' : 'capRanNoCookie');
+      default: return h('span', { class: 'sd-hl' }, t('capFix'));
+    }
+  }
+
+  var labels = { 'stored-raw': 'presetStoredRaw', reflected: 'presetReflected', 'img-onerror': 'presetImg', encoded: 'presetEncoded', httponly: 'presetHttpOnly' };
+
+  sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'kind', type: 'choice', label: t('kind'), resets: true, value: L.defaults.kind,
+        options: [['stored', t('kindStored')], ['reflected', t('kindReflected')]] },
+      { key: 'encoding', type: 'choice', label: t('encoding'), value: L.defaults.encoding,
+        options: [['none', t('encNone')], ['htmlEncode', t('encHtml')], ['textContent', t('encText')]] },
+      { key: 'payload', type: 'choice', label: t('payload'), hint: t('payloadHint'), value: L.defaults.payload,
+        options: [['script', t('payScript')], ['img', t('payImg')], ['plain', t('payPlain')], ['own', t('payOwn')]] },
+      { key: 'httpOnly', type: 'toggle', label: t('httpOnly') },
+      { key: 'csp', type: 'toggle', label: t('csp'), hint: t('cspHint') }
+    ],
+
+    presets: [
+      { id: 'stored-raw', params: { kind: 'stored', encoding: 'none', payload: 'script' } },
+      { id: 'reflected', params: { kind: 'reflected', encoding: 'none', payload: 'script' } },
+      { id: 'img-onerror', params: { kind: 'stored', encoding: 'none', payload: 'img' } },
+      { id: 'encoded', params: { kind: 'stored', encoding: 'htmlEncode', payload: 'script' } },
+      { id: 'httponly', params: { kind: 'stored', encoding: 'none', payload: 'script', httpOnly: true } }
+    ].map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+
+    legend: [
+      { shape: 'xs-in', label: t('legendInput') },
+      { shape: 'xs-live', label: t('legendLive') },
+      { shape: 'xs-text', label: t('legendText') },
+      { shape: 'xs-ran', label: t('legendRan') },
+      { shape: 'xs-cookie', label: t('legendCookie') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      if (!ui || !c.stage.contains(ui.root)) ui = build(c.stage);
+      var chart = renderChart(c);
+      ui.mid.replaceChildren(chart);
+      fillForm(c);
+      fillPanes(c);
+      fillLog(c);
+      chart.fit();
+    },
+
+    caption: caption
+  });
+
+  // ---- the typed text survives a reload (the language switch reloads the page; text is not in the URL) ----
+  // Saved on leaving, restored once and only into the same address apart from ?lang=, so a later link to another
+  // preset never gets old text. Storage may be unavailable (private mode, file://): then the field starts fresh.
+  var KEEP = 'simdeck.xss.text';
+  function here() { var u = new URLSearchParams(window.location.search); u.delete('lang'); return window.location.pathname + '?' + u.toString(); }
+  window.addEventListener('pagehide', function () {
+    try { window.sessionStorage.setItem(KEEP, JSON.stringify({ at: here(), comment: sim.params.comment })); } catch (e) { /* no storage */ }
+  });
+  try {
+    var kept = JSON.parse(window.sessionStorage.getItem(KEEP) || 'null');
+    window.sessionStorage.removeItem(KEEP);
+    if (kept && kept.at === here() && typeof kept.comment === 'string' && kept.comment !== sim.params.comment) sim.set({ comment: kept.comment });
+  } catch (e) { /* no storage */ }
+})();
+</script>
+</body>
+</html>
