@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **338 of 469 entries are live**, 109 w3, 10 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 wip.
+**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **339 of 469 entries are live**, 109 w3, 10 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -351,7 +351,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
 | §4.10 Radio and crisis communications | 17 | 3 | 4 w3, 10 w3 · queued |
-| §4.11 Reference posters and classroom tools | 6 | 5 | 1 wip |
+| §4.11 Reference posters and classroom tools | 6 | 6 | – |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 0 | 25 w3 |
@@ -828,7 +828,7 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | `ref-linux-dirs` | live | The Linux directory tree | FHS: what lives where and why | click directories | ref | S | P3 | UL | UL ch05 |  |
 | `ref-protocol-headers` | live | Header poster | Ethernet, IPv4, IPv6, TCP, UDP headers side by side | hover fields | ref | S | P3 | URM | overlaps `spl-l2l3-protocols` |  |
 | `tool-countdown` | live | Exercise countdown | a projector-sized timer for in-class exercises | set and start | tool | S | P3 | all |  |  |
-| `tool-quick-poll` | wip | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today |  |
+| `tool-quick-poll` | live | Quick poll | students answer A–D from phones, results on the projector | ask, collect, reveal | tool | M | P3 | all | needs a server or a shared-state capability; out of scope for static pages today |  |
 
 ### 4.12 Finance basics for IT managers
 
