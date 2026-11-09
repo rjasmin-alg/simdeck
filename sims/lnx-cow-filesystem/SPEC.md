@@ -158,3 +158,67 @@ asserted in `sim.test.js`). Every op touches only blocks 0–3, so every scene r
 - **`action` param (write / take-shadow / restore):** the presets are fixed scripts, one op per step (the host's
   decision "scripts, not free-form ops"); the ops are those three.
 - **Steps:** 6 / 7 / 9 instead of about 8 / 8 / 10.
+
+## Comparison: copy-on-write vs redirect-on-write (preset `sto-cow-vs-row`)
+
+Task `docs/tasks/w3/cow-vs-row.md`, catalogue `sto-cow-vs-row` (§4.6, overlap §5.2). One concept: **where the old and
+the new block end up after a snapshot, and the write penalty.** Scenes `four-writes`, `rewrite-same`,
+`delete-snapshot` (presets 8–10) run in mode **`compare`** (`logic.mode(p)`); every other scene is unchanged (test
+"rule C7").
+
+**Model, added.** The state holds two sides, `cow` and `row`, each the host's fs data plus what the step did:
+`{ fs, io: { list, reads, writes, meta }, total: { reads, writes, meta }, allocated, freed, moved, copied, read }`.
+Both start from the same volume: file `a` of 8 blocks (A0…H0) in slots 0–7 and snapshot `@s1` of it, taken at step 0
+(`cmpStart`). Copy-on-write is `writeInPlace` (the win-vss mode) over a volume of 8 with a 4-slot snapshot area
+(diff ids 8–11 = slots 8–11); redirect-on-write is the host's `write` over 12 slots. `maps(fs)` gives the live and the
+snapshot map (logical block → slot; `snap` null once deleted). The geometry is fixed (`CMP`: 8 blocks, 12 slots); the
+host's `fileBlocks`, `poolSize` and `diffLimit` do not apply (tested).
+
+**Rules** (sources: lvcreate(8) and lvmthin(7), OpenZFS "Copy-on-write", Btrfs "Subvolumes"/"Snapshots", SNIA
+Dictionary "copy on write" and "redirect on write": all from memory, not re-read in this session; every rule *(check)*):
+
+- **C1 CoW, first write to b after the snapshot:** read the old block, write it to the lowest free slot of the
+  snapshot area, then write the new data in place: **1 read + 2 writes**. The live map does not change; the snapshot
+  map points to the copy (classic LVM snapshot, NLA T20).
+- **C2 CoW, a later write to the same b:** in place only, **1 write** (the old version is already preserved).
+- **C3 RoW:** the new data goes to a free slot, the live map is re-pointed, the old block stays and now belongs to the
+  snapshot only: **1 write + 1 metadata update, no read**. A previous live version the snapshot does not hold is freed
+  after the write (host rule 3) (CoW filesystems and thin pools, NLA T20/T22/T23; SNIA "redirect-on-write").
+- **C4 Fragmentation:** a sequential read of the live map in logical order; a **jump** is a next slot that is not the
+  previous + 1 (backwards counts too). `seqRead` returns the slots, the contiguous runs and the jumps. The read is not a
+  write: the I/O totals do not change.
+- **C5 Deleting the snapshot:** CoW drops its whole area at once; RoW frees only the slots no map points to any more
+  (reference counting: the host's `destroy`).
+- **C6 Tie-breaks:** RoW takes the lowest-numbered free slot (a slot freed in an earlier step first, never one freed in
+  the same write); CoW copies take the lowest free slot of the area. A write's I/Os are listed in order: the read, the
+  copy, then the in-place write (CoW); the new block, then the map update (RoW). Derived.
+- **C7 Lockstep:** both sides run every op of the same script; the `policy` param (both / cow / row) chooses only the
+  columns the page shows, never the state (ossimulator §11: each variant runs to its own end).
+- **Naming trap** (text only): the "copy-on-write" filesystems of NLA T22/T23 redirect on write by this taxonomy; the
+  start caption and the explanation say so once each (SNIA Dictionary) *(check)*.
+
+I/O accounting: per write, `ioOf('cow', r)` counts the copy's read and write and the in-place write; `ioOf('row', r)`
+counts the new block's write and one metadata update per moved pointer. The metadata a real CoW snapshot also writes
+(its exception table) and the pointer tree a real RoW system rewrites up to its root are **not** counted (the task's
+numbers; the explanation says so).
+
+**Presets and expected numbers** (printed by a node script over the model before the page; asserted in
+`sim.test.js`):
+
+| # | preset | steps | numbers |
+|---|---|---|---|
+| 8 | `four-writes` | **5** | write 1, 2, 5, 6, then read back. CoW **4 reads + 8 writes = 12 I/Os**, copies in 8, 9, 10, 11, live stays 0–7; RoW **4 writes + 4 metadata updates**, live 1, 2, 5, 6 in 8, 9, 10, 11. Step 5: CoW reads 0–7, 0 jumps; RoW reads 0, 8, 9, 3, 4, 10, 11, 7: **4 jumps** (0→8, 9→3, 4→10, 11→7) |
+| 9 | `rewrite-same` | **3** | write 1 three times. CoW 3 + 1 + 1 = **5 I/Os** (1 read, 4 writes); RoW 3 writes + 3 metadata updates; slots 8, 9, 8; steps 2 and 3 free 8, then 9 (the previous live version, not in the snapshot) |
+| 10 | `delete-snapshot` | **6** | `four-writes`, then delete the snapshot: CoW frees 8–11; RoW frees 1, 2, 5, 6, live stays in 0, 8, 9, 3, 4, 10, 11, 7 |
+
+## Deviations from the task (sto-cow-vs-row)
+
+- **The host model was extended additively** (as win-vss did), not requested and stopped: `ioOf`, `seqRead`, `maps`,
+  `cmpStart` and the `compare` mode; the host's functions are reused unchanged.
+- **State shape:** two sides `{ cow, row }` of the host's fs data instead of `{ mode, maps, slots, io, snapArea }`;
+  `maps()` gives the maps, the CoW snapshot area is diff ids 8–11.
+- **Param `policy`**, not `mode` (`logic.mode(p)` is already the scene's write policy and `data-mode` the page's).
+- **Legend:** an in-place write and a redirected write are the same solid arrow (from the live block to the slot
+  written; an arrow into the same slot cannot be drawn in K3); the metadata update is the kit's underline on the moved
+  live pointer, not an icon. Added: "free in the snapshot area" (ghost), "read in one run" (span), "jump while
+  reading" (dotted arc).

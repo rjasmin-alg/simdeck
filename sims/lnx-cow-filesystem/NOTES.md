@@ -259,3 +259,120 @@ No separate fresh reviewer (a preset task); the mutations and the script check s
 ## Time (win-vss)
 
 Start 2026-11-05 02:27 CET, done 02:42 CET (about 15 minutes, one session).
+
+---
+
+# Preset sto-cow-vs-row: copy-on-write vs redirect-on-write
+
+Task `docs/tasks/w3/cow-vs-row.md` (catalogue `sto-cow-vs-row` §4.6, overlap §5.2). Scenes `four-writes`,
+`rewrite-same`, `delete-snapshot` (presets 8–10) in compare mode; rules C1–C7 and numbers: `SPEC.md`, "Comparison".
+Preset entry in `sim.json`: `four-writes`.
+
+## Decisions (cow-vs-row)
+
+- **The host model was extended additively, not requested and stopped**, as win-vss did: the task lists four things
+  the host must support (a per-volume logical → physical map, a write policy switch, per-operation I/O accounting, two
+  volumes in lockstep). The host already had the map (a tree's pointer list) and both policies (`write` redirects,
+  `writeInPlace` copies first); this preset adds `ioOf` (the I/Os of one write, in order), `seqRead` (runs and jumps),
+  `maps`, the `compare` mode and the two-sided state. No host function changed; the 29 earlier tests pass; two generic
+  ones changed only to cover the new scenes (the step-count list; the fileBlocks/poolSize loop skips the comparison,
+  whose geometry is fixed and has its own test).
+- **Copy-on-write is the win-vss mode with a 4-slot area.** `writeInPlace` over a volume of 8 with `diffSize` 4 puts
+  the diff ids at 8–11, exactly the task's slots 8–11 for the snapshot area, so the CoW column needs no new write code.
+  The area never fills in these presets (at most 4 copies), so win-vss's "drop the oldest shadow" never runs here.
+- **Two K3 grids side by side**, one per policy: rows live map (8 cells, text = the version, `→slot` as sub), snapshot
+  map, then the 12 slots. Colours: blue = only the live volume, orange = only the snapshot, hatched neutral ×2 =
+  shared. The CoW snapshot area is a dashed span with its name under it; its free slots are `ghost`. A bracket above
+  was tried first: the read-for-copy arrow's level run passes through that band and crossed its label.
+- **Arrows:** the write (solid, from the live block down to the slot written: in place for CoW, the new slot for RoW),
+  the read for the copy (dashed, slot to slot, an arc over the row), and on the read-back step the jumps between runs
+  (dotted arcs). The metadata update is the moved live pointer: highlighted with the kit's underline mark.
+- **Under each grid:** this step's I/Os in order as numbered chips ("1. čitaj 1 · 2. piši 8 (kopija) · 3. piši 1 (na
+  mjestu)"), then a table of reads / writes / metadata / total for this write and for all writes since the snapshot;
+  the header counter is the running total. The read-back and the delete show what they read or freed instead.
+- **The read-back is not counted as I/O** in the totals: the totals are the write penalty (12 vs 4 + 4); the read's
+  cost is its jumps.
+- **`policy` param** (both / CoW / RoW, default both) only hides a column (rule C7: the model always runs both); it
+  keeps the captions to the columns shown.
+- **Captions:** the task's two sample captions are used for the first write (hr CoW: „staro se prvo pročita i prepiše
+  u snimku, pa tek onda novo ide na isto mjesto: 3 U/I operacije za jedno pisanje"; en RoW: "the new block goes to
+  slot 8 and only the pointer changes"), with the I/O count as a numeral. The start caption introduces the terms
+  (*snapshot*, *copy-on-write*, *redirect-on-write* with the Croatian in parentheses) and the naming trap (Btrfs and ZFS
+  are called copy-on-write but redirect on write), once. The last write of a scene adds the totals.
+- **Subtitle** in compare mode: `subtitleCmp` (the host's "writes go to new blocks" is only half of this comparison).
+- **Ten presets** no longer fit one column of the panel at 1920×1080 (957 > 827 px in Croatian): the panel lists them
+  in two columns (one on a phone), as `xss` and `wireguard` do. The tenth preset has no number key (the kit has 1–9).
+- **Grayscale:** shared blocks are hatched, owned ones solid; "live only" (blue) and "snapshot only" (orange) are
+  both solid and differ in grey only slightly. The version label carries it (B0 = the snapshot's old block, B1 = the
+  live data) and so does the map row whose `→n` points to the slot, as in the host, whose trees also differ by colour
+  and row only.
+- **Named:** LVM (classic snapshot vs thin pools, NLA T20), Btrfs and ZFS (NLA T22, T23), in the explanation and the
+  start caption only (the naming trap needs the names). No commands.
+
+## Deviations (cow-vs-row)
+
+See SPEC.md "Deviations from the task (sto-cow-vs-row)": additive host extension; two-sided state shape; param
+`policy` instead of `mode`; legend arrows and the metadata mark. The task's topic `storage` does not apply to a
+preset (a preset has no topic in `sim.json` entries; the host's topic is `linux-admin`); tag `filesystems` is the
+host's.
+
+## Sources (cow-vs-row)
+
+All **from memory, not re-read in this session (no network)**; every rule C1–C5 and the naming trap is *(check)*:
+
+- lvcreate(8) `-s` (a classic snapshot with its own COW area: the origin's old chunks are copied there on the first
+  write), lvmthin(7) (thin snapshots share the pool's blocks; new data goes to newly provisioned blocks) *(check)*.
+- OpenZFS documentation, "Copy-on-write" (blocks are never overwritten in place; new data goes to new blocks and the
+  block pointers are updated up to the uberblock) *(check)*.
+- Btrfs documentation, "Subvolumes" and "Snapshots" *(check)*.
+- SNIA Dictionary, "copy on write" and "redirect on write" *(check the entry titles and wording)*.
+- NLA `meta/toc.md` T20, T22, T23: chapters not written; used only for the topics and the word *snimka*.
+- Numbers: printed by a node script over the model before the page was written; they match the task's preset numbers
+  (12 vs 4 + 4, the 4 jumps, 5 vs 3 + 3, the freed slots) and are asserted in `sim.test.js`.
+- Not counted (simplification, said in the explanation): a CoW snapshot's own metadata write (its exception table)
+  and a RoW system's pointer-tree updates up to the root *(check how much they add)*.
+
+## Term pairs (cow-vs-row; missing from `kit/glossary.js`, written out in both tables)
+
+| en | hr |
+|---|---|
+| redirect-on-write | preusmjeravanje pri pisanju *(check)* |
+| write penalty | kazna pisanja *(check; the glossary has "small-write penalty" → kazna malog pisanja)* |
+| fragmentation (of a volume) | rascjepkanost *(check; the glossary has "internal / external fragmentation" → fragmentacija)* |
+| metadata | metapodaci (UL ch23) |
+| I/O | U/I (the glossary's "I/O module" → U/I modul) |
+| slot (physical position) | utor *(check)* |
+| snapshot area | područje snimke |
+
+## Shared requests (cow-vs-row)
+
+- **K3 arrow into the same cell:** a write in place ("an arrow into the same slot") cannot be drawn; a link with the
+  same cell at both ends is a spec error. A self-link drawn as a small loop or a bold down-tick on the cell would do.
+  The page draws the arrow from the live map's block to its slot instead.
+- **K3 dotted-link legend swatch:** the kit has `dash` (dashed line) but no dotted one; the page defines `dot`.
+- **kit.js presets past nine:** a tenth preset has no number key; presets 10+ could take `0` or a second row.
+- **Model promotion:** `ioOf` and `seqRead` are pure and word-free, like the host's functions, and can move to
+  `models/` with the rest.
+
+## Checks (cow-vs-row)
+
+- Numbers before the page: a node script over the model printing, per step and side, the live and snapshot maps, the
+  I/O list, the totals, the freed slots and the read's runs and jumps; they match the task.
+- `node --test sims/lnx-cow-filesystem/sim.test.js`: 39 tests (10 new). Mutations, each caught (11 of 11): no read
+  for the copy; the in-place write before the copy; no metadata update; RoW writing in place; CoW redirecting;
+  backwards steps not counted as jumps; the read-back counted as I/O; delete as a no-op; the policy changing the state;
+  a 3-slot area; a start without a snapshot.
+- Every comparison step in both languages at 1920×1080, plus single-column views and 375×812 (scripted): one screen,
+  no text under 16 px, no stage overflow, no console error. Screenshots looked at: four-writes 0, 1, 4, 5; rewrite-same
+  3; delete-snapshot 6; four-writes 1 CoW-only and 4 RoW-only; four-writes 1 at 375×812. The tightest is four-writes 4
+  in Croatian (a four-line caption with the totals).
+- `npm run gate -- lnx-cow-filesystem`: pass (65/65 browser checks, both entries open). `npm test` (8588) and
+  `npm run check` pass.
+
+## Review (cow-vs-row)
+
+No separate fresh reviewer (a preset task); the mutations and the script check stand in for it.
+
+## Time (cow-vs-row)
+
+Start 2026-11-09 06:06 CET, done 06:23 CET (about 17 minutes, one session).

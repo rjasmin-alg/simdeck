@@ -184,8 +184,8 @@ test('labels: letter = logical block, digit = times it was written before', () =
 });
 
 test('step counts per scene; every scene runs with every fileBlocks and poolSize', () => {
-  assert.deepEqual(logic.SCENE_IDS.map((id) => logic.steps(P({ scene: id }))), [3, 4, 7, 7, 6, 7, 9]);
-  for (const scene of logic.SCENE_IDS) {
+  assert.deepEqual(logic.SCENE_IDS.map((id) => logic.steps(P({ scene: id }))), [3, 4, 7, 7, 6, 7, 9, 5, 3, 6]);
+  for (const scene of logic.SCENE_IDS.filter((id) => logic.mode(P({ scene: id })) !== 'compare')) {
     const cow = logic.mode(P({ scene })) === 'copy-on-write';
     for (let fb = 4; fb <= 8; fb++) {
       for (const ps of [10, 12, 24]) {
@@ -364,6 +364,117 @@ test('copy-on-write mode is the win-vss scenes\' only; the host\'s scenes have n
   assert.deepEqual(ev(V('diff-full')).slice(7), ['overwrite', 'restore-none', 'restore']);
   assert.deepEqual(at(V('diff-full'), 8).dropped, []);            // what each step did is this step's only
   assert.deepEqual(at(V('diff-full'), 8).copied, []);
+});
+
+// ── preset sto-cow-vs-row: copy-on-write vs redirect-on-write (SPEC.md "Comparison", rules C1–C7) ──
+
+const C = (scene, over) => Object.assign({ scene }, over);
+const cAt = (scene, n, over) => at(C(scene, over), n);
+const maps = (sd) => logic.maps(sd.fs);
+const io = (sd) => sd.io.list.map((x) => x.io + ':' + x.slot + (x.to !== undefined ? '>' + x.to : ''));
+const tot = (sd) => [sd.total.reads, sd.total.writes, sd.total.meta];
+const vers = (sd) => Object.fromEntries(sd.fs.blocks.map((b) => [b.id, b.ver]));
+
+test('tie-break (C6): redirect-on-write takes the lowest free slot; a slot freed earlier is reused first', () => {
+  assert.deepEqual([1, 2, 3, 4].map((n) => cAt('four-writes', n).row.allocated), [[8], [9], [10], [11]]);
+  // rewrite-same: 1 → 8; 1 again → 9 (8 is still live until the new block is written), 8 freed; 1 again → 8
+  assert.deepEqual([1, 2, 3].map((n) => cAt('rewrite-same', n).row.allocated), [[8], [9], [8]]);
+  // copy-on-write copies go to the lowest free slot of the snapshot area (8–11)
+  assert.deepEqual([1, 2, 3, 4].map((n) => cAt('four-writes', n).cow.copied.map((c) => c.to)), [[8], [9], [10], [11]]);
+});
+
+test('tie-break (C6): the I/Os of one write are listed in order: read, copy, then the in-place write', () => {
+  assert.deepEqual(io(cAt('four-writes', 1).cow), ['read:1', 'write:8', 'write:1']);
+  assert.deepEqual(cAt('four-writes', 1).cow.io.list.map((x) => x.what), ['copy', 'copy', 'inplace']);
+  assert.deepEqual(io(cAt('four-writes', 1).row), ['write:8', 'meta:1>8']);
+});
+
+test('rule C1: copy-on-write, first write after the snapshot: 1 read + 2 writes, live stays, snapshot gets the copy', () => {
+  const s = cAt('four-writes', 1), sd = s.cow;
+  assert.deepEqual([sd.io.reads, sd.io.writes, sd.io.meta], [1, 2, 0]);
+  assert.deepEqual(maps(sd).live, [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(maps(sd).snap, [0, 8, 2, 3, 4, 5, 6, 7]);
+  assert.equal(vers(sd)[1], 'B1');                               // new data in place
+  assert.equal(vers(sd)[8], 'B0');                               // the old copy in the snapshot area
+});
+
+test('rule C2: copy-on-write, a later write to the same block: in place only, 1 write', () => {
+  const sd = cAt('rewrite-same', 2).cow;
+  assert.deepEqual(io(sd), ['write:1']);
+  assert.deepEqual(maps(sd).snap, [0, 8, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(tot(cAt('rewrite-same', 3).cow), [1, 4, 0]);  // 3 + 1 + 1 = 5 I/Os
+  assert.equal(vers(cAt('rewrite-same', 3).cow)[1], 'B3');
+});
+
+test('rule C3: redirect-on-write: new slot, live map re-pointed, old block now the snapshot\'s only; no read', () => {
+  const sd = cAt('four-writes', 1).row;
+  assert.deepEqual([sd.io.reads, sd.io.writes, sd.io.meta], [0, 1, 1]);
+  assert.deepEqual(maps(sd), { live: [0, 8, 2, 3, 4, 5, 6, 7], snap: [0, 1, 2, 3, 4, 5, 6, 7] });
+  assert.deepEqual([vers(sd)[1], vers(sd)[8]], ['B0', 'B1']);
+  assert.equal(sd.fs.blocks.find((b) => b.id === 1).refs, 1);
+  // a block the snapshot does not hold is not kept: the previous live version is freed (rewrite-same)
+  assert.deepEqual([1, 2, 3].map((n) => cAt('rewrite-same', n).row.freed), [[], [8], [9]]);
+  assert.deepEqual(tot(cAt('rewrite-same', 3).row), [0, 3, 3]);
+});
+
+test('rule C4: a sequential read of the live volume: copy-on-write 0 jumps, redirect-on-write 4', () => {
+  const s = cAt('four-writes', 5);
+  assert.equal(s.event, 'read');
+  assert.deepEqual(s.cow.read.slots, [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(s.cow.read.jumps, 0);
+  assert.deepEqual(s.row.read.slots, [0, 8, 9, 3, 4, 10, 11, 7]);
+  assert.equal(s.row.read.jumps, 4);
+  assert.deepEqual(s.row.read.runs.map((r) => [r.from, r.len]), [[0, 1], [8, 2], [3, 2], [10, 2], [7, 1]]);
+  assert.deepEqual(logic.seqRead([3, 4, 5]).jumps, 0);
+  assert.deepEqual(logic.seqRead([5, 4]).jumps, 1);            // backwards is a jump too
+  assert.deepEqual(s.cow.io.list, []);                          // the read is not a write: totals unchanged
+  assert.deepEqual(tot(s.cow), tot(cAt('four-writes', 4).cow));
+});
+
+test('rule C5: deleting the snapshot: copy-on-write drops its area, redirect-on-write frees only unreferenced slots', () => {
+  const s = cAt('delete-snapshot', 6);
+  assert.equal(s.event, 'destroy');
+  assert.deepEqual(s.cow.freed, [8, 9, 10, 11]);
+  assert.deepEqual(s.row.freed, [1, 2, 5, 6]);
+  assert.deepEqual(maps(s.row), { live: [0, 8, 9, 3, 4, 10, 11, 7], snap: null });  // live stays fragmented
+  assert.deepEqual(maps(s.cow), { live: [0, 1, 2, 3, 4, 5, 6, 7], snap: null });
+  assert.ok(s.cow.fs.blocks.every((b) => b.refs === 1) && s.row.fs.blocks.every((b) => b.refs === 1));
+});
+
+test('preset four-writes: copy-on-write 4 reads + 8 writes = 12 I/Os, redirect-on-write 4 writes + 4 metadata updates', () => {
+  const s = cAt('four-writes', 4);
+  assert.deepEqual(tot(s.cow), [4, 8, 0]);
+  assert.deepEqual(tot(s.row), [0, 4, 4]);
+  assert.deepEqual(maps(s.row).live, [0, 8, 9, 3, 4, 10, 11, 7]);
+  assert.deepEqual(maps(s.cow).snap, [0, 8, 9, 3, 4, 10, 11, 7]);   // the snapshot area holds the old copies
+  assert.deepEqual(sp({ blocks: s.cow.fs.blocks, trees: s.cow.fs.trees, poolSize: 8, writes: {}, diffSize: 4 }).diffUsed, 4);
+});
+
+test('rule C7: both volumes run in lockstep from the same script; the policy param changes no state', () => {
+  for (const scene of logic.CMP_SCENES) {
+    assert.equal(logic.mode(P({ scene })), 'compare');
+    for (let n = 1; n <= logic.steps(P({ scene })); n++) {
+      const s = cAt(scene, n);
+      assert.deepEqual(s.op, logic.SCENES[scene][n - 1]);
+      for (const pol of ['cow', 'row', 'both']) assert.deepEqual(cAt(scene, n, { policy: pol }), s);
+      // and neither depends on the host's sliders
+      assert.deepEqual(cAt(scene, n, { fileBlocks: 4, poolSize: 10, diffLimit: 2 }), s);
+    }
+  }
+  assert.deepEqual(['cow', 'row', 'both', 'x', undefined].map((v) => logic.policy({ policy: v })), ['cow', 'row', 'both', 'both', 'both']);
+  // the other scenes are untouched: no comparison fields
+  assert.equal('cmp' in at({}, 3), false);
+  assert.equal(logic.mode(P({ scene: 'basic' })), 'redirect-on-write');
+});
+
+test('comparison start: the same 8 blocks in slots 0–7 of both volumes, snapshot taken, nothing counted', () => {
+  const s = cAt('four-writes', 0);
+  for (const sd of [s.cow, s.row]) {
+    assert.deepEqual(maps(sd), { live: [0, 1, 2, 3, 4, 5, 6, 7], snap: [0, 1, 2, 3, 4, 5, 6, 7] });
+    assert.deepEqual(tot(sd), [0, 0, 0]);
+    assert.ok(sd.fs.blocks.every((b) => b.refs === 2));
+  }
+  assert.deepEqual([s.cow.fs.poolSize, s.cow.fs.diffSize, s.row.fs.poolSize], [8, 4, 12]);
 });
 
 // ── generic checks every sim keeps ──

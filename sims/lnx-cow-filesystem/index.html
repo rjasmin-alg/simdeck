@@ -5,6 +5,9 @@
      moves only the live pointer, rm and destroy free only what no tree points to. Drawn on kit view K3 (block grid).
      Preset win-vss (scenes previous-versions, diff-growth, diff-full) runs in copy-on-write mode: one row for the
      volume (the live data, never moved), one for the diff area, a row per shadow copy; renderCow below.
+     Preset cow-vs-row (scenes four-writes, rewrite-same, delete-snapshot) runs in compare mode: two grids side by side,
+     copy-on-write and redirect-on-write, each with its live map, snapshot map and 12 slots, and the I/Os of each write;
+     renderCmp below.
      Model: sim.js; rules: SPEC.md; words: strings.js. -->
 <html lang="hr" data-sim="lnx-cow-filesystem">
 <head>
@@ -82,9 +85,28 @@
 [data-sim="lnx-cow-filesystem"] .cw-table .cw-now { background: var(--hl); color: var(--on-hl); outline: 2px solid var(--ink); outline-offset: -2px; }
 [data-sim="lnx-cow-filesystem"] .cw-table tr[data-off] { color: var(--muted); }
 
-/* win-vss: the legend items and the explanation of the other mode are hidden (render sets data-mode on <html>) */
-[data-sim="lnx-cow-filesystem"][data-mode="cow"] [data-only="row"],
-[data-sim="lnx-cow-filesystem"]:not([data-mode="cow"]) [data-only="cow"] { display: none; }
+/* win-vss, cow-vs-row: the legend items and the explanation of the other modes are hidden (render sets data-mode on
+   <html>: row, cow or cmp) */
+[data-sim="lnx-cow-filesystem"][data-mode="row"] [data-only]:not([data-only="row"]),
+[data-sim="lnx-cow-filesystem"][data-mode="cow"] [data-only]:not([data-only="cow"]),
+[data-sim="lnx-cow-filesystem"][data-mode="cmp"] [data-only]:not([data-only="cmp"]) { display: none; }
+
+/* ten presets (four scenes of the host, three of win-vss, three of cow-vs-row): two columns so the panel fits one screen */
+[data-sim="lnx-cow-filesystem"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-cow-filesystem"] .sd-preset { line-height: 1.15; }
+
+/* cow-vs-row: two block grids side by side (copy-on-write, redirect-on-write), each with its I/O list and counters */
+[data-sim="lnx-cow-filesystem"] .cw-cmp { flex-direction: row; flex-wrap: wrap; align-items: flex-start; align-content: center; gap: 1.2cqw; }
+[data-sim="lnx-cow-filesystem"] .cw-cmp > .sd-bg { flex: 1 1 0; min-width: 0; }
+[data-sim="lnx-cow-filesystem"] .cw-cmp .sd-bg-grid { --bg-row-gap: 1.1rem; }
+[data-sim="lnx-cow-filesystem"] .cw-io { display: flex; flex-direction: column; gap: 0.4rem; width: 100%; }
+[data-sim="lnx-cow-filesystem"] .cw-ios { display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; margin: 0; padding: 0; list-style: none; min-height: 3.6rem; align-content: flex-start; }
+[data-sim="lnx-cow-filesystem"] .cw-ios li { padding: 0.05rem 0.45rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-cow-filesystem"] .cw-ios li[data-io="read"] { border-style: dashed; }
+[data-sim="lnx-cow-filesystem"] .cw-ios li[data-io="meta"] { border-color: var(--ink); }
+[data-sim="lnx-cow-filesystem"] .cw-ios .cw-none { border: 0; background: none; padding-left: 0; }
+/* legend: a jump of the sequential read (the dotted arc) */
+[data-sim="lnx-cow-filesystem"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.15em, transparent 0.15em 0.4em); }
 [data-sim="lnx-cow-filesystem"] .cw-foot .sd-bg-meter { flex: 1 1 14rem; align-self: center; }
 [data-sim="lnx-cow-filesystem"][data-mode="cow"] .cw .sd-bg-grid { --bg-row-gap: 0.9rem; }
 
@@ -94,6 +116,9 @@
   [data-sim="lnx-cow-filesystem"] .cw { height: auto; padding: 0.5rem; }
   [data-sim="lnx-cow-filesystem"] .cw .sd-bg-grid { --bg-row-gap: 1rem; }
   [data-sim="lnx-cow-filesystem"] .cw-foot { gap: 0.6rem 1rem; }
+  [data-sim="lnx-cow-filesystem"] .cw-cmp { flex-direction: column; flex-wrap: nowrap; align-items: stretch; align-content: normal; gap: 1rem; }
+  [data-sim="lnx-cow-filesystem"] .cw-cmp > .sd-bg { flex: none; }
+  [data-sim="lnx-cow-filesystem"] .sd-presets { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -123,6 +148,7 @@
         <summary></summary>
         <div data-t-html="explain" data-only="row"></div>
         <div data-t-html="explainCow" data-only="cow"></div>
+        <div data-t-html="explainCmp" data-only="cmp"></div>
       </details>
     </aside>
   </main>
@@ -210,17 +236,28 @@
     { shape: 'slot', label: t('legFree') },
     { shape: 'bg-dead', label: t('legFreed') },
     { shape: 'bg-link', label: t('legMoved'), only: 'row' },
-    { shape: 'bg-link', label: t('legMovedCow'), only: 'cow' }
+    { shape: 'bg-link', label: t('legMovedCow'), only: 'cow' },
+    // cow-vs-row (comparison)
+    { shape: 'hl', label: t('legCmpWritten'), only: 'cmp' },
+    { shape: 'bg-soft', c: Number(SHARED), label: t('legCmpShared'), only: 'cmp' },
+    { shape: 'bg-fill', c: 1, label: t('legCmpLive'), only: 'cmp' },
+    { shape: 'bg-fill', c: 2, label: t('legCmpSnap'), only: 'cmp' },
+    { shape: 'bg-ghost', label: t('legCmpArea'), only: 'cmp' },
+    { shape: 'bg-link', label: t('legCmpWrite'), only: 'cmp' },
+    { shape: 'dash', label: t('legCmpRead'), only: 'cmp' },
+    { shape: 'under', label: t('legCmpMeta'), only: 'cmp' },
+    { shape: 'bg-span', label: t('legCmpRun'), only: 'cmp' },
+    { shape: 'dot', label: t('legCmpJump'), only: 'cmp' }
   ];
   function setMode(p) {
-    var cow = L.mode(p) === 'copy-on-write';
-    if (cow) document.documentElement.dataset.mode = 'cow';
-    else delete document.documentElement.dataset.mode;
-    // the host's subtitle says writes go to new blocks: in copy-on-write mode the subtitle says what this mode does
+    var m = L.mode(p), cow = m === 'copy-on-write', cmp = m === 'compare';
+    document.documentElement.dataset.mode = cmp ? 'cmp' : cow ? 'cow' : 'row';
+    // the host's subtitle says writes go to new blocks: in copy-on-write mode and in the comparison the subtitle says
+    // what that mode does
     var sub = document.querySelector('.sd-subtitle');
     if (sub) {
       if (sub.dataset.host === undefined) sub.dataset.host = sub.textContent;
-      sub.textContent = cow ? t('subtitleCow') : sub.dataset.host;
+      sub.textContent = cmp ? t('subtitleCmp') : cow ? t('subtitleCow') : sub.dataset.host;
     }
     var lis = document.querySelectorAll('[data-sd-legend] > li');
     LEGEND.forEach(function (it, i) { if (lis[i] && it.only) lis[i].dataset.only = it.only; });
@@ -231,6 +268,7 @@
   function render(c) {
     setMode(c.params);
     if (L.mode(c.params) === 'copy-on-write') { renderCow(c); return; }
+    if (L.mode(c.params) === 'compare') { renderCmp(c); return; }
     var s = c.state, p = c.params, o = L.norm(p), prev = c.prev;
     var moved = {};
     s.moved.forEach(function (m) { moved[m.k] = m; });
@@ -598,6 +636,177 @@
     return capError(c);
   }
 
+  // ── cow-vs-row: copy-on-write and redirect-on-write side by side (SPEC.md "Comparison") ──
+
+  var CMP_COLOUR = { live: '1', snap: '2' };
+  /** The sides the page shows: both, or the one the policy param picks (the model always runs both). */
+  function cmpSides(p) { var pol = L.policy(p); return pol === 'both' ? ['cow', 'row'] : [pol]; }
+  function contiguous(map) { return L.seqRead(map).jumps === 0; }
+
+  function renderCmp(c) {
+    var grids = cmpSides(c.params).map(function (k) { return cmpGrid(c, k); });
+    c.stage.replaceChildren(h('div', { class: 'cw cw-cmp' }, grids));
+  }
+
+  /** One side: the live map and the snapshot map (logical block → slot) over the row of 12 physical slots. */
+  function cmpGrid(c, k) {
+    var s = c.state, p = c.params, sd = s[k], before = c.prev ? c.prev[k] : null;
+    var f = sd.fs, m = L.maps(f), was = before ? L.maps(before.fs) : m;
+    var N = L.CMP.vol, SLOTS = L.CMP.slots, snapGone = m.snap === null;
+    var written = {}, read = {};
+    sd.io.list.forEach(function (x) { if (x.io === 'write') written[x.slot] = true; else if (x.io === 'read') read[x.slot] = true; });
+    var freed = {};
+    sd.freed.forEach(function (id) { freed[id] = true; });
+    var freedVer = {};
+    if (before) before.fs.blocks.forEach(function (b) { freedVer[b.id] = b.ver; });
+
+    var mapRow = function (id, map, old, colour, meta) {
+      var cells = [];
+      for (var i = 0; i < N; i++) {
+        if (!map) { cells.push(null); continue; }
+        var b = block(f, map[i]), moved = old && old[i] !== map[i];
+        cells.push({ text: b.ver, sub: '→' + b.id, kind: b.refs >= 2 ? 'soft' : 'fill', c: b.refs >= 2 ? SHARED : colour,
+          now: !!moved, mark: meta && moved ? 'under' : undefined });
+      }
+      return cells;
+    };
+    var slots = [];
+    for (var id = 0; id < SLOTS; id++) {
+      var b = block(f, id), area = k === 'cow' && id >= N;
+      if (b) {
+        var hs = L.holders(f, id);
+        slots.push({ text: b.ver, sub: p.showRefs ? '×' + b.refs : undefined, kind: b.refs >= 2 ? 'soft' : 'fill',
+          c: b.refs >= 2 ? SHARED : hs[0] === L.LIVE ? CMP_COLOUR.live : CMP_COLOUR.snap, now: !!written[id] });
+      } else if (freed[id]) slots.push({ text: freedVer[id], sub: p.showRefs ? '×0' : undefined, kind: 'dead' });
+      else slots.push(area ? { kind: 'ghost' } : {});
+    }
+    // copy-on-write's snapshot area: a dashed outline with its name under it (a bracket above would meet the arrows)
+    var spans = k === 'cow' ? [{ from: N, len: SLOTS - N, label: h('span', null, t('cmpArea')), style: 'dashed' }] : [];
+    if (sd.read) spans = spans.concat(sd.read.runs.map(function (r) { return { from: r.from, len: r.len, now: true }; }));
+    var slotRow = { id: 'slots', label: h('span', null, t('cmpSlots')), cells: slots, spans: spans };
+    var snapLabel = snapGone ? h('span', { class: 'cw-gone' }, t('cmpSnap')) : h('span', null, t('cmpSnap'));
+    var rows = [
+      { id: 'live', label: h('span', null, t('cmpLive')), cells: mapRow('live', m.live, before && was.live, CMP_COLOUR.live, k === 'row') },
+      { id: 'snap', label: snapLabel, cells: mapRow('snap', m.snap, before && was.snap, CMP_COLOUR.snap, false) },
+      slotRow
+    ];
+
+    // this step's arrows: the read for the copy (dashed, slot to slot), each write (from the live block to its slot)
+    var links = [];
+    sd.io.list.forEach(function (x) {
+      if (x.io === 'read') {
+        var to = sd.io.list.filter(function (y) { return y.io === 'write' && y.what === 'copy' && y.k === x.k; })[0];
+        links.push({ from: { row: 'slots', cell: x.slot }, to: { row: 'slots', cell: to.slot }, style: 'dashed', now: true });
+      } else if (x.io === 'write' && x.what !== 'copy') links.push({ from: { row: 'live', cell: x.k }, to: { row: 'slots', cell: x.slot }, now: true });
+    });
+    // the read-back: the jumps between the runs it reads (dotted arcs)
+    if (sd.read) sd.read.runs.forEach(function (r, i) {
+      var nx = sd.read.runs[i + 1];
+      if (nx) links.push({ from: { row: 'slots', cell: r.from + r.len - 1 }, to: { row: 'slots', cell: nx.from }, style: 'dotted' });
+    });
+
+    var ops = sd.total.reads + sd.total.writes + sd.total.meta;
+    var opsWas = before ? before.total.reads + before.total.writes + before.total.meta : ops;
+    return Simdeck.blockGrid({
+      dir: c.dir,
+      title: t(k === 'cow' ? 'cmpCowTitle' : 'cmpRowTitle'),
+      count: { text: t('cmpCount', { n: ops }), hl: ops !== opsWas },
+      cols: SLOTS,
+      colLabels: slots.map(function (x, i) { return String(i); }),
+      cellHeight: '3.1rem',
+      rows: rows, links: links,
+      foot: [cmpFoot(c, k)]
+    });
+  }
+
+  /** Under each grid: this step's I/Os in order (or the read-back's jumps, or what the delete freed), then the counters
+      for this write and for all writes since the snapshot. */
+  function cmpFoot(c, k) {
+    var s = c.state, sd = s[k];
+    var items;
+    if (sd.read) {
+      items = [h('li', { class: 'cw-none' }, rich('ioReadBack', { list: data(sd.read.slots.join(' → ')), n: t.n('jumps', sd.read.jumps) }))];
+    } else if (s.event === 'destroy') {
+      items = [h('li', { class: 'cw-none' }, rich(k === 'cow' ? 'ioDropArea' : 'ioFreeRefs', { list: ids(sd.freed) }))];
+    } else if (!sd.io.list.length) {
+      items = [h('li', { class: 'cw-none' }, t('ioNone'))];
+    } else {
+      items = sd.io.list.map(function (x, i) {
+        var key = x.io === 'read' ? 'ioRead' : x.io === 'meta' ? 'ioMeta' : x.what === 'copy' ? 'ioWriteCopy' : x.what === 'inplace' ? 'ioWriteIn' : 'ioWriteNew';
+        return h('li', { dataset: { io: x.io } }, data((i + 1) + '. '), rich(key, { slot: data(x.slot), k: data(x.k), to: data(x.to) }));
+      });
+    }
+    var write = s.event === 'overwrite';
+    var cell = function (v, hl) { return h('td', { class: hl ? 'cw-now' : null }, v === null ? '–' : String(v)); };
+    var io = sd.io, tot = sd.total;
+    var table = h('table', { class: 'cw-table' },
+      h('thead', null, h('tr', null, h('th', null, ''), h('th', null, t('thReads')), h('th', null, t('thWrites')), h('th', null, t('thMeta')), h('th', null, t('thOps')))),
+      h('tbody', null,
+        h('tr', null, h('th', null, t('thThisWrite')),
+          cell(write ? io.reads : null), cell(write ? io.writes : null), cell(write ? io.meta : null), cell(write ? io.reads + io.writes + io.meta : null)),
+        h('tr', null, h('th', null, t('thAllWrites')),
+          cell(tot.reads, write && io.reads > 0), cell(tot.writes, write && io.writes > 0), cell(tot.meta, write && io.meta > 0),
+          cell(tot.reads + tot.writes + tot.meta, write))));
+    return h('div', { class: 'cw-io' }, h('ol', { class: 'cw-ios' }, items), table);
+  }
+
+  // ── captions (comparison) ──
+
+  function firstWrite(c) {
+    var sc = L.script(c.params);
+    for (var i = 0; i < c.n - 1; i++) if (sc[i].op === 'write') return false;
+    return true;
+  }
+  function lastWrite(c) { var nx = L.script(c.params)[c.n]; return !nx || nx.op !== 'write'; }
+
+  function captionCmp(c) {
+    var s = c.state, sides = cmpSides(c.params), has = function (k) { return sides.indexOf(k) >= 0; };
+    var out;
+    if (s.event === 'start') {
+      out = rich('capCmpStart', { snap: term('termSnap'), list: data('0–' + (L.CMP.vol - 1)) });
+      out = out.concat(sp(rich(sides.length === 2 ? 'capCmpBoth' : sides[0] === 'cow' ? 'capCmpCowOnly' : 'capCmpRowOnly',
+        { cow: term('termCmpCow'), row: term('termCmpRow') })));
+      if (has('row')) out = out.concat(sp(rich('capCmpTrap', { cow: term('termCow', has('cow')) })));
+      return out;
+    }
+    if (s.event === 'overwrite') {
+      var k = s.op.idx[0];
+      out = rich('capCmpHead', { k: data(k) });
+      if (has('cow')) {
+        var cw = s.cow;
+        out = out.concat(sp(cw.copied.length
+          ? rich('capCmpCowFirst', { to: data(cw.copied[0].to), n: t.n('ops', cw.io.list.length) })
+          : rich('capCmpCowAgain', { n: t.n('ops', cw.io.list.length) })));
+      }
+      if (has('row')) {
+        var rw = s.row, mv = rw.moved[0];
+        out = out.concat(sp(rich('capCmpRow', { to: data(mv.to) })));
+        if (rw.freed.length) out = out.concat(sp(rich('capCmpRowFreed', { old: data(mv.from) })));
+        else out = out.concat(sp(rich('capCmpRowKept', { old: data(mv.from) })));
+        var was = L.maps(c.prev.row.fs).live;
+        if (contiguous(was) && !contiguous(L.maps(rw.fs).live)) out = out.concat(sp(rich('capCmpRowFrag')));
+      }
+      if (lastWrite(c) && !firstWrite(c)) {
+        var nw = L.script(c.params).filter(function (o) { return o.op === 'write'; }).length;
+        var ct = s.cow.total, rt = s.row.total;
+        out = out.concat(sp(rich(sides.length === 2 ? 'capCmpTotalBoth' : sides[0] === 'cow' ? 'capCmpTotalCow' : 'capCmpTotalRow', {
+          w: t.n('writesN', nw), n: t.n('ops', ct.reads + ct.writes + ct.meta), reads: t.n('reads', ct.reads), writes: t.n('writesN', ct.writes),
+          rwrites: t.n('writesN', rt.writes), meta: t.n('metas', rt.meta) })));
+      }
+      return out;
+    }
+    if (s.event === 'read') {
+      out = rich('capCmpRead');
+      if (has('cow')) out = out.concat(sp(rich('capCmpReadCow', { list: data(s.cow.read.slots.join(' → ')), n: t.n('jumps', s.cow.read.jumps) })));
+      if (has('row')) out = out.concat(sp(rich('capCmpReadRow', { list: data(s.row.read.slots.join(' → ')), n: t.n('jumps', s.row.read.jumps) })));
+      return out;
+    }
+    out = rich('capCmpDestroy', { snap: term('termSnap', true) });
+    if (has('cow')) out = out.concat(sp(rich('capCmpDestroyCow', { list: ids(s.cow.freed) })));
+    if (has('row')) out = out.concat(sp(rich('capCmpDestroyRow', { list: ids(s.row.freed) })));
+    return out;
+  }
+
   Simdeck.mount({
     steps: L.steps,
     defaults: L.defaults,
@@ -608,11 +817,16 @@
       { key: 'scene', type: 'select', label: t('scene'), resets: true,
         options: [['basic', t('presetBasic')], ['delete-doesnt-free', t('presetDelete')], ['middle-snapshot', t('presetMiddle')],
           ['full-pool', t('presetFull')], ['previous-versions', t('presetPrev')], ['diff-growth', t('presetGrowth')],
-          ['diff-full', t('presetDiffFull')]],
+          ['diff-full', t('presetDiffFull')], ['four-writes', t('presetFour')], ['rewrite-same', t('presetRewrite')],
+          ['delete-snapshot', t('presetDelSnap')]],
         visible: function () { return false; } },
-      { key: 'fileBlocks', type: 'range', label: t('fileBlocks'), min: 4, max: 8, resets: true },
+      { key: 'policy', type: 'choice', label: t('policy'),
+        options: [['both', t('polBoth')], ['cow', t('polCow')], ['row', t('polRow')]],
+        visible: function (q) { return L.mode(q) === 'compare'; } },
+      { key: 'fileBlocks', type: 'range', label: t('fileBlocks'), min: 4, max: 8, resets: true,
+        visible: function (q) { return L.mode(q) !== 'compare'; } },
       { key: 'poolSize', type: 'range', label: t('poolSize'), min: 10, max: 24, resets: true,
-        visible: function (q) { return L.mode(q) !== 'copy-on-write'; } },
+        visible: function (q) { return L.mode(q) === 'redirect-on-write'; } },
       { key: 'diffLimit', type: 'range', label: t('diffLimit'), min: 2, max: 8, resets: true,
         visible: function (q) { return L.mode(q) === 'copy-on-write'; } },
       { key: 'showRefs', type: 'toggle', label: t('showRefs') }
@@ -625,7 +839,10 @@
       { id: 'full-pool', label: t('presetFull'), params: { scene: 'full-pool', poolSize: 10 }, hint: t('presetFullHint') },
       { id: 'previous-versions', label: t('presetPrev'), params: { scene: 'previous-versions', poolSize: 10, diffLimit: 8 }, hint: t('presetPrevHint') },
       { id: 'diff-growth', label: t('presetGrowth'), params: { scene: 'diff-growth', poolSize: 10, diffLimit: 8 }, hint: t('presetGrowthHint') },
-      { id: 'diff-full', label: t('presetDiffFull'), params: { scene: 'diff-full', poolSize: 10, diffLimit: 4 }, hint: t('presetDiffFullHint') }
+      { id: 'diff-full', label: t('presetDiffFull'), params: { scene: 'diff-full', poolSize: 10, diffLimit: 4 }, hint: t('presetDiffFullHint') },
+      { id: 'four-writes', label: t('presetFour'), params: { scene: 'four-writes', policy: 'both' }, hint: t('presetFourHint') },
+      { id: 'rewrite-same', label: t('presetRewrite'), params: { scene: 'rewrite-same', policy: 'both' }, hint: t('presetRewriteHint') },
+      { id: 'delete-snapshot', label: t('presetDelSnap'), params: { scene: 'delete-snapshot', policy: 'both' }, hint: t('presetDelSnapHint') }
     ],
 
     legend: LEGEND,
@@ -635,6 +852,7 @@
     caption: function (c) {
       var s = c.state;
       if (L.mode(c.params) === 'copy-on-write') return captionCow(c);
+      if (L.mode(c.params) === 'compare') return captionCmp(c);
       if (s.event === 'start') return rich('capStart', { pool: t.n('blocksOf', s.poolSize), live: data(L.LIVE) });
       if (s.event === 'create') return capCreate(c);
       if (s.event === 'snapshot') return capSnap(c);

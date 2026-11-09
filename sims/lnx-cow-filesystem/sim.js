@@ -13,7 +13,10 @@
    'copy-on-write' the live file's blocks never move; on the first change of a block a shadow still shares, the old
    block is first copied into a separate diff area (ids poolSize … poolSize + diffSize − 1), the shadows' pointers move
    to the copy, and the new data overwrites the original in place (writeInPlace, restore, pickShadow). The host's
-   scenes run in mode 'redirect-on-write' and are unchanged. */
+   scenes run in mode 'redirect-on-write' and are unchanged.
+   Preset sto-cow-vs-row (SPEC.md "Comparison: copy-on-write vs redirect-on-write") runs the same writes on two
+   volumes in lockstep: one in place with a snapshot area (writeInPlace over 8 slots + 4), one redirected (write over
+   12 slots), and counts each write's I/Os (ioOf) and the live volume's jumps on a sequential read (seqRead). */
 (function (root) {
   'use strict';
 
@@ -82,11 +85,38 @@
       { op: 'write', file: FILE, idx: [0, 1], time: '11:30' },
       { op: 'restore', file: FILE, before: '09:30', time: '12:00' },
       { op: 'restore', file: FILE, before: '11:30', time: '12:15' }
+    ],
+    // sto-cow-vs-row (comparison): a volume of 8 blocks in slots 0–7 and a snapshot taken at step 0; each write goes
+    // to both volumes. `read` reads the live volume in logical order; `destroy` deletes the snapshot.
+    'four-writes': [
+      { op: 'write', file: FILE, idx: [1] },
+      { op: 'write', file: FILE, idx: [2] },
+      { op: 'write', file: FILE, idx: [5] },
+      { op: 'write', file: FILE, idx: [6] },
+      { op: 'read', file: FILE }
+    ],
+    'rewrite-same': [
+      { op: 'write', file: FILE, idx: [1] },
+      { op: 'write', file: FILE, idx: [1] },
+      { op: 'write', file: FILE, idx: [1] }
+    ],
+    'delete-snapshot': [
+      { op: 'write', file: FILE, idx: [1] },
+      { op: 'write', file: FILE, idx: [2] },
+      { op: 'write', file: FILE, idx: [5] },
+      { op: 'write', file: FILE, idx: [6] },
+      { op: 'read', file: FILE },
+      { op: 'destroy', name: '@s1' }
     ]
   };
   var SCENE_IDS = Object.keys(SCENES);
   /** The write policy of each scene: the host's scenes redirect, the win-vss scenes copy the old block first. */
   var COW_SCENES = ['previous-versions', 'diff-growth', 'diff-full'];
+  /** sto-cow-vs-row: the scenes that run both policies side by side (rules C1–C7). */
+  var CMP_SCENES = ['four-writes', 'rewrite-same', 'delete-snapshot'];
+  /** The comparison's fixed geometry: a volume of 8 blocks, 12 physical slots; copy-on-write keeps slots 8–11 as its
+      snapshot area (the diff ids of writeInPlace), redirect-on-write may use all 12. */
+  var CMP = { vol: 8, slots: 12, snap: '@s1' };
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function findTree(fs, name) { for (var i = 0; i < fs.trees.length; i++) if (fs.trees[i].name === name) return fs.trees[i]; return null; }
@@ -323,6 +353,95 @@
     return writeInPlace(fs, LIVE, file, ks, undefined, { vers: vers, keep: from });
   }
 
+  // ── comparison (sto-cow-vs-row; SPEC.md "Comparison", rules C1–C7) ──
+
+  /** Rules C1–C3: the I/Os of one write, in order, from what writeInPlace (policy 'cow') or write (policy 'row')
+      did. Copy-on-write: per block a shadow shared, read the old block and write it to the snapshot area; then write
+      every block in place. Redirect-on-write: per block, write the new block to its new slot, then update the live
+      map (one metadata update). Returns { list: [{ io: 'read'|'write'|'meta', k, slot, to, what }], reads, writes,
+      meta }. */
+  function ioOf(policy, r) {
+    var list = [];
+    if (policy === 'cow') {
+      (r.copied || []).forEach(function (c) {
+        list.push({ io: 'read', k: c.k, slot: c.from, what: 'copy' });
+        list.push({ io: 'write', k: c.k, slot: c.to, what: 'copy' });
+      });
+      var live = findTree(r.fs, LIVE).files[FILE];
+      (r.overwritten || []).forEach(function (id) { list.push({ io: 'write', k: live.indexOf(id), slot: id, what: 'inplace' }); });
+    } else {
+      r.moved.forEach(function (m) {
+        list.push({ io: 'write', k: m.k, slot: m.to, what: 'redirect' });
+        list.push({ io: 'meta', k: m.k, slot: m.from, to: m.to, what: 'pointer' });
+      });
+    }
+    var n = function (kind) { return list.filter(function (x) { return x.io === kind; }).length; };
+    return { list: list, reads: n('read'), writes: n('write'), meta: n('meta') };
+  }
+
+  /** Rule C4: a sequential read of a map in logical order: the slots visited, the contiguous runs ({ from, len, at }:
+      first slot, length, index of the first logical block) and the jumps (a next slot that is not the previous + 1). */
+  function seqRead(map) {
+    var runs = [];
+    map.forEach(function (slot, k) {
+      var last = runs[runs.length - 1];
+      if (last && slot === last.from + last.len) last.len++;
+      else runs.push({ from: slot, len: 1, at: k });
+    });
+    return { slots: map.slice(), runs: runs, jumps: runs.length - 1 };
+  }
+
+  /** The comparison's start: the same 8 blocks A0…H0 in slots 0–7 of both volumes and a snapshot of each. */
+  function cmpStart() {
+    var base = function (size, diff) {
+      var fs = { blocks: [], trees: [{ name: LIVE, readonly: false, files: {} }], poolSize: size, writes: {} };
+      if (diff) fs.diffSize = diff;
+      return snapshot(write(fs, LIVE, FILE, undefined, CMP.vol).fs, CMP.snap).fs;
+    };
+    return { cow: base(CMP.vol, CMP.slots - CMP.vol), row: base(CMP.slots) };
+  }
+
+  function side(fs, total) {
+    return { fs: fs, io: { list: [], reads: 0, writes: 0, meta: 0 }, total: total || { reads: 0, writes: 0, meta: 0 },
+      allocated: [], freed: [], moved: [], copied: [], read: null };
+  }
+
+  /** One op on one side: 'cow' writes in place with a snapshot area, 'row' redirects. */
+  function cmpOp(policy, sd, op) {
+    var fs = sd.fs, out = side(fs, clone(sd.total)), r;
+    if (op.op === 'write') {
+      r = policy === 'cow' ? writeInPlace(fs, LIVE, op.file, op.idx) : write(fs, LIVE, op.file, op.idx);
+      var io = ioOf(policy, r);
+      out.io = io;
+      out.total = { reads: sd.total.reads + io.reads, writes: sd.total.writes + io.writes, meta: sd.total.meta + io.meta };
+    } else if (op.op === 'read') {
+      r = result(clone(fs));
+      out.read = seqRead(findTree(fs, LIVE).files[op.file]);
+    } else r = destroy(fs, op.name);
+    out.fs = r.fs;
+    out.err = r.err;
+    out.allocated = r.allocated; out.moved = r.moved; out.copied = r.copied || [];
+    out.freed = r.freed.map(function (f) { return f.id; }).sort(function (a, b) { return a - b; });
+    return out;
+  }
+
+  function cmpInitial() {
+    var st = cmpStart();
+    return { cmp: true, op: null, event: 'start', cow: side(st.cow), row: side(st.row) };
+  }
+
+  function cmpStep(s, n, p) {
+    var op = script(p)[n - 1];
+    return { cmp: true, op: clone(op), event: op.op === 'write' ? 'overwrite' : op.op,
+      cow: cmpOp('cow', s.cow, op), row: cmpOp('row', s.row, op) };
+  }
+
+  /** The live and the snapshot map of one side (logical block → slot); snap is null once deleted. */
+  function maps(fs) {
+    var sn = findTree(fs, CMP.snap);
+    return { live: findTree(fs, LIVE).files[FILE].slice(), snap: sn ? sn.files[FILE].slice() : null };
+  }
+
   function norm(p) {
     var clamp = function (v, lo, hi, d) { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
     return {
@@ -332,7 +451,12 @@
     };
   }
 
-  function mode(p) { return COW_SCENES.indexOf(norm(p).scene) >= 0 ? 'copy-on-write' : 'redirect-on-write'; }
+  function mode(p) {
+    var sc = norm(p).scene;
+    return CMP_SCENES.indexOf(sc) >= 0 ? 'compare' : COW_SCENES.indexOf(sc) >= 0 ? 'copy-on-write' : 'redirect-on-write';
+  }
+  /** Comparison: which columns the page shows ('both', 'cow', 'row'); both volumes are always computed (rule C7). */
+  function policy(p) { return ['cow', 'row'].indexOf(p.policy) >= 0 ? p.policy : 'both'; }
   /** The diff area's size limit in blocks (copy-on-write mode), 2–8. */
   function diffLimit(p) {
     var v = Math.round(Number(p.diffLimit));
@@ -360,19 +484,24 @@
     SCENES: SCENES,
     SCENE_IDS: SCENE_IDS,
     COW_SCENES: COW_SCENES,
+    CMP_SCENES: CMP_SCENES,
+    CMP: CMP,
 
     /** Parameter defaults. scene: the preset script; fileBlocks: blocks in file a; poolSize: physical blocks;
-        diffLimit: the diff area's limit in blocks (copy-on-write scenes only). */
-    defaults: { scene: 'basic', fileBlocks: 8, poolSize: 24, showRefs: true, diffLimit: 8 },
+        diffLimit: the diff area's limit in blocks (copy-on-write scenes only); policy: the columns the comparison
+        scenes show. */
+    defaults: { scene: 'basic', fileBlocks: 8, poolSize: 24, showRefs: true, diffLimit: 8, policy: 'both' },
 
     steps: steps,
     script: script,
     treeNames: treeNames,
     mode: mode,
+    policy: policy,
     diffLimit: diffLimit,
 
     /** Step 0: an empty pool and the live tree with no files. */
     initial: function (p) {
+      if (mode(p) === 'compare') return cmpInitial();
       var o = norm(p);
       var s = {
         blocks: [], trees: [{ name: LIVE, readonly: false, files: {} }], poolSize: o.poolSize, writes: {},
@@ -387,6 +516,7 @@
 
     /** Step n from step n − 1. */
     step: function (s, n, p) {
+      if (mode(p) === 'compare') return cmpStep(s, n, p);
       var o = norm(p), op = script(p)[n - 1], cow = mode(p) === 'copy-on-write';
       var fs = fsOf(s), r, from = null;
       if (op.op === 'write') r = cow ? writeInPlace(fs, LIVE, op.file, op.idx, o.fileBlocks) : write(fs, LIVE, op.file, op.idx, o.fileBlocks);
@@ -415,6 +545,9 @@
       return out;
     },
 
+    ioOf: ioOf,
+    seqRead: seqRead,
+    maps: maps,
     write: write,
     writeInPlace: writeInPlace,
     restore: restore,

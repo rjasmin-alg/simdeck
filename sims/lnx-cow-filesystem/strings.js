@@ -189,7 +189,104 @@
         'i da raste kako se živo stablo mijenja.</p>' +
         '<p>Ista ideja na razini jedne datoteke je <em lang="en">reflink</em> (kopija koja dijeli blokove), npr. u XFS-u s <code>reflink=1</code>. ' +
         'Izvan ovog prikaza: kopiranje stabla metapodataka do korijena, kontrolni zbrojevi, slanje i primanje snimaka, ' +
-        'klonovi i snimke u koje se piše.</p>'
+        'klonovi i snimke u koje se piše.</p>',
+
+      // ── preset sto-cow-vs-row (comparison: copy-on-write vs redirect-on-write after a snapshot) ──
+      subtitleCmp: 'Kopiranje ili preusmjeravanje pri pisanju: kamo ide stari, a kamo novi blok i koliko to košta',
+      presetFour: 'CoW i RoW: četiri pisanja',
+      presetFourHint: 'Ista pisanja na dva načina: 12 U/I operacija prema 4 + 4, pa slijedno čitanje.',
+      presetRewrite: 'CoW i RoW: isti blok',
+      presetRewriteHint: 'Blok 1 tri puta: CoW kopira samo prvi put; RoW svaki put seli blok.',
+      presetDelSnap: 'CoW i RoW: brisanje',
+      presetDelSnapHint: 'Četiri pisanja, pa brisanje snimke: CoW odbaci svoje područje; RoW oslobodi samo stare blokove.',
+      policy: 'Prikaz',
+      polBoth: 'oba',
+      polCow: 'CoW',
+      polRow: 'RoW',
+
+      cmpCowTitle: 'CoW: kopiranje pri pisanju',
+      cmpRowTitle: 'RoW: preusmjeravanje pri pisanju',
+      cmpCount: 'U/I ukupno: {n}',
+      cmpLive: 'živi',
+      cmpSnap: 'snimka',
+      cmpSlots: 'utori',
+      cmpArea: 'područje snimke',
+      legCmpWritten: 'upisano u ovom koraku',
+      legCmpShared: 'dijele živi i snimka (×2)',
+      legCmpLive: 'samo živi svezak',
+      legCmpSnap: 'samo snimka',
+      legCmpArea: 'slobodno u području snimke',
+      legCmpWrite: 'pisanje',
+      legCmpRead: 'čitanje za kopiju',
+      legCmpMeta: 'zapis metapodataka (pokazivač)',
+      legCmpRun: 'pročitano u komadu',
+      legCmpJump: 'skok pri čitanju',
+
+      ioRead: 'čitaj {slot}',
+      ioWriteCopy: 'piši {slot} (kopija)',
+      ioWriteIn: 'piši {slot} (na mjestu)',
+      ioWriteNew: 'piši {slot} (novi utor)',
+      ioMeta: 'mapa: {k} → {to}',
+      ioNone: 'Nema U/I operacija.',
+      ioReadBack: 'Čitanje redom: utori {list}; {n}.',
+      ioDropArea: 'Odbačeno cijelo područje snimke: {list}.',
+      ioFreeRefs: 'Oslobođeni utori bez reference: {list}.',
+      jumps: ['{n} skok', '{n} skoka', '{n} skokova'],
+      thReads: 'čitanja',
+      thWrites: 'pisanja',
+      thMeta: 'metapodaci',
+      thOps: 'ukupno',
+      thThisWrite: 'ovo pisanje',
+      thAllWrites: 'sva pisanja',
+
+      termCmpCow: 'CoW (*copy-on-write*, kopiranje pri pisanju)',
+      termCmpCowLater: 'CoW',
+      termCmpRow: 'RoW (*redirect-on-write*, preusmjeravanje pri pisanju)',
+      termCmpRowLater: 'RoW',
+      ops: ['{n} U/I operacija', '{n} U/I operacije', '{n} U/I operacija'],
+      writesN: ['{n} pisanje', '{n} pisanja', '{n} pisanja'],
+      reads: ['{n} čitanje', '{n} čitanja', '{n} čitanja'],
+      metas: ['{n} zapis metapodataka', '{n} zapisa metapodataka', '{n} zapisa metapodataka'],
+
+      capCmpStart: 'Svezak od 8 blokova u utorima {list}; {snap} upravo je uzeta, pa obje mape pokazuju na iste utore.',
+      capCmpBoth: 'Ista pisanja idu lijevo kao {cow}, a desno kao {row}. Pritisni → za prvi korak.',
+      capCmpCowOnly: 'Prikazano je samo {cow}. Pritisni → za prvi korak.',
+      capCmpRowOnly: 'Prikazano je samo {row}. Pritisni → za prvi korak.',
+      capCmpTrap: 'Pazi na nazive: Btrfs i ZFS zovu se datotečnim sustavima s {cow}, a po ovoj podjeli preusmjeravaju pri pisanju.',
+      capCmpHead: 'Piše se blok {k}.',
+      capCmpCowFirst: 'CoW: staro se prvo pročita i prepiše u snimku (utor {to}), pa tek onda novo ide na isto mjesto: {n} za jedno pisanje.',
+      capCmpCowAgain: 'CoW: staro je već sačuvano u snimci, pa se samo piše na mjestu: {n}.',
+      capCmpRow: 'RoW: novo ide u utor {to} i mijenja se samo pokazivač: jedno pisanje i jedan zapis metapodataka, bez čitanja.',
+      capCmpRowKept: 'Stari blok ostaje u utoru {old} i sad pripada samo snimci.',
+      capCmpRowFreed: 'Prethodna verzija u utoru {old} nije u snimci, pa se oslobađa.',
+      capCmpRowFrag: 'Živi svezak više nije u komadu.',
+      capCmpTotalBoth: 'Ukupno za {w}: CoW {n} ({reads} i {writes}), RoW {rwrites} i {meta}, bez čitanja.',
+      capCmpTotalCow: 'Ukupno za {w}: CoW {n} ({reads} i {writes}).',
+      capCmpTotalRow: 'Ukupno za {w}: RoW {rwrites} i {meta}, bez čitanja.',
+      capCmpRead: 'Slijedno čitanje živog sveska, blok po blok.',
+      capCmpReadCow: 'CoW: utori {list}; {n}.',
+      capCmpReadRow: 'RoW: utori {list}; {n}. Jeftinije pisanje plaća se rascjepkanošću.',
+      capCmpDestroy: 'Briše se {snap}.',
+      capCmpDestroyCow: 'CoW: cijelo područje snimke ({list}) odbacuje se odjednom.',
+      capCmpDestroyRow: 'RoW: oslobađaju se samo utori {list}, na koje više ne pokazuje nijedna mapa; za to treba brojati reference. Živi svezak ostaje rascjepkan.',
+
+      explainCmp: '<p>Dvije politike pisanja nakon što je uzet <em lang="en">snapshot</em> (snimka). <b>CoW</b> ' +
+        '(<em lang="en">copy-on-write</em>, kopiranje pri pisanju): pri prvom pisanju bloka nakon snimke stari se blok ' +
+        'pročita i zapiše u područje snimke, pa novi podaci idu na isto mjesto. Živi svezak ostaje u komadu, ali prvo ' +
+        'pisanje svakog bloka košta tri U/I operacije umjesto jedne: <em lang="en">write penalty</em> (kazna pisanja). ' +
+        'Tako radi klasična LVM snimka.</p>' +
+        '<p><b>RoW</b> (<em lang="en">redirect-on-write</em>, preusmjeravanje pri pisanju): novi podaci idu u slobodni ' +
+        'utor i mijenja se samo pokazivač u mapi, jedan zapis metapodataka. Stari blok ostaje gdje je bio i sad pripada ' +
+        'samo snimci. Nema čitanja ni kopiranja, ali živi svezak postaje rascjepkan (<em lang="en">fragmentation</em>): ' +
+        'slijedno čitanje skače po disku.</p>' +
+        '<p>Brisanje snimke: CoW odbacuje cijelo područje snimke odjednom; RoW smije osloboditi samo blokove na koje više ' +
+        'ne pokazuje nijedna mapa, pa mora voditi reference.</p>' +
+        '<p>Pazi na nazive: Btrfs, ZFS i tanki LVM bazeni zovu se <em lang="en">copy-on-write</em>, a po ovoj podjeli ' +
+        'preusmjeravaju pri pisanju. Tri zablude: sve snimke jednako koštaju pri pisanju; datotečni sustav s ' +
+        '<em lang="en">copy-on-write</em> kopira stari blok pri svakom pisanju; RoW snimka je zauvijek besplatna ' +
+        '(rascjepkanost i mjesto koje drže stari blokovi).</p>' +
+        '<p>Pojednostavnjeno: brojimo blokove podataka i jedan zapis pokazivača po pisanju. Stvarni sustavi pišu i svoje ' +
+        'metapodatke (CoW popis kopiranih blokova, RoW stablo pokazivača do korijena).</p>'
     },
     en: {
       stage: 'Block pool and the trees that point into it',
@@ -356,7 +453,101 @@
         'grows as the live tree changes.</p>' +
         '<p>The same idea for a single file is a reflink copy (XFS with <code>reflink=1</code>). Not shown: the metadata ' +
         'tree\'s own copy-on-write up to its root, checksums, sending and receiving snapshots, clones and writable ' +
-        'snapshots.</p>'
+        'snapshots.</p>',
+
+      // ── preset sto-cow-vs-row ──
+      subtitleCmp: 'Copy-on-write vs redirect-on-write: where the old and the new block go, and what a write costs',
+      presetFour: 'CoW vs RoW: four writes',
+      presetFourHint: 'The same writes both ways: 12 I/Os against 4 + 4, then a sequential read.',
+      presetRewrite: 'CoW vs RoW: rewrite',
+      presetRewriteHint: 'Block 1 three times: CoW copies only the first time; RoW moves the block every time.',
+      presetDelSnap: 'CoW vs RoW: delete',
+      presetDelSnapHint: 'Four writes, then the snapshot is deleted: CoW drops its area; RoW frees only the old blocks.',
+      policy: 'Show',
+      polBoth: 'both',
+      polCow: 'CoW',
+      polRow: 'RoW',
+
+      cmpCowTitle: 'CoW: copy-on-write',
+      cmpRowTitle: 'RoW: redirect-on-write',
+      cmpCount: 'I/O total: {n}',
+      cmpLive: 'live',
+      cmpSnap: 'snapshot',
+      cmpSlots: 'slots',
+      cmpArea: 'snapshot area',
+      legCmpWritten: 'written this step',
+      legCmpShared: 'shared by live and snapshot (×2)',
+      legCmpLive: 'live volume only',
+      legCmpSnap: 'snapshot only',
+      legCmpArea: 'free in the snapshot area',
+      legCmpWrite: 'write',
+      legCmpRead: 'read for the copy',
+      legCmpMeta: 'metadata update (pointer)',
+      legCmpRun: 'read in one run',
+      legCmpJump: 'jump while reading',
+
+      ioRead: 'read {slot}',
+      ioWriteCopy: 'write {slot} (copy)',
+      ioWriteIn: 'write {slot} (in place)',
+      ioWriteNew: 'write {slot} (new slot)',
+      ioMeta: 'map: {k} → {to}',
+      ioNone: 'No I/O.',
+      ioReadBack: 'Read in order: slots {list}; {n}.',
+      ioDropArea: 'The whole snapshot area dropped: {list}.',
+      ioFreeRefs: 'Freed the slots no map points to: {list}.',
+      jumps: ['{n} jump', '{n} jumps'],
+      thReads: 'reads',
+      thWrites: 'writes',
+      thMeta: 'metadata',
+      thOps: 'total',
+      thThisWrite: 'this write',
+      thAllWrites: 'all writes',
+
+      termCmpCow: 'CoW (copy-on-write)',
+      termCmpCowLater: 'CoW',
+      termCmpRow: 'RoW (redirect-on-write)',
+      termCmpRowLater: 'RoW',
+      ops: ['{n} I/O', '{n} I/Os'],
+      writesN: ['{n} write', '{n} writes'],
+      reads: ['{n} read', '{n} reads'],
+      metas: ['{n} metadata update', '{n} metadata updates'],
+
+      capCmpStart: 'A volume of 8 blocks in slots {list}; a {snap} has just been taken, so both maps point to the same slots.',
+      capCmpBoth: 'The same writes run as {cow} on the left and as {row} on the right. Press → for the first step.',
+      capCmpCowOnly: 'Showing {cow} only. Press → for the first step.',
+      capCmpRowOnly: 'Showing {row} only. Press → for the first step.',
+      capCmpTrap: 'Mind the names: Btrfs and ZFS are called {cow} filesystems, but by this taxonomy they redirect on write.',
+      capCmpHead: 'Writing block {k}.',
+      capCmpCowFirst: 'CoW: the old block is first read and copied into the snapshot (slot {to}); only then does the new data go to the same place: {n} for one write.',
+      capCmpCowAgain: 'CoW: the old block is already in the snapshot, so it is just written in place: {n}.',
+      capCmpRow: 'RoW: the new block goes to slot {to} and only the pointer changes: one write and one metadata update, no read.',
+      capCmpRowKept: 'The old block stays in slot {old} and now belongs to the snapshot only.',
+      capCmpRowFreed: 'The previous version in slot {old} is not in the snapshot, so it is freed.',
+      capCmpRowFrag: 'The live volume is no longer contiguous.',
+      capCmpTotalBoth: 'In total for {w}: CoW {n} ({reads} and {writes}), RoW {rwrites} and {meta}, no read.',
+      capCmpTotalCow: 'In total for {w}: CoW {n} ({reads} and {writes}).',
+      capCmpTotalRow: 'In total for {w}: RoW {rwrites} and {meta}, no read.',
+      capCmpRead: 'Reading the live volume in order, block by block.',
+      capCmpReadCow: 'CoW: slots {list}; {n}.',
+      capCmpReadRow: 'RoW: slots {list}; {n}. The cheaper writes are paid for with fragmentation.',
+      capCmpDestroy: 'Deleting the {snap}.',
+      capCmpDestroyCow: 'CoW: the whole snapshot area ({list}) is dropped at once.',
+      capCmpDestroyRow: 'RoW: only slots {list} are freed, the ones no map points to any more; that takes reference counting. The live volume stays fragmented.',
+
+      explainCmp: '<p>Two write policies after a snapshot is taken. <b>CoW</b> (copy-on-write): on the first write to a ' +
+        'block after the snapshot, the old block is read and written to the snapshot area, then the new data goes to the ' +
+        'same place. The live volume stays contiguous, but the first write to every block costs three I/Os instead of ' +
+        'one: the write penalty. This is how a classic LVM snapshot works.</p>' +
+        '<p><b>RoW</b> (redirect-on-write): the new data goes to a free slot and only the pointer in the map changes, one ' +
+        'metadata update. The old block stays where it was and now belongs to the snapshot only. No read and no copy, ' +
+        'but the live volume becomes fragmented: a sequential read jumps around the disk.</p>' +
+        '<p>Deleting the snapshot: CoW drops its whole snapshot area at once; RoW may free only the blocks no map points ' +
+        'to any more, so it has to track references.</p>' +
+        '<p>Mind the names: Btrfs, ZFS and LVM thin pools are called copy-on-write, but by this taxonomy they redirect on ' +
+        'write. Three misconceptions: all snapshots cost the same on write; a copy-on-write filesystem copies the old ' +
+        'block on every write; a RoW snapshot is free forever (fragmentation, and the space the old blocks hold).</p>' +
+        '<p>Simplified: we count the data blocks and one pointer update per write. Real systems also write their own ' +
+        'metadata (CoW the list of copied blocks, RoW the pointer tree up to its root).</p>'
     }
   };
 
