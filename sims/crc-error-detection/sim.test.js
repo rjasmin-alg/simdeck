@@ -229,6 +229,204 @@ test('every step stays within 20 for every message and generator', () => {
   }
 });
 
+// ── Hamming(15,11), the fec-hamming presets (SPEC.md "Hamming(15,11)") ──
+
+const HAM = { gen: logic.HAMMING };
+const H = (over) => P(Object.assign({}, HAM, over));
+const hat = (over, n) => kit.stateAt(logic, H(over), n);
+const hflip = (pos) => ({ hflip: logic.hmaskOf(pos) });
+const WORD = '111101100011101'; // 10110011101 encoded (task; independent Python check in NOTES.md)
+
+// tie-breaks first
+
+test('H tie-break: zero 1s counts as even, so a parity bit over all-zero data is 0, and an all-zero word passes', () => {
+  assert.equal(S(logic.hammingEncode(logic.bitsOf(0, 11))), '000000000000000');
+  assert.deepEqual(logic.hammingChecks(logic.hammingEncode(logic.bitsOf(0, 11))).map((c) => c.result), ['pass', 'pass', 'pass', 'pass']);
+});
+
+test('H tie-break: syndrome 0 means no correction (there is no position 0); the word is taken as received', () => {
+  const w = B(WORD);
+  assert.deepEqual(logic.hammingCorrect(w, 0), w);
+  const s = hat({}, 12);
+  assert.equal(s.syndrome, 0);
+  assert.equal(s.corrected, null);
+  assert.deepEqual(s.fixed, w);
+});
+
+test('H tie-break: the syndrome reads p4 p3 p2 p1, p1 the lowest bit (p1 alone = 1, p4 alone = 8)', () => {
+  const pass = { result: 'pass' }, fail = { result: 'fail' };
+  assert.equal(logic.syndromeOf([fail, pass, pass, pass]), 1);
+  assert.equal(logic.syndromeOf([pass, pass, pass, fail]), 8);
+  assert.equal(logic.syndromeOf([fail, fail, pass, pass]), 3);
+});
+
+test('H tie-break: duplicate flipped positions count once; positions are listed ascending, 1 … 15', () => {
+  assert.equal(logic.hmaskOf([3, 3]), logic.hmaskOf([3]));
+  assert.deepEqual(logic.hflipList(logic.hmaskOf([15, 3, 1, 3])), [1, 3, 15]);
+  assert.equal(logic.hmaskOf([1]), 1 << 14);
+  assert.equal(logic.hmaskOf([15]), 1);
+});
+
+// rules
+
+test('rule H2: p_j covers every position whose binary index has bit j − 1 set, itself included', () => {
+  assert.deepEqual(logic.covers(1), [1, 3, 5, 7, 9, 11, 13, 15]);
+  assert.deepEqual(logic.covers(2), [2, 3, 6, 7, 10, 11, 14, 15]);
+  assert.deepEqual(logic.covers(3), [4, 5, 6, 7, 12, 13, 14, 15]);
+  assert.deepEqual(logic.covers(4), [8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.deepEqual(logic.PPOS, [1, 2, 4, 8]);
+  assert.deepEqual(logic.DPOS, [3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]);
+});
+
+test('rule H1: data a…k go to the non-powers of two; each p_j makes its positions even (task word)', () => {
+  const w = logic.hammingEncode(B('10110011101'));
+  assert.equal(S(w), WORD);
+  assert.deepEqual([1, 2, 4, 8].map((i) => w[i - 1]), [1, 1, 1, 0]);
+  assert.deepEqual(logic.hammingDecode(w), B('10110011101'));
+  // every code word of every data word passes all four checks, and decodes to its data
+  for (let d = 0; d < 1 << 11; d++) {
+    const data = logic.bitsOf(d, 11), cw = logic.hammingEncode(data);
+    for (const c of logic.hammingChecks(cw)) assert.equal(c.result, 'pass', `data ${d}`);
+    assert.deepEqual(logic.hammingDecode(cw), data);
+  }
+});
+
+test('rule H1: each check counts its covered positions, parity bit included; odd fails', () => {
+  const rx = B(WORD); rx[2] ^= 1; // a flipped
+  assert.deepEqual(logic.hammingChecks(rx).map((c) => c.ones), [5, 5, 6, 4]);
+  assert.deepEqual(logic.hammingChecks(rx).map((c) => c.result), ['fail', 'fail', 'pass', 'pass']);
+});
+
+test('rules H3, H4: one flipped bit anywhere, data or parity, gives its own position as the syndrome and is corrected', () => {
+  for (const d of [0, 1437, 2047, 1000]) {
+    const data = logic.bitsOf(d, 11), cw = logic.hammingEncode(data);
+    for (let pos = 1; pos <= 15; pos++) {
+      const rx = cw.slice(); rx[pos - 1] ^= 1;
+      const syn = logic.syndromeOf(logic.hammingChecks(rx));
+      assert.equal(syn, pos, `data ${d}, position ${pos}`);
+      assert.deepEqual(logic.hammingCorrect(rx, syn), cw);
+    }
+  }
+});
+
+test('rule H5: two flipped bits give a non-zero syndrome that names a third, correct position: three wrong bits', () => {
+  const cw = B(WORD);
+  for (let a = 1; a <= 15; a++) {
+    for (let b = a + 1; b <= 15; b++) {
+      const s = hat(hflip([a, b]), 13);
+      assert.ok(s.syndrome > 0 && s.syndrome !== a && s.syndrome !== b, `${a}, ${b}`);
+      assert.equal(s.syndrome, a ^ b);
+      assert.equal(s.wrong, 3);
+      assert.ok(s.dataWrong >= 1, 'the data is always wrong after the miscorrection');
+      assert.equal(s.verdict, 'wrong');
+      assert.notDeepEqual(s.fixed, cw);
+    }
+  }
+});
+
+test('rule H5, all 2^15 − 1 patterns: one flip is always corrected; two or more always leave the data wrong', () => {
+  // After the decoder's flip the remaining errors XOR to 0, so they are never a non-empty set of parity positions alone.
+  const cw = B(WORD), data = B('10110011101');
+  for (let mask = 1; mask < 1 << 15; mask++) {
+    const pos = logic.hflipList(mask);
+    const rx = logic.flipBits(cw, pos.map((p) => p - 1));
+    const fixed = logic.hammingCorrect(rx, logic.syndromeOf(logic.hammingChecks(rx)));
+    const ok = S(logic.hammingDecode(fixed)) === S(data);
+    assert.equal(ok, pos.length === 1, `positions ${pos}`);
+  }
+});
+
+test('H verdicts: ok without errors, corrected for one, wrong when the data differs (three errors may give syndrome 0)', () => {
+  assert.equal(hat({}, 13).verdict, 'ok');
+  assert.equal(hat(hflip([9]), 13).verdict, 'corrected');
+  const three = hat(hflip([1, 2, 3]), 13); // 1 ⊕ 2 ⊕ 3 = 0: every check passes, the error gets through
+  assert.equal(three.syndrome, 0);
+  assert.equal(three.verdict, 'wrong');
+});
+
+test('H run: 13 steps for every word and pattern; parity bits appear one per step, errors only on the line', () => {
+  assert.equal(logic.steps(H({})), 13);
+  assert.equal(logic.steps(H(hflip([1, 2, 3, 4, 5]))), 13);
+  assert.ok(hat({}, 0).word.every((b) => b === null));
+  assert.deepEqual(hat({}, 1).word.map((b, i) => b === null ? i + 1 : 0).filter(Boolean), [1, 2, 4, 8]);
+  for (let j = 1; j <= 4; j++) {
+    const s = hat({}, 1 + j);
+    assert.equal(s.phase, 'parity'); assert.equal(s.j, j);
+    assert.deepEqual(s.word.map((b, i) => b === null ? i + 1 : 0).filter(Boolean), [1, 2, 4, 8].slice(j));
+  }
+  assert.equal(S(hat({}, 6).word), WORD);
+  const before = hat(hflip([3]), 6);
+  assert.deepEqual([before.flipped, before.received, before.planned], [[], null, [3]]);
+  for (let j = 1; j <= 4; j++) {
+    const s = hat(hflip([3]), 7 + j);
+    assert.equal(s.phase, 'check'); assert.equal(s.j, j);
+    assert.equal(s.checks.filter(Boolean).length, j);
+    assert.equal(s.syndrome, null);
+  }
+  assert.equal(hat(hflip([3]), 12).decoded, null);
+});
+
+test('H: the CRC run is untouched by the Hamming params', () => {
+  assert.deepEqual(at({ hdata: 5, hflip: 99 }, 6), at({}, 6));
+  assert.equal(logic.steps(P({ hflip: 99 })), 6);
+});
+
+// presets (task numbers, checked by script)
+
+const hpreset = (pos) => hat(hflip(pos), 13);
+
+test('preset hamming-k: k (position 15) flipped → all four checks fail, syndrome 1111 = 15, corrected', () => {
+  const s = hpreset([15]);
+  assert.equal(S(s.received), '111101100011100');
+  assert.deepEqual(s.checks.map((c) => c.result), ['fail', 'fail', 'fail', 'fail']);
+  assert.deepEqual(s.checks.map((c) => c.ones), [5, 5, 5, 3]);
+  assert.equal(s.syndrome, 15);
+  assert.equal(S(s.fixed), WORD);
+  assert.equal(s.verdict, 'corrected');
+});
+
+test('preset hamming-a: a (position 3) flipped → p1 and p2 fail, syndrome 3, corrected', () => {
+  const s = hpreset([3]);
+  assert.deepEqual(s.checks.map((c) => c.result), ['fail', 'fail', 'pass', 'pass']);
+  assert.equal(s.syndrome, 3);
+  assert.equal(s.corrected, 3);
+  assert.equal(S(s.decoded), '10110011101');
+  assert.equal(s.verdict, 'corrected');
+});
+
+test('preset hamming-p1: p1 flipped → only p1 fails, syndrome 1: a parity bit is corrected too', () => {
+  const s = hpreset([1]);
+  assert.deepEqual(s.checks.map((c) => c.result), ['fail', 'pass', 'pass', 'pass']);
+  assert.equal(s.syndrome, 1);
+  assert.equal(S(s.fixed), WORD);
+  assert.equal(s.dataWrong, 0);
+  assert.equal(s.verdict, 'corrected');
+});
+
+test('preset hamming-two: a and b (3, 5) flipped → p2 and p3 fail, syndrome 6 → c flipped: three wrong bits', () => {
+  const s = hpreset([3, 5]);
+  assert.deepEqual(s.checks.map((c) => c.result), ['pass', 'fail', 'fail', 'pass']);
+  assert.equal(s.syndrome, 6);
+  assert.equal(s.corrected, 6);
+  assert.equal(S(s.decoded), '01010011101');
+  assert.deepEqual([s.wrong, s.dataWrong, s.verdict], [3, 3, 'wrong']);
+});
+
+test('H state is JSON-safe, replay is deterministic, and step does not mutate its input', () => {
+  const p = H(hflip([3, 5]));
+  const forward = [];
+  let s = logic.initial(p);
+  forward.push(s);
+  for (let n = 1; n <= logic.steps(p); n++) {
+    const copy = structuredClone(s);
+    const next = logic.step(s, n, p);
+    assert.deepEqual(s, copy);
+    s = next; forward.push(s);
+    assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+  }
+  for (let n = logic.steps(p); n >= 0; n--) assert.deepEqual(kit.stateAt(logic, p, n), forward[n]);
+});
+
 // ── generic checks every sim keeps ──
 
 test('state is JSON-safe at every step', () => {
