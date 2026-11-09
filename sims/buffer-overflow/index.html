@@ -1,0 +1,458 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- buffer-overflow: a stack buffer overflow. A stepper: greet() sets up its frame, copy() writes the input into
+     char buf[N] two (or four) bytes a step with no bounds check, greet() returns, the CPU jumps, the outcome.
+     Left: the frame in 4-byte rows, high addresses at the top. Right: the program, the input, the CPU and the three
+     protections (canary, NX, ASLR) with what each did. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="buffer-overflow">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preljev međuspremnika na stogu · simdeck</title>
+<meta name="description" content="Kopiraj predug ulaz u buf na stogu korak po korak: što prepiše povratnu adresu i koji od kanarinca, NX-a i ASLR-a to zaustavi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "buffer-overflow",
+  "title": {
+    "hr": "Preljev međuspremnika na stogu",
+    "en": "Stack buffer overflow"
+  },
+  "concept": {
+    "hr": "Prepisivanje povratne adrese; kanarinac, NX i ASLR",
+    "en": "Overwriting the return address; canaries, NX, ASLR"
+  },
+  "summary": {
+    "hr": "Kopiraj predug ulaz u buf na stogu korak po korak: što prepiše povratnu adresu i koji od kanarinca, NX-a i ASLR-a to zaustavi.",
+    "en": "Copy too long an input into a stack buffer step by step: what overwrites the return address, and which of canary, NX and ASLR stops it."
+  },
+  "tags": [
+    "attacks"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="buffer-overflow"]; colours only from kit tokens.
+   Slots: buf c1, canary c7 hatched, saved FP c6, return address c2, the caller's frame muted. Input bytes: padding c3,
+   injected code c4, target address c5, each with its glyph (A, C, @), so colour is never alone. A frame byte the input
+   overwrote has a double danger border. */
+[data-sim="buffer-overflow"] .bo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 1.5cqw;
+  height: 100%;
+  padding: 1.2cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="buffer-overflow"] .bo-left { display: flex; flex-direction: column; justify-content: center; gap: 0.4rem; min-height: 0; }
+[data-sim="buffer-overflow"] .bo-right { display: flex; flex-direction: column; gap: 0.8cqh; min-height: 0; justify-content: center; }
+[data-sim="buffer-overflow"] .bo-axis { color: var(--muted); font-size: var(--fs-sm); display: flex; justify-content: space-between; gap: 1rem; }
+
+/* the frame: address | four byte cells | slot label and value */
+[data-sim="buffer-overflow"] .bo-stack {
+  --cell: min(calc(74cqh / var(--rows)), 5rem, 6.2cqw);
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: 0.7rem;
+  row-gap: max(3px, calc(var(--cell) * 0.1));
+  align-items: center;
+}
+[data-sim="buffer-overflow"] .bo-addr { font-family: var(--mono); color: var(--muted); font-size: max(16px, calc(var(--cell) * 0.32)); text-align: right; }
+[data-sim="buffer-overflow"] .bo-cells { display: flex; gap: max(2px, calc(var(--cell) * 0.07)); }
+[data-sim="buffer-overflow"] .bo-cell {
+  display: grid; place-items: center;
+  width: var(--cell); height: var(--cell);
+  border: 0.2rem solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono); font-weight: 700;
+  font-size: max(16px, calc(var(--cell) * 0.5));
+  color: var(--ink);
+}
+[data-sim="buffer-overflow"] .bo-cell[data-k="none"] { border-style: dashed; border-color: var(--line); background: transparent; }
+[data-sim="buffer-overflow"] .bo-cell[data-k="empty"] { color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="buf"] { border-color: var(--c1); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="canary"] { border-color: var(--c7); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="canary"][data-k="orig"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--c7) 55%, transparent) 0.35em 0.55em);
+}
+[data-sim="buffer-overflow"] .bo-cell[data-slot="fp"] { border-color: var(--c6); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="fp"][data-k="orig"] { background: color-mix(in srgb, var(--c6) 22%, var(--bg)); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="ra"] { border-color: var(--c2); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="ra"][data-k="orig"] { background: color-mix(in srgb, var(--c2) 22%, var(--bg)); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="caller"] { border-style: dotted; border-color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-cell[data-slot="caller"][data-k="orig"] { background: var(--panel); }
+[data-sim="buffer-overflow"] .bo-cell[data-k="fill"] { background: color-mix(in srgb, var(--c3) 22%, var(--bg)); }
+[data-sim="buffer-overflow"] .bo-cell[data-k="code"] { background: color-mix(in srgb, var(--c4) 26%, var(--bg)); }
+[data-sim="buffer-overflow"] .bo-cell[data-k="addr"] { background: color-mix(in srgb, var(--c5) 26%, var(--bg)); }
+[data-sim="buffer-overflow"] .bo-cell.bo-over { border: 0.32rem double var(--danger); }
+[data-sim="buffer-overflow"] .bo-cell.sd-changed { background: var(--hl); color: var(--on-hl); }
+
+[data-sim="buffer-overflow"] .bo-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; line-height: 1.2; min-width: 0; }
+[data-sim="buffer-overflow"] .bo-label b { font-weight: 700; }
+[data-sim="buffer-overflow"] .bo-label[data-slot="caller"], [data-sim="buffer-overflow"] .bo-muted { color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-val { font-family: var(--mono); }
+[data-sim="buffer-overflow"] .bo-bad { font-weight: 700; color: var(--danger); }
+[data-sim="buffer-overflow"] .bo-good { font-weight: 700; color: var(--ok); }
+[data-sim="buffer-overflow"] .bo-jump { font-weight: 700; padding: 0 0.3rem; border: 0.18rem solid var(--ink); border-radius: var(--radius-sm); white-space: nowrap; }
+
+/* cards on the right */
+[data-sim="buffer-overflow"] .bo-card {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.35rem 0.7rem 0.45rem;
+}
+[data-sim="buffer-overflow"] .bo-card h2 { margin: 0 0 0.2rem; font-size: 1rem; font-weight: 700; display: flex; justify-content: space-between; gap: 0.5rem; }
+[data-sim="buffer-overflow"] .bo-card h2 span { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="buffer-overflow"] .bo-code { margin: 0; font-family: var(--mono); font-size: 0.9rem; line-height: 1.35; }
+[data-sim="buffer-overflow"] .bo-code > div { padding: 0 0.3rem; border-radius: var(--radius-sm); white-space: pre; }
+[data-sim="buffer-overflow"] .bo-code > div[data-on="true"] { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--on-hl); }
+[data-sim="buffer-overflow"] .bo-code .bo-cmt { font-family: var(--sans); font-style: italic; }
+
+[data-sim="buffer-overflow"] .bo-in { display: flex; flex-wrap: wrap; gap: 0.2rem; align-items: center; }
+[data-sim="buffer-overflow"] .bo-in .bo-cell { --cell: 1.75rem; font-size: 0.95rem; border-width: 0.15rem; }
+[data-sim="buffer-overflow"] .bo-in .bo-cell[data-done="true"] { opacity: 0.45; }
+[data-sim="buffer-overflow"] .bo-edge { display: inline-flex; align-items: center; gap: 0.2rem; font-size: var(--fs-sm); color: var(--muted); border-left: 0.25rem solid var(--c1); padding-left: 0.2rem; height: 1.75rem; }
+[data-sim="buffer-overflow"] .bo-key { margin-top: 0.2rem; font-size: var(--fs-sm); color: var(--muted); }
+
+[data-sim="buffer-overflow"] .bo-cpu p { margin: 0.1rem 0 0; }
+[data-sim="buffer-overflow"] .bo-cpu .bo-sm { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-out {
+  display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; padding: 0.1rem 0.5rem;
+  border: 0.22rem solid var(--line); border-radius: var(--radius-sm); font-weight: 700; background: var(--bg);
+}
+[data-sim="buffer-overflow"] .bo-out[data-tone="ok"] { border-color: var(--ok); }
+[data-sim="buffer-overflow"] .bo-out[data-tone="warn"] { border-color: var(--warn); border-style: dashed; }
+[data-sim="buffer-overflow"] .bo-out[data-tone="danger"] { border: 0.35rem double var(--danger); }
+
+[data-sim="buffer-overflow"] .bo-layers { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.15rem 0.6rem; align-items: baseline; }
+[data-sim="buffer-overflow"] .bo-layers .bo-name { font-weight: 700; }
+[data-sim="buffer-overflow"] .bo-layers .bo-job { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-st { padding: 0 0.35rem; border: 0.16rem solid var(--line); border-radius: var(--radius-sm); white-space: nowrap; font-size: var(--fs-sm); }
+[data-sim="buffer-overflow"] .bo-st[data-st="off"] { border-style: dotted; color: var(--muted); }
+[data-sim="buffer-overflow"] .bo-st[data-st="stopped"] { border: 0.28rem double var(--ok); font-weight: 700; }
+[data-sim="buffer-overflow"] .bo-st[data-st="no-effect"] { border-color: var(--danger); font-weight: 700; }
+
+/* Six presets and six controls: the presets go in two columns so the panel fits one screen (as cors). */
+[data-sim="buffer-overflow"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="buffer-overflow"] .sd-preset { line-height: 1.15; }
+
+/* legend swatches */
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-buf"] { background: var(--bg); border: 0.16rem solid var(--c1); }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-canary"] { background: var(--bg); border: 0.16rem solid var(--c7);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, var(--c7) 0.2em 0.32em); }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-slot"] { background: color-mix(in srgb, var(--c2) 22%, var(--bg)); border: 0.16rem solid var(--c2); }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-input"] { background: color-mix(in srgb, var(--c3) 22%, var(--bg)); border: 0.16rem solid var(--ink); }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-over"] { background: var(--bg); border: 0.3rem double var(--danger); }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-jump"] { width: auto; height: auto; border: 0; background: transparent; font-weight: 700; line-height: 1; }
+[data-sim="buffer-overflow"] .sd-swatch[data-shape="bo-jump"]::before { content: '◀'; }
+
+/* Phone and portrait: the stage grows with its content and the columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="buffer-overflow"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="buffer-overflow"] .bo { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; gap: 0.7rem; }
+  [data-sim="buffer-overflow"] .bo-stack { --cell: min(2.6rem, 11cqw); }
+  [data-sim="buffer-overflow"] .bo-code { font-size: var(--fs-sm); }
+  [data-sim="buffer-overflow"] .bo-code > div { white-space: pre-wrap; }
+  [data-sim="buffer-overflow"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Preljev međuspremnika na stogu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var W = L.WORD;
+  var GLYPH = { fill: 'A', code: 'C', addr: '@', empty: '·', orig: '', none: '' };
+  var TONE = { normal: 'ok', crash: 'warn', 'canary-trip': 'warn', 'nx-block': 'warn', 'aslr-miss': 'warn', hijack: 'danger' };
+  var ICON = { ok: '✓', warn: '✕', danger: '⚠' };
+
+  /** Data (addresses, code, byte glyphs) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || 'bo-val' }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  function range(a, b) { return L.hex(a) + '–' + L.hex(b - 1); }
+  function written(k) { return k === 'fill' || k === 'code' || k === 'addr'; }
+
+  /** The value shown beside a slot's row. */
+  function slotValue(s, slot, lay, phase) {
+    if (phase === 'start') return h('span', { class: 'bo-muted' }, t('notYet'));
+    if (slot === 'ra') {
+      var ra = s.retAddr;
+      if (ra.state === 'partial') return h('span', { class: 'bo-bad' }, t('damaged'), ': ', t('raMixed'));
+      var where = ra.label === 'caller' ? t('raCaller') : (ra.label === 'admin' ? 'raAdmin' : 'raBuf');
+      if (ra.state === 'target') where = t(s.aslr ? where + 'Old' : where); // under ASLR it is where that was in another run
+      return h('span', { class: ra.state === 'target' ? 'bo-bad' : null }, data(L.hex(ra.value)), ' → ', where);
+    }
+    if (slot === 'fp') {
+      if (s.savedFP.intact) return data(L.hex(s.savedFP.value));
+      var allA = true;
+      for (var i = lay.fpOff; i < lay.fpOff + W; i++) if (s.cells[i] !== 'fill') allA = false;
+      return h('span', { class: 'bo-bad' }, allA ? data('0x41414141 (AAAA)') : t('damaged'));
+    }
+    if (slot === 'canary') {
+      var check = null;
+      if (phase === 'return' || phase === 'jump' || phase === 'outcome') {
+        check = h('span', { class: s.canary.intact ? 'bo-good' : 'bo-bad' }, s.canary.intact ? t('checkOk') : t('checkBad'));
+      }
+      return h('span', null, s.canary.intact ? data(L.hex(s.canary.value)) : h('span', { class: 'bo-bad' }, t('changedWord')),
+        check ? ' · ' : null, check);
+    }
+    return null;
+  }
+
+  function renderStack(c, lay) {
+    var s = c.state, rows = [];
+    var jumpToBuf = s.jump && s.jump.region === 'stack' && (s.phase === 'jump' || s.phase === 'outcome');
+    for (var top = lay.end - W; top >= 0; top -= W) {
+      var slot = L.slotOf(lay, top);
+      var cells = [];
+      for (var i = top; i < top + W; i++) {
+        var k = s.cells[i];
+        var changed = s.changed.indexOf(i) >= 0;
+        cells.push(h('div', {
+          class: 'bo-cell' + (written(k) && slot !== 'buf' ? ' bo-over' : '') + (changed ? ' sd-changed' : '') +
+            (changed && c.dir === 'forward' ? ' sd-anim-in' : ''),
+          dataset: { slot: slot, k: k }, translate: 'no'
+        }, GLYPH[k]));
+      }
+      var label;
+      if (slot === 'buf') {
+        label = [data('buf[' + top + '–' + (top + W - 1) + ']')];
+        if (top === 0 && jumpToBuf) label.push(h('span', { class: 'bo-jump' }, '◀ ', t('jumpHere')));
+      } else if (slot === 'caller') {
+        label = top === lay.callerOff ? [t('slotCaller')] : [];
+      } else {
+        var name = slot === 'ra' ? t('slotRa') : slot === 'fp' ? t('slotFp') : t('slotCanary');
+        label = [h('b', null, name), slotValue(s, slot, lay, s.phase)];
+      }
+      rows.push(h('div', { class: 'bo-addr', translate: 'no' }, L.hex(lay.bufAddr + top)),
+        h('div', { class: 'bo-cells' }, cells),
+        h('div', { class: 'bo-label', dataset: { slot: slot } }, label));
+    }
+    return h('div', { class: 'bo-left' },
+      h('div', { class: 'bo-axis' }, h('span', null, '↑ ', t('higher')), h('span', null, t('writes'), ' ↑')),
+      h('div', { class: 'bo-stack', style: { '--rows': String(lay.end / W) } }, rows),
+      h('div', { class: 'bo-axis' }, h('span', null, '↓ ', t('lower')), h('span', null, t('grows'), ' ↓')));
+  }
+
+  function renderCode(c) {
+    var p = c.params, ph = c.state.phase;
+    var on = ph === 'start' ? 4 : ph === 'frame' ? 1 : ph === 'copy' ? 2 : 3;
+    var lines = [
+      [data('void greet(char *input) {')],
+      [data('  char buf[' + p.bufSize + '];')],
+      [data('  copy(buf, input);'), '  ', h('span', { class: 'bo-cmt' }, '// ', t('noCheck'))],
+      [data('}')],
+      [data('main() { … greet(input); … }')]
+    ];
+    return h('section', { class: 'bo-card' }, h('h2', null, t('codeTitle')),
+      h('div', { class: 'bo-code' }, lines.map(function (l, i) { return h('div', { dataset: { on: String(i === on) } }, l); })));
+  }
+
+  function renderInput(c, lay) {
+    var p = c.params, s = c.state;
+    var bytes = L.inputBytes(p), cells = [];
+    bytes.forEach(function (b, i) {
+      if (i === lay.bufSize) cells.push(h('span', { class: 'bo-edge' }, t('bufEnd')));
+      cells.push(h('div', {
+        class: 'bo-cell' + (s.changed.indexOf(i) >= 0 ? ' sd-changed' : ''),
+        dataset: { k: b.k, done: String(i < s.written && s.changed.indexOf(i) < 0) }, translate: 'no'
+      }, GLYPH[b.k]));
+    });
+    return h('section', { class: 'bo-card' },
+      h('h2', null, t('inputTitle'), h('span', null, p.inputLen ? t.n('inputBytes', p.inputLen) : t('inputEmpty'))),
+      cells.length ? h('div', { class: 'bo-in' }, cells) : null,
+      cells.length ? h('p', { class: 'bo-key' }, t('inputKey')) : null);
+  }
+
+  function renderCpu(c, lay) {
+    var s = c.state, p = c.params, lines = [];
+    var ph = s.phase;
+    if (ph === 'start') lines.push(t('cpuStart'));
+    else if (ph === 'frame') lines.push(t('cpuFrame'));
+    else if (ph === 'copy') lines.push(t('cpuCopy'));
+    else if (ph === 'return') lines.push(t('cpuReturn'));
+    else if (s.outcome === 'canary-trip') lines.push(h('span', { class: 'bo-bad' }, t('cpuAbort')));
+    else {
+      var j = s.jump, res;
+      if (j.what === 'caller') res = s.savedFP.intact ? h('span', { class: 'bo-good' }, t('cpuMain')) : h('span', { class: 'bo-bad' }, t('cpuMainBadFp'));
+      else if (j.what === 'mixed') res = h('span', { class: 'bo-bad' }, t('cpuMixed'));
+      else if (s.outcome === 'aslr-miss') res = h('span', { class: 'bo-bad' }, t('cpuUnmapped'));
+      else if (s.outcome === 'nx-block') res = h('span', { class: 'bo-bad' }, t('cpuNx'));
+      else res = h('span', { class: 'bo-bad' }, j.what === 'admin' ? t('cpuRunsAdmin') : t('cpuRunsBuf'));
+      lines.push(h('span', null, t('cpuTo'), ' ', j.to == null ? '?' : B(L.hex(j.to)), ': ', res));
+    }
+    var map = p.aslr ? h('p', { class: 'bo-sm' }, t.parts('cpuMap', { stack: data(range(lay.stack[0], lay.stack[1])), code: data(range(lay.code[0], lay.code[1])) })) : null;
+    var out = null;
+    if (ph === 'outcome') {
+      var tone = TONE[s.outcome];
+      out = h('div', { class: 'bo-out', dataset: { tone: tone } }, h('span', { 'aria-hidden': 'true' }, ICON[tone]), t('out_' + s.outcome));
+    }
+    return h('section', { class: 'bo-card bo-cpu' }, h('h2', null, t('cpuTitle')), h('p', null, lines), map, out);
+  }
+
+  function renderLayers(c) {
+    var s = c.state, p = c.params;
+    var rows = [['canary', 'layerCanary', 'layerCanaryJob'], ['aslr', 'layerAslr', 'layerAslrJob'], ['nx', 'layerNx', 'layerNxJob']]; // the order the CPU meets them
+    var cells = [];
+    rows.forEach(function (r) {
+      var st = s.layers ? s.layers[r[0]] : (p[r[0]] ? 'on' : 'off');
+      cells.push(h('span', { class: 'bo-name' }, t(r[1])), h('span', { class: 'bo-job' }, t(r[2])),
+        h('span', { class: 'bo-st' + (st === 'stopped' || st === 'no-effect' ? ' sd-changed' : ''), dataset: { st: st } }, t('st_' + st)));
+    });
+    return h('section', { class: 'bo-card' }, h('h2', null, t('layersTitle')), h('div', { class: 'bo-layers' }, cells));
+  }
+
+  // ── captions ──
+  function copyCaption(c, lay) {
+    var s = c.state, prev = c.prev, p = c.params;
+    if (!p.inputLen) return t('capCopyEmpty');
+    var ch = s.changed;
+    var parts = ch.length === 1 ? t.parts('capCopyOne', { a: B(ch[0]) }) : t.parts('capCopy', { a: B(ch[0]), b: B(ch[ch.length - 1]) });
+    var more;
+    if (s.retAddr.state === 'target' && prev.retAddr.state !== 'target') more = h('span', { class: 'sd-hl' }, t('capRaDone'));
+    else if (s.retAddr.state === 'partial' && prev.retAddr.state === 'orig') more = t('capRaPartial');
+    else if (s.canary.present && !s.canary.intact && prev.canary.intact) more = t('capIntoCanary');
+    else if (!s.savedFP.intact && prev.savedFP.intact) more = t('capIntoFp');
+    else if (s.hit.indexOf('caller') >= 0 && prev.hit.indexOf('caller') < 0) more = t('capIntoCaller');
+    else if (s.written <= lay.bufSize && s.written === p.inputLen) more = p.inputLen === lay.bufSize ? t('capFilled') : t('capFits');
+    else if (s.written <= lay.bufSize) more = t('capInBuf');
+    else more = t('capStillOver');
+    parts.push(' ', more);
+    return parts;
+  }
+
+  function jumpCaption(c) {
+    var s = c.state, p = c.params, j = s.jump;
+    if (s.outcome === 'canary-trip') return t('capJumpTrip');
+    var to = j && j.to != null ? B(L.hex(j.to)) : null;
+    if (s.outcome === 'normal') return t.parts('capJumpNormal', { to: to });
+    if (s.outcome === 'crash') return s.why === 'fp' ? t('capJumpFp') : t('capJumpMixed');
+    if (s.outcome === 'aslr-miss') return t.parts('capJumpAslr', { to: to });
+    if (s.outcome === 'nx-block') return t.parts('capJumpNx', { to: to });
+    if (j.what === 'admin') return t.parts(p.nx ? 'capJumpAdminNx' : 'capJumpAdmin', { to: to });
+    return t.parts('capJumpBuf', { to: to });
+  }
+
+  function lessonKey(s, p) {
+    if (s.outcome === 'hijack' && p.target === 'code' && p.nx) return 'lesson_hijack-nx';
+    return 'lesson_' + s.outcome;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'bufSize', type: 'range', label: t('bufSize'), min: 4, max: 16, step: 4, resets: true },
+      { key: 'inputLen', type: 'range', label: t('inputLen'), min: 0, max: 40, resets: true },
+      { key: 'canary', type: 'toggle', label: t('canary') },
+      { key: 'nx', type: 'toggle', label: t('nx') },
+      { key: 'aslr', type: 'toggle', label: t('aslr') },
+      { key: 'target', type: 'choice', label: t('target'), options: [['stack', t('targetStack')], ['code', t('targetCode')]] }
+    ],
+
+    presets: [
+      { id: 'fits', label: t('presetFits'), params: { bufSize: 8, inputLen: 8 }, hint: t('presetFitsHint') },
+      { id: 'smash', label: t('presetSmash'), params: { bufSize: 8, inputLen: 24, target: 'stack' }, hint: t('presetSmashHint') },
+      { id: 'canary', label: t('presetCanary'), params: { bufSize: 8, inputLen: 24, canary: true, target: 'stack' } },
+      { id: 'nx', label: t('presetNx'), params: { bufSize: 8, inputLen: 24, nx: true, target: 'stack' } },
+      { id: 'aslr', label: t('presetAslr'), params: { bufSize: 8, inputLen: 24, aslr: true, target: 'code' }, hint: t('presetAslrHint') },
+      { id: 'all-on', label: t('presetAllOn'), params: { bufSize: 8, inputLen: 24, canary: true, nx: true, aslr: true, target: 'stack' } }
+    ],
+
+    legend: [
+      { shape: 'bo-buf', label: t('legendBuf') },
+      { shape: 'bo-canary', label: t('legendCanary') },
+      { shape: 'bo-slot', label: t('legendSlot') },
+      { shape: 'bo-over', label: t('legendOver') },
+      { shape: 'hl', label: t('legendChanged') },
+      { shape: 'bo-jump', label: t('legendJump') }
+    ],
+
+    render: function (c) {
+      var lay = L.layout(c.params);
+      c.stage.replaceChildren(h('div', { class: 'bo' },
+        renderStack(c, lay),
+        h('div', { class: 'bo-right' }, renderCode(c), renderInput(c, lay), renderCpu(c, lay), renderLayers(c))));
+    },
+
+    caption: function (c) {
+      var s = c.state, p = c.params, lay = L.layout(p);
+      switch (s.phase) {
+        case 'start':
+          return p.inputLen
+            ? t.parts('capStart', { len: h('b', null, t.n('inputBytes', p.inputLen)), size: h('b', null, t.n('inputBytes', p.bufSize)) })
+            : t.parts('capStartEmpty', { size: h('b', null, t.n('inputBytes', p.bufSize)) });
+        case 'frame':
+          return p.canary
+            ? t.parts('capFrameCanary', { ra: B(L.hex(lay.retPoint)), canary: B(L.hex(s.canary.value)), n: data(p.bufSize) })
+            : t.parts('capFrame', { ra: B(L.hex(lay.retPoint)), n: data(p.bufSize) });
+        case 'copy': return copyCaption(c, lay);
+        case 'return':
+          if (s.outcome === 'canary-trip') return h('span', { class: 'sd-hl' }, t('capReturnTrip'));
+          var ra = s.retAddr.value == null ? h('b', null, t('damaged')) : B(L.hex(s.retAddr.value));
+          return t.parts(p.canary ? 'capReturnOk' : 'capReturnNone', { ra: ra });
+        case 'jump': return jumpCaption(c);
+        default: {
+          var parts = t.parts('capOutcome', { out: h('b', null, t('out_' + s.outcome)) });
+          parts.push(' ', t(lessonKey(s, p)));
+          return parts;
+        }
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>
