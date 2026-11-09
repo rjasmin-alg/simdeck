@@ -9,8 +9,8 @@
 | Class | explorer |
 | Size | M |
 | Priority | P2 |
-| Courses | HAM, URM |
-| Topic / tags / level | `radio` / `propagation`, `antennas` / `intro` |
+| Courses | HAM |
+| Topic / tags / level | `radio` / `propagation`, `antennas` / `core` |
 | Languages | Croatian and English (COMMON.md §4) |
 | Licence | AGPL-3.0-or-later |
 | Depends on | wave 0 (foundation) merged; soft: start after `gain-directivity` is merged and reuse its model (COMMON.md §6) |
@@ -32,12 +32,13 @@ The student: set power, gains, cable lengths, frequency and distance; add a pola
 ## Sources
 
 - The textbooks under "Antenna notes" below (Purcell & Morin, Griffiths, Balanis, Kraus) and the 50ohm-contents-hr chapters on antennas and propagation for the Croatian terms; mark every number and term you could not check with *(check)* and list it in `NOTES.md`.
-- Catalogue seed: Friis (1946); Balanis ch. 2; builds on ant-gain-directivity; related fading, wifi-channels → §5.26
+- Catalogue seed: Friis (1946); Balanis ch. 2; builds on ant-gain-directivity; related fading, wifi-channels → §5.26; URM (Wi-Fi) only as a side note (owner, 2026-11-09): linked from networks › wireless › channels, not on the URM course path
 
 ## Antenna notes (all `ant-` tasks)
 
 - **Who it is for:** the ham radio licence course (classes A and P) and anyone who has seen the 50ohm pictures of an antenna but not why it radiates. These pages go further than the 50ohm ports: a real model computed live, presets, and one contrast that is the stage (c finite against c infinite, parallel against crossed, one element against two, free space against ground). Not a quiz and not a slideshow.
 - **Why this list exists** (owner, 2026-11-08): a reviewer's remark on `lc-antenna` said its last step misses time. Field lines kink because a disturbance travels at a finite speed c; without travel time everything shown also holds in the near (reactive, evanescent) field, where nothing radiates. The owner wants new, richer pages rather than a change to `lc-antenna`, which stays as it is. Link it under `related`, never edit it.
+- **Idea credit** (owner, 2026-11-09): `ant-accelerated-charge`, `ant-dipole-field`, `ant-polarization` and `ant-tx-rx-polarization` name the source of the kinked-field-line explanation in the page's credit line, in both languages: "Ideja: objašnjenje zračenja lomom silnica, s predavanja iz Antena na FER-u" / "Idea: explaining radiation by kinking field lines, from the antenna lectures at FER". It is an idea credit, not a licence: it does not go into `sim.json` `credits` (no material is copied), and no person is named on the page.
 - **Standard physics, checked.** Every formula is textbook (Purcell & Morin, *Electricity and Magnetism*; Griffiths, *Introduction to Electrodynamics*; Balanis, *Antenna Theory*; Kraus, *Antennas*) and is checked in SPEC.md with a small script against the book's numbers. Cite chapter and equation in SPEC.md; do not copy figures.
 - **Tests check the limits:** with c → ∞ nothing radiates; the far field falls as 1/r and the near field as 1/r² or 1/r³; pattern nulls sit where the theory puts them (along a dipole's axis, sin θ); the received voltage follows the cos law (the polarization loss factor |ê_tx·ê_rx*|²); a half-wave dipole has about 73 Ω radiation resistance and 2.15 dBi; free-space path loss rises 6 dB per doubling of distance. Tie-breaks first, as COMMON.md asks.
 - **Concepts, not tools** (COMMON.md §1): no brand of antenna, cable, analyser or modelling program; say "a half-wave dipole", "a three-element Yagi", "a field-strength meter".

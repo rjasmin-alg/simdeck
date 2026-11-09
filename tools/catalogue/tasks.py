@@ -726,6 +726,11 @@ ANT_NOTES = ["## Antenna notes (all `ant-` tasks)", "",
     "time. Field lines kink because a disturbance travels at a finite speed c; without travel time everything shown "
     "also holds in the near (reactive, evanescent) field, where nothing radiates. The owner wants new, richer pages "
     "rather than a change to `lc-antenna`, which stays as it is. Link it under `related`, never edit it.",
+    "- **Idea credit** (owner, 2026-11-09): `ant-accelerated-charge`, `ant-dipole-field`, `ant-polarization` and "
+    "`ant-tx-rx-polarization` name the source of the kinked-field-line explanation in the page's credit line, in both "
+    "languages: \"Ideja: objašnjenje zračenja lomom silnica, s predavanja iz Antena na FER-u\" / \"Idea: explaining "
+    "radiation by kinking field lines, from the antenna lectures at FER\". It is an idea credit, not a licence: it "
+    "does not go into `sim.json` `credits` (no material is copied), and no person is named on the page.",
     "- **Standard physics, checked.** Every formula is textbook (Purcell & Morin, *Electricity and Magnetism*; "
     "Griffiths, *Introduction to Electrodynamics*; Balanis, *Antenna Theory*; Kraus, *Antennas*) and is checked in "
     "SPEC.md with a small script against the book's numbers. Cite chapter and equation in SPEC.md; do not copy figures.",

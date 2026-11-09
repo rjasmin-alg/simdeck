@@ -18,10 +18,11 @@ default is "only the model and layouts can be built", and that is what this is:
   projector says "Pokazni način" under the join code, and the Ideja text says plainly that a static page cannot
   receive answers from other devices yet.
 
-**`status` stays `"wip"`** although the rest of the definition of done holds (gate, tests, both languages): a
-published "Brza anketa" that phones cannot reach would promise what it cannot do in class. The owner decides whether to
-publish the demo as it is or wait for the transport; the follow-up task that adds a transport should not need to
-change the model.
+**Published as a demo** (owner, 2026-11-09): `status` is `"ready"` and the page sits in `lecturer › classroom › poll`.
+It says on the projector ("Pokazni način") and in the Ideja text that a static page cannot receive answers from other
+devices yet. The builder had held it at `"wip"` because a published "Brza anketa" that phones cannot reach promises
+more than it does; the owner chose to publish the demo anyway. A follow-up task that adds a transport should not need
+to change the model.
 
 ## Decisions
 
