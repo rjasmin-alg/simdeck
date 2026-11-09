@@ -1,0 +1,486 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Autoscaling lag: one service's demand and capacity over a run of ticks, capacity orders that come online after
+     their lead time, ρ and p99 against the target (task docs/tasks/w3/autoscaling-lag.md). An explorer: the params
+     drive the stage live; the model is in sim.js (rules in SPEC.md), the words in strings.js. No kit view fits (a
+     tick chart), so the page draws its own SVG at 1:1 (no viewBox), redrawn on resize. -->
+<html lang="hr" data-sim="autoscaling-lag">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kašnjenje autoskaliranja · simdeck</title>
+<meta name="description" content="Vrijeme isporuke kapaciteta prema vršku opterećenja; prekid spot instance.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "autoscaling-lag",
+  "title": {
+    "hr": "Kašnjenje autoskaliranja",
+    "en": "Autoscaling lag"
+  },
+  "concept": {
+    "hr": "Vrijeme isporuke kapaciteta prema vršku opterećenja; prekid spot instance",
+    "en": "Capacity lead time against a load spike; spot preemption"
+  },
+  "summary": {
+    "hr": "Pošalji vršak opterećenja uz različito vrijeme isporuke: autoskaliranje reagira odmah, kapacitet stiže kasnije; spot kapacitet nestane i ne vraća se.",
+    "en": "Spike the load with different lead times: the autoscaler reacts at once, the capacity arrives later; spot capacity vanishes and does not come back."
+  },
+  "tags": [
+    "performance"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "dc-sim-provisioning"
+    },
+    {
+      "preset": "fast-scaler"
+    },
+    {
+      "preset": "slow-scaler"
+    },
+    {
+      "preset": "too-late"
+    },
+    {
+      "preset": "spot-and-domains"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="autoscaling-lag"]; colours only from kit tokens. */
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="autoscaling-lag"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+/* Controls hidden by `visible` (spike and baseline outside the spike scenario): the kit's .sd-ctl display wins over [hidden]. */
+[data-sim="autoscaling-lag"] .sd-ctl[hidden] { display: none; }
+
+[data-sim="autoscaling-lag"] .al { position: relative; height: 100%; min-height: 0; }
+[data-sim="autoscaling-lag"] .al svg { position: absolute; inset: 0; overflow: visible; }
+[data-sim="autoscaling-lag"] .al text { font-family: var(--sans); font-size: var(--fs-sm); fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+[data-sim="autoscaling-lag"] .al .al-muted { fill: var(--muted); }
+[data-sim="autoscaling-lag"] .al .al-b { font-weight: 700; }
+[data-sim="autoscaling-lag"] .al .al-bad { fill: var(--danger); font-weight: 700; }
+[data-sim="autoscaling-lag"] .al .al-inf { fill: var(--danger); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="autoscaling-lag"] .al .al-in { stroke: none; font-weight: 700; }
+[data-sim="autoscaling-lag"] .al-axis { stroke: var(--ink); stroke-width: 3; }
+[data-sim="autoscaling-lag"] .al-grid { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
+[data-sim="autoscaling-lag"] .al-chg { fill: var(--hl); opacity: 0.35; }
+[data-sim="autoscaling-lag"] .al-chg-tick { fill: var(--hl); stroke: var(--ink); stroke-width: 2; }
+[data-sim="autoscaling-lag"] .al .al-chg-num { fill: var(--on-hl); stroke: none; font-weight: 700; }
+
+/* Capacity blocks: baseline solid, reserved striped, spot dotted; down or reclaimed blocks dashed and empty. */
+[data-sim="autoscaling-lag"] .al-blk { stroke-width: 2; }
+[data-sim="autoscaling-lag"] .al-blk-baseline { fill: var(--c6); fill-opacity: 0.4; stroke: var(--c6); }
+[data-sim="autoscaling-lag"] .al-blk-reserved { fill: url(#al-stripes); stroke: var(--c2); }
+[data-sim="autoscaling-lag"] .al-blk-spot { fill: url(#al-dots); stroke: var(--c4); }
+[data-sim="autoscaling-lag"] .al-stripe { stroke: var(--c2); stroke-width: 3; }
+[data-sim="autoscaling-lag"] .al-dot { fill: var(--c4); }
+[data-sim="autoscaling-lag"] .al-ghost { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 6 5; }
+[data-sim="autoscaling-lag"] .al-capline { fill: none; stroke: var(--ink); stroke-width: 4; stroke-linejoin: round; }
+[data-sim="autoscaling-lag"] .al-demand { fill: var(--ink); }
+[data-sim="autoscaling-lag"] .al-cap-sat { fill: var(--danger); }
+
+/* Orders: a flag at the tick placed, an arrow to the tick online, a dashed drop to that tick's capacity. */
+[data-sim="autoscaling-lag"] .al-flag { fill: var(--ink); stroke: var(--ink); stroke-width: 2; }
+[data-sim="autoscaling-lag"] .al-flag-plan { fill: var(--bg); }
+[data-sim="autoscaling-lag"] .al-pole { stroke: var(--ink); stroke-width: 2; }
+[data-sim="autoscaling-lag"] .al-arrow { stroke: var(--ink); stroke-width: 3; }
+[data-sim="autoscaling-lag"] .al-head { fill: var(--ink); }
+[data-sim="autoscaling-lag"] .al-drop { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 3 4; }
+
+/* p99 strip: points and line against the dashed target. */
+[data-sim="autoscaling-lag"] .al-slo { stroke: var(--danger); stroke-width: 3; stroke-dasharray: 10 6; }
+[data-sim="autoscaling-lag"] .al-p99 { fill: none; stroke: var(--c1); stroke-width: 3; }
+[data-sim="autoscaling-lag"] .al-pt { fill: var(--c1); stroke: var(--bg); stroke-width: 2; }
+[data-sim="autoscaling-lag"] .al-pt-over { fill: var(--bg); stroke: var(--c1); stroke-width: 3; }
+[data-sim="autoscaling-lag"] .al-up { fill: var(--danger); }
+
+/* Legend swatches: shapes and patterns, so they read in grayscale too. */
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-demand'] { width: 0.6em; border: 0; border-radius: 0; background: var(--ink); }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-baseline'] { border: 2px solid var(--c6); border-radius: 0; background: color-mix(in srgb, var(--c6) 40%, transparent); }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-reserved'] { border: 2px solid var(--c2); border-radius: 0; background: repeating-linear-gradient(45deg, var(--c2) 0 0.12em, transparent 0.12em 0.36em); }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-spot'] { border: 2px solid var(--c4); border-radius: 0; background: radial-gradient(circle, var(--c4) 0 0.09em, transparent 0.1em) 0 0 / 0.33em 0.33em; }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-order'],
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-sat'] { position: relative; width: 1.6em; border: 0; background: transparent; }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-order']::after { content: '⚑→'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink); font-weight: 700; line-height: 1; }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-sat']::after { content: '∞'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--danger); font-weight: 700; line-height: 1; border-bottom: 0.2em solid var(--danger); }
+[data-sim="autoscaling-lag"] .sd-swatch[data-shape='al-slo'] { width: 1.8em; height: 0.25rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--danger) 0 0.45em, transparent 0.45em 0.7em); }
+
+/* Phone and portrait: the stage grows with its content; the chart gets a fixed height. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="autoscaling-lag"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="autoscaling-lag"] .al { height: 34rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kašnjenje autoskaliranja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+  var BLOCK = { 'rack-a': 'blockRackA', 'rack-b': 'blockRackB', 'spot': 'blockSpot' };
+
+  // ── numbers in the page's language ──
+  /** At most `digits` decimals, trailing zeros dropped (22.857 → 22.9, 15 → 15). */
+  function short(v, digits) { return String(parseFloat(v.toFixed(digits == null ? 1 : digits))).replace('.', t('dec')); }
+  /** Fixed decimals (0.70, 2.30). */
+  function fixed(v, digits) { return v.toFixed(digits).replace('.', t('dec')); }
+  function sec(v) { return t('sec', { v: v < 10 ? fixed(v, 2) : short(v, 0) }); }
+  function rho(v) { return fixed(v, 2); }
+  function amt(v) { return short(v, 1); }
+  function b(x) { return h('b', null, x); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var str = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (str === null) {
+        // a placeholder used twice gives the same node twice: the second use is a copy, so the first stays put
+        out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p);
+        seen.push(p);
+        return;
+      }
+      str.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+  /** Ticks as runs: [2, 3, 4, 6] → "2–4, 6". */
+  function runs(list) {
+    var out = [], i = 0;
+    while (i < list.length) {
+      var j = i;
+      while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+      out.push(j > i ? t('range', { a: String(list[i]), b: String(list[j]) }) : String(list[i]));
+      i = j + 1;
+    }
+    return out.join(', ');
+  }
+  function leadText(n) { return t('lead' + n); }
+  /** A tick number, negative ones with a real minus sign (an order placed before the run). */
+  function tk(v) { return v < 0 ? '−' + (-v) : String(v); }
+
+  function s(tag, attrs) {
+    var e = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] != null) e.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+
+  // ── what changed with the last change: the params before it ──
+  var lastKey = null, lastP = null, prevP = null;
+  function track(p) {
+    var key = JSON.stringify(p);
+    if (key === lastKey) return;            // a redraw of the same state (theme, resize) keeps the last change
+    prevP = lastP; lastP = p; lastKey = key;
+  }
+
+  // ── the chart ──
+  function draw(box, st, changed) {
+    var W = box.clientWidth, H = box.clientHeight;
+    if (!W || !H) return;
+    var rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    var fs = Math.max(16, 0.8 * rem);
+    var narrow = W < 40 * rem;
+    var n = st.n;
+    var m = { l: (narrow ? 2.6 : 4.4) * rem, r: (narrow ? 0.4 : 1.2) * rem };
+    var pw = W - m.l - m.r, colW = pw / n;
+    var X = function (i) { return m.l + i * colW; };
+    var CX = function (i) { return X(i) + colW / 2; };
+    var svg = s('svg', { width: W, height: H, role: 'img', 'aria-label': t('chart') });
+    box.replaceChildren(svg);
+    svg.append(s('defs', null,
+      s('pattern', { id: 'al-stripes', patternUnits: 'userSpaceOnUse', width: 10, height: 10, patternTransform: 'rotate(45)' },
+        s('line', { class: 'al-stripe', x1: 0, y1: 0, x2: 0, y2: 10 })),
+      s('pattern', { id: 'al-dots', patternUnits: 'userSpaceOnUse', width: 9, height: 9 },
+        s('circle', { class: 'al-dot', cx: 4.5, cy: 4.5, r: 2 }))));
+    function text(x, y, str, cls, anchor) {
+      var e = s('text', { x: x, y: y, class: cls || null, 'text-anchor': anchor || 'middle' }, str);
+      svg.append(e);
+      return e;
+    }
+
+    // Order lanes: each order gets the first row where it does not overlap an earlier one.
+    var laneH = 2.1 * fs, rows = [];
+    var orders = st.orders.map(function (o) {
+      var xs = o.at < 0 ? m.l : CX(o.at), xe = o.online >= n ? m.l + pw : CX(o.online);
+      var label = t('orderAmt', { v: amt(o.amount) }) + (o.at < 0 ? ' · ' + t('orderAt', { t: tk(o.at) }) : '');
+      var end = Math.max(xe, xs + (label.length + 3) * 0.55 * fs) + (o.online >= n ? (6 + String(o.online).length) * 0.55 * fs : 0);
+      var row = 0;
+      while (rows[row] != null && rows[row] > xs - 0.5 * rem) row++;
+      rows[row] = end;
+      return { o: o, xs: xs, xe: xe, label: label, row: row };
+    });
+    var lanes = Math.max(1, rows.length);
+
+    // Vertical layout: lanes, the capacity chart, tick numbers, the ρ row, the p99 strip.
+    var top = lanes * laneH + 0.3 * fs;
+    var rows2 = narrow ? 1.3 * fs : 0;   // phone: the ρ row in two staggered lines
+    var rest = H - top - 5.4 * fs - rows2 - 1.2 * fs;
+    var ch = Math.max(8 * fs, rest * 0.66), ph = Math.max(4 * fs, rest - ch);
+    var cTop = top, cBot = cTop + ch;
+    var tickY = cBot + 1.25 * fs, rhoY = cBot + 2.75 * fs;
+    var pTop = cBot + 5.4 * fs + rows2, pBot = pTop + ph;
+
+    // Capacity axis: up to the largest capacity, ghost or demand, with room for the ∞ marks.
+    var peak = 0;
+    st.ticks.forEach(function (k) {
+      var ghost = k.down.reduce(function (a, d) { return a + d.amount; }, 0);
+      peak = Math.max(peak, k.capacity + ghost, k.demand);
+    });
+    var ymax = Math.ceil(peak * 1.18 / 5) * 5, gstep = ymax > 30 ? 10 : 5;
+    var Y = function (v) { return cBot - Math.min(v, ymax) / ymax * ch; };
+
+    // changed ticks: a highlighted column behind everything
+    changed.forEach(function (i) { svg.append(s('rect', { class: 'al-chg', x: X(i), y: cTop, width: colW, height: pBot - cTop })); });
+
+    for (var g = 0; g <= ymax; g += gstep) {
+      svg.append(s('line', { class: 'al-grid', x1: m.l, x2: m.l + pw, y1: Y(g), y2: Y(g) }));
+      text(m.l - 0.4 * rem, Y(g) + 0.35 * fs, String(g), null, 'end');
+    }
+    if (narrow) text(2, cTop - 1.0 * fs, t('axisCap'), 'al-muted', 'start');
+    else text(m.l - 0.4 * rem, cTop - 1.0 * fs, t('axisCap'), 'al-muted', 'end');
+
+    // blocks, ghosts, demand bars and saturation marks per tick
+    var bx = 0.08 * colW, bw = 0.84 * colW, dw = Math.max(6, 0.32 * colW);
+    // Named blocks (racks, spot) carry a label in their left part: the demand bar moves right to leave it room.
+    var named = st.blocks.some(function (blk) { return BLOCK[blk.id]; }) && bw > 2.6 * fs;
+    var DX = function (i) { return named ? X(i) + bx + bw - 0.1 * colW - dw / 2 : CX(i); };
+    st.ticks.forEach(function (k, i) {
+      var y0 = 0;
+      k.active.forEach(function (blk) {
+        var yTop = Y(y0 + blk.amount), hgt = Y(y0) - yTop;
+        svg.append(s('rect', { class: 'al-blk al-blk-' + blk.kind, x: X(i) + bx, y: yTop, width: bw, height: hgt }));
+        if (BLOCK[blk.id] && hgt > 1.4 * fs && bw > 2.6 * fs) {
+          // the label sits beside the demand bar, in the block's left part
+          text(X(i) + bx + 0.3 * rem, yTop + 1.1 * fs, t(BLOCK[blk.id]), 'al-in', 'start');
+        }
+        y0 += blk.amount;
+      });
+      k.down.forEach(function (d) {
+        var yTop = Y(y0 + d.amount), hgt = Y(y0) - yTop;
+        svg.append(s('rect', { class: 'al-ghost', x: X(i) + bx, y: yTop, width: bw, height: hgt }));
+        if (hgt > 1.4 * fs) {
+          var lbl = (bw > 4.2 * fs ? t(d.why === 'domain' ? 'down' : 'reclaimed') : '✕');
+          // at the top of the ghost, clear of the demand bar's ∞ mark below
+          var e = text(CX(i), yTop + 1.1 * fs, lbl, 'al-muted');
+          if (bw > 4.2 * fs && e.getComputedTextLength() > bw - 0.3 * rem) e.textContent = '✕';
+        }
+        y0 += d.amount;
+      });
+      var yd = Y(k.demand);
+      svg.append(s('rect', { class: 'al-demand', x: DX(i) - dw / 2, y: yd, width: dw, height: cBot - yd }));
+      if (k.saturated) {
+        svg.append(s('rect', { class: 'al-cap-sat', x: DX(i) - dw / 2 - 3, y: yd - 5, width: dw + 6, height: 6 }));
+        text(DX(i), yd - 0.6 * fs, t('inf'), 'al-inf');
+      }
+    });
+
+    // the capacity step line
+    var d = '';
+    st.ticks.forEach(function (k, i) {
+      var y = Y(k.capacity).toFixed(1);
+      d += (i ? ' L' : 'M') + X(i).toFixed(1) + ' ' + y + ' L' + X(i + 1).toFixed(1) + ' ' + y;
+    });
+    svg.append(s('path', { class: 'al-capline', d: d }));
+    svg.append(s('line', { class: 'al-axis', x1: m.l, x2: m.l + pw, y1: cBot, y2: cBot }));
+    svg.append(s('line', { class: 'al-axis', x1: m.l, x2: m.l, y1: cTop, y2: cBot }));
+
+    // orders: flag, amount, arrow to the tick online, dashed drop to that tick's capacity
+    orders.forEach(function (q) {
+      var y = (q.row + 1) * laneH - 0.15 * fs, o = q.o;
+      svg.append(s('line', { class: 'al-pole', x1: q.xs, x2: q.xs, y1: y - 1.5 * fs, y2: y }));
+      svg.append(s('path', { class: 'al-flag' + (o.by === 'plan' ? ' al-flag-plan' : ''), d: 'M' + q.xs + ' ' + (y - 1.5 * fs) + ' L' + (q.xs + 0.85 * fs) + ' ' + (y - 1.2 * fs) + ' L' + q.xs + ' ' + (y - 0.9 * fs) + ' Z' }));
+      text(q.xs + 1.1 * fs, y - 0.45 * fs, q.label, 'al-b', 'start');
+      var a = 0.45 * fs;
+      svg.append(s('line', { class: 'al-arrow', x1: q.xs, x2: q.xe - a, y1: y, y2: y }));
+      svg.append(s('path', { class: 'al-head', d: 'M' + (q.xe - 1.6 * a) + ' ' + (y - a) + ' L' + q.xe + ' ' + y + ' L' + (q.xe - 1.6 * a) + ' ' + (y + a) + ' Z' }));
+      if (o.online < n) svg.append(s('line', { class: 'al-drop', x1: q.xe, x2: q.xe, y1: y + a, y2: Y(st.ticks[o.online].capacity) }));
+      else text(q.xe, y - 0.45 * fs, t('orderBeyond', { t: String(o.online) }), 'al-b', 'end');
+    });
+
+    // tick numbers (changed ones highlighted) and the ρ row
+    text(m.l - 0.4 * rem, tickY, narrow ? 't' : t('axisTick'), 'al-muted', 'end');
+    text(m.l - 0.4 * rem, rhoY, t('rowRho'), 'al-muted', 'end');
+    st.ticks.forEach(function (k, i) {
+      var chg = changed.indexOf(i) >= 0;
+      if (chg) svg.append(s('rect', { class: 'al-chg-tick', x: CX(i) - Math.min(colW / 2 - 2, 1.1 * fs), y: tickY - 1.05 * fs, width: 2 * Math.min(colW / 2 - 2, 1.1 * fs), height: 1.4 * fs, rx: 4 }));
+      text(CX(i), tickY, String(k.t), chg ? 'al-chg-num' : null);
+      // phone: odd ticks one line lower so neighbours never touch
+      var v = rho(k.rho);
+      text(CX(i), rhoY + (narrow && i % 2 ? rows2 : 0), v, k.saturated ? 'al-bad' : k.rho > L.TRIGGER ? 'al-b' : null);
+    });
+
+    // p99 strip against the target
+    var bounded = st.ticks.filter(function (k) { return !k.saturated; }).map(function (k) { return k.p99; });
+    var pmax = Math.max(3, Math.min(10, Math.ceil(Math.max.apply(null, bounded.concat([0])))));
+    var P = function (v) { return pBot - Math.min(v, pmax) / pmax * ph; };
+    var pstep = pmax > 5 ? 2 : 1;
+    for (var pv = 0; pv <= pmax; pv += pstep) {
+      svg.append(s('line', { class: 'al-grid', x1: m.l, x2: m.l + pw, y1: P(pv), y2: P(pv) }));
+      text(m.l - 0.4 * rem, P(pv) + 0.35 * fs, narrow ? String(pv) : t('sec', { v: String(pv) }), null, 'end');
+    }
+    text(m.l - 0.4 * rem, pTop - 1.0 * fs, t('rowP99'), 'al-muted', 'end');
+    svg.append(s('line', { class: 'al-slo', x1: m.l, x2: m.l + pw, y1: P(st.slo), y2: P(st.slo) }));
+    svg.append(s('line', { class: 'al-axis', x1: m.l, x2: m.l + pw, y1: pBot, y2: pBot }));
+    svg.append(s('line', { class: 'al-axis', x1: m.l, x2: m.l, y1: pTop, y2: pBot }));
+    var path = '', pen = false;
+    st.ticks.forEach(function (k, i) {
+      if (k.saturated) { pen = false; return; }
+      path += (pen ? ' L' : ' M') + CX(i).toFixed(1) + ' ' + P(k.p99).toFixed(1);
+      pen = true;
+    });
+    if (path) svg.append(s('path', { class: 'al-p99', d: path.trim() }));
+    var showVals = colW > 3.6 * fs;
+    st.ticks.forEach(function (k, i) {
+      var x = CX(i);
+      if (k.saturated || k.p99 > pmax) {
+        var yy = pTop + 0.2 * fs, a = 0.45 * fs;
+        svg.append(s('path', { class: 'al-up', d: 'M' + (x - a) + ' ' + (yy + 1.2 * a) + ' L' + x + ' ' + (yy - 0.4 * a) + ' L' + (x + a) + ' ' + (yy + 1.2 * a) + ' Z' }));
+        text(x, yy + 1.2 * a + 1.05 * fs, k.saturated ? t('inf') : (showVals ? sec(k.p99) : short(k.p99, 0)), 'al-bad');
+        return;
+      }
+      var y = P(k.p99);
+      svg.append(s('circle', { class: k.verdict === 'over' ? 'al-pt-over' : 'al-pt', cx: x, cy: y, r: 0.32 * fs }));
+      if (showVals) text(x, y - 0.6 * fs, fixed(k.p99, 2), k.verdict === 'over' ? 'al-b' : null);
+    });
+    // the target's label at the right end, above its line
+    text(m.l + pw, P(st.slo) - 0.4 * fs, t('slo', { v: t('sec', { v: String(st.slo) }) }), 'al-bad', 'end');
+  }
+
+  // ── captions: the one thing the current run shows ──
+  function caption(c) {
+    var st = c.state, p = c.params;
+    var sat = L.saturatedTicks(st);
+    var satText = function () { return t.n('nSat', sat.length); };
+    var o = L.captionOrder(st);
+    switch (L.captionKey(st)) {
+      case 'spot': {
+        var pre = 6, k = st.ticks[pre];
+        return rich('cSpot', { t: b(String(pre)), c: b(amt(k.capacity)), d: amt(k.demand) });
+      }
+      case 'provisioning': {
+        var plan = st.orders[0], on = st.ticks[plan.online];
+        return rich('cProv', { b: b(String(plan.online)), last: String(plan.online - 1), rho0: rho(st.ticks[0].rho),
+          c: b(amt(on.capacity)), rho: b(rho(on.rho)), p: b(sec(on.p99)), slo: t('sec', { v: String(st.slo) }) });
+      }
+      case 'beyondRun':
+        return rich('cBeyond', { amt: b(amt(o.amount)), a: String(o.at), lead: leadText(p.lead), b: b(String(o.online)), sat: b(satText()) });
+      case 'tooLate': {
+        var last = st.ticks[st.n - 1];
+        return rich('cTooLate', { amt: b(amt(o.amount)), a: String(o.at), b: b(String(o.online)), from: String(st.spike.from), to: String(st.spike.to),
+          sat: b(satText()), rho: b(rho(last.rho)) });
+      }
+      case 'lag': {
+        if (!sat.length) return rich('cLagNoSat', { a: b(String(o.at)), rho: rho(st.ticks[o.at].rho), amt: amt(o.amount), b: b(String(o.online)) });
+        var vars = { a: b(String(o.at)), b: b(String(o.online)), sat: b(satText()) };
+        if (st.spike) {
+          vars.spike = t.n('nSpike', st.spike.to - st.spike.from + 1);
+          return rich('cLagSpike', vars);
+        }
+        return rich('cLag', vars);
+      }
+      case 'pre': {
+        var po = st.orders.filter(function (x) { return x.by === 'pre'; })[0];
+        return rich('cPre', { amt: b(amt(po.amount)), a: tk(po.at), lead: leadText(p.lead), b: b(String(po.online)), rho: rho(st.ticks[st.n - 1].rho) });
+      }
+      case 'preSat': {
+        var ps = st.orders.filter(function (x) { return x.by === 'pre'; })[0];
+        return rich('cPreSat', { amt: b(amt(ps.amount)), a: tk(ps.at), b: b(String(ps.online)), sat: b(satText()), list: runs(sat) });
+      }
+      case 'noScaler':
+        return rich('cNoScaler', { sat: b(satText()), list: runs(sat) });
+      default: {
+        // calm: the busiest tick
+        var top = st.ticks.reduce(function (a, k) { return k.rho > a.rho ? k : a; }, st.ticks[0]);
+        var vars2 = { d: amt(top.demand), c: amt(top.capacity), rho: b(rho(top.rho)), p: b(sec(top.p99)), slo: t('sec', { v: String(st.slo) }) };
+        return rich(st.policy === 'none' ? 'cNoScalerCalm' : top.verdict === 'over' ? 'cCalm' : 'cCalmOk', vars2);
+      }
+    }
+  }
+
+  var labels = { 'dc-sim-provisioning': 'presetProv', 'fast-scaler': 'presetFast', 'slow-scaler': 'presetSlow', 'too-late': 'presetLate', 'spot-and-domains': 'presetSpot' };
+  var chart = null, last = null;
+  var isSpike = function (p) { return p.scenario === 'spike'; };
+
+  var sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'scenario', type: 'choice', label: t('scenario'), hint: t('scenarioHint'), options: [['spike', t('scSpike')], ['provisioning', t('scProv')], ['spot', t('scSpot')]] },
+      { key: 'lead', type: 'choice', label: t('lead'), disabled: function (p) { return p.policy === 'none' ? t('noOrders') : p.scenario === 'provisioning' ? t('leadFixed') : false; }, options: [[1, t('lead1')], [4, t('lead4')], [9, t('lead9')]] },
+      { key: 'policy', type: 'choice', label: t('policy'), hint: t('policyHint'), options: [['none', t('polNone')], ['reactive', t('polReactive')], ['pre', t('polPre')]] },
+      { key: 'spike', type: 'toggle', label: t('spike'), visible: isSpike },
+      { key: 'baseline', type: 'range', label: t('baseline'), min: 5, max: 20, step: 1, visible: isSpike, format: function (v) { return String(v); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'al-demand', label: t('legendDemand') },
+      { shape: 'al-baseline', label: t('legendBaseline') },
+      { shape: 'al-reserved', label: t('legendReserved') },
+      { shape: 'al-spot', label: t('legendSpot') },
+      { shape: 'al-order', label: t('legendOrder') },
+      { shape: 'al-sat', label: t('legendSat') },
+      { shape: 'al-slo', label: t('legendSlo') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+    render: function (c) {
+      if (!chart) {
+        chart = h('div', { class: 'al' });
+        c.stage.replaceChildren(chart);
+        new ResizeObserver(function () { if (last) draw(chart, last.state, last.changed); }).observe(chart);
+      }
+      track(c.params);
+      var changed = prevP ? L.changedTicks(c.state, L.compute(prevP)) : [];
+      last = { state: c.state, changed: changed };
+      draw(chart, c.state, changed);
+    },
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
