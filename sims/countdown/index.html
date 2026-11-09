@@ -1,0 +1,469 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Exercise countdown: a projector-sized timer for in-class exercises (docs/tasks/w3/countdown.md). A tool
+     (lecturer-only): no steps. The kit holds the settings (length, warning, title, sound) as params; the timer itself
+     lives in this page, because it depends on the clock: the page reads Date.now() and the pure model in sim.js turns
+     the state and the time into what is shown (SPEC.md). The timer is kept in sessionStorage so the language switch,
+     which reloads the page, does not stop it. -->
+<html lang="hr" data-sim="countdown">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odbrojavanje za vježbu · simdeck</title>
+<meta name="description" content="Mjerač vremena za vježbe na satu, čitljiv sa zadnjeg reda.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "countdown",
+  "title": {
+    "hr": "Odbrojavanje za vježbu",
+    "en": "Exercise countdown"
+  },
+  "concept": {
+    "hr": "Mjerač vremena za vježbe na satu, čitljiv sa zadnjeg reda",
+    "en": "A projector-sized timer for in-class exercises"
+  },
+  "summary": {
+    "hr": "Odaberi trajanje i pokreni: velike znamenke, traka napretka, vrijeme završetka i upozorenje u zadnjoj minuti.",
+    "en": "Choose a length and start: large digits, a progress bar, the finishing time and a warning in the last minute."
+  },
+  "tags": [
+    "classroom-tool"
+  ],
+  "class": "tool"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="countdown"]; colours only from kit tokens.
+   Phases carry shape and words as well as colour: running a thin solid frame and a solid bar; warning a thick dashed
+   frame, a striped bar and "još N min"; done a thick double frame, the box filled and "Vrijeme!"; paused a dotted
+   frame and "Pauza". */
+[data-sim="countdown"] .cd { height: 100%; padding: 2.5cqh 2cqw; }
+[data-sim="countdown"] .cd-box {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2cqh;
+  height: 100%;
+  padding: 2cqh 3cqw 3cqh;
+  border: 0.3rem solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+}
+[data-sim="countdown"] .cd-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-width: 0; }
+[data-sim="countdown"] .cd-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: max(var(--fs-lg), 6cqh);
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+[data-sim="countdown"] .cd-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.35em;
+  margin-left: auto;
+  padding: 0.1em 0.6em;
+  border: 0.18rem solid currentColor;
+  border-radius: 999px;
+  font-size: max(var(--fs-md), 5cqh);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+[data-sim="countdown"] .cd-badge .sd-icon { width: 0.8em; height: 0.8em; }
+[data-sim="countdown"] .cd-digits {
+  font-size: max(3rem, min(54cqh, 33cqw));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+[data-sim="countdown"] .cd-bar {
+  position: relative;
+  height: max(0.9rem, 4cqh);
+  overflow: hidden;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="countdown"] .cd-fill { height: 100%; background: var(--line); }
+[data-sim="countdown"] .cd-end {
+  font-size: max(var(--fs-lg), 6.5cqh);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+[data-sim="countdown"] .cd-end:empty::before { content: '\00a0'; }
+
+/* idle: thin frame in --line, bar full and neutral */
+/* running */
+[data-sim="countdown"] .cd-box[data-phase="running"] { border-color: var(--ok); }
+[data-sim="countdown"] .cd-box[data-phase="running"] .cd-fill { background: var(--ok); }
+[data-sim="countdown"] .cd-box[data-phase="running"] .cd-badge { color: var(--ok); }
+/* warning */
+[data-sim="countdown"] .cd-box[data-phase="warning"] { border: 0.7rem dashed var(--warn); }
+[data-sim="countdown"] .cd-box[data-phase="warning"] .cd-digits,
+[data-sim="countdown"] .cd-box[data-phase="warning"] .cd-badge { color: var(--warn); }
+[data-sim="countdown"] .cd-box[data-phase="warning"] .cd-badge { background: var(--hl); color: var(--on-hl); border-color: var(--on-hl); }
+[data-sim="countdown"] .cd-box[data-phase="warning"] .cd-fill {
+  background: repeating-linear-gradient(-45deg, var(--warn) 0 0.6rem, var(--bg) 0.6rem 1rem);
+}
+/* done */
+[data-sim="countdown"] .cd-box[data-phase="done"] {
+  border: 1rem double var(--on-series);
+  outline: 0.3rem solid var(--danger);
+  outline-offset: -0.3rem;
+  background: var(--danger);
+  color: var(--on-series);
+  animation: cd-pulse 1.2s ease-in-out 3;
+}
+[data-sim="countdown"] .cd-box[data-phase="done"] .cd-digits { font-size: max(2.5rem, min(44cqh, 17cqw)); }
+[data-sim="countdown"] .cd-box[data-phase="done"] .cd-bar { border-color: var(--on-series); }
+@keyframes cd-pulse { 50% { opacity: 0.72; } }
+/* paused: dotted frame, whatever the phase */
+[data-sim="countdown"] .cd-box[data-paused="true"] { border-style: dotted; }
+[data-sim="countdown"] .cd-box[data-paused="true"] .cd-badge { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+/* the timer's buttons sit in the transport bar, where a stepper has its play button */
+[data-sim="countdown"] .cd-tgroup .sd-btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+[data-sim="countdown"] .cd-go { min-width: 12rem; justify-content: center; }
+/* phone and portrait: the three timer buttons on one row of the sticky bar; reset stays in the panel */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="countdown"] .cd-tgroup { flex: 1 1 100%; flex-wrap: nowrap; }
+  [data-sim="countdown"] .cd-tgroup .sd-btn { flex: none; padding-inline: 0.6rem; }
+  [data-sim="countdown"] .cd-tgroup .cd-go { flex: 1 1 auto; min-width: 0; }
+  [data-sim="countdown"] .sd-bar > .sd-tgroup:not(.cd-tgroup) { display: none; }
+}
+/* the phase key in the header legend: the same frames as on the stage, small */
+[data-sim="countdown"] .sd-swatch[data-shape^="cd-"] { width: 2rem; height: 1.3rem; border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="countdown"] .sd-swatch[data-shape="cd-running"] { border: 0.15rem solid var(--ok); }
+[data-sim="countdown"] .sd-swatch[data-shape="cd-warning"] { border: 0.25rem dashed var(--warn); }
+[data-sim="countdown"] .sd-swatch[data-shape="cd-done"] { border: 0.35rem double var(--on-series); outline: 0.12rem solid var(--danger); outline-offset: -0.12rem; background: var(--danger); }
+[data-sim="countdown"] .sd-swatch[data-shape="cd-paused"] { border: 0.22rem dotted var(--ink); }
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Odbrojavanje za vježbu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings); // picks the language; every visible word goes through t
+  var KEY = 'simdeck.countdown';
+  var MIN = L.MIN;
+  var STALE_MS = 3 * 60 * MIN;
+
+  var timer = null;     // the timer state (SPEC.md); the kit's state is only the configuration the params choose
+  var cfg = null;       // the kit state last seen: a new object means params, a preset or R changed it
+  var restored = load();
+  var sim;
+  var els = null;       // the stage's live parts, painted every frame while the timer runs
+  var shownSig = '';    // what the caption and the stage structure were last rendered for
+  var params = L.defaults;
+  var frame = 0, slow = 0, endTimer = 0, endFor = null;
+
+  function now() { return Date.now(); }
+  /** The time-zone offset at the moment the timer ends (so a daylight-saving change in between is right). */
+  function offset() {
+    var end = timer && timer.status === 'done' ? timer.startedAt + timer.pausedTotalMs + timer.durationMs : now() + (timer ? L.remaining(timer, now()) : 0);
+    return -new Date(end).getTimezoneOffset();
+  }
+
+  // ── storage: the timer survives the reload a language switch does; it may be unavailable ──
+  function load() {
+    try {
+      var raw = sessionStorage.getItem(KEY);
+      if (!raw) return null;
+      var x = JSON.parse(raw);
+      var s = L.sanitize(x && x.timer);
+      // a timer left in this tab for hours is not the one the lecturer wants back
+      if (typeof x.savedAt !== 'number' || Math.abs(Date.now() - x.savedAt) > STALE_MS) return null;
+      return s && typeof x.cfgDurationMs === 'number' ? { timer: s, cfgDurationMs: x.cfgDurationMs } : null;
+    } catch (e) { return null; }
+  }
+  function save() {
+    try { sessionStorage.setItem(KEY, JSON.stringify({ timer: timer, cfgDurationMs: cfg ? cfg.durationMs : null, savedAt: Date.now() })); } catch (e) { /* unavailable */ }
+  }
+
+  // ── sound: a short tone made here (Web Audio), only when the toggle is on; no files, no network ──
+  var audio = null;
+  function prepareAudio() {
+    if (audio) { if (audio.state === 'suspended') audio.resume().catch(function () {}); return; }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { audio = new AC(); } catch (e) { audio = null; }
+  }
+  function tone() {
+    if (!audio) prepareAudio();
+    if (!audio) return;
+    if (audio.state === 'suspended') audio.resume().catch(function () {});
+    var t0 = audio.currentTime + 0.05;
+    [0, 0.3, 0.6].forEach(function (d, i) {
+      var o = audio.createOscillator(), g = audio.createGain();
+      o.type = 'sine';
+      o.frequency.value = i === 2 ? 660 : 880;
+      g.gain.setValueAtTime(0.0001, t0 + d);
+      g.gain.exponentialRampToValueAtTime(0.3, t0 + d + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.25);
+      o.connect(g).connect(audio.destination);
+      o.start(t0 + d);
+      o.stop(t0 + d + 0.27);
+    });
+  }
+
+  // ── actions ──
+  function apply(next) {
+    if (next === timer) return;
+    timer = next;
+    save();
+    if (sim) sim.render();
+    schedule();
+  }
+  function act(fn) {
+    return function () {
+      if (cfg && cfg.sound) prepareAudio(); // a user gesture: the browser lets the tone play later
+      apply(fn(timer, now()));
+    };
+  }
+  var toggle = act(L.toggle);
+  var plus = act(function (s, n) { return L.adjust(s, MIN, n); });
+  var minus = act(function (s, n) { return L.adjust(s, -MIN, n); });
+
+  // Space through the page's own key (the kit gives Space only to steppers): a keyboard user's focused control keeps
+  // its own Space (a button, a link, a switch), as it would on a stepper page (the kit's exclusion, kit.js keydown).
+  function spaceKey() {
+    var a = document.activeElement;
+    var own = a instanceof HTMLElement && a !== document.body && a !== bGo ? a.closest('button, a[href], summary, select, input:not([type="range"])') : null;
+    if (own) { if (own.tagName !== 'SELECT') own.click(); return; }
+    toggle();
+  }
+
+  // R (the kit's reset) and a preset must give a fresh timer even when they bring back settings that differ only in
+  // the warning, title or sound. The kit does not tell the page that R happened, so the page notes the key press and
+  // the reset buttons' clicks before the kit handles them (capture phase); render() then passes reset to reconcile().
+  var pendingReset = false;
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || (e.key !== 'r' && e.key !== 'R')) return;
+    var tg = e.target;
+    if (tg instanceof HTMLElement && (tg.isContentEditable || tg.tagName === 'TEXTAREA' || (tg.tagName === 'INPUT' && ['checkbox', 'radio', 'button', 'range'].indexOf(tg.type) < 0))) return;
+    if (document.querySelector('dialog[open]')) return;
+    var blank = document.querySelector('.sd-blank');
+    if (blank && !blank.hidden) return;
+    pendingReset = true;
+  }, true);
+  document.addEventListener('click', function (e) {
+    if (e.target instanceof Element && e.target.closest('button[aria-keyshortcuts="R"]')) pendingReset = true;
+  }, true);
+
+
+  // ── the clock: one requestAnimationFrame loop while the timer runs or stands paused, plus a timeout at the end
+  // (frames stop in a background tab; the timeout still fires, late at worst, and settle() is exact either way) ──
+  function onFrame() { frame = 0; tick(); }
+  function onEnd() { endTimer = 0; endFor = null; tick(); }
+  function tick() {
+    var n = now();
+    var next = L.settle(timer, n);
+    if (next !== timer) {
+      timer = next;
+      save();
+      if (cfg && cfg.sound) tone();
+      sim.render();
+    } else {
+      paint();
+    }
+    schedule();
+  }
+  // Running: one frame loop. Paused: a check once a second (only the end clock moves). The end timeout is armed once
+  // per timer state, not every frame.
+  function schedule() {
+    var running = timer && timer.status === 'running', paused = timer && timer.status === 'paused';
+    if (running && !frame) frame = requestAnimationFrame(onFrame);
+    if (!running && frame) { cancelAnimationFrame(frame); frame = 0; }
+    if (paused && !slow) slow = setTimeout(function () { slow = 0; tick(); }, 1000);
+    if (!paused && slow) { clearTimeout(slow); slow = 0; }
+    if (endFor !== timer) {
+      if (endTimer) { clearTimeout(endTimer); endTimer = 0; }
+      endFor = null;
+      if (running) { endFor = timer; endTimer = setTimeout(onEnd, L.remaining(timer, now()) + 30); }
+    }
+  }
+
+  // ── drawing ──
+  function labelText(p) {
+    return { exercise: t('labelExercise'), pair: t('labelPair'), lab: t('labelLab'), 'break': t('labelBreak') }[p.label] || '';
+  }
+  function badge(v) {
+    if (v.paused) return [Simdeck.icon('pause'), t('badgePaused')];
+    if (v.phase === 'done') return ['■ ', h('span', { translate: 'no' }, v.clock)];
+    if (v.phase === 'warning') return ['▲ ', t('badgeWarning', { n: v.minutesLeft })];
+    if (v.phase === 'running') return [Simdeck.icon('play'), t('badgeRunning')];
+    return ['● ', t('badgeIdle')];
+  }
+  function sig(v, p) { return [v.status, v.phase, v.minutesLeft, v.status === 'running' ? v.endClock : '', p.label].join('|'); }
+
+  /** Per frame: digits, bar and end time, in place; a change the caption or the stage structure shows re-renders. */
+  function paint() {
+    if (!els) return;
+    var v = L.view(timer, now(), offset());
+    if (sig(v, params) !== shownSig) { sim.render(); return; }
+    var d = v.phase === 'done' ? t('badgeDone') : v.clock;
+    if (els.digits.textContent !== d) els.digits.textContent = d;
+    els.fill.style.width = (v.fraction * 100).toFixed(2) + '%';
+    var pct = String(Math.round(v.fraction * 100));
+    if (els.bar.getAttribute('aria-valuenow') !== pct) els.bar.setAttribute('aria-valuenow', pct);
+    var end = v.endClock === null ? '' : t(v.phase === 'done' ? 'endedAt' : 'endAt', { time: v.endClock });
+    if (els.end.textContent !== end) els.end.textContent = end;
+  }
+
+  // The timer's buttons: built here, placed in the transport bar after the kit has filled it. Buttons never keep focus
+  // on click, as the kit's own (docs/sim-ui.md §3), so Space after a click is the shortcut.
+  function tbtn(cls, key, keyText, onclick, content) {
+    return h('button', { type: 'button', class: 'sd-btn ' + cls, 'aria-keyshortcuts': key,
+      onmousedown: function (e) { e.preventDefault(); }, onclick: onclick }, content, h('kbd', null, keyText));
+  }
+  var goLabel = h('span');
+  var goIcon = h('span', { class: 'cd-icon' });
+  var bGo = tbtn('sd-btn--primary cd-go', 'Space', 'Space', toggle, [goIcon, goLabel]);
+  var bMinus = tbtn('cd-minus', '-', '−', function () { if (bMinus.getAttribute('aria-disabled') !== 'true') minus(); }, h('span', null, t('minus')));
+  var bPlus = tbtn('cd-plus', '+', '+', function () { if (bPlus.getAttribute('aria-disabled') !== 'true') plus(); }, h('span', null, t('plus')));
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'minutes', type: 'choice', label: t('minutes'), options: [[1, '1'], [3, '3'], [5, '5'], [10, '10'], [15, '15']] },
+      { key: 'seconds', type: 'range', label: t('seconds'), min: 0, max: 55, step: 5, unit: 's' },
+      { key: 'warn', type: 'choice', label: t('warn'), options: [[30, '30 s'], [60, '1 min'], [120, '2 min']] },
+      { key: 'label', type: 'choice', label: t('label'), options: [['none', t('optNone')], ['exercise', t('optExercise')], ['pair', t('optPair')], ['lab', t('optLab')], ['break', t('optBreak')]] },
+      { key: 'sound', type: 'toggle', label: t('sound') }
+    ],
+
+    presets: [
+      { id: 'think-90', label: t('presetThink'), params: { minutes: 1, seconds: 30, label: 'pair' } },
+      { id: 'five', label: t('presetFive'), params: { minutes: 5, label: 'exercise' } },
+      { id: 'ten', label: t('presetTen'), params: { minutes: 10, label: 'exercise' } },
+      { id: 'fifteen', label: t('presetFifteen'), params: { minutes: 15, label: 'lab' } },
+      { id: 'break', label: t('presetBreak'), params: { minutes: 10, label: 'break' } }
+    ],
+
+    legend: [
+      { shape: 'cd-running', label: t('phaseRunning') },
+      { shape: 'cd-warning', label: t('phaseWarning') },
+      { shape: 'cd-done', label: t('phaseDone') },
+      { shape: 'cd-paused', label: t('phasePaused') }
+    ],
+
+    keys: [
+      { key: ' ', label: t('keyToggle'), run: spaceKey },
+      { key: '+', label: t('keyPlus'), run: function () { plus(); } },
+      { key: '-', label: t('keyMinus'), run: function () { minus(); } }
+    ],
+
+    render: function (c) {
+      if (c.state !== cfg) {
+        var prev = cfg;
+        cfg = c.state;
+        // A new kit state while a preset is active can only come from loading it (or R): a hand change deselects the
+        // preset. Either way it counts as a reset.
+        var reset = pendingReset || c.preset !== null;
+        if (!prev && restored && restored.cfgDurationMs === cfg.durationMs) timer = L.setWarn(restored.timer, cfg.warnAtMs);
+        else timer = L.reconcile(timer, prev, cfg, reset);
+        pendingReset = false;
+        restored = null;
+        if (cfg.sound && prev && !prev.sound) prepareAudio(); // the toggle's click is the gesture audio needs
+        save();
+        schedule();
+      }
+      params = c.params;
+      var v = L.view(timer, now(), offset());
+      shownSig = sig(v, params);
+      var title = labelText(c.params);
+      els = {
+        digits: h('div', { class: 'cd-digits', translate: 'no' }),
+        fill: h('div', { class: 'cd-fill' }),
+        end: h('div', { class: 'cd-end' })
+      };
+      els.bar = h('div', { class: 'cd-bar', role: 'progressbar', 'aria-label': t('stage'), 'aria-valuemin': '0', 'aria-valuemax': '100' }, els.fill);
+      c.stage.replaceChildren(h('div', { class: 'cd' },
+        h('div', { class: 'cd-box', dataset: { phase: v.phase, paused: String(v.paused) } },
+          h('div', { class: 'cd-top' },
+            title ? h('div', { class: 'cd-title' }, title) : null,
+            h('div', { class: 'cd-badge' }, badge(v))),
+          els.digits,
+          els.bar,
+          els.end)));
+      paint();
+
+      // the panel's buttons follow the timer
+      goLabel.textContent = t(v.status === 'running' ? 'pause' : v.status === 'paused' ? 'resume' : v.status === 'done' ? 'again' : 'start');
+      goIcon.replaceChildren(Simdeck.icon(v.status === 'running' ? 'pause' : 'play'));
+      bGo.setAttribute('aria-pressed', String(v.status === 'running'));
+      var n = now();
+      bPlus.setAttribute('aria-disabled', String(!L.canAdjust(timer, MIN, n)));
+      bMinus.setAttribute('aria-disabled', String(!L.canAdjust(timer, -MIN, n)));
+    },
+
+    caption: function () {
+      var v = L.view(timer, now(), offset());
+      if (v.status === 'idle') return t('captionIdle', { time: v.clock });
+      if (v.phase === 'done') return t('captionDone', { time: v.endClock }) + ' ' + t('captionDoneHint');
+      if (v.paused) return t('captionPaused') + ' ' + t.n('captionLeft', v.minutesLeft) + ' ' + t('captionResume');
+      return t.n('captionLeft', v.minutesLeft) + ' ' + t('captionFinish', { time: v.endClock });
+    }
+  });
+
+  var bar = document.querySelector('[data-sd-transport]');
+  if (bar) bar.insertBefore(h('div', { class: 'sd-tgroup cd-tgroup', role: 'group', 'aria-label': t('timerTitle') }, bMinus, bGo, bPlus), bar.firstChild);
+  sim.render();
+})();
+</script>
+</body>
+</html>
