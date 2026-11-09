@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **328 of 469 entries are live**, 109 w3, 20 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 wip.
+**Status, 2026-11-09** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **333 of 469 entries are live**, 109 w3, 15 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -337,7 +337,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 22 | 8 w3 |
-| §4.3 Security and cryptography | 17 | 11 | 2 w3, 4 w3 · queued |
+| §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 40 | 14 w3, 1 wip |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
@@ -348,7 +348,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
 | §4.6 Storage, backup and disaster recovery | 22 | 16 | 3 w3, 3 w3 · queued |
 | §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
-| §4.8 Performance and capacity | 10 | 6 | 3 w3, 1 w3 · queued |
+| §4.8 Performance and capacity | 10 | 7 | 3 w3 |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 6 w3 |
 | §4.10 Radio and crisis communications | 17 | 1 | 4 w3, 12 w3 · queued |
 | §4.11 Reference posters and classroom tools | 6 | 5 | 1 wip |
@@ -537,11 +537,11 @@ decides the final grouping axes (§7.1).
 | `sec-ransomware-321` | live | 3-2-1 and immutable copies vs ransomware | which copies survive encryption and deletion | release ransomware on an estate with different backup designs | step | S | P2 | DR, SEC | DR S3, P09 |  |
 | `sec-mfa-phishing` | w3 | MFA fatigue and adversary-in-the-middle | push bombing and session-token theft defeat weak MFA | step attacks against OTP, push, FIDO2 | step | S | P3 | SEC |  |  |
 | `sec-sql-injection` | live | SQL injection | concatenated input becomes code; parameters fix it | type inputs, see the built query | step | S | P2 | SEC |  |  |
-| `sec-xss` | w3 · queued | Cross-site scripting | stored vs reflected; output encoding | post a comment with a script | step | S | P3 | SEC |  |  |
-| `sec-buffer-overflow` | w3 · queued | Stack buffer overflow | overwriting the return address; canaries, NX, ASLR | feed longer inputs, step the stack | step | M | P3 | SEC, OS, ARH |  |  |
-| `sec-pki-revocation` | w3 · queued | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 |  |
+| `sec-xss` | live | Cross-site scripting | stored vs reflected; output encoding | post a comment with a script | step | S | P3 | SEC |  |  |
+| `sec-buffer-overflow` | live | Stack buffer overflow | overwriting the return address; canaries, NX, ASLR | feed longer inputs, step the stack | step | M | P3 | SEC, OS, ARH |  |  |
+| `sec-pki-revocation` | live in `cert-chain` | Revocation: CRL vs OCSP | how a revoked certificate is (or isn't) noticed; stapling | revoke, then connect with different checks | step | S | P3 | NLA, SEC | NLA T50 → §5.5 |  |
 | `sec-wireguard` | live | WireGuard | handshake, cryptokey routing, roaming | step a handshake; move a peer | step | M | P2 | NLA, SEC | NLA T09 → §5.9 |  |
-| `sec-ipsec-ike` | w3 · queued | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 |  |
+| `sec-ipsec-ike` | live | IPsec and IKE | IKE phases, transport vs tunnel mode, ESP | step a site-to-site tunnel coming up | step | M | P3 | NLA, SEC | NLA T09 |  |
 | `sec-lateral-movement` | live | Lateral movement and tiering | one admin login on a workstation exposes the domain | follow credentials hop to hop; apply tiering | step | M | P2 | WIN2, SEC | → §4.5 |  |
 
 ### 4.4 Linux
@@ -776,7 +776,7 @@ instead of repeating them.
 | `perf-rate-limiting` | live | Token bucket vs leaky bucket | bursts allowed vs smoothed | send bursts through each limiter | step | S | P2 | NLA, URM |  |  |
 | `perf-cache-hit-ratio` | w3 | Cache hit ratio and latency | a few percent of hit ratio dominates average latency | sliders for hit ratio and miss cost | expl | S | P3 | OS, ARH |  |  |
 | `perf-goodhart-teams` | w3 | Local optimisation, global degradation | teams meeting their own metric hurt the whole | tune each team's target, watch the system | expl | M | P3 | DR | dc-sim `goodhart` |  |
-| `perf-autoscaling-lag` | w3 · queued | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
+| `perf-autoscaling-lag` | live | Autoscaling lag | provisioning lead time vs load spikes; spot preemption | spike the load with different lead times | expl | S | P3 | DR, NLA | dc-sim `resource_provisioning` |  |
 | `perf-slo-error-budget` | live | SLOs and error budgets | burn rate, fast and slow burn alerts | inject incidents, watch the budget | expl | S | P2 | NLA, DR | NLA T40, dc-sim |  |
 | `perf-game-tick-server` | w3 | Authoritative tick server | a fixed tick, server-side line of sight, why clients lag | step ticks, move players, add latency | step | M | P3 | URM | agentvsagent |  |
 
