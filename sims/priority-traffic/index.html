@@ -1,0 +1,568 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- priority-traffic: a running directed net with a queue of four priorities. HITNO breaks in and cuts what is on the
+     air, the NCS can restrict the net to priority and emergency traffic, only an ACK delivers a message, and a sender
+     with no ACK retries three times and then uses its relay. Rules and numbers: SPEC.md. -->
+<html lang="hr" data-sim="priority-traffic">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prioritetni promet i potvrda primitka · simdeck</title>
+<meta name="description" content="Ubaci poruke četiriju prioriteta u usmjerenu mrežu: HITNO prekida poruku na kanalu, NCS može ograničiti promet, a bez ACK-a se ponavlja pa ide releju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "priority-traffic",
+  "title": {
+    "hr": "Prioritetni promet i potvrda primitka",
+    "en": "Priority traffic and ACK"
+  },
+  "concept": {
+    "hr": "HITNO prekida, prioritet određuje red, tek ACK isporučuje poruku",
+    "en": "HITNO preempts, priority sets the order, only an ACK delivers"
+  },
+  "summary": {
+    "hr": "Ubaci poruke četiriju prioriteta u usmjerenu mrežu: HITNO prekida poruku na kanalu, NCS može ograničiti promet, a bez ACK-a se ponavlja pa ide releju.",
+    "en": "Inject four priorities of traffic into a directed net: HITNO cuts what is on the air, the NCS can restrict traffic, no ACK means retry, then a relay."
+  },
+  "tags": [
+    "emergency-comms"
+  ],
+  "class": "stepper",
+  "steps": 10,
+  "entries": [
+    {
+      "preset": "emergency"
+    },
+    {
+      "preset": "fifo"
+    },
+    {
+      "preset": "four-priority"
+    },
+    {
+      "preset": "no-ack"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="priority-traffic"]; colours only from kit tokens. */
+[data-sim="priority-traffic"] .pt {
+  display: flex; flex-direction: column; gap: 1.2cqh; height: 100%; padding: 1.2cqh 1.4cqw; font-size: 1rem;
+}
+[data-sim="priority-traffic"] .pt-k { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="priority-traffic"] .pt-box {
+  min-width: 0; padding: 0.4rem 0.6rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+[data-sim="priority-traffic"] .pt-h { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; align-items: baseline; }
+
+/* priority marks: shape + prefix, colour only as a third carrier */
+[data-sim="priority-traffic"] .pt-p {
+  display: inline-flex; align-items: center; gap: 0.2rem; padding: 0 0.3rem; border: 0.14rem solid currentColor;
+  border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm); line-height: 1.3; white-space: nowrap;
+}
+[data-sim="priority-traffic"] [data-p="HIT"] { --pc: var(--danger); }
+[data-sim="priority-traffic"] [data-p="PRI"] { --pc: var(--c2); }
+[data-sim="priority-traffic"] [data-p="RUT"] { --pc: var(--c1); }
+[data-sim="priority-traffic"] [data-p="INF"] { --pc: var(--c8); }
+[data-sim="priority-traffic"] .pt-p[data-p] { color: var(--pc); }
+[data-sim="priority-traffic"] .pt-p[data-p="HIT"] { border-width: 0.22rem; }
+[data-sim="priority-traffic"] .pt-p[data-p="INF"] { border-style: dashed; }
+
+/* stations */
+[data-sim="priority-traffic"] .pt-row { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(6, minmax(0, 1fr)); gap: 0.6cqw; }
+[data-sim="priority-traffic"] .pt-st { display: flex; flex-direction: column; gap: 0.15rem; border-color: var(--ink); }
+[data-sim="priority-traffic"] .pt-st[data-reach="0"] { border-style: dashed; border-width: 0.2rem; }
+[data-sim="priority-traffic"] .pt-st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.4rem; font-weight: 700; min-width: 0; }
+[data-sim="priority-traffic"] .pt-letter {
+  display: inline-grid; place-items: center; flex: none; width: 2.1rem; height: 2.1rem; border-radius: 50%;
+  background: var(--ink); color: var(--bg); font-weight: 800; font-size: 1.15rem;
+}
+[data-sim="priority-traffic"] .pt-call { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; }
+[data-sim="priority-traffic"] .pt-line { font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="priority-traffic"] .pt-bad { color: var(--danger); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-good { color: var(--ok); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-ncs { border: 0.3rem solid var(--ink); }
+[data-sim="priority-traffic"] .pt-badge { padding: 0 0.45rem; border: 0.25rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 800; }
+
+/* queue and net state */
+[data-sim="priority-traffic"] .pt-mid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 0.8cqw; flex: 1 1 auto; min-height: 0; }
+[data-sim="priority-traffic"] .pt-q { display: flex; flex-direction: column; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="priority-traffic"] .pt-q li {
+  display: grid; grid-template-columns: 2.2rem auto minmax(0, 1fr); align-items: center; gap: 0.5rem;
+  padding: 0.15rem 0.4rem; border: 0.12rem solid var(--line); border-radius: var(--radius-sm); min-height: 2.1rem;
+}
+[data-sim="priority-traffic"] .pt-q li[data-air="1"] { border: 0.25rem solid var(--ink); }
+[data-sim="priority-traffic"] .pt-q li[data-held="1"] { border-style: dashed; color: var(--muted); }
+[data-sim="priority-traffic"] .pt-pos { font-family: var(--mono); font-weight: 700; text-align: center; }
+[data-sim="priority-traffic"] .pt-who { display: flex; align-items: center; gap: 0.4rem; font-weight: 700; white-space: nowrap; }
+[data-sim="priority-traffic"] .pt-tags { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; font-size: var(--fs-sm); min-width: 0; }
+[data-sim="priority-traffic"] .pt-tag { white-space: nowrap; }
+[data-sim="priority-traffic"] .pt-tag[data-k="cut"] { color: var(--danger); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-tag[data-k="via"] { padding: 0 0.25rem; border: 0.12rem dashed var(--c6); border-radius: var(--radius-sm); }
+[data-sim="priority-traffic"] .pt-state { display: flex; flex-direction: column; gap: 0.5rem; }
+[data-sim="priority-traffic"] .pt-restr { padding: 0.25rem 0.5rem; border: 0.15rem dashed var(--line); border-radius: var(--radius-sm); color: var(--muted); }
+[data-sim="priority-traffic"] .pt-restr[data-on="1"] { border: 0.3rem solid var(--warn); color: var(--ink); font-weight: 800; }
+[data-sim="priority-traffic"] .pt-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+[data-sim="priority-traffic"] .pt-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.05rem 0.35rem; border: 0.14rem solid var(--ok);
+  border-radius: var(--radius-sm); font-weight: 700; white-space: nowrap;
+}
+[data-sim="priority-traffic"] .pt-chip[data-k="off"] { border-color: var(--line); border-style: dotted; }
+[data-sim="priority-traffic"] .pt-chip[data-k="owed"] { border-color: var(--danger); border-style: dashed; }
+[data-sim="priority-traffic"] .sd-changed.pt-chip, [data-sim="priority-traffic"] li.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="priority-traffic"] li.sd-changed .pt-p, [data-sim="priority-traffic"] li.sd-changed .pt-tag,
+[data-sim="priority-traffic"] .pt-chip.sd-changed .pt-p, [data-sim="priority-traffic"] .pt-chip.sd-changed .pt-k { color: var(--on-hl); }
+
+/* the strip */
+[data-sim="priority-traffic"] .pt-strip { display: flex; flex-direction: column; gap: 0.25rem; flex: none; }
+[data-sim="priority-traffic"] .pt-grid { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 0 0.25rem; }
+[data-sim="priority-traffic"] .pt-cells { height: min(13rem, 30cqh); }
+[data-sim="priority-traffic"] .pt-col { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; height: 100%; }
+[data-sim="priority-traffic"] .pt-cell {
+  display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+  min-height: 0; min-width: 0; overflow: hidden; padding: 0.1rem;
+  border: 0.15rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); text-align: center; line-height: 1.15;
+}
+[data-sim="priority-traffic"] .pt-cell b { font-size: 1.35rem; white-space: nowrap; }
+[data-sim="priority-traffic"] .pt-cell span { font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="priority-traffic"] .pt-cell span.pt-wrap { white-space: normal; overflow-wrap: anywhere; font-weight: 700; }
+[data-sim="priority-traffic"] .pt-cell[data-k="msg"] { background: var(--pc); border-color: var(--pc); color: var(--on-series); }
+[data-sim="priority-traffic"] .pt-cell[data-k="lost"] { border: 0.2rem dashed var(--pc); color: var(--ink); }
+[data-sim="priority-traffic"] .pt-cell[data-k="ncs"] { border-width: 0.35rem; }
+[data-sim="priority-traffic"] .pt-cell[data-k="ncs"] b { font-size: 1.05rem; }
+[data-sim="priority-traffic"] .pt-cell[data-k="break"] { border: 0.35rem solid var(--danger); color: var(--danger); }
+[data-sim="priority-traffic"] .pt-cell[data-k="break"] .pt-cutmark { color: var(--ink); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-cell[data-k="noack"] { border: 0.15rem dashed var(--line); color: var(--muted); }
+[data-sim="priority-traffic"] .pt-cell[data-k="relay"] { border: 0.2rem dashed var(--c6); }
+[data-sim="priority-traffic"] .pt-cell[data-k="idle"] { border-style: dashed; border-color: var(--line); color: var(--muted); }
+[data-sim="priority-traffic"] .pt-cell[data-k="future"] { border: 0.15rem dashed var(--line); background: transparent; opacity: 0.6; }
+[data-sim="priority-traffic"] .pt-cell.sd-changed { position: relative; z-index: 1; }
+[data-sim="priority-traffic"] .pt-num { font-size: var(--fs-sm); color: var(--muted); text-align: center; font-family: var(--mono); }
+[data-sim="priority-traffic"] .pt-num[data-now="1"] { color: var(--ink); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-inj { min-height: 1.3rem; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.1rem; font-size: var(--fs-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="priority-traffic"] .pt-inj span { color: var(--pc); white-space: nowrap; }
+[data-sim="priority-traffic"] .pt-grid[data-dense="1"] .pt-cell b { font-size: 1.1rem; }
+[data-sim="priority-traffic"] .pt-grid[data-dense="1"] [data-wide] { display: none; }
+
+/* legend swatches the kit lacks */
+[data-sim="priority-traffic"] .sd-swatch[data-shape^="pt-"] { display: inline-grid; place-items: center; font-weight: 800; line-height: 1; font-size: var(--fs-sm); background: transparent; border: 0; color: var(--ink); }
+[data-sim="priority-traffic"] .sd-swatch[data-shape="pt-relay"] { border: 0.15rem dashed var(--c6); }
+[data-sim="priority-traffic"] .sd-swatch[data-shape="pt-prio"] { width: auto; padding: 0 0.1rem; }
+
+[data-sim="priority-traffic"] .sd-presets { grid-template-columns: 1fr 1fr; gap: 0.2rem; }
+/* the four inject buttons two by two; the other controls take the whole width */
+[data-sim="priority-traffic"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); gap: 0.45rem; }
+[data-sim="priority-traffic"] [data-sd-controls] .sd-group > :not(.sd-btn) { grid-column: 1 / -1; }
+[data-sim="priority-traffic"] [data-sd-controls] .sd-btn:not([aria-keyshortcuts="e"]):not([aria-keyshortcuts="p"]):not([aria-keyshortcuts="u"]):not([aria-keyshortcuts="i"]) { grid-column: 1 / -1; }
+[data-sim="priority-traffic"] [data-sd-controls] .sd-btn[aria-keyshortcuts="e"], [data-sim="priority-traffic"] [data-sd-controls] .sd-btn[aria-keyshortcuts="p"],
+[data-sim="priority-traffic"] [data-sd-controls] .sd-btn[aria-keyshortcuts="u"], [data-sim="priority-traffic"] [data-sd-controls] .sd-btn[aria-keyshortcuts="i"] {
+  padding-left: 0.3rem; padding-right: 0.3rem; line-height: 1.15; gap: 0.3rem; white-space: nowrap;
+}
+
+/* Phone and portrait: stations three per row, slots five per row; nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="priority-traffic"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="priority-traffic"] .pt { height: auto; gap: 0.8rem; padding: 0.5rem; }
+  [data-sim="priority-traffic"] .pt-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
+  [data-sim="priority-traffic"] .pt-ncs { grid-column: 1 / -1; }
+  [data-sim="priority-traffic"] .pt-mid { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="priority-traffic"] .pt-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.4rem 0.25rem; }
+  [data-sim="priority-traffic"] .pt-cells { height: auto; }
+  [data-sim="priority-traffic"] .pt-cell { min-height: 4.6rem; }
+  [data-sim="priority-traffic"] .pt-cell [data-wide] { display: none; }
+  [data-sim="priority-traffic"] .pt-call { display: none; }
+  [data-sim="priority-traffic"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prioritetni promet i potvrda primitka</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var GLYPH = { HIT: '◆', PRI: '▲', RUT: '●', INF: '○' };
+  var note = null;   // a refusal from a button, shown once in the caption
+
+  // ── small helpers ──
+
+  /** Data that is not language (letters, call signs, prefixes): kept out of the word check. */
+  function nt(x, cls) { return h('span', { translate: 'no', class: cls || null }, String(x)); }
+  function msgOf(s, id) { return L.msgOf(s, id); }
+  function stOf(s, id) { return s.stations.filter(function (x) { return x.id === id; })[0]; }
+  /** Shape + prefix of a priority, e.g. "◆ HIT". */
+  function pmark(prio) { return h('span', { class: 'pt-p', dataset: { p: prio }, translate: 'no' }, GLYPH[prio] + ' ' + prio); }
+  function who(m) { return m.via ? t('viaTag', { from: m.from, via: m.via }) : m.from; }
+  function listNode(items) {
+    var kids = [];
+    items.forEach(function (x, i) {
+      if (i > 0) kids.push(i === items.length - 1 ? t('listAnd') : ', ');
+      kids.push(typeof x === 'string' ? nt(x) : x);
+    });
+    return h('span', null, kids);
+  }
+
+  // ── stage parts ──
+
+  function ncsCard(s) {
+    return h('div', { class: 'pt-box pt-st pt-ncs' },
+      h('div', { class: 'pt-st-head' }, h('span', { class: 'pt-badge' }, t('ncsName')), h('span', { class: 'pt-k', 'data-wide': '' }, t('ncsRole'))),
+      h('span', { class: 'pt-line' + (s.ncs.restricted ? ' pt-bad' : ' pt-k') }, s.ncs.restricted ? t('cellOn') : t('restrictedOff')));
+  }
+
+  function stationCard(s, x, n) {
+    var e = n ? s.ncs.log[n] : null;
+    var active = e && (e.who === x.id || e.to === x.id);
+    return h('div', { class: 'pt-box pt-st' + (active ? ' sd-changed' : ''), dataset: { reach: x.reachesNcs ? '1' : '0' } },
+      h('div', { class: 'pt-st-head' }, h('span', { class: 'pt-letter', translate: 'no' }, x.id), nt(x.call, 'pt-call')),
+      x.reachesNcs
+        ? h('span', { class: 'pt-line pt-k' }, t('reachOk'))
+        : h('span', { class: 'pt-line pt-bad' }, '⊘ ' + t('reachNo')),
+      h('span', { class: 'pt-line pt-k', 'data-wide': '' }, t('relayOf', { r: x.relay })));
+  }
+
+  /** What the exchange on the air is doing now (its next phase). */
+  function phaseText(s, cur) {
+    var m = msgOf(s, cur.msgId);
+    if (cur.phase === 'send') return m.via ? t('phViaSend') : m.tries ? t('phResend') : t('phSend');
+    return t({ ack: 'phAck', wait: 'phWait', goahead: 'phGoahead', relay: 'phRelay', relayAck: 'phRelayAck' }[cur.phase]);
+  }
+
+  function msgTags(m, extra) {
+    return h('span', { class: 'pt-tags' },
+      extra,
+      m.interrupted && !m.delivered ? h('span', { class: 'pt-tag', dataset: { k: 'cut' } }, '✂ ' + t('cutTag')) : null,
+      m.tries && !m.delivered ? h('span', { class: 'pt-tag' }, t('tryTag', { k: m.tries })) : null);
+  }
+
+  function queueBox(c) {
+    var s = c.state, prev = c.prev, cq = s.ncs, rows = [];
+    var before = prev ? [prev.ncs.current ? prev.ncs.current.msgId : null].concat(prev.ncs.queue.map(function (e) { return e.msgId; })) : null;
+    var cur = cq.current;
+    if (cur) {
+      var m = msgOf(s, cur.msgId);
+      rows.push(h('li', { dataset: { air: '1', p: m.prio }, class: before && before[0] !== m.id ? 'sd-changed' : null },
+        h('span', { class: 'pt-pos' }, '▶'),
+        h('span', { class: 'pt-who' }, pmark(m.prio), nt(who(m))),
+        msgTags(m, h('span', { class: 'pt-tag' }, (cur.phase === 'ack' || cur.phase === 'wait' || cur.phase === 'relayAck' ? '⌛ ' : '') + phaseText(s, cur)))));
+    }
+    cq.queue.forEach(function (e, i) {
+      var m = msgOf(s, e.msgId);
+      var held = cq.restricted && L.rank(m.prio) >= L.rank('RUT');
+      var moved = before && before.indexOf(m.id) !== i + 1;
+      rows.push(h('li', { dataset: { held: held ? '1' : '0' }, class: moved ? 'sd-changed' : null },
+        h('span', { class: 'pt-pos' }, String(i + 1)),
+        h('span', { class: 'pt-who' }, pmark(m.prio), nt(who(m))),
+        msgTags(m, held ? h('span', { class: 'pt-tag' }, '⏸ ' + t('held')) : null)));
+    });
+    return h('div', { class: 'pt-box' },
+      h('h3', { class: 'pt-h' }, t('queueTitle'),
+        h('span', { class: 'pt-k' }, t('order'), ' ', s.priorities
+          ? nt('◆ HIT > ▲ PRI > ● RUT > ○ INF')
+          : t('orderFifo'))),
+      rows.length ? h('ol', { class: 'pt-q' }, rows) : h('p', { class: 'pt-k' }, t('queueEmpty')));
+  }
+
+  function stateBox(c) {
+    var s = c.state, cq = s.ncs, n = c.n;
+    var restr = cq.restricted
+      ? h('div', { class: 'pt-restr', dataset: { on: '1' } }, '⚠ ' + t('restrictedOn'))
+      : h('div', { class: 'pt-restr', dataset: { on: '0' } }, t('restrictedOff'));
+    var done = s.messages.filter(function (m) { return m.delivered; }).sort(function (a, b) { return a.deliveredAt - b.deliveredAt; });
+    var off = s.messages.filter(function (m) { return m.offChannel; });
+    return h('div', { class: 'pt-box pt-state' },
+      h('h3', { class: 'pt-h' }, t('netTitle')),
+      restr,
+      cq.announce ? h('span', { class: 'pt-line pt-k' }, '⌛ ' + t('announcePending')) : null,
+      cq.ackOwed.length ? h('div', { class: 'pt-chips' }, cq.ackOwed.map(function (id) {
+        var m = msgOf(s, id);
+        return h('span', { class: 'pt-chip', dataset: { k: 'owed' } }, '⌛', pmark(m.prio), nt(who(m)), t('owed'));
+      })) : null,
+      h('h3', { class: 'pt-h' }, t('doneTitle')),
+      done.length ? h('div', { class: 'pt-chips' }, done.map(function (m) {
+        return h('span', { class: 'pt-chip' + (m.deliveredAt === n ? ' sd-changed' : '') }, '✓', pmark(m.prio), nt(who(m)),
+          h('span', { class: 'pt-k' }, t('doneAt', { n: m.deliveredAt })));
+      })) : h('span', { class: 'pt-k' }, t('doneNone')),
+      off.length ? h('h3', { class: 'pt-h' }, t('offTitle')) : null,
+      off.length ? h('div', { class: 'pt-chips' }, off.map(function (m) {
+        return h('span', { class: 'pt-chip', dataset: { k: 'off' } }, '↪', pmark(m.prio), nt(m.from));
+      })) : null);
+  }
+
+  /** One slot cell of the strip, from its log entry. */
+  function cell(s, e) {
+    if (!e) return h('div', { class: 'pt-cell', dataset: { k: 'future' } });
+    var m = e.msgId ? msgOf(s, e.msgId) : null;
+    if (e.kind === 'idle') return h('div', { class: 'pt-cell', dataset: { k: 'idle' } }, h('span', null, t('cellIdle')));
+    if (e.kind === 'msg') {
+      return h('div', { class: 'pt-cell', dataset: { k: e.heard ? 'msg' : 'lost', p: m.prio } },
+        h('b', { translate: 'no' }, e.who), nt(GLYPH[m.prio] + ' ' + m.prio),
+        e.via ? h('span', { translate: 'no' }, '(' + m.from + ')') : null,
+        e.heard ? null : h('span', { class: 'pt-wrap', 'data-wide': '' }, '✗ ' + t('cellNotHeard')));
+    }
+    if (e.kind === 'breakin') {
+      var cut = e.cut;
+      var cutMark = null;
+      if (cut && cut.msgId) {
+        var cm = msgOf(s, cut.msgId);
+        cutMark = h('span', { class: 'pt-cutmark', translate: 'no' }, (cut.phase === 'wait' ? '⏸ ' : '✂ ') + (cut.phase === 'ack' ? '✓' + cm.from : cm.via || cm.from));
+      } else if (cut) {
+        cutMark = h('span', { class: 'pt-cutmark', translate: 'no' }, '✂ NCS');
+      }
+      return h('div', { class: 'pt-cell', dataset: { k: 'break' } },
+        h('b', { translate: 'no' }, '◆ ' + e.who), h('span', { 'data-wide': '' }, t('cellBreak')), cutMark);
+    }
+    if (e.kind === 'goahead') {
+      return h('div', { class: 'pt-cell', dataset: { k: 'ncs' } }, h('b', null, t('ncsName')), nt('→ ' + e.to), h('span', { 'data-wide': '' }, t('cellGo')));
+    }
+    if (e.kind === 'noack') {
+      return h('div', { class: 'pt-cell', dataset: { k: 'noack' } }, h('b', null, '⌛'), h('span', { 'data-wide': '' }, t('cellNoAck')));
+    }
+    if (e.kind === 'relay' || e.kind === 'relayAck') {
+      return h('div', { class: 'pt-cell', dataset: { k: 'relay' } },
+        h('b', { translate: 'no' }, e.who), nt(e.kind === 'relay' ? '┄→ ' + e.to : '✓ ' + e.to));
+    }
+    // the NCS: ACKs, then an announcement or a call
+    var body = [h('b', null, t('ncsName'))];
+    e.acks.forEach(function (id) { body.push(nt('✓ ' + msgOf(s, id).from + (msgOf(s, id).via ? '/' + msgOf(s, id).via : ''))); });
+    if (e.announce) body.push(h('span', { class: 'pt-wrap' }, e.announce === 'on' ? t('cellOn') : t('cellOff')));
+    if (e.call) body.push(nt('→ ' + sendOf(s, e.call)));
+    return h('div', { class: 'pt-cell', dataset: { k: 'ncs' } }, body);
+  }
+  function sendOf(s, id) { var m = msgOf(s, id); return m.via || m.from; }
+
+  function strip(c, injects) {
+    var s = c.state, N = c.steps, n = c.n, cols = [];
+    for (var i = 1; i <= N; i++) {
+      var cl = cell(s, i <= n ? s.ncs.log[i] : null);
+      if (i === n) cl.classList.add('sd-changed');
+      if (i === n && c.dir === 'forward') cl.classList.add('sd-anim-in');
+      var inj = injects.filter(function (x) { return x.slot === i; });
+      cols.push(h('div', { class: 'pt-col', 'aria-label': t('slotLabel', { n: i }) },
+        h('div', { class: 'pt-inj', translate: 'no' }, inj.map(function (x) { return h('span', { dataset: { p: x.prio } }, '+' + x.from + GLYPH[x.prio]); })),
+        cl,
+        h('div', { class: 'pt-num', dataset: { now: i === n ? '1' : '0' } }, String(i))));
+    }
+    return h('div', { class: 'pt-strip' },
+      h('span', { class: 'pt-k' }, t('channel')),
+      h('div', { class: 'pt-grid pt-cells', style: { '--n': String(N) }, dataset: { dense: N > 14 ? '1' : '0' } }, cols));
+  }
+
+  // ── caption ──
+
+  function caption(c) {
+    var s = c.state, n = c.n, p = c.params, out = [];
+    var injects = L.injectsOf(p);
+    function add(key, vars, plural) {
+      out.push(' ');
+      var seen = [];   // a node used twice gets its own copy (a node lives in one place)
+      var parts = plural != null ? [t.n(key, plural, vars)] : t.parts(key, vars);
+      out.push.apply(out, parts.map(function (x) {
+        if (!(x instanceof Node)) return x;
+        if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+        seen.push(x);
+        return x;
+      }));
+    }
+    function pw(m) { return t('p' + m.prio); }
+    if (note) { var nn = note; note = null; out.push(h('b', null, t(nn.key, nn.vars))); }
+
+    if (c.first) {
+      var cur = s.ncs.current;
+      if (!cur) { add('capStartEmpty'); return out; }
+      var m0 = msgOf(s, cur.msgId);
+      var rest = s.ncs.queue.map(function (e) { return e.from; });
+      add(rest.length ? 'capStart' : 'capStartAlone', { st: nt(m0.from), p: pw(m0), list: listNode(rest) });
+      return out;
+    }
+    out.push(h('b', null, t('capSlot', { n: n })));
+    var e = s.ncs.log[n], m = e.msgId ? msgOf(s, e.msgId) : null;
+    // registrations of this slot that went into the queue
+    injects.filter(function (x) { return x.slot === n; }).forEach(function (x) {
+      var pos = s.ncs.queue.map(function (q) { return q.msgId; }).indexOf(x.id);
+      if (pos >= 0) add('capReg', { st: nt(x.from), acc: t('acc' + x.prio), k: pos + 1 });
+    });
+    if (e.kind === 'breakin') {
+      var cut = e.cut, cm = cut && cut.msgId ? msgOf(s, cut.msgId) : null;
+      if (!cut) add('capBreakIdle', { st: nt(e.who) });
+      else if (!cm) add('capBreakNcs', { st: nt(e.who) });
+      else if (cut.phase === 'ack') add('capBreakAck', { st: nt(e.who), cut: nt(cm.from) });
+      else if (cut.phase === 'wait') add('capBreakWait', { st: nt(e.who), cut: nt(cm.from) });
+      else if (cut.phase === 'relayAck') add('capBreakRelayAck', { st: nt(e.who), cut: nt(cm.via) });
+      else add('capBreakSend', { st: nt(e.who), cut: nt(cm.via || cm.from), acc: t('acc' + cm.prio) });
+    } else if (e.kind === 'goahead') {
+      add('capGo', { call: nt(stOf(s, e.to).call) });
+    } else if (e.kind === 'msg') {
+      if (e.via) add('capMsgVia', { relay: nt(e.who), from: nt(m.from), p: pw(m) });
+      else if (!e.heard) add('capMsgLost', { st: nt(e.who), k: e.tries });
+      else add('capMsg', { st: nt(e.who), acc: t('acc' + m.prio) });
+    } else if (e.kind === 'noack') {
+      var relay = stOf(s, m.from).relay;
+      if (e.next === 'send') add('capNoAck', { st: nt(m.from), k: e.tries });
+      else add(e.next === 'relay' ? 'capNoAckRelay' : 'capNoAckOff', { st: nt(m.from), relay: nt(relay) });
+    } else if (e.kind === 'relay') {
+      add('capRelay', { st: nt(e.who), relay: nt(e.to) });
+    } else if (e.kind === 'relayAck') {
+      add('capRelayAck', { st: nt(e.to), relay: nt(e.who) });
+    } else if (e.kind === 'idle') {
+      add('capIdle');
+    } else {
+      var prevOwed = c.prev ? c.prev.ncs.ackOwed : [];
+      if (e.acks.length) {
+        add('capAck', { list: listNode(e.acks.map(function (id) { return who(msgOf(s, id)); })) });
+        var owed = e.acks.filter(function (id) { return prevOwed.indexOf(id) >= 0; });
+        if (owed.length) add('capAckOwed', { list: listNode(owed.map(function (id) { return msgOf(s, id).from; })) });
+        if (e.acks.some(function (id) { return msgOf(s, id).prio === 'HIT'; }) && s.priorities) add('capPass');
+      }
+      if (e.announce) add(e.announce === 'on' ? 'capOn' : 'capOff');
+      if (e.call) {
+        var cm2 = msgOf(s, e.call);
+        var afterHit = s.priorities && cm2.prio === 'HIT' && e.acks.some(function (id) { return msgOf(s, id).prio === 'HIT'; });
+        add(afterHit ? 'capCallHit' : 'capCall', { st: nt(sendOf(s, e.call)), p: pw(cm2) });
+      }
+    }
+    var held = s.ncs.restricted ? s.ncs.queue.filter(function (q) { return L.rank(q.prio) >= L.rank('RUT'); }).length : 0;
+    if (held && !c.last && (e.kind === 'idle' || e.announce === 'on')) add('capHeld', { n: held }, held);
+    if (c.last) endNote(c, add, held);
+    return out;
+  }
+
+  /** The last step: what got through, and for a HITNO what the other mode would have given (COMMON.md §11). */
+  function endNote(c, add, held) {
+    var s = c.state, p = c.params;
+    var done = s.messages.filter(function (m) { return m.delivered; }).length;
+    add('capEnd', { d: done, m: s.messages.length }, done);
+    var hit = s.messages.filter(function (m) { return m.prio === 'HIT' && m.delivered; })[0];
+    if (hit) {
+      var q = Object.assign({}, p, { priorities: !s.priorities });
+      var other = Simdeck.stateAt(L, q, L.steps(q)).messages.filter(function (m) { return m.id === hit.id; })[0];
+      if (other && other.delivered && other.deliveredAt !== hit.deliveredAt) {
+        add(s.priorities ? 'capEndHitOn' : 'capEndHitOff', { st: nt(hit.from), a: hit.deliveredAt, b: other.deliveredAt });
+        if (!s.priorities && c.preset === 'fifo') add('capEndFifoNote');
+      }
+    }
+    if (held) add('capEndHeld', { n: held }, held);
+    s.messages.filter(function (m) { return m.offChannel; }).forEach(function (m) { add('capEndOff', { st: nt(m.from) }); });
+    if (c.n >= L.MAX_STEPS && !L.settled(s)) add('capCap');
+  }
+
+  // ── buttons ──
+
+  function injectButton(prio) {
+    return function (sim) {
+      var p = sim.params, from = p.from;
+      if (L.cutoffOf(p).indexOf(from) >= 0) { note = { key: 'noteCutoff', vars: { st: from } }; sim.render(); return; }
+      var slot = sim.n + 1, list = L.injectsOf(p);
+      if (list.length >= L.MAX_MSGS || slot > L.LAST_SLOT) { note = { key: 'noteFull' }; sim.render(); return; }
+      var toks = String(p.inject || '').split('.').filter(Boolean);
+      toks.push(L.token(slot, from, prio));
+      sim.set({ inject: toks.join('.') });
+    };
+  }
+  function restrictButton(sim) {
+    var p = sim.params, slot = sim.n + 1, list = L.restrictsOf(p);
+    if (list.indexOf(slot) >= 0) { list = list.filter(function (x) { return x !== slot; }); }
+    else if (list.length >= L.MAX_RESTRICT || slot > L.LAST_SLOT) { note = { key: 'noteRestrictFull' }; sim.render(); return; }
+    else list.push(slot);
+    sim.set({ restrict: list.sort(function (a, b) { return a - b; }).join('.') });
+  }
+
+  // ── mount ──
+
+  var stations = L.IDS.map(function (id) { return [id, t('stationN', { id: id })]; });
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'priorities', type: 'toggle', label: t('priorities'), hint: t('prioritiesHint') },
+      { key: 'cutoff', type: 'select', label: t('cutoff'), hint: t('cutoffHint'), options: [['none', t('nobody')]].concat(stations) },
+      { key: 'from', type: 'select', label: t('from'), options: stations },
+      { type: 'button', label: t('injHit'), hint: t('injHint'), key: 'e', run: injectButton('HIT') },
+      { type: 'button', label: t('injPri'), hint: t('injHint'), key: 'p', run: injectButton('PRI') },
+      { type: 'button', label: t('injRut'), hint: t('injHint'), key: 'u', run: injectButton('RUT') },
+      { type: 'button', label: t('injInf'), hint: t('injHint'), key: 'i', run: injectButton('INF') },
+      { type: 'button', label: t('restrict'), hint: t('restrictHint'), key: 's', run: restrictButton }
+    ],
+
+    presets: [
+      { id: 'emergency', label: t('presetEmergency'), hint: t('presetEmergencyHint'), params: {} },
+      { id: 'fifo', label: t('presetFifo'), hint: t('presetFifoHint'), params: { priorities: false } },
+      { id: 'four-priority', label: t('presetFour'), hint: t('presetFourHint'), params: { inject: '-2AI.-1BR.0CP.0DP.0EP.0FP' } },
+      { id: 'no-ack', label: t('presetNoAck'), hint: t('presetNoAckHint'), params: { inject: '0ER', cutoff: 'E' } }
+    ],
+
+    legend: [
+      { shape: 'pt-prio', label: t('legendPrio') },
+      { shape: 'pt-cut', label: t('legendCut') },
+      { shape: 'pt-wait', label: t('legendWait') },
+      { shape: 'pt-done', label: t('legendDone') },
+      { shape: 'pt-relay', label: t('legendRelay') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      c.stage.replaceChildren(h('div', { class: 'pt' },
+        h('div', { class: 'pt-row' }, ncsCard(s), s.stations.map(function (x) { return stationCard(s, x, c.n); })),
+        h('div', { class: 'pt-mid' }, queueBox(c), stateBox(c)),
+        strip(c, L.injectsOf(c.params).filter(function (x) { return x.slot > 0; }))));
+    },
+
+    caption: caption
+  });
+
+  // the legend's symbol swatches (the kit draws empty swatches with data-shape; the page fills them)
+  var fill = { 'pt-prio': '◆▲●○', 'pt-cut': '✂', 'pt-wait': '⌛', 'pt-done': '✓', 'pt-relay': '┄' };
+  document.querySelectorAll('[data-sd-legend] .sd-swatch').forEach(function (sw) {
+    var f = fill[sw.dataset.shape];
+    if (f) { sw.textContent = f; sw.setAttribute('translate', 'no'); }
+  });
+})();
+</script>
+</body>
+</html>
