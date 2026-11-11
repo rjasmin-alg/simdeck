@@ -1,0 +1,444 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- set-chain-of-command: who decides what on a film set. Five requests cross the set, either straight to whoever
+     stands nearest or through the head of department and the 1st AD; both ways run from the same start, one minute per
+     step. The chart draws one way, the scoreboard counts both. Crew: crew.js; model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="set-chain-of-command">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tko o čemu odlučuje: hijerarhija na setu · simdeck</title>
+<meta name="description" content="Pošalji zahtjeve preko seta najbližemu ili kroz šefa odjela i 1st AD-a: tko mora reći da, izgubljeni zahtjevi, dva naloga za istu osobu i vrijeme do odgovora.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "set-chain-of-command",
+  "title": {
+    "hr": "Tko o čemu odlučuje: hijerarhija na setu",
+    "en": "Who decides what: the chain of command on set"
+  },
+  "concept": {
+    "hr": "Zahtjev ide kroz šefa odjela i 1st AD-a, ne ravno tuđoj ekipi",
+    "en": "Requests go through the head of department and the 1st AD"
+  },
+  "summary": {
+    "hr": "Pošalji zahtjeve preko seta najbližemu ili kroz šefa odjela i 1st AD-a: tko mora reći da, izgubljeni zahtjevi, dva naloga i vrijeme do odgovora.",
+    "en": "Send requests across the set to the nearest person or through the head and the 1st AD: who must say yes, lost requests, two orders, time to answer."
+  },
+  "tags": [
+    "set-roles"
+  ],
+  "class": "stepper",
+  "steps": 7,
+  "entries": [
+    {
+      "preset": "direct"
+    },
+    {
+      "preset": "chain"
+    },
+    {
+      "preset": "exit"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="set-chain-of-command"]; colours only from kit tokens. */
+[data-sim="set-chain-of-command"] .cc {
+  display: flex; flex-direction: column; gap: 1.2cqh; height: 100%; padding: 1cqh 1.2cqw; font-size: 1rem;
+}
+[data-sim="set-chain-of-command"] .cc-top { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; align-items: center; }
+
+/* the chart: one box with a fixed aspect ratio; the SVG (lines, arrows) and the HTML nodes share its coordinates */
+[data-sim="set-chain-of-command"] .cc-chart {
+  position: relative; aspect-ratio: 1000 / 360; width: min(100%, calc(52cqh * 1000 / 360)); margin: 0 auto;
+}
+[data-sim="set-chain-of-command"] .cc-chart > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="set-chain-of-command"] .cc-bg line { stroke: var(--line); stroke-width: 2; vector-effect: non-scaling-stroke; }
+[data-sim="set-chain-of-command"] .cc-bg[data-mode="direct"] line { stroke-width: 1; opacity: 0.55; }
+[data-sim="set-chain-of-command"] .cc-arrow { stroke-width: 4; vector-effect: non-scaling-stroke; fill: none; }
+[data-sim="set-chain-of-command"] .cc-arrow[data-how="call"] { stroke-dasharray: 10 6; }
+[data-sim="set-chain-of-command"] .cc-arrow[data-how="counter"] { stroke: var(--danger); stroke-dasharray: 3 5; stroke-linecap: round; }
+[data-sim="set-chain-of-command"] .cc-head { stroke: none; }
+
+[data-sim="set-chain-of-command"] .cc-node {
+  position: absolute; transform: translate(-50%, -50%); width: 17.4%; height: 13.6%;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.05rem;
+  padding: 0.1rem 0.3rem; border: 0.14rem solid var(--ink); border-radius: var(--radius); background: var(--bg);
+  text-align: center; line-height: 1.1;
+}
+[data-sim="set-chain-of-command"] .cc-node[data-head="1"] { border-width: 0.24rem; }
+[data-sim="set-chain-of-command"] .cc-node[data-id="ad1"] { width: 21.4%; }
+[data-sim="set-chain-of-command"] .cc-name { font-weight: 700; white-space: nowrap; }
+[data-sim="set-chain-of-command"] .cc-dec { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+[data-sim="set-chain-of-command"] .cc-node[data-two="1"] { border: 0.3rem double var(--danger); }
+[data-sim="set-chain-of-command"] .cc-node[data-two="1"] .cc-dec { color: var(--danger); font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-node.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="set-chain-of-command"] .cc-node.sd-changed .cc-dec { color: var(--on-hl); }
+[data-sim="set-chain-of-command"] .cc-chips {
+  position: absolute; right: 0.2rem; top: -1.2rem; display: flex; gap: 0.15rem;
+}
+
+/* request chips: number + shape; the series colour is the third carrier */
+[data-sim="set-chain-of-command"] .cc-q {
+  display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.2rem; border-radius: 50%;
+  border: 0.16rem solid var(--qc); background: var(--qc); color: var(--on-series); font-weight: 800; font-size: var(--fs-sm); line-height: 1;
+  white-space: nowrap;
+}
+[data-sim="set-chain-of-command"] .cc-q[data-k="done"] { border-radius: var(--radius-sm); }
+[data-sim="set-chain-of-command"] .cc-q[data-k="unapproved"] { border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); border-style: dashed; }
+[data-sim="set-chain-of-command"] .cc-q[data-k="lost"] { background: var(--bg); color: var(--ink); border-style: dotted; border-width: 0.2rem; }
+[data-sim="set-chain-of-command"] [data-q="0"] { --qc: var(--c1); }
+[data-sim="set-chain-of-command"] [data-q="1"] { --qc: var(--c2); }
+[data-sim="set-chain-of-command"] [data-q="2"] { --qc: var(--c3); }
+[data-sim="set-chain-of-command"] [data-q="3"] { --qc: var(--c4); }
+[data-sim="set-chain-of-command"] [data-q="4"] { --qc: var(--c5); }
+[data-sim="set-chain-of-command"] .cc-arrow[data-q] { stroke: var(--qc); }
+[data-sim="set-chain-of-command"] .cc-head[data-q] { fill: var(--qc); }
+[data-sim="set-chain-of-command"] .cc-head[data-how="counter"] { fill: var(--danger); }
+[data-sim="set-chain-of-command"] .cc-badge {
+  position: absolute; transform: translate(-50%, -50%); z-index: 2;
+}
+[data-sim="set-chain-of-command"] .cc-badge .cc-q { box-shadow: 0 0 0 0.15rem var(--bg); }
+[data-sim="set-chain-of-command"] .cc-badge[data-how="counter"] .cc-q { background: var(--bg); color: var(--danger); border-color: var(--danger); border-radius: var(--radius-sm); }
+
+/* bottom: the requests of the way shown, and the scoreboard of both ways */
+[data-sim="set-chain-of-command"] .cc-bottom { flex: none; display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 1cqw; align-items: start; }
+[data-sim="set-chain-of-command"] .cc-tab { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); line-height: 1.2; }
+[data-sim="set-chain-of-command"] .cc-tab th { text-align: left; font-weight: 700; color: var(--muted); padding: 0.1rem 0.35rem; border-bottom: var(--line-w) solid var(--line); white-space: nowrap; }
+[data-sim="set-chain-of-command"] .cc-tab td { padding: 0.18rem 0.35rem; border-bottom: 0.08rem solid var(--line); vertical-align: middle; }
+[data-sim="set-chain-of-command"] .cc-tab td.cc-num { width: 2rem; }
+[data-sim="set-chain-of-command"] .cc-tab td.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="set-chain-of-command"] .cc-rq { font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-safe { margin-left: 0.4rem; padding: 0 0.3rem; border: 0.14rem solid var(--warn); border-radius: var(--radius-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="set-chain-of-command"] .cc-yes { display: inline-block; margin-right: 0.5rem; white-space: nowrap; }
+[data-sim="set-chain-of-command"] .cc-yes[data-y="0"] { color: var(--muted); }
+[data-sim="set-chain-of-command"] .cc-yes[data-y="1"] { font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-st[data-k="done"] { color: var(--ok); font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-st[data-k="unapproved"], [data-sim="set-chain-of-command"] .cc-st[data-k="lost"] { color: var(--danger); font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-time { font-family: var(--mono); white-space: nowrap; text-align: right; }
+[data-sim="set-chain-of-command"] .cc-score td:not(:first-child), [data-sim="set-chain-of-command"] .cc-score th:not(:first-child) { text-align: right; font-family: var(--mono); white-space: nowrap; }
+[data-sim="set-chain-of-command"] .cc-score th:not(:first-child) { font-family: inherit; }
+[data-sim="set-chain-of-command"] .cc-score [data-on="1"] { color: var(--ink); font-weight: 800; box-shadow: inset 0 -0.2rem 0 var(--accent); }
+[data-sim="set-chain-of-command"] .cc-score td[data-bad="1"] { color: var(--danger); font-weight: 700; }
+[data-sim="set-chain-of-command"] .cc-empty { color: var(--muted); }
+[data-sim="set-chain-of-command"] .cc-foot { flex: none; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+
+/* legend swatches the kit lacks */
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape^="cc-"] { position: relative; background: var(--bg); }
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape^="cc-"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 800; line-height: 1; color: var(--ink); }
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape="cc-lost"] { border-style: dotted; border-radius: 50%; }
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape="cc-lost"]::after { content: '✕'; }
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape="cc-two"] { border: 0.25rem double var(--danger); }
+[data-sim="set-chain-of-command"] .sd-swatch[data-shape="cc-two"]::after { content: '!'; color: var(--danger); }
+
+/* Phone and portrait: the chart keeps its proportions at full width with smaller boxes; the tables stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="set-chain-of-command"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="set-chain-of-command"] .cc { height: auto; gap: 0.8rem; padding: 0.4rem; }
+  [data-sim="set-chain-of-command"] .cc-top { display: block; overflow-x: auto; padding: 0.9rem 0.6rem 0.2rem; }
+  [data-sim="set-chain-of-command"] .cc-chart { width: 46rem; aspect-ratio: 1000 / 400; }
+  [data-sim="set-chain-of-command"] .cc-node { padding: 0.05rem 0.15rem; }
+  [data-sim="set-chain-of-command"] .cc-name { font-size: var(--fs-sm); }
+  [data-sim="set-chain-of-command"] .cc-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="set-chain-of-command"] .cc-reqs th:nth-child(3), [data-sim="set-chain-of-command"] .cc-reqs td:nth-child(3),
+  [data-sim="set-chain-of-command"] .cc-reqs th:nth-child(6), [data-sim="set-chain-of-command"] .cc-reqs td:nth-child(6) { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tko o čemu odlučuje: hijerarhija na setu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="crew.js"></script>
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var C = L.crew;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVG = 'http://www.w3.org/2000/svg';
+
+  /* Where each person sits in the chart (viewBox 1000 × 360, left to right: top, the 1st AD, the heads, their crew).
+     The phone layout keeps the same table in a horizontally scrollable box (CSS), so the boxes keep their order. */
+  var POS = {
+    prod: [95, 120], dir: [95, 240],
+    ad1: [290, 180],
+    trainee: [490, 30], actor: [490, 90], dop: [490, 150], snd: [490, 270], pmast: [490, 330],
+    op: [695, 90], gaf: [695, 150], kg: [695, 210], boom: [695, 270], prop: [695, 330],
+    el: [900, 150], gr: [900, 210]
+  };
+  var W = 1000, H = 360, HALF = [87, 24.5], HALF_AD = [107, 24.5];
+
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVG, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function role(id) { return t('r_' + id); }
+  function qIndex(id) { return L.REQUESTS.map(function (r) { return r.id; }).indexOf(id); }
+  function qNum(id) { return String(qIndex(id) + 1); }
+  function chip(id, kind, text) {
+    return h('span', { class: 'cc-q', dataset: { q: String(qIndex(id)), k: kind || '' } }, text || qNum(id));
+  }
+  function list(nums) {
+    if (nums.length < 2) return nums.join('');
+    return nums.slice(0, -1).join(', ') + t('and') + nums[nums.length - 1];
+  }
+  function pct(v, of) { return (100 * v / of) + '%'; }
+
+  /* An arrow from box a to box b, cut at both box edges and shifted to the right of its direction, so two arrows
+     between the same pair in opposite directions stay apart. */
+  function ends(a, b) {
+    var pa = POS[a], pb = POS[b];
+    var dx = pb[0] - pa[0], dy = pb[1] - pa[1];
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / len, uy = dy / len;
+    function cut(id) {
+      var half = id === 'ad1' ? HALF_AD : HALF;
+      var sx = ux === 0 ? Infinity : half[0] / Math.abs(ux);
+      var sy = uy === 0 ? Infinity : half[1] / Math.abs(uy);
+      return Math.min(sx, sy) + 5;
+    }
+    var off = 7, ox = -uy * off, oy = ux * off;
+    var ca = cut(a), cb = cut(b);
+    return {
+      x1: pa[0] + ux * ca + ox, y1: pa[1] + uy * ca + oy,
+      x2: pb[0] - ux * cb + ox, y2: pb[1] - uy * cb + oy, ux: ux, uy: uy
+    };
+  }
+
+  function arrow(g, badges, a, b, q, how) {
+    var e = ends(a, b);
+    var tip = 14, wing = 7;
+    var bx = e.x2 - e.ux * tip, by = e.y2 - e.uy * tip;
+    var line = svg('line', { class: 'cc-arrow', x1: e.x1, y1: e.y1, x2: bx, y2: by, 'data-how': how });
+    var head = svg('polygon', {
+      class: 'cc-head', 'data-how': how,
+      points: [e.x2, e.y2, bx - e.uy * wing, by + e.ux * wing, bx + e.uy * wing, by - e.ux * wing].join(' ')
+    });
+    if (how !== 'counter') { line.setAttribute('data-q', String(qIndex(q))); head.setAttribute('data-q', String(qIndex(q))); }
+    g.append(line, head);
+    var mx = (e.x1 + e.x2) / 2, my = (e.y1 + e.y2) / 2;
+    badges.push(h('div', { class: 'cc-badge', dataset: { how: how }, style: { left: pct(mx, W), top: pct(my, H) } },
+      how === 'counter' ? h('span', { class: 'cc-q', dataset: { q: String(qIndex(q)) } }, '!') : chip(q)));
+  }
+
+  function chart(run, mode) {
+    var bg = svg('g', { class: 'cc-bg', 'data-mode': mode });
+    var ids = C.PEOPLE.map(function (p) { return p.id; });
+    if (mode === 'direct') {
+      for (var i = 0; i < ids.length; i++) for (var j = i + 1; j < ids.length; j++) {
+        bg.append(svg('line', { x1: POS[ids[i]][0], y1: POS[ids[i]][1], x2: POS[ids[j]][0], y2: POS[ids[j]][1] }));
+      }
+    } else {
+      C.lines().forEach(function (l) {
+        bg.append(svg('line', { x1: POS[l[0]][0], y1: POS[l[0]][1], x2: POS[l[1]][0], y2: POS[l[1]][1] }));
+      });
+    }
+    var fg = svg('g', null), badges = [];
+    var touched = {};
+    run.events.forEach(function (e) {
+      if (e.kind === 'hop') { arrow(fg, badges, e.from, e.to, e.req, e.how); touched[e.to] = 1; }
+      if (e.kind === 'counter') { arrow(fg, badges, e.from, e.to, e.req, 'counter'); touched[e.to] = 1; }
+    });
+    var root = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    root.append(bg, fg);
+
+    // chips per person: requests they hold now, and where each one ended
+    var chips = {};
+    run.reqs.forEach(function (q) {
+      var kind = q.status === 'idle' || q.status === 'moving' ? '' : q.status;
+      var mark = { done: '✓', unapproved: '!', lost: '✕' }[kind];
+      (chips[q.at] = chips[q.at] || []).push(chip(q.id, kind, mark ? qNum(q.id) + mark : null));
+    });
+
+    var nodes = C.PEOPLE.map(function (p) {
+      var two = run.two.indexOf(p.id) >= 0;
+      var dec = two ? t('twoOrders') : (p.decides ? t('d_' + p.decides) : null);
+      return h('div', {
+        class: 'cc-node' + (touched[p.id] ? ' sd-changed' : ''),
+        dataset: { id: p.id, head: p.head ? '1' : '0', two: two ? '1' : '0' },
+        style: { left: pct(POS[p.id][0], W), top: pct(POS[p.id][1], H) }
+      },
+        h('span', { class: 'cc-name' }, role(p.id)),
+        dec ? h('span', { class: 'cc-dec' }, dec) : null,
+        chips[p.id] ? h('span', { class: 'cc-chips' }, chips[p.id]) : null);
+    });
+    return h('div', { class: 'cc-chart' }, root, nodes, badges);
+  }
+
+  function reqTable(run, mode, changed) {
+    if (!run.reqs.length) return h('p', { class: 'cc-empty' }, t('noRequests'));
+    var rows = run.reqs.map(function (q) {
+      var r = L.spec(q.id);
+      var first = mode === 'direct' ? r.near : L.chainRoute(r.from, r, r.approvers).route[1];
+      var st = q.status === 'moving' ? t('st_moving', { who: role(q.at) })
+        : q.status === 'lost' ? t('st_lost', { who: role(q.at) })
+        : t('st_' + q.status);
+      var mins = L.answerTime(q);
+      return h('tr', null,
+        h('td', { class: 'cc-num' }, chip(q.id)),
+        h('td', null, h('span', { class: 'cc-rq' }, t('q_' + q.id)), r.safety ? h('span', { class: 'cc-safe' }, t('safetyMark')) : null),
+        h('td', null, role(r.from) + ' → ' + role(first)),
+        h('td', null, r.approvers.map(function (a) {
+          var y = q.yes.indexOf(a) >= 0;
+          return h('span', { class: 'cc-yes', dataset: { y: y ? '1' : '0' } }, (y ? '✓ ' : '○ ') + role(a));
+        })),
+        h('td', { class: 'cc-st' + (changed[q.id] ? ' sd-changed' : ''), dataset: { k: q.status } }, st),
+        h('td', { class: 'cc-time' }, mins == null ? t('none') : t('minutes', { n: mins })));
+    });
+    return h('table', { class: 'cc-tab cc-reqs' },
+      h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, t('thReq')), h('th', null, t('thFrom')),
+        h('th', null, t('thYes')), h('th', null, t('thState')), h('th', null, t('thTime')))),
+      h('tbody', null, rows));
+  }
+
+  function fmtMean(v) {
+    if (v == null) return t('none');
+    var s = (Math.round(v * 10) / 10).toString();
+    return t('meanMin', { n: Simdeck.lang === 'hr' ? s.replace('.', ',') : s });
+  }
+
+  function score(s, p) {
+    var d = L.tally(s.runs.direct), c = L.tally(s.runs.chain);
+    var on = function (m) { return p.mode === m ? '1' : '0'; };
+    function row(label, a, b, badA, badB) {
+      return h('tr', null, h('td', null, label),
+        h('td', { dataset: { on: on('direct'), bad: badA ? '1' : '0' } }, a),
+        h('td', { dataset: { on: on('chain'), bad: badB ? '1' : '0' } }, b));
+    }
+    return h('table', { class: 'cc-tab cc-score' },
+      h('thead', null, h('tr', null, h('th', null, t('thWay')),
+        h('th', { dataset: { on: on('direct') } }, t('wayDirect')), h('th', { dataset: { on: on('chain') } }, t('wayChain')))),
+      h('tbody', null,
+        row(t('sc_done'), t('outOf', { a: d.done, b: d.total }), t('outOf', { a: c.done, b: c.total })),
+        row(t('sc_unapproved'), String(d.unapproved), String(c.unapproved), d.unapproved > 0, c.unapproved > 0),
+        row(t('sc_lost'), String(d.lost), String(c.lost), d.lost > 0, c.lost > 0),
+        row(t('sc_two'), String(d.two), String(c.two), d.two > 0, c.two > 0),
+        row(t('sc_mean'), fmtMean(d.mean), fmtMean(c.mean)),
+        row(t('sc_links', { n: p.crew }), String(C.linksAll(p.crew)), String(C.linksChain(p.crew)))));
+  }
+
+  function caption(c) {
+    var p = c.params, run = c.state.runs[p.mode];
+    var k = run.reqs.length;
+    if (!k) return t('capNone');
+    if (c.first) return t.n(p.mode === 'direct' ? 'capStartDirect' : 'capStartChain', k);
+    var ev = run.events, out = [];
+    var by = function (kind) { return ev.filter(function (e) { return e.kind === kind; }); };
+    by('counter').forEach(function (e) { out.push(t('capCounter', { head: role(e.from), who: role(e.to) })); });
+    var lost = by('lost');
+    if (lost.length) out.push(t.n('capLost', lost.length, { list: list(lost.map(function (e) { return qNum(e.req); })) }));
+    by('unapproved').forEach(function (e) { out.push(t('capUnapproved', { who: role(e.at), num: qNum(e.req) })); });
+    by('hop').forEach(function (e) { if (e.how === 'call') out.push(t('capCall', { num: qNum(e.req), from: role(e.from), to: role(e.to) })); });
+    by('wait').forEach(function (e) { out.push(t('capWait', { who: role(e.at), num: qNum(e.req), behind: qNum(e.behind) })); });
+    var done = by('done');
+    if (done.length) out.push(t.n('capDone', done.length, { list: list(done.map(function (e) { return qNum(e.req); })) }));
+    if (out.length < 2) {
+      by('yes').forEach(function (e) {
+        var isCall = ev.some(function (x) { return x.kind === 'hop' && x.req === e.req && x.how === 'call'; });
+        var isDone = done.some(function (x) { return x.req === e.req; });
+        if (!isCall && !isDone) out.push(t('capYes', { who: role(e.at), num: qNum(e.req) }));
+      });
+    }
+    if (!out.length) {
+      var hops = by('hop');
+      if (hops.length) hops.forEach(function (e) { out.push(t('capHop', { num: qNum(e.req), from: role(e.from), to: role(e.to) })); });
+      else {
+        var open = run.reqs.some(function (q) { return q.status === 'idle' || q.status === 'moving'; });
+        var tl = L.tally(run);
+        if (!open) out.push(t(tl.lost > 0 ? 'capQuietDirect' : tl.done === k ? 'capQuietChain' : 'capQuietNone'));
+      }
+    }
+    var text = t('capMinute', { m: c.n }) + ' ' + out.slice(0, 3).join(' ');
+    if (c.last) text += ' ' + t(p.mode === 'direct' ? 'capEndDirect' : 'capEndChain');
+    return text;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: [['direct', t('modeDirect')], ['chain', t('modeChain')]] },
+      { key: 'lamp', type: 'toggle', label: '1 · ' + t('q_lamp') },
+      { key: 'overtime', type: 'toggle', label: '2 · ' + t('q_overtime') },
+      { key: 'actor', type: 'toggle', label: '3 · ' + t('q_actor') },
+      { key: 'exit', type: 'toggle', label: '4 · ' + t('q_exit') },
+      { key: 'prop', type: 'toggle', label: '5 · ' + t('q_prop') },
+      { key: 'crew', type: 'range', label: t('crewSize'), min: 10, max: 60, step: 1, hint: t('crewHint') }
+    ],
+
+    presets: [
+      { id: 'direct', label: t('presetDirect'), params: { mode: 'direct' }, hint: t('presetDirectHint') },
+      { id: 'chain', label: t('presetChain'), params: { mode: 'chain' }, hint: t('presetChainHint') },
+      { id: 'exit', label: t('presetExit'), params: { mode: 'chain', lamp: false, overtime: false, actor: false, prop: false }, hint: t('presetExitHint') },
+      { id: 'overtime', label: t('presetOvertime'), params: { mode: 'chain', lamp: false, actor: false, exit: false, prop: false }, hint: t('presetOvertimeHint') }
+    ],
+
+    keys: [{ key: 'm', label: t('modeKey'), run: function (sim) { sim.set({ mode: sim.params.mode === 'direct' ? 'chain' : 'direct' }); } }],
+
+    legend: [
+      { shape: 'line', label: t('legendLine') },
+      { shape: 'dash', label: t('legendCall') },
+      { shape: 'cc-lost', label: t('legendLost') },
+      { shape: 'cc-two', label: t('legendTwo') }
+    ],
+
+    render: function (c) {
+      var p = c.params, s = c.state, run = s.runs[p.mode];
+      var changed = {};
+      if (!c.first) run.events.forEach(function (e) { if (e.kind !== 'wait') changed[e.req] = 1; });
+      c.stage.replaceChildren(h('div', { class: 'cc' },
+        h('div', { class: 'cc-top' }, chart(run, p.mode)),
+        h('div', { class: 'cc-bottom' }, reqTable(run, p.mode, changed), score(s, p)),
+        h('p', { class: 'cc-foot' }, t('foot'))));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
