@@ -4,7 +4,7 @@ How the OS simulator was built (16 pages plus a map in two days, 71 commits, abo
 waves). This is the method to reuse for a project that is **diverse** (each simulator models something different)
 yet **consistent** (each looks, behaves, tests and ships the same way).
 
-Written from `~/projects/ossimulator` (GitLab `rjasmin/ossimulator`) as input for simdeck; this copy is the
+Written from the ossimulator project as input for simdeck; this copy is the
 working one. File names such as `ARCHITECTURE.md`, `DOD.md` or `src/shared/` refer to that repository (its
 `docs/` are in Croatian); the section numbers show where to look.
 

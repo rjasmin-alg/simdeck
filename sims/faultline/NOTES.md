@@ -256,8 +256,7 @@ richer gate authoring goes with dependency editing, `probe.js` goes with the rev
       regions, Azure regions with no zones at all, AZ-ID vs AZ-name scoping, FD/UD, and which
       control planes are single-homed where.
 - [ ] **8 — Ship.** Presentation mode (`step` field per item), SVG/PNG export. *`scripts/deploy.sh`,
-      the deploy and the GitLab repo all moved up to 0b* — the repo is `rjasmin/faultline` on the
-      local GitLab, created by push-to-create, and the site is live at `materijali.online/faultline`
+      the deploy and the repo all moved up to 0b* — the site is live at `materijali.online/faultline`
       behind the same basic auth as `/urm`, `/topologija` and `/ceph`, so what is published is the
       spike, and every later phase redeploys over it.
 

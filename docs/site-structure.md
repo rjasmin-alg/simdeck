@@ -211,8 +211,8 @@ backup/backups/sigurnosne kopije (playbook §10.6). Topics and tags are edited i
 - `reservedPaths` are top-level paths already used on the server, so a course's short address can
   never take one of them.
 - `source` is where every page's "Izvorni kod / Source code" link points (AGPL-3.0 §13): a path relative to the
-  site root, by default `source.tar.gz`, the archive `scripts/deploy.sh` writes from the published `main` commit
-  while the site sits behind basic auth; or an absolute URL, a public repo once there is one.
+  site root, by default `source.tar.gz`, the archive `scripts/deploy.sh` writes from the published `main` commit;
+  or an absolute URL.
 
 ## 3. The published site
 

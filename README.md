@@ -2,7 +2,8 @@
 
 A library of short, colourful browser simulators for lectures, one concept each, gathered in one searchable index. Open a demo on the fly in class, or generate a one-page course list to hand to students.
 
-Status: the site frame is built (admin, home page, course pages, build); the first simulators are next.
+**Live at <https://materijali.online/simdeck/>**, public: the `main` branch, published with `npm run deploy`
+(`docs/deploy.md`). Over 300 simulators, placed in a "Što želite danas naučiti?" tree on the home page.
 
 Two sides, from the same files (`docs/site-structure.md`):
 

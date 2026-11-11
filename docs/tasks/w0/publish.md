@@ -10,14 +10,14 @@
 
 ## Goal
 
-"Adopt it and publish it": every merged sim reaches `https://materijali.online/simdeck/` (login `deck`/`***`,
+"Adopt it and publish it": every merged sim reaches `https://materijali.online/simdeck/` (public,
 `docs/deploy.md`).
 
 ## Each time
 
 1. On `main` after a merge: `npm test && npm run check && npm run build`.
 2. `npm run deploy:dry`, read the diff, then `npm run deploy` (asks nothing; the owner approves the step).
-3. The script checks 401 without login, 200 with it, and `/simdeck/VERSION` = `main`'s commit.
+3. The script checks 200 without a login, and `/simdeck/VERSION` = `main`'s commit.
 4. Course short addresses: paste new nginx rules from the admin's Objava tab (owner, on the server).
 5. Nothing runs automatically (no background jobs on these machines, by design).
 

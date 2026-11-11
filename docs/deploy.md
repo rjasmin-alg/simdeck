@@ -1,16 +1,16 @@
 # simdeck: publishing
 
-**main is published at <https://materijali.online/simdeck/>**, behind basic auth: user **`deck`**, password *** (realm "simdeck", `/etc/nginx/.htpasswd-simdeck`). The login is deliberately trivial. It only keeps the
-pages from being freely reachable, it is not real security, and it is separate from the other course materials
-(`/singles`, `/ceph`, … share one login; `/ossim` has its own, ***).
+**main is published at <https://materijali.online/simdeck/>**, public, with no login (until 2026-11-11 it sat
+behind basic auth).
 
-Same VPS (`root@materijali.online`, vhost `materijali-online`) and pattern as ossimulator's `/ossim`.
+The deploy connects as `root@materijali.online` (`SIMDECK_DEPLOY_HOST` overrides it) and serves from the nginx vhost
+`materijali-online`, the same pattern as the other course materials on that server.
 
 | Command | Does |
 |---|---|
-| `npm run server:setup -- --dry-run` / `npm run server:setup` | one-time, idempotent: nginx `location /simdeck/` (after `/ossim/`, vhost backed up first, `nginx -t` before reload, backup restored on failure), the login file, the web folder, and an `include` of the short-address rules after `/simdeck/`; then checks 401/200 |
+| `npm run server:setup -- --dry-run` / `npm run server:setup` | one-time, idempotent: nginx `location /simdeck/` (after `/ossim/`, vhost backed up first, `nginx -t` before reload, backup restored on failure), the removal of the old login file, the web folder, and an `include` of the short-address rules after `/simdeck/`; then checks that the page answers 200 without a login |
 | `npm run deploy:dry` | builds from main and shows what would change on the server |
-| `npm run deploy` | publishes main, its source archive and its short course addresses, then checks: 401 without login, 200 with it, that `/simdeck/VERSION` is main's commit and that `/simdeck/source.tar.gz` is served |
+| `npm run deploy` | publishes main, its source archive and its short course addresses, then checks: 200 without a login, that `/simdeck/VERSION` is main's commit and that `/simdeck/source.tar.gz` is served |
 
 Rules the script enforces:
 - **Only main is published.** It exports the committed `main` with `git archive`, so uncommitted files and other
@@ -27,9 +27,8 @@ Rules the script enforces:
   matching thumbnails into `dist/thumbs/`. Without Playwright the deploy stops and says so; `SIMDECK_THUMBS=0
   npm run deploy` publishes without thumbnails, and the tiles show placeholders in their topic's colour.
 - **Source archive (AGPL-3.0 §13).** Every page links "Izvorni kod / Source code" (`docs/site-structure.md`
-  §3.3). While the site sits behind basic auth, the deploy writes `/simdeck/source.tar.gz` with `git archive` from
-  the same `main` commit it publishes, so the source offered is always the source served. Once there is a public
-  repo, set `site.json` `source` to its URL; the archive is still written.
+  §3.3). The deploy writes `/simdeck/source.tar.gz` with `git archive` from
+  the same `main` commit it publishes, so the source offered is always the source served.
 - **Short course addresses** (`materijali.online/linux`, set per course in the admin): the script generates one nginx
   rule per course (`scripts/short-links.mjs`) and keeps `/etc/nginx/snippets/simdeck-short.conf` in step. It
   uploads only when the rules changed, runs `nginx -t` before reloading, and restores the previous rules (and

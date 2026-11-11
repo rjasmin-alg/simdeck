@@ -19,9 +19,8 @@ Owner decision (2026-10-01): simdeck is **AGPL-3.0-or-later**, to keep it open a
 - SPDX headers in `kit/`, `site/`, `lib/`, `scripts/`, `admin/` and the template.
 - **Source link** (AGPL §13: users of a served page must be offered the source): the kit help overlay or
   header, the home page footer and course pages show "Izvorni kod / Source code" and the licence name, pointing
-  to the source. While the site is behind basic auth, publish a source archive next to it
-  (`/simdeck/source.tar.gz`, built by the deploy script from the same `main` commit), or link a public repo
-  once there is one.
+  to the source: a source archive next to it
+  (`/simdeck/source.tar.gz`, built by the deploy script from the same `main` commit).
 - `kit/fonts/OFL.txt` stays; the home page credits third-party licences (fonts, vendored libraries, CC BY
   material) on a small "Licences" page generated from the sims' `NOTES.md` or `sim.json`.
 - The proposal, design notes, playbook and README already say AGPL-3.0-or-later (thread t-0002); rebuild

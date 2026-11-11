@@ -119,9 +119,8 @@ Owner decision (2026-10-01): simdeck is **AGPL-3.0-or-later**, to keep it open a
 - SPDX headers in `kit/`, `site/`, `lib/`, `scripts/`, `admin/` and the template.
 - **Source link** (AGPL §13: users of a served page must be offered the source): the kit help overlay or
   header, the home page footer and course pages show "Izvorni kod / Source code" and the licence name, pointing
-  to the source. While the site is behind basic auth, publish a source archive next to it
-  (`/simdeck/source.tar.gz`, built by the deploy script from the same `main` commit), or link a public repo
-  once there is one.
+  to the source: a source archive next to it
+  (`/simdeck/source.tar.gz`, built by the deploy script from the same `main` commit).
 - `kit/fonts/OFL.txt` stays; the home page credits third-party licences (fonts, vendored libraries, CC BY
   material) on a small "Licences" page generated from the sims' `NOTES.md` or `sim.json`.
 - The proposal, design notes, playbook and README already say AGPL-3.0-or-later (thread t-0002); rebuild
@@ -244,14 +243,14 @@ with a note pointing to its simdeck home (playbook §10.7 step 5).
 W0["publish"] = HDR("publish", "build and deploy after every merge", "0 (recurring)", "S each time", "owner approval for each deploy") + """
 ## Goal
 
-"Adopt it and publish it": every merged sim reaches `https://materijali.online/simdeck/` (login `deck`/`***`,
+"Adopt it and publish it": every merged sim reaches `https://materijali.online/simdeck/` (public,
 `docs/deploy.md`).
 
 ## Each time
 
 1. On `main` after a merge: `npm test && npm run check && npm run build`.
 2. `npm run deploy:dry`, read the diff, then `npm run deploy` (asks nothing; the owner approves the step).
-3. The script checks 401 without login, 200 with it, and `/simdeck/VERSION` = `main`'s commit.
+3. The script checks 200 without a login, and `/simdeck/VERSION` = `main`'s commit.
 4. Course short addresses: paste new nginx rules from the admin's Objava tab (owner, on the server).
 5. Nothing runs automatically (no background jobs on these machines, by design).
 

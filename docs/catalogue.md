@@ -1411,8 +1411,8 @@ simdeck is **AGPL-3.0-or-later** (owner, 2026-10-01). It is the strongest copyle
 
 - **Network clause (§13).** Anyone who modifies a simdeck page and serves it to users must offer them the
   source. simdeck itself should do the same: every page and the index link to the source (a kit
-  requirement, §7.2). While `materijali.online` sits behind basic auth, the link can point to a source
-  archive on the same server, or to a public repo once there is one.
+  requirement, §7.2). The link points to a source archive of the served commit on the same server
+  (`source.tar.gz`).
 - **Single-file builds.** The build inlines the kit into each page. If the output is minified, it is no
   longer the "preferred form for modification", so the source link matters; an unminified build keeps
   every page its own source.
