@@ -11,6 +11,7 @@ import { applyTheme, initRenderer, paint } from './render.js';
 import { evaluator } from './engine/graph.js';
 import { authorityById } from './engine/authorities.js';
 import { applyStatic, has, lang, switchLang, t } from './i18n.js';
+import { clampStep, feedHits, stepOf, stepState, tripId, voteCount, walkFor, withFeed } from './walk.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -18,6 +19,9 @@ let doc = null;
 let failedEvents = new Set();   // event ids the user has broken
 let litComponents = new Set();  // components highlighted by a hovered/clicked cut
 let current = null;             // last analyse() result
+// simdeck (preset correlated-failure): the sample's guided walk (js/walk.js), and whether its hidden feed is drawn.
+let walk = null;
+let feedDrawn = true;
 
 const esc = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -48,16 +52,60 @@ function failedComponents() {
   return out;
 }
 
+// simdeck: the document the engine sees. With a walk, the feed event is in it only once the feed is drawn.
+const shownDoc = () => (walk ? withFeed(doc, walk, feedDrawn) : doc);
+
+// simdeck: the feed outline on the canvas (dashed, "not drawn"), while a walk has it drawn.
+function paintOpts(down) {
+  const hits = walk && feedHits(doc, walk, feedDrawn);
+  return { down, lit: litComponents, feeds: hits ? [{ hits, label: t(`${walk.strings}.feed`) }] : [] };
+}
+
 function render() {
   invalidate();
-  current = analyse(doc);
+  current = analyse(shownDoc());
+  // Hiding the feed again repairs it: drawn once more, it is whole.
+  if (walk && !feedDrawn) failedEvents.delete(tripId(walk));
 
   const down = failedComponents();
-  paint(current.doc, { down, lit: litComponents });
+  paint(current.doc, paintOpts(down));
   renderEvents();
   renderCutsets(down);
   renderStatus(down);
+  renderWalk(down);
 }
+
+// --- simdeck: the guided walk (preset correlated-failure) -----------------
+
+// The step on show follows the state (stepOf), so drawing the feed by hand or breaking PDU A from the rail or the cut
+// list moves the walk too; ← and → put the step's own state back.
+function renderWalk(down) {
+  const bar = $('#walk');
+  bar.hidden = !walk;
+  if (!walk) return;
+  const i = stepOf(walk, { feed: feedDrawn, failed: failedEvents });
+  const n = walk.steps.length;
+  $('#walk-step').textContent = t('walk.step', { i: i + 1, n });
+  $('#walk-caption').textContent = t(`${walk.strings}.cap${i + 1}`);
+  $('#walk-prev').setAttribute('aria-disabled', String(i === 0));
+  $('#walk-next').setAttribute('aria-disabled', String(i === n - 1));
+  $('#walk-feed').checked = feedDrawn;
+  const c = voteCount(current.graph, down, walk.service);
+  const el = $('#walk-count');
+  el.textContent = c ? t('walk.count', { live: c.live, of: c.of, need: c.need }) : '';
+  el.className = c && c.live < c.need ? 'down' : 'up';
+}
+
+function goStep(i) {
+  if (!walk) return;
+  const s = stepState(walk, clampStep(walk, i));
+  feedDrawn = s.feed;
+  failedEvents = s.failed;
+  litComponents = new Set();
+  render();
+}
+
+const walkStep = () => (walk ? stepOf(walk, { feed: feedDrawn, failed: failedEvents }) : 0);
 
 // --- left rail: the things that can break ---------------------------------
 
@@ -172,14 +220,18 @@ function renderStatus(down) {
 // simdeck copy: the sample on the canvas, kept for ?sample= when the language switches.
 let sampleKey = null;
 
-function load(key) {
+function load(key, step = 0) {
   sampleKey = key;
   $('#sample-picker').value = key;
   doc = makeSample(key);
   doc.settings = { ...doc.settings, maxCutSize: Number($('#max-size').value) };
+  // simdeck: the box follows the sample (onePdu runs with the authorities off; the rest with them on).
+  $('#toggle-auth').checked = doc.settings.authorities !== false;
   failedEvents = new Set();
   litComponents = new Set();
-  render();
+  walk = walkFor(key);
+  feedDrawn = true;
+  if (walk) goStep(step); else render();
 }
 
 function applySettings() {
@@ -214,6 +266,7 @@ darkQuery?.addEventListener?.('change', applyPageTheme);
 $('#btn-lang').addEventListener('click', () => {
   const next = new URLSearchParams(location.search);
   if (sampleKey) next.set('sample', sampleKey);
+  if (walk) next.set('step', String(walkStep() + 1)); else next.delete('step');
   switchLang(next);
 });
 
@@ -225,6 +278,23 @@ $('#sample-picker').addEventListener('change', (e) => load(e.target.value));
 $('#max-size').addEventListener('change', applySettings);
 $('#toggle-auth').addEventListener('change', applySettings);
 $('#reset').addEventListener('click', () => { failedEvents = new Set(); render(); });
+
+// simdeck: the walk's controls. ← → and PgUp/PgDn (a clicker), Home and End, unless a select has the focus (its
+// arrows change the option). A step past either end does nothing; the button says so with aria-disabled.
+$('#walk-prev').addEventListener('click', () => goStep(walkStep() - 1));
+$('#walk-next').addEventListener('click', () => goStep(walkStep() + 1));
+$('#walk-feed').addEventListener('change', (e) => { feedDrawn = e.target.checked; render(); });
+document.addEventListener('keydown', (e) => {
+  if (!walk || e.altKey || e.ctrlKey || e.metaKey || e.target.closest?.('select, textarea, input[type="text"]')) return;
+  const to = {
+    ArrowRight: walkStep() + 1, PageDown: walkStep() + 1,
+    ArrowLeft: walkStep() - 1, PageUp: walkStep() - 1,
+    Home: 0, End: walk.steps.length - 1,
+  }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  goStep(to);
+});
 
 $('#event-list').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-ev]');
@@ -243,11 +313,11 @@ $('#cutset-panel').addEventListener('mouseover', (e) => {
   const byId = new Map(current.universe.map((x) => [x.id, x]));
   litComponents = new Set();
   for (const ev of cut.events) for (const h of byId.get(ev.id)?.hits || []) litComponents.add(h);
-  paint(current.doc, { down: failedComponents(), lit: litComponents });
+  paint(current.doc, paintOpts(failedComponents()));
 });
 $('#cutset-panel').addEventListener('mouseleave', () => {
   litComponents = new Set();
-  paint(current.doc, { down: failedComponents(), lit: litComponents });
+  paint(current.doc, paintOpts(failedComponents()));
 });
 
 // Clicking a cut breaks it, so you can walk from "here is a single point of
@@ -260,6 +330,7 @@ $('#cutset-panel').addEventListener('click', (e) => {
   render();
 });
 
-load(SAMPLES[params.get('sample')] ? params.get('sample') : Object.keys(SAMPLES)[0]);
+// simdeck: ?step=1..n opens a walk at that step (onePdu); out-of-range values are clamped, others ignored.
+load(SAMPLES[params.get('sample')] ? params.get('sample') : Object.keys(SAMPLES)[0], Number(params.get('step') || 1) - 1);
 
-window.FL = { get doc() { return doc; }, get current() { return current; }, load, render };
+window.FL = { get doc() { return doc; }, get current() { return current; }, load, render, get step() { return walkStep(); } };

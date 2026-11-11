@@ -52,7 +52,9 @@ function onePdu() {
   return {
     version: 1,
     title: t('s.onePdu.title'),
-    settings: { profile: 'onprem', maxCutSize: 3 },
+    // simdeck (preset correlated-failure): the authorities stay off here, so the lesson is the one shared feed; they
+    // are threeZone's lesson. The box "show what was never drawn" brings them back.
+    settings: { profile: 'onprem', maxCutSize: 3, authorities: false },
     domains: [
       dom('dc', t('s.serverRoom'), 'dc'),
       dom('r1', t('s.rack', { n: 1 }), 'rack', 'dc'),

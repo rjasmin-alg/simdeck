@@ -3,7 +3,7 @@
    looks them up with t(key, vars) from js/i18n.js: {name} is a placeholder, an array is plural forms
    (hr: 1 / 2–4 / 5+, en: 1 / other). Keys: ui.* the chrome (index.html), ev.* cut.* hl.* st.* the rails and the
    status bar (main.js), scope1.* scopeN.* the headline's unit, role.* kind.* cv.* the canvas (render.js), auth.*
-   authq.* the six authorities nobody drew, s.* the samples (samples.js).
+   authq.* the six authorities nobody drew, s.* the samples (samples.js), walk.* the guided walk (js/walk.js).
    Not here, on purpose: names that are data in a sample (us-east-1, use1-az1, osd-1, etcd-1, payments-api, IAM / STS,
    Entra ID, Front Door, West Europe) and Ceph's own settings (size=2, min_size=2; NLA T26). sim.test.js checks that
    both tables match. */
@@ -140,6 +140,21 @@
       's.frontDoor.edge': 'Globalni rub',
       's.frontDoor.event': 'Uvođenje konfiguracije Front Doora',
       's.frontDoor.note': '29. 10. 2025. Čvorovi diljem globalne flote nisu učitali novu konfiguraciju. Vraćeno je na staro; sve regije bile su pogođene odjednom.',
+
+      // ── the guided walk (js/walk.js; preset correlated-failure, SPEC.md) ──
+      'walk.title': 'Vođeni prolaz',
+      'walk.prev': '← Natrag',
+      'walk.next': 'Dalje →',
+      'walk.keysPrev': 'Prethodni korak (←, PgUp)',
+      'walk.keysNext': 'Sljedeći korak (→, PgDn)',
+      'walk.step': 'Korak {i} / {n}',
+      'walk.count': 'Žive replike: {live} od {of} · potrebne: {need}',
+      'walk.authOff': 'Autoriteti koje nitko nije nacrtao ovdje su isključeni, da ostane jedna lekcija; kvačica gore ih vraća.',
+      'walk.onePdu.toggle': 'Nacrtaj napajanje (razdjelnica A)',
+      'walk.onePdu.feed': 'Razdjelnica A · nenacrtana',
+      'walk.onePdu.cap1': 'Tri ormara, tri kopije, potrebne dvije: na crtežu kvar jednog ormara ne ruši uslugu. Ali ormari 1 i 2 vise na istoj razdjelnici napajanja (PDU).',
+      'walk.onePdu.cap2': 'Napajanje je nacrtano: razdjelnica A postaje jedan događaj koji pogađa ormare 1 i 2 odjednom. Popis reznih skupova dobiva novi skup veličine 1: samo razdjelnica A. Nadzorna ploča i dalje piše »3× zalihost«.',
+      'walk.onePdu.cap3': 'Ispada razdjelnica A: dva ormara gase se zajedno, ostaje jedna kopija, a potrebne su dvije. Zalihost je bila stvarna; neovisnost nije.',
     },
 
     en: {
@@ -269,6 +284,21 @@
       's.frontDoor.edge': 'Global edge',
       's.frontDoor.event': 'Front Door configuration rollout',
       's.frontDoor.note': '29 Oct 2025. Nodes across the global fleet failed to load the new config. Rolled back; every region was affected at once.',
+
+      // ── the guided walk (js/walk.js; preset correlated-failure, SPEC.md) ──
+      'walk.title': 'Guided walk',
+      'walk.prev': '← Back',
+      'walk.next': 'Next →',
+      'walk.keysPrev': 'Previous step (←, PgUp)',
+      'walk.keysNext': 'Next step (→, PgDn)',
+      'walk.step': 'Step {i} / {n}',
+      'walk.count': 'Replicas up: {live} of {of} · needed: {need}',
+      'walk.authOff': 'The authorities nobody drew are off here, to keep one lesson; the box above brings them back.',
+      'walk.onePdu.toggle': 'Draw the feed (PDU A)',
+      'walk.onePdu.feed': 'PDU A · not drawn',
+      'walk.onePdu.cap1': 'Three racks, three copies, two needed: in the drawing, losing any one rack leaves the service up. But racks 1 and 2 hang on the same power distribution unit (PDU).',
+      'walk.onePdu.cap2': 'The feed is drawn: PDU A becomes one event that hits racks 1 and 2 at once. The cut list gains a new size-1 entry: PDU A alone. The dashboard still reads 3× redundant.',
+      'walk.onePdu.cap3': 'PDU A trips: two racks go dark together, one replica is left, two are needed. The redundancy was real; the independence was not.',
     },
   };
 

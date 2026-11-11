@@ -48,6 +48,11 @@ export const CANVAS_CSS = `
   .down .dom { color: var(--down); fill-opacity: .1; }
   .implicit .comp { stroke-dasharray: 5 3; }
   .swatch { rx: 2.5; }
+  .feed { fill: none; stroke: var(--feed); stroke-width: 2.4; stroke-dasharray: 1 5;
+          stroke-linecap: round; rx: 13; }
+  .feed-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+                fill: var(--feed); stroke: var(--paper); stroke-width: 5px; stroke-linejoin: round;
+                paint-order: stroke; }
 `;
 
 // Editor-only. Deliberately NOT exported, so selection state cannot reach an
@@ -64,12 +69,12 @@ export const THEMES = {
   light: {
     '--paper': '#ffffff', '--ink': '#0f172a', '--ink-soft': '#64748b',
     '--dom-fill': '#475569', '--down': '#dc2626', '--down-fill': '#fef2f2',
-    '--sel': '#0ea5e9', '--edge': '#cbd5e1',
+    '--sel': '#0ea5e9', '--edge': '#cbd5e1', '--feed': '#b45309',
   },
   dark: {
     '--paper': '#0f172a', '--ink': '#e2e8f0', '--ink-soft': '#94a3b8',
     '--dom-fill': '#94a3b8', '--down': '#f87171', '--down-fill': '#450a0a',
-    '--sel': '#38bdf8', '--edge': '#334155',
+    '--sel': '#38bdf8', '--edge': '#334155', '--feed': '#fbbf24',
   },
 };
 
@@ -174,8 +179,23 @@ export function paintComponent(comp, box, { down = false, lit = false } = {}) {
     `</g>`;
 }
 
+// simdeck (preset correlated-failure): a hidden dependency, drawn as one dotted outline around everything it reaches
+// (`hits`: domain or component ids), labelled on its lower edge, at the right so it clears the service chip below
+// the racks. Dotted and labelled, unlike the dashed domain frames, so it reads without colour.
+export function paintFeed(feed, boxes) {
+  const bs = (feed.hits || []).map((id) => boxes.get(id)).filter(Boolean);
+  if (!bs.length) return '';
+  const o = 5;
+  const x0 = Math.min(...bs.map((b) => b.x)) - o, y0 = Math.min(...bs.map((b) => b.y)) - o;
+  const x1 = Math.max(...bs.map((b) => b.x + b.w)) + o, y1 = Math.max(...bs.map((b) => b.y + b.h)) + o;
+  return `<g class="feed-group" data-kind="feed">` +
+    `<rect class="feed" x="${r1(x0)}" y="${r1(y0)}" width="${r1(x1 - x0)}" height="${r1(y1 - y0)}"/>` +
+    `<text class="feed-label" x="${r1(x1 - 12)}" y="${r1(y1 + 4)}" text-anchor="end">${esc(feed.label)}</text>` +
+    `</g>`;
+}
+
 // The whole canvas as one string. `down` is a Set of component ids.
-export function paintAll(doc, { down = new Set(), lit = new Set() } = {}) {
+export function paintAll(doc, { down = new Set(), lit = new Set(), feeds = [] } = {}) {
   const { boxes, width, height, idx } = layoutDoc(doc);
   const parts = [];
 
@@ -195,6 +215,7 @@ export function paintAll(doc, { down = new Set(), lit = new Set() } = {}) {
     if (!box) continue;
     parts.push(paintComponent(c, box, { down: down.has(c.id), lit: lit.has(c.id) }));
   }
+  for (const f of feeds) parts.push(paintFeed(f, boxes));
 
   return { markup: parts.join(''), width, height, boxes };
 }

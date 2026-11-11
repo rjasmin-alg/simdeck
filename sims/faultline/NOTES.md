@@ -142,6 +142,79 @@ None.
   finding 7, planned for its phase 4).
 - Freezing the original (`~/projects/faultline`, `materijali.online/faultline/`) is outside simdeck.
 
+## Preset `one-pdu` (task `correlated-failure`, t-0388)
+
+Task `docs/tasks/w3/correlated-failure.md`, catalogue `dr-correlated-failure`. Rules, tie-breaks and numbers in
+`SPEC.md`. The sample `onePdu` already existed and was already bilingual with an entry (`faultline#one-pdu`), so the
+work is the guided walk, the authorities off, the feed's outline, the strings and the tests; no engine change.
+
+**What changed, all for this preset:**
+
+| File | |
+|---|---|
+| `js/walk.js` | new: `WALKS.onePdu` (three steps), `stepState`, `stepOf`, `clampStep`, `withFeed`, `feedHits`, `voteCount`; pure |
+| `js/samples.js` | `onePdu` gets `settings.authorities: false` |
+| `js/main.js` | the walk bar, ← → PgUp PgDn Home End, `?step=`, the feed box, the language switch keeps the step; `load()` sets the authorities box from the sample |
+| `js/render.js` | `paintFeed` and a `feeds` option on `paintAll`; `.feed`, `.feed-label` in `CANVAS_CSS`; `--feed` in both themes |
+| `index.html`, `css/style.css` | the walk bar (hidden on the other samples) |
+| `strings.js` | `walk.*`, both languages |
+| `sim.test.js` | 16 tests: three tie-breaks, one per rule, the numbers per step, the walk helpers, the outline, both languages, and the walk in Chromium |
+| `SPEC.md` | new: this file's presets |
+
+**Decisions**
+
+- **The walk is part of `onePdu`, not a sixth sample.** The task names one preset, `one-pdu`, which is `onePdu`; the
+  entry and its `?sample=onePdu` stay as they were. `?step=1..3` is new and optional.
+- **The step on show follows the state** (`stepOf`): drawing the feed with the box or breaking PDU A from the rail or
+  the cut list moves the caption along, so the explorer stays an explorer and the walk never disagrees with the
+  canvas. ← and → put the step's own state back.
+- **"Drawing the feed" adds and removes the event** (task (b)): with the box off, the page analyses the sample
+  without `pdu-a` (`withFeed`); the engine is not told anything new.
+- **Authorities off** in the sample's settings, said in the walk bar; the toolbar box brings them back. `load()` now
+  sets that box from the sample (`authorities !== false`); before, the box kept its last state while a newly loaded
+  sample always showed the authorities, which would have been wrong for `onePdu`. The other samples behave as before
+  (box on).
+- **The feed outline** is dotted (1 5, round caps, 2.4 px), amber `--feed` (`#b45309` light, `#fbbf24` dark), around
+  Rack 1 and Rack 2, labelled at the lower right so it clears the service chip under the racks. The domain frames are
+  dashed (6 4), so dotted plus the label tells them apart in grayscale.
+- **The live count** under the caption ("Replicas up: 1 of 3 · needed: 2") is read from the graph (`voteCount`: the
+  service's first non-`all` group, `GATES[gate].need`), not typed in; red with ✕ when short.
+- **The walk bar's text is 16–20 px** (caption 1.25rem), larger than the app's 14 px chrome: it is the lecture text.
+  The page's `text-size` exception still covers the rest.
+
+**Deviations from the task**
+
+- **Pair cuts are named by the replica** (osd-1 + osd-2), not "{Rack 1, Rack 2}": faultline's dedupe keeps the
+  component when a rack holds only it (`SPEC.md`). Same cuts, other names.
+- **"Server room lost" is a size-1 cut in every step** (the room holds the service too); the task's lists leave it
+  out. So step 1 has one size-1 cut, not none, and the step-1 caption says "losing any one rack leaves the service
+  up" instead of the task's „na crtežu nijedan kvar ne ruši uslugu" (no failure in the drawing takes it down), which
+  the cut list on the same screen would contradict. Step 2 says "a *new* size-1 entry".
+- **Terms:** the task's (check) terms differ from the ones this page already uses; the page keeps its own so it reads
+  as one text: *korelirani kvar* (task: povezani kvar), *razdjelnica napajanja* (task: razdjelnik napajanja),
+  *minimalni rezni skup* (task: minimalni presječni skup). Owner to pick; one table edit either way.
+- **Class:** the task says stepper; faultline is an explorer without the kit, so the three steps are a walk in its
+  own UI (the task's note says the same). `sim.json` `class` and `steps` are unchanged.
+- **The entry** in `sim.json` was already there; unchanged.
+- **OPEN.md** is outside this folder (the gate's scope); the owner questions are in the report instead.
+
+**Checked:** the numbers in `SPEC.md` with a probe script on the bundle before the page, then by the tests; every
+rule test failed once against a mutation (`kofn` at `<=`, radius order flipped, an event hitting only its first
+domain, no minimality check, authorities on, `withFeed` never hiding, step 2 without the feed, `voteCount`'s need,
+the outline too small, hiding the feed not repairing it, the box not following the sample). One equivalent mutant:
+dropping the `feed &&` guard in `stepOf` changes nothing, since no step has a trip without the feed and the fallback
+is step 1.
+
+**Not checked** *(check)*: a real projector (the outline's amber and the dotted line at distance); hover on a cut
+lighting osd-1 and osd-2 under the feed outline (clicking is tested).
+
+**Term pairs** (in addition to the table above): power distribution unit (PDU) — razdjelnica napajanja; correlated
+failure — korelirani kvar (task: povezani kvar *(check)*); hidden dependency — skrivena ovisnost (not on the page).
+
+**Shared requests:** none.
+
+**Time:** start 2026-11-12 00:35, done 00:55 (about 20 minutes, one session).
+
 ## Roadmap (from the original `TODO.md`, at 268db27)
 
 Phases 0 and 0b are done. Each phase ends with checks passing and a commit.

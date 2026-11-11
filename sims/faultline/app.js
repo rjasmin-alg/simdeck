@@ -5,7 +5,7 @@
 var __mods = {};
 globalThis.Faultline = { modules: __mods };
 
-// ── i18n → samples → engine/authorities → engine/graph → engine/cutset → engine/domain → engine/events → compile → render → main ──
+// ── i18n → samples → engine/authorities → engine/graph → engine/cutset → engine/domain → engine/events → compile → render → walk → main ──
 __mods["i18n"] = (function () {
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Languages (simdeck copy): every visible string comes from strings.js ({ hr, en }, loaded before app.js as
@@ -131,7 +131,9 @@ function onePdu() {
   return {
     version: 1,
     title: t('s.onePdu.title'),
-    settings: { profile: 'onprem', maxCutSize: 3 },
+    // simdeck (preset correlated-failure): the authorities stay off here, so the lesson is the one shared feed; they
+    // are threeZone's lesson. The box "show what was never drawn" brings them back.
+    settings: { profile: 'onprem', maxCutSize: 3, authorities: false },
     domains: [
       dom('dc', t('s.serverRoom'), 'dc'),
       dom('r1', t('s.rack', { n: 1 }), 'rack', 'dc'),
@@ -1045,6 +1047,11 @@ const CANVAS_CSS = `
   .down .dom { color: var(--down); fill-opacity: .1; }
   .implicit .comp { stroke-dasharray: 5 3; }
   .swatch { rx: 2.5; }
+  .feed { fill: none; stroke: var(--feed); stroke-width: 2.4; stroke-dasharray: 1 5;
+          stroke-linecap: round; rx: 13; }
+  .feed-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+                fill: var(--feed); stroke: var(--paper); stroke-width: 5px; stroke-linejoin: round;
+                paint-order: stroke; }
 `;
 
 // Editor-only. Deliberately NOT exported, so selection state cannot reach an
@@ -1061,12 +1068,12 @@ const THEMES = {
   light: {
     '--paper': '#ffffff', '--ink': '#0f172a', '--ink-soft': '#64748b',
     '--dom-fill': '#475569', '--down': '#dc2626', '--down-fill': '#fef2f2',
-    '--sel': '#0ea5e9', '--edge': '#cbd5e1',
+    '--sel': '#0ea5e9', '--edge': '#cbd5e1', '--feed': '#b45309',
   },
   dark: {
     '--paper': '#0f172a', '--ink': '#e2e8f0', '--ink-soft': '#94a3b8',
     '--dom-fill': '#94a3b8', '--down': '#f87171', '--down-fill': '#450a0a',
-    '--sel': '#38bdf8', '--edge': '#334155',
+    '--sel': '#38bdf8', '--edge': '#334155', '--feed': '#fbbf24',
   },
 };
 
@@ -1171,8 +1178,23 @@ function paintComponent(comp, box, { down = false, lit = false } = {}) {
     `</g>`;
 }
 
+// simdeck (preset correlated-failure): a hidden dependency, drawn as one dotted outline around everything it reaches
+// (`hits`: domain or component ids), labelled on its lower edge, at the right so it clears the service chip below
+// the racks. Dotted and labelled, unlike the dashed domain frames, so it reads without colour.
+function paintFeed(feed, boxes) {
+  const bs = (feed.hits || []).map((id) => boxes.get(id)).filter(Boolean);
+  if (!bs.length) return '';
+  const o = 5;
+  const x0 = Math.min(...bs.map((b) => b.x)) - o, y0 = Math.min(...bs.map((b) => b.y)) - o;
+  const x1 = Math.max(...bs.map((b) => b.x + b.w)) + o, y1 = Math.max(...bs.map((b) => b.y + b.h)) + o;
+  return `<g class="feed-group" data-kind="feed">` +
+    `<rect class="feed" x="${r1(x0)}" y="${r1(y0)}" width="${r1(x1 - x0)}" height="${r1(y1 - y0)}"/>` +
+    `<text class="feed-label" x="${r1(x1 - 12)}" y="${r1(y1 + 4)}" text-anchor="end">${esc(feed.label)}</text>` +
+    `</g>`;
+}
+
 // The whole canvas as one string. `down` is a Set of component ids.
-function paintAll(doc, { down = new Set(), lit = new Set() } = {}) {
+function paintAll(doc, { down = new Set(), lit = new Set(), feeds = [] } = {}) {
   const { boxes, width, height, idx } = layoutDoc(doc);
   const parts = [];
 
@@ -1192,6 +1214,7 @@ function paintAll(doc, { down = new Set(), lit = new Set() } = {}) {
     if (!box) continue;
     parts.push(paintComponent(c, box, { down: down.has(c.id), lit: lit.has(c.id) }));
   }
+  for (const f of feeds) parts.push(paintFeed(f, boxes));
 
   return { markup: parts.join(''), width, height, boxes };
 }
@@ -1232,7 +1255,84 @@ function paint(doc, opts) {
   return { width, height };
 }
 
-return { ROLE_COLOUR, CANVAS_CSS, THEMES, layoutDoc, paintDomain, paintComponent, paintAll, initRenderer, applyTheme, paint };
+return { ROLE_COLOUR, CANVAS_CSS, THEMES, layoutDoc, paintDomain, paintComponent, paintFeed, paintAll, initRenderer, applyTheme, paint };
+})();
+
+__mods["walk"] = (function () {
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// simdeck: guided walks over a sample (preset task correlated-failure, docs/tasks/w3/correlated-failure.md; rules in
+// SPEC.md). A walk is a short list of states over one sample, nothing the engine does not already do: each step says
+// whether the walk's hidden dependency (one correlated event of the sample) is drawn, and whether it has tripped.
+// Pure: plain data in, plain data out, no DOM and no strings (the page looks up `${strings}.cap<i>` and friends).
+
+const { evaluator, gateOrDefault } = __mods["engine/graph"];
+
+// Keyed by the sample's ?sample= key, like SAMPLES.
+const WALKS = {
+  'onePdu': {
+    feed: 'pdu-a',          // the sample's correlated event: "PDU A trips", hits Rack 1 and Rack 2
+    service: 'svc',
+    strings: 'walk.onePdu', // cap1..cap3, feed (canvas label), toggle
+    steps: [
+      { feed: false, trip: false }, // 1. the drawing: three racks, three replicas, "3x redundant"
+      { feed: true, trip: false },  // 2. the feed is drawn: {PDU A} joins the cut list at size 1
+      { feed: true, trip: true },   // 3. PDU A trips: two racks down, 1 of 3 replicas, service down
+    ],
+  },
+};
+
+const walkFor = (key) => WALKS[key] || null;
+
+/** The engine's id for the walk's event once it is in the universe (events.js: `ev:evt:<id>`). */
+const tripId = (walk) => `ev:evt:${walk.feed}`;
+
+/** The canonical state of step i (clamped): is the feed drawn, and which events are broken. */
+function stepState(walk, i) {
+  const s = walk.steps[clampStep(walk, i)];
+  return { feed: s.feed, failed: new Set(s.trip ? [tripId(walk)] : []) };
+}
+
+function clampStep(walk, i) {
+  const n = walk.steps.length;
+  return Math.min(n - 1, Math.max(0, Number.isFinite(i) ? Math.trunc(i) : 0));
+}
+
+/** Which step a state shows. Only the feed and its trip count; anything else the user broke is their own. The trip
+ * cannot count while the feed is not drawn: the event is not in the model then. */
+function stepOf(walk, { feed, failed }) {
+  const tripped = !!feed && failed.has(tripId(walk));
+  const i = walk.steps.findIndex((s) => s.feed === !!feed && s.trip === tripped);
+  return i < 0 ? 0 : i;
+}
+
+/** The sample as drawn at this state: without the feed event, the drawing nobody corrected; with it, the sample. */
+function withFeed(doc, walk, feed) {
+  if (feed) return doc;
+  return { ...doc, events: (doc.events || []).filter((e) => e.id !== walk.feed) };
+}
+
+/** What the feed reaches on the canvas (the event's `hits`, domain or component ids), or null when it is not drawn. */
+function feedHits(doc, walk, feed) {
+  if (!feed) return null;
+  const e = (doc.events || []).find((x) => x.id === walk.feed);
+  return e ? [...e.hits] : null;
+}
+
+/** The service's voting group (the first group whose gate is not `all`), counted under `down`: how many of its
+ * dependencies are up, of how many, and how many the gate needs (graph.js GATES). Null when it has none. */
+function voteCount(graph, down, serviceId) {
+  const node = graph.nodes.get(serviceId);
+  const g = node && node.groupList.find((x) => x.gate !== 'all');
+  if (!g) return null;
+  const ev = evaluator(graph, down);
+  return {
+    live: g.deps.filter((d) => ev.isUp(d)).length,
+    of: g.deps.length,
+    need: gateOrDefault(g.gate).need(g.deps.length, g.n),
+  };
+}
+
+return { WALKS, walkFor, tripId, stepState, clampStep, stepOf, withFeed, feedHits, voteCount };
 })();
 
 if (!globalThis.FAULTLINE_NO_BOOT) {
@@ -1250,6 +1350,7 @@ const { applyTheme, initRenderer, paint } = __mods["render"];
 const { evaluator } = __mods["engine/graph"];
 const { authorityById } = __mods["engine/authorities"];
 const { applyStatic, has, lang, switchLang, t } = __mods["i18n"];
+const { clampStep, feedHits, stepOf, stepState, tripId, voteCount, walkFor, withFeed } = __mods["walk"];
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -1257,6 +1358,9 @@ let doc = null;
 let failedEvents = new Set();   // event ids the user has broken
 let litComponents = new Set();  // components highlighted by a hovered/clicked cut
 let current = null;             // last analyse() result
+// simdeck (preset correlated-failure): the sample's guided walk (js/walk.js), and whether its hidden feed is drawn.
+let walk = null;
+let feedDrawn = true;
 
 const esc = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -1287,16 +1391,60 @@ function failedComponents() {
   return out;
 }
 
+// simdeck: the document the engine sees. With a walk, the feed event is in it only once the feed is drawn.
+const shownDoc = () => (walk ? withFeed(doc, walk, feedDrawn) : doc);
+
+// simdeck: the feed outline on the canvas (dashed, "not drawn"), while a walk has it drawn.
+function paintOpts(down) {
+  const hits = walk && feedHits(doc, walk, feedDrawn);
+  return { down, lit: litComponents, feeds: hits ? [{ hits, label: t(`${walk.strings}.feed`) }] : [] };
+}
+
 function render() {
   invalidate();
-  current = analyse(doc);
+  current = analyse(shownDoc());
+  // Hiding the feed again repairs it: drawn once more, it is whole.
+  if (walk && !feedDrawn) failedEvents.delete(tripId(walk));
 
   const down = failedComponents();
-  paint(current.doc, { down, lit: litComponents });
+  paint(current.doc, paintOpts(down));
   renderEvents();
   renderCutsets(down);
   renderStatus(down);
+  renderWalk(down);
 }
+
+// --- simdeck: the guided walk (preset correlated-failure) -----------------
+
+// The step on show follows the state (stepOf), so drawing the feed by hand or breaking PDU A from the rail or the cut
+// list moves the walk too; ← and → put the step's own state back.
+function renderWalk(down) {
+  const bar = $('#walk');
+  bar.hidden = !walk;
+  if (!walk) return;
+  const i = stepOf(walk, { feed: feedDrawn, failed: failedEvents });
+  const n = walk.steps.length;
+  $('#walk-step').textContent = t('walk.step', { i: i + 1, n });
+  $('#walk-caption').textContent = t(`${walk.strings}.cap${i + 1}`);
+  $('#walk-prev').setAttribute('aria-disabled', String(i === 0));
+  $('#walk-next').setAttribute('aria-disabled', String(i === n - 1));
+  $('#walk-feed').checked = feedDrawn;
+  const c = voteCount(current.graph, down, walk.service);
+  const el = $('#walk-count');
+  el.textContent = c ? t('walk.count', { live: c.live, of: c.of, need: c.need }) : '';
+  el.className = c && c.live < c.need ? 'down' : 'up';
+}
+
+function goStep(i) {
+  if (!walk) return;
+  const s = stepState(walk, clampStep(walk, i));
+  feedDrawn = s.feed;
+  failedEvents = s.failed;
+  litComponents = new Set();
+  render();
+}
+
+const walkStep = () => (walk ? stepOf(walk, { feed: feedDrawn, failed: failedEvents }) : 0);
 
 // --- left rail: the things that can break ---------------------------------
 
@@ -1411,14 +1559,18 @@ function renderStatus(down) {
 // simdeck copy: the sample on the canvas, kept for ?sample= when the language switches.
 let sampleKey = null;
 
-function load(key) {
+function load(key, step = 0) {
   sampleKey = key;
   $('#sample-picker').value = key;
   doc = makeSample(key);
   doc.settings = { ...doc.settings, maxCutSize: Number($('#max-size').value) };
+  // simdeck: the box follows the sample (onePdu runs with the authorities off; the rest with them on).
+  $('#toggle-auth').checked = doc.settings.authorities !== false;
   failedEvents = new Set();
   litComponents = new Set();
-  render();
+  walk = walkFor(key);
+  feedDrawn = true;
+  if (walk) goStep(step); else render();
 }
 
 function applySettings() {
@@ -1453,6 +1605,7 @@ darkQuery?.addEventListener?.('change', applyPageTheme);
 $('#btn-lang').addEventListener('click', () => {
   const next = new URLSearchParams(location.search);
   if (sampleKey) next.set('sample', sampleKey);
+  if (walk) next.set('step', String(walkStep() + 1)); else next.delete('step');
   switchLang(next);
 });
 
@@ -1464,6 +1617,23 @@ $('#sample-picker').addEventListener('change', (e) => load(e.target.value));
 $('#max-size').addEventListener('change', applySettings);
 $('#toggle-auth').addEventListener('change', applySettings);
 $('#reset').addEventListener('click', () => { failedEvents = new Set(); render(); });
+
+// simdeck: the walk's controls. ← → and PgUp/PgDn (a clicker), Home and End, unless a select has the focus (its
+// arrows change the option). A step past either end does nothing; the button says so with aria-disabled.
+$('#walk-prev').addEventListener('click', () => goStep(walkStep() - 1));
+$('#walk-next').addEventListener('click', () => goStep(walkStep() + 1));
+$('#walk-feed').addEventListener('change', (e) => { feedDrawn = e.target.checked; render(); });
+document.addEventListener('keydown', (e) => {
+  if (!walk || e.altKey || e.ctrlKey || e.metaKey || e.target.closest?.('select, textarea, input[type="text"]')) return;
+  const to = {
+    ArrowRight: walkStep() + 1, PageDown: walkStep() + 1,
+    ArrowLeft: walkStep() - 1, PageUp: walkStep() - 1,
+    Home: 0, End: walk.steps.length - 1,
+  }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  goStep(to);
+});
 
 $('#event-list').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-ev]');
@@ -1482,11 +1652,11 @@ $('#cutset-panel').addEventListener('mouseover', (e) => {
   const byId = new Map(current.universe.map((x) => [x.id, x]));
   litComponents = new Set();
   for (const ev of cut.events) for (const h of byId.get(ev.id)?.hits || []) litComponents.add(h);
-  paint(current.doc, { down: failedComponents(), lit: litComponents });
+  paint(current.doc, paintOpts(failedComponents()));
 });
 $('#cutset-panel').addEventListener('mouseleave', () => {
   litComponents = new Set();
-  paint(current.doc, { down: failedComponents(), lit: litComponents });
+  paint(current.doc, paintOpts(failedComponents()));
 });
 
 // Clicking a cut breaks it, so you can walk from "here is a single point of
@@ -1499,9 +1669,10 @@ $('#cutset-panel').addEventListener('click', (e) => {
   render();
 });
 
-load(SAMPLES[params.get('sample')] ? params.get('sample') : Object.keys(SAMPLES)[0]);
+// simdeck: ?step=1..n opens a walk at that step (onePdu); out-of-range values are clamped, others ignored.
+load(SAMPLES[params.get('sample')] ? params.get('sample') : Object.keys(SAMPLES)[0], Number(params.get('step') || 1) - 1);
 
-window.FL = { get doc() { return doc; }, get current() { return current; }, load, render };
+window.FL = { get doc() { return doc; }, get current() { return current; }, load, render, get step() { return walkStep(); } };
 
 return {  };
 })();

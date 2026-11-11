@@ -135,7 +135,9 @@ test('every literal t() key and data-t* key in the page and js/ is in the table,
   assert.ok(keys.size > 50, `found ${keys.size} keys`);
   for (const k of keys) for (const l of ['hr', 'en']) assert.ok(k in strings[l], `${l}: ${k}`);
   // Built keys: role.<role>, kind.<kind>, scope1|scopeN.<scope>, auth|authq.<kind>, the two-word picks in main.js.
-  const built = (k) => /^(role|kind|scope1|scopeN|auth|authq)\./.test(k) || /^(cut\.reveal(More|Zero)|st\.(up|down))$/.test(k);
+  // walk.onePdu.cap<i> and .feed are looked up through the walk's `strings` prefix (main.js renderWalk, paintOpts).
+  const built = (k) => /^(role|kind|scope1|scopeN|auth|authq)\./.test(k) || /^(cut\.reveal(More|Zero)|st\.(up|down))$/.test(k)
+    || /^walk\.onePdu\.(cap\d|feed)$/.test(k);
   const unused = Object.keys(strings.en).filter((k) => !keys.has(k) && !built(k));
   assert.deepEqual(unused, []);
 });
@@ -211,6 +213,185 @@ test('in English the samples read as the original: the names the app\'s checks l
   assert.ok(names('onePdu').includes('Server room'));
   M.i18n.useLang('hr');
   assert.ok(!names('onePdu').includes('Server room'));
+});
+
+// ── the one-pdu walk (preset correlated-failure: SPEC.md, docs/tasks/w3/correlated-failure.md) ──
+// Tie-breaks first: the k-of-n boundary (exactly k up is up), the order of the two size-1 cuts (radius), and which step
+// a state shows when the feed is hidden but its trip is still in the broken set. Then one test per rule, the preset's
+// numbers per step, the walk's state helpers, the outline, and the page.
+
+/** A value from the vm, as plain JSON in this realm (deepStrictEqual compares prototypes). */
+const plain = (x) => JSON.parse(JSON.stringify(x));
+
+/** onePdu at a walk step, analysed: { a, s (the service's result), cuts (by event id), down, walk, M }. */
+function atStep(i, env = {}) {
+  const { M, errors } = loadApp(env);
+  const walk = M.walk.walkFor('onePdu');
+  const st = M.walk.stepState(walk, i);
+  M.compile.invalidate();
+  const a = M.compile.analyse(M.walk.withFeed(M.samples.makeSample('onePdu'), walk, st.feed));
+  const down = new Set();
+  for (const e of a.universe) if (st.failed.has(e.id)) for (const h of e.hits) down.add(h);
+  const s = a.services[0];
+  const cuts = plain(s.cuts.map((c) => [c.size, c.events.map((e) => e.id).join('+'), c.blastRadius, c.drawn]));
+  return { M, a, s, cuts, down, walk, st, errors };
+}
+const CUTS_DRAWING = [
+  [1, 'ev:dom:dc', 4, true],
+  [2, 'ev:comp:osd1+ev:comp:osd2', 2, true],
+  [2, 'ev:comp:osd1+ev:comp:osd3', 2, true],
+  [2, 'ev:comp:osd2+ev:comp:osd3', 2, true],
+];
+
+test('tie-break: k of n is up at exactly k (2 of 3 up serves), down at k - 1 (graph.js GATES.kofn, need = k)', () => {
+  const { M, a } = atStep(0);
+  const { evaluator } = M['engine/graph'];
+  const up = (ids) => evaluator(a.graph, new Set(ids)).isUp('svc');
+  assert.equal(up(['osd1']), true);
+  assert.equal(up(['osd3']), true);
+  assert.equal(up(['osd1', 'osd2']), false);
+  assert.equal(up(['osd2', 'osd3']), false);
+  assert.deepEqual({ ...M.walk.voteCount(a.graph, new Set(['osd2']), 'svc') }, { live: 2, of: 3, need: 2 });
+  assert.deepEqual({ ...M.walk.voteCount(a.graph, new Set(['osd1', 'osd2']), 'svc') }, { live: 1, of: 3, need: 2 });
+});
+
+test('tie-break: of the two size-1 cuts, PDU A (radius 2) lists before the server room (radius 4)', () => {
+  const { s } = atStep(1);
+  const ones = s.cuts.filter((c) => c.size === 1);
+  assert.deepEqual(plain(ones.map((c) => [c.events[0].id, c.blastRadius])), [['ev:evt:pdu-a', 2], ['ev:dom:dc', 4]]);
+  assert.equal(s.smallestDrawn.blastRadius, 2);
+  assert.equal(s.smallestDrawn.scope, 'correlated');
+});
+
+test('tie-break: a trip without the feed drawn is no trip; stepOf ignores what else the user broke', () => {
+  const { M, walk } = atStep(0);
+  const { stepOf, tripId } = M.walk;
+  assert.equal(stepOf(walk, { feed: false, failed: new Set([tripId(walk)]) }), 0);
+  assert.equal(stepOf(walk, { feed: true, failed: new Set() }), 1);
+  assert.equal(stepOf(walk, { feed: true, failed: new Set([tripId(walk)]) }), 2);
+  assert.equal(stepOf(walk, { feed: true, failed: new Set(['ev:comp:osd3']) }), 1);
+  assert.equal(stepOf(walk, { feed: false, failed: new Set(['ev:comp:osd1', 'ev:comp:osd2']) }), 0);
+});
+
+test('rule 2: PDU A takes down every component in the domains it hits (Rack 1, Rack 2: osd-1, osd-2), not Rack 3', () => {
+  const { a } = atStep(1);
+  const pdu = a.universe.find((e) => e.id === 'ev:evt:pdu-a');
+  assert.deepEqual([...pdu.hits].sort(), ['osd1', 'osd2']);
+  assert.deepEqual(plain(a.doc.events.find((e) => e.id === 'pdu-a').hits), ['r1', 'r2']);
+});
+
+test('rule 3: every cut is minimal: it takes the service down, and without any one of its events the service serves', () => {
+  for (const i of [0, 1]) {
+    const { M, a, s } = atStep(i);
+    const { evaluator } = M['engine/graph'];
+    const byId = new Map(a.universe.map((e) => [e.id, e]));
+    const downBy = (ids) => { const d = new Set(); for (const id of ids) for (const h of byId.get(id).hits) d.add(h); return d; };
+    for (const c of s.cuts) {
+      const ids = c.events.map((e) => e.id);
+      assert.equal(evaluator(a.graph, downBy(ids)).isUp('svc'), false, ids.join('+'));
+      for (const drop of ids) assert.equal(evaluator(a.graph, downBy(ids.filter((x) => x !== drop))).isUp('svc'), true, `${ids} - ${drop}`);
+    }
+  }
+});
+
+test('rule 4, step 1 (the drawing): no feed event; the room is the only size-1 cut, then the three replica pairs', () => {
+  const { a, cuts, s, down } = atStep(0);
+  assert.ok(!a.universe.some((e) => e.kind === 'correlated'));
+  assert.deepEqual(cuts, CUTS_DRAWING);
+  assert.equal(s.searched, 7);
+  assert.equal(down.size, 0);
+  // A rack holds one replica, so "Rack n lost" and "osd-n fails" are one failure told twice (events.js dedupe): the
+  // pair cuts are named by the replica.
+  assert.ok(!a.universe.some((e) => e.id === 'ev:dom:r1'));
+});
+
+test('rule 4, step 2 (the feed drawn): PDU A joins at size 1, ahead of everything; the rest is unchanged', () => {
+  const { cuts, s, down } = atStep(1);
+  assert.deepEqual(cuts, [[1, 'ev:evt:pdu-a', 2, true], ...CUTS_DRAWING]);
+  assert.equal(s.searched, 8);
+  assert.equal(down.size, 0);
+});
+
+test('step 3 (PDU A trips): racks 1 and 2 down, 1 of 3 replicas up, 2 needed, the service down', () => {
+  const { M, a, down } = atStep(2);
+  assert.deepEqual([...down].sort(), ['osd1', 'osd2']);
+  assert.deepEqual({ ...M.walk.voteCount(a.graph, down, 'svc') }, { live: 1, of: 3, need: 2 });
+  assert.equal(M['engine/graph'].evaluator(a.graph, down).isUp('svc'), false);
+});
+
+test('the preset runs with the authorities off; with them on, six more size-1 cuts, none drawn, and the drawn ones stay', () => {
+  const { M } = loadApp();
+  const walk = M.walk.walkFor('onePdu');
+  const doc = M.samples.makeSample('onePdu');
+  assert.equal(doc.settings.authorities, false);
+  M.compile.invalidate();
+  const on = M.compile.analyse({ ...doc, settings: { ...doc.settings, authorities: true } }).services[0];
+  assert.equal(on.implicitCuts.length, 6);
+  assert.ok(on.implicitCuts.every((c) => c.size === 1 && !c.drawn));
+  assert.deepEqual(plain(on.drawnCuts.map((c) => c.events.map((e) => e.id).join('+'))),
+    plain(atStep(1).s.cuts.map((c) => c.events.map((e) => e.id).join('+'))));
+  assert.ok(walk);
+});
+
+test('the walk: three steps, each a state the next one builds on; stepState and stepOf agree; steps clamp', () => {
+  const { M, walk } = atStep(0);
+  const { stepState, stepOf, clampStep, walkFor } = M.walk;
+  assert.equal(walk.steps.length, 3);
+  for (let i = 0; i < 3; i++) assert.equal(stepOf(walk, stepState(walk, i)), i);
+  assert.deepEqual([-1, 0, 2, 3, 99, NaN, 1.7].map((i) => clampStep(walk, i)), [0, 0, 2, 2, 2, 0, 1]);
+  assert.equal(walkFor('threeZone'), null);
+  assert.equal(walkFor('nope'), null);
+  // Every walk is on a sample, its feed is one of the sample's events, and its captions exist in both tables.
+  for (const [key, w] of Object.entries(M.walk.WALKS)) {
+    const doc = M.samples.makeSample(key);
+    assert.ok(doc, key);
+    assert.ok(doc.events.some((e) => e.id === w.feed), `${key}: ${w.feed}`);
+    assert.ok(doc.components.some((c) => c.id === w.service && c.role === 'service'), key);
+    for (const l of ['hr', 'en']) {
+      for (let i = 1; i <= w.steps.length; i++) assert.ok(`${w.strings}.cap${i}` in strings[l], `${l} cap${i}`);
+      for (const k of ['feed', 'toggle']) assert.ok(`${w.strings}.${k}` in strings[l], `${l} ${k}`);
+    }
+  }
+});
+
+test('withFeed leaves the sample alone: hidden means a copy without the event; feedHits only while drawn', () => {
+  const { M, walk } = atStep(0);
+  const doc = M.samples.makeSample('onePdu');
+  const before = JSON.stringify(doc);
+  const hidden = M.walk.withFeed(doc, walk, false);
+  assert.equal(hidden.events.length, 0);
+  assert.equal(M.walk.withFeed(doc, walk, true), doc);
+  assert.equal(JSON.stringify(doc), before);
+  assert.deepEqual(plain(M.walk.feedHits(doc, walk, true)), ['r1', 'r2']);
+  assert.equal(M.walk.feedHits(doc, walk, false), null);
+});
+
+test('the same walk gives the same answer in both languages, step by step', () => {
+  for (let i = 0; i < 3; i++) {
+    const hr = atStep(i, { search: '?lang=hr' });
+    const en = atStep(i, { search: '?lang=en' });
+    assert.deepEqual(hr.cuts.map((c) => c.slice().sort()), en.cuts.map((c) => c.slice().sort()), `step ${i + 1}`);
+    assert.deepEqual([...hr.down].sort(), [...en.down].sort());
+    assert.deepEqual(plain(hr.errors), []);
+  }
+});
+
+test('the feed outline: one dotted frame around Rack 1 and Rack 2 (not Rack 3), labelled; nothing without a feed', () => {
+  const { M, a } = atStep(1, { search: '?lang=en' });
+  const { paintAll, paintFeed, layoutDoc } = M.render;
+  const { boxes } = layoutDoc(a.doc);
+  const plain = paintAll(a.doc).markup;
+  assert.doesNotMatch(plain, /class="feed/);
+  const svg = paintAll(a.doc, { feeds: [{ hits: ['r1', 'r2'], label: 'PDU A · not drawn' }] }).markup;
+  assert.equal((svg.match(/<rect class="feed"/g) || []).length, 1);
+  assert.match(svg, />PDU A · not drawn<\/text>/);
+  const [x, y, w, h] = ['x', 'y', 'width', 'height'].map((k) => Number(new RegExp(`<rect class="feed" [^>]*\\b${k}="([\\d.]+)"`).exec(svg)[1]));
+  const inside = (b) => b.x >= x && b.y >= y && b.x + b.w <= x + w && b.y + b.h <= y + h;
+  assert.ok(inside(boxes.get('r1')) && inside(boxes.get('r2')));
+  assert.ok(!inside(boxes.get('r3')) && boxes.get('r3').x > x + w, 'Rack 3 is outside the frame');
+  assert.equal(paintFeed({ hits: ['nope'], label: 'x' }, boxes), '');
+  assert.match(M.render.CANVAS_CSS, /\.feed \{[^}]*stroke-dasharray/);
+  for (const th of Object.values(M.render.THEMES)) assert.ok(th['--feed'], 'every theme defines --feed');
 });
 
 // ── import markers ──
@@ -301,6 +482,135 @@ test('every sample opens in Chromium from file:// in hr and en; events and cuts 
     await page.emulateMedia({ colorScheme: 'light' });
     await page.goto(`${url}?lang=en&theme=dark`);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('the one-pdu walk in Chromium, hr and en: keys and buttons, the feed toggle, ?step=, fit, phone, the language switch', async () => {
+  const { chromium } = require('playwright');
+  const browser = await chromium.launch();
+  const url = pathToFileURL(path.join(DIR, 'index.html')).href;
+  const state = (page) => page.evaluate(() => ({
+    step: window.FL.step,
+    label: document.querySelector('#walk-step').textContent,
+    caption: document.querySelector('#walk-caption').textContent,
+    verdict: document.querySelector('#verdict').className,
+    count: document.querySelector('#walk-count').textContent,
+    countClass: document.querySelector('#walk-count').className,
+    feed: document.querySelector('#walk-feed').checked,
+    auth: document.querySelector('#toggle-auth').checked,
+    firstCut: document.querySelector('#cutset-panel [data-cut] .cut-names')?.textContent,
+    firstSize: document.querySelector('#cutset-panel [data-cut] .cut-size')?.textContent,
+    rail: document.querySelector('#event-list').textContent,
+    outline: document.querySelectorAll('#canvas rect.feed').length,
+    canvas: document.querySelector('#canvas').textContent,
+    prevOff: document.querySelector('#walk-prev').getAttribute('aria-disabled'),
+    nextOff: document.querySelector('#walk-next').getAttribute('aria-disabled'),
+    fits: document.scrollingElement.scrollHeight <= innerHeight && document.scrollingElement.scrollWidth <= innerWidth,
+  }));
+  try {
+    for (const lang of ['hr', 'en']) {
+      const T = strings[lang];
+      const fill = (k, v) => T[k].replace(/\{(\w+)\}/g, (_, x) => v[x]);
+      const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(String(e)));
+      page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()); });
+      await page.goto(`${url}?lang=${lang}&sample=onePdu`);
+      await page.waitForFunction(() => document.querySelector('#verdict')?.className === 'up');
+      // Step 1: the drawing. No feed on the rail or the canvas; the room is the one size-1 cut; authorities off.
+      let s = await state(page);
+      assert.equal(await page.isVisible('#walk'), true);
+      assert.equal(s.step, 0);
+      assert.equal(s.label, fill('walk.step', { i: 1, n: 3 }));
+      assert.equal(s.caption, T['walk.onePdu.cap1']);
+      assert.equal(s.feed, false);
+      assert.equal(s.auth, false, 'the preset runs with the authorities off');
+      assert.equal(s.outline, 0);
+      assert.ok(!s.rail.includes(T['s.onePdu.event']));
+      assert.equal(s.firstCut, fill('ev.domainLost', { name: T['s.serverRoom'] }));
+      assert.equal(s.count, fill('walk.count', { live: 3, of: 3, need: 2 }));
+      assert.equal(s.prevOff, 'true');
+      assert.equal(s.fits, true, `${lang} step 1: page scrolls at 1920x1080`);
+      // ← at step 1 does nothing (aria-disabled); → draws the feed.
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await state(page)).step, 0);
+      await page.keyboard.press('ArrowRight');
+      s = await state(page);
+      assert.equal(s.step, 1);
+      assert.equal(s.caption, T['walk.onePdu.cap2']);
+      assert.equal(s.feed, true);
+      assert.equal(s.outline, 1);
+      assert.ok(s.canvas.includes(T['walk.onePdu.feed']));
+      assert.equal(s.firstCut, T['s.onePdu.event']);
+      assert.equal(s.firstSize, '1');
+      assert.ok(s.rail.includes(T['s.onePdu.event']));
+      assert.equal(s.verdict, 'up');
+      // PgDn: PDU A trips.
+      await page.keyboard.press('PageDown');
+      s = await state(page);
+      assert.equal(s.step, 2);
+      assert.equal(s.caption, T['walk.onePdu.cap3']);
+      assert.equal(s.verdict, 'down');
+      assert.equal(s.count, fill('walk.count', { live: 1, of: 3, need: 2 }));
+      assert.equal(s.countClass, 'down');
+      assert.equal(s.nextOff, 'true');
+      assert.equal((s.canvas.match(/✕ /g) || []).length, 2, 'two replicas marked down');
+      assert.equal(s.fits, true, `${lang} step 3: page scrolls at 1920x1080`);
+      await page.click('#walk-next', { force: true }); // aria-disabled: it keeps the focus and does nothing
+      assert.equal((await state(page)).step, 2);
+      // Home, End, the buttons.
+      await page.keyboard.press('Home');
+      assert.equal((await state(page)).step, 0);
+      await page.keyboard.press('End');
+      assert.equal((await state(page)).step, 2);
+      await page.click('#walk-prev');
+      s = await state(page);
+      assert.equal(s.step, 1);
+      assert.equal(s.verdict, 'up');
+      // The step follows the state: break PDU A from the cut list (step 3); hide the feed by hand (step 1, repaired);
+      // draw it again (step 2, still whole).
+      await page.click('#cutset-panel [data-cut]');
+      assert.equal((await state(page)).step, 2);
+      await page.uncheck('#walk-feed');
+      s = await state(page);
+      assert.deepEqual([s.step, s.verdict, s.outline], [0, 'up', 0]);
+      await page.check('#walk-feed');
+      s = await state(page);
+      assert.deepEqual([s.step, s.verdict, s.outline], [1, 'up', 1]);
+      // A select keeps its arrows.
+      await page.focus('#max-size');
+      await page.keyboard.press('ArrowRight');
+      assert.equal((await state(page)).step, 1);
+      // ?step= opens at a step; nonsense opens at 1.
+      await page.goto(`${url}?lang=${lang}&sample=onePdu&step=3`);
+      s = await state(page);
+      assert.deepEqual([s.step, s.verdict], [2, 'down']);
+      await page.goto(`${url}?lang=${lang}&sample=onePdu&step=x`);
+      assert.equal((await state(page)).step, 0);
+      // Another sample: no walk, the authorities box back on, the keys leave the page alone.
+      await page.selectOption('#sample-picker', 'threeZone');
+      assert.equal(await page.isVisible('#walk'), false);
+      assert.equal((await state(page)).auth, true);
+      await page.locator('#event-list [data-ev]').first().focus();
+      await page.keyboard.press('End');
+      assert.equal(await page.locator('#event-list .ev.on').count(), 0);
+      // Phone: no sideways scroll with the walk bar.
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${url}?lang=${lang}&sample=onePdu&step=2`);
+      assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), `${lang}: phone scrolls sideways`);
+      assert.deepEqual(errors, [], lang);
+      await ctx.close();
+    }
+    // The language button keeps the sample and the step.
+    const page = await browser.newPage();
+    await page.goto(`${url}?lang=hr&sample=onePdu&step=2`);
+    await page.click('#btn-lang');
+    await page.waitForFunction(() => document.documentElement.lang === 'en');
+    assert.match(page.url(), /step=2/);
+    assert.equal(await page.evaluate(() => window.FL.step), 1);
   } finally {
     await browser.close();
   }
