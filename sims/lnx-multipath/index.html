@@ -1,0 +1,683 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-multipath: path failover for iSCSI/FC. One LUN reached over four paths while I/O runs.
+     Scene: the host with ports h0 and h1 (and above it the filesystem on its device), two switches, the array with
+     controllers A (owner of the LUN) and B; four path lines with their disk names, this interval's I/O as dots.
+     Side: a multipath -ll style listing and the counters. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-multipath">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multipath: preuzimanje kad put padne · simdeck</title>
+<meta name="description" content="Jedan LUN preko četiri puta: obori put, port, kontroler ili sve putove dok U/I teče i prati grupe putova, failback i no_path_retry.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-multipath",
+  "title": {
+    "hr": "Multipath: preuzimanje kad put padne",
+    "en": "Multipath I/O: path failover"
+  },
+  "concept": {
+    "hr": "Kad put do LUN-a padne, U/I se ponavlja na drugom putu ili čeka",
+    "en": "When a path to the LUN fails, I/O is resent on another path or waits"
+  },
+  "summary": {
+    "hr": "Jedan LUN preko četiri puta (iSCSI/FC): obori put, port, kontroler ili sve putove dok U/I teče i prati grupe putova, failback i no_path_retry.",
+    "en": "One LUN over four paths (iSCSI/FC): fail a path, a port, a controller or all of them while I/O runs; follow path groups, failback and no_path_retry."
+  },
+  "tags": [
+    "storage-basics"
+  ],
+  "class": "stepper",
+  "steps": 7
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-multipath"]; colours only from kit tokens. */
+[data-sim="lnx-multipath"] .mp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 27rem);
+  gap: 0.6rem 0.8rem;
+  height: 100%;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-multipath"] .mp-mono { font-family: var(--mono); }
+[data-sim="lnx-multipath"] .mp-muted { color: var(--muted); }
+[data-sim="lnx-multipath"] h3 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+
+/* the scene: boxes placed in percent of the scene, lines in an SVG stretched over it */
+[data-sim="lnx-multipath"] .mp-scene { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; min-height: 0; overflow: hidden; }
+[data-sim="lnx-multipath"] .mp-top { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem 1.2rem; }
+[data-sim="lnx-multipath"] .mp-diagram { position: relative; flex: 1 1 auto; min-height: 0; }
+[data-sim="lnx-multipath"] .mp-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; }
+[data-sim="lnx-multipath"] .mp-svg polyline { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+[data-sim="lnx-multipath"] .mp-ln-act { stroke: var(--c1); stroke-width: 6; }
+[data-sim="lnx-multipath"] .mp-ln-stby { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 10 7; }
+[data-sim="lnx-multipath"] .mp-ln-unused { stroke: var(--line); stroke-width: 3; stroke-dasharray: 3 6; }
+[data-sim="lnx-multipath"] .mp-ln-fail { stroke: var(--danger); stroke-width: 3; }
+[data-sim="lnx-multipath"] .mp-ln-changed { stroke: var(--hl); stroke-width: 16; stroke-dasharray: none; opacity: 0.85; }
+[data-sim="lnx-multipath"] .mp-at { position: absolute; transform: translate(-50%, -50%); }
+[data-sim="lnx-multipath"] .mp-box {
+  position: absolute;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="lnx-multipath"] .mp-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-weight: 700;
+  line-height: 1.15;
+  z-index: 2;
+}
+[data-sim="lnx-multipath"] .mp-node small { font-weight: 400; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-multipath"] .mp-node-own { border-width: 0.25rem; }
+[data-sim="lnx-multipath"] .mp-down { border-color: var(--danger); border-style: dashed; color: var(--danger); }
+[data-sim="lnx-multipath"] .mp-down small { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-boxtitle { font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-boxsub { font-size: var(--fs-sm); color: var(--muted); }
+
+/* the stack above the host */
+[data-sim="lnx-multipath"] .mp-stack { position: static; flex: 0 1 24rem; display: flex; flex-direction: column; gap: 0.2rem; border-color: var(--ink); background: var(--bg); }
+[data-sim="lnx-multipath"] .mp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.5rem; }
+[data-sim="lnx-multipath"] .mp-dev { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-badge {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  padding: 0 0.35rem;
+  border: 0.15rem solid var(--ok);
+  border-radius: var(--radius-sm);
+  color: var(--ok);
+}
+[data-sim="lnx-multipath"] .mp-badge-ro { border-color: var(--danger); color: var(--danger); border-style: dashed; }
+[data-sim="lnx-multipath"] .mp-q { display: inline-flex; flex-wrap: wrap; gap: 0.12rem; max-width: 14rem; }
+[data-sim="lnx-multipath"] .mp-q i { width: 0.7rem; height: 0.7rem; border: 0.12rem solid var(--ink); background: var(--c7); }
+[data-sim="lnx-multipath"] .mp-x { color: var(--danger); font-weight: 700; letter-spacing: 0.05em; }
+[data-sim="lnx-multipath"] .mp-small { font-size: var(--fs-sm); }
+
+/* path labels and marks on the lines */
+[data-sim="lnx-multipath"] .mp-plabel {
+  position: absolute;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  line-height: 1.2;
+  white-space: nowrap;
+  z-index: 3;
+}
+[data-sim="lnx-multipath"] .mp-plabel b { font-family: var(--mono); }
+[data-sim="lnx-multipath"] .mp-plabel .mp-st { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="lnx-multipath"] .mp-plabel-grp { border: 0.22rem solid var(--c1); }
+[data-sim="lnx-multipath"] .mp-plabel-fail { border-color: var(--danger); border-style: dashed; }
+[data-sim="lnx-multipath"] .mp-plabel-fail .mp-st { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-dot {
+  position: absolute;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: -0.475rem 0 0 -0.475rem;
+  border-radius: 50%;
+  border: 0.14rem solid var(--bg);
+  background: var(--c1);
+  z-index: 3;
+}
+[data-sim="lnx-multipath"] .mp-dot-q { border-radius: 0.1rem; background: var(--c7); border-color: var(--ink); }
+[data-sim="lnx-multipath"] .mp-dot-move { animation: mp-move 0.6s ease-out backwards; animation-delay: var(--d, 0s); }
+@keyframes mp-move { from { left: var(--x0); top: var(--y0); opacity: 0.2; } }
+[data-sim="lnx-multipath"] .mp-cnt {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: var(--line-w) solid var(--c1);
+  white-space: nowrap;
+  z-index: 4;
+}
+[data-sim="lnx-multipath"] .mp-cross {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 0.15rem solid var(--danger);
+  background: var(--bg);
+  color: var(--danger);
+  font-weight: 700;
+  line-height: 1;
+  z-index: 3;
+}
+[data-sim="lnx-multipath"] .mp-failnote {
+  position: absolute;
+  transform: translate(-50%, -130%);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--danger);
+  background: var(--bg);
+  padding: 0 0.2rem;
+  white-space: nowrap;
+  z-index: 3;
+}
+[data-sim="lnx-multipath"] .mp-event { flex: 1 1 12rem; display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="lnx-multipath"] .mp-tick { font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="lnx-multipath"] .mp-evtext { font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-evtext-fail { color: var(--danger); }
+[data-sim="lnx-multipath"] .mp-evtext-fail::before { content: '✕ '; }
+[data-sim="lnx-multipath"] .mp-evtext-back { color: var(--ok); }
+[data-sim="lnx-multipath"] .mp-evtext-back::before { content: '↺ '; }
+
+/* side: the listing and the counters */
+[data-sim="lnx-multipath"] .mp-side { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; min-height: 0; overflow: hidden; }
+[data-sim="lnx-multipath"] .mp-ll {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.55rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+[data-sim="lnx-multipath"] .mp-ll-cmd { font-weight: 700; margin-bottom: 0.15rem; }
+[data-sim="lnx-multipath"] .mp-ll-cmd::before { content: '# '; color: var(--muted); }
+[data-sim="lnx-multipath"] .mp-ll div { white-space: pre-wrap; }
+[data-sim="lnx-multipath"] .mp-ll .sd-changed, [data-sim="lnx-multipath"] .mp-ll .mp-ll-fail.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--ink); outline-offset: 0; box-shadow: none; }
+[data-sim="lnx-multipath"] .mp-ll .mp-ll-grp { border: 0.15rem solid transparent; border-radius: var(--radius-sm); margin: 0.1rem -0.2rem; padding: 0 0.15rem; }
+[data-sim="lnx-multipath"] .mp-ll .mp-ll-grp-act { border-color: var(--c1); border-width: 0.22rem; }
+[data-sim="lnx-multipath"] .mp-ll .mp-ll-fail { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-ll .mp-ll-note { font-family: var(--sans); color: var(--muted); white-space: normal; }
+[data-sim="lnx-multipath"] .mp-ll .mp-ll-mnt { font-family: var(--sans); font-weight: 700; }
+[data-sim="lnx-multipath"] .mp-ctr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 0.15rem 0.6rem;
+  align-items: baseline;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem;
+}
+[data-sim="lnx-multipath"] .mp-ctr b { font-size: var(--fs-lg); text-align: right; }
+[data-sim="lnx-multipath"] .mp-ctr .mp-plus { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); margin-left: 0.3rem; }
+[data-sim="lnx-multipath"] .mp-ctr .mp-bad { color: var(--danger); }
+
+/* legend swatches */
+[data-sim="lnx-multipath"] .sd-swatch[data-shape^='mp-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-act'] { border: 0; height: 0.4rem; border-radius: 0; background: var(--c1); }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-stby'] { border: 0; height: 0.25rem; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.35em, transparent 0.35em 0.6em); }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-fail'] { border: 0; height: 0.2rem; border-radius: 0; background: var(--danger); overflow: visible; }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-fail']::after { content: '✕'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 0.8em; font-weight: 700; color: var(--danger); background: var(--bg); line-height: 1; }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-group'] { border: 0.22rem solid var(--c1); }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-io'] { border-radius: 50%; border: 0; background: var(--c1); width: 0.9em; height: 0.9em; }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-q'] { border: 0.12rem solid var(--ink); border-radius: 0.1rem; background: var(--c7); width: 0.8em; height: 0.8em; }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-err'] { border: 0; background: transparent; }
+[data-sim="lnx-multipath"] .sd-swatch[data-shape='mp-err']::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; color: var(--danger); line-height: 1; }
+
+[data-sim="lnx-multipath"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-multipath"] .sd-titles { flex: 1 1 60rem; }
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-multipath"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-multipath"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-multipath"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-multipath"] .mp { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.4rem; }
+  [data-sim="lnx-multipath"] .mp-diagram { flex: 0 0 24rem; font-size: var(--fs-sm); }
+  [data-sim="lnx-multipath"] .mp-node small, [data-sim="lnx-multipath"] .mp-boxsub { display: none; }
+  [data-sim="lnx-multipath"] .mp-plabel .mp-grp { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Multipath: preuzimanje kad put padne</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var HOST = 'demosrv1';
+  var MAP = '/dev/mapper/mpatha';
+  var MNT = '/data';
+  var WWID = '36001405a1b2c3d4e';
+  var FAULT_LABEL = { sdb: 'faultSdb', h0: 'faultH0', 'ctrl-A': 'faultCtrlA', all: 'faultAll' };
+
+  /** Data (disk names, ports, policies, multipath output) never gets translated. */
+  function data(text, cls) { return h('span', { class: 'mp-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** t.parts with every placeholder value wrapped as data; a placeholder used twice gets its own copy of the node. */
+  function parts(key, vars, n) {
+    var out = {};
+    Object.keys(vars).forEach(function (k) {
+      var v = vars[k];
+      out[k] = Array.isArray(v) ? h('span', null, v) : typeof v === 'object' ? v : data(v);
+    });
+    if (n !== undefined) out.n = n;
+    var seen = [];
+    return [].concat(t.parts(key, out)).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function list(devs) { return devs.join(', '); }
+
+  // ── geometry, in percent of the scene ──
+
+  var PORT = { h0: { x: 18, y: 50 }, h1: { x: 18, y: 82 } };
+  var SW = { A: { x: 46, y: 50 }, B: { x: 46, y: 82 } };
+  var CTRL = { A: { y: 50 }, B: { y: 82 } };
+  /** Per path: its offset beside the other path through the same port, and where it enters its controller. */
+  var LANE = { sda: { off: -5, ctrlY: 46 }, sdb: { off: -5, ctrlY: 54 }, sdc: { off: 5, ctrlY: 78 }, sdd: { off: 5, ctrlY: 86 } };
+  var SWITCH_OF = { h0: 'A', h1: 'B' };
+
+  function geom(path) {
+    var port = PORT[path.port], y = port.y + LANE[path.dev].off, cy = LANE[path.dev].ctrlY;
+    return {
+      pts: [[port.x, Y(port.y)], [21, Y(y)], [40, Y(y)], [52, Y(y)], [77, Y(cy)], [81, Y(cy)]],
+      labelY: Y(y),
+      // the long segment from the switch to the controller carries the I/O dots
+      from: [53, Y(y)], to: [75, Y(cy)]
+    };
+  }
+  function lerp(a, b, f) { return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
+  function pct(v) { return v.toFixed(2) + '%'; }
+  /** The layout was drawn for y 28…100; the diagram area is 0…100. */
+  function Y(y) { return (y - 28) * 100 / 72; }
+  function H(v) { return v * 100 / 72; }
+
+  function faultActive(p, n) { return n >= p.failAt && n < p.failAt + p.downFor; }
+
+  /** How a path is drawn: active (carries I/O), standby (usable, not in the active group), unused (no multipath), failed. */
+  function lineKind(s, path) {
+    if (path.state === 'failed') return 'fail';
+    if (!s.multipath) return path.dev === L.PLAIN_DEV ? 'act' : 'unused';
+    return path.group === s.activeGroup ? 'act' : 'stby';
+  }
+
+  // ── the scene ──
+
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  function lines(s) {
+    var svg = svgEl('svg', { class: 'mp-svg', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    s.paths.forEach(function (path) {
+      var pts = geom(path).pts.map(function (q) { return q.join(','); }).join(' ');
+      if (s.changed.indexOf(path.dev) >= 0) svg.appendChild(svgEl('polyline', { points: pts, class: 'mp-ln-changed' }));
+    });
+    // failed lines first, active ones on top
+    var order = { fail: 0, unused: 1, stby: 2, act: 3 };
+    s.paths.slice().sort(function (a, b) { return order[lineKind(s, a)] - order[lineKind(s, b)]; }).forEach(function (path) {
+      var pts = geom(path).pts.map(function (q) { return q.join(','); }).join(' ');
+      svg.appendChild(svgEl('polyline', { points: pts, class: 'mp-ln-' + lineKind(s, path) }));
+    });
+    return svg;
+  }
+
+  function failedHere(s, dev) {
+    return s.io.some(function (io) { return io.tries.indexOf(dev) >= 0 && io.on !== dev; });
+  }
+
+  function marks(c) {
+    var s = c.state, out = [];
+    var animate = c.dir === 'forward' && !Simdeck.reducedMotion();
+    s.paths.forEach(function (path) {
+      var g = geom(path), kind = lineKind(s, path);
+      var group = s.multipath ? path.group : null;
+      var cls = 'mp-plabel' + (kind === 'fail' ? ' mp-plabel-fail' : '') + (s.multipath && path.group === s.activeGroup ? ' mp-plabel-grp' : '') +
+        (s.changed.indexOf(path.dev) >= 0 ? ' sd-changed' : '');
+      out.push(h('div', { class: cls, style: { left: '22.5%', top: pct(g.labelY) } },
+        h('span', null, h('b', { translate: 'no' }, path.dev), ' ', h('span', { class: 'mp-st', translate: 'no' }, path.state)),
+        h('span', { class: 'mp-small mp-grp' }, group !== null ? t('groupTag', { g: group }) : (path.dev === L.PLAIN_DEV ? t('fsHere') : t('unusedTag')))));
+      // this interval's I/O as dots on the long segment, the count beside them
+      var k = s.tickDone[path.dev] || 0;
+      var drained = s.drainedOn[path.dev] || 0;
+      var shown = Math.min(k, 4);
+      for (var i = 0; i < shown; i++) {
+        var q = lerp(g.from, g.to, (i + 1) / (shown + 1));
+        var cls2 = 'mp-dot' + (i >= shown - Math.min(drained, shown) && drained ? ' mp-dot-q' : '') + (animate ? ' mp-dot-move' : '');
+        out.push(h('i', { class: cls2, 'aria-hidden': 'true', style: { left: pct(q[0]), top: pct(q[1]), '--x0': pct(g.from[0]), '--y0': pct(g.from[1]), '--d': (i * 0.08) + 's' } }));
+      }
+      if (k) {
+        var cq = lerp(g.from, g.to, 0.12);
+        out.push(h('span', { class: 'mp-cnt', style: { left: pct(cq[0]), top: pct(cq[1] + H(LANE[path.dev].off < 0 ? -3.6 : 3.6)) } },
+          k > drained ? t.n('ioN', k - drained) : null, k > drained && drained ? ' · ' : null, drained ? t.n('drainedHere', drained) : null));
+      }
+      if (kind === 'fail') {
+        var mid = lerp(g.from, g.to, 0.3);
+        out.push(h('span', { class: 'mp-cross', 'aria-hidden': 'true', style: { left: pct(mid[0]), top: pct(mid[1]) } }, '✕'));
+      }
+      if (failedHere(s, path.dev)) {
+        out.push(h('span', { class: 'mp-failnote', style: { left: pct(31), top: pct(g.labelY - H(3)) } }, t('failedHere')));
+      }
+    });
+    return out;
+  }
+
+  function nodes(c) {
+    var s = c.state, p = L.norm(c.params);
+    var down = s.n > 0 && faultActive(p, s.n) ? p.fault : null;
+    function node(x, y, w, hgt, label, sub, extra, after) {
+      return h('div', { class: 'mp-node' + (extra || ''), style: { left: pct(x), top: pct(Y(y)), width: pct(w), height: pct(H(hgt)) } }, label, sub ? h('small', null, sub) : null, after || null);
+    }
+    var out = [];
+    // host and its ports
+    out.push(h('div', { class: 'mp-box', style: { left: '0%', top: pct(Y(38)), width: '17%', height: pct(H(58)) } },
+      h('div', { class: 'mp-boxtitle' }, t('hostTitle')), data(HOST, 'mp-boxsub')));
+    ['h0', 'h1'].forEach(function (port) {
+      var isDown = down === port;
+      out.push(node(PORT[port].x - 5, PORT[port].y - 5, 7, 10, data(port), isDown ? t('portDown') : null, isDown ? ' mp-down' : ''));
+    });
+    // switches
+    ['A', 'B'].forEach(function (sw) {
+      out.push(node(SW[sw].x - 6, SW[sw].y - 7, 12, 14, h('small', null, t('switchTitle')), null, '', data(sw)));
+    });
+    // array and controllers
+    out.push(h('div', { class: 'mp-box', style: { left: '76%', top: '0%', width: '24%', height: pct(H(68)) } },
+      h('div', { class: 'mp-boxtitle' }, t('arrayTitle')),
+      h('div', { class: 'mp-boxsub' }, data('LUN 1 · 100 GiB'))));
+    ['A', 'B'].forEach(function (ctl) {
+      var isDown = down === 'ctrl-' + ctl;
+      out.push(node(79, CTRL[ctl].y - 8, 19, 16, data('ctrl-' + ctl), isDown ? t('portDown') : (ctl === 'A' ? t('ownsLun') : null),
+        (ctl === 'A' ? ' mp-node-own' : '') + (isDown ? ' mp-down' : '')));
+    });
+    return out;
+  }
+
+  function stack(c) {
+    var s = c.state;
+    var dev = s.multipath ? MAP : '/dev/' + L.PLAIN_DEV;
+    var ro = s.fsState === 'ro';
+    var q = [];
+    for (var i = 0; i < Math.min(s.queued, 24); i++) q.push(h('i', { 'aria-hidden': 'true' }));
+    var x = [];
+    for (var j = 0; j < s.tickErrors; j++) x.push('✕');
+    return h('div', { class: 'mp-box mp-stack' },
+      h('div', { class: 'mp-row' }, h('b', null, t('appLabel')), h('span', { class: 'mp-small mp-muted' }, t('appIo'))),
+      h('div', { class: 'mp-row' + (s.fsWentRo ? ' sd-changed' : '') },
+        h('b', null, parts('fsLabel', { mnt: MNT })),
+        h('span', { class: 'mp-badge' + (ro ? ' mp-badge-ro' : '') }, ro ? t('fsRo') : t('fsRw'))),
+      h('div', { class: 'mp-row' }, h('span', { class: 'mp-muted' }, t('fsOn')), h('span', { class: 'mp-dev', translate: 'no' }, dev)),
+      s.queued ? h('div', { class: 'mp-row' }, h('span', { class: 'mp-q' }, q), h('span', { class: 'mp-small' }, t('queuedHere', { n: s.queued }))) : null,
+      s.tickErrors ? h('div', { class: 'mp-row' }, h('span', { class: 'mp-x', 'aria-hidden': 'true' }, x.join('')), h('span', { class: 'mp-small mp-bad' }, t('errorsHere', { n: s.tickErrors }))) : null);
+  }
+
+  function eventBox(c) {
+    var s = c.state;
+    var ev = s.event;
+    return h('div', { class: 'mp-event' },
+      h('span', { class: 'mp-tick' }, t('intervalLabel', { n: s.n, t: s.t })),
+      ev ? h('span', { class: 'mp-evtext mp-evtext-' + ev.kind }, eventText(ev)) : null);
+  }
+
+  function eventText(ev) {
+    return parts((ev.kind === 'fail' ? 'evFail_' : 'evBack_') + ev.what, { dev: L.PLAIN_DEV, port: 'h0', devs: list(ev.devs) });
+  }
+
+  // ── the side: listing and counters ──
+
+  function listing(c) {
+    var s = c.state, p = L.norm(c.params);
+    var lines = [h('div', { class: 'mp-ll-cmd', translate: 'no' }, 'multipath -ll')];
+    if (!s.multipath) {
+      lines.push(h('div', { class: 'mp-ll-note' }, t('noMap')));
+      lines.push(h('div', { class: 'mp-ll-cmd', translate: 'no' }, 'lsblk -o NAME,SIZE,WWN,MOUNTPOINT'));
+      s.paths.forEach(function (path) {
+        var row = path.dev + ' 100G ' + WWID + (path.dev === L.PLAIN_DEV ? ' ' + MNT : '');
+        lines.push(h('div', { class: (path.state === 'failed' ? 'mp-ll-fail' : '') + (s.changed.indexOf(path.dev) >= 0 ? ' sd-changed' : ''), translate: 'no' },
+          (path.state === 'failed' ? '✕ ' : '  ') + row));
+      });
+      lines.push(h('div', { class: 'mp-ll-note' }, t('sameWwid')));
+      return h('div', { class: 'mp-ll' }, lines);
+    }
+    var queueing = L.queueing(s, p);
+    lines.push(h('div', { translate: 'no' }, 'mpatha (' + WWID + ') dm-0'));
+    lines.push(h('div', { translate: 'no' }, "size=100G features='" + (queueing ? '1\u00a0queue_if_no_path' : '0') + "' hwhandler='1\u00a0alua'"));
+    var switched = s.switches.length ? s.switches[s.switches.length - 1].to : null;
+    s.groups.forEach(function (g, gi) {
+      var last = gi === s.groups.length - 1;
+      var act = g.id === s.activeGroup;
+      var rows = [h('div', { class: act && switched === g.id ? 'sd-changed' : null, translate: 'no' },
+        (last ? '`-+- ' : '|-+- ') + "policy='round-robin\u00a00' prio=" + L.livePrio(s, g) + ' status=' + (act ? 'active' : 'enabled'))];
+      g.devs.forEach(function (dev, di) {
+        var path = L.pathOf(s, dev);
+        var lastp = di === g.devs.length - 1;
+        var st = path.state === 'active' ? 'active ready running' : 'failed faulty running';
+        rows.push(h('div', { class: (path.state === 'failed' ? 'mp-ll-fail' : '') + (s.changed.indexOf(dev) >= 0 ? ' sd-changed' : ''), translate: 'no' },
+          (last ? '  ' : '| ') + (lastp ? '`- ' : '|- ') + path.hctl + ' ' + dev + ' ' + st));
+      });
+      lines.push(h('div', { class: 'mp-ll-grp' + (act ? ' mp-ll-grp-act' : '') }, rows));
+    });
+    return h('div', { class: 'mp-ll' }, lines);
+  }
+
+  function counters(c) {
+    var s = c.state, p = L.norm(c.params);
+    function row(label, value, plus, bad) {
+      return [h('span', null, label), h('b', { class: bad ? 'mp-bad' : null }, String(value), plus ? h('span', { class: 'mp-plus' }, t('plusTick', { n: plus })) : null)];
+    }
+    var tickDone = 0;
+    Object.keys(s.tickDone).forEach(function (k) { tickDone += s.tickDone[k]; });
+    var out = [
+      row(t('cDone'), s.done, tickDone),
+      s.multipath ? row(t('cRetried'), s.retried, s.tickRetried) : null,
+      s.multipath ? row(t('cQueued'), s.queued, 0) : null,
+      row(t('cErrors'), s.errors, s.tickErrors, s.errors > 0),
+      [h('span', null, t('cFs')), h('b', { class: s.fsState === 'ro' ? 'mp-bad' : null }, s.fsState === 'ro' ? t('fsRo') : t('fsRw'))]
+    ];
+    if (s.multipath) {
+      var npr = p.noPathRetry;
+      var note = null;
+      if (/^\d+$/.test(npr) && s.retryLeft !== null) note = s.retryLeft > 0 ? t.n('nprLeft', s.retryLeft) : t('nprOut');
+      else if (npr === 'queue' && s.queued) note = t('nprWaiting');
+      out.push([h('span', null, data(t('cNpr'))), h('b', null, data(npr), note ? h('span', { class: 'mp-plus' }, note) : null)]);
+    }
+    return h('div', { class: 'mp-ctr' }, out);
+  }
+
+  function render(c) {
+    var scene = h('div', { class: 'mp-scene' }, h('div', { class: 'mp-top' }, stack(c), eventBox(c)),
+      h('div', { class: 'mp-diagram' }, lines(c.state), nodes(c), marks(c)));
+    c.stage.replaceChildren(h('div', { class: 'mp' }, scene, h('div', { class: 'mp-side' }, listing(c), counters(c))));
+  }
+
+  // ── captions ──
+
+  function groupName(s, p, id, acc) {
+    var g = L.groupById(s, id);
+    var ctrls = g.devs.map(function (d) { return L.pathOf(s, d).ctrl; });
+    var one = ctrls.every(function (x) { return x === ctrls[0]; });
+    if (p.grouping === 'group_by_prio' && one) return parts(acc ? 'groupCtrlAcc' : 'groupCtrl', { ctrl: ctrls[0] });
+    return parts(acc ? 'groupNAcc' : 'groupN', { g: id, devs: list(g.devs) });
+  }
+
+  function caption(c) {
+    var s = c.state, p = L.norm(c.params);
+    var failed = 'failed';
+    if (c.first) {
+      return s.multipath ? parts('capStart', { devs: list(L.PATHS.map(function (x) { return x.dev; })), map: MAP, g: s.activeGroup })
+        : parts('capStartPlain', { devs: list(L.PATHS.map(function (x) { return x.dev; })), dev: '/dev/' + L.PLAIN_DEV });
+    }
+    var ev = s.event;
+    var out = [];
+    var head = ev ? eventText(ev) : null;
+
+    if (!s.multipath) {
+      // the errors sentence names the dead path itself: the event sentence would only repeat it
+      var healthy = s.paths.some(function (x) { return x.dev !== L.PLAIN_DEV && x.state === 'active'; });
+      if (s.tickErrors) { if (ev && ev.kind === 'fail') head = null; out.push(parts(healthy ? 'capPlainErrors' : 'capPlainErrorsAll', { dev: L.PLAIN_DEV, n: s.tickErrors })); }
+      else out.push(parts('capPlainOk', { dev: L.PLAIN_DEV, others: list(L.PATHS.map(function (x) { return x.dev; }).filter(function (d) { return d !== L.PLAIN_DEV; })) }));
+      if (s.fsWentRo) out.push(t('capFsRo'));
+      else if (ev && ev.kind === 'back' && s.fsState === 'ro') out.push(t('capFsStillRo'));
+      return join(head, out);
+    }
+
+    // group switches between two groups during the I/O (not the clearing when no group is left)
+    var nopath = s.switches.filter(function (x) { return x.why === 'nopath' && x.from !== null && x.to !== null; });
+    var deadByIo = s.marks.filter(function (m) { return m.by === 'io'; }).map(function (m) { return m.dev; });
+    var weight = 0; // sentences beyond one per item: the task's caption has two
+    var atOnce = s.tickErrors - s.flushed;
+    var max = p.noPathRetry;
+    var reinstated = s.marks.filter(function (m) { return m.by === 'checker' && m.state === 'active'; }).map(function (m) { return m.dev; });
+    var byChecker = s.marks.filter(function (m) { return m.by === 'checker' && m.state === 'failed'; }).map(function (m) { return m.dev; });
+
+    // the main outcome of the interval's I/O
+    if (nopath.length && !s.tickQueued && !atOnce) {
+      if (ev && ev.what === 'ctrl-A' && ev.kind === 'fail' && p.grouping === 'group_by_prio') { head = null; weight = 1; out.push(parts('capCtrlAFailover', { failed: failed })); }
+      else out.push(parts('capSwitch', { devs: list(deadByIo), failed: failed, group: groupName(s, p, nopath[nopath.length - 1].to, true) }, deadByIo.length));
+    } else if (s.tickRetried && !s.tickQueued && !atOnce) {
+      var to = [];
+      s.io.forEach(function (x) { if (x.tries.length > 1 && x.on && to.indexOf(x.on) < 0) to.push(x.on); });
+      out.push(parts('capRetry', { devs: list(deadByIo), failed: failed, to: list(to) }, deadByIo.length));
+    }
+    if (ev && ev.kind === 'back' && s.tickQueued) out.push(t('capStillNoPath'));
+    else if (ev && ev.kind === 'back' && atOnce) out.push(parts('capStillErrors', { n: atOnce }));
+    else if (s.tickQueued && !s.flushed) {
+      out.push(parts('capQueued', { n: s.queued || s.drained }));
+      if (/^\d+$/.test(max) && s.retryLeft > 0) out.push(parts('capRetryLeft', { npr: 'no_path_retry', max: max }, s.retryLeft));
+    }
+    if (s.flushed) out.push(parts('capFlushed', { npr: 'no_path_retry', max: max, n: s.flushed }));
+    else if (atOnce && !(ev && ev.kind === 'back')) {
+      var out0 = /^\d+$/.test(max) && s.retryLeft === 0;
+      out.push(parts(out0 ? 'capErrorsOut' : 'capErrors', { npr: 'no_path_retry ' + max, n: atOnce }));
+    }
+    if (s.fsWentRo) out.push(t('capFsRo'));
+    else if (ev && ev.kind === 'back' && s.fsState === 'ro') out.push(t('capFsStillRo'));
+    if (s.drained) out.push(parts('capDrained', { n: s.drained }));
+    else if (reinstated.length) out.push(parts('capReinstated', { devs: list(reinstated) }, reinstated.length));
+    if (byChecker.length) out.push(parts('capCheckerFailed', { devs: list(byChecker), failed: failed }, byChecker.length));
+    var fb = s.switches.filter(function (x) { return x.why === 'failback'; })[0];
+    if (fb) out.push(parts('capFailback', { fb: 'failback immediate', group: groupName(s, p, fb.to, false) }));
+    else if (p.failback === 'manual' && reinstated.length) {
+      var best = L.bestGroup(s);
+      if (best !== null && best !== s.activeGroup) out.push(parts('capManual', { fb: 'failback manual', g: s.activeGroup, group: groupName(s, p, best, false) }));
+    }
+    // a quiet interval: where the I/O goes
+    if (!out.length) {
+      var used = s.paths.filter(function (x) { return s.tickDone[x.dev] > 0; }).map(function (x) { return x.dev; });
+      if (used.length) out.push(parts('capSpread', { devs: list(used) }, used.length));
+      var standby = s.paths.filter(function (x) { return x.state === 'active' && x.group !== s.activeGroup; }).map(function (x) { return x.dev; });
+      var dead = s.paths.filter(function (x) { return x.state === 'failed'; }).map(function (x) { return x.dev; });
+      if (dead.length) out.push(parts('capStillFailed', { devs: list(dead), failed: failed }, dead.length));
+      else if (standby.length) out.push(parts('capStandby', { devs: list(standby), enabled: 'enabled' }, standby.length));
+    }
+    // at most three sentences: the event and the ones that matter most
+    return join(head, out.slice(0, 3 - (head ? 1 : 0) - weight));
+  }
+
+  function join(head, list) {
+    var out = [];
+    if (head) out = out.concat(head);
+    list.forEach(function (x) { if (out.length) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'useMultipath', type: 'toggle', label: t('useMultipath'), resets: true },
+      { key: 'grouping', type: 'choice', label: t('grouping'), resets: true, visible: function (p) { return !!p.useMultipath; },
+        options: [['failover', t('optFailover')], ['multibus', t('optMultibus')], ['group_by_prio', t('optGroupByPrio')]] },
+      { key: 'failback', type: 'choice', label: t('failback'), resets: true, visible: function (p) { return !!p.useMultipath; },
+        options: [['immediate', t('optImmediate')], ['manual', t('optManual')]] },
+      { key: 'noPathRetry', type: 'choice', label: t('noPathRetry'), resets: true, visible: function (p) { return !!p.useMultipath; },
+        options: [['queue', t('optQueue')], ['fail', t('optFail')], ['3', t('opt3')]] },
+      { key: 'fault', type: 'choice', label: t('fault'), resets: true,
+        options: Object.keys(L.FAULTS).map(function (k) { return [k, t(FAULT_LABEL[k])]; }) },
+      // up to one interval past the end: the top of the slider is a fault that does not return in this demo
+      { key: 'downFor', type: 'range', label: t('downFor'), min: 1, resets: true,
+        max: function (p) { return Math.max(1, Math.min(10, (p.ticks || 7) - (p.failAt || 2) + 1)); } },
+      // the fault comes at interval 2 in every preset (interval 1 shows the healthy state); hidden to fit one screen
+      { key: 'failAt', type: 'range', label: t('failAt'), min: 1, max: 10, resets: true, visible: function () { return false; } },
+      // the number of intervals comes with the preset; hidden to keep the panel on one screen
+      { key: 'ticks', type: 'range', label: t('ticks'), min: 3, max: 12, resets: true, visible: function () { return false; } }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'mp-act', label: t('legActive') },
+      { shape: 'mp-stby', label: t('legStandby') },
+      { shape: 'mp-fail', label: t('legFailed') },
+      { shape: 'mp-group', label: t('legGroup') },
+      { shape: 'mp-io', label: t('legIo') },
+      { shape: 'mp-q', label: t('legQueued') },
+      { shape: 'mp-err', label: t('legError') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
