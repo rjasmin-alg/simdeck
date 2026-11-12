@@ -1,0 +1,685 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-quotas: soft vs hard limit, grace period.
+     Top: the step's command as the book writes it and its output. Middle: the filesystem /mnt/polje with ana's blocks
+     bar (files as segments, soft limit dashed, hard limit a wall, the part above soft hatched) and files bar, root's
+     line, and /home without quotas in the other-fs preset. Bottom: the live repquota report in the book's layout and a
+     calendar with the grace clocks. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-quotas">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kvote: meko i tvrdo ograničenje, razdoblje odgode · simdeck</title>
+<meta name="description" content="Korisnica piše datoteke na datotečni sustav s kvotom, a dani prolaze: prekoračeno meko ograničenje pokreće razdoblje odgode, tvrdo zaustavlja pisanje točno na granici.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-quotas",
+  "title": {
+    "hr": "Kvote: meko i tvrdo ograničenje, razdoblje odgode",
+    "en": "Disk quotas: soft and hard limit, grace period"
+  },
+  "concept": {
+    "hr": "Meko se smije prijeći dok traje razdoblje odgode; tvrdo zaustavlja pisanje",
+    "en": "Soft limit: passable while the grace period runs; the hard limit stops the write"
+  },
+  "summary": {
+    "hr": "Korisnica piše datoteke na datotečni sustav s kvotom, a dani prolaze: tvrdo ograničenje, sat razdoblja odgode, istek roka, brisanje i broj datoteka.",
+    "en": "A user writes files on a filesystem with a quota while days pass: the hard limit, the grace clock, the deadline, deleting, and the number of files."
+  },
+  "tags": [
+    "filesystems"
+  ],
+  "class": "stepper",
+  "steps": 5,
+  "entries": [
+    {
+      "preset": "grace-expires"
+    },
+    {
+      "preset": "other-fs"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-quotas"]; colours only from kit tokens. */
+[data-sim="lnx-quotas"] .qt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.62fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.55rem 0.8rem;
+  height: 100%;
+  padding: 0.55rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-quotas"] .qt-mono { font-family: var(--mono); }
+[data-sim="lnx-quotas"] .qt-muted { color: var(--muted); }
+[data-sim="lnx-quotas"] .qt-sm { font-size: var(--fs-sm); }
+[data-sim="lnx-quotas"] .qt-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.45rem 0.65rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-quotas"] h3 { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; }
+[data-sim="lnx-quotas"] h3 .qt-mono { font-weight: 700; }
+
+/* command */
+[data-sim="lnx-quotas"] .qt-cmd { grid-column: 1 / -1; flex-direction: row; align-items: flex-start; gap: 0.7rem; }
+[data-sim="lnx-quotas"] .qt-cmd h3 { flex: none; padding-top: 0.35rem; }
+[data-sim="lnx-quotas"] .qt-cmd .qt-term { flex: 1 1 auto; min-width: 0; }
+[data-sim="lnx-quotas"] .qt-term {
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-quotas"] .qt-term b { font-size: 1rem; }
+[data-sim="lnx-quotas"] .qt-term .qt-prompt { color: var(--muted); }
+[data-sim="lnx-quotas"] .qt-out { display: block; }
+[data-sim="lnx-quotas"] .qt-out-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-quotas"] .qt-out-err::before { content: '✗ '; }
+[data-sim="lnx-quotas"] .qt-out-ok::before { content: '✓ '; color: var(--ok); }
+[data-sim="lnx-quotas"] .qt-out-1 { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-quotas"] .qt-time { font-family: var(--sans); font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="lnx-quotas"] .qt-time::before { content: '⏱ '; }
+
+/* filesystem cards */
+[data-sim="lnx-quotas"] .qt-fsw { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+[data-sim="lnx-quotas"] .qt-fs { border: 0.2rem solid var(--c1); }
+[data-sim="lnx-quotas"] .qt-fs-home { border: 0.2rem dashed var(--c6); }
+[data-sim="lnx-quotas"] .qt-on { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-quotas"] .qt-on-yes::before { content: '● '; color: var(--ok); }
+[data-sim="lnx-quotas"] .qt-on-no { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-quotas"] .qt-on-no::before { content: '○ '; }
+[data-sim="lnx-quotas"] .qt-on.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-quotas"] .qt-user {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr) 12.5rem;
+  gap: 0.15rem 0.7rem;
+  align-items: center;
+}
+[data-sim="lnx-quotas"] .qt-uname { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); grid-row: span 2; align-self: start; }
+[data-sim="lnx-quotas"] .qt-kind { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-quotas"] .qt-nums { font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="lnx-quotas"] .qt-nums b { font-family: var(--mono); font-size: 1rem; }
+[data-sim="lnx-quotas"] .qt-nums .qt-mono { white-space: nowrap; }
+
+/* blocks bar */
+[data-sim="lnx-quotas"] .qt-bar { position: relative; padding: 1.35rem 0 1.35rem; }
+[data-sim="lnx-quotas"] .qt-track {
+  position: relative;
+  height: 2.2rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-quotas"] .qt-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-right: 0.15rem solid var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="lnx-quotas"] .qt-seg.sd-changed { outline-offset: -0.2rem; box-shadow: none; outline: 0.25rem solid var(--hl); }
+[data-sim="lnx-quotas"] .qt-over {
+  position: absolute;
+  top: -0.2rem;
+  bottom: -0.2rem;
+  border-top: 0.2rem solid var(--ink);
+  border-bottom: 0.2rem solid var(--ink);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, var(--bg) 0.3em 0.5em);
+  pointer-events: none;
+}
+[data-sim="lnx-quotas"] .qt-line { position: absolute; top: -0.5rem; bottom: -0.5rem; width: 0; }
+[data-sim="lnx-quotas"] .qt-line-soft { border-left: 0.22rem dashed var(--ink); margin-left: -0.11rem; }
+[data-sim="lnx-quotas"] .qt-line-hard { border-left: 0.45rem solid var(--ink); margin-left: -0.22rem; top: -0.7rem; bottom: -0.7rem; }
+[data-sim="lnx-quotas"] .qt-line-soft.qt-wall { border-left-style: solid; border-left-width: 0.45rem; margin-left: -0.22rem; }
+[data-sim="lnx-quotas"] .qt-lab {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+}
+[data-sim="lnx-quotas"] .qt-lab-top { top: 0; }
+[data-sim="lnx-quotas"] .qt-lab-bot { bottom: 0; }
+[data-sim="lnx-quotas"] .qt-lab b { font-family: var(--mono); }
+[data-sim="lnx-quotas"] .qt-lab.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; padding: 0 0.2rem; }
+[data-sim="lnx-quotas"] .qt-x {
+  position: absolute;
+  top: 50%;
+  transform: translate(-0.1rem, -50%);
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: 50%;
+  background: var(--hl);
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 1;
+  z-index: 2;
+}
+[data-sim="lnx-quotas"] .qt-ticks { position: relative; height: 1.2rem; }
+[data-sim="lnx-quotas"] .qt-tick { position: absolute; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+[data-sim="lnx-quotas"] .qt-tick:first-child { transform: none; }
+[data-sim="lnx-quotas"] .qt-tick:last-child { transform: translateX(-100%); }
+
+/* files bar: one cell per file */
+[data-sim="lnx-quotas"] .qt-cells { display: flex; gap: 0.2rem; align-items: center; flex-wrap: wrap; }
+[data-sim="lnx-quotas"] .qt-cell {
+  position: relative;
+  width: 1.7rem;
+  height: 1.5rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-quotas"] .qt-cell.sd-fill { border-color: var(--ink); background-color: var(--sw, var(--c6)); }
+[data-sim="lnx-quotas"] .qt-cell.sd-fill.qt-cell-over { background-image: repeating-linear-gradient(45deg, transparent 0 0.25em, var(--bg) 0.25em 0.42em); }
+[data-sim="lnx-quotas"] .qt-cell.sd-changed { box-shadow: none; outline: 0.25rem solid var(--hl); outline-offset: 0.05rem; }
+[data-sim="lnx-quotas"] .qt-cell-soft { margin-right: 0.55rem; }
+[data-sim="lnx-quotas"] .qt-cell-soft::after { content: ''; position: absolute; right: -0.55rem; top: -0.4rem; bottom: -0.4rem; border-left: 0.22rem dashed var(--ink); }
+[data-sim="lnx-quotas"] .qt-cell-hard { margin-right: 0.6rem; }
+[data-sim="lnx-quotas"] .qt-cell-hard::after { content: ''; position: absolute; right: -0.65rem; top: -0.5rem; bottom: -0.5rem; border-left: 0.45rem solid var(--ink); }
+[data-sim="lnx-quotas"] .qt-cell-x { border: 0.2rem solid var(--ink); border-radius: 50%; background: var(--hl); color: var(--danger); font-weight: 700; display: grid; place-items: center; line-height: 1; }
+[data-sim="lnx-quotas"] .qt-fl { font-size: var(--fs-sm); margin-left: 0.4rem; }
+[data-sim="lnx-quotas"] .qt-fl b { font-family: var(--mono); }
+
+/* grace badge */
+[data-sim="lnx-quotas"] .qt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: fit-content;
+  padding: 0 0.4rem;
+  border: 0.2rem solid var(--warn);
+  border-radius: 1rem;
+  background: var(--bg);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+[data-sim="lnx-quotas"] .qt-badge::before { content: '⏱'; }
+[data-sim="lnx-quotas"] .qt-badge-gone { border-color: var(--danger); color: var(--danger); border-style: double; border-width: 0.3rem; }
+[data-sim="lnx-quotas"] .qt-badge.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-quotas"] .qt-fs-home { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.7rem; padding-top: 0.3rem; padding-bottom: 0.3rem; }
+[data-sim="lnx-quotas"] .qt-fs-home h3 { flex: 1 1 100%; }
+[data-sim="lnx-quotas"] .qt-fs-home .qt-user { flex: 1 1 auto; grid-template-columns: 4.2rem minmax(0, 1fr) 12.5rem; }
+[data-sim="lnx-quotas"] .qt-fs-home .qt-uname { grid-row: auto; align-self: center; }
+[data-sim="lnx-quotas"] .qt-fs-home .qt-bar { padding: 0.15rem 0 0; }
+[data-sim="lnx-quotas"] .qt-root { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-quotas"] .qt-root b { font-family: var(--mono); color: var(--ink); }
+
+/* report */
+[data-sim="lnx-quotas"] .qt-rep { min-width: 0; }
+[data-sim="lnx-quotas"] .qt-pre {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.32;
+  white-space: pre;
+  overflow-x: auto;
+}
+[data-sim="lnx-quotas"] .qt-pre.sd-changed { box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-quotas"] .qt-c { white-space: pre; }
+[data-sim="lnx-quotas"] .qt-c-ch { background: var(--hl); color: var(--on-hl); font-weight: 700; outline: 0.12rem solid var(--ink); }
+
+/* calendar */
+[data-sim="lnx-quotas"] .qt-cal { min-width: 0; }
+[data-sim="lnx-quotas"] .qt-days { display: grid; grid-template-columns: 3.4rem repeat(var(--days), minmax(0, 1fr)); gap: 0.12rem; align-items: stretch; }
+[data-sim="lnx-quotas"] .qt-dh { font-size: var(--fs-sm); color: var(--muted); align-self: center; }
+[data-sim="lnx-quotas"] .qt-d {
+  display: grid;
+  place-items: center;
+  min-height: 1.6rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm);
+}
+[data-sim="lnx-quotas"] .qt-d-today { border-color: var(--ink); border-width: 0.2rem; font-weight: 700; background: var(--bg); }
+[data-sim="lnx-quotas"] .qt-d-today.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+[data-sim="lnx-quotas"] .qt-span { min-height: 1.1rem; border-radius: 0; }
+[data-sim="lnx-quotas"] .qt-span-on { background-color: color-mix(in srgb, var(--warn) 30%, var(--bg)); border-top: 0.15rem solid var(--warn); border-bottom: 0.15rem solid var(--warn); }
+[data-sim="lnx-quotas"] .qt-span-end { background: var(--bg); border: 0.2rem solid var(--danger); color: var(--danger); font-weight: 700; }
+[data-sim="lnx-quotas"] .qt-span-end::after { content: '✗'; font-family: var(--sans); }
+[data-sim="lnx-quotas"] .qt-span-run.qt-span-end::after { content: '⏱'; color: var(--ink); }
+[data-sim="lnx-quotas"] .qt-calnote { font-size: var(--fs-sm); }
+
+/* legend swatches */
+[data-sim="lnx-quotas"] .sd-swatch[data-shape^='qt-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape^='qt-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-wall'] { border: 0; background: transparent; }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-wall']::after { content: ''; left: 50%; right: auto; width: 0.4rem; margin-left: -0.2rem; background: var(--ink); }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-over'] { background-color: var(--c1); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, var(--bg) 0.2em 0.35em); }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-grace'] { border-color: var(--warn); border-radius: 50%; }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-grace']::after { content: '⏱'; }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-x'] { border-radius: 50%; background: var(--hl); }
+[data-sim="lnx-quotas"] .sd-swatch[data-shape='qt-x']::after { content: '×'; color: var(--danger); font-size: 1em; }
+
+[data-sim="lnx-quotas"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-quotas"] .sd-titles { flex: 1 1 60rem; }
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-quotas"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-quotas"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-quotas"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-quotas"] .qt { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; padding: 0.45rem; }
+  [data-sim="lnx-quotas"] .qt-user { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-quotas"] .qt-uname { grid-row: auto; }
+  [data-sim="lnx-quotas"] .qt-nums { flex-direction: row; flex-wrap: wrap; gap: 0.1rem 0.8rem; }
+  [data-sim="lnx-quotas"] .qt-days { grid-template-columns: repeat(var(--days), minmax(0, 1fr)); }
+  [data-sim="lnx-quotas"] .qt-dh { grid-column: 1 / -1; }
+  [data-sim="lnx-quotas"] .qt-d { min-height: 1.3rem; }
+  [data-sim="lnx-quotas"] .qt-cmd { flex-direction: column; gap: 0.35rem; }
+  [data-sim="lnx-quotas"] .qt-cmd .qt-term { align-self: stretch; }
+  [data-sim="lnx-quotas"] .qt-dnum:nth-child(odd):not(.qt-d-today) { color: transparent; }
+  [data-sim="lnx-quotas"] .qt-tick:nth-child(even) { display: none; }
+  [data-sim="lnx-quotas"] .qt-fs-home .qt-user { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kvote: meko i tvrdo ograničenje, razdoblje odgode</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SCALE = 64 * 1024;           // blocks bar: 0–64 MiB in KiB
+  var MSG = 'Disk quota exceeded';
+
+  /** Data (paths, numbers, commands, file names) never gets translated. */
+  function data(text, cls) { return h('span', { class: 'qt-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** t.parts with the values in `d` wrapped as data and the others (words, plural phrases) left as text. */
+  function parts(key, d, w) {
+    var out = {};
+    Object.keys(d || {}).forEach(function (k) { out[k] = typeof d[k] === 'object' ? d[k] : data(d[k]); });
+    Object.keys(w || {}).forEach(function (k) { out[k] = w[k]; });
+    return [].concat(t.parts(key, out));
+  }
+  function pct(kb) { return Math.max(0, Math.min(100, kb / SCALE * 100)) + '%'; }
+  function blocksN(n) { return numPhrase('blocks', n); }
+  function filesN(n) { return numPhrase('files', n); }
+  function daysN(n) { return numPhrase('days', n); }
+  /** A plural phrase with its number as data: "46084 bloka". */
+  function numPhrase(key, n) {
+    var s = t.n(key, n), i = s.indexOf(String(n));
+    if (i < 0) return h('span', null, s);
+    return h('span', null, s.slice(0, i), data(n), s.slice(i + String(n).length));
+  }
+  function has(c, key) { return c.state.changed.indexOf(key) >= 0; }
+
+  // ── command ──
+
+  function command(c) {
+    var s = c.state, last = s.last;
+    var body;
+    if (!last) body = h('p', { class: 'qt-term qt-muted', style: { fontFamily: 'var(--sans)' } }, t('idle'));
+    else if (last.op === 'days') {
+      body = h('p', { class: 'qt-term sd-changed' }, h('span', { class: 'qt-time' }, numPhraseIn('daysPass', last.n)),
+        h('span', { class: 'qt-out', style: { fontFamily: 'var(--sans)' } }, parts('todayIs', { day: s.day })));
+    } else {
+      var out = last.out.map(function (line) {
+        var cls = /^status=0$/.test(line) ? 'qt-out qt-out-ok' : /^status=1$/.test(line) ? 'qt-out qt-out-1' : /Disk quota exceeded/.test(line) ? 'qt-out qt-out-err' : 'qt-out';
+        return h('span', { class: cls, translate: 'no' }, line);
+      });
+      if (!out.length) out = [h('span', { class: 'qt-out qt-muted', style: { fontFamily: 'var(--sans)' } }, last.op === 'repquota' ? t('reportBelow') : t('noOutput'))];
+      body = h('p', { class: 'qt-term' }, h('span', { class: 'qt-prompt', translate: 'no' }, L.PROMPT), h('b', { translate: 'no' }, last.cmd), out);
+    }
+    return h('div', { class: 'qt-box qt-cmd' }, h('h3', null, t('cmdTitle')), body);
+  }
+  function numPhraseIn(key, n) {
+    var s = t.n(key, n), i = s.indexOf(String(n));
+    return i < 0 ? s : [s.slice(0, i), data(n), s.slice(i + String(n).length)];
+  }
+
+  // ── filesystem: ana's bars ──
+
+  function expiredNow(u, day) { return u.graceUntil != null && day >= u.graceUntil; }
+
+  function blocksBar(c, fs, u) {
+    var s = c.state, key = fs.id + ':' + u.name;
+    var segs = [], x = 0;
+    u.list.forEach(function (f) {
+      if (f.kb > 0) {
+        var ch = has(c, 'file:' + key + ':' + f.name);
+        segs.push(h('div', { class: 'qt-seg sd-fill' + (ch ? ' sd-changed' : ''), dataset: { c: '1' },
+          style: { left: pct(x), width: pct(f.kb) }, title: f.name }, f.kb / SCALE > 0.12 ? data(f.name) : null));
+      }
+      x += f.kb;
+    });
+    var over = u.soft && u.usedKB > u.soft ? h('div', { class: 'qt-over', style: { left: pct(u.soft), width: pct(Math.min(u.usedKB, SCALE) - u.soft) } }) : null;
+    var lim = has(c, 'limits:' + key);
+    var wallSoft = expiredNow(u, s.day);
+    var lines = [], labs = [];
+    if (u.soft) {
+      lines.push(h('div', { class: 'qt-line qt-line-soft' + (wallSoft ? ' qt-wall' : ''), style: { left: pct(u.soft) } }));
+      labs.push(h('span', { class: 'qt-lab qt-lab-top' + (lim ? ' sd-changed' : ''), style: { left: pct(u.soft) } }, parts('softAt', { n: u.soft })));
+    }
+    if (u.hard) {
+      lines.push(h('div', { class: 'qt-line qt-line-hard', style: { left: pct(u.hard) } }));
+      labs.push(h('span', { class: 'qt-lab qt-lab-bot' + (lim ? ' sd-changed' : ''), style: { left: pct(u.hard) } }, parts('hardAt', { n: u.hard })));
+    }
+    var x2 = null;
+    if (has(c, 'refused:' + key + ':blocks')) {
+      var at = s.last.why === 'block-expired' ? u.soft : u.hard;
+      x2 = h('span', { class: 'qt-x', style: { left: pct(Math.max(at, u.usedKB)) }, 'aria-label': t('legRefused') }, '×');
+    }
+    return h('div', { class: 'qt-bar' }, labs, h('div', { class: 'qt-track' }, segs, over, lines, x2));
+  }
+
+  function ticks() {
+    return h('div', { class: 'qt-ticks' }, [0, 16, 32, 48, 64].map(function (m) {
+      return h('span', { class: 'qt-tick', style: { left: m / 64 * 100 + '%' } }, m ? numPhraseIn('tick', m) : data(0));
+    }));
+  }
+
+  function filesBar(c, fs, u) {
+    var key = fs.id + ':' + u.name;
+    var n = Math.max(8, u.files + 1, u.ihard + 1);
+    var refused = has(c, 'refused:' + key + ':files');
+    var newName = c.state.last && c.state.last.op === 'touch' && !refused ? c.state.last.file : null;
+    var cells = [];
+    for (var i = 1; i <= n; i++) {
+      var used = i <= u.files;
+      var cls = 'qt-cell' + (used ? ' sd-fill' : '') + (used && u.isoft && i > u.isoft ? ' qt-cell-over' : '') +
+        (u.isoft && i === u.isoft ? ' qt-cell-soft' : '') + (u.ihard && i === u.ihard ? ' qt-cell-hard' : '') +
+        (used && i === u.files && (newName || has(c, 'file:' + key + ':' + (c.state.last && c.state.last.file))) ? ' sd-changed' : '');
+      if (refused && i === u.files + 1) cells.push(h('span', { class: 'qt-cell qt-cell-x', 'aria-label': t('legRefused') }, '×'));
+      else cells.push(h('span', { class: cls, dataset: { c: '6' } }));
+    }
+    var lim = has(c, 'limits:' + key);
+    var label = u.isoft || u.ihard
+      ? h('span', { class: 'qt-fl' + (lim ? ' sd-hl' : '') }, parts('softAt', { n: u.isoft }), ' · ', parts('hardAt', { n: u.ihard }))
+      : h('span', { class: 'qt-fl qt-muted' }, t('noLimits'));
+    return h('div', { class: 'qt-cells' }, cells, label);
+  }
+
+  function badge(c, until, from, prevUntil) {
+    var s = c.state;
+    if (until == null) return null;
+    var gone = s.day >= until;
+    var changed = prevUntil !== until || has(c, 'day');
+    return h('span', { class: 'qt-badge' + (gone ? ' qt-badge-gone' : '') + (changed ? ' sd-changed' : '') },
+      gone ? t('graceGone') : parts('graceLeft', null, { left: daysN(until - s.day) }));
+  }
+
+  function prevUser(c, fsId, name) {
+    if (!c.prev) return null;
+    for (var i = 0; i < c.prev.fs.length; i++) if (c.prev.fs[i].id === fsId) return L.userOf(c.prev.fs[i], name);
+    return null;
+  }
+
+  function userRow(c, fs, u) {
+    var pu = prevUser(c, fs.id, u.name) || {};
+    var lim = u.soft || u.hard;
+    // a filesystem without quotas: one line, no limits to draw and no file row
+    if (!fs.quotas) return h('div', { class: 'qt-user' },
+      h('span', { class: 'qt-uname', translate: 'no' }, u.name),
+      h('div', null, blocksBar(c, fs, u), ticks()),
+      h('div', { class: 'qt-nums' }, h('span', null, parts('usedIs', { n: u.usedKB })), h('span', { class: 'qt-muted' }, t('noLimits'))));
+    return h('div', { class: 'qt-user' },
+      h('span', { class: 'qt-uname', translate: 'no' }, u.name),
+      h('div', null, blocksBar(c, fs, u), lim ? null : ticks()),
+      h('div', { class: 'qt-nums' },
+        h('span', { class: 'qt-kind' }, t('blocksRow'), ' · ', t('unitNote')),
+        h('span', null, parts('usedIs', { n: u.usedKB })),
+        lim ? null : h('span', { class: 'qt-muted' }, t('noLimits')),
+        badge(c, u.graceUntil, u.graceFrom, pu.graceUntil)),
+      h('div', { class: 'qt-files' }, h('span', { class: 'qt-kind' }, t('filesRow')), ' ', filesBar(c, fs, u)),
+      h('div', { class: 'qt-nums' }, h('span', null, parts('usedIs', { n: u.files })), badge(c, u.igraceUntil, u.igraceFrom, pu.igraceUntil)));
+  }
+
+  function fsCard(c, fs) {
+    var s = c.state;
+    var anaU = L.userOf(fs, 'ana');
+    var head;
+    if (fs.quotas) {
+      head = h('h3', null, data(fs.mount), h('span', { class: 'qt-muted qt-sm' }, parts('fsDev', { type: fs.fstype, dev: fs.dev })),
+        h('span', { class: 'qt-on ' + (s.quotaOn ? 'qt-on-yes' : 'qt-on-no') + (has(c, 'quotaon') ? ' sd-changed' : '') }, s.quotaOn ? t('quotaOn') : t('quotaOff')));
+    } else {
+      head = h('h3', null, data(fs.mount), h('span', { class: 'qt-muted qt-sm' }, t('fsOther')), h('span', { class: 'qt-on qt-on-no' }, t('quotaNone')));
+    }
+    var others = fs.users.filter(function (u) { return u.name !== 'ana'; }).map(function (u) {
+      return h('div', { class: 'qt-root' }, h('b', { translate: 'no' }, u.name), ': ',
+        parts('rootLine', null, { blocks: blocksN(u.usedKB), files: filesN(u.files) }));
+    });
+    return h('div', { class: 'qt-box qt-fs' + (fs.quotas ? '' : ' qt-fs-home') }, head, userRow(c, fs, anaU), others);
+  }
+
+  // ── report ──
+
+  function report(c) {
+    var s = c.state, fs = L.fsOf(s, 'polje');
+    var prevFs = c.prev ? L.fsOf(c.prev, 'polje') : null;
+    var head = L.repquotaHead(fs.dev, s.graceDays).join('\n') + '\n';
+    var rows = fs.users.map(function (u) {
+      var cells = L.repquotaCells(u, s.day);
+      var pc = prevFs ? L.repquotaCells(L.userOf(prevFs, u.name), c.prev.day) : null;
+      var line = L.COLS.map(function (col) {
+        var txt = String(cells[col.key]);
+        while (txt.length < col.width) txt = col.left ? txt + ' ' : ' ' + txt;
+        var ch = pc && String(pc[col.key]) !== String(cells[col.key]);
+        return [col.sep, h('span', { class: 'qt-c' + (ch ? ' qt-c-ch' : '') }, txt)];
+      });
+      return [line, '\n'];
+    });
+    var asked = s.last && s.last.op === 'repquota';
+    return h('div', { class: 'qt-box qt-rep' },
+      h('h3', null, t('reportTitle'), data('sudo repquota ' + fs.mount, 'qt-sm')),
+      h('pre', { class: 'qt-pre' + (asked ? ' sd-changed' : ''), translate: 'no' }, head, rows));
+  }
+
+  // ── calendar ──
+
+  function calendar(c) {
+    var s = c.state, u = L.userOf(L.fsOf(s, 'polje'), 'ana');
+    var clocks = [];
+    if (u.graceUntil != null) clocks.push({ key: 'calBlocks', from: u.graceFrom, until: u.graceUntil });
+    if (u.igraceUntil != null) clocks.push({ key: 'calFiles', from: u.igraceFrom, until: u.igraceUntil });
+    var last = 15;
+    clocks.forEach(function (k) { last = Math.max(last, k.until); });
+    last = Math.max(last, s.day);
+    var nd = last + 1;
+    var cells = [h('span', { class: 'qt-dh' }, t('calDays'))];
+    for (var d = 0; d <= last; d++) {
+      var today = d === s.day;
+      cells.push(h('span', { class: 'qt-d qt-dnum' + (today ? ' qt-d-today' : '') + (today && has(c, 'day') ? ' sd-changed' : ''), translate: 'no',
+        title: today ? t('calToday') : null }, String(d)));
+    }
+    var rows = clocks.map(function (k) {
+      var r = [h('span', { class: 'qt-dh' }, '⏱')];
+      for (var d = 0; d <= last; d++) {
+        var on = d >= k.from && d < k.until;
+        var end = d === k.until;
+        var run = s.day < k.until;
+        r.push(h('span', { class: 'qt-d qt-span' + (on ? ' qt-span-on' : '') + (end ? ' qt-span-end' + (run ? ' qt-span-run' : '') : '') }));
+      }
+      return r;
+    });
+    var notes = clocks.length ? clocks.map(function (k) {
+      return h('div', { class: 'qt-calnote' }, h('b', null, t(k.key)), ': ', parts('calSpan', { from: k.from, until: k.until }));
+    }) : [h('div', { class: 'qt-calnote qt-muted' }, t('calNoClock'))];
+    return h('div', { class: 'qt-box qt-cal' },
+      h('h3', null, t('calTitle'), h('span', { class: 'qt-sm qt-muted' }, t('calToday'), ': ', data(s.day))),
+      h('div', { class: 'qt-days' + (nd > 16 ? ' qt-days-wide' : ''), style: { '--days': String(nd) } }, cells, rows),
+      notes);
+  }
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'qt' },
+      command(c),
+      h('div', { class: 'qt-fsw' }, s.fs.map(function (fs) { return fsCard(c, fs); })),
+      report(c),
+      calendar(c)));
+  }
+
+  // ── captions: what the command did, then where ana stands ──
+
+  function caption(c) {
+    var s = c.state, last = s.last;
+    var fs = L.fsOf(s, 'polje'), u = L.userOf(fs, 'ana');
+    if (!last) return parts('cap_start', { mount: fs.mount }, { used: blocksN(u.usedKB), files: numPhrase('filesAcc', u.files) });
+    var pu = prevUser(c, last.fs || 'polje', 'ana');
+    var st = 'status=' + last.status;
+    var g = s.graceDays;
+    var out = [];
+    function add(x) { if (out.length) out.push(' '); out.push.apply(out, [].concat(x)); }
+    var op = last.op;
+    if (op === 'setquota') {
+      add(parts('cap_setquota', { cmd: 'setquota', soft: u.soft, hard: u.hard, softM: u.soft / 1024, hardM: u.hard / 1024 }));
+      add(u.isoft || u.ihard ? parts('cap_setquotaFiles', { isoft: u.isoft, ihard: u.ihard }) : parts('cap_setquotaFilesNone', { zero: '0 0' }));
+      if (!s.quotaOn) add(t('cap_notYet'));
+    } else if (op === 'repquota') {
+      add(parts(s.quotaOn ? 'cap_repquotaOn' : 'cap_repquota', { cmd: 'repquota', used: u.usedKB, soft: u.soft, hard: u.hard }));
+    } else if (op === 'quotaon') {
+      add(parts('cap_quotaon', { cmd: 'quotaon', dev: fs.dev }));
+    } else if (op === 'dd' || op === 'touch') {
+      var fsx = L.fsOf(s, last.fs), ux = L.userOf(fsx, 'ana');
+      var crossed = ux.graceUntil != null && (pu.graceUntil == null);
+      if (last.why === 'inode-hard') add(parts('cap_inodeHard', { files: ux.files, ihard: ux.ihard, file: last.file, msg: MSG, st: st }));
+      else if (last.why === 'inode-expired') add(parts('cap_inodeExpired', { until: ux.igraceUntil, file: last.file, msg: MSG, st: st }));
+      else if (op === 'touch') {
+        add(parts('cap_touch', { cmd: 'touch', file: last.file }, { files: numPhrase('filesAcc', ux.files) }));
+        var icrossed = ux.igraceUntil != null && pu.igraceUntil == null;
+        var flag = L.flags(ux).charAt(1);
+        if (!ux.isoft && !ux.ihard) add(t('cap_touchNoLimit'));
+        else if (icrossed) add(parts('cap_touchCrossed', { isoft: ux.isoft, flag: flag }, { g: String(g) }));
+        else if (ux.ihard && ux.files === ux.ihard) add(parts('cap_touchAtHard', { ihard: ux.ihard }));
+        else if (ux.files === ux.isoft) add(parts('cap_touchAtSoft', { isoft: ux.isoft, flag: flag }));
+        else if (ux.files > ux.isoft && ux.igraceUntil != null) add(parts('cap_touchInGrace', { isoft: ux.isoft }, { left: daysN(ux.igraceUntil - s.day) }));
+        else add(parts('cap_touchUnder', { isoft: ux.isoft }));
+      } else if (!fsx.quotas) {
+        add(parts('cap_ddHome', { mount: fsx.mount, mib: last.wantKB / 1024, st: st, other: fs.mount }));
+      } else if (last.why === 'block-hard') {
+        add(parts('cap_ddHard', { want: last.wantKB, written: last.writtenKB, hard: ux.hard, msg: MSG, st: st, file: last.file }));
+        if (crossed) add(parts('cap_alsoCrossed', { soft: ux.soft }, { g: String(g) }));
+      } else if (last.why === 'block-expired') {
+        add(parts('cap_ddExpired', { until: ux.graceUntil, msg: MSG, st: st, used: ux.usedKB, hard: ux.hard, file: last.file }));
+      } else if (!s.quotaOn) add(parts('cap_ddOff', { st: st }));
+      else if (!ux.soft && !ux.hard) add(parts('cap_ddNoLimit', { st: st }));
+      else if (crossed && ux.usedKB === ux.hard) add(parts('cap_crossedAtHard', { soft: ux.soft, hard: ux.hard }, { used: blocksN(ux.usedKB), g: String(g) }));
+      else if (crossed) add(parts('cap_crossed', { soft: ux.soft, hard: ux.hard }, { used: blocksN(ux.usedKB), g: String(g) }));
+      else if (ux.usedKB > ux.soft) add(parts('cap_ddInGrace', { st: st }, { left: daysN(ux.graceUntil - s.day) }));
+      else if (ux.usedKB === ux.soft) add(parts('cap_ddAtSoft', { st: st, used: ux.usedKB }));
+      else add(parts('cap_ddUnder', { st: st, soft: ux.soft }, { used: blocksN(ux.usedKB) }));
+    } else if (op === 'rm') {
+      add(parts('cap_rm', { cmd: 'rm', file: last.file }, { freed: blocksN(last.freedKB), used: blocksN(u.usedKB) }));
+      if (pu.graceUntil != null && u.graceUntil == null) add(parts('cap_rmCleared', { soft: u.soft }, { g: daysN(g) }));
+      else if (u.graceUntil != null) add(t('cap_rmStill'));
+    } else if (op === 'days') {
+      add(parts('cap_days', { day: s.day }, { passed: h('span', null, numPhraseIn('daysPass', last.n)) }));
+      var k = u.graceUntil != null ? { until: u.graceUntil, from: u.graceFrom } : u.igraceUntil != null ? { until: u.igraceUntil, from: u.igraceFrom } : null;
+      if (!k) add(t('cap_daysNone'));
+      else if (s.day >= k.until) add(parts('cap_daysExpired', { until: k.until, none: 'none' }));
+      else add(parts('cap_daysRunning', { from: k.from, until: k.until }, { left: daysN(k.until - s.day) }));
+    }
+    return out;
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'graceDays', type: 'range', label: t('graceDays'), min: 1, max: 14, step: 1,
+        format: function (v) { return t.n('days', v); } },
+      { key: 'fileLimits', type: 'toggle', label: t('fileLimits'), hint: t('fileLimitsHint') },
+      // the commands come with the preset; hidden so the panel fits one screen
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; },
+        options: L.SCRIPT_IDS.map(function (x) { return [x, t('preset_' + x)]; }) }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { c: 1, label: t('legUsed') },
+      { shape: 'dash', label: t('legSoft') },
+      { shape: 'qt-wall', label: t('legHard') },
+      { shape: 'qt-over', label: t('legOver') },
+      { shape: 'qt-grace', label: t('legGrace') },
+      { shape: 'qt-x', label: t('legRefused') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
