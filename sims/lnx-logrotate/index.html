@@ -1,0 +1,551 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-logrotate: rotation numbering, compress, copytruncate vs create, while the system logger writes.
+     Left: the logger, its selector and its open descriptor. Centre: /var/log, one row per name (directory entry) and
+     the inode it points at, with the inode's lines; the descriptor's arrow lands on an inode, never on a name.
+     Right: logrotate's settings, its status file and this run's operations in order. Bottom: day, rotations, lost lines.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-logrotate">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotacija dnevnika: create i copytruncate · simdeck</title>
+<meta name="description" content="Rotiraj /var/log/messages tjedan po tjedan dok zapisivač piše: brojevi i datumi, compress, create s reloadom ili bez njega, copytruncate.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-logrotate",
+  "title": {
+    "hr": "Rotacija dnevnika: create i copytruncate",
+    "en": "Log rotation: create and copytruncate"
+  },
+  "concept": {
+    "hr": "Zapisivač piše u i-čvor: create traži reload, a copytruncate može izgubiti retke",
+    "en": "The logger writes to an inode: create needs a reload, copytruncate loses lines"
+  },
+  "summary": {
+    "hr": "Rotiraj /var/log/messages tjedan po tjedan dok zapisivač piše: brojevi i datumi, compress, create s reloadom ili bez njega i copytruncate.",
+    "en": "Rotate /var/log/messages week by week while the logger writes: numbers and dates, compress, create with or without a reload, and copytruncate."
+  },
+  "tags": [
+    "logging"
+  ],
+  "class": "stepper",
+  "steps": 12
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-logrotate"]; colours only from kit tokens. */
+[data-sim="lnx-logrotate"] .lr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 21rem);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.6rem 0.8rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-logrotate"] .lr-mono { font-family: var(--mono); }
+[data-sim="lnx-logrotate"] .lr-muted { color: var(--muted); }
+[data-sim="lnx-logrotate"] h3 { margin: 0 0 0.3rem; font-size: var(--fs-md); }
+[data-sim="lnx-logrotate"] .lr-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.5rem 0.65rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* the writer */
+[data-sim="lnx-logrotate"] .lr-writer {
+  grid-column: 1;
+  grid-row: 1 / span var(--rows, 1);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border: 0.2rem solid var(--c1);
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-width: 0;
+}
+[data-sim="lnx-logrotate"] .lr-writer-pid { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-logrotate"] .lr-sel { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-logrotate"] .lr-sel code { display: block; font-family: var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+[data-sim="lnx-logrotate"] .lr-fdline { font-size: var(--fs-sm); font-weight: 700; color: var(--c1); }
+[data-sim="lnx-logrotate"] .lr-wrote { font-size: var(--fs-sm); }
+
+/* /var/log: lane (the descriptor's arrow) | inode with its lines | ◀ the name */
+[data-sim="lnx-logrotate"] .lr-list { display: flex; flex-direction: column; gap: 0.3rem; overflow: hidden; }
+[data-sim="lnx-logrotate"] .lr-rows { display: grid; grid-template-columns: minmax(0, 12rem) 4.2rem minmax(0, 1fr) max-content; gap: 0.25rem 0; align-items: center; }
+[data-sim="lnx-logrotate"] .lr-lane { grid-column: 2; }
+[data-sim="lnx-logrotate"] .lr-ino { grid-column: 3; }
+[data-sim="lnx-logrotate"] .lr-name { grid-column: 4; }
+[data-sim="lnx-logrotate"] .lr-lane { align-self: stretch; display: flex; align-items: center; }
+[data-sim="lnx-logrotate"] .lr-arrow {
+  position: relative;
+  flex: 1;
+  height: 0.3rem;
+  margin-right: 0.75rem;
+  background: var(--c1);
+}
+[data-sim="lnx-logrotate"] .lr-arrow::after {
+  content: '';
+  position: absolute;
+  right: -0.75rem;
+  top: -0.45rem;
+  border-left: 0.8rem solid var(--c1);
+  border-top: 0.6rem solid transparent;
+  border-bottom: 0.6rem solid transparent;
+}
+[data-sim="lnx-logrotate"] .lr-arrow > span {
+  position: absolute;
+  left: 0.2rem;
+  bottom: 0.35rem;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--c1);
+  line-height: 1;
+}
+[data-sim="lnx-logrotate"] .lr-arrow.sd-changed { outline: none; box-shadow: 0 0 0 0.35rem var(--hl); }
+[data-sim="lnx-logrotate"] .lr-ino {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.3rem;
+  min-height: 2.2rem;
+  padding: 0.1rem 0.4rem;
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-logrotate"] .lr-ino-live { border-width: 0.25rem; border-color: var(--c1); }
+/* the kit's .sd-hatch loses to the box's own background, so the hatch is repeated here */
+[data-sim="lnx-logrotate"] .lr-ino-gz { background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 22%, transparent) 0.35em 0.5em); }
+[data-sim="lnx-logrotate"] .lr-ino-gz .lr-count { background: var(--bg); padding: 0 0.2rem; }
+[data-sim="lnx-logrotate"] .lr-ino-del { border-style: dashed; border-color: var(--danger); }
+[data-sim="lnx-logrotate"] .lr-ino-gone { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+[data-sim="lnx-logrotate"] .lr-ino-no { font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; min-width: 3.2rem; }
+[data-sim="lnx-logrotate"] .lr-count { font-size: var(--fs-sm); color: var(--muted); margin-left: auto; white-space: nowrap; }
+[data-sim="lnx-logrotate"] .lr-chip {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 0 0.25rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+[data-sim="lnx-logrotate"] .lr-more { font-weight: 700; color: var(--muted); }
+[data-sim="lnx-logrotate"] .lr-chip-new { border-color: var(--ink); border-width: 0.15rem; font-weight: 700; background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-logrotate"] .lr-chip-lost { border-color: var(--danger); color: var(--danger); text-decoration: line-through; background: var(--bg); }
+[data-sim="lnx-logrotate"] .lr-gzb {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--bg);
+}
+[data-sim="lnx-logrotate"] .lr-name {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  padding-left: 0.4rem;
+  white-space: nowrap;
+}
+[data-sim="lnx-logrotate"] .lr-name::before { content: '◀ '; color: var(--muted); }
+[data-sim="lnx-logrotate"] .lr-name-live { font-weight: 700; }
+[data-sim="lnx-logrotate"] .lr-name-del, [data-sim="lnx-logrotate"] .lr-name-gone { font-family: var(--sans); font-size: var(--fs-sm); color: var(--muted); white-space: normal; max-width: 13rem; }
+[data-sim="lnx-logrotate"] .lr-name-del::before { content: '✕ '; color: var(--danger); }
+[data-sim="lnx-logrotate"] .lr-name-gone::before { content: '✕ '; }
+[data-sim="lnx-logrotate"] .lr-name-gone s { font-family: var(--mono); }
+[data-sim="lnx-logrotate"] .lr-row-gone { opacity: 0.75; }
+
+/* logrotate */
+[data-sim="lnx-logrotate"] .lr-rot { display: flex; flex-direction: column; gap: 0.4rem; border-color: var(--c2); border-width: 0.2rem; }
+[data-sim="lnx-logrotate"] .lr-dirs { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+[data-sim="lnx-logrotate"] .lr-dir { font-family: var(--mono); font-size: var(--fs-sm); padding: 0 0.3rem; border: var(--line-w) solid var(--c2); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-logrotate"] .lr-status { font-size: var(--fs-sm); }
+[data-sim="lnx-logrotate"] .lr-ops { margin: 0; padding-left: 1.6rem; display: flex; flex-direction: column; gap: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="lnx-logrotate"] .lr-ops li::marker { font-weight: 700; }
+[data-sim="lnx-logrotate"] .lr-op-main { font-weight: 700; }
+[data-sim="lnx-logrotate"] .lr-op-sub { display: block; color: var(--muted); }
+[data-sim="lnx-logrotate"] .lr-op-bad .lr-op-sub { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-logrotate"] .lr-op-pairs { font-family: var(--mono); color: var(--ink); }
+[data-sim="lnx-logrotate"] .lr-nowrap { white-space: nowrap; }
+[data-sim="lnx-logrotate"] .lr-idle { font-size: var(--fs-sm); color: var(--muted); margin: 0; }
+
+/* bottom bar */
+[data-sim="lnx-logrotate"] .lr-foot {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1.4rem;
+  padding: 0.3rem 0.65rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-logrotate"] .lr-day { font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="lnx-logrotate"] .lr-lost { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+[data-sim="lnx-logrotate"] .lr-lost b { color: var(--danger); }
+
+/* legend swatches */
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape^='lr-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape^='lr-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-live'] { border: 0.25rem solid var(--c1); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-old'] { border: 0.15rem solid var(--ink); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-gz'] { border: 0.15rem solid var(--ink); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 40%, transparent) 0.2em 0.32em); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-gone'] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-gone']::after { content: '✕'; color: var(--muted); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-del'] { border-style: dashed; border-color: var(--danger); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-del']::after { content: '✕'; color: var(--danger); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-fd'] { border: 0; height: 0.3rem; border-radius: 0; background: var(--c1); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-lost'] { border-color: var(--danger); }
+[data-sim="lnx-logrotate"] .sd-swatch[data-shape='lr-lost']::after { content: '✕'; color: var(--danger); }
+
+[data-sim="lnx-logrotate"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the title takes the first header row, the legend and the tools the second */
+[data-sim="lnx-logrotate"] .sd-titles { flex: 1 1 70rem; }
+
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-logrotate"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-logrotate"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-logrotate"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-logrotate"] .lr { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; }
+  [data-sim="lnx-logrotate"] .lr-rows { grid-template-columns: 3rem minmax(0, 1fr); }
+  [data-sim="lnx-logrotate"] .lr-writer { grid-column: 1 / -1; grid-row: auto; margin-bottom: 0.3rem; }
+  [data-sim="lnx-logrotate"] .lr-lane { grid-column: 1; grid-row: span 2; }
+  [data-sim="lnx-logrotate"] .lr-ino { grid-column: 2; }
+  [data-sim="lnx-logrotate"] .lr-name { grid-column: 2; padding-left: 0; margin-top: -0.2rem; white-space: normal; overflow-wrap: anywhere; }
+  [data-sim="lnx-logrotate"] .lr-arrow > span { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Rotacija dnevnika: create i copytruncate</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var SELECTOR = '*.info;mail.none;authpriv.none;cron.none';
+
+  /** Data (names, numbers, directives) never gets translated. */
+  function data(text, cls) { return h('span', { class: 'lr-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  /** t.parts with every placeholder value wrapped as data; a placeholder used twice gets its own copy of the node. */
+  function parts(key, vars) {
+    var out = {};
+    Object.keys(vars).forEach(function (k) { out[k] = typeof vars[k] === 'object' ? vars[k] : data(vars[k]); });
+    var seen = [];
+    return t.parts(key, out).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function date(day) {
+    var c = L.dateOf(day);
+    return Simdeck.lang === 'hr' ? c.d + '. ' + c.m + '. ' + c.y + '.' : L.ymd(day).replace(/^(\d{4})(\d\d)(\d\d)$/, '$1-$2-$3');
+  }
+  function inodeName(s, inode) {
+    var f = L.byInode(s, inode);
+    return f ? f.name : null;
+  }
+
+  // ── stage: the writer ──
+
+  function writer(c) {
+    var s = c.state;
+    return h('div', { class: 'lr-writer' },
+      h('h3', null, t('writerTitle')),
+      data(t('writerPid', { pid: s.writer.pid }), 'lr-writer-pid'),
+      h('div', { class: 'lr-sel' }, t('writerSel'),
+        h('code', { translate: 'no' }, SELECTOR.split(';').map(function (x, i, a) { return i < a.length - 1 ? [x + ';', h('wbr')] : x; })),
+        code(L.DIR + '/' + L.LOG)),
+      h('div', { class: 'lr-fdline' + (s.arrowMoved ? ' sd-changed' : '') }, parts('writerFd', { inode: s.writer.inode })),
+      s.written.length ? h('div', { class: 'lr-wrote' }, t.n('writerWrote', s.written.length)) : null);
+  }
+
+  // ── stage: /var/log ──
+
+  /** One chip per line; a long run keeps its first 2 and last 6, the count says how many there are. */
+  var MAX_CHIPS = 10;
+  function chips(lines, s) {
+    var show = lines.length > MAX_CHIPS ? lines.slice(0, 2).concat([null], lines.slice(-6)) : lines;
+    return show.map(function (id) {
+      if (id === null) return h('span', { class: 'lr-more', 'aria-hidden': 'true' }, '…');
+      return h('span', { class: 'lr-chip' + (s.written.indexOf(id) >= 0 ? ' lr-chip-new' : ''), translate: 'no' }, id);
+    });
+  }
+
+  function row(s, o) {
+    // o: { inode, lines, gz, name, kind: 'live' | 'old' | 'del' | 'gone', was }
+    var held = o.kind !== 'gone' && s.writer.inode === o.inode;
+    var changed = s.changed.indexOf(o.inode) >= 0 && o.kind !== 'gone';
+    var cls = 'lr-ino lr-ino-' + o.kind + (o.gz ? ' lr-ino-gz' : '') + (changed ? ' sd-changed' : '');
+    var count = o.lines.length ? t.n('linesN', o.lines.length) : t('empty');
+    var name;
+    if (o.kind === 'del') name = h('span', { class: 'lr-name lr-name-del' }, t('deletedName'), ' ', parts('deletedWas', { name: o.was }));
+    else if (o.kind === 'gone') name = h('span', { class: 'lr-name lr-name-gone' }, h('s', { translate: 'no' }, o.name), ' ', t('removedTag'));
+    else name = h('span', { class: 'lr-name' + (o.kind === 'live' ? ' lr-name-live' : ''), translate: 'no' }, o.name);
+    return [
+      h('div', { class: 'lr-lane' }, held ? h('div', { class: 'lr-arrow' + (s.arrowMoved ? ' sd-changed' : ''), 'aria-label': t('legFd') }, h('span', null, t('fd'))) : null),
+      h('div', { class: cls + (o.kind === 'gone' ? ' lr-row-gone' : '') },
+        data(t('inode', { inode: o.inode }), 'lr-ino-no'),
+        o.gz ? h('span', { class: 'lr-gzb', translate: 'no' }, '.gz') : null,
+        chips(o.lines, s),
+        h('span', { class: 'lr-count' }, count)),
+      name
+    ];
+  }
+
+  function listing(c) {
+    var s = c.state;
+    var rows = [];
+    s.files.forEach(function (f) {
+      rows.push(row(s, { inode: f.inode, lines: f.lines, gz: f.gz, name: f.name, kind: f.name === L.LOG ? 'live' : 'old' }));
+    });
+    s.deleted.forEach(function (d) { rows.push(row(s, { inode: d.inode, lines: d.lines, gz: d.gz, was: d.was, kind: 'del' })); });
+    // removed this step and not still open: crossed, so the student sees what went
+    s.removed.filter(function (r) { return !r.open && r.why === 'removed'; }).forEach(function (r) {
+      rows.push(row(s, { inode: r.inode, lines: r.lines, gz: r.gz, name: r.name, kind: 'gone' }));
+    });
+    return h('div', { class: 'lr-box lr-list' },
+      h('h3', null, data(L.DIR), ' · ', t('listTitle')),
+      h('div', { class: 'lr-rows', style: { '--rows': String(rows.length) } }, writer(c), rows));
+  }
+
+  // ── stage: logrotate ──
+
+  function directives(p) {
+    var d = ['weekly', 'rotate ' + p.rotate, p.method === 'copytruncate' ? 'copytruncate' : 'create'];
+    if (p.dateext) d.push('dateext');
+    if (p.compress) d.push('compress');
+    if (p.delaycompress) d.push('delaycompress');
+    var out = d.map(function (x) { return h('span', { class: 'lr-dir', translate: 'no' }, x); });
+    if (p.method === 'create-reload') out.push(h('span', { class: 'lr-dir' }, t('reloadDirective')));
+    return out;
+  }
+
+  function op(o) {
+    var main, sub = null, bad = false;
+    switch (o.op) {
+      case 'rename': main = parts('opRename', { from: o.from, to: o.to }); if (o.from === L.LOG) sub = parts('opRenameKeeps', { inode: o.inode }); break;
+      case 'create': main = parts('opCreate', { name: o.name }); sub = parts('opCreateInode', { inode: o.inode }); break;
+      case 'copy': main = parts('opCopy', { from: o.from, to: o.to }); sub = t.parts('opCopyInode', { inode: data(o.inode), n: o.n }); break;
+      case 'between': main = parts('opBetween', { line: o.line }); break;
+      case 'truncate':
+        main = parts('opTruncate', { name: o.name });
+        if (o.lost.length) { sub = parts('opTruncateLost', { lines: o.lost.join(', ') }); bad = true; }
+        break;
+      case 'reload': main = t('opReload'); sub = parts('opReloadTo', { inode: o.to }); break;
+      case 'freed': main = parts('opFreed', { inodes: o.inodes.join(', ') }); break;
+      case 'compress': main = parts('opCompress', { from: o.from, to: o.to }); if (o.open) { sub = parts('opCompressOpen', { inode: o.old }); bad = true; } break;
+      case 'remove': main = parts('opRemove', { name: o.name }); if (o.open) { sub = t('opRemoveOpen'); bad = true; } break;
+      default: main = t('opNotDue');
+    }
+    return h('li', { class: bad ? 'lr-op-bad' : null }, h('span', { class: 'lr-op-main' }, main), sub ? h('span', { class: 'lr-op-sub' }, sub) : null);
+  }
+
+  /** The shift of old versions (renames other than the live log's) is one item: its renames in order, short. */
+  function opItems(list) {
+    var out = [], shift = null;
+    list.forEach(function (o) {
+      if (o.op === 'rename' && o.from !== L.LOG) {
+        if (!shift) { shift = []; out.push(shift); }
+        shift.push(o);
+        return;
+      }
+      shift = null;
+      out.push(o);
+    });
+    return out.map(function (x) {
+      if (!Array.isArray(x)) return op(x);
+      return h('li', null, h('span', { class: 'lr-op-main' }, t('opShift')),
+        h('span', { class: 'lr-op-sub lr-op-pairs', translate: 'no' }, x.map(function (o, i) {
+          return [i ? ', ' : '', h('span', { class: 'lr-nowrap' }, o.from.replace(L.LOG, '') + ' → ' + o.to.replace(L.LOG, ''))];
+        })));
+    });
+  }
+
+  function logrotate(c) {
+    var s = c.state, p = L.norm(c.params);
+    var body;
+    if (s.phase === 'rotate') body = [h('div', { class: 'lr-status' }, t('lrRun', { day: s.day })), h('ol', { class: 'lr-ops' }, opItems(s.ops))];
+    else body = [h('p', { class: 'lr-idle' }, t(s.phase === 'start' ? 'lrStart' : 'lrWrite'))];
+    return h('div', { class: 'lr-box lr-rot' },
+      h('h3', null, data(t('lrTitle'))),
+      h('div', { class: 'lr-status lr-muted' }, t('lrDirectives')),
+      h('div', { class: 'lr-dirs' }, directives(p)),
+      h('div', { class: 'lr-status' }, t('lrStatus', { date: date(s.lastRotation), day: s.lastRotation })),
+      body);
+  }
+
+  // ── stage: the bottom bar ──
+
+  function foot(c) {
+    var s = c.state;
+    return h('div', { class: 'lr-foot' },
+      h('span', { class: 'lr-day' }, t('dayLabel', { day: s.day }), ' · ', date(s.day)),
+      h('span', null, t.n('rotations', s.rotations)),
+      h('span', { class: 'lr-lost' }, h('b', null, t('lostLabel')),
+        s.lostLines.length ? s.lostLines.map(function (id) { return h('span', { class: 'lr-chip lr-chip-lost', translate: 'no' }, '✕ ' + id); })
+          : h('span', null, t('lostNone'))));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'lr' }, listing(c), logrotate(c), foot(c)));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, p = L.norm(c.params);
+    var log = data(L.LOG);
+    if (c.first) return parts('capStart', { pid: s.writer.pid, log: L.DIR + '/' + L.LOG, inode: s.writer.inode });
+    if (s.phase === 'write') {
+      var out = t.parts('capWrite', { day: data(s.day), n: s.written.length, inode: data(s.writer.inode) });
+      out = [].concat(out);
+      // the plural form decides the sentence; the tail says where the inode is
+      var name = inodeName(s, s.writer.inode);
+      if (name === L.LOG) out = out.concat(t.parts('capWriteLive', { log: log }));
+      else if (name) out = out.concat(t.parts('capWriteOld', { name: data(name), log: log }));
+      else out = out.concat(t('capWriteDeleted'));
+      return out;
+    }
+    if (!s.due) return t('capNotDue');
+    var made = s.ops.filter(function (o) { return o.op === 'create' || o.op === 'copy'; })[0];
+    var to = s.ops.filter(function (o) { return o.op === 'rename' && o.from === L.LOG; })[0];
+    var target = to ? to.to : made.to;
+    var res;
+    if (p.method === 'copytruncate') {
+      var between = s.ops.filter(function (o) { return o.op === 'between'; })[0];
+      res = between ? parts('capRotCopyLost', { log: L.LOG, to: target, line: between.line })
+        : parts('capRotCopy', { log: L.LOG, to: target, inode: s.writer.inode });
+    } else if (p.method === 'create-reload') {
+      res = parts('capRotCreateReload', { log: L.LOG, to: target, inode: s.writer.inode });
+    } else {
+      // without the reload the writer's inode may be an older version by now, or have no name at all
+      var held = inodeName(s, s.writer.inode);
+      res = held === target ? parts('capRotCreate', { log: L.LOG, to: target, inode: s.writer.inode })
+        : held ? parts('capRotCreateOlder', { log: L.LOG, to: target, inode: s.writer.inode, name: held })
+          : parts('capRotCreateNoName', { log: L.LOG, to: target, inode: s.writer.inode });
+    }
+    res = [].concat(res);
+    // at most two extra sentences: what matters most first
+    var extra = [];
+    var removed = s.ops.filter(function (o) { return o.op === 'remove'; });
+    var openGone = s.removed.filter(function (r) { return r.open; })[0];
+    if (openGone && openGone.why === 'removed') extra.push(parts('capRemovedOpen', { name: openGone.name, inode: openGone.inode }));
+    else if (openGone) extra.push(parts('capCompressedOpen', { inode: openGone.inode }));
+    if (s.ops.some(function (o) { return o.op === 'freed'; })) extra.push(t.parts('capFreed', {}));
+    if (removed.length && !(openGone && openGone.why === 'removed')) {
+      extra.push(t.parts(p.dateext ? 'capRemovedDate' : 'capRemoved', { name: data(removed[0].name), n: p.rotate }));
+    }
+    var comp = s.ops.filter(function (o) { return o.op === 'compress'; });
+    if (p.compress && p.delaycompress) extra.push(parts('capDelayed', { name: target }));
+    else if (comp.length && !openGone) extra.push(parts('capCompressed', { from: comp[comp.length - 1].from, to: comp[comp.length - 1].to }));
+    if (!removed.length && s.ops.some(function (o) { return o.op === 'rename' && o.from !== L.LOG; }) && extra.length < 2) extra.push(t.parts('capShift', {}));
+    extra.slice(0, 2).forEach(function (x) { res = res.concat(x); });
+    return res;
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'method', type: 'choice', label: t('method'), resets: true, options: [
+        ['create-reload', t('methodCreateReload')], ['create', t('methodCreate')], ['copytruncate', t('methodCopytruncate')]] },
+      { key: 'rotate', type: 'range', label: t('rotate'), min: 1, max: 6, resets: true },
+      { key: 'dateext', type: 'toggle', label: t('dateext'), resets: true },
+      { key: 'compress', type: 'toggle', label: t('compress'), resets: true },
+      // shown only where they mean something (hidden, not disabled, so the panel fits one screen)
+      { key: 'delaycompress', type: 'toggle', label: t('delaycompress'), resets: true,
+        visible: function (p) { return !!p.compress; } },
+      { key: 'writeDuringRotation', type: 'toggle', label: t('writeDuringRotation'), resets: true,
+        visible: function (p) { return p.method === 'copytruncate'; } },
+      { key: 'linesPerCycle', type: 'range', label: t('linesPerCycle'), min: 1, max: 4, resets: true },
+      // the number of weeks comes with the preset; hidden to keep the panel on one screen
+      { key: 'cycles', type: 'range', label: t('cycles'), min: 2, max: 8, resets: true, visible: function () { return false; } }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'lr-live', label: t('legLive') },
+      { shape: 'lr-old', label: t('legOld') },
+      { shape: 'lr-gz', label: t('legGz') },
+      { shape: 'lr-gone', label: t('legGone') },
+      { shape: 'lr-del', label: t('legDeleted') },
+      { shape: 'lr-fd', label: t('legFd') },
+      { shape: 'lr-lost', label: t('legLost') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
