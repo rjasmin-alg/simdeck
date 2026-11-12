@@ -271,6 +271,11 @@ KIT = {
         "an ordered rule list, the packet or request being evaluated, the row being compared highlighted per "
         "step, the matching row marked, implicit default shown, and evaluation modes (first match, most specific, "
         "deny wins) so the contrast in catalogue §5.1 can be shown"),
+    "kit-paper-columns": ("K5", "paper columns", "ari-column-addition",
+        "squared-paper cells with one digit each, aligned by place, a carry or borrow row above, digits crossed out "
+        "and rewritten, the current column highlighted, a result line, partial products shifted by one place, the "
+        "Croatian division layout (\"846 : 3 = 282\" with the remainders underneath), any base from 2 to 16, and the "
+        "audience switch (teacher by default, adult, child) remembered across the `ari-` pages"),
 }
 
 

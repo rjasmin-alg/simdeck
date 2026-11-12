@@ -83,6 +83,7 @@ live parameters), `ref` (reference poster, no controls), `tool` (lecturer only, 
 | `FIN` | Finance basics for IT managers | owner, 2026-11-06: three requests |
 | `CMP` | Compliance and procedures for IT managers | owner, 2026-11-07: same audience as `FIN` |
 | `SET` | Rad na setu / Working on set (crew safety and departments) | owner, 2026-11-08: for a colleague who trains film crews |
+| `ARI` | Računanje na papiru / Arithmetic on paper (the four operations written in columns, any base) | owner suggestion s-002, 2026-11-12: teachers, parents and pupils, and at university to show that a base is only notation |
 
 **Seed** names where an entry comes from: a book chapter (`UL ch19`), a planned URM card
 (`URM card ch08-arp`), an NLA topic (`NLA T20`), a DR scenario (`DR S6`) or an existing simulator
@@ -326,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **367 of 471 entries are live**, 64 w3, 30 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **368 of 477 entries are live**, 70 w3, 28 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -338,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 42 | 13 w3 · queued |
+| §4.4 Linux | 55 | 43 | 1 w3 · building, 11 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -356,6 +357,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 1 | 13 w3, 11 w3 · queued |
 | §4.15 Antennas and radiation | 12 | 12 | – |
+| §4.16 Arithmetic on paper | 6 | 0 | 6 w3 |
 
 <!-- status:end -->
 
@@ -571,7 +573,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-page-cache` | live | free vs available | the page cache is not lost memory; dirty pages and writeback | read and write files, watch the counters | expl | S | P2 | UL, NLA | NLA T42 |  |
 | `lnx-load-average` | live | Load average | load counts runnable and D-state tasks, not CPU percent | add CPU and I/O-bound tasks on 1–8 cores | expl | S | P2 | UL, NLA | NLA T41 |  |
 | `lnx-log-path` | live | The path of a log message | app → journald → rsyslog → file or remote | send messages with facilities and priorities | step | S | P2 | UL | UL ch13 (`put-poruke.svg`) |  |
-| `lnx-logrotate` | w3 · queued | logrotate | rotation numbering, compress, copytruncate vs create | run rotations while an app writes | step | S | P3 | UL | UL ch13 |  |
+| `lnx-logrotate` | live | logrotate | rotation numbering, compress, copytruncate vs create | run rotations while an app writes | step | S | P3 | UL | UL ch13 |  |
 | `lnx-routing-decision` | live | Address, route and resolver | the three things a host needs, and the route lookup | break each one, see which command fails | step | S | P2 | UL | UL ch14 (`cetiri-podatka-i-tri-mjesta.svg`); `urm-routing-table` for LPM |  |
 | `lnx-firewalld-zones` | live | firewalld zones | a packet's zone comes from its source or interface | send packets from different sources | step | S | P2 | UL | UL ch15 → §5.16 |  |
 | `lnx-selinux-decision` | live | DAC says yes, SELinux says no | a second, label-based check after permissions | change modes and contexts, retry access | step | S | P1 | UL | UL ch15 (`dozvola-i-politika.svg`, `tri-mjesta-koja-kazu-ne.svg`) |  |
@@ -597,7 +599,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-send-receive` | w3 · queued | Btrfs/ZFS send and receive | incremental replication from snapshot pairs | snapshot, send, change, send incremental | step | S | P3 | NLA, DR | NLA T22 → §5.3 |  |
 | `lnx-zfs-self-heal` | live | Checksums and self-healing | a scrub finds a bad block and repairs it from the mirror | corrupt a block, scrub | step | S | P2 | NLA | NLA T23 |  |
 | `lnx-raid-rebuild` | live | Rebuild under load and the second failure | a long rebuild, an unreadable sector, a lost array | fail a disk, rebuild, hit a URE | step | S | P2 | NLA, DR | NLA T24 → §5.3 |  |
-| `lnx-multipath` | w3 · queued | Multipath I/O | path failover for iSCSI/FC | fail paths during I/O | step | S | P3 | NLA | NLA T25; `spl-stratis-lab` |  |
+| `lnx-multipath` | w3 · building | Multipath I/O | path failover for iSCSI/FC | fail paths during I/O | step | S | P3 | NLA | NLA T25; `spl-stratis-lab` |  |
 | `lnx-ansible-idempotence` | live | Idempotence | a script run twice breaks things; a declarative task doesn't | run both versions repeatedly | step | S | P2 | NLA | NLA T30 |  |
 | `lnx-terraform-drift` | live | Infrastructure as code: state and drift | desired vs state vs real; plan shows the diff | change infra by hand, run plan | step | S | P2 | NLA | NLA T31 |  |
 | `lnx-deploy-strategies` | live | Blue-green, canary, rolling | how each moves traffic and rolls back | deploy a bad version with each strategy | step | M | P2 | NLA | NLA T33 |  |
@@ -1367,6 +1369,47 @@ radiation", `lang: hr`; text only, no file yet):
   - `link` "Proračun veze" / "The link budget": `ant-link-budget`
 - Also in existing leaves: `ant-ground-image` in `radio › propagation › ionosphere`, next to `skip-distance`;
   `ant-link-budget` in `radio › propagation › fading` and `networks › wireless › channels`.
+
+### 4.16 Arithmetic on paper
+
+How to add, subtract, multiply and divide on paper, from owner suggestion s-002 (2026-11-12): "elementary
+mathematical problems - how to add, subtract, multiply and divide on paper". Owner decisions of the same day: one
+page serves three audiences through a switch, **teacher** (the default: projected in class, any numbers, step forward
+and back, a typical mistake shown with why it is wrong), **adult** (why each step works) and **child** (grades 2 to 4:
+big digits, one step per click, the school phrasing); every column page works in **any base**, 10 by default, because
+at university the same page shows that a base is only a way of writing a number (a carry happens when a column reaches
+the base); subtraction shows **both methods side by side**, borrowing and the method Croatian schools teach. The
+written forms are the Croatian ones (division as "846 : 3 = 282" with the remainders under the dividend). The Croatian
+school method of subtraction is believed to be equal additions (add the base to the top digit and one to the next
+digit of the number taken away) *(check)*: it stays off the pages until the owner confirms it. Six pages; the first
+column page is the pilot of kit view K5 (paper columns: squared-paper cells, the carry row, crossed-out digits, the
+audience and base switches).
+
+| ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `ari-place-value` | w3 | Place value: a digit is worth what its place says | a digit is worth the digit times the base to the power of its place; ten ones regroup into one ten (in base b, b of them into one of the next place); the same quantity written in base 10, 2, 8 and 16 has other digits but is the same number | build a number from blocks, regroup ones into tens, switch the base and watch the digits change while the blocks stay | expl | S | P2 | ARI | owner suggestion s-002; pairs with `arh-twos-complement` (number-representation) |  |
+| `ari-column-addition` | w3 | Column addition: carrying | add column by column from the right; a column whose sum reaches the base writes what is left over and carries the rest to the next column (more than 1 with three or more numbers); the carry is a regrouping, not a trick | type two to four numbers, step column by column, see the carry move, switch the base | step | M | P2 | ARI | owner suggestion s-002; pilot of kit view K5 |  |
+| `ari-column-subtraction` | w3 | Column subtraction: two methods side by side | when a top digit is smaller, either borrow (take one from the next column, it is worth the base here) or use equal additions (add the base to the top digit and one to the next digit taken away); both keep the difference unchanged, so they give the same answer | type two numbers, step both methods at once, compare what is written where; a zero in the top number | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition` |  |
+| `ari-column-multiplication` | w3 | Column multiplication: partial products | multiply by each digit of the second number, write each partial product one place further left (it is multiplied by the base), then add; an area model shows why; in base 2 every partial product is the number itself or zero, shifted: shift-and-add | type two numbers, step digit by digit, open the area model, switch to base 2 | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition`; base 2 pairs with `arh-twos-complement` |  |
+| `ari-long-division` | w3 | Long division, the Croatian way | take as few leading digits as can be divided, ask how many times, multiply, subtract, bring down the next digit, repeat; a 0 in the quotient when a step is too small; the remainder is less than the divisor | type a dividend and a divisor, step through, see a forgotten 0 in the quotient as a typical mistake | step | M | P2 | ARI | owner suggestion s-002; after `ari-column-multiplication` |  |
+| `ari-checking` | w3 | Is it right? Checking a result | the inverse operation checks a result (difference plus the number taken away gives the top number; quotient times divisor plus remainder gives the dividend), and an estimate from rounded numbers catches a result that is off by a place | check given results, find the wrong one, estimate before computing | expl | S | P3 | ARI | owner suggestion s-002; after `ari-long-division` |  |
+
+**Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area before
+`lecturer`:
+
+- **`arithmetic`**: "Računanje na papiru" / "Arithmetic on paper"; blurb "Zbrajanje, oduzimanje, množenje i dijeljenje
+  na papiru, u bilo kojoj bazi." / "Adding, subtracting, multiplying and dividing on paper, in any base."
+  - `numbers` "Brojevi i mjesna vrijednost" / "Numbers and place value"
+    - `place-value`: `ari-place-value`
+  - `operations` "Četiri računske operacije" / "The four operations"
+    - `addition`: `ari-column-addition`
+    - `subtraction`: `ari-column-subtraction`
+    - `multiplication`: `ari-column-multiplication`
+    - `division`: `ari-long-division`
+  - `checking` "Provjera" / "Checking"
+    - `checking`: `ari-checking`
+- Also in existing leaves: `ari-place-value` and base 2 of `ari-column-multiplication` next to `arh-twos-complement`
+  once that is placed.
 
 ---
 

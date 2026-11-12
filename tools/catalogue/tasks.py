@@ -57,6 +57,7 @@ PILOTS = {
     "net-arp-local-remote": "K2 topology with moving packets",
     "sto-dedup-chunking": "K3 block grid",
     "net-rule-first-match": "K4 rule table with the matching row",
+    "ari-column-addition": "K5 paper columns",
 }
 
 # A preset task adds a preset (and its strings) to another sim's folder: hard dependency, one at a time per host.
@@ -75,6 +76,8 @@ PRESET_OF = {
 
 # Soft dependency: start after this sim is merged, and reuse its model (copied, see COMMON.md §6).
 BUILDS_ON = {
+    "ari-column-subtraction": "ari-column-addition", "ari-column-multiplication": "ari-column-addition",
+    "ari-long-division": "ari-column-multiplication", "ari-checking": "ari-long-division",
     "net-osi-tcpip-map": "net-encapsulation", "net-nominal-vs-actual": "net-delay-components",
     "net-ethernet-frame": "net-encapsulation", "net-domains": "urm-mac-table", "net-mac-flooding": "urm-mac-table",
     "net-vlan-trunk": "urm-vlan", "net-intervlan-routing": "urm-vlan", "net-arp-spoofing": "net-arp-local-remote",
@@ -220,7 +223,7 @@ def topic_of(cid, area):
         "win": "windows-admin", "sto": "storage", "dr": "storage", "ha": "distributed", "perf": "distributed",
         "arh": "architecture", "os": "os", "ossim": "os", "aut": "theory", "ham": "radio", "kk": "radio",
         "50ohm": "radio", "tool": "classroom", "app": "distributed", "fin": "finance",
-        "cmp": "compliance", "set": "film-set", "ant": "radio",
+        "cmp": "compliance", "set": "film-set", "ant": "radio", "ari": "arithmetic",
     }.get(pre, "networks")
 
 
@@ -304,7 +307,11 @@ TAG_RULES = [
 ]
 
 
-TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"], "ham-multiple-access": ["modulation"],
+TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"],
+    "ha-cluster-membership": ["fault-tolerance", "consensus"], "ha-resource-placement": ["fault-tolerance", "scheduling"],
+    "ari-place-value": ["number-representation"], "ari-column-addition": ["column-arithmetic", "number-representation"],
+    "ari-column-subtraction": ["column-arithmetic"], "ari-column-multiplication": ["column-arithmetic"],
+    "ari-long-division": ["column-arithmetic"], "ari-checking": ["column-arithmetic"], "ham-multiple-access": ["modulation"],
     "fin-capex-opex": ["accounting", "budgeting"], "fin-depreciation": ["accounting"],
     "fin-refresh-cycle": ["costs", "accounting"], "fin-accruals-cash": ["accounting"],
     "fin-budget-variance": ["budgeting"], "fin-tco": ["costs"], "fin-npv-discounting": ["investment"],
@@ -357,7 +364,8 @@ def tags_of(cid):
             tags.append(tag)
         if len(tags) == 3:
             break
-    return tags or ["networking"]
+    assert tags, f"{cid}: no tag rule matches; add it to TAGS_OVERRIDE (tags.json has no catch-all tag)"
+    return tags
 
 
 ADOPT_COURSES = {
@@ -372,7 +380,7 @@ ADOPT_COURSES = {
 
 def level_of(courses):
     """sim.json level from the courses: intro courses first, then advanced ones (owner may override)."""
-    if re.search(r"\b(FIN|CMP|SET)\b", courses):
+    if re.search(r"\b(FIN|CMP|SET|ARI)\b", courses):
         return "intro"
     if re.search(r"\b(URM|UL|WIN1|AUT)\b", courses):
         return "intro"
@@ -665,6 +673,32 @@ CMP_NOTES = ["## Compliance notes (all `cmp-` tasks)", "",
     "(catalogue §4.13 has the proposed `compliance` area).", ""]
 
 
+ARI_NOTES = ["## Paper arithmetic notes (all `ari-` tasks)", "",
+    "- **Who it is for, three views:** one page serves three audiences through an audience switch in the page header, "
+    "remembered across the `ari-` pages: **teacher** (the default: projected in class, any numbers typed in, step "
+    "forward and back, \"show a typical mistake\" with why it is wrong), **adult** (a parent or someone refreshing it: "
+    "every step says why it works, the ten ones that became one ten), **child** (grades 2 to 4: big digits, one step "
+    "per click, the school phrasing, almost no text). The model is the same in all three; only the captions, the "
+    "amount of text and the digit size change.",
+    "- **Any base, 10 by default:** a base control (2 to 16; digits 0 to 9 then A to F) with presets for 2, 8, 10 and "
+    "16. The point, from the owner (2026-11-12), is that a base is only a way of writing a number: the same quantity, "
+    "the same algorithm, other digits; a carry happens when a column reaches the base, not 10. Base 2 links to "
+    "`arh-twos-complement` and shows multiplication as shift-and-add, which is how a processor multiplies. The child "
+    "view stays in base 10 (the switch is hidden there).",
+    "- **Croatian school layout and words:** the written forms Croatian pupils use (division written as "
+    "\"846 : 3 = 282\" with the remainders under the dividend, not the English bracket; the multiplication sign as a "
+    "centred dot), the words of the lesson (zbrajanje, oduzimanje, množenje, dijeljenje, pribrojnik, umanjenik, "
+    "umanjitelj, faktor, djeljenik, djelitelj, količnik, ostatak), and the spoken step (\"pišem 7, pamtim 1\"). Put "
+    "the English textbook terms in the English strings.",
+    "- **Concepts, not tricks:** each page shows why the step works (the place value behind a carry, the shift behind a "
+    "partial product), never a rule to memorise without it. No calculators, apps or brands.",
+    "- **Kit view K5 (paper columns):** `ari-column-addition` is the pilot; it draws the squared-paper columns, the "
+    "carry row, crossed-out digits and the audience and base switches in its own folder, and the coordinator then "
+    "moves them into the kit (`kit-paper-columns`). The other `ari-` pages use the kit view.",
+    "- **Learn tree:** the `npm run check` warning \"in no leaf yet\" is expected; catalogue §4.16 has the proposed "
+    "`arithmetic` area.", ""]
+
+
 SET_NOTES = ["## Film set notes (all `set-` tasks)", "",
     "- **Who it is for:** people learning to work on a film set (trainees, new crew, day players, film students), "
     "taught by a colleague who trains film crews; they know neither the equipment nor the jobs. Each page puts one "
@@ -840,6 +874,10 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         srcs.append("The primary texts under \"Film set notes\" below (EUR-Lex, Narodne novine, published film and TV "
                     "safety guidance); mark every number and rule you could not check with *(check)* and list it in "
                     "`NOTES.md`.")
+    if cid.startswith("ari-"):
+        srcs.append("Croatian primary-school mathematics textbooks for grades 2 to 4 (the layout and the phrasing a "
+                    "child hears, \"pišem 7, pamtim 1\") and the national curriculum for mathematics (Narodne novine "
+                    "7/2019); mark every phrasing and layout you could not check with *(check)* and list it in `NOTES.md`.")
     if cid.startswith("ant-"):
         srcs.append("The textbooks under \"Antenna notes\" below (Purcell & Morin, Griffiths, Balanis, Kraus) and the "
                     "50ohm-contents-hr chapters on antennas and propagation for the Croatian terms; mark every number "
@@ -860,6 +898,8 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         lines += SET_NOTES
     if cid.startswith("ant-"):
         lines += ANT_NOTES
+    if cid.startswith("ari-"):
+        lines += ARI_NOTES
     if clusters.get(cid):
         lines += ["## Overlaps (catalogue §5)", ""]
         for num, name, rec in clusters[cid]:
@@ -942,7 +982,10 @@ VIEWS = [
 ]
 
 
-VIEW_OVERRIDE = {"net-osi-tcpip-map": None, "sec-digital-signature": None, "win-gpo-processing": None,
+VIEW_OVERRIDE = {"ari-place-value": "K5 paper columns", "ari-column-subtraction": "K5 paper columns",
+                 "ari-column-multiplication": "K5 paper columns", "ari-long-division": "K5 paper columns",
+                 "ari-checking": "K5 paper columns",
+                 "net-osi-tcpip-map": None, "sec-digital-signature": None, "win-gpo-processing": None,
                  "win-gpo-software-install": None, "win-gpo-slow-link": None, "kk-backup-ncs": None,
                  "win-ad-backup-restore": "K2 topology with moving packets", "sto-ec-vs-replication": "K3 block grid",
                  "ham-multiple-access": "K3 block grid", "win-dhcp-policies": "K4 rule table",
@@ -1045,6 +1088,7 @@ W0_TASKS = [
 ]
 KIT_TASKS = [
     ("kit-sequence-chart", "K1"), ("kit-topology", "K2"), ("kit-block-grid", "K3"), ("kit-rule-table", "K4"),
+    ("kit-paper-columns", "K5"),
 ]
 
 if __name__ == "__main__":
