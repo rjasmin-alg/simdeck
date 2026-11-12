@@ -3,6 +3,7 @@
 
 One line per change; the kit only grows (playbook §4). Rules and API: `docs/sim-ui.md`.
 
+- **0.7.0** (2026-11-12): view K5, paper columns: `kit/papercolumns.js` (`Simdeck.paperColumns`, `.audience`, `.power`, `.digits`, `.numeral`, `.checkSpec`, `.layout`, `.rowCells`), its section in `kit.css` (`.sd-paper`, `.sd-paper-box`, swatches `pc-band`, `pc-carry`), tests in `kit/papercolumns.test.js`, docs/sim-ui.md §14; the audience switch with one storage key for the `ari-` pages. Pilot `ari-column-addition` moved onto it.
 - **0.6.1** (2026-11-05): the home page became the tree of subjects (learn.json) and the old home page moved to
   `find/`: the back link also goes back in history from the finder, and returns to a lecture set stored there.
 - **0.6.0** (2026-10-04): view K3, block grid: `kit/blockgrid.js` (`Simdeck.blockGrid`, `.space`, `.split`, `.route`,

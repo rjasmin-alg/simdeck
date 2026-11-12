@@ -6,12 +6,14 @@ pilot of kit view **K5, paper columns**. Rules and expected numbers: `SPEC.md`.
 
 ## Decisions
 
-- **K5 is drawn in this folder** (the task says so): `drawPaper(spec)` in `index.html` draws squared-paper cells
-  (one digit per cell, CSS grid with a gradient grid), the place row, the carry row, the numbers aligned on the
-  right, the `+` sign, the rule, the result row, a current-column band, crossed-out digits (`crossed`, used by the
-  mistake card) and an optional decimal column that is not squared. The spec is plain data indexed by place
-  (k = 0 is the ones), so the subtraction, multiplication and division pages can draw with it. The audience switch
-  (header) and the base control (panel) are the other two K5 parts; see "Shared requests".
+- **K5 was drawn in this folder** (the task said so) and is now the kit's (`kit-paper-columns`, kit 0.7.0, thread
+  t-0406): the paper is `Simdeck.paperColumns(spec)` (squared cells, the place row, the carry row, the numbers aligned
+  on the right with the `+` in the sign column, the rule, the result row, the current-column band, the mistake card's
+  wrong digits as `x: 'wrong'`, the decimal aside) and the header's audience switch is
+  `Simdeck.paperColumns.audience(…)` (same storage key, same `?audience=`). The page's screenshots did not change:
+  200 states (every preset step, each mistake, adult and child, base 2 and 16, nine-digit numbers; hr and en at
+  1920×1080, hr at 375×812) were pixel-identical before and after the move. The regrouping box, the mistake card
+  and the base control stay here (docs/sim-ui.md §14).
 - **Numbers are params as quantities** (`count`, `a`–`d`), not digit strings. Changing the base keeps the quantity
   and rewrites the digits, which is the owner's point (a base is only a way of writing a number). The field shows
   and reads them in the current base. The kit has no text param, so `count` and `a`–`d` are hidden `range` params:
@@ -115,16 +117,13 @@ had focus; the dots' aria-label had no plural forms; three places where SPEC.md 
 
 ## Shared requests (kit view K5, `kit-paper-columns`)
 
-- Move `drawPaper(spec)` and its CSS (`.ac-paper`, `.ac-c`, `.ac-band`, `.ac-rule`, `.ac-x`, `.ac-dec*`) into the
-  kit as `Simdeck.paperColumns(spec)`. Spec as it stands: `{ width, places, placeTitles, carries, carryChanged, rows,
-  result, changed, crossed, band, decimals, decimalResult, decimalHead, aud, label }`, all arrays indexed by place.
-  Subtraction will also need crossed-out digits in the number rows with a small replacement digit above them (only
-  the result row has `crossed` now), and division a layout that is not right-aligned under one rule.
-- The audience switch: a kit header control with a shared storage key (`simdeck.ari.audience`) and `?audience=`; it
-  is page code here (`buildAudience`, `setAudience`, `writeAudienceUrl`).
-- The base control: the kit range plus quick buttons that can be refused per value with a reason (the kit's
-  `disabled` covers a whole control only); page code here (`buildQuick`, `pickBase`).
-- A text param type in the kit (a field whose value is kept in the URL) would replace the hidden `range` params.
+- Done in kit 0.7.0: `drawPaper(spec)` and its CSS became `Simdeck.paperColumns(spec)` (with crossed and rewritten
+  digits in any row, a borrow row, tags, shifted rows and squares right of the ones for division), and the audience
+  switch became `Simdeck.paperColumns.audience(…)`.
+- Still open: the base control (the kit range plus quick buttons that can be refused per value with a reason; the
+  kit's `disabled` covers a whole control only); page code here (`buildQuick`, `pickBase`).
+- Still open: a text param type in the kit (a field whose value is kept in the URL) would replace the hidden `range`
+  params.
 
 ## Time
 

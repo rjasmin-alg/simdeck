@@ -6,7 +6,7 @@ and carries the rest to the next column (more than 1 with three or more numbers)
 trick.** Task: `docs/tasks/w3/ari-column-addition.md`; catalogue §4.16. Every expected number below was checked with
 a small script before coding (NOTES.md, Checks) and is asserted in `sim.test.js`.
 
-## Scene (kit view K5, paper columns, drawn in this folder)
+## Scene (kit view K5, paper columns: `kit/papercolumns.js`, docs/sim-ui.md §14)
 
 - **Paper** (left, the largest part): squared-paper cells, one digit per cell, the numbers written under each other
   **aligned on the right** (ones under ones), the `+` sign left of the last number, a rule under it, the result row

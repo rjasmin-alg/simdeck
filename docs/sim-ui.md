@@ -1,9 +1,9 @@
 # simdeck: sim UI, control kit and template
 
 How every native simdeck simulator looks and behaves, the API of the shared kit, and how to start a new sim from
-the template. Kit version **0.6.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
-sequence chart view K1, §11; 0.5.0 the rule table view K4, §12; 0.6.0 the block grid view K3, §13; changes in
-`kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
+the template. Kit version **0.7.0** (0.2.0 adds the languages, §9; 0.3.0 the topology view K2, §10; 0.4.0 the
+sequence chart view K1, §11; 0.5.0 the rule table view K4, §12; 0.6.0 the block grid view K3, §13; 0.7.0 the paper
+columns view K5, §14; changes in `kit/CHANGELOG.md`), not frozen: it becomes `kit-v1` after the first real sim (playbook §10.8).
 
 ```
 kit/
@@ -13,6 +13,7 @@ kit/
   sequence.js      view K1: message sequence chart (§11; a classic script, ~15 KB, linked only by pages that draw one)
   ruletable.js     view K4: rule table with the matching row (§12; a classic script, ~13 KB, linked only by pages that draw one)
   blockgrid.js     view K3: block grid (§13; a classic script, ~22 KB, linked only by pages that draw one)
+  papercolumns.js  view K5: paper columns and the ari- audience switch (§14; a classic script, ~14 KB, linked only by pages that draw one)
   glossary.js      the shared term list, English term and Croatian term (§9.4; ~40 KB, seeded by tools/glossary/seed.py)
   fonts/           Atkinson Hyperlegible 400/700, latin + latin-ext woff2 (53 KB), SIL OFL 1.1
   template/        the proto-simulator: index.html, strings.js (hr and en), sim.js (model), sim.test.js
@@ -22,6 +23,7 @@ kit/
   sequence.test.js tests for view K1's lane geometry, tie-breaks, spec checks and stylesheet rules
   ruletable.test.js tests for view K4's evaluation modes, tie-breaks, spec checks and stylesheet rules
   blockgrid.test.js tests for view K3's arrow routes, space counter, row splitting, tie-breaks, spec checks and stylesheet rules
+  papercolumns.test.js tests for view K5's digits in any base, cell placement, layout, audience choice, spec checks and stylesheet rules
   CHANGELOG.md     one line per kit change
   tools/contrast.mjs    palette contrast report (normal and washed-out projector)
   tools/check-page.mjs  browser check of one page from file:// (fit, text size, words, keys, languages, screenshots)
@@ -377,7 +379,7 @@ settled each one as follows.
   and applies the page's declared exceptions (docs/tasks/COMMON.md §7).
 - Drawing helpers come as **kit views**, each extracted from a pilot sim once it works, then checked against two
   later consumers before its API is frozen: K2 topology (§10, 0.3.0), K1 sequence chart (§11, 0.4.0), K4 rule table
-  (§12, 0.5.0), K3 block grid (§13, 0.6.0).
+  (§12, 0.5.0), K3 block grid (§13, 0.6.0), K5 paper columns (§14, 0.7.0).
 - The build inlines the whole glossary (~40 KB) into every page that links it; it could keep only the terms the
   page uses.
 
@@ -996,3 +998,168 @@ The API was frozen after drawing four later sims with different needs on it (ske
 - **`lnx-thin-overcommit`**: a 100-cell pool through `split()` into five rows of 20 coloured by volume; meters for
   Data% with the autoextend tick, the promised total overcommitted (dashed `--danger` end), and per volume (allocated
   `fill`, written but not allocated `ghost`). This sketch added the **meter** and on phones the content-width cells.
+
+## 14. View K5: paper columns (`kit/papercolumns.js`, 0.7.0)
+
+Arithmetic the way it is written on squared paper: one digit or sign per square, numbers aligned by place (ones under
+ones), a small carry or borrow row, a sign column, a rule over the result, the current column as a band, digits
+crossed out (rewritten, or wrong) with a small tag in a square's corner, rows shifted left by places (partial
+products), squares right of the ones (the Croatian division line "846 : 3 = 282" with the working under the
+dividend), a plain aside column (a value in decimal), and digits of any base from 2 to 16. With it, the audience switch
+shared by the `ari-` pages (teacher by default, adult, child). Extracted from the pilot `sims/ari-column-addition/`;
+built for the five consumers in `docs/tasks/w0/kit-paper-columns.md` (`ari-place-value`, `ari-column-subtraction`,
+`ari-column-multiplication`, `ari-long-division`, `ari-checking`; catalogue §4.16).
+
+```html
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/papercolumns.js"></script>    <!-- after kit.js; the build inlines it like the kit -->
+…
+<header class="sd-header"> … <ul class="sd-legend" data-sd-legend></ul> <div data-pc-audience></div> <div class="sd-tools" data-sd-tools></div></header>
+```
+
+```js
+var P = Simdeck.paperColumns;
+var aud = P.audience({ host: document.querySelector('[data-pc-audience]'), label: t('audLabel'), group: t('audGroup'),
+  names: { teacher: t('audTeacher'), adult: t('audAdult'), child: t('audChild') },
+  hints: { teacher: t('audTeacherHint'), adult: t('audAdultHint'), child: t('audChildHint') },
+  onChange: function () { sim.render(); } });                      // before Simdeck.mount; aud.value is the audience
+
+render: function (c) {
+  var s = c.state, b = c.params.base;
+  var paper = P({
+    cols: 4, big: aud.value === 'child', label: t('paper'),
+    places: [t('place0'), t('place1'), t('place2'), t('place3')],  // b ≠ 10: [0, 1, 2, 3].map(function (k) { return P.power(b, k); })
+    band: [s.col],
+    rows: [
+      { kind: 'carry', cells: s.carries.map(function (c, k) { return c == null ? null : { text: P.numeral(c, b), now: k === s.col + 1 }; }) },
+      { cells: P.digits(457, b).map(function (d) { return P.DIGITS[d]; }) },
+      { cells: P.digits(368, b).map(function (d) { return P.DIGITS[d]; }), sign: '+' },
+      { kind: 'result', rule: true, cells: s.result }
+    ]
+  });
+  c.stage.replaceChildren(h('section', { class: 'my-box sd-paper-box' }, paper));
+}
+```
+
+**How it draws.** One CSS grid: a sign column on the left (when a row has a `sign`), the squares of places `cols − 1`
+… 0 (0 = the ones), then `right` squares for places −1, −2, … right of the ones, then an aside column (plain paper,
+when a row has an `aside`). A place row on top when `places` is given, then `rows` top to bottom. The squares are a
+gradient of hairlines; every text is HTML at 1:1. The square's size comes from the nearest size container: put the
+paper in an element with class `sd-paper-box` (a centring size container; on phones an inline-size container that
+scrolls sideways) or your own container. Square = min(`--pc-fill-w` / (squares + aside width), `--pc-fill-h` /
+(rows + 0.3), `--pc-max`), defaults 94cqw, 92cqh, 7rem (9rem when `big`); a second, smaller paper in a card sets
+them on its `.sd-paper` (the pilot's mistake card: `--pc-fill-h: 96cqh; --pc-max: 3.2rem`). On phones the square is
+min(92cqw / (squares + aside), `--pc-max-phone`, default 3.4rem). The view holds no words: **cell texts, signs and
+asides are data** (`translate="no"`, monospace); **place labels and `asideHead` are the page's words** (a node for
+data, as `P.power` gives).
+
+### `Simdeck.paperColumns(spec)` → element
+
+| Field | Meaning |
+|---|---|
+| `rows[]` | `{ kind, cells \| text, at, sign, rule, aside }`, top to bottom (below) |
+| `cols` | the number of place squares (places 0 … cols − 1); default: the widest row. Give it when digits are still to come (the final carry), so the paper does not grow |
+| `right` | squares right of the ones (places −1 … −right): the division line's ": 3 = 282"; default: as far right as a row reaches |
+| `signs` | keep the sign column even when no row has a sign (two papers side by side that must line up) |
+| `places[]`, `placeTitles[]` | the place row, by place (k = 0 the ones): `J, D, S, T` / `O, T, H, Th` (words), or `P.power(b, k)` (b with k as a superscript, data); `''` or null leaves a square empty. `placeTitles` are their tooltips |
+| `band[]` | the current column: a place `k`, or `{ k, from, to }` to cover only rows `from` … `to` (indices into `rows`; default all of them, not the place row). A tinted band with a thick ink frame: colour **and** outline |
+| `asideHead`, `asideWidth` | the aside column's head (a word, in the place row) and its width in squares (default 1 + 0.4 × the longest aside or head, in characters) |
+| `big` | bigger digits (0.7 of the square, the carry and place rows too) and squares up to 9rem: the child view |
+| `label`, `className` | the paper's `aria-label` (it is `role="img"`); an extra class |
+
+**Rows.** `kind`: none (a number row), `'carry'` (small bold digits in `--c2` at the bottom of the square: the carry
+row, the borrow row, a rewritten digit above a crossed one; a page may give two), `'result'` (bold). `cells[i]` is the
+square of place `at + i` (so `cells` is indexed by place, ones first, as `P.digits` gives them); or `text` is written
+left to right, one character per square, its last character at place `at` (`'846:3=282'` at −6 puts the dividend's ones
+at place 0; a space leaves a square empty). `at` (default 0) shifts the row left: partial products at 1, 2, …; a
+remainder of the division under the dividend digit it ends at. `sign` goes in the sign column (`'+'`, `'−'`, `'·'`).
+`rule: true` draws the result line over this row across the sign column and every square; `{ from, to }` (places,
+from ≥ to) only over those (under the partial products of one factor). `aside` is a data text right of the paper
+(`'= 935'`).
+
+**Cells:** a string (or number) is the digit; `null`, `undefined` or `''` leaves the square empty, `0` does not. An
+object `{ text, x, now, tag, label }`: `now: true` is the kit's changed mark (yellow, ink outline: the digit written
+this step); `x: true` crosses the digit out (an ink slash, the digit greyed: rewritten, as in borrowing), `x: 'wrong'`
+crosses it in `--danger` (a wrong digit in a typical mistake); `tag` is a small `--c2` text in the square's top-left
+corner (equal additions: `'1'` on the top digit that became 13, `'+1'` on the digit taken away; keep it to one or two
+characters); `label` is its `aria-label` ("carry 1", "wrong: 7"). A text longer than one character (a carry of `12`,
+a whole column sum in a mistake) is drawn smaller to fit its square.
+
+**Digits in any base** (pure): `P.DIGITS` is `'0123456789ABCDEF'`; `P.digits(v, b)` the digits of v by place, ones
+first (0 is `[0]`); `P.numeral(v, b)` the numeral, most significant first (`P.numeral(26, 16)` → `'1A'`). A page keeps
+its numbers as quantities and writes them in the current base with these, so switching the base keeps the quantity.
+
+**The audience switch.** `P.audience({ host, label, group, names, hints, values, key, onChange })` builds the label and a
+segmented group of buttons into `host` (the header's `<div data-pc-audience>`) and returns `{ value, set(a), sync(),
+buttons }`. The audience is `?audience=` when it names one, else the choice stored in `localStorage`
+`simdeck.ari.audience` (one key for every `ari-` page), else the first of `values` (`teacher`, `adult`, `child`).
+Choosing one stores it, writes `?audience=` (left out for teacher; the kit keeps unknown query keys, so it survives
+the kit's URL updates and the L switch), presses its button and calls `onChange(a)`. Storage is read and written in
+`try`: with storage off the switch still works for the page's life. A click does not take focus (the clicker keys
+stay live). Build it before `Simdeck.mount`, so the controls' `visible` functions can read `aud.value`. The words are
+the page's; the switch does not decide what each audience sees (catalogue §4.16: captions, digit size, the base
+control hidden for the child, the typical mistake for the teacher).
+
+**Legend swatches:** `{ shape: 'pc-band' }` (the current column) and `'pc-carry'` (a carry: a small orange mark in a
+square); the kit's `'hl'` is "written in this step".
+
+**Fit.** At 1920×1080 with the panel open, the pilot's paper (three fifths of the stage) holds its largest case, 11
+squares (nine digits, a final carry, the sign) × 7 rows (places, carries, four numbers, the result), at about 68 px a
+square, digits about 40 px; 457 + 368 reaches the 7rem cap. Two papers side by side (subtraction's two methods) each take half; give them the same `cols`, `signs` and
+row count and their squares are the same size and line up.
+
+**Phone and portrait.** The square follows the box's width (at most 3.4rem) and the box scrolls sideways when the
+paper is wider, never the page; a page puts its stage at `height: auto` as the pilot does.
+
+**Spec checks.** `P.checkSpec(spec)` (pure, also under node: `require('kit/papercolumns.js')`) lists no rows, an
+unknown `kind`, a row with both `text` and `cells`, a `text` that is not a string, an `at` that is not whole, a cell
+off the paper (outside places −right … cols − 1), an `x` that is not true/false/`'wrong'`, a `rule` with from < to or
+off the paper, a band without a place, off the paper or over rows that do not exist, and more `places` than columns;
+the view logs them on the console, which the page check fails. `P.layout(spec)` and `P.rowCells(row)` give where
+things go (tests, and a page that draws over the paper).
+
+### Checked against consumers (sketched, not built)
+
+The API was frozen after drawing two later sims with different needs on it (sketch page and screenshots:
+`library/k5-consumer-sketch.html`, `library/k5-sketch-step2.png`, `-step4.png`, `-step6.png` in the thread t-0406
+report):
+
+```js
+// ari-long-division, step 4 of 846 : 3 = 282 (the line, then the remainders with the next digit brought down)
+P({ cols: 3, right: 6, places: [t('place0'), t('place1'), t('place2')],
+    band: [{ k: 0, from: 0, to: 2 }],
+    rows: [{ text: '846:3=28', at: -5 },                     // the quotient so far; the dividend's ones stay at 0
+           { text: '24', at: 1 },                             // 8 − 6 = 2, the 4 brought down: under the 4
+           { cells: [{ text: '6', now: true }, '0'] },       // 24 − 24 = 0, the 6 brought down
+           { cells: [] }] });                                 // an empty row keeps the paper's height
+
+// ari-column-subtraction, 503 − 178, both methods side by side, the tens being worked on
+var borrow = P({ cols: 3, places: pl, band: [1], rows: [
+  { kind: 'carry', cells: [null, { text: '10', x: true }] },           // 0 became 10 …
+  { kind: 'carry', cells: ['13', { text: '9', now: true }, '4'] },     // … then 9 when it lent 1 to the ones
+  { cells: [{ text: '3', x: true }, { text: '0', x: true }, { text: '5', x: true }] },
+  { cells: ['8', '7', '1'], sign: '−' },
+  { kind: 'result', rule: true, cells: ['5', { text: '2', now: true }] }] });
+var equal = P({ cols: 3, places: pl, band: [1], rows: [
+  { kind: 'carry', cells: [] }, { kind: 'carry', cells: [] },          // the same row count: the squares line up
+  { cells: [{ text: '3', tag: '1' }, { text: '0', tag: '1', now: true }, '5'] },
+  { cells: ['8', { text: '7', tag: '+1' }, { text: '1', tag: '+1', now: true }], sign: '−' },
+  { kind: 'result', rule: true, cells: ['5', { text: '2', now: true }] }] });
+```
+
+- **`ari-long-division`**: the Croatian line "846 : 3 = 282" on one row, each sign in its own square, the quotient
+  growing to the right; the remainders under the dividend with the brought-down digit as `now`; the band on the
+  dividend column being divided, from the line down to the row being written. This sketch added **`right`** and
+  negative places (squares right of the ones, so the dividend's places keep their labels and the band), **`text`**
+  rows (a line of digits and signs written as it is read), and **bands over a row range** (`from`, `to`).
+- **`ari-column-subtraction`**: two papers side by side with the same columns and rows. Borrowing crosses the top
+  digits it takes from (`x: true`, ink, not `--danger`: rewriting is not a mistake) and writes the new digits in a borrow
+  row above them, two rows when a 0 lends (0 → 10 → 9). Equal additions (the method the catalogue keeps off the pages
+  until the owner confirms it) tags the top digit with the 1 that made it 13 and the next digit taken away with +1.
+  This sketch added **`x: true` next to `'wrong'`**, **`tag`**, and the **second carry row**; it showed that a
+  two-character tag crowds its digit (kept to one or two characters).
+- Also covered without a sketch: **`ari-column-multiplication`** writes "457 · 36" as a `text` row, the partial products
+  at `at` 1 and 0 under the factor's digits with `sign: '+'` on the last, `rule: { from, to }` under them and the sum
+  under a full rule; base 2 is `P.numeral(v, 2)`. **`ari-place-value`** is one number row with the place row and an aside
+  per place value, `big` for the child. **`ari-checking`** redraws a finished sum or difference and crosses the wrong
+  result digit with `x: 'wrong'`.
