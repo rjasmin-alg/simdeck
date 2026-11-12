@@ -91,19 +91,194 @@
 
   function lane(mode) { return { mode: mode, sets: [], stored: 0, restore: null }; }
 
+  // ── lnx-send-receive: replication from snapshot pairs (opt-in: param repl; SPEC.md "Send and receive") ──
+  //
+  // Two machines: the source filesystem with its read-only snapshots (one per day, Mon–Wed), and the target with the
+  // snapshots it has received. A send is full (every block of one snapshot) or incremental from a parent (only the
+  // blocks that differ between parent and child). The receive applies the stream: the target then holds a complete
+  // snapshot. An incremental receive needs the parent on the target, and (ZFS) a target unchanged since its newest
+  // snapshot unless forced to roll back.
+
+  /** The source's writes per day, Mon–Wed: Monday writes the data (blocks A–H), Tuesday 3 and 4, Wednesday 6. */
+  var SEND_WEEK = [[0, 1, 2, 3, 4, 5, 6, 7], [3, 4], [6]];
+  /** The block a file written on the target lands in (target-touched). */
+  var TOUCH = 5;
+
+  /** The four scripted cases, one op per step. send: take the day's snapshot (after its writes) and send it;
+      parent 'common' = the newest snapshot both sides hold (rule 5), a number = the parent named, null = full. */
+  var REPL = {
+    chain: [{ op: 'send', day: 0, parent: 'common' }, { op: 'send', day: 1, parent: 'common' },
+      { op: 'send', day: 2, parent: 'common' }, { op: 'restore', day: 2 }],
+    missing: [{ op: 'send', day: 0, parent: 'common' }, { op: 'del', side: 'tgt', day: 0 },
+      { op: 'send', day: 1, parent: 0 }, { op: 'resend', day: 1, parent: 'common' }],
+    common: [{ op: 'send', day: 0, parent: 'common' }, { op: 'send', day: 1, parent: 'common' },
+      { op: 'del', side: 'src', day: 0 }, { op: 'send', day: 2, parent: 'common' }],
+    touched: [{ op: 'send', day: 0, parent: 'common' }, { op: 'touch', i: TOUCH }, { op: 'send', day: 1, parent: 'common' }]
+  };
+  var REPL_IDS = ['chain', 'missing', 'common', 'touched'];
+
+  function normRepl(p) {
+    return { id: REPL_IDS.indexOf(p.repl) >= 0 ? p.repl : null, force: p.force === true || p.force === 'true' };
+  }
+
+  function snapOf(side, day) {
+    for (var k = 0; k < side.snaps.length; k++) if (side.snaps[k].day === day) return side.snaps[k];
+    return null;
+  }
+  function days(side) { return side.snaps.map(function (x) { return x.day; }); }
+
+  /** Rule 5 (tie-break): the newest snapshot both sides still hold, or null. */
+  function commonParent(src, tgt) {
+    var both = days(src).filter(function (d) { return snapOf(tgt, d); });
+    return both.length ? Math.max.apply(null, both) : null;
+  }
+  /** The snapshots both sides hold, oldest first. */
+  function commonSnaps(src, tgt) {
+    return days(src).filter(function (d) { return snapOf(tgt, d); }).sort(function (a, b) { return a - b; });
+  }
+
+  /** Rules 1–2: the stream of a send. `what` must be a read-only snapshot on the source ('live' is refused: rule 2).
+      parent null: full, every block; otherwise only the blocks where parent and child differ. */
+  function makeStream(src, day, parent) {
+    var child = snapOf(src, day);
+    if (!child || !child.ro) return { day: day, parent: parent, kind: null, carried: [], blocks: {}, refused: 'not-snapshot' };
+    var base = parent === null ? null : snapOf(src, parent);
+    if (parent !== null && !base) return { day: day, parent: parent, kind: 'incr', carried: [], blocks: {}, refused: 'no-source-parent' };
+    var carried = [];
+    for (var i = 0; i < BLOCKS; i++) if (!base || base.blocks[i] !== child.blocks[i]) carried.push(i);
+    var blocks = {};
+    carried.forEach(function (i) { blocks[i] = child.blocks[i]; });
+    return { day: day, parent: parent, kind: parent === null ? 'full' : 'incr', carried: carried, blocks: blocks, refused: null };
+  }
+
+  /** Rule 3: whether the target accepts a stream, and why not. A full stream is received as a new filesystem
+      (it needs no parent); an incremental one needs the parent on the target, and a target not written to since its
+      newest snapshot unless force rolls it back. */
+  function receiveCheck(tgt, stream, force) {
+    if (stream.refused) return stream.refused;
+    if (stream.kind === 'full') return null;
+    if (!snapOf(tgt, stream.parent)) return 'no-parent';
+    if (tgt.modified && !force) return 'modified';
+    return null;
+  }
+
+  /** Rule 4: apply an accepted stream. The new snapshot is the parent's blocks on the target with the carried blocks
+      on top, so it is complete; the target's filesystem becomes it. Returns the new target and the blocks a forced
+      rollback threw away. */
+  function receive(tgt, stream) {
+    var out = JSON.parse(JSON.stringify(tgt)), lostWrites = [];
+    if (stream.kind === 'incr' && out.modified) {                        // receive -F: roll back to the newest snapshot first
+      var newest = out.snaps[out.snaps.length - 1].blocks;
+      for (var i = 0; i < BLOCKS; i++) if (out.live[i] !== newest[i]) lostWrites.push(i);
+    }
+    var base = stream.kind === 'full' ? [] : snapOf(tgt, stream.parent).blocks.slice();
+    var blocks = [];
+    for (var j = 0; j < BLOCKS; j++) blocks.push(j in stream.blocks ? stream.blocks[j] : base[j]);
+    out.snaps.push({ day: stream.day, ro: true, blocks: blocks });
+    out.snaps.sort(function (a, b) { return a.day - b.day; });
+    out.live = blocks.slice();
+    out.modified = false;
+    return { tgt: out, lostWrites: lostWrites };
+  }
+
+  /** Blocks stored on one side: distinct (block, content) pairs over its snapshots and its filesystem. Snapshots
+      share the blocks they have in common, so a received chain costs only the blocks its streams carried. */
+  function storedOn(side) {
+    var seen = {}, n = 0;
+    side.snaps.map(function (x) { return x.blocks; }).concat(side.live ? [side.live] : []).forEach(function (b) {
+      b.forEach(function (c, i) { if (c && !seen[i + ':' + c]) { seen[i + ':' + c] = true; n++; } });
+    });
+    return n;
+  }
+  /** How many of a side's snapshots hold block i with content c (the reference count the page shows). */
+  function refsOf(side, i, c) {
+    return side.snaps.filter(function (x) { return x.blocks[i] === c; }).length;
+  }
+
+  function replInitial(o) {
+    var blank = [], ver = [];
+    for (var i = 0; i < BLOCKS; i++) { blank.push(''); ver.push(-1); }
+    var w = write(blank, ver, SEND_WEEK[0]);           // Monday's data is on the source from the start
+    return {
+      repl: o.id, phase: 'start', day: 0, op: null,
+      src: { live: w.disk, ver: w.ver, snaps: [], gone: [] },
+      tgt: { live: null, snaps: [], modified: false, touched: [], gone: [] },
+      written: [], stream: null, check: null, lostWrites: [], deleted: null, restore: null, history: []
+    };
+  }
+
+  function replStep(s, n, o) {
+    var op = REPL[o.id][n - 1];
+    var out = JSON.parse(JSON.stringify(s));
+    out.op = op.op; out.phase = op.op; out.written = []; out.stream = null; out.check = null; out.lostWrites = [];
+    out.deleted = null; out.restore = null;
+    if (op.op === 'send' || op.op === 'resend') {
+      out.day = op.day;
+      if (op.op === 'send') {
+        if (op.day > 0) {                              // the day's writes, then its read-only snapshot
+          var w = write(s.src.live, s.src.ver, SEND_WEEK[op.day]);
+          out.src.live = w.disk; out.src.ver = w.ver; out.written = w.written;
+        }
+        out.src.snaps.push({ day: op.day, ro: true, blocks: out.src.live.slice() });
+        out.history.push(out.src.live.slice());
+      }
+      var parent = op.parent === 'common' ? commonParent(out.src, out.tgt) : op.parent;
+      if (parent === op.day) parent = null;
+      var stream = makeStream(out.src, op.day, parent);
+      out.stream = stream;
+      out.check = receiveCheck(out.tgt, stream, o.force);
+      if (out.check === null) {
+        var r = receive(out.tgt, stream);
+        out.tgt = r.tgt; out.lostWrites = r.lostWrites;
+        if (r.lostWrites.length) out.tgt.touched = [];
+      }
+      return out;
+    }
+    if (op.op === 'del') {                             // rule 4: deleting a snapshot leaves the others whole
+      var side = out[op.side];
+      side.snaps = side.snaps.filter(function (x) { return x.day !== op.day; });
+      side.gone.push(op.day);
+      out.deleted = { side: op.side, day: op.day };
+      return out;
+    }
+    if (op.op === 'touch') {                           // a file written on the target after its newest snapshot
+      out.tgt.live[op.i] = LETTERS[op.i] + '*';
+      out.tgt.modified = true;
+      out.tgt.touched = [op.i];
+      out.written = [op.i];
+      return out;
+    }
+    // restore: the day's snapshot on the target, alone (rule 4)
+    var snap = snapOf(out.tgt, op.day);
+    var result = snap ? snap.blocks.slice() : [];
+    out.restore = { day: op.day, from: snap ? [op.day] : [], read: result.length, result: result,
+      ok: diff(result, out.history[op.day]).length === 0 };
+    return out;
+  }
+
   var logic = {
     BLOCKS: BLOCKS,
     DAYS: DAYS,
     WEEK: WEEK,
     MODES: MODES,
+    SEND_WEEK: SEND_WEEK,
+    REPL: REPL,
+    REPL_IDS: REPL_IDS,
+    TOUCH: TOUCH,
 
-    /** Parameter defaults. The page's controls describe how each one is shown. lose: 0 = none, 1–3 = Mon–Wed. */
-    defaults: { mode: 'incr', compare: false, restoreDay: 4, lose: 0 },
+    /** Parameter defaults. The page's controls describe how each one is shown. lose: 0 = none, 1–3 = Mon–Wed.
+        repl: 'off' (the backup week) or one of the send/receive cases; force: receive -F (rolls the target back). */
+    defaults: { mode: 'incr', compare: false, restoreDay: 4, lose: 0, repl: 'off', force: false },
 
-    steps: steps,
+    steps: function (p) {
+      var r = normRepl(p);
+      return r.id ? REPL[r.id].length : steps(p);
+    },
 
-    /** Step 0: an empty disk, no backups yet. */
+    /** Step 0: an empty disk, no backups yet (send/receive: the source's data, no snapshots, an empty target). */
     initial: function (p) {
+      var r = normRepl(p);
+      if (r.id) return replInitial(r);
       var o = norm(p), blank = [];
       for (var i = 0; i < BLOCKS; i++) blank.push('');
       return {
@@ -115,6 +290,8 @@
 
     /** Step n from step n − 1 (SPEC.md "One step"). */
     step: function (s, n, p) {
+      var rp = normRepl(p);
+      if (rp.id) return replStep(s, n, rp);
       var o = norm(p);
       var out = JSON.parse(JSON.stringify(s));
       out.written = []; out.twice = [];
@@ -188,7 +365,16 @@
     planFor: planFor,
     newestRestorable: newestRestorable,
     restoreLen: restoreLen,
-    norm: norm
+    norm: norm,
+    normRepl: normRepl,
+    snapOf: snapOf,
+    commonParent: commonParent,
+    commonSnaps: commonSnaps,
+    makeStream: makeStream,
+    receiveCheck: receiveCheck,
+    receive: receive,
+    storedOn: storedOn,
+    refsOf: refsOf
   };
 
   /** Indices where two disks differ (an empty or missing block counts as different). */

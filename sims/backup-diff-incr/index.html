@@ -67,6 +67,23 @@
 /* legend: an empty slot (a block the set does not store) */
 [data-sim="backup-diff-incr"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
 
+/* lnx-send-receive (param repl): the legend items and the explanation of the other scene are hidden (render sets
+   data-mode on <html>: host or send) */
+[data-sim="backup-diff-incr"][data-mode="host"] [data-only]:not([data-only="host"]),
+[data-sim="backup-diff-incr"][data-mode="send"] [data-only]:not([data-only="send"]) { display: none; }
+/* a param hidden by its visible() (kit.css gives .sd-ctl display: flex, which beats [hidden]) */
+[data-sim="backup-diff-incr"] .sd-ctl[hidden] { display: none; }
+/* nine presets (five of the backup week, four of send and receive): two columns so the panel fits one screen */
+[data-sim="backup-diff-incr"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="backup-diff-incr"] .sd-preset { line-height: 1.15; }
+/* legend: a snapshot's flag, and the mark of a snapshot both sides hold */
+[data-sim="backup-diff-incr"] .sd-swatch[data-shape="flag"],
+[data-sim="backup-diff-incr"] .sd-swatch[data-shape="common"] { background: none; border: 0; width: auto; height: auto; font-weight: 700; }
+[data-sim="backup-diff-incr"] .sd-swatch[data-shape="flag"]::before { content: "⚑"; }
+[data-sim="backup-diff-incr"] .sd-swatch[data-shape="common"]::before { content: "⇄"; }
+[data-sim="backup-diff-incr"] .bd-tag { color: var(--muted); }
+[data-sim="backup-diff-incr"] .bd-tag b { color: var(--ink); }
+
 /* Phone and portrait: the stage grows with its content; lanes stack; grids scroll inside their box. */
 @media (max-width: 900px), (max-aspect-ratio: 1/1) {
   [data-sim="backup-diff-incr"] .sd-stage { height: auto; container-type: inline-size; }
@@ -100,7 +117,8 @@
       <div data-sd-controls></div>
       <details class="sd-explain">
         <summary></summary>
-        <div data-t-html="explain"></div>
+        <div data-t-html="explain" data-only="host"></div>
+        <div data-t-html="explainSr" data-only="send"></div>
       </details>
     </aside>
   </main>
@@ -354,7 +372,182 @@
     return out;
   }
 
+  // ── lnx-send-receive (param repl): two machines, snapshots, the stream of each send ──
+
+  var SNAP = ['@mon', '@tue', '@wed'];                 // snapshot names are data (the same in both languages)
+  function isSend(p) { return L.normRepl(p).id !== null; }
+  function snapName(d) { return data(SNAP[d]); }
+  function snapList(ds) { return data(joinList(ds.map(function (d) { return SNAP[d]; }))); }
+  /** Send days 0–2 are Monday–Wednesday: the host's day lists start on Sunday. */
+  function sDay(d) { return d + 1; }
+
+  // The legend of both scenes; setMode hides the other scene's items (data-only, CSS above).
+  var LEGEND = [
+    { shape: 'hl', label: t('legChanged'), only: 'host' },
+    { shape: 'bg-fill', c: 1, label: t('legStored'), only: 'host' },
+    { shape: 'slot', label: t('legSlot'), only: 'host' },
+    { shape: 'bg-soft', c: 1, label: t('legRestored'), only: 'host' },
+    { shape: 'bg-link', label: t('legLink'), only: 'host' },
+    { shape: 'bg-bad', label: t('legLost'), only: 'host' },
+    { shape: 'bg-dead', label: t('legStale'), only: 'host' },
+    { shape: 'hl', label: t('legSrNow'), only: 'send' },
+    { shape: 'flag', label: t('legSrFlag'), only: 'send' },
+    { shape: 'bg-fill', c: 1, label: t('legSrBlock'), only: 'send' },
+    { shape: 'bg-soft', c: 1, label: t('legSrShared'), only: 'send' },
+    { shape: 'bg-bracket', label: t('legSrStream'), only: 'send' },
+    { shape: 'slot', label: t('legSrSlot'), only: 'send' },
+    { shape: 'bg-link', label: t('legSrLink'), only: 'send' },
+    { shape: 'bg-bad', label: t('legSrRefused'), only: 'send' },
+    { shape: 'common', label: t('legSrCommon'), only: 'send' },
+    { shape: 'bg-dead', label: t('legSrGone'), only: 'send' }
+  ];
+  function setMode(p) {
+    var send = isSend(p);
+    document.documentElement.dataset.mode = send ? 'send' : 'host';
+    var sub = document.querySelector('.sd-subtitle');
+    if (sub) {
+      if (sub.dataset.host === undefined) sub.dataset.host = sub.textContent;
+      sub.textContent = send ? t('srSubtitle') : sub.dataset.host;
+    }
+    var stage = document.querySelector('[data-sd-stage]');
+    if (stage) stage.setAttribute('aria-label', t(send ? 'srStage' : 'stage'));
+    var lis = document.querySelectorAll('[data-sd-legend] > li');
+    LEGEND.forEach(function (it, i) { if (lis[i]) lis[i].dataset.only = it.only; });
+  }
+
+  /** The tags beside a snapshot row: common (on both sides), the parent of this step's send, the snapshot sent. */
+  function snapTags(s, d, sideKey) {
+    var bits = [];
+    var both = L.snapOf(s.src, d) && L.snapOf(s.tgt, d);
+    if (both) bits.push('⇄');
+    if (s.stream && s.stream.parent === d) bits.push(t('srParent'));
+    if (sideKey === 'src' && s.stream && s.stream.day === d) bits.push(t('srSent'));
+    return bits.length ? h('span', { class: 'bd-tag' }, bits.join(' ')) : '';
+  }
+
+  function snapRows(s, sideKey, col) {
+    var side = s[sideKey], rows = [];
+    for (var d = 0; d < SNAP.length; d++) {
+      var snap = L.snapOf(side, d), gone = side.gone.indexOf(d) >= 0;
+      var got = s.stream && !s.check && s.stream.day === d && sideKey === 'tgt';
+      rows.push({
+        id: sideKey + d, label: '⚑ ' + SNAP[d],
+        aside: gone ? h('span', { class: 'bd-bad' }, t('srGone')) : snap ? snapTags(s, d, sideKey) : '',
+        cells: BLOCK_IDS.map(function (i) {
+          if (gone) return { text: s.history[d][i], kind: 'dead' };
+          if (!snap) return null;                      // not taken (or not received) yet
+          var b = snap.blocks[i], refs = L.refsOf(side, i, b);
+          return { text: b, kind: refs > 1 ? 'soft' : 'fill', refs: refs, c: col, now: got && s.stream.carried.indexOf(i) >= 0 };
+        })
+      });
+    }
+    return rows;
+  }
+
+  function srcGrid(c) {
+    var s = c.state;
+    var rows = [{
+      id: 'live', label: h('span', null, t('srLive')),
+      cells: s.src.live.map(function (b, i) { return { text: b, kind: 'fill', c: 1, now: s.op === 'send' && s.written.indexOf(i) >= 0 }; })
+    }].concat(snapRows(s, 'src', 1));
+    return Simdeck.blockGrid({
+      dir: c.dir, className: 'bd-lane',
+      title: t('srSrc'), meta: [t('diskToday', { day: nom(sDay(s.day)) })],
+      count: { text: t.n('srStored', L.storedOn(s.src)), hl: s.op === 'del' && s.deleted.side === 'src' },
+      colLabels: BLOCK_IDS.map(String), cellHeight: '2.9rem', rows: rows
+    });
+  }
+
+  function tgtGrid(c) {
+    var s = c.state, st = s.stream, refused = st && s.check !== null;
+    var pair = st ? (st.kind === 'full' ? '⚑ ' + SNAP[st.day] : SNAP[st.parent] + ' → ' + SNAP[st.day]) : null;
+    var rows = [{
+      id: 'stream', label: h('span', null, t('srStream')),
+      aside: !st ? '' : refused ? h('span', { class: 'bd-bad' }, '✕ ' + t('srRefused'))
+        : h('span', { class: 'bd-tag' }, t(st.kind === 'full' ? 'srFullTag' : 'srIncrTag')),
+      brackets: st ? [{ from: 0, len: L.BLOCKS, label: data(pair) }] : [],
+      cells: BLOCK_IDS.map(function (i) {
+        if (!st) return null;
+        if (!(i in st.blocks)) return {};             // not carried: an empty slot
+        return { text: st.blocks[i], kind: refused ? 'bad' : 'fill', c: 2, now: !refused };
+      })
+    }].concat(snapRows(s, 'tgt', 2));
+    var tl = s.tgt.live;
+    rows.push({
+      id: 'tlive', label: h('span', null, t('srLive')),
+      aside: s.tgt.modified ? h('span', { class: 'bd-bad' }, t('srChanged'))
+        : s.lostWrites.length ? h('span', { class: 'bd-bad' }, t('srRolledBack')) : '',
+      cells: BLOCK_IDS.map(function (i) {
+        if (!tl) return {};                            // the target holds nothing yet
+        var mine = s.tgt.touched.indexOf(i) >= 0;
+        if (s.lostWrites.indexOf(i) >= 0) return { text: tl[i], sub: data(c.prev.tgt.live[i]), kind: 'fill', c: 2, now: true };
+        return { text: tl[i], kind: 'fill', c: mine ? 3 : 2, now: s.op === 'touch' && mine };
+      })
+    });
+    if (L.REPL[s.repl].some(function (o) { return o.op === 'restore'; })) {
+      var r = s.restore;
+      rows.push({
+        id: 'rest', label: h('span', null, t('srRest')),
+        aside: r && r.ok ? h('span', { class: 'bd-ok' }, '✓ ' + t('srSame')) : '',
+        cells: BLOCK_IDS.map(function (i) { return r ? { text: r.result[i], sub: data(SNAP[r.day]), kind: 'soft', c: 2, now: true } : null; })
+      });
+    }
+    var links = [];
+    if (st && !refused) links.push({ from: { row: 'stream', cell: st.carried[0] }, to: { row: 'tgt' + st.day, cell: st.carried[0] }, now: true });
+    if (s.restore) links.push({ from: { row: 'tgt' + s.restore.day, cell: 0 }, to: { row: 'rest', cell: 0 }, now: true });
+    return Simdeck.blockGrid({
+      dir: c.dir, className: 'bd-lane',
+      title: t('srTgt'), meta: s.tgt.live ? [t.n('srSnaps', s.tgt.snaps.length)] : [t('srEmpty')],
+      count: { text: t.n('srStored', L.storedOn(s.tgt)), hl: !!st && !refused },
+      colLabels: BLOCK_IDS.map(String), cellHeight: '2.9rem', rows: rows, links: links
+    });
+  }
+
+  function srRender(c) {
+    c.stage.replaceChildren(h('div', { class: 'bd' }, h('div', { class: 'bd-lanes' }, srcGrid(c), tgtGrid(c))));
+  }
+
+  function srCapSend(c) {
+    var s = c.state, st = s.stream, prev = c.prev, out = [];
+    if (s.op === 'send') {
+      if (!s.written.length) out = out.concat(t.parts('srCapDaySnap', { day: cap(nom(sDay(s.day))), snap: snapName(st.day) }), [' ']);
+      else out = out.concat(t.parts('capWrite', { n: s.written.length, day: cap(nom(sDay(s.day))), list: blocksList(s.written) }), [' '],
+        t.parts('srCapSnap', { snap: snapName(st.day) }), [' ']);
+    }
+    if (s.check === 'no-parent') return out.concat(t.parts('srCapNoParent', { parent: snapName(st.parent) }));
+    if (s.check === 'modified') return out.concat(t.parts('srCapModified', { parent: snapName(st.parent), parent2: snapName(st.parent) }));
+    if (st.kind === 'full') return out.concat(t.parts(s.op === 'resend' ? 'srCapResend' : 'srCapFull', { snap: snapName(st.day), snap2: snapName(st.day) }));
+    var common = L.commonSnaps(prev.src, prev.tgt);
+    if (common.length > 1) out = out.concat(t.parts('srCapTie', { list: snapList(common), parent: snapName(st.parent) }), [' ']);
+    var goneSrc = prev.src.gone.filter(function (d) { return L.snapOf(prev.tgt, d); });
+    if (goneSrc.length) out = out.concat(t.parts('srCapKept', { gone: snapList(goneSrc), parent: snapName(st.parent) }), [' ']);
+    out = out.concat(t.parts('srCapIncr', { n: st.carried.length, parent: snapName(st.parent), snap: snapName(st.day), list: blocksList(st.carried) }), [' ']);
+    if (s.lostWrites.length) {
+      var i = s.lostWrites[0];
+      return out.concat(t.parts('srCapForced', { parent: snapName(st.parent), i: data(i), c: data(prev.tgt.live[i]), snap: snapName(st.day) }));
+    }
+    return out.concat(t.parts('srCapWhole', { snap: snapName(st.day), day: gen(sDay(st.day)) }));
+  }
+
+  function srCaption(c) {
+    var s = c.state;
+    if (s.phase === 'start') return rich('srCapStart');
+    if (s.op === 'send' || s.op === 'resend') return srCapSend(c);
+    if (s.op === 'del') {
+      if (s.deleted.side === 'tgt') return t.parts('srCapDelTgt', { snap: snapName(s.deleted.day), snap2: snapName(s.deleted.day) });
+      var later = s.src.snaps.map(function (x) { return x.day; }).filter(function (d) { return d > s.deleted.day; });
+      return t.parts('srCapDelSrc', { snap: snapName(s.deleted.day), later: snapList(later) });
+    }
+    if (s.op === 'touch') {
+      var tgtSnaps = s.tgt.snaps;
+      return t.parts('srCapTouch', { i: data(s.written[0]), c: data(s.tgt.live[s.written[0]]), snap: snapName(tgtSnaps[tgtSnaps.length - 1].day) });
+    }
+    var r = s.restore;
+    return t.parts('srCapRestore', { day: gen(sDay(r.day)), snap: snapName(r.day), snap2: snapName(r.day), r: r.read });
+  }
+
   var dayChoices = [1, 2, 3, 4].map(function (d) { return [d, short(d)]; });
+  function host(q) { return !isSend(q); }
 
   Simdeck.mount({
     steps: L.steps,
@@ -364,10 +557,17 @@
 
     params: [
       { key: 'mode', type: 'select', label: t('mode'), resets: true,
-        options: [['incr', t('modeIncr')], ['diff', t('modeDiff')], ['full', t('modeFull')]] },
-      { key: 'compare', type: 'toggle', label: t('compare'), hint: t('compareHint'), resets: true },
-      { key: 'restoreDay', type: 'choice', label: t('restoreDay'), resets: true, options: dayChoices },
-      { key: 'lose', type: 'choice', label: t('lose'), resets: true, options: [[0, t('loseNone')]].concat(dayChoices.slice(0, 3)) }
+        options: [['incr', t('modeIncr')], ['diff', t('modeDiff')], ['full', t('modeFull')]], visible: host },
+      { key: 'compare', type: 'toggle', label: t('compare'), hint: t('compareHint'), resets: true, visible: host },
+      { key: 'restoreDay', type: 'choice', label: t('restoreDay'), resets: true, options: dayChoices, visible: host },
+      { key: 'lose', type: 'choice', label: t('lose'), resets: true, options: [[0, t('loseNone')]].concat(dayChoices.slice(0, 3)), visible: host },
+      // lnx-send-receive: the case is chosen by its preset; force only matters where the target was written to
+      { key: 'repl', type: 'select', label: t('repl'), resets: true,
+        options: [['off', t('replOff')], ['chain', t('presetChain')], ['missing', t('presetMissing')], ['common', t('presetCommon')],
+          ['touched', t('presetTouched')]],
+        visible: function () { return false; } },
+      { key: 'force', type: 'toggle', label: t('force'), hint: t('forceHint'),
+        visible: function (q) { return L.normRepl(q).id === 'touched'; } }
     ],
 
     presets: [
@@ -375,26 +575,25 @@
       { id: 'week-differential', label: t('presetDiff'), params: { mode: 'diff' }, hint: t('presetDiffHint') },
       { id: 'full-nightly', label: t('presetFull'), params: { mode: 'full' }, hint: t('presetFullHint') },
       { id: 'lost-tuesday', label: t('presetLost'), params: { mode: 'incr', lose: 2 }, hint: t('presetLostHint') },
-      { id: 'compare', label: t('presetCompare'), params: { compare: true }, hint: t('presetCompareHint') }
+      { id: 'compare', label: t('presetCompare'), params: { compare: true }, hint: t('presetCompareHint') },
+      { id: 'send-chain', label: t('presetChain'), params: { repl: 'chain' }, hint: t('presetChainHint') },
+      { id: 'missing-parent', label: t('presetMissing'), params: { repl: 'missing' }, hint: t('presetMissingHint') },
+      { id: 'common-kept', label: t('presetCommon'), params: { repl: 'common' }, hint: t('presetCommonHint') },
+      { id: 'target-touched', label: t('presetTouched'), params: { repl: 'touched' }, hint: t('presetTouchedHint') }
     ],
 
-    legend: [
-      { shape: 'hl', label: t('legChanged') },
-      { shape: 'bg-fill', c: 1, label: t('legStored') },
-      { shape: 'slot', label: t('legSlot') },
-      { shape: 'bg-soft', c: 1, label: t('legRestored') },
-      { shape: 'bg-link', label: t('legLink') },
-      { shape: 'bg-bad', label: t('legLost') },
-      { shape: 'bg-dead', label: t('legStale') }
-    ],
+    legend: LEGEND,
 
     render: function (c) {
+      setMode(c.params);
+      if (isSend(c.params)) { srRender(c); return; }
       var lanes = c.state.lanes.map(function (l, k) { return laneGrid(c, k); });
       c.stage.replaceChildren(h('div', { class: 'bd' }, diskGrid(c), h('div', { class: 'bd-lanes' }, lanes)));
     },
 
     caption: function (c) {
       var s = c.state;
+      if (isSend(c.params)) return srCaption(c);
       if (s.phase === 'start') return t.parts('capStart');
       if (s.phase === 'write') return capWrite(s);
       if (s.phase === 'backup') return capNight(s);

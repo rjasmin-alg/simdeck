@@ -120,7 +120,64 @@ Every param changes the step count, so each resets to step 0.
 Same loss in differential mode: Thursday restores from Sun + Thu (14 steps); a restore *to Tuesday* then stops after
 Sunday (newest restorable point Monday).
 
+## Send and receive (preset task `lnx-send-receive`)
+
+Task: `docs/tasks/w3/lnx-send-receive.md` (catalogue `lnx-send-receive`, §4.4; overlap §5.3). **One concept:**
+incremental replication from snapshot pairs. Opt-in: param `repl` (`off` by default = the backup week above, whose
+states are unchanged); `force` (receive with rollback) only matters in `target-touched`.
+
+**Scene (K3).** Two grids side by side. **Source** (left): its filesystem (`podaci` / `data`, 8 blocks) and one row
+per read-only snapshot, `⚑ @mon`, `⚑ @tue`, `⚑ @wed` (a hole row until taken; a deleted one crossed, `dead`).
+**Target** (right): the **stream** row on top (the blocks this step's send carries, the rest empty slots; a bracket
+over it names the pair, `@mon → @tue`, or `@mon` for a full send; a refused receive draws the carried blocks `bad` with
+"✕" and the reason as the row's aside), then the received snapshots under the same names, then the target's
+filesystem, and in `send-chain` a restored row. On both sides a snapshot block that other snapshots of that side share
+is hatched (`soft`) with its count (×2, ×3); a block only one snapshot holds is solid. A snapshot both sides hold is
+tagged "⇄" on both (common); the parent of this step's send is tagged "roditelj" / "parent". Each grid's counter: blocks
+stored on that machine.
+
+**State** (`repl` on): `{ repl, phase: 'start'|'send'|'resend'|'del'|'touch'|'restore', day, op,
+src: { live, ver, snaps: [{ day, ro, blocks[8] }], gone: [day] }, tgt: { live, snaps, modified, touched: [idx], gone }, written: [idx],
+stream: null | { day, parent, kind: 'full'|'incr', carried: [idx], blocks: { idx: label }, refused }, check: null |
+'no-parent' | 'modified' | …, lostWrites: [idx], deleted: null | { side, day }, restore: null | { day, from, read,
+result, ok }, history: [source disk per snapshot day] }`.
+
+**Data.** The source's writes: Monday the data (blocks 0–7, `A`…`H`, on the source from step 0), Tuesday blocks 3
+and 4 (`D1`, `E1`), Wednesday block 6 (`G1`). A file written on the target lands in block 5 (`F*`).
+
+### Rules
+
+1. **An incremental stream carries only the blocks that differ between the parent and the child snapshot**; a full
+   stream carries every block of one snapshot. From `@mon` straight to `@wed` it is the difference (3, 4, 6), not the
+   sum of the days. *(zfs-send(8) `-i`; btrfs-send(8) `-p`; (check).)*
+2. **Only read-only snapshots are sent**, and an incremental send needs its parent on the source too. *(btrfs-send(8):
+   the subvolume must be read-only; (check).)*
+3. **The receive needs the parent on the target**; otherwise it is refused and nothing changes, and only a full send
+   works. **ZFS also refuses** if the target filesystem was written to after its newest snapshot, unless the receive is
+   forced (`receive -F`), which first rolls the target back to that snapshot and loses the write. A full stream is
+   received as a new filesystem and needs no parent. *(zfs-receive(8) `-F`; (check).) Btrfs receives into read-only
+   snapshots (btrfs-receive(8)); the "target modified" case is ZFS's.*
+4. **The receive applies the stream:** the new snapshot on the target is the parent's blocks there with the carried
+   blocks on top, a whole filesystem. Restoring Wednesday reads `@wed` alone (8 blocks, 1 snapshot), no chain, unlike
+   the incremental backup above. Received snapshots share their unchanged blocks (the target stores 8 + 2 + 1 = 11);
+   deleting an older one does not break a later one, but the next incremental needs a snapshot both sides still hold.
+   *(zfs-send(8); (check).)*
+5. **Tie-break:** of several common snapshots the newest is the parent (what an operator would choose; the tools take
+   the one named). Scripted sends use it; `missing-parent`'s Tuesday names `@mon`, as an operator would who did not
+   know the target lost it.
+
+### Presets and expected numbers (checked by script, `sim.test.js`)
+
+| Preset | Steps | What happens |
+|---|---|---|
+| `send-chain` | 4 | Mon full `@mon`, **8** blocks; Tue `@mon → @tue`, **2** (3, 4); Wed `@tue → @wed` (common `@mon`, `@tue`: newest), **1** (6); restore Wednesday on the target from `@wed` alone: **8** blocks read from **1** snapshot, equal to the source's `@wed`. Target stores **11** |
+| `missing-parent` | 4 | Mon full `@mon` (8); the target deletes `@mon`; Tue `@mon → @tue` (2 blocks) **refused**: no parent on the target, target unchanged; then full `@tue`, **8** blocks |
+| `common-kept` | 4 | Mon full (8); Tue `@mon → @tue` (2); the source deletes `@mon` (source now stores 8, the target keeps 10); Wed `@tue → @wed`, **1** block, accepted: `@tue` is common |
+| `target-touched` | 3 | Mon full (8); a file written on the target (block 5 `F*`); Tue `@mon → @tue` **refused** (target modified). With `force`: rolled back to `@mon`, the write to block 5 **lost**, then `@tue` applied |
+
+`force` changes no step count and nothing in the other three presets (tested).
+
 ## Not in this sim
 
-Retention (`retention-gfs`), dedup (`dedup-chunking`), synthetic fulls, `rsync --link-dest` trees, snapshot
-send/receive (`lnx-send-receive`, a later preset of this sim).
+Retention (`retention-gfs`), dedup (`dedup-chunking`), synthetic fulls, `rsync --link-dest` trees. In the send and
+receive presets: resumable sends, encryption and raw sends, compression in the stream, scheduling and retention.

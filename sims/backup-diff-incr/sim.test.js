@@ -191,9 +191,126 @@ test('params: unknown values fall back to the defaults', () => {
   assert.deepEqual(logic.norm({ mode: 'full', restoreDay: '2', lose: '3' }), { modes: ['full'], target: 2, lost: 3 });
 });
 
+// ── lnx-send-receive presets (repl): replication from snapshot pairs ──
+
+const R = (repl, force) => ({ repl, force: !!force });
+const MON = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+const TUE = ['A', 'B', 'C', 'D1', 'E1', 'F', 'G', 'H'];
+const WED = ['A', 'B', 'C', 'D1', 'E1', 'F', 'G1', 'H'];
+const side = (days) => ({ live: null, snaps: days.map(([day, blocks]) => ({ day, ro: true, blocks })), modified: false });
+
+test('send tie-break (rule 5): of several common snapshots the newest is the parent', () => {
+  assert.equal(logic.commonParent(side([[0, MON], [1, TUE]]), side([[0, MON], [1, TUE]])), 1);
+  assert.equal(logic.commonParent(side([[0, MON], [1, TUE], [2, WED]]), side([[0, MON], [1, TUE]])), 1);
+  assert.equal(logic.commonParent(side([[1, TUE]]), side([[0, MON]])), null);
+  // send-chain, Wednesday: @mon and @tue are on both sides; the stream goes from @tue
+  const before = at(R('chain'), 2);
+  assert.deepEqual(logic.commonSnaps(before.src, before.tgt), [0, 1]);
+  const wed = at(R('chain'), 3).stream;
+  assert.equal(wed.parent, 1);
+  assert.deepEqual(wed.carried, [6]);
+  // common-kept: after @mon is deleted on the source, @tue is the only common one and still the parent
+  const s = at(R('common'), 3);
+  assert.deepEqual(logic.commonSnaps(s.src, s.tgt), [1]);
+  assert.equal(at(R('common'), 4).stream.parent, 1);
+});
+
+test('send rule 1: an incremental stream carries only the blocks that differ between parent and child', () => {
+  const carried = [1, 2, 3].map((n) => at(R('chain'), n).stream);
+  assert.deepEqual(carried.map((x) => x.kind), ['full', 'incr', 'incr']);
+  assert.deepEqual(carried.map((x) => x.carried.length), [8, 2, 1]);
+  assert.deepEqual(carried[1].carried, [3, 4]);
+  assert.deepEqual(carried[1].blocks, { 3: 'D1', 4: 'E1' });
+  // from @mon straight to @wed: the difference, not the sum of the days
+  const src = at(R('chain'), 3).src;
+  assert.deepEqual(logic.makeStream(src, 2, 0).carried, [3, 4, 6]);
+  assert.deepEqual(logic.makeStream(src, 2, null).carried, [0, 1, 2, 3, 4, 5, 6, 7]);
+});
+
+test('send rule 2: only a read-only snapshot can be sent, and an incremental one needs its parent on the source', () => {
+  const src = side([[0, MON], [1, TUE]]);
+  src.snaps[1].ro = false;
+  assert.equal(logic.makeStream(src, 1, 0).refused, 'not-snapshot');
+  assert.equal(logic.makeStream(src, 2, 0).refused, 'not-snapshot');      // no such snapshot
+  assert.equal(logic.makeStream(side([[1, TUE]]), 1, 0).refused, 'no-source-parent');
+  for (const id of logic.REPL_IDS) assert.ok(end(R(id)).src.snaps.every((x) => x.ro === true), id);
+});
+
+test('send rule 3: the receive is refused without the parent on the target; a full send works instead', () => {
+  const del = at(R('missing'), 2);
+  assert.deepEqual(del.deleted, { side: 'tgt', day: 0 });
+  assert.deepEqual(del.tgt.snaps, []);
+  const s = at(R('missing'), 3);
+  assert.equal(s.stream.kind, 'incr');
+  assert.equal(s.stream.parent, 0);
+  assert.equal(s.check, 'no-parent');
+  assert.deepEqual(s.tgt, del.tgt);                    // refused: the target is unchanged
+  const full = at(R('missing'), 4);
+  assert.equal(full.check, null);
+  assert.equal(full.stream.kind, 'full');
+  assert.equal(full.stream.carried.length, 8);
+  assert.deepEqual(full.tgt.snaps.map((x) => x.day), [1]);
+  assert.deepEqual(full.tgt.snaps[0].blocks, TUE);
+});
+
+test('send rule 3: a target written after its newest snapshot refuses the receive, unless forced to roll back', () => {
+  const t2 = at(R('touched'), 2);
+  assert.equal(t2.tgt.modified, true);
+  assert.equal(t2.tgt.live[logic.TOUCH], 'F*');
+  const no = end(R('touched'));
+  assert.equal(no.check, 'modified');
+  assert.deepEqual(no.tgt, t2.tgt);                    // nothing applied, the write is still there
+  assert.deepEqual(no.lostWrites, []);
+  const yes = end(R('touched', true));
+  assert.equal(yes.check, null);
+  assert.deepEqual(yes.lostWrites, [logic.TOUCH]);    // the rollback threw the write away
+  assert.deepEqual(yes.tgt.live, TUE);
+  assert.equal(yes.tgt.modified, false);
+  assert.deepEqual(yes.tgt.snaps.map((x) => x.day), [0, 1]);
+  // force changes nothing where the target was not written to
+  assert.deepEqual(end(R('chain', true)), end(R('chain')));
+  // a full stream needs no parent
+  assert.equal(logic.receiveCheck(side([]), { kind: 'full', refused: null }, false), null);
+});
+
+test('send rule 4: a received snapshot is a whole filesystem; restoring Wednesday reads @wed alone', () => {
+  const s = end(R('chain'));
+  assert.deepEqual(s.tgt.snaps.map((x) => x.blocks), [MON, TUE, WED]);
+  s.tgt.snaps.forEach((x) => assert.deepEqual(x.blocks, logic.snapOf(s.src, x.day).blocks));
+  assert.deepEqual(s.restore, { day: 2, from: [2], read: 8, result: WED, ok: true });
+  // the snapshots share their unchanged blocks: the target stores 8 + 2 + 1
+  assert.equal(logic.storedOn(s.tgt), 11);
+  assert.equal(logic.refsOf(s.tgt, 0, 'A'), 3);
+  assert.equal(logic.refsOf(s.tgt, 6, 'G1'), 1);
+  // deleting an older snapshot does not break a later one, on either side
+  const c = at(R('common'), 3);
+  assert.deepEqual(c.src.snaps.map((x) => [x.day, x.blocks]), [[1, TUE]]);
+  assert.equal(logic.storedOn(c.src), 8);              // Monday's D and E are freed
+  const r = logic.receive(c.tgt, logic.makeStream(Object.assign({}, c.src, { snaps: c.src.snaps.concat([{ day: 2, ro: true, blocks: WED }]) }), 2, 1)).tgt;
+  r.snaps = r.snaps.filter((x) => x.day !== 0);
+  assert.deepEqual(logic.snapOf(r, 2).blocks, WED);
+  // common-kept ends with the same three snapshots on the target as send-chain
+  assert.deepEqual(end(R('common')).tgt.snaps.map((x) => x.blocks), [MON, TUE, WED]);
+});
+
+test('send presets: steps 4, 4, 4, 3; the host scenes are unchanged', () => {
+  assert.deepEqual(logic.REPL_IDS.map((id) => logic.steps(P(R(id)))), [4, 4, 4, 3]);
+  assert.equal(logic.steps(P(R('touched', true))), 3);
+  assert.deepEqual(logic.REPL_IDS.map((id) => [1, 2, 3, 4].map((n) => n <= logic.steps(P(R(id))) ? at(R(id), n).phase : '-')),
+    [['send', 'send', 'send', 'restore'], ['send', 'del', 'send', 'resend'], ['send', 'send', 'del', 'send'], ['send', 'touch', 'send', '-']]);
+  // repl off (or unknown) is the backup week; its states carry no send/receive field
+  assert.equal(logic.steps(P({ repl: 'x' })), 17);
+  const host = Object.keys(at({}, 0)).sort();
+  assert.deepEqual(host, ['changed', 'day', 'disk', 'history', 'lanes', 'lost', 'phase', 'target', 'ver', 'written', 'twice'].sort());
+  for (let n = 0; n <= 17; n++) assert.deepEqual(Object.keys(at({}, n)).sort(), host);
+  assert.deepEqual(logic.normRepl({ repl: 'chain', force: 'true' }), { id: 'chain', force: true });
+  assert.deepEqual(logic.normRepl({}), { id: null, force: false });
+});
+
 // ── generic checks every sim keeps ──
 
-const ALL = [{}, { mode: 'diff' }, { mode: 'full' }, { lose: 2 }, { compare: true, lose: 1, restoreDay: 3 }];
+const ALL = [{}, { mode: 'diff' }, { mode: 'full' }, { lose: 2 }, { compare: true, lose: 1, restoreDay: 3 },
+  R('chain'), R('missing'), R('common'), R('touched'), R('touched', true)];
 
 test('state is JSON-safe at every step', () => {
   for (const over of ALL) {
@@ -216,13 +333,15 @@ test('replay is deterministic and step back equals replay', () => {
 });
 
 test('step does not mutate its input', () => {
-  const p = P({ compare: true });
-  let s = logic.initial(p);
-  for (let n = 1; n <= logic.steps(p); n++) {
-    const copy = structuredClone(s);
-    const next = logic.step(s, n, p);
-    assert.deepEqual(s, copy);
-    s = next;
+  for (const over of [{ compare: true }, R('missing'), R('common'), R('touched', true)]) {
+    const p = P(over);
+    let s = logic.initial(p);
+    for (let n = 1; n <= logic.steps(p); n++) {
+      const copy = structuredClone(s);
+      const next = logic.step(s, n, p);
+      assert.deepEqual(s, copy);
+      s = next;
+    }
   }
 });
 

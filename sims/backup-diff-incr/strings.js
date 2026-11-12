@@ -131,6 +131,89 @@
       termDiff: '*differential backup* (diferencijalna kopija)',
       termDiffLater: '*differential backup*',
 
+      // lnx-send-receive (param repl): replication from snapshot pairs
+      srStage: 'Izvor s datotečnim sustavom i snimkama, tok koji slanje nosi i odredište sa snimkama koje je primilo',
+      srSubtitle: 'Inkrementalna replikacija iz parova snimki',
+      repl: 'Slanje i primanje',
+      replOff: 'tjedan kopija',
+      force: 'Prisilno primanje (-F)',
+      forceHint: 'Odredište se prvo vraća na svoju zadnju snimku.',
+      presetChain: 'Lanac slanja',
+      presetChainHint: 'Potpuno, pa inkrementalno; oporavak iz jedne snimke.',
+      presetMissing: 'Nema roditelja',
+      presetMissingHint: 'Odredište je obrisalo @mon.',
+      presetCommon: 'Zajednička ostaje',
+      presetCommonHint: 'Izvor briše @mon, a @tue je zajednička.',
+      presetTouched: 'Dirano odredište',
+      presetTouchedHint: 'Upis na odredištu između dva slanja.',
+      legSrNow: 'promijenjen ili nošen u ovom koraku',
+      legSrFlag: 'snimka, samo za čitanje',
+      legSrBlock: 'blok jedne snimke ili podataka',
+      legSrShared: 'blok koji snimke dijele (×n)',
+      legSrStream: 'tok: blokovi koje slanje nosi',
+      legSrSlot: 'tok ga ne nosi',
+      legSrLink: 'primjenjuje se u snimku',
+      legSrRefused: 'odbijeno primanje',
+      legSrCommon: 'zajednička snimka, na obje strane',
+      legSrGone: 'obrisana snimka',
+      srSrc: 'Izvor',
+      srTgt: 'Odredište',
+      srLive: 'podaci',
+      srStream: 'tok',
+      srRest: 'vraćeno',
+      srEmpty: 'još prazno',
+      srSnaps: ['{n} snimka', '{n} snimke', '{n} snimki'],
+      srStored: ['{n} blok na disku', '{n} bloka na disku', '{n} blokova na disku'],
+      srParent: 'roditelj',
+      srSent: 'šalje se',
+      srGone: 'obrisana',
+      srFullTag: 'potpuno',
+      srIncrTag: 'inkrementalno',
+      srRefused: 'odbijeno',
+      srChanged: 'mijenjano nakon snimke',
+      srRolledBack: 'vraćeno, upis izgubljen',
+      srSame: 'isto kao izvor',
+
+      srCapStart: 'Dva računala. Na izvoru je datotečni sustav od osam blokova, A–H; odredište je još prazno. Svaki dan ' +
+        'uzima se *snapshot* (snimka), samo za čitanje, i šalje na odredište.',
+      srCapSnap: 'Snimka {snap}.',
+      srCapDaySnap: '{day}: snimka {snap}.',
+      srCapFull: 'Odredište nema nijednu snimku zajedničku s izvorom, pa je slanje potpuno: tok nosi svih osam blokova. ' +
+        'Na odredištu je sada {snap}.',
+      srCapIncr: ['Inkrementalno slanje od {parent} do {snap} nosi samo {n} blok, {list}: onaj koji se među njima razlikuje.',
+        'Inkrementalno slanje od {parent} do {snap} nosi samo {n} bloka, {list}: one koji se među njima razlikuju.',
+        'Inkrementalno slanje od {parent} do {snap} nosi samo {n} blokova, {list}: one koji se među njima razlikuju.'],
+      srCapWhole: 'Na odredištu je {snap} time cijeli datotečni sustav: za oporavak {day} ne treba lanac.',
+      srCapTie: 'Na obje strane su {list}; roditelj je najnovija, {parent}.',
+      srCapKept: 'Na izvoru više nema {gone}, ali {parent} je na obje strane, pa slanje radi.',
+      srCapNoParent: 'Primanje je odbijeno: odredište nema {parent}, a inkrementalni tok samo je razlika od nje. Odredište je ' +
+        'ostalo kakvo je bilo.',
+      srCapResend: 'Bez zajedničke snimke radi samo potpuno slanje: cijela {snap}, svih osam blokova. Na odredištu je sada {snap2}.',
+      srCapModified: 'Primanje je odbijeno: odredište je promijenjeno nakon svoje zadnje snimke, {parent} (tako radi ZFS). ' +
+        'Prisilno primanje (-F) prvo bi ga vratilo na {parent2} i izgubilo taj upis.',
+      srCapForced: 'Prisilno primanje (-F) vraća odredište na {parent}: upis u blok {i} ({c}) je izgubljen. Zatim se tok ' +
+        'primjenjuje i na odredištu je {snap}.',
+      srCapDelTgt: 'Na odredištu je obrisana snimka {snap}. Podaci odredišta ostaju, ali {snap2} više nije zajednička.',
+      srCapDelSrc: 'Na izvoru je obrisana snimka {snap}; oslobođeni su blokovi koje nijedna druga snimka ne dijeli. {later} ' +
+        'je i dalje cijela na obje strane: snimke dijele blokove, ali ne ovise jedna o drugoj.',
+      srCapTouch: 'Na odredištu je upisana datoteka: blok {i} je sada {c}. Odredište se promijenilo nakon svoje zadnje ' +
+        'snimke, {snap}.',
+      srCapRestore: 'Oporavak {day} na odredištu: čita se samo {snap}, {r} blokova iz jedne snimke, i svi su isti kao u ' +
+        'izvornoj {snap2}. Primanje je svaki tok već primijenilo, pa lanac ne treba; prirasnim kopijama trebao bi cijeli, redom.',
+
+      explainSr: '<p><em lang="en">Replication</em> (replikacija) šalje snimke s jednog računala na drugo. Prvo slanje ' +
+        'je potpuno: tok nosi sve blokove jedne snimke. Svako sljedeće je inkrementalno, od <b>roditeljske snimke</b> do ' +
+        'nove, i nosi samo blokove koji se među njima razlikuju. Šalju se samo snimke, a one su samo za čitanje.</p>' +
+        '<p>Primanje tok <b>primjenjuje</b>: na odredištu nastaje cijela snimka istog imena. Za oporavak srijede dovoljna ' +
+        'je <span translate="no">@wed</span>; lanac ne treba, za razliku od prirasnih kopija. Snimke dijele nepromijenjene ' +
+        'blokove, pa brisanje starije ne kvari kasniju.</p>' +
+        '<p>Inkrementalni tok samo je razlika, pa roditelj mora postojati <b>na obje strane</b>; inače se primanje odbija ' +
+        'i radi samo potpuno slanje. Od više zajedničkih snimki uzima se najnovija. ZFS primanje odbija i kad je odredište ' +
+        'promijenjeno nakon svoje zadnje snimke, osim prisilnog (<code translate="no">receive -F</code>), koje ga vraća ' +
+        'na nju i taj upis gubi. Btrfs prima u snimke samo za čitanje. Roditelj se u ZFS-u zadaje s ' +
+        '<code translate="no">send -i</code>, u Btrfs-u s <code translate="no">send -p</code>.</p>' +
+        '<p>Replikacija sama nije [[backup]]: i brisanje se replicira, osim ako se snimke čuvaju.</p>',
+
       explain: '<p>[[full backup]] sprema sve, promijenjeno ili ne: to je razina 0. Prva kopija uvijek je takva: ' +
         '[[snapshot file]], u kojoj se pamti stanje zatečeno pri zadnjoj kopiji, još ne postoji.</p>' +
         '<p>[[incremental backup]] sprema samo ono što se promijenilo od <b>prethodne kopije bilo koje vrste</b> ' +
@@ -249,6 +332,89 @@
       capGapDiffHint: 'With differential sets the same loss costs only {lost}: {target} restores from Sunday and {targetGen}\'s set.',
       termDiff: 'differential backup',
       termDiffLater: 'differential backup',
+
+      srStage: 'The source with its filesystem and snapshots, the stream a send carries, and the target with the snapshots it received',
+      srSubtitle: 'Incremental replication from snapshot pairs',
+      repl: 'Send and receive',
+      replOff: 'a week of backups',
+      force: 'Forced receive (-F)',
+      forceHint: 'The target is first rolled back to its newest snapshot.',
+      presetChain: 'Send chain',
+      presetChainHint: 'Full, then incremental; restore from one snapshot.',
+      presetMissing: 'Missing parent',
+      presetMissingHint: 'The target deleted @mon.',
+      presetCommon: 'Common kept',
+      presetCommonHint: 'The source deletes @mon; @tue is common.',
+      presetTouched: 'Target touched',
+      presetTouchedHint: 'A write on the target between two sends.',
+      legSrNow: 'changed or carried in this step',
+      legSrFlag: 'snapshot, read-only',
+      legSrBlock: 'a block of one snapshot or of the data',
+      legSrShared: 'a block snapshots share (×n)',
+      legSrStream: 'stream: the blocks a send carries',
+      legSrSlot: 'not carried',
+      legSrLink: 'applied into the snapshot',
+      legSrRefused: 'refused receive',
+      legSrCommon: 'common snapshot, on both sides',
+      legSrGone: 'deleted snapshot',
+      srSrc: 'Source',
+      srTgt: 'Target',
+      srLive: 'data',
+      srStream: 'stream',
+      srRest: 'restored',
+      srEmpty: 'still empty',
+      srSnaps: ['{n} snapshot', '{n} snapshots'],
+      srStored: ['{n} block on disk', '{n} blocks on disk'],
+      srParent: 'parent',
+      srSent: 'sent',
+      srGone: 'deleted',
+      srFullTag: 'full',
+      srIncrTag: 'incremental',
+      srRefused: 'refused',
+      srChanged: 'changed after the snapshot',
+      srRolledBack: 'rolled back, write lost',
+      srSame: 'matches the source',
+
+      srCapStart: 'Two machines. The source has a filesystem of eight blocks, A–H; the target is still empty. Every day a ' +
+        'read-only snapshot is taken and sent to the target.',
+      srCapSnap: 'Snapshot {snap}.',
+      srCapDaySnap: '{day}: snapshot {snap}.',
+      srCapFull: 'The target shares no snapshot with the source, so the send is full: the stream carries all eight blocks. ' +
+        'The target now holds {snap}.',
+      srCapIncr: ['The incremental send from {parent} to {snap} carries only {n} block, {list}: the one that differs between them.',
+        'The incremental send from {parent} to {snap} carries only {n} blocks, {list}: those that differ between them.'],
+      srCapWhole: 'On the target {snap} is then a whole filesystem: restoring {day} needs no chain.',
+      srCapTie: 'Both sides hold {list}; the parent is the newest, {parent}.',
+      srCapKept: '{gone} is gone from the source, but {parent} is on both sides, so the send works.',
+      srCapNoParent: 'The receive is refused: the target has no {parent}, and an incremental stream is only the difference ' +
+        'from it. The target stays as it was.',
+      srCapResend: 'With no common snapshot only a full send works: all of {snap}, eight blocks. The target now holds {snap2}.',
+      srCapModified: 'The receive is refused: the target was changed after its newest snapshot, {parent} (this is how ZFS ' +
+        'behaves). A forced receive (-F) would first roll it back to {parent2} and lose that write.',
+      srCapForced: 'The forced receive (-F) rolls the target back to {parent}: the write to block {i} ({c}) is lost. Then the ' +
+        'stream is applied and the target holds {snap}.',
+      srCapDelTgt: 'Snapshot {snap} is deleted on the target. The target\'s data stays, but {snap2} is no longer common.',
+      srCapDelSrc: 'Snapshot {snap} is deleted on the source; the blocks no other snapshot shares are freed. {later} stays ' +
+        'whole on both sides: snapshots share blocks but do not depend on each other.',
+      srCapTouch: 'A file is written on the target: block {i} is now {c}. The target has changed since its newest snapshot, ' +
+        '{snap}.',
+      srCapRestore: 'Restoring {day} on the target: only {snap} is read, {r} blocks from one snapshot, and all match the ' +
+        'source\'s {snap2}. Each receive already applied its stream, so no chain is needed; incremental backups would need ' +
+        'all of it, in order.',
+
+      explainSr: '<p>Replication sends snapshots from one machine to another. The first send is full: the stream carries ' +
+        'every block of one snapshot. Every later one is incremental, from a <b>parent snapshot</b> to the new one, and ' +
+        'carries only the blocks that differ between them. Only snapshots are sent, and they are read-only.</p>' +
+        '<p>The receive <b>applies</b> the stream: the target gets a whole snapshot of the same name. Restoring Wednesday ' +
+        'needs only <span translate="no">@wed</span>; no chain, unlike incremental backups. Snapshots share their ' +
+        'unchanged blocks, so deleting an older one does not break a later one.</p>' +
+        '<p>An incremental stream is only a difference, so the parent must exist <b>on both sides</b>; otherwise the ' +
+        'receive is refused and only a full send works. Of several common snapshots the newest is used. ZFS also refuses ' +
+        'the receive when the target was changed after its newest snapshot, unless it is forced ' +
+        '(<code translate="no">receive -F</code>), which rolls the target back to it and loses that write. Btrfs receives ' +
+        'into read-only snapshots. The parent is named with <code translate="no">send -i</code> in ZFS and ' +
+        '<code translate="no">send -p</code> in Btrfs.</p>' +
+        '<p>Replication alone is not a [[backup]]: a deletion replicates too, unless snapshots are kept.</p>',
 
       explain: '<p>A [[full backup]] (level 0) stores everything, changed or not. The first backup is always one: the ' +
         '[[snapshot file]], which records the state found at the last backup, does not exist yet.</p>' +

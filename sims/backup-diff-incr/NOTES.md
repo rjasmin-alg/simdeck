@@ -110,3 +110,90 @@ They found these caption defects, all fixed:
 ## Time
 
 Start 2026-10-04 09:54 CEST, done 10:16 CEST (about 22 minutes, plus the review).
+
+# Preset task `lnx-send-receive`: snapshot send and receive
+
+Task `docs/tasks/w3/lnx-send-receive.md` (catalogue `lnx-send-receive`, §4.4; overlap §5.3). Rules, data and expected
+numbers: `SPEC.md`, "Send and receive". Presets `send-chain`, `missing-parent`, `common-kept`, `target-touched`; entry
+`send-chain` in `sim.json`.
+
+## Decisions
+
+- **The host model could not express it, so the change is in this folder.** The task says to file a shared request
+  and stop if the host cannot express the applied receive or the both-sides precondition; it could not (one disk, no
+  second machine, no named snapshots, no deletion). As the `win-vss`, `win-boot`, `win-update-rings` and
+  `win-failover-cluster` preset tasks did with their hosts, and running unattended with the host merged, I added an
+  opt-in flow to `sim.js`: param `repl` (`off` by default) and `force`, functions `normRepl`, `snapOf`,
+  `commonParent`, `commonSnaps`, `makeStream`, `receiveCheck`, `receive`, `storedOn`, `refsOf`, data `SEND_WEEK`,
+  `REPL`, `TOUCH`. The host's scenes are unchanged: `norm` is untouched, `steps`/`initial`/`step` only branch when
+  `repl` names a case, and a test checks that every host state keeps exactly its old fields. Pure functions over
+  plain data, no words: promotable to `models/` with the host's.
+- **Scripted cases, one op per step** (`REPL`): `send` (the day's writes, its read-only snapshot, the send and the
+  receive in one step: the task's "one step per day"), `resend`, `del`, `touch`, `restore`. Monday's data is on the
+  source at step 0, so step 1 is the first snapshot and full send.
+- **Parent choice.** Scripted sends use the newest common snapshot (rule 5). `missing-parent`'s Tuesday names `@mon`
+  explicitly (what an operator who did not know the target lost it would type), so the refusal is visible; its fourth
+  step falls back to the newest common one, which is none, so the send is full.
+- **A full receive keeps the target's other snapshots** (a new filesystem beside them). In ZFS a full stream into an
+  existing dataset needs a new name or `-F`; the generic model does not show that *(check)*. In the presets a full
+  receive only lands on a target with no snapshots, so nothing depends on it.
+- **Target modified** is ZFS's case (the caption says so); Btrfs receives into read-only snapshots, said in the
+  explanation. One generic model for both, as the task's coordinator note asks.
+- **Scene (K3):** two grids side by side, source (blue) and target (orange); the stream is the target grid's top row
+  with a bracket naming the pair; refused = the carried cells `bad` and "✕ odbijeno"; common = "⇄" beside the
+  snapshot on both sides (the word went: with it the asides squeezed the cells); parent and "šalje se" as tags;
+  deleted = the row crossed (`dead`) with the snapshot's old content and "obrisana"; sharing within a side = `soft`
+  with ×n; the file written on the target is green (`c: 3`), and after a forced receive the cell shows the lost `F*`
+  as its second line and the row says "vraćeno, upis izgubljen". Each grid counts the blocks stored on that machine
+  (distinct block contents over its snapshots and its data): 11 on the target after the chain.
+- **Legend and explanation per scene:** `data-mode` on `<html>` (`host` / `send`) hides the other scene's legend
+  items and explanation, as `lnx-cow-filesystem` does; the subtitle and the stage's label change with it. The host's
+  four params hide in the send scene; `repl` is always hidden (its presets choose it); `force` shows only in
+  `target-touched`.
+- **Presets in two columns** (nine now), so the panel fits one screen; the host's look is otherwise unchanged.
+- **Snapshot names** `@mon`, `@tue`, `@wed` are data in both languages (the task's captions use them so).
+- **Concepts, not tools:** ZFS and Btrfs are named (NLA T22, T23 teach them). `send -i`, `send -p` and `receive -F`
+  appear only in the explanation, as the subject; the stage uses `@mon → @tue`. Man pages only in Sources.
+
+## Deviations from the task
+
+- Host model extended in this folder instead of a shared request and stop (above).
+- Captions: the task's caption is used at Wednesday's send („Inkrementalno slanje od `@tue` do `@wed` nosi samo
+  jedan blok. Na odredištu je `@wed` time cijeli datotečni sustav: za oporavak srijede ne treba lanac."), with the
+  count as a numeral („1 blok").
+- The task's metadata (topic `linux-admin`, tag `snapshots`, level `advanced`) has no place in a preset entry; the
+  host keeps `storage` / `backup` / `intro`. See the report.
+
+## Sources
+
+- NLA `meta/toc.md` T22 („Btrfs — podvolumeni, snimke, `send`/`receive`…") and T23 („ZFS na Linuxu…"); no chapters
+  yet, so every rule is *(check)*.
+- zfs-send(8) (`-i`, `-I`), zfs-receive(8) (`-F`: roll back to the most recent snapshot; refuses a target modified
+  since it), btrfs-send(8) (`-p`, read-only subvolumes), btrfs-receive(8): from memory, not re-read online *(check)*.
+- Related lab `~/projects/single-page-labs/zfs-btrfs-topology-lab.html` not used.
+
+## Term pairs (missing from `kit/glossary.js`; written out in both tables)
+
+| en | hr |
+|---|---|
+| snapshot | snimka (NLA toc T20/T22) |
+| replication | replikacija |
+| incremental send | inkrementalno slanje *(check)* |
+| parent snapshot | roditeljska snimka *(check)* |
+| stream | tok *(check)* |
+| receive | primanje |
+| forced receive | prisilno primanje *(check)* |
+
+## Checks
+
+- `node --test sims/backup-diff-incr/sim.test.js`: 23 tests (16 host + 7 send); every send rule broken once
+  (8 mutants: oldest common parent, stream carries every block, read-only ignored, no-parent check gone, modified
+  ignored, receive not applied, silent rollback, delete ignored): all killed.
+- `npm run gate -- backup-diff-incr`: pass (62/62; the entry `send-chain` opens). Screenshots looked at: every step of
+  the four presets in hr and en at 1920×1080, `target-touched` with `force` in both, dark (`send-chain` 4), grayscale
+  (`missing-parent` 3), 375×812 (`send-chain` 3, `missing-parent` 3), and the host's own gate shots (host legend
+  only, panel fits). Phone: the grids scroll inside their box, as the host's lanes do.
+
+## Time
+
+Start 2026-11-12 20:29 CET, done 20:44 CET (about 15 minutes).
