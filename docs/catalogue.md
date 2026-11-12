@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **378 of 477 entries are live**, 64 w3, 24 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **379 of 477 entries are live**, 64 w3, 24 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -357,7 +357,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 1 | 13 w3, 11 w3 · queued |
 | §4.15 Antennas and radiation | 12 | 12 | – |
-| §4.16 Arithmetic on paper | 6 | 0 | 1 w3 · building, 5 w3 · queued |
+| §4.16 Arithmetic on paper | 6 | 1 | 5 w3 · queued |
 
 <!-- status:end -->
 
@@ -1388,7 +1388,7 @@ audience and base switches).
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `ari-place-value` | w3 · queued | Place value: a digit is worth what its place says | a digit is worth the digit times the base to the power of its place; ten ones regroup into one ten (in base b, b of them into one of the next place); the same quantity written in base 10, 2, 8 and 16 has other digits but is the same number | build a number from blocks, regroup ones into tens, switch the base and watch the digits change while the blocks stay | expl | S | P2 | ARI | owner suggestion s-002; pairs with `arh-twos-complement` (number-representation) |  |
-| `ari-column-addition` | w3 · building | Column addition: carrying | add column by column from the right; a column whose sum reaches the base writes what is left over and carries the rest to the next column (more than 1 with three or more numbers); the carry is a regrouping, not a trick | type two to four numbers, step column by column, see the carry move, switch the base | step | M | P2 | ARI | owner suggestion s-002; pilot of kit view K5 |  |
+| `ari-column-addition` | live | Column addition: carrying | add column by column from the right; a column whose sum reaches the base writes what is left over and carries the rest to the next column (more than 1 with three or more numbers); the carry is a regrouping, not a trick | type two to four numbers, step column by column, see the carry move, switch the base | step | M | P2 | ARI | owner suggestion s-002; pilot of kit view K5 |  |
 | `ari-column-subtraction` | w3 · queued | Column subtraction: two methods side by side | when a top digit is smaller, either borrow (take one from the next column, it is worth the base here) or use equal additions (add the base to the top digit and one to the next digit taken away); both keep the difference unchanged, so they give the same answer | type two numbers, step both methods at once, compare what is written where; a zero in the top number | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition` |  |
 | `ari-column-multiplication` | w3 · queued | Column multiplication: partial products | multiply by each digit of the second number, write each partial product one place further left (it is multiplied by the base), then add; an area model shows why; in base 2 every partial product is the number itself or zero, shifted: shift-and-add | type two numbers, step digit by digit, open the area model, switch to base 2 | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition`; base 2 pairs with `arh-twos-complement` |  |
 | `ari-long-division` | w3 · queued | Long division, the Croatian way | take as few leading digits as can be divided, ask how many times, multiply, subtract, bring down the next digit, repeat; a 0 in the quotient when a step is too small; the remainder is less than the divisor | type a dividend and a divisor, step through, see a forgotten 0 in the quotient as a typical mistake | step | M | P2 | ARI | owner suggestion s-002; after `ari-column-multiplication` |  |
