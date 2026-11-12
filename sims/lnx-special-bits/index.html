@@ -1,0 +1,594 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-special-bits: who the process runs as; who may delete in /tmp.
+     On top, the action of this step: who acts, the command, the result. Below, three columns: left the process's card
+     (RUID, EUID, RGID, EGID; the effective ones highlighted when they differ) and the users; in the middle the file or
+     directory whose special bit the preset is about, its ls -l line with the letter enlarged, the fourth octal digit
+     broken into 4 + 2 + 1 and the key of s S t T; right the file the action touches and the decision with its rule
+     and checks. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-special-bits">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Posebni bitovi: setuid, setgid i sticky · simdeck</title>
+<meta name="description" content="Pokreni program sa setuid i gledaj stvarni i efektivni UID, pa briši u /tmp sa sticky bitom: četvrta oktalna znamenka 4 + 2 + 1, s i S, setgid na direktoriju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-special-bits",
+  "title": {
+    "hr": "Posebni bitovi: setuid, setgid i sticky",
+    "en": "Special bits: setuid, setgid and sticky"
+  },
+  "concept": {
+    "hr": "Proces dobiva efektivni UID vlasnika programa; u /tmp briše samo vlasnik",
+    "en": "A process gets the program owner’s effective UID; in /tmp only owners delete"
+  },
+  "summary": {
+    "hr": "Pokreni program sa setuid i gledaj stvarni i efektivni UID, pa briši u /tmp sa sticky bitom: četvrta oktalna znamenka 4 + 2 + 1, s i S, setgid na direktoriju.",
+    "en": "Run a setuid program and watch the real and effective UID, then delete in sticky /tmp: the fourth octal digit 4 + 2 + 1, s and S, setgid on a directory."
+  },
+  "tags": [
+    "permissions"
+  ],
+  "class": "stepper",
+  "steps": 3,
+  "entries": [
+    {
+      "preset": "sticky-tmp"
+    },
+    {
+      "preset": "setgid-dir"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-special-bits"]; colours only from kit tokens.
+   Layout: the command strip on top, then three columns (process | special bit | target and decision). */
+[data-sim="lnx-special-bits"] .sb {
+  display: flex; flex-direction: column; gap: 0.6rem;
+  height: 100%; padding: 0.5rem 0.8rem; font-size: 1.25rem;
+}
+[data-sim="lnx-special-bits"] .sb-mono, [data-sim="lnx-special-bits"] code { font-family: var(--mono); }
+[data-sim="lnx-special-bits"] .sb-muted { color: var(--muted); }
+[data-sim="lnx-special-bits"] .sb-small { font-size: var(--fs-sm); }
+[data-sim="lnx-special-bits"] .sb h3 { margin: 0 0 0.3rem; font-size: var(--fs-lg); }
+[data-sim="lnx-special-bits"] .sb h4 { margin: 0.6rem 0 0.2rem; font-size: var(--fs-sm); font-weight: 700; }
+
+/* the command strip */
+[data-sim="lnx-special-bits"] .sb-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem;
+  padding: 0.35rem 0.8rem; min-height: 3rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel);
+}
+[data-sim="lnx-special-bits"] .sb-who { font-weight: 700; padding: 0.05rem 0.5rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap; }
+[data-sim="lnx-special-bits"] .sb-who-proc { border-style: dashed; font-weight: 400; }
+[data-sim="lnx-special-bits"] .sb-cmd { font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-cmd-words { font-weight: 400; font-family: var(--sans); font-size: var(--fs-md); }
+[data-sim="lnx-special-bits"] .sb-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-special-bits"] .sb-res-ok { color: var(--ok); font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-res-err { color: var(--danger); font-weight: 700; font-family: var(--mono); }
+[data-sim="lnx-special-bits"] .sb-res-look { color: var(--muted); }
+
+/* three columns */
+[data-sim="lnx-special-bits"] .sb-cols {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr) minmax(0, 1.2fr); gap: 0.9rem;
+}
+[data-sim="lnx-special-bits"] .sb-col {
+  min-width: 0; padding: 0.5rem 0.7rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+
+/* left: the process card */
+[data-sim="lnx-special-bits"] .sb-card { border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); padding: 0.3rem 0.5rem; background: var(--panel); }
+[data-sim="lnx-special-bits"] .sb-card-cmd { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); margin-bottom: 0.2rem; }
+[data-sim="lnx-special-bits"] .sb-ids { width: 100%; border-collapse: separate; border-spacing: 0 0.2rem; }
+[data-sim="lnx-special-bits"] .sb-ids th { text-align: left; font-family: var(--mono); padding: 0 0.5rem 0 0; white-space: nowrap; line-height: 1.1; }
+[data-sim="lnx-special-bits"] .sb-ids th .sb-kind { display: block; font-family: var(--sans); font-weight: 400; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-special-bits"] .sb-ids td { padding: 0.05rem 0; white-space: nowrap; width: 100%; }
+[data-sim="lnx-special-bits"] .sb-ids .sb-idv { font-family: var(--mono); border: 2px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-special-bits"] .sb-ids tr.sb-eff th, [data-sim="lnx-special-bits"] .sb-ids tr.sb-eff .sb-idv { font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-ids tr.sb-eff .sb-idv { border-color: var(--ink); }
+[data-sim="lnx-special-bits"] .sb-ids tr.sb-diff .sb-idv { background: var(--hl); color: var(--on-hl); border-width: 0.2rem; }
+[data-sim="lnx-special-bits"] .sb-ne { display: inline-block; color: var(--ink); font-weight: 700; font-size: var(--fs-sm); padding: 0 0.3rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="lnx-special-bits"] .sb-users { margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="lnx-special-bits"] .sb-users li { display: flex; flex-wrap: wrap; gap: 0 0.5rem; }
+[data-sim="lnx-special-bits"] .sb-users .sb-mono { font-weight: 700; }
+
+/* the ls -l line and the enlarged letter */
+[data-sim="lnx-special-bits"] .sb-path { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); overflow-wrap: anywhere; }
+[data-sim="lnx-special-bits"] .sb-ls { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.6rem; font-family: var(--mono); }
+[data-sim="lnx-special-bits"] .sb-mode { display: inline-flex; align-items: center; }
+[data-sim="lnx-special-bits"] .sb-nowrap { white-space: nowrap; }
+[data-sim="lnx-special-bits"] .sb-big .sb-mode { font-size: 2rem; font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-sp {
+  display: inline-grid; place-items: center; min-width: 1.15em; margin: 0 0.06em;
+  border: 0.18rem solid var(--ink); border-radius: var(--radius-sm); background: var(--panel);
+  font-size: 1.25em; line-height: 1.05; font-weight: 700;
+}
+[data-sim="lnx-special-bits"] .sb-sp.sb-upper { border-style: dashed; }
+
+/* middle: octal digits, breakdown, key */
+[data-sim="lnx-special-bits"] .sb-oct { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem; }
+[data-sim="lnx-special-bits"] .sb-digit { display: inline-grid; place-items: center; width: 2.1rem; height: 2.3rem; border: 2px solid var(--line); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-lg); }
+[data-sim="lnx-special-bits"] .sb-digit.sb-first { border: 0.2rem solid var(--ink); font-weight: 700; background: var(--panel); }
+[data-sim="lnx-special-bits"] .sb-parts { margin: 0.3rem 0 0; padding: 0; list-style: none; }
+[data-sim="lnx-special-bits"] .sb-parts li { display: flex; gap: 0.5rem; align-items: center; }
+[data-sim="lnx-special-bits"] .sb-parts li.sb-off { color: var(--muted); }
+[data-sim="lnx-special-bits"] .sb-parts li.sb-on { font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-parts .sb-mark { width: 1.2em; text-align: center; }
+[data-sim="lnx-special-bits"] .sb-key { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin-top: 0.2rem; font-size: var(--fs-sm); }
+[data-sim="lnx-special-bits"] .sb-key span { display: inline-flex; align-items: center; gap: 0.3rem; }
+[data-sim="lnx-special-bits"] .sb-key .sb-sp { font-size: 1.2rem; }
+[data-sim="lnx-special-bits"] .sb-key .sb-shown { font-weight: 700; text-decoration: underline; text-decoration-thickness: 0.15rem; }
+
+/* rows of files (directory entries, the target) */
+[data-sim="lnx-special-bits"] .sb-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.6rem;
+  margin: 0.2rem 0; padding: 0.15rem 0.45rem; min-height: 2.2rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); font-family: var(--mono);
+}
+[data-sim="lnx-special-bits"] .sb-row .sb-name { font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-row.sb-gone { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-special-bits"] .sb-row.sb-gone .sb-name { text-decoration: line-through; }
+[data-sim="lnx-special-bits"] .sb-tag { font-family: var(--sans); font-weight: 700; font-size: var(--fs-sm); padding: 0 0.25rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); }
+[data-sim="lnx-special-bits"] .sb-empty { color: var(--muted); font-style: italic; margin: 0.2rem 0; }
+
+/* right: the decision */
+[data-sim="lnx-special-bits"] .sb-dec { margin-top: 0.5rem; padding: 0.4rem 0.6rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="lnx-special-bits"] .sb-dec.sb-no { border-color: var(--danger); }
+[data-sim="lnx-special-bits"] .sb-dec.sb-look { border-style: dashed; border-color: var(--line); }
+[data-sim="lnx-special-bits"] .sb-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-icon { display: inline-grid; place-items: center; width: 1.7em; height: 1.7em; border-radius: 50%; border: 0.2rem solid currentColor; line-height: 1; }
+[data-sim="lnx-special-bits"] .sb-yes .sb-icon, [data-sim="lnx-special-bits"] .sb-ok-c { color: var(--ok); }
+[data-sim="lnx-special-bits"] .sb-no .sb-icon, [data-sim="lnx-special-bits"] .sb-no-c { color: var(--danger); }
+[data-sim="lnx-special-bits"] .sb-errno { font-family: var(--mono); font-size: var(--fs-md); }
+[data-sim="lnx-special-bits"] .sb-rule { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; font-size: var(--fs-sm); }
+[data-sim="lnx-special-bits"] .sb-badge { font-weight: 700; padding: 0 0.4rem; border: 2px solid var(--ink); border-radius: 1rem; background: var(--bg); white-space: nowrap; }
+[data-sim="lnx-special-bits"] .sb-checks { margin: 0.4rem 0 0; padding: 0; list-style: none; }
+[data-sim="lnx-special-bits"] .sb-checks li { display: flex; gap: 0.45rem; align-items: baseline; margin: 0.12rem 0; }
+[data-sim="lnx-special-bits"] .sb-checks li .sb-mark { flex: none; width: 1.2em; text-align: center; font-weight: 700; }
+[data-sim="lnx-special-bits"] .sb-checks li.sb-sub { padding-left: 1.2rem; }
+[data-sim="lnx-special-bits"] .sb-checks li.sb-skip { color: var(--muted); }
+[data-sim="lnx-special-bits"] .sb-checks li.sb-first { font-weight: 700; }
+
+/* legend swatches */
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape^='sb-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape^='sb-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-real'] { border: 2px solid var(--line); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-eff'] { border: 0.2rem solid var(--ink); background: var(--hl); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-eff']::after { content: '≠'; color: var(--on-hl); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-letter'] { border: 0.18rem solid var(--ink); background: var(--panel); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-letter']::after { content: 's'; }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-ok'] { border-radius: 50%; border: 0.18rem solid var(--ok); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-ok']::after { content: '✓'; color: var(--ok); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-no'] { border-radius: 50%; border: 0.18rem solid var(--danger); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-no']::after { content: '✗'; color: var(--danger); }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-rule'] { border: 2px solid var(--ink); border-radius: 1rem; }
+[data-sim="lnx-special-bits"] .sd-swatch[data-shape='sb-rule']::after { content: '3'; }
+
+[data-sim="lnx-special-bits"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-special-bits"] .sd-titles { flex: 1 1 60rem; }
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-special-bits"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; the columns stack. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-special-bits"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-special-bits"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-special-bits"] .sb { height: auto; padding: 0.4rem; }
+  [data-sim="lnx-special-bits"] .sb-cols { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-special-bits"] .sb-big .sb-mode { font-size: 1.35rem; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Posebni bitovi: setuid, setgid i sticky</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var ERR = { EACCES: 'Permission denied', EPERM: 'Operation not permitted', ENOENT: 'No such file or directory' };
+
+  // ── small pieces ──
+
+  /** Data (numbers, names, paths, commands) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'sb-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function uname(uid) { for (var i = 0; i < L.USERS.length; i++) if (L.USERS[i].uid === uid) return L.USERS[i].name; return String(uid); }
+  function gname(gid) { return L.GROUPS[gid] || String(gid); }
+  function base(path) { return path.slice(path.lastIndexOf('/') + 1); }
+  function has(s, key) { return s.changed.indexOf(key) >= 0; }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands, *word* as <em lang="en"> and `x` as
+      code (from sims/lnx-userns-mapping/index.html, itself from sims/lnx-namespaces); a number becomes data. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); }
+      else if (typeof v === 'number') { flat[k] = MARK + nodes.length + MARK; nodes.push(data(v)); }
+      else flat[k] = v;
+    });
+    var out = [];
+    [].concat(t.parts(key, flat)).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+  /** Croatian agrees with the user's gender (pokrenuo / pokrenula): ana's sentences have their own _f key. */
+  var FEMALE = { ana: true };
+  function gk(key, name) { return FEMALE[name] ? key + '_f' : key; }
+
+  /** The ls -l mode string with the special letters enlarged (uppercase dashed: the bit without x). */
+  function modeNode(kind, mode) {
+    var ls = L.lsString(kind, mode), spc = L.special(kind, mode).bits;
+    var kids = [];
+    for (var i = 0; i < ls.length; i++) {
+      var hit = spc.filter(function (b) { return b.index === i; })[0];
+      kids.push(hit ? h('span', { class: 'sb-sp' + (hit.upper ? ' sb-upper' : '') }, ls[i]) : ls[i]);
+    }
+    return h('span', { class: 'sb-mode', translate: 'no' }, kids);
+  }
+  /** A file row: mode, owner, group, name (path or base name), a tag. */
+  function fileRow(f, opts) {
+    opts = opts || {};
+    return h('div', { class: 'sb-row' + (opts.gone ? ' sb-gone' : '') + (opts.now ? ' sd-changed' : '') },
+      modeNode(f.kind, f.mode), data(uname(f.owner)), data(gname(f.group)),
+      data(opts.short ? base(f.path) : f.path, 'sb-name'),
+      opts.tag ? h('span', { class: 'sb-tag' }, opts.tag) : null);
+  }
+  /** The class and its three letters as ls -l prints them (rws, not rwx: the page is about the s). */
+  function classPhrase(check) {
+    if (check.cls === 'root') return [t('clsRoot')];
+    return t.parts('clsBits', { cls: t('clsg_' + check.cls), bits: code(check.letters) });
+  }
+
+  // ── the command strip ──
+
+  function cmdText(s) {
+    var a = s.action;
+    if (a.kind === 'exec') return a.prog;
+    if (a.kind === 'open' && a.prog) return base(a.prog) + ' ' + a.path;
+    if (a.kind === 'stat') return 'ls -ld ' + a.path;
+    if (a.kind === 'create') return 'touch ' + a.path + (a.mode === 0x1b6 ? ' && chmod 666 ' + a.path : '');
+    if (a.kind === 'unlink') return 'rm ' + a.path;
+    return null;
+  }
+  function errText(s) {
+    var a = s.action, e = ERR[s.result.errno];
+    if (a.kind === 'unlink') return "rm: cannot remove '" + a.path + "': " + e;
+    if (a.kind === 'open' && a.prog && base(a.prog) === 'ls') return "ls: cannot open directory '" + a.path + "': " + e;
+    if (a.kind === 'open' && a.prog) return base(a.prog) + ': ' + a.path + ': ' + e;
+    return e;
+  }
+  function strip(s) {
+    var a = s.action;
+    if (!a) return h('div', { class: 'sb-strip' }, h('span', { class: 'sb-muted' }, t('before')));
+    var who = a.who
+      ? h('span', { class: 'sb-who', translate: 'no' }, a.who)
+      : h('span', { class: 'sb-who sb-who-proc' }, t.parts('stripProc', { cmd: data(s.proc.cmd) }));
+    var text = cmdText(s);
+    var cmd = text
+      ? h('span', { class: 'sb-cmd' }, h('span', { class: 'sb-prompt', translate: 'no' }, a.who === 'root' ? '# ' : '$ '), h('span', { translate: 'no' }, text))
+      : h('span', { class: 'sb-cmd sb-cmd-words' }, t.parts('opens', { path: data(a.path), need: t('need_' + a.need) }));
+    var res;
+    if (!s.result.ok) res = h('span', { class: 'sb-res-err', translate: 'no' }, '✗ ' + errText(s));
+    else if (a.kind === 'stat') res = h('span', { class: 'sb-res-look' }, t('resLook'));
+    else res = h('span', { class: 'sb-res-ok' }, '✓ ', t('resOk'));
+    return h('div', { class: 'sb-strip' }, who, cmd, res);
+  }
+
+  // ── left: the process ──
+
+  function idRow(label, id, name, eff, diff, kind) {
+    return h('tr', { class: (eff ? 'sb-eff' : '') + (diff ? ' sb-diff' : '') },
+      h('th', null, h('span', { translate: 'no' }, label), h('span', { class: 'sb-kind' }, t(kind))),
+      h('td', null, h('span', { class: 'sb-idv', translate: 'no' }, ' ' + id + ' ' + name + ' '),
+        diff ? [' ', h('span', { class: 'sb-ne' }, t('differs'))] : null));
+  }
+  function colProc(c) {
+    var s = c.state, p = s.proc;
+    var card;
+    if (!p) card = h('p', { class: 'sb-empty' }, t('noProc'));
+    else {
+      card = h('div', { class: 'sb-card' + (c.n > 0 && has(s, 'proc') ? ' sd-changed' : '') },
+        h('div', { class: 'sb-card-cmd', translate: 'no' }, p.cmd),
+        h('table', { class: 'sb-ids' }, h('tbody', null,
+          idRow('RUID', p.ruid, uname(p.ruid), false, false, 'real'),
+          idRow('EUID', p.euid, uname(p.euid), true, p.euid !== p.ruid, 'eff'),
+          idRow('RGID', p.rgid, gname(p.rgid), false, false, 'real'),
+          idRow('EGID', p.egid, gname(p.egid), true, p.egid !== p.rgid, 'eff'))),
+        h('div', { class: 'sb-small' }, t('groupsLbl'), ': ',
+          data(p.groups.map(function (g) { return gname(g) + ' ' + g; }).join(', '))));
+    }
+    return h('div', { class: 'sb-col' },
+      h('h3', null, t('colProc')), card,
+      h('h4', null, t('users')),
+      h('ul', { class: 'sb-users' }, L.USERS.map(function (u) {
+        return h('li', null, data(u.name), data(u.uid), h('span', { class: 'sb-muted' },
+          t.parts('inGroups', { list: data(u.groups.map(function (g) { return gname(g) + ' ' + g; }).join(', ')) })));
+      })));
+  }
+
+  // ── middle: the bit carrier ──
+
+  function colBit(c) {
+    var s = c.state, f = L.findFile(s, s.subject);
+    var spc = L.special(f.kind, f.mode);
+    var oct = L.octal4(f.mode);
+    var letters = spc.bits.map(function (b) { return b.letter; });
+    var parts = [['setuid', 4], ['setgid', 2], ['sticky', 1]].map(function (x) {
+      var on = spc.bits.some(function (b) { return b.bit === x[0]; });
+      return h('li', { class: on ? 'sb-on' : 'sb-off' }, h('span', { class: 'sb-mark', 'aria-hidden': 'true' }, on ? '✓' : '–'),
+        data(x[1]), h('span', null, t('bitName_' + x[0])));
+    });
+    var key = h('div', { class: 'sb-key' }, h('span', { class: 'sb-muted' }, t('keyHead'), ':'),
+      [['s', 'keyWithX'], ['S', 'keyNoX'], ['t', 'keyWithX'], ['T', 'keyNoX']].map(function (k) {
+        var shown = letters.indexOf(k[0]) >= 0;
+        return h('span', { class: shown ? 'sb-shown' : null },
+          h('span', { class: 'sb-sp' + (k[0] === k[0].toUpperCase() ? ' sb-upper' : ''), translate: 'no' }, k[0]), t(k[1]));
+      }));
+    var extra = null;
+    if (f.kind === 'dir') {
+      var rows = L.entries(s, f.path).map(function (e) {
+        return fileRow(e, { short: true, now: c.n > 0 && has(s, 'entry:' + e.path), tag: e.isNew ? t('newTag') : null });
+      });
+      var rm = s.result && s.result.removed;
+      if (rm && L.dirName(rm.path) === f.path) rows.push(fileRow(rm, { short: true, gone: true, now: true, tag: t('removedTag') }));
+      extra = [h('h4', null, t('entries')), rows.length ? rows : h('p', { class: 'sb-empty' }, t('empty'))];
+    } else if (f.script) {
+      extra = h('p', { class: 'sb-small' }, t('scriptNote'), ': ', code('#!/bin/sh'));
+    }
+    return h('div', { class: 'sb-col' },
+      h('h3', null, t('colBit')),
+      h('div', { class: 'sb-path', translate: 'no' }, f.path),
+      h('div', { class: 'sb-ls sb-big' }, modeNode(f.kind, f.mode), data(uname(f.owner) + ' ' + gname(f.group), 'sb-nowrap')),
+      h('div', { class: 'sb-oct' }, h('span', { class: 'sb-muted' }, t('octalLbl')),
+        oct.split('').map(function (d, i) { return h('span', { class: 'sb-digit' + (i === 0 ? ' sb-first' : ''), translate: 'no' }, d); })),
+      h('div', { class: 'sb-small sb-muted' }, t('digitHead'), ' = ', data(spc.digit)),
+      h('ul', { class: 'sb-parts' }, parts),
+      key, extra);
+  }
+
+  // ── right: target and decision ──
+
+  function mark(ok) { return h('span', { class: 'sb-mark ' + (ok ? 'sb-ok-c' : 'sb-no-c'), 'aria-hidden': 'true' }, ok ? '✓' : '✗'); }
+  function li(ok, kids, cls) { return h('li', { class: cls || null }, ok === null ? h('span', { class: 'sb-mark' }, '·') : mark(ok), h('span', null, kids)); }
+
+  function execLines(ex, prog) {
+    var out = [li(ex.check.ok, t.parts('chkX', { check: h('span', null, classPhrase(ex.check)) }))];
+    if (!ex.ok) return out;
+    if (ex.ignored) out.push(li(null, t('chkIgnored'), 'sb-sub'));
+    else if (ex.setuid || ex.setgid) {
+      if (ex.setuid) out.push(li(null, t.parts('chkSetuid', { uid: data(prog.owner + ' ' + uname(prog.owner)) }), 'sb-sub'));
+      if (ex.setgid) out.push(li(null, t.parts('chkSetgid', { gid: data(prog.group + ' ' + gname(prog.group)) }), 'sb-sub'));
+    } else out.push(li(null, t('chkNone'), 'sb-sub'));
+    return out;
+  }
+  function onLine(path, check, need) {
+    return li(check.ok, t.parts('chkOn', { path: data(path), check: h('span', null, classPhrase(check)), need: code(need) }));
+  }
+
+  function colTarget(c) {
+    var s = c.state, a = s.action, r = s.result;
+    var head = h('h3', null, t('colTarget'));
+    if (!a) return h('div', { class: 'sb-col' }, head, h('p', { class: 'sb-empty' }, t('noAction')));
+    var path = L.targetOf(s);
+    var f = L.findFile(s, path);
+    var target;
+    if (f) target = fileRow(f, { now: c.n > 0 && has(s, 'entry:' + f.path), tag: f.isNew ? t('newTag') : null });
+    else if (r.removed) target = fileRow(r.removed, { gone: true, now: true, tag: t('removedTag') });
+    else target = h('div', { class: 'sb-row sb-gone' }, data(path, 'sb-name'), h('span', { class: 'sb-tag' }, t.parts('goneLine', { n: data(r.goneAt) })));
+
+    var checks = [];
+    var prog = a.prog ? L.findFile(s, a.prog) : null;
+    if (r.exec) checks = checks.concat(execLines(r.exec, prog));
+    if (a.kind === 'open' && r.check) checks.push(onLine(a.path, r.check, a.need));
+    if (a.kind === 'create' && r.check) {
+      checks.push(onLine(L.dirName(a.path), r.check, 'wx'));
+      if (r.created) checks.push(li(null, [t.parts('chkGroup', { group: data(gname(r.created.group)) }), ' (', t(r.created.fromDir ? 'chkFromDir' : 'chkFromProc'), ')'], 'sb-sub'));
+    }
+    if (a.kind === 'unlink' && r.check) {
+      checks.push(onLine(L.dirName(a.path), r.check, 'wx'));
+      var st = r.sticky;
+      if (st.on && st.tests.length) {
+        var dir = L.findFile(s, L.dirName(a.path));
+        var fowner = (r.removed || f || {}).owner;
+        checks.push(li(null, t('stickyHead'), 'sb-sub'));
+        var passed = false;
+        st.tests.forEach(function (x) {
+          var uid = x.test === 'fileOwner' ? fowner : x.test === 'dirOwner' ? dir.owner : null;
+          var label = t.parts('test_' + x.test, { uid: data(uid === null ? '' : uid + ' ' + uname(uid)) });
+          if (passed) checks.push(h('li', { class: 'sb-sub sb-skip' }, h('span', { class: 'sb-mark' }, '–'), h('span', null, label, ' (', t('notTested'), ')')));
+          else checks.push(li(x.ok, label, 'sb-sub' + (x.ok ? ' sb-first' : '')));
+          if (x.ok) passed = true;
+        });
+      } else if (st.by === 'dirWrite') checks.push(li(null, t('by_dirWrite'), 'sb-sub'));
+    }
+
+    var look = a.kind === 'stat';
+    var verdict = h('div', { class: 'sb-verdict ' + (look ? '' : r.ok ? 'sb-yes' : 'sb-no') },
+      look ? h('span', { class: 'sb-muted' }, t('look'))
+        : [h('span', { class: 'sb-icon', 'aria-hidden': 'true' }, r.ok ? '✓' : '✗'), h('span', null, t(r.ok ? 'allowed' : 'refused')),
+          r.ok ? null : h('span', { class: 'sb-errno', translate: 'no' }, r.errno + ': ' + ERR[r.errno])]);
+    var rule = h('div', { class: 'sb-rule' }, h('span', { class: 'sb-badge' }, t('ruleN', { n: r.rule })), h('span', null, t('rule_' + r.rule)));
+    return h('div', { class: 'sb-col' }, head, target,
+      h('div', { class: 'sb-dec' + (look ? ' sb-look' : r.ok ? '' : ' sb-no') }, verdict, rule,
+        checks.length ? h('ul', { class: 'sb-checks' }, checks) : null));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'sb' }, strip(c.state),
+      h('div', { class: 'sb-cols' }, colProc(c), colBit(c), colTarget(c))));
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, a = s.action, r = s.result, p = s.proc;
+    if (!a) return rich('goal_' + s.script);
+    var path = a.path ? data(a.path) : null;
+    var user = a.who ? data(a.who) : null;
+
+    if (a.kind === 'exec') {
+      var prog = L.findFile(s, a.prog), pn = data(base(a.prog)), owner = data(uname(prog.owner));
+      if (r.exec.ignored) return rich('capExecScript', { prog: pn, owner: owner, euid: p.euid });
+      if (p.euid === p.ruid) return rich('capExecSame', { user: user, prog: pn, uid: p.euid });
+      var out = rich(gk('capExecSuid', a.who), { prog: pn, owner: owner, user: user, ruid: p.ruid, euid: p.euid });
+      if (prog.owner !== 0) out = out.concat(sp(rich('capNotRoot')));
+      if (p.ruid === 0) out = out.concat(sp(rich('capLower', { euid: p.euid })));
+      return out;
+    }
+
+    if (a.kind === 'stat') {
+      var d = L.findFile(s, a.path);
+      return rich(d.mode & L.S_ISVTX ? 'capStatSticky' : 'capStatPlain', { oct: code(L.octal4(d.mode)) });
+    }
+
+    if (r.errno === 'ENOENT') return rich('capGone', { path: path, n: r.goneAt });
+
+    if (a.kind === 'open') {
+      var f = L.findFile(s, a.path), k = r.check;
+      var pre = [];
+      if (a.prog && p.via === 'none') pre = rich('capPlainProg', { prog: code(base(a.prog)), uid: p.euid }).concat([' ']);
+      if (!a.who && p.via === 'ignored' && p.euid !== 0) pre = rich('capScriptStill', { euid: p.euid }).concat([' ']);
+      var verb = t('verb_' + a.need), needc = code(a.need);
+      if (k.cls === 'root') {
+        var ro = pre.concat(rich(k.bitsAllow ? 'capOpenRootAnyway' : 'capOpenRoot', { verb: verb, path: path, ls: code(L.lsString(f.kind, f.mode)) }));
+        if (p.ruid !== 0) ro = ro.concat(sp(rich('capOpenRootReal', { ruid: p.ruid })));
+        return ro;
+      }
+      if (k.ok && k.cls === 'owner') {
+        var o = pre.concat(rich('capOpenOwner', { euid: p.euid, path: path, bits: code(k.letters), need: needc }));
+        if (p.ruid !== p.euid) { var rn = uname(p.ruid); o = o.concat(sp(rich(gk('capOpenVia', rn), { user: data(rn), ruid: p.ruid, euid: p.euid }))); }
+        return o;
+      }
+      if (k.ok) {
+        var oc = pre.concat(rich('capOpenClass', { euid: p.euid, path: path, cls: t('clsg_' + k.cls), bits: code(k.letters), need: needc }));
+        var parent = L.findFile(s, L.dirName(a.path));
+        if (a.need === 'w' && parent && parent.mode & L.S_ISVTX) oc = oc.concat(sp(rich('capWriteNotDelete', { dir: data(parent.path) })));
+        return oc;
+      }
+      var dv = { euid: p.euid, owner: data(uname(f.owner)), group: data(gname(f.group)), bits: code(k.letters), need: needc };
+      var od = pre.concat(k.cls === 'others' ? rich('capOpenDenied', dv) : k.cls === 'group' ? rich('capOpenDeniedGroup', dv)
+        : rich('capDenied', { cls: t('clsg_' + k.cls), bits: code(k.letters), need: needc }));
+      if (p.via === 'setuid' && p.euid !== p.ruid) od = od.concat(sp(rich('capNotRootDenied', { euid: p.euid })));
+      return od;
+    }
+
+    var dirPath = L.dirName(a.path), dirN = data(dirPath);
+    var check = h('span', null, classPhrase(r.check));
+    if (a.kind === 'create') {
+      if (!r.ok) return rich('capDenied', { cls: t('clsg_' + r.check.cls), bits: code(r.check.letters), need: code('wx') });
+      var nf = L.findFile(s, a.path);
+      var cc = r.created.fromDir
+        ? rich('capCreateDir', { user: user, dir: dirN, check: check, euid: p.euid, group: data(gname(nf.group)), egid: data(p.egid + ' ' + gname(p.egid)) })
+        : rich('capCreateProc', { user: user, dir: dirN, check: check, euid: p.euid, group: data(gname(nf.group)) });
+      if (nf.mode & 2) cc = cc.concat(sp(rich('capCreateMode', { ls: code(L.lsString('file', nf.mode)) })));
+      return cc;
+    }
+
+    // unlink
+    var dd = L.findFile(s, dirPath);
+    if (r.errno === 'EACCES') return rich('capDenied', { cls: t('clsg_' + r.check.cls), bits: code(r.check.letters), need: code('wx') });
+    if (r.errno === 'EPERM') {
+      var tf = L.findFile(s, a.path);
+      return rich('capUnlinkDenied', { user: user, dir: dirN, check: check, euid: p.euid, fowner: data(tf.owner + ' ' + uname(tf.owner)), downer: data(dd.owner + ' ' + uname(dd.owner)) });
+    }
+    var by = r.sticky.by, fo = r.removed.owner;
+    return rich('capUnlinkBy_' + by, { dir: dirN, euid: p.euid, name: data(base(a.path)), fowner: data(fo + ' ' + uname(fo)), check: check, user: user });
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'actor', type: 'choice', label: t('actor'), options: L.ACTORS.map(function (x) { return [x, t('actor_' + x)]; }) },
+      { key: 'sticky', type: 'toggle', label: t('sticky'), visible: function (p) { return p.script === 'sticky-tmp'; } },
+      // the actions come with the preset; hidden so the panel fits one screen
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; },
+        options: L.SCRIPT_IDS.map(function (x) { return [x, t('preset_' + x)]; }) }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'sb-real', label: t('legReal') },
+      { shape: 'sb-eff', label: t('legEff') },
+      { shape: 'sb-letter', label: t('legLetter') },
+      { shape: 'sb-ok', label: t('legOk') },
+      { shape: 'sb-no', label: t('legNo') },
+      { shape: 'sb-rule', label: t('legRule') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
