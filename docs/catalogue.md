@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **375 of 477 entries are live**, 70 w3, 21 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **376 of 477 entries are live**, 70 w3, 20 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 50 | 1 w3 · building, 4 w3 · queued |
+| §4.4 Linux | 55 | 51 | 1 w3 · building, 3 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -557,7 +557,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-links-inodes` | live | Hard links, symlinks and inodes | names point to inodes; the link count; dangling symlinks | create, link, delete, see what survives | step | S | P2 | UL | UL ch05 (`unos-u-direktoriju-i-brojac-poveznica.svg`) |  |
 | `lnx-permissions-rwx` | live | Permission bits, octal, umask | nine bits, octal notation, umask clearing bits from the defaults (666 with umask 077 gives 600) | toggle bits, set umask, create files | expl | S | P1 | UL | UL ch07 (`devet-bitova-dozvola.svg`) |  |
 | `lnx-access-decision` | live | The access decision | owner → group → other, first match decides; the ACL mask | pick a user and a file, step the check | step | S | P2 | UL | UL ch07 → §5.1 |  |
-| `lnx-special-bits` | w3 · building | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 |  |
+| `lnx-special-bits` | live | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 |  |
 | `lnx-signals` | live | Signals | SIGTERM vs SIGKILL, traps, SIGHUP and nohup | send signals to processes with and without handlers | step | S | P2 | UL | UL ch08 |  |
 | `lnx-job-control` | live | Job control | fg/bg, Ctrl-Z, process groups, what dies on logout | drive jobs from a shell | step | S | P3 | UL | UL ch08 |  |
 | `lnx-boot-chain` | live | The boot chain | firmware → bootloader → kernel → initramfs → systemd | step a boot; break one stage | step | S | P2 | UL | UL ch10 (`lanac-podizanja.svg`) → §5.15 |  |
@@ -579,7 +579,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-selinux-decision` | live | DAC says yes, SELinux says no | a second, label-based check after permissions | change modes and contexts, retry access | step | S | P1 | UL | UL ch15 (`dozvola-i-politika.svg`, `tri-mjesta-koja-kazu-ne.svg`) |  |
 | `lnx-shell-quoting` | live | Quoting and word splitting | what the shell does to a line before the command sees it | type lines, step expansion, splitting, globbing | step | S | P2 | UL | UL ch16 (`navodnici-i-razdvajanje.svg`) |  |
 | `lnx-exit-status` | live | Exit status and `&&`, `\|\|`, `set -e`, `pipefail` | how failure propagates, and a pipeline that reports success while failing | run chains where one step fails | step | S | P2 | UL, DR | UL ch17 (`izlazni-status-spaja.svg`), DR S8 → §5.3 |  |
-| `lnx-subshell-trap` | w3 · queued | Subshells and traps | a `cd` in a subshell doesn't stick; cleanup on EXIT | run scripts with and without subshells | step | S | P3 | UL | UL ch17 (`podljuska-i-trap.svg`) |  |
+| `lnx-subshell-trap` | w3 · building | Subshells and traps | a `cd` in a subshell doesn't stick; cleanup on EXIT | run scripts with and without subshells | step | S | P3 | UL | UL ch17 (`podljuska-i-trap.svg`) |  |
 | `lnx-rsync-delete` | live | rsync, trailing slashes and `--delete` | `src` vs `src/`, and how `--delete` mirrors a mistake | sync, delete at source, sync again | step | S | P2 | UL, DR | UL ch15 |  |
 | `lnx-package-deps` | live | Package dependency resolution | repo metadata, dependency trees, conflicts | install packages into a small repo | step | S | P3 | UL | UL ch09 |  |
 | `lnx-nfs-root-squash` | live | NFS and root squash | the server, not the client, decides who you are | access as root and as a user | step | S | P3 | UL | UL ch18 |  |
