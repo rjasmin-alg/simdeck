@@ -1,0 +1,558 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-nfs-root-squash: the server, not the client, decides who you are.
+     Left: client democli1, its users, the mount and the command. Middle: the request (numbers only) and the server's
+     five phases (send, export ro/rw, squash mapping, permission bits, apply). Right: server demosrv1, its users, the
+     export line as exportfs -v prints it, and the export's files. Bottom: what the client sees and what changed on the
+     server. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-nfs-root-squash">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFS i root_squash: tko si, odlučuje poslužitelj · simdeck</title>
+<meta name="description" content="Šalji zahtjeve na NFS izvoz kao root i kao korisnik: ro, root_squash, no_root_squash, all_squash i isti broj koji na poslužitelju znači drugog korisnika.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-nfs-root-squash",
+  "title": {
+    "hr": "NFS i root_squash: tko si, odlučuje poslužitelj",
+    "en": "NFS and root squash: the server decides who you are"
+  },
+  "concept": {
+    "hr": "Zahtjev nosi samo broj; poslužitelj ga preslikava, pa provjerava dozvole",
+    "en": "A request carries only a number; the server maps it, then checks permissions"
+  },
+  "summary": {
+    "hr": "Šalji zahtjeve na NFS izvoz kao root i kao korisnik: ro, root_squash, no_root_squash, all_squash i isti broj koji na poslužitelju znači drugog korisnika.",
+    "en": "Send requests to an NFS export as root and as a user: ro, root_squash, no_root_squash, all_squash, and one number that means another user on the server."
+  },
+  "tags": [
+    "file-sharing"
+  ],
+  "class": "stepper",
+  "steps": 2,
+  "entries": [
+    {
+      "preset": "uid-collision"
+    },
+    {
+      "preset": "bin-not-squashed"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-nfs-root-squash"]; colours only from kit tokens. */
+[data-sim="lnx-nfs-root-squash"] .nf {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.05fr) minmax(0, 1.45fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.6rem 0.8rem;
+  height: 100%;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-mono { font-family: var(--mono); }
+[data-sim="lnx-nfs-root-squash"] .nf-muted { color: var(--muted); }
+[data-sim="lnx-nfs-root-squash"] .nf-small { font-size: var(--fs-sm); }
+[data-sim="lnx-nfs-root-squash"] h3 { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="lnx-nfs-root-squash"] h3 .nf-mono { font-weight: 700; }
+[data-sim="lnx-nfs-root-squash"] h4 { margin: 0; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="lnx-nfs-root-squash"] .nf-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.5rem 0.65rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-client { border: 0.2rem solid var(--c1); }
+[data-sim="lnx-nfs-root-squash"] .nf-server { border: 0.2rem solid var(--c2); }
+
+/* users: a person chip with the number */
+[data-sim="lnx-nfs-root-squash"] .nf-users { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-nfs-root-squash"] .nf-user {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.05rem 0.4rem;
+  border: var(--line-w) solid transparent;
+  border-radius: var(--radius-sm);
+}
+[data-sim="lnx-nfs-root-squash"] .nf-user-me { border-color: var(--ink); background: var(--bg); font-weight: 700; }
+[data-sim="lnx-nfs-root-squash"] .nf-user-me::after { content: '◀'; margin-left: auto; color: var(--ink); }
+[data-sim="lnx-nfs-root-squash"] .nf-user-me.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-nfs-root-squash"] .nf-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 5.2rem;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-person::before {
+  content: '';
+  width: 0.75rem;
+  height: 0.95rem;
+  flex: none;
+  /* a head over shoulders, drawn with two gradients */
+  background:
+    radial-gradient(circle at 50% 28%, currentColor 0 0.2rem, transparent 0.21rem),
+    radial-gradient(ellipse at 50% 100%, currentColor 0 0.38rem, transparent 0.39rem);
+}
+
+/* client */
+[data-sim="lnx-nfs-root-squash"] .nf-mount { font-size: var(--fs-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-nb { white-space: nowrap; }
+[data-sim="lnx-nfs-root-squash"] .nf-mount .nf-mono { color: var(--ink); }
+[data-sim="lnx-nfs-root-squash"] .nf-cmd {
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: var(--line-w) solid var(--line);
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-cmd code { font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-cmd code b { display: block; font-size: var(--fs-lg); margin-top: 0.2rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-cmd b { font-family: var(--mono); }
+[data-sim="lnx-nfs-root-squash"] .nf-who { font-size: var(--fs-sm); margin-top: 0.2rem; }
+
+/* request envelope */
+[data-sim="lnx-nfs-root-squash"] .nf-mid { background: var(--bg); }
+[data-sim="lnx-nfs-root-squash"] .nf-env {
+  position: relative;
+  padding: 1.1rem 0.7rem 0.35rem;
+  border: 0.2rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  text-align: center;
+}
+/* the flap of the envelope */
+[data-sim="lnx-nfs-root-squash"] .nf-env::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1rem;
+  background: linear-gradient(to bottom right, transparent 49%, var(--ink) 49% 51%, transparent 51%) left / 50% 100% no-repeat,
+    linear-gradient(to bottom left, transparent 49%, var(--ink) 49% 51%, transparent 51%) right / 50% 100% no-repeat;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-ids { font-family: var(--mono); font-weight: 700; font-size: var(--fs-lg); }
+[data-sim="lnx-nfs-root-squash"] .nf-env-op { font-size: var(--fs-md); }
+[data-sim="lnx-nfs-root-squash"] .nf-env-note { font-size: var(--fs-sm); color: var(--muted); }
+
+/* phases */
+[data-sim="lnx-nfs-root-squash"] .nf-phases { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="lnx-nfs-root-squash"] .nf-ph {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0 0.4rem;
+  align-items: center;
+  padding: 0.2rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+[data-sim="lnx-nfs-root-squash"] .nf-ph-key { font-family: var(--mono); font-weight: 700; grid-row: span 2; align-self: start; }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-name { font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-mark { font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-detail { grid-column: 2 / 4; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-detail:empty { display: none; }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-ok .nf-ph-mark { color: var(--ok); }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-refused { border: 0.2rem solid var(--danger); background: var(--bg); }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-refused .nf-ph-mark { color: var(--danger); }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-skipped { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-nfs-root-squash"] .nf-ph-skipped .nf-ph-mark { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-nfs-root-squash"] .nf-map { display: inline-flex; flex-wrap: wrap; gap: 0 0.35rem; align-items: center; font-family: var(--mono); }
+[data-sim="lnx-nfs-root-squash"] .nf-arrow { font-weight: 700; }
+[data-sim="lnx-nfs-root-squash"] .nf-map.sd-changed { outline-offset: 0; box-shadow: none; background: var(--hl); color: var(--on-hl); padding: 0 0.25rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-opt { font-family: var(--mono); font-size: var(--fs-sm); padding: 0 0.25rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); }
+
+/* server: exportfs line */
+[data-sim="lnx-nfs-root-squash"] .nf-export { font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.6; }
+[data-sim="lnx-nfs-root-squash"] .nf-w { padding: 0 0.15rem; border-radius: var(--radius-sm); white-space: nowrap; }
+[data-sim="lnx-nfs-root-squash"] .nf-w-dim { color: var(--muted); }
+[data-sim="lnx-nfs-root-squash"] .nf-w-key { font-weight: 700; border: var(--line-w) solid var(--ink); background: var(--bg); }
+[data-sim="lnx-nfs-root-squash"] .nf-w-key.sd-changed { outline-offset: 0; background: var(--hl); color: var(--on-hl); box-shadow: none; }
+
+/* server: files */
+[data-sim="lnx-nfs-root-squash"] .nf-files { width: 100%; border-collapse: separate; border-spacing: 0 0.25rem; font-size: var(--fs-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-files th { text-align: left; font-weight: 400; color: var(--muted); padding: 0 0.4rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-files td { padding: 0.15rem 0.35rem; background: var(--bg); border-top: var(--line-w) solid var(--line); border-bottom: var(--line-w) solid var(--line); white-space: nowrap; }
+[data-sim="lnx-nfs-root-squash"] .nf-files td:first-child { border-left: var(--line-w) solid var(--line); border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-files td:last-child { border-right: var(--line-w) solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+[data-sim="lnx-nfs-root-squash"] .nf-files .nf-fname { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-nfs-root-squash"] .nf-files .nf-own b { font-family: var(--mono); }
+[data-sim="lnx-nfs-root-squash"] .nf-files .nf-mode { font-family: var(--mono); }
+/* desktop: the ls letters (the check reads them); phone: the octal, which fits */
+[data-sim="lnx-nfs-root-squash"] .nf-oct { display: none; }
+[data-sim="lnx-nfs-root-squash"] .nf-row-checked td { border-color: var(--ink); border-width: 0.2rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-row-new td { border-color: var(--ink); border-width: 0.2rem; border-style: dashed; }
+[data-sim="lnx-nfs-root-squash"] .nf-row-refused td { border-color: var(--danger); border-width: 0.2rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-row-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-nfs-root-squash"] .nf-tag { font-family: var(--sans); font-weight: 700; font-size: var(--fs-sm); margin-left: 0.3rem; padding: 0 0.25rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); }
+[data-sim="lnx-nfs-root-squash"] .nf-x { color: var(--danger); font-weight: 700; margin-left: 0.3rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-row-changed .nf-x { color: var(--on-hl); }
+
+/* result bar */
+[data-sim="lnx-nfs-root-squash"] .nf-foot {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1.4rem;
+  padding: 0.35rem 0.65rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  min-height: 2.8rem;
+}
+[data-sim="lnx-nfs-root-squash"] .nf-foot b { margin-right: 0.4rem; }
+[data-sim="lnx-nfs-root-squash"] .nf-out { font-family: var(--mono); padding: 0 0.3rem; background: var(--bg); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+[data-sim="lnx-nfs-root-squash"] .nf-out-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-nfs-root-squash"] .nf-out-err::before { content: '✗ '; }
+[data-sim="lnx-nfs-root-squash"] .nf-exit { font-family: var(--mono); }
+
+/* legend swatches */
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape^='nf-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape^='nf-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-user']::after { content: '●'; color: var(--c1); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-env'] { background: linear-gradient(to bottom right, transparent 47%, var(--ink) 47% 53%, transparent 53%) left top / 50% 55% no-repeat, linear-gradient(to bottom left, transparent 47%, var(--ink) 47% 53%, transparent 53%) right top / 50% 55% no-repeat, var(--panel); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-map'] { border: 0; background: transparent; }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-map']::after { content: '→'; font-size: 1em; }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-file'] { border-color: var(--line); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-refused'] { border: 0.2rem solid var(--danger); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-refused']::after { content: '✗'; color: var(--danger); }
+[data-sim="lnx-nfs-root-squash"] .sd-swatch[data-shape='nf-new'] { border: 0.18rem dashed var(--ink); }
+
+[data-sim="lnx-nfs-root-squash"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the title takes the first header row, the legend and the tools the second */
+[data-sim="lnx-nfs-root-squash"] .sd-titles { flex: 1 1 70rem; }
+
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-nfs-root-squash"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-nfs-root-squash"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-nfs-root-squash"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-nfs-root-squash"] .nf { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; padding: 0.5rem; }
+  [data-sim="lnx-nfs-root-squash"] .nf-files td { white-space: normal; }
+  [data-sim="lnx-nfs-root-squash"] .nf-files td.nf-mode { white-space: nowrap; }
+  [data-sim="lnx-nfs-root-squash"] .nf-ls { display: none; }
+  [data-sim="lnx-nfs-root-squash"] .nf-oct { display: inline; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">NFS i root_squash: tko si, odlučuje poslužitelj</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var C = L.CLIENT, S = L.SERVER;
+  var MSG = { EROFS: 'Read-only file system', EACCES: 'Permission denied' };
+  var CWD = 'sa-posluzitelja';
+
+  /** Data (names, numbers, options, commands) never gets translated. */
+  function data(text, cls) { return h('span', { class: 'nf-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** t.parts with every plain placeholder value wrapped as data; a node used twice gets its own copy. */
+  function parts(key, vars) {
+    var out = {};
+    Object.keys(vars).forEach(function (k) { out[k] = typeof vars[k] === 'object' ? vars[k] : data(vars[k]); });
+    var seen = [];
+    return [].concat(t.parts(key, out)).map(function (x) {
+      if (!(x instanceof Node)) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function named(uid) { var n = L.serverName(uid); return n ? uid + ' (' + n + ')' : String(uid); }
+  function ids(uid, gid) { return 'uid=' + uid + ' gid=' + gid; }
+
+  // ── the client's command line and its error message (what a shell prints) ──
+
+  function prompt(req) { return '[' + (req.via === 'sudo' ? 'student' : req.clientUser) + '@' + C.host + ' ' + CWD + ']$ '; }
+  function cmdOf(req) {
+    var sudo = req.via === 'sudo' ? 'sudo ' : '';
+    if (req.op === 'read') return sudo + 'cat ' + req.name;
+    if (req.op === 'create') return sudo + 'touch ' + req.name;
+    return req.via === 'sudo' ? 'echo ok | sudo tee -a ' + req.name : 'echo ok >> ' + req.name;
+  }
+  function errOf(req, errno) {
+    var msg = MSG[errno];
+    if (req.op === 'read') return 'cat: ' + req.name + ': ' + msg;
+    if (req.op === 'create') return 'touch: cannot touch \'' + req.name + '\': ' + msg;
+    return (req.via === 'sudo' ? 'tee: ' : 'bash: ') + req.name + ': ' + msg;
+  }
+  function contentOf(name) { return t('content_' + name.replace(/\W/g, '_')); }
+
+  // ── stage: client ──
+
+  function person(name, uid) { return h('span', { class: 'nf-person', translate: 'no' }, String(uid)); }
+
+  function client(c) {
+    var s = c.state, req = s.request;
+    var me = req ? req.clientUser : null;
+    return h('div', { class: 'nf-box nf-client' },
+      h('h3', null, t('client'), data(C.host)),
+      // breaks only between the address, the path and the mount point
+      h('div', { class: 'nf-mount' }, t('mounted'), ': ', data(S.addr + ':', 'nf-nb'), h('wbr'), data(S.path, 'nf-nb'), ' ',
+        data('→ ' + C.mountpoint, 'nf-nb')),
+      h('h4', null, data(t('passwd'))),
+      h('ul', { class: 'nf-users' }, C.users.map(function (u) {
+        return h('li', { class: 'nf-user' + (u.name === me ? ' nf-user-me' : '') }, person(u.name, u.uid), data(u.name));
+      })),
+      req ? h('div', { class: 'nf-cmd' },
+        h('code', { translate: 'no' }, prompt(req), h('b', null, cmdOf(req))),
+        h('div', { class: 'nf-who' }, t('runs'), ': ', data(req.clientUser),
+          req.via === 'sudo' ? [' (', t('viaSudo'), ')'] : req.clientUser === 'bin' ? [' (', t('binProcess'), ')'] : null))
+        : h('p', { class: 'nf-small nf-muted' }, t('idle')));
+  }
+
+  // ── stage: the request and the phases ──
+
+  function mapLine(s) {
+    var q = s.request, m = s.mapped;
+    if (!m) return null;
+    var same = m.uid === q.uid && m.gid === q.gid;
+    if (same) return h('span', null, parts('mapSame', { ids: ids(m.uid, m.gid) }), ' ', data('= ' + L.serverName(m.uid)));
+    var opt = s.export.squash;
+    return h('span', { class: 'nf-map sd-changed', translate: 'no' },
+      h('span', null, 'uid ' + q.uid), h('span', { class: 'nf-arrow' }, '→'), h('span', null, named(m.uid) + ','),
+      h('span', null, 'gid ' + q.gid), h('span', { class: 'nf-arrow' }, '→'), h('span', null, String(m.gid)),
+      h('span', { class: 'nf-opt' }, opt));
+  }
+
+  function checkLine(s) {
+    var k = s.check;
+    if (!k) return null;
+    if (k.cls === 'root') return t('checkRoot');
+    var target = k.target === 'dir' ? [t('targetDir'), ' ', data('.')] : data(k.name);
+    return parts('checkLine', { target: h('span', null, target), cls: h('span', null, t('cls_' + k.cls)), bits: k.bits, need: k.need });
+  }
+
+  function applyLine(s) {
+    if (!s.result || !s.result.ok) return null;
+    var q = s.request;
+    if (q.op === 'read') return t('applyRead');
+    if (q.op === 'write') return t('applyWrite');
+    return parts('applyCreate', { owner: named(s.result.owner.uid) });
+  }
+
+  function phase(key, letter, st, detail) {
+    var state = st || 'idle';
+    var mark = state === 'ok' ? '✓ ' + t('st_ok') : state === 'refused' ? '✗ ' + t('st_refused') : state === 'skipped' ? '– ' + t('st_skipped') : '';
+    return h('li', { class: 'nf-ph nf-ph-' + state + (state === 'skipped' ? ' sd-hatch' : '') + (state === 'refused' ? ' sd-changed' : '') },
+      h('span', { class: 'nf-ph-key', translate: 'no' }, '(' + letter + ')'),
+      h('span', { class: 'nf-ph-name' }, t('ph_' + key)),
+      h('span', { class: 'nf-ph-mark' }, mark),
+      h('span', { class: 'nf-ph-detail' }, state === 'skipped' ? null : detail));
+  }
+
+  function middle(c) {
+    var s = c.state, q = s.request, ph = s.phases || {};
+    var env = q ? h('div', { class: 'nf-env' },
+      h('div', { class: 'nf-ids', translate: 'no' }, ids(q.uid, q.gid)),
+      h('div', { class: 'nf-env-op' }, data('sec=sys'), ' · ', t('op_' + q.op), ' ', data(q.name)),
+      h('div', { class: 'nf-env-note' }, t('noNames')))
+      : h('div', { class: 'nf-env' }, h('div', { class: 'nf-env-note' }, t('idle')));
+    var write = q && (q.op === 'write' || q.op === 'create');
+    var roWord = s.export.ro ? 'ro' : 'rw';
+    return h('div', { class: 'nf-box nf-mid' },
+      h('h3', null, t('request')),
+      env,
+      h('h4', null, t('phases')),
+      h('ol', { class: 'nf-phases' },
+        phase('send', 'a', ph.send, q ? data(ids(q.uid, q.gid)) : null),
+        phase('export', 'b', ph.export, q ? parts(write ? 'exportWrite' : 'exportRead', { opt: roWord }) : null),
+        phase('map', 'c', ph.map, mapLine(s)),
+        phase('perm', 'd', ph.perm, checkLine(s)),
+        phase('apply', 'e', ph.apply, applyLine(s))));
+  }
+
+  // ── stage: server ──
+
+  var DIM = ['sync', 'wdelay', 'hide', 'no_subtree_check'];
+  function exportLine(s) {
+    var ph = s.phases || {};
+    var words = [];
+    DIM.forEach(function (w) { words.push({ w: w, cls: 'nf-w-dim' }); });
+    words.push({ w: 'sec=sys', cls: '' });
+    words.push({ w: s.export.ro ? 'ro' : 'rw', cls: 'nf-w-key' + (ph.export === 'refused' ? ' sd-changed' : '') });
+    words.push({ w: 'secure', cls: 'nf-w-dim' });
+    L.squashWords(s.export.squash).forEach(function (w) {
+      var deciding = s.mapped && (s.mapped.uid !== s.request.uid || s.mapped.gid !== s.request.gid) &&
+        (w === s.export.squash || (s.export.squash === 'all_squash' && w === 'all_squash'));
+      words.push({ w: w, cls: 'nf-w-key' + (deciding ? ' sd-changed' : '') });
+    });
+    return h('div', { class: 'nf-export', translate: 'no' },
+      h('div', null, S.path),
+      h('div', null, S.clients + '(', words.map(function (x, i) {
+        // a break is allowed only after a comma, never inside an option
+        return [i ? ',\u200b' : '', h('span', { class: 'nf-w ' + x.cls }, x.w)];
+      }), ')'));
+  }
+
+  function fileRow(s, f, kind) {
+    var name = kind === 'dir' ? '.' : f.name;
+    var k = s.check;
+    var checked = k && k.name === name;
+    var changed = s.changed.indexOf('file:' + name) >= 0;
+    var refused = checked && !k.ok;
+    var cls = [checked ? 'nf-row-checked' : '', f.isNew ? 'nf-row-new' : '', refused ? 'nf-row-refused' : '', changed ? 'nf-row-changed' : ''].join(' ');
+    var own = L.serverName(f.uid), grp = L.serverName(f.gid);
+    return h('tr', { class: cls },
+      h('td', { class: 'nf-fname' }, data(name), f.isNew ? h('span', { class: 'nf-tag' }, t('newTag')) : null),
+      h('td', { class: 'nf-own' }, h('b', { translate: 'no' }, String(f.uid)), own ? [' ', data(own)] : null),
+      h('td', { class: 'nf-own' }, h('b', { translate: 'no' }, String(f.gid)), grp ? [' ', data(grp)] : null),
+      h('td', { class: 'nf-mode' }, h('span', { class: 'nf-ls', translate: 'no' }, L.lsString(kind, f.mode)), data(L.octal(f.mode), 'nf-oct'),
+        refused ? h('span', { class: 'nf-x', 'aria-label': t('legRefused') }, '✗') : null));
+  }
+
+  function server(c) {
+    var s = c.state;
+    var mappedUid = s.mapped ? s.mapped.uid : null;
+    var mapChanged = s.changed.indexOf('mapped') >= 0;
+    return h('div', { class: 'nf-box nf-server' },
+      h('h3', null, t('server'), data(S.host), data(S.addr, 'nf-muted')),
+      h('h4', null, data(t('passwd'))),
+      h('ul', { class: 'nf-users' }, S.users.map(function (u) {
+        var me = u.uid === mappedUid;
+        return h('li', { class: 'nf-user' + (me ? ' nf-user-me' : '') + (me && mapChanged ? ' sd-changed' : '') }, person(u.name, u.uid), data(u.name));
+      })),
+      h('h4', null, t('exportfs')),
+      exportLine(s),
+      h('div', { class: 'nf-small nf-muted' }, t('outOfScope')),
+      h('h4', null, t('files'), ' ', data(S.path)),
+      h('table', { class: 'nf-files' },
+        h('thead', null, h('tr', null, ['colName', 'colOwner', 'colGroup', 'colMode'].map(function (k) { return h('th', null, t(k)); }))),
+        h('tbody', null, fileRow(s, s.dir, 'dir'), s.files.map(function (f) { return fileRow(s, f, 'file'); }))));
+  }
+
+  // ── stage: the result ──
+
+  function foot(c) {
+    var s = c.state, q = s.request, r = s.result;
+    if (!q) return h('div', { class: 'nf-foot' }, h('span', { class: 'nf-muted' }, t('idle')));
+    var out;
+    if (r.errno) out = [h('span', { class: 'nf-out nf-out-err', translate: 'no' }, errOf(q, r.errno))];
+    else if (q.op === 'read') out = [h('span', { class: 'nf-out', translate: 'no' }, contentOf(q.name))];
+    else out = [];
+    var srv;
+    if (r.owner) srv = parts('ownerIs', { name: q.name, owner: named(r.owner.uid) });
+    else if (r.ok && q.op === 'write') srv = parts('wroteTo', { name: q.name });
+    else srv = t('nothingChanged');
+    return h('div', { class: 'nf-foot' },
+      h('span', null, h('b', null, t('result')), out, ' ', h('span', { class: 'nf-exit' }, t('exitStatus', { n: r.exit }))),
+      h('span', null, h('b', null, t('onServer')), srv));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'nf' }, client(c), middle(c), server(c), foot(c)));
+  }
+
+  // ── captions: what the server made of the number, then what happened ──
+
+  function caption(c) {
+    var s = c.state, q = s.request;
+    if (!q) return parts('capStart', { cli: C.host, path: S.path, srv: S.host });
+    var r = s.result, m = s.mapped;
+    if (!m) return parts(q.via === 'sudo' ? 'map_notReached' : 'map_notReachedPlain', { ro: 'ro' }).concat(' ', parts('res_erofs', { msg: MSG.EROFS }));
+    var opt = m.kind === 'keptSystem' ? 'root_squash' : s.export.squash;
+    var first = parts('map_' + m.kind, {
+      uid: 'uid=' + q.uid, opt: opt, nobody: 'nobody', root: 'root', user: q.clientUser, sname: L.serverName(m.uid) || String(m.uid)
+    });
+    var k = s.check, second;
+    var target = k.target === 'dir' ? t('targetDirIn') : parts('targetFile', { name: k.name });
+    if (r.owner) second = parts('res_created', { name: q.name, owner: r.owner.uid, sname: L.serverName(r.owner.uid) || String(r.owner.uid) });
+    else if (k.cls === 'root') second = [t('res_root')];
+    else if (!r.ok) second = parts('res_eacces', { cls: h('span', null, t('capCls_' + k.cls)), target: h('span', null, target), bits: k.bits, need: k.need, msg: MSG.EACCES });
+    else second = parts('res_ok', { cls: h('span', null, t('capCls_' + k.cls)), target: h('span', null, target), bits: k.bits });
+    return first.concat(' ', second);
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'ro', type: 'toggle', label: t('ro') },
+      { key: 'squash', type: 'choice', label: t('squash'), options: L.SQUASH.map(function (x) { return [x, x]; }) },
+      // the requests come with the preset; hidden so the panel fits one screen
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; },
+        options: L.SCRIPT_IDS.map(function (x) { return [x, t('preset_' + x)]; }) }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'nf-user', label: t('legUser') },
+      { shape: 'nf-env', label: t('legEnvelope') },
+      { shape: 'nf-map', label: t('legMap') },
+      { shape: 'nf-file', label: t('legFile') },
+      { shape: 'nf-refused', label: t('legRefused') },
+      { shape: 'nf-new', label: t('legNew') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
