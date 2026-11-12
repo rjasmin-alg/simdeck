@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **364 of 469 entries are live**, 62 w3, 32 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **365 of 469 entries are live**, 62 w3, 31 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 wip.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -336,7 +336,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
-| §4.2 Internet and application protocols | 30 | 23 | 6 w3, 1 w3 · queued |
+| §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 40 | 14 w3 · queued, 1 wip |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
@@ -519,7 +519,7 @@ decides the final grouping axes (§7.1).
 | `inet-bgp-hijack` | live | BGP hijack and RPKI | a more-specific prefix wins; route origin validation | announce a hijack, then turn on ROV | step | M | P2 | NLA, SEC |  |  |
 | `inet-peering-transit` | w3 | Transit vs peering | who pays whom, tier-1, IXPs | connect networks, follow the money and the traffic | expl | S | P3 | URM |  |  |
 | `inet-ddos-amplification` | live | DRDoS amplification | spoofed small requests become large replies at the victim | pick protocols, see the amplification factor | expl | S | P2 | URM, SEC | URM card ch18 (DRDoS) |  |
-| `inet-oauth-flow` | w3 · queued | OAuth 2.0 / OIDC authorization code flow | who sees what: browser, app, identity provider | step a login with a third-party IdP | step | M | P3 | SEC |  |  |
+| `inet-oauth-flow` | live | OAuth 2.0 / OIDC authorization code flow | who sees what: browser, app, identity provider | step a login with a third-party IdP | step | M | P3 | SEC |  |  |
 | `inet-websocket` | w3 | WebSocket upgrade | from HTTP request to a persistent two-way channel | step the upgrade, then push messages | step | S | P3 | URM |  |  |
 
 ### 4.3 Security and cryptography
