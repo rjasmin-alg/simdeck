@@ -1,0 +1,557 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-policy-routing: ip rule picks a table before the route lookup. A stepper: each step is one event of one
+     packet's decision on rt1 (a rule test, the lookup in the rule's table, the packet forwarded) or one command. On top
+     the network as kit view K2 (a LAN, rt1, two ISPs, the internet); below the rule list (kit view K4, the router's own
+     rule: a matching rule whose table has no route goes on), the tables (K4 for main and 100, compact boxes for local
+     and tables that do not exist) and the packet with the kernel's answer and the packets sent so far.
+     Model: sim.js; rules and numbers: SPEC.md; words: strings.js; kit: docs/sim-ui.md. -->
+<html lang="hr" data-sim="lnx-policy-routing">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usmjeravanje po pravilu · simdeck</title>
+<meta name="description" content="Usmjernik s dvije vanjske veze: pravila po izvoru biraju tablicu, pa isto odredište ide različitim putem.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+<script src="../../kit/ruletable.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder, written from sim.json (the build replaces it). -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-policy-routing",
+  "title": {
+    "hr": "Usmjeravanje po pravilu",
+    "en": "Policy routing"
+  },
+  "concept": {
+    "hr": "ip rule bira tablicu prije traženja rute",
+    "en": "ip rule picks a table before the route lookup"
+  },
+  "summary": {
+    "hr": "Usmjernik s dvije vanjske veze: pravila po izvoru biraju tablicu, pa isto odredište ide različitim putem. Dodaj pravila i tablice, pošalji s dva izvora.",
+    "en": "A router with two uplinks: rules on the source pick the table, so one destination takes different paths. Add rules and tables, send from two sources."
+  },
+  "tags": [
+    "routing"
+  ],
+  "class": "stepper",
+  "steps": 11,
+  "entries": [
+    {
+      "preset": "lan-leak"
+    },
+    {
+      "preset": "reply-path"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-policy-routing"]; colours only from kit tokens.
+   The box the current step works in has a thick ink border; what a step changed has the kit's changed mark. */
+[data-sim="lnx-policy-routing"] .pr {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.8cqh;
+  height: 100%;
+  padding: 0.8cqh 0.8cqw;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+[data-sim="lnx-policy-routing"] [translate="no"] { font-family: var(--mono); }
+[data-sim="lnx-policy-routing"] h3 { margin: 0 0 0.2rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.45rem; }
+[data-sim="lnx-policy-routing"] .pr-sub { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="lnx-policy-routing"] .pr-box {
+  min-width: 0;
+  padding: 0.3rem 0.55rem 0.4rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-policy-routing"] .pr-box[data-here],
+[data-sim="lnx-policy-routing"] .sd-rt[data-here] { border: 0.22rem solid var(--ink); }
+[data-sim="lnx-policy-routing"] .pr-low {
+  display: grid;
+  grid-template-columns: minmax(0, 1.24fr) minmax(0, 1.1fr) minmax(0, 0.44fr);
+  gap: 0.8cqw;
+  min-height: 0;
+}
+[data-sim="lnx-policy-routing"] .pr-col { display: flex; flex-direction: column; gap: 0.6cqh; min-width: 0; min-height: 0; }
+/* the kit's .sd-ctl display wins over [hidden]: the source and destination show only for the one-packet scenario */
+[data-sim="lnx-policy-routing"] .sd-ctl[hidden] { display: none; }
+[data-sim="lnx-policy-routing"] .pr-empty { color: var(--muted); font-style: italic; font-size: var(--fs-sm); }
+
+/* K4 tables: rules and routes */
+[data-sim="lnx-policy-routing"] .pr-low .sd-rt { min-width: 0; padding-top: 0.3rem; }
+[data-sim="lnx-policy-routing"] .pr-low .sd-rt-title { margin-bottom: 0.15rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.45rem; font-size: 1em; }
+[data-sim="lnx-policy-routing"] .pr-low .sd-rt-table { font-size: var(--fs-sm); }
+[data-sim="lnx-policy-routing"] .pr-low .sd-rt-table td { padding-top: 0.08rem; padding-bottom: 0.08rem; line-height: 1.15; }
+[data-sim="lnx-policy-routing"] .pr-low .sd-rt-table td.sd-rt-mark { min-width: 5rem; }
+[data-sim="lnx-policy-routing"] .pr-tables .sd-rt-table td.sd-rt-mark { min-width: 4.5rem; }
+[data-sim="lnx-policy-routing"] .pr-tables .sd-rt-ptr { display: none; }
+[data-sim="lnx-policy-routing"] .pr-dest { white-space: nowrap; }
+
+/* compact tables: local and the ones that do not exist */
+[data-sim="lnx-policy-routing"] .pr-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.4rem; font-size: var(--fs-sm); }
+[data-sim="lnx-policy-routing"] .pr-mini h3 { margin: 0; font-size: 1rem; }
+[data-sim="lnx-policy-routing"] .pr-chip { padding: 0 0.3rem; border: 0.15rem solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-policy-routing"] .pr-chip[data-r="win"] { border: 0.22rem solid var(--ink); font-weight: 700; }
+[data-sim="lnx-policy-routing"] .pr-chip[data-r="no"] { color: var(--muted); border-style: dashed; }
+[data-sim="lnx-policy-routing"] .pr-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-policy-routing"] .pr-verdict { margin-left: auto; }
+
+/* the network (K2) */
+[data-sim="lnx-policy-routing"] .pr-net { display: flex; flex-direction: column; min-height: 0; padding-bottom: 0.2rem; }
+[data-sim="lnx-policy-routing"] .pr-net .sd-topo-card { padding-top: 0.2rem; padding-bottom: 0.2rem; }
+[data-sim="lnx-policy-routing"] .pr-net .sd-topo-card[data-kind='cloud'] { padding: 0.3rem 0.4rem; }
+
+/* the packet */
+[data-sim="lnx-policy-routing"] .pr-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.05rem 0.5rem; align-items: baseline; }
+[data-sim="lnx-policy-routing"] .pr-k { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="lnx-policy-routing"] .pr-v { font-weight: 700; overflow-wrap: anywhere; }
+[data-sim="lnx-policy-routing"] .pr-term {
+  margin-top: 0.3rem; padding: 0.2rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg);
+  border: var(--line-w) solid var(--line); font-size: var(--fs-sm); line-height: 1.25;
+}
+[data-sim="lnx-policy-routing"] .pr-term div { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 1.2em; text-indent: -1.2em; }
+[data-sim="lnx-policy-routing"] .pr-cmd { font-weight: 700; }
+[data-sim="lnx-policy-routing"] .pr-term .sd-changed,
+[data-sim="lnx-policy-routing"] .pr-log .sd-changed { background: var(--hl); color: var(--on-hl); outline: 0.12rem solid var(--ink); box-shadow: none; }
+[data-sim="lnx-policy-routing"] .pr-log { display: grid; gap: 0.15rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="lnx-policy-routing"] .pr-log li { display: flex; flex-wrap: wrap; gap: 0 0.4rem; align-items: baseline; padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-policy-routing"] .pr-n {
+  display: inline-grid; place-items: center; min-width: 1.4em; height: 1.4em; border-radius: 50%;
+  background: var(--c1); color: var(--on-series); font-weight: 700; font-size: var(--fs-sm);
+}
+[data-sim="lnx-policy-routing"] .pr-ok { color: var(--ok); font-weight: 700; }
+[data-sim="lnx-policy-routing"] .pr-bad { color: var(--danger); font-weight: 700; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-policy-routing"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-policy-routing"] .pr { height: auto; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="lnx-policy-routing"] .pr-low { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Usmjeravanje po pravilu</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var HOSTS = { pc20: '192.168.10.20', pc30: '192.168.10.30' };
+  var ISP_WORD = { ispA: 'vIspA', ispB: 'vIspB' };
+
+  /** Data (commands, addresses, table names, outputs) is not language: the word check skips translate="no". */
+  function data(s, cls) { return h('span', Object.assign({ translate: 'no' }, cls ? { class: cls } : {}), String(s)); }
+  function b(x) { return h('b', null, x); }
+  /** t.parts, but a placeholder used twice in one string gets a copy (a DOM node can stand in one place only). */
+  function tp(key, vars) {
+    var seen = [];
+    return t.parts(key, vars).map(function (x) {
+      if (!x || !x.nodeType) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function hl(on, c) { return on ? ' sd-changed' + anim(c) : ''; }
+  function prefixText(r) { return r.type === 'local' ? r.dst : r.prefix === 0 ? 'default' : r.dst + '/' + r.prefix; }
+  function short(p) { return p ? p.replace(/\/32$/, '') : 'all'; }
+  /** The selector as `ip rule add` takes it: from (or to alone), then to and iif when the rule has them; `ip rule`
+      prints a `to` rule as `from all to …`, which did not fit the column at 1920×1080. */
+  function selText(r) {
+    var parts = [];
+    if (r.from || !r.to) parts.push('from ' + short(r.from));
+    if (r.to) parts.push('to ' + r.to);
+    if (r.iif) parts.push('iif ' + r.iif);
+    return parts.join(' ');
+  }
+  function ispOfVia(via) { return via === L.IFACES.eth0.gw ? 'ispA' : via === L.IFACES.eth1.gw ? 'ispB' : null; }
+  /** Where a route sends a packet, in words: towards an ISP, onto the LAN, for rt1. */
+  function routeWord(r) {
+    if (r.type === 'local') return t('outLocal');
+    var isp = ispOfVia(r.via);
+    return isp ? t(ISP_WORD[isp]) : t('outLan');
+  }
+  function okVerdict(ok, word) { return h('span', { class: 'sd-rt-verdict', dataset: { ok: String(!!ok) } }, ok ? '✓ ' : '✕ ', word); }
+  /** The table the step shows decided: the one looked up now, or the chosen one while the packet is forwarded. */
+  function shownLookup(s) {
+    if (s.lookup) return s.lookup;
+    if (s.phase === 'forward' && s.chosen && s.chosen.table) {
+      var lk = L.lookup(s.tables[s.chosen.table], s.packet.dst);
+      return { table: s.chosen.table, exists: true, matches: lk.matches, winner: lk.winner, order: lk.order, dest: s.packet.dst, after: true };
+    }
+    return null;
+  }
+
+  // ── the rule list (K4, the router's own rule: every row gets its mark from the model) ──
+  var MARK = { pending: 'pending', no: 'no', hit: 'hit', empty: 'beaten', win: 'win', skip: 'skip' };
+  function rulesBox(s, c) {
+    var cols = [{ key: 'sel', label: t('colSel') }];
+    var added = s.run && s.run.rule;
+    var rows = s.rules.map(function (r, i) {
+      var tested = i === s.ruleIdx && s.phase === 'rule';
+      var no = s.marks[i] === 'no';
+      return {
+        no: String(r.prio),
+        cells: { sel: selText(r) },
+        action: r.action === 'lookup' ? 'lookup ' + r.table : r.action,
+        hit: no ? false : null,
+        miss: no && tested ? ['sel'] : [],
+        mark: MARK[s.marks[i]],
+        tags: r.id === added ? [{ k: 'hl', text: '+' }] : null
+      };
+    });
+    var decided = s.marks.indexOf('win');
+    var title = h('span', { class: c.n && s.event.kind === 'ruleAdd' ? 'sd-changed' + anim(c) : null },
+      t('rulesTitle'), ' ', h('span', { class: 'pr-sub', translate: 'no' }, 'ip rule'));
+    var table = RT({
+      dir: c.dir,
+      mode: 'first',
+      title: title,
+      noLabel: t('colPrio'),
+      columns: cols,
+      actionLabel: t('colAction'),
+      markLabel: s.packet ? t('packetN', { n: s.packet.n }) : '',
+      rows: rows,
+      at: s.packet && s.phase === 'rule' ? s.ruleIdx : -1,
+      subject: s.packet ? { mark: s.packet.n, c: 1 } : null,
+      done: decided >= 0,
+      outcome: function (i) {
+        var r = s.rules[i];
+        if (r.action !== 'lookup') return okVerdict(false, r.action === 'blackhole' ? t('outDrop') : t('outErr'));
+        return okVerdict(true, data(r.table));
+      },
+      words: { hit: t('wHit'), win: t('wWin'), beaten: t('wEmpty'), skip: t('wSkip') },
+      changed: s.phase === 'rule'
+    });
+    if (s.phase === 'rule') table.dataset.here = '';
+    return table;
+  }
+
+  // ── the tables ──
+  function routeTable(s, c, name) {
+    var tab = s.tables[name];
+    var lk = shownLookup(s);
+    var mine = lk && lk.table === name;
+    var fresh = s.run && s.run.added && s.run.table === name;
+    var rows = tab.map(function (r, i) {
+      var hit = mine ? lk.matches.indexOf(i) >= 0 : null;
+      return {
+        no: i + 1,
+        cells: { dst: prefixText(r) },
+        action: r.via ? r.via : 'dev ' + r.dev,
+        hit: hit,
+        rank: hit ? r.prefix : undefined,
+        tags: fresh && i === tab.length - 1 ? [{ k: 'hl', text: '+' }] : null
+      };
+    });
+    var el = RT({
+      dir: c.dir,
+      mode: 'specific',
+      title: h('span', null, h('span', { class: fresh ? 'sd-changed' + anim(c) : null }, data('table ' + name)), ' ',
+        h('span', { class: 'pr-sub', translate: 'no' }, 'ip route show table ' + name)),
+      columns: [{ key: 'dst', label: t('colDst') }],
+      actionLabel: t('colHop'),
+      markLabel: '',
+      rows: rows,
+      implicit: { text: t('noRouteNext'), action: '' },
+      at: mine ? 'all' : -1,
+      done: !!mine,
+      outcome: function (i) {
+        if (i >= tab.length) return okVerdict(false, t('next'));
+        return okVerdict(true, routeWord(tab[i]));
+      },
+      words: { beaten: t('wEmpty') },
+      changed: false
+    });
+    if (mine && !lk.after) el.dataset.here = '';
+    return el;
+  }
+  /** local, compact: rt1's own addresses as chips, the one that matches outlined. */
+  function localBox(s, c) {
+    var lk = shownLookup(s);
+    var mine = lk && lk.table === 'local';
+    var chips = s.tables.local.map(function (r, i) {
+      var r0 = mine ? (i === lk.winner ? 'win' : 'no') : null;
+      return h('span', { class: 'pr-chip', translate: 'no', dataset: r0 ? { r: r0 } : {} }, r.dst);
+    });
+    var verdict = mine ? h('span', { class: 'pr-verdict' }, lk.winner >= 0 ? okVerdict(true, t('outLocal')) : okVerdict(false, t('next'))) : null;
+    return h('section', { class: 'pr-box pr-mini', dataset: mine && !lk.after ? { here: '' } : {} },
+      h('h3', null, data('table local')), h('span', { class: 'pr-sub' }, t('localOwn'), ':'), chips,
+      mine ? h('span', { class: 'pr-dest pr-sub' }, '→ ', data(lk.dest)) : null, verdict);
+  }
+  /** A table a rule points to that does not exist (200; `default` only while it is looked up). */
+  function missingBox(s, c, name) {
+    var mine = s.lookup && s.lookup.table === name;
+    return h('section', { class: 'pr-box pr-mini', dataset: mine ? { here: '' } : {} },
+      h('h3', null, data('table ' + name)), h('span', { class: 'pr-sub' }, t('noTable'), ':'),
+      data('Error: ipv4: FIB table does not exist.', 'pr-err'),
+      mine ? h('span', { class: 'pr-verdict' }, okVerdict(false, t('next'))) : null);
+  }
+  function tablesCol(s, c) {
+    var kids = [localBox(s, c), routeTable(s, c, 'main')];
+    Object.keys(s.tables).filter(function (n) { return n !== 'local' && n !== 'main'; }).sort().forEach(function (n) { kids.push(routeTable(s, c, n)); });
+    var missing = [];
+    s.rules.forEach(function (r) {
+      if (r.action === 'lookup' && !s.tables[r.table] && missing.indexOf(r.table) < 0 && (r.table !== 'default' || (s.lookup && s.lookup.table === 'default'))) missing.push(r.table);
+    });
+    missing.forEach(function (n) { kids.push(missingBox(s, c, n)); });
+    return h('div', { class: 'pr-col pr-tables' }, kids);
+  }
+
+  // ── the network (K2) ──
+  function netBox(s, c) {
+    var badges = { pc20: [], pc30: [], rt1: [], ispA: [], ispB: [], inet: [] };
+    var packets = [];
+    var pk = s.packet;
+    var fresh = s.event.fresh && c.dir === 'forward';
+    if (pk) {
+      var chip = t('packetN', { n: pk.n });
+      if (s.phase === 'direct') {
+        // a LAN host sends to its own network straight on the bus: rt1 is not asked
+        packets.push({ from: pk.from, to: s.forward.at, label: chip, c: 1, move: fresh });
+        badges[pk.from].push({ text: t('bSends'), k: 'fill' });
+        badges[s.forward.at].push({ text: t('bGets'), k: 'fill' });
+      } else if (s.phase !== 'forward') {
+        // the packet has reached rt1, which decides
+        if (pk.from === 'pc20' || pk.from === 'pc30') packets.push({ from: pk.from, to: 'rt1', label: chip, c: 1, move: fresh });
+        else if (pk.from === 'inet') packets.push({ from: 'inet', to: 'ispB', label: chip, c: 1, move: fresh, chip: false }, { from: 'ispB', to: 'rt1', label: chip, c: 1, move: fresh });
+        if (badges[pk.from] && pk.from !== 'rt1') badges[pk.from].push({ text: t('bSends'), k: 'fill' });
+        badges.rt1.push(pk.from === 'rt1' ? { text: t('bSends'), k: 'fill' } : { text: t('bDecides'), k: 'solid' });
+        if (s.outcome && s.outcome.kind === 'local') badges.rt1.push({ text: t('bForMe'), k: 'fill' });
+        if (s.outcome && s.outcome.at === 'rt1' && s.outcome.kind !== 'local') badges.rt1.push({ text: t('bDropped'), k: 'dashed' });
+      } else {
+        var f = s.forward;
+        var hop = f.via ? ispOfVia(f.via) : (f.at === 'pc20' || f.at === 'pc30' ? f.at : null);
+        var dropHere = f.fate !== 'delivered';
+        if (hop) packets.push({ from: 'rt1', to: hop, label: chip, c: 1, drop: dropHere && f.at === hop });
+        if (f.via && f.fate === 'delivered') packets.push({ from: hop, to: 'inet', label: chip, c: 1, chip: false });
+        if (f.fate === 'delivered') badges[f.at === 'inet' ? 'inet' : f.at].push({ text: t('bGets'), k: 'fill' });
+        else if (f.fate === 'filtered') badges[f.at].push({ text: t('bFiltered'), k: 'dashed' });
+        else if (f.fate === 'lost' && f.at !== 'lan') {
+          badges[f.at].push({ text: t('bNotHere'), k: 'dashed' });
+          var host = L.LAN[pk.dst];
+          if (host) badges[host].push({ text: t('bLost'), k: 'dashed' });
+        }
+      }
+    }
+    var rtState = pk && s.phase !== 'forward' && s.phase !== 'direct' ? 'active' : null;
+    var nodes = [
+      { id: 'pc20', kind: 'host', col: 0, row: 0, c: 2, mark: '20', lines: [{ text: 'pc20', kind: 'addr' }, { text: HOSTS.pc20, kind: 'sub' }], badges: badges.pc20 },
+      { id: 'pc30', kind: 'host', col: 1, row: 0, c: 3, mark: '30', lines: [{ text: 'pc30', kind: 'addr' }, { text: HOSTS.pc30, kind: 'sub' }], badges: badges.pc30 },
+      { id: 'rt1', kind: 'router', col: 2, row: 0, c: 1, mark: 'R', state: rtState,
+        lines: [{ text: 'rt1', kind: 'addr' }, { text: 'eth2 .1', kind: 'sub' }], badges: badges.rt1 },
+      { id: 'ispA', kind: 'router', col: 4, row: 0, c: 4, mark: 'A', name: t('ispA'), lines: [{ text: L.IFACES.eth0.gw, kind: 'sub' }], badges: badges.ispA },
+      { id: 'ispB', kind: 'router', col: 4, row: 1, c: 6, mark: 'B', name: t('ispB'), lines: [{ text: L.IFACES.eth1.gw, kind: 'sub' }], badges: badges.ispB },
+      { id: 'inet', kind: 'cloud', col: 5, row: 0, name: t('internet'), lines: [{ text: L.SERVER, kind: 'sub' }], badges: badges.inet }
+    ];
+    var topo = Simdeck.topology({
+      cols: 6, rows: ['auto', 'auto'], dir: c.dir, gap: '0.8cqw',
+      nodes: nodes,
+      links: [
+        { id: 'lan', bus: ['pc20', 'pc30', 'rt1'], row: 1 },
+        { id: 'a', a: 'rt1', b: 'ispA', ends: { a: 'eth0 .10' }, active: !!(s.forward && ispOfVia(s.forward.via) === 'ispA') },
+        { id: 'b', a: 'rt1', b: 'ispB', ends: { a: 'eth1 .10' }, active: !!(s.forward && ispOfVia(s.forward.via) === 'ispB') },
+        { id: 'ai', a: 'ispA', b: 'inet' },
+        { id: 'bi', a: 'ispB', b: 'inet' }
+      ],
+      packets: packets
+    });
+    return h('section', { class: 'pr-box pr-net', dataset: s.phase === 'forward' ? { here: '' } : {} },
+      h('h3', null, t('lan'), data('192.168.10.0/24', 'pr-sub')), topo);
+  }
+
+  // ── the packet, the kernel's answer, the log ──
+  function fateWord(l) {
+    if (l.kind === 'local') return t('fateLocal');
+    return t({ delivered: 'fateDelivered', filtered: 'fateFiltered', lost: 'fateLost', dropped: 'fateDropped', error: 'fateError' }[l.fate]);
+  }
+  function packetBox(s, c) {
+    if (s.run) {
+      return (h('section', { class: 'pr-box', dataset: { here: '' } }, h('h3', null, t('cmdBox')),
+        h('div', { class: 'pr-term' },
+          h('div', { class: 'pr-cmd', translate: 'no' }, '# ', h('span', { class: 'sd-changed' + anim(c) }, s.run.text)),
+          s.run.out.map(function (ln) { return h('div', { translate: 'no', class: 'pr-err' }, ln); }))));
+    }
+    if (s.packet) {
+      var pk = s.packet;
+      var who = pk.from === 'inet' ? L.SERVER : pk.from;
+      return h('section', { class: 'pr-box' },
+        h('h3', null, h('span', { class: 'pr-n', translate: 'no' }, String(pk.n)), t('packetBox')),
+        h('div', { class: 'pr-fields' },
+          h('span', { class: 'pr-k' }, t('fSrc')), h('span', { class: 'pr-v' }, data(pk.src), pk.from !== 'inet' ? h('span', { class: 'pr-sub' }, ' ', data(who)) : null),
+          h('span', { class: 'pr-k' }, t('fDst')), h('span', { class: 'pr-v' }, data(pk.dst)),
+          s.phase === 'direct' ? null : h('span', { class: 'pr-k' }, t('fIif')),
+          s.phase === 'direct' ? null : h('span', { class: 'pr-v' }, pk.iif === 'lo' ? h('span', { class: 'pr-sub' }, t('fLocalOut')) : data(pk.iif))),
+        s.phase === 'direct' ? h('div', { class: 'pr-empty' }, t('notAsked')) : h('div', { class: 'pr-sub' }, t('askKernel')),
+        s.phase === 'direct' ? null : h('div', { class: 'pr-term' },
+          h('div', { class: 'pr-cmd', translate: 'no' }, '# ' + s.getCmd),
+          s.get ? h('div', { translate: 'no', class: /RTNETLINK/.test(s.get) ? 'pr-err' : (s.lookup || s.end ? 'sd-changed' + anim(c) : null) }, s.get)
+            : h('div', { class: 'pr-empty' }, t('waiting'))));
+    }
+    return h('section', { class: 'pr-box' }, h('h3', null, t('packetBox')), h('div', { class: 'pr-empty' }, t('noPacket')));
+  }
+  function logBox(s, c) {
+    var log = s.log.map(function (l, i) {
+      var ok = l.fate === 'delivered';
+      var newest = i === s.log.length - 1 && s.outcome && s.packet && s.packet.n === l.n;
+      return h('li', { class: newest ? 'sd-changed' + anim(c) : null },
+        h('span', { class: 'pr-n', translate: 'no' }, String(l.n)),
+        data(l.src + ' → ' + l.dst),
+        l.prio != null ? h('span', { class: 'pr-sub' }, t('logRule'), ' ', data(l.prio + (l.table ? ' → ' + l.table : ''))) : null,
+        l.via ? data(t(ISP_WORD[ispOfVia(l.via)])) : null,
+        h('span', { class: ok ? 'pr-ok' : 'pr-bad' }, ok ? '✓ ' : '✕ ', fateWord(l)));
+    });
+    return h('section', { class: 'pr-box' }, h('h3', null, t('logTitle')),
+      log.length ? h('ul', { class: 'pr-log' }, log) : h('div', { class: 'pr-empty' }, t('logEmpty')));
+  }
+
+  // ── captions ──
+  function sel(r) { return data(selText(r)); }
+  function ispName(id) { return data(t(ISP_WORD[id])); }
+  function caption(c) {
+    var s = c.state, ev = s.event;
+    if (s.phase === 'start') return t('cStart');
+    if (s.phase === 'change') {
+      var run = s.run;
+      if (ev.kind === 'routeAdd') {
+        var route = data(s.cmd.route.dst + '/' + s.cmd.route.prefix + ' dev ' + s.cmd.route.dev);
+        return tp(run.ok ? 'cRouteAdd' : 'cRouteAddDup', { table: data(s.cmd.table), route: b(route) });
+      }
+      if (!run.ok) return t('cRuleAddRefused');
+      return tp(run.dup ? 'cRuleAddDup' : 'cRuleAdd', { prio: b(data(run.prio)) });
+    }
+    var pk = s.packet, r = s.rules[s.ruleIdx];
+    if (s.phase === 'rule') {
+      if (s.marks[s.ruleIdx] === 'no') {
+        var k = s.miss[0];
+        var why = k === 'from' ? tp('whyFrom', { src: data(pk.src), from: data(short(r.from)) })
+          : k === 'to' ? tp('whyTo', { dst: data(pk.dst), to: data(r.to) }) : tp('whyIif', { iif: data(r.iif) });
+        return tp('cRuleNo', { prio: b(data(r.prio)), why: h('span', null, why) });
+      }
+      if (s.end === 'blackhole') return tp('cBlackhole', { prio: b(data(r.prio)), sel: sel(r) });
+      if (s.end) return tp('cUnreachable', { prio: b(data(r.prio)), sel: sel(r), action: data(s.end) });
+      if (r.prio === 0 && r.table === 'local') return t('cRule0');
+      return tp(r.table === 'main' ? 'cRuleMatch' : 'cRuleMatchNotMain', { prio: b(data(r.prio)), sel: sel(r), table: b(data(r.table)) });
+    }
+    if (s.phase === 'lookup') {
+      var lk = s.lookup, dst = b(data(pk.dst));
+      var tail = s.outcome && s.outcome.kind === 'noroute' ? [' ', t('cNoRoute')] : [];
+      if (lk.table === 'local') return lk.winner >= 0 ? tp('cLocalHit', { dst: dst }) : tp('cLocalMiss', { dst: dst });
+      if (!lk.exists) return [].concat(tp('cNoTable', { table: b(data(lk.table)) }), tail);
+      if (lk.winner < 0) return [].concat(tp('cTableMiss', { table: b(data(lk.table)), dst: dst }), tail);
+      var w = s.tables[lk.table][lk.winner];
+      var isp = ispOfVia(w.via);
+      var how = isp ? tp('howVia', { isp: ispName(isp), via: data(w.via) }) : t('howLan');
+      var v = { table: b(data(lk.table)), dst: dst, win: b(data(prefixText(w))), how: h('span', null, how), k: t.n('kRows', lk.matches.length) };
+      if (lk.matches.length === 1 && w.prefix === 0 && lk.table !== 'main') return tp('cOneDefault', v);
+      return tp(lk.matches.length === 1 ? 'cOne' : 'cMany', v);
+    }
+    if (s.phase === 'direct') return tp('cDirect', { dst: b(data(pk.dst)), host: data(pk.from), to: b(data(s.forward.at)) });
+    // forward
+    var f = s.forward, res;
+    if (f.fate === 'delivered' && f.at === 'inet') res = tp('cFwdInet', { dev: data(f.dev), isp: ispName(ispOfVia(f.via)), dst: b(data(pk.dst)) });
+    else if (f.fate === 'delivered') res = tp('cFwdLan', { host: b(data(f.at)) });
+    else if (f.fate === 'filtered') res = tp('cFwdFiltered', { isp: ispName(f.at), src: b(data(pk.src)) });
+    else res = tp('cFwdLost', { dst: data(pk.dst), isp: ispName(f.at), host: b(data(L.LAN[pk.dst] || pk.dst)) });
+    // two packets to one destination by different tables: say what decided it
+    var same = s.log.filter(function (l) { return l.dst === pk.dst && l.fate === 'delivered'; });
+    if (same.length >= 2 && same[0].table !== same[same.length - 1].table && same[0].src !== same[same.length - 1].src) res = res.concat(' ', t('cCompare'));
+    return res;
+  }
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'pr' },
+      netBox(s, c),
+      h('div', { class: 'pr-low' }, h('div', { class: 'pr-col' }, rulesBox(s, c), packetBox(s, c)), tablesCol(s, c), h('div', { class: 'pr-col' }, logBox(s, c)))));
+  }
+
+  var isOne = function (p) { return p.script === 'one'; };
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'script', type: 'select', label: t('script'), resets: true,
+        options: [['two-sources', t('pTwo')], ['lan-leak', t('pLeak')], ['empty-table', t('pEmpty')], ['reply-path', t('pReply')],
+          ['blackhole', t('pBlackhole')], ['one', t('sOne')]] },
+      { key: 'source', type: 'choice', label: t('source'), resets: true, visible: isOne,
+        options: [['pc20', 'pc20'], ['pc30', 'pc30'], ['rt1', 'rt1']] },
+      { key: 'dst', type: 'choice', label: t('dst'), resets: true, visible: isOne,
+        options: [['192.0.2.80', '192.0.2.80'], ['192.168.10.20', '192.168.10.20']] },
+      { key: 'ruleFrom30', type: 'toggle', label: t('ruleFrom30'), resets: true },
+      { key: 'lanInTable100', type: 'toggle', label: t('lanInTable100'), resets: true },
+      { key: 'replyRule', type: 'toggle', label: t('replyRule'), resets: true }
+    ],
+
+    presets: [
+      { id: 'two-sources', label: t('pTwo'), params: { script: 'two-sources' } },
+      { id: 'lan-leak', label: t('pLeak'), params: { script: 'lan-leak', replyRule: true } },
+      { id: 'empty-table', label: t('pEmpty'), params: { script: 'empty-table' } },
+      { id: 'reply-path', label: t('pReply'), params: { script: 'reply-path' } },
+      { id: 'blackhole', label: t('pBlackhole'), params: { script: 'blackhole' } }
+    ],
+
+    legend: [
+      { shape: 'rt-hit', label: t('legHit') },
+      { shape: 'rt-win', label: t('legWin') },
+      { shape: 'rt-beaten', label: t('legEmpty') },
+      { shape: 'rt-no', label: t('legNo') },
+      { shape: 'rt-skip', label: t('legSkip') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
