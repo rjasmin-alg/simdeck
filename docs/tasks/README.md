@@ -185,7 +185,7 @@ Then the kit tasks: [`kit-sequence-chart`](w0/kit-sequence-chart.md), [`kit-topo
 | 60 | [`db-replication`](w2/db-replication.md) | Replication lag and failover | Replication and HA | S | P2 |  |
 | 61 | [`utilisation-latency`](w2/utilisation-latency.md) | Latency near full utilisation | Performance | S | P2 |  |
 
-## Wave 3: derivatives (316 tasks)
+## Wave 3: derivatives (318 tasks)
 
 | # | Task | Title | Group | Size | Pri | Depends on |
 |---|---|---|---|---|---|---|
@@ -481,30 +481,32 @@ Then the kit tasks: [`kit-sequence-chart`](w0/kit-sequence-chart.md), [`kit-topo
 | 290 | [`dedup-file-funnel`](w3/dedup-file-funnel.md) | Finding duplicate files | Storage, backup and disaster recovery | S | P3 | after `dedup-chunking` |
 | 291 | [`nas-vs-san`](w3/nas-vs-san.md) | File vs block storage | Storage, backup and disaster recovery | S | P3 |  |
 | 292 | [`cap-under-partition`](w3/cap-under-partition.md) | CAP under partition | High availability and distributed systems | S | P2 | after `db-replication` |
-| 293 | [`consistent-hashing`](w3/consistent-hashing.md) | Consistent hashing | High availability and distributed systems | S | P2 |  |
-| 294 | [`fencing`](w3/fencing.md) | Fencing (STONITH) | High availability and distributed systems | S | P2 | preset on `quorum-split-brain` |
-| 295 | [`raft`](w3/raft.md) | Raft leader election and log replication | High availability and distributed systems | M | P2 | after `quorum-split-brain` |
-| 296 | [`vrrp-failover`](w3/vrrp-failover.md) | VRRP failover | High availability and distributed systems | S | P2 | after `arp-local-remote` |
-| 297 | [`lamport-clocks`](w3/lamport-clocks.md) | Logical clocks | High availability and distributed systems | M | P3 |  |
-| 298 | [`never-zero-spof`](w3/never-zero-spof.md) | No system has zero SPOFs | High availability and distributed systems | S | P3 | preset on `faultline` |
-| 299 | [`two-phase-commit`](w3/two-phase-commit.md) | Two-phase commit | High availability and distributed systems | S | P3 |  |
-| 300 | [`littles-law`](w3/littles-law.md) | Little's law | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 301 | [`rate-limiting`](w3/rate-limiting.md) | Token bucket vs leaky bucket | Performance and capacity | S | P2 |  |
-| 302 | [`retry-storm`](w3/retry-storm.md) | Retry storms and metastable collapse | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 303 | [`slo-error-budget`](w3/slo-error-budget.md) | SLOs and error budgets | Performance and capacity | S | P2 |  |
-| 304 | [`tail-latency`](w3/tail-latency.md) | Tail latency and fan-out | Performance and capacity | S | P2 | after `utilisation-latency` |
-| 305 | [`autoscaling-lag`](w3/autoscaling-lag.md) | Autoscaling lag | Performance and capacity | S | P3 | after `utilisation-latency` |
-| 306 | [`cache-hit-ratio`](w3/cache-hit-ratio.md) | Cache hit ratio and latency | Performance and capacity | S | P3 |  |
-| 307 | [`game-tick-server`](w3/game-tick-server.md) | Authoritative tick server | Performance and capacity | M | P3 |  |
-| 308 | [`goodhart-teams`](w3/goodhart-teams.md) | Local optimisation, global degradation | Performance and capacity | M | P3 | after `utilisation-latency` |
-| 309 | [`cache-mapping`](w3/cache-mapping.md) | Cache mapping | Computer architecture, OS gaps and automata | M | P2 |  |
-| 310 | [`pipeline-hazards`](w3/pipeline-hazards.md) | Pipeline hazards | Computer architecture, OS gaps and automata | M | P2 |  |
-| 311 | [`endianness`](w3/endianness.md) | Endianness | Computer architecture, OS gaps and automata | S | P3 |  |
-| 312 | [`floating-point`](w3/floating-point.md) | IEEE 754 | Computer architecture, OS gaps and automata | S | P3 |  |
-| 313 | [`mesi-coherence`](w3/mesi-coherence.md) | MESI coherence on its own | Computer architecture, OS gaps and automata | S | P3 | after `multicore-mesi` |
-| 314 | [`twos-complement`](w3/twos-complement.md) | Two's complement and overflow | Computer architecture, OS gaps and automata | S | P3 |  |
-| 315 | [`regex-to-nfa`](w3/regex-to-nfa.md) | Regex to NFA to DFA | Computer architecture, OS gaps and automata | M | P3 | after `automata` |
-| 316 | [`os-context-switch-cost`](w3/os-context-switch-cost.md) | What a context switch costs | Computer architecture, OS gaps and automata | S | P3 |  |
+| 293 | [`cluster-membership`](w3/cluster-membership.md) | Who is still in the cluster: heartbeats and the token timeout | High availability and distributed systems | S | P2 |  |
+| 294 | [`consistent-hashing`](w3/consistent-hashing.md) | Consistent hashing | High availability and distributed systems | S | P2 |  |
+| 295 | [`fencing`](w3/fencing.md) | Fencing (STONITH) | High availability and distributed systems | S | P2 | preset on `quorum-split-brain` |
+| 296 | [`raft`](w3/raft.md) | Raft leader election and log replication | High availability and distributed systems | M | P2 | after `quorum-split-brain` |
+| 297 | [`resource-placement`](w3/resource-placement.md) | Where cluster resources run: location, colocation, order and stickiness | High availability and distributed systems | S | P2 |  |
+| 298 | [`vrrp-failover`](w3/vrrp-failover.md) | VRRP failover | High availability and distributed systems | S | P2 | after `arp-local-remote` |
+| 299 | [`lamport-clocks`](w3/lamport-clocks.md) | Logical clocks | High availability and distributed systems | M | P3 |  |
+| 300 | [`never-zero-spof`](w3/never-zero-spof.md) | No system has zero SPOFs | High availability and distributed systems | S | P3 | preset on `faultline` |
+| 301 | [`two-phase-commit`](w3/two-phase-commit.md) | Two-phase commit | High availability and distributed systems | S | P3 |  |
+| 302 | [`littles-law`](w3/littles-law.md) | Little's law | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 303 | [`rate-limiting`](w3/rate-limiting.md) | Token bucket vs leaky bucket | Performance and capacity | S | P2 |  |
+| 304 | [`retry-storm`](w3/retry-storm.md) | Retry storms and metastable collapse | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 305 | [`slo-error-budget`](w3/slo-error-budget.md) | SLOs and error budgets | Performance and capacity | S | P2 |  |
+| 306 | [`tail-latency`](w3/tail-latency.md) | Tail latency and fan-out | Performance and capacity | S | P2 | after `utilisation-latency` |
+| 307 | [`autoscaling-lag`](w3/autoscaling-lag.md) | Autoscaling lag | Performance and capacity | S | P3 | after `utilisation-latency` |
+| 308 | [`cache-hit-ratio`](w3/cache-hit-ratio.md) | Cache hit ratio and latency | Performance and capacity | S | P3 |  |
+| 309 | [`game-tick-server`](w3/game-tick-server.md) | Authoritative tick server | Performance and capacity | M | P3 |  |
+| 310 | [`goodhart-teams`](w3/goodhart-teams.md) | Local optimisation, global degradation | Performance and capacity | M | P3 | after `utilisation-latency` |
+| 311 | [`cache-mapping`](w3/cache-mapping.md) | Cache mapping | Computer architecture, OS gaps and automata | M | P2 |  |
+| 312 | [`pipeline-hazards`](w3/pipeline-hazards.md) | Pipeline hazards | Computer architecture, OS gaps and automata | M | P2 |  |
+| 313 | [`endianness`](w3/endianness.md) | Endianness | Computer architecture, OS gaps and automata | S | P3 |  |
+| 314 | [`floating-point`](w3/floating-point.md) | IEEE 754 | Computer architecture, OS gaps and automata | S | P3 |  |
+| 315 | [`mesi-coherence`](w3/mesi-coherence.md) | MESI coherence on its own | Computer architecture, OS gaps and automata | S | P3 | after `multicore-mesi` |
+| 316 | [`twos-complement`](w3/twos-complement.md) | Two's complement and overflow | Computer architecture, OS gaps and automata | S | P3 |  |
+| 317 | [`regex-to-nfa`](w3/regex-to-nfa.md) | Regex to NFA to DFA | Computer architecture, OS gaps and automata | M | P3 | after `automata` |
+| 318 | [`os-context-switch-cost`](w3/os-context-switch-cost.md) | What a context switch costs | Computer architecture, OS gaps and automata | S | P3 |  |
 
 ## Wave 4: course pages
 
@@ -578,6 +580,7 @@ Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-`, `cmp-
 | `dr-rpo-rto` | `rpo-rto` |
 | `dr-site-failover` | `site-failover` |
 | `ha-cap` | `cap-under-partition` |
+| `ha-cluster-membership` | `cluster-membership` |
 | `ha-consistent-hashing` | `consistent-hashing` |
 | `ha-db-replication` | `db-replication` |
 | `ha-fencing` | `fencing` |
@@ -586,6 +589,7 @@ Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-`, `cmp-
 | `ha-never-zero-spof` | `never-zero-spof` |
 | `ha-quorum-split-brain` | `quorum-split-brain` |
 | `ha-raft` | `raft` |
+| `ha-resource-placement` | `resource-placement` |
 | `ha-two-phase-commit` | `two-phase-commit` |
 | `ha-vrrp-failover` | `vrrp-failover` |
 | `ham-adsb-frame` | `adsb-frame` |
@@ -796,7 +800,7 @@ Area prefixes are dropped from folder names except `win-`, `lnx-`, `fin-`, `cmp-
 Wave 0 task `vocabulary` added these to `tags.json`, with Croatian and English labels and search aliases
 (`tests/vocabulary.test.mjs` keeps this list, the task files and `tags.json` in step):
 
-`accounting`, `active-directory`, `antennas`, `arp`, `attacks`, `audit`, `authentication`, `automata`, `automation`, `backup`, `bgp`, `boot`, `budgeting`, `caches`, `change-management`, `circuits`, `classroom-tool`, `consensus`, `containers`, `contracts`, `costs`, `cpu`, `cryptography`, `data-protection`, `deduplication`, `dhcp`, `disaster-recovery`, `dns`, `electrical-safety`, `em-waves`, `email`, `emergency-comms`, `encapsulation`, `error-detection`, `ethernet`, `fault-tolerance`, `file-sharing`, `filesystems`, `fire-safety`, `firewall`, `governance`, `group-policy`, `http`, `icmp`, `identity-governance`, `incident-response`, `investment`, `ip`, `ip-addressing`, `ipv6`, `kerberos`, `link-aggregation`, `logging`, `lvm`, `memory`, `modulation`, `monitoring`, `multicast`, `nat`, `number-representation`, `occupational-health`, `operating-systems`, `packages`, `parallelism`, `partitioning`, `performance`, `permissions`, `physical-layer`, `processes`, `propagation`, `qos`, `radio-networks`, `raid`, `receivers`, `replication`, `rigging`, `risk`, `routing`, `selinux`, `services`, `set-procedure`, `set-roles`, `set-safety`, `shell`, `signals`, `snapshots`, `specialist-hazards`, `spectrum`, `ssh`, `storage-basics`, `storage-cluster`, `switching`, `tcp`, `time-sync`, `tls`, `topology`, `troubleshooting`, `udp`, `updates`, `virtualization`, `vlan`, `vpn`, `wifi`, `windows-internals`, `working-at-height`
+`accounting`, `active-directory`, `antennas`, `arp`, `attacks`, `audit`, `authentication`, `automata`, `automation`, `backup`, `bgp`, `boot`, `budgeting`, `caches`, `change-management`, `circuits`, `classroom-tool`, `consensus`, `containers`, `contracts`, `costs`, `cpu`, `cryptography`, `data-protection`, `deduplication`, `dhcp`, `disaster-recovery`, `dns`, `electrical-safety`, `em-waves`, `email`, `emergency-comms`, `encapsulation`, `error-detection`, `ethernet`, `fault-tolerance`, `file-sharing`, `filesystems`, `fire-safety`, `firewall`, `governance`, `group-policy`, `http`, `icmp`, `identity-governance`, `incident-response`, `investment`, `ip`, `ip-addressing`, `ipv6`, `kerberos`, `link-aggregation`, `logging`, `lvm`, `memory`, `modulation`, `monitoring`, `multicast`, `nat`, `networking`, `number-representation`, `occupational-health`, `operating-systems`, `packages`, `parallelism`, `partitioning`, `performance`, `permissions`, `physical-layer`, `processes`, `propagation`, `qos`, `radio-networks`, `raid`, `receivers`, `replication`, `rigging`, `risk`, `routing`, `selinux`, `services`, `set-procedure`, `set-roles`, `set-safety`, `shell`, `signals`, `snapshots`, `specialist-hazards`, `spectrum`, `ssh`, `storage-basics`, `storage-cluster`, `switching`, `tcp`, `time-sync`, `tls`, `topology`, `troubleshooting`, `udp`, `updates`, `virtualization`, `vlan`, `vpn`, `wifi`, `windows-internals`, `working-at-height`
 
 Topics: `architecture`, `classroom`, `compliance`, `distributed`, `film-set`, `finance`, `internet`, `linux-admin`, `networks`, `os`, `radio`, `security`, `storage`, `theory`, `windows-admin`.
 

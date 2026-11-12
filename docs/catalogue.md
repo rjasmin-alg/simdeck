@@ -326,7 +326,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **367 of 469 entries are live**, 62 w3, 30 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **367 of 471 entries are live**, 64 w3, 30 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -347,7 +347,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
 | §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
 | §4.6 Storage, backup and disaster recovery | 22 | 20 | 2 w3 |
-| §4.7 High availability and distributed systems | 11 | 8 | 3 w3 |
+| §4.7 High availability and distributed systems | 13 | 8 | 5 w3 |
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
 | §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 5 w3, 1 w3 · queued |
 | §4.10 Radio and crisis communications | 17 | 13 | 4 w3 |
@@ -756,6 +756,8 @@ instead of repeating them.
 | `ha-multimaster-conflict` | live | Multi-master replication with a conflict | concurrent writes on two masters; last-writer-wins, versions, what is lost | write on both sides of a partition, heal it | step | M | B1 | DR, NLA, WIN2 | proposal first batch; NLA T55 → §5.7 |  |
 | `ha-quorum-split-brain` | live | Quorum and split-brain | majority keeps one side alive; even counts and witnesses; fencing | partition a cluster of 2–5 nodes, add a witness | step | S | P1 | NLA, DR, WIN2 | NLA T52–53; cephsim MON quorum → §5.7 |  |
 | `ha-fencing` | live in `quorum-split-brain` | Fencing (STONITH) | why a node must be killed before its resources move | hang a node with and without fencing | step | S | P2 | NLA | NLA T53 → §5.7 |  |
+| `ha-cluster-membership` | w3 | Who is still in the cluster: heartbeats and the token timeout | nodes pass a token round a ring; a node that misses it past the timeout is dropped and membership re-forms before quorum is counted; a short timeout drops slow nodes, a long one delays failover | slow a node, cut a link, change the timeout | step | S | P2 | NLA | NLA T52; owner suggestion s-001 "corosync" (2026-11-12); next to `quorum-split-brain` |  |
+| `ha-resource-placement` | w3 | Where cluster resources run: location, colocation, order and stickiness | constraints and scores decide which node runs each resource and in what order a group starts; a failure moves the whole group, stickiness keeps it from moving back | fail a node, change scores and stickiness, add a colocation or an order | explorer | S | P2 | NLA | NLA T52; owner suggestion s-001 "corosync" (2026-11-12) |  |
 | `ha-vrrp-failover` | live | VRRP failover | master election, virtual IP, preemption, gratuitous ARP | fail and restore the master | step | S | P2 | NLA, URM | NLA T54 |  |
 | `ha-db-replication` | live | Replication lag and failover | async replicas lag; failover loses the tail; reading your own writes | write, read from a replica, fail the primary | step | S | P2 | NLA, DR | NLA T55 → §5.7 |  |
 | `ha-cap` | live | CAP under partition | a partitioned system picks consistency or availability | partition, issue reads and writes in CP and AP modes | step | S | P2 | NLA, DR |  |  |
