@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **374 of 477 entries are live**, 70 w3, 22 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **375 of 477 entries are live**, 70 w3, 21 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 49 | 1 w3 · building, 5 w3 · queued |
+| §4.4 Linux | 55 | 50 | 1 w3 · building, 4 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -557,7 +557,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-links-inodes` | live | Hard links, symlinks and inodes | names point to inodes; the link count; dangling symlinks | create, link, delete, see what survives | step | S | P2 | UL | UL ch05 (`unos-u-direktoriju-i-brojac-poveznica.svg`) |  |
 | `lnx-permissions-rwx` | live | Permission bits, octal, umask | nine bits, octal notation, umask clearing bits from the defaults (666 with umask 077 gives 600) | toggle bits, set umask, create files | expl | S | P1 | UL | UL ch07 (`devet-bitova-dozvola.svg`) |  |
 | `lnx-access-decision` | live | The access decision | owner → group → other, first match decides; the ACL mask | pick a user and a file, step the check | step | S | P2 | UL | UL ch07 → §5.1 |  |
-| `lnx-special-bits` | w3 · queued | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 |  |
+| `lnx-special-bits` | w3 · building | setuid, setgid and sticky | who the process runs as; who may delete in /tmp | run a setuid binary, delete in a sticky dir | step | S | P3 | UL | UL ch07 |  |
 | `lnx-signals` | live | Signals | SIGTERM vs SIGKILL, traps, SIGHUP and nohup | send signals to processes with and without handlers | step | S | P2 | UL | UL ch08 |  |
 | `lnx-job-control` | live | Job control | fg/bg, Ctrl-Z, process groups, what dies on logout | drive jobs from a shell | step | S | P3 | UL | UL ch08 |  |
 | `lnx-boot-chain` | live | The boot chain | firmware → bootloader → kernel → initramfs → systemd | step a boot; break one stage | step | S | P2 | UL | UL ch10 (`lanac-podizanja.svg`) → §5.15 |  |
@@ -596,7 +596,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-lvm-snapshot` | live | LVM snapshot filling up | CoW snapshot space and invalidation when full | write to the origin, watch the snapshot fill | step | S | P2 | NLA | NLA T20 → §5.2 |  |
 | `lnx-thin-overcommit` | live | Thin provisioning and overcommit | promised vs real space; the pool fills under everyone | create thin volumes, write, run out | expl | S | P2 | NLA, DR | NLA T20 → §5.2 |  |
 | `lnx-cow-filesystem` | live | Copy-on-write filesystems | snapshots share blocks; writes go to new blocks | write, snapshot, write, see shared and owned blocks | step | S | P2 | NLA | NLA T22–23 → §5.2 |  |
-| `lnx-send-receive` | w3 · building | Btrfs/ZFS send and receive | incremental replication from snapshot pairs | snapshot, send, change, send incremental | step | S | P3 | NLA, DR | NLA T22 → §5.3 |  |
+| `lnx-send-receive` | live in `backup-diff-incr` | Btrfs/ZFS send and receive | incremental replication from snapshot pairs | snapshot, send, change, send incremental | step | S | P3 | NLA, DR | NLA T22 → §5.3 |  |
 | `lnx-zfs-self-heal` | live | Checksums and self-healing | a scrub finds a bad block and repairs it from the mirror | corrupt a block, scrub | step | S | P2 | NLA | NLA T23 |  |
 | `lnx-raid-rebuild` | live | Rebuild under load and the second failure | a long rebuild, an unreadable sector, a lost array | fail a disk, rebuild, hit a URE | step | S | P2 | NLA, DR | NLA T24 → §5.3 |  |
 | `lnx-multipath` | live | Multipath I/O | path failover for iSCSI/FC | fail paths during I/O | step | S | P3 | NLA | NLA T25; `spl-stratis-lab` |  |
