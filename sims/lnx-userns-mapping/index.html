@@ -1,0 +1,508 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-userns-mapping: root inside a rootless container is an unprivileged UID outside.
+     On top, the command of this step, who ran it (a container process or the host user) and its result. Below, the
+     container diagram of lnx-namespaces in three columns: left the container's view (its /etc/passwd, its processes,
+     /data as it lists it), right the host's view of the same, and in the middle the user namespace: uid_map and the
+     /etc/subuid line, and per process and per file an arrow with the map line that translates the owner.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-userns-mapping">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontejner bez root ovlasti: root unutra, običan vani · simdeck</title>
+<meta name="description" content="Stvori datoteke u kontejneru bez root ovlasti i provjeri vlasnike na domaćinu: uid_map, podređeni rasponi, nobody za nepreslikane brojeve i usporedba s rootom.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-userns-mapping",
+  "title": {
+    "hr": "Kontejner bez root ovlasti: root unutra, običan vani",
+    "en": "Rootless containers: root inside, an ordinary user outside"
+  },
+  "concept": {
+    "hr": "Root u kontejneru preslikava se u neprivilegirani UID na domaćinu",
+    "en": "Root inside the container maps to an unprivileged UID on the host"
+  },
+  "summary": {
+    "hr": "Stvori datoteke u kontejneru bez root ovlasti i provjeri vlasnike na domaćinu: uid_map, podređeni rasponi, nobody za nepreslikane brojeve i usporedba s rootom.",
+    "en": "Create files from a rootless container and check their owners on the host: uid_map, subordinate ranges, nobody for unmapped IDs, and the rootful contrast."
+  },
+  "tags": [
+    "containers"
+  ],
+  "class": "stepper",
+  "steps": 2,
+  "entries": [
+    {
+      "preset": "service-user"
+    },
+    {
+      "preset": "host-file-inside"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-userns-mapping"]; colours only from kit tokens.
+   Layout: the command strip on top; then one grid of three columns (container | user namespace | host) whose rows
+   line up, so each process and each file has its two owners on one line with the map line between them. */
+[data-sim="lnx-userns-mapping"] .um {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.66fr) minmax(0, 1.2fr);
+  column-gap: 0;
+  row-gap: 0.4rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem;
+  font-size: 1.12rem;
+  align-content: start;
+}
+[data-sim="lnx-userns-mapping"] .um-mono, [data-sim="lnx-userns-mapping"] code { font-family: var(--mono); }
+[data-sim="lnx-userns-mapping"] .um-muted { color: var(--muted); }
+[data-sim="lnx-userns-mapping"] .um-small { font-size: var(--fs-sm); }
+[data-sim="lnx-userns-mapping"] .um h3 { margin: 0; font-size: var(--fs-lg); display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.5rem; }
+[data-sim="lnx-userns-mapping"] .um h3 small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="lnx-userns-mapping"] .um h4 { margin: 0; font-size: var(--fs-sm); font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="lnx-userns-mapping"] .um h4 code { font-weight: 400; color: var(--muted); }
+
+/* the panels behind the columns: the container hatched with the C badge (lnx-namespaces), the host plain */
+[data-sim="lnx-userns-mapping"] .um-bg { grid-column: 1; border: 0.2rem solid var(--c2); border-radius: var(--radius); z-index: 0;
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.6em, color-mix(in srgb, var(--c2) 16%, transparent) 0.6em 0.8em); }
+[data-sim="lnx-userns-mapping"] .um-bg-h { grid-column: 3; border: 0.2rem solid var(--ink); background: var(--panel); }
+[data-sim="lnx-userns-mapping"] .um-cell { position: relative; z-index: 1; min-width: 0; padding: 0 0.6rem; }
+[data-sim="lnx-userns-mapping"] .um-mid { padding: 0 0.3rem; }
+[data-sim="lnx-userns-mapping"] .um-badge-c {
+  display: inline-grid; place-items: center; min-width: 1.3em; height: 1.3em; padding: 0 0.15em;
+  border: 2px solid var(--c2); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink);
+  font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm); line-height: 1;
+}
+
+/* the command strip */
+[data-sim="lnx-userns-mapping"] .um-strip {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem;
+  margin-bottom: 0.35rem; padding: 0.35rem 0.8rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel);
+  min-height: 3rem;
+}
+[data-sim="lnx-userns-mapping"] .um-side { font-weight: 700; padding: 0.05rem 0.5rem; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); white-space: nowrap; }
+[data-sim="lnx-userns-mapping"] .um-side-c { border-color: var(--c2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.45em, color-mix(in srgb, var(--c2) 24%, transparent) 0.45em 0.65em); }
+[data-sim="lnx-userns-mapping"] .um-cmd { font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; }
+[data-sim="lnx-userns-mapping"] .um-prompt { color: var(--muted); font-weight: 400; }
+[data-sim="lnx-userns-mapping"] .um-res { font-family: var(--mono); }
+[data-sim="lnx-userns-mapping"] .um-res-ok { color: var(--ok); font-weight: 700; font-family: var(--sans); }
+[data-sim="lnx-userns-mapping"] .um-res-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-userns-mapping"] .um-res-note { color: var(--muted); font-family: var(--sans); }
+
+/* headings and the top row */
+[data-sim="lnx-userns-mapping"] .um-head { padding-top: 0.35rem; }
+[data-sim="lnx-userns-mapping"] .um-mid.um-head h3 { justify-content: center; text-align: center; }
+[data-sim="lnx-userns-mapping"] .um-passwd { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; margin: 0.1rem 0 0; padding: 0; list-style: none; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="lnx-userns-mapping"] .um-passwd li { white-space: nowrap; }
+[data-sim="lnx-userns-mapping"] .um-map { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+[data-sim="lnx-userns-mapping"] .um-maptab { border-collapse: separate; border-spacing: 0 0.15rem; font-family: var(--mono); }
+[data-sim="lnx-userns-mapping"] .um-maptab th { font-family: var(--sans); font-weight: 400; font-size: var(--fs-sm); color: var(--muted); padding: 0 0.4rem; }
+[data-sim="lnx-userns-mapping"] .um-maptab td { padding: 0.05rem 0.4rem; white-space: nowrap; text-align: right; background: var(--bg); border-top: var(--line-w) solid var(--line); border-bottom: var(--line-w) solid var(--line); }
+[data-sim="lnx-userns-mapping"] .um-maptab td:first-child { text-align: left; font-family: var(--sans); font-size: var(--fs-sm); color: var(--muted); border-left: var(--line-w) solid var(--line); }
+[data-sim="lnx-userns-mapping"] .um-maptab td:last-child { border-right: var(--line-w) solid var(--line); }
+[data-sim="lnx-userns-mapping"] .um-maptab tr.um-used td { border-color: var(--ink); border-width: 0.2rem; font-weight: 700; }
+[data-sim="lnx-userns-mapping"] .um-maptab tr.um-used.um-now td { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-userns-mapping"] .um-subuid { font-family: var(--mono); padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-userns-mapping"] .um-subuid.um-off { color: var(--muted); border-style: dashed; }
+[data-sim="lnx-userns-mapping"] .um-mapnote { font-size: var(--fs-sm); color: var(--muted); text-align: center; }
+
+/* section rows and item rows */
+[data-sim="lnx-userns-mapping"] .um-sec { padding-top: 0.8rem; }
+[data-sim="lnx-userns-mapping"] .um-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.55rem;
+  margin: 0 0.6rem; padding: 0.15rem 0.45rem; min-height: 2.3rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+}
+[data-sim="lnx-userns-mapping"] .um-row .um-name { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-userns-mapping"] .um-row .um-dim { color: var(--muted); font-family: var(--mono); }
+[data-sim="lnx-userns-mapping"] .um-row .um-mode { font-size: var(--fs-sm); }
+[data-sim="lnx-userns-mapping"] .um-row.um-listed { border: 0.2rem solid var(--ink); }
+[data-sim="lnx-userns-mapping"] .um-row.um-now { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="lnx-userns-mapping"] .um-row.um-now .um-dim, [data-sim="lnx-userns-mapping"] .um-row.um-now .um-muted { color: var(--on-hl); }
+[data-sim="lnx-userns-mapping"] .um-row.um-refused { border: 0.2rem solid var(--danger); }
+[data-sim="lnx-userns-mapping"] .um-x { color: var(--danger); font-weight: 700; margin-left: auto; }
+[data-sim="lnx-userns-mapping"] .um-row.um-now .um-x { color: var(--on-hl); }
+[data-sim="lnx-userns-mapping"] .um-tag { font-weight: 700; font-size: var(--fs-sm); padding: 0 0.25rem; border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); }
+[data-sim="lnx-userns-mapping"] .um-empty { margin: 0 0.6rem; color: var(--muted); font-style: italic; }
+
+/* UID badges: inside hatched with the container's colour, outside plain, unmapped dashed */
+[data-sim="lnx-userns-mapping"] .um-uid {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  min-width: 4.2rem; justify-content: center; padding: 0 0.35rem;
+  border: 2px solid var(--ink); border-radius: 0.8rem; background: var(--bg); color: var(--ink);
+  font-family: var(--mono); font-weight: 700;
+}
+[data-sim="lnx-userns-mapping"] .um-uid-c { border-color: var(--c2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.4em, color-mix(in srgb, var(--c2) 28%, transparent) 0.4em 0.6em); }
+[data-sim="lnx-userns-mapping"] .um-uid-un { border-style: dashed; border-color: var(--ink); background-image: none; }
+[data-sim="lnx-userns-mapping"] .um-uid small { font-weight: 400; font-size: var(--fs-sm); }
+
+/* the arrow between the two owners, with the map line on it */
+[data-sim="lnx-userns-mapping"] .um-arrow { display: flex; align-items: center; height: 100%; min-height: 2rem; }
+[data-sim="lnx-userns-mapping"] .um-arrow::before, [data-sim="lnx-userns-mapping"] .um-arrow::after { content: ''; flex: 1 1 auto; border-top: 0.18rem solid var(--ink); }
+[data-sim="lnx-userns-mapping"] .um-arrow-un::before, [data-sim="lnx-userns-mapping"] .um-arrow-un::after { border-top-style: dashed; }
+[data-sim="lnx-userns-mapping"] .um-head-l, [data-sim="lnx-userns-mapping"] .um-head-r { flex: none; font-weight: 700; line-height: 1; }
+[data-sim="lnx-userns-mapping"] .um-lab {
+  flex: none; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--bg); font-size: var(--fs-sm); white-space: nowrap;
+}
+[data-sim="lnx-userns-mapping"] .um-arrow-un .um-lab { border-style: dashed; }
+[data-sim="lnx-userns-mapping"] .um-arrow.um-now .um-lab { background: var(--hl); color: var(--on-hl); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape^='um-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-in'] { border: 2px solid var(--c2); border-radius: 0.5rem;
+  background-image: repeating-linear-gradient(135deg, transparent 0 0.15rem, color-mix(in srgb, var(--c2) 55%, transparent) 0.15rem 0.3rem); }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-out'] { border: 2px solid var(--ink); border-radius: 0.5rem; }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-line'] { border: 0.2rem solid var(--ink); }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-un'] { border: 2px dashed var(--ink); border-radius: 0.5rem; }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-refused'] { border: 0.2rem solid var(--danger); }
+[data-sim="lnx-userns-mapping"] .sd-swatch[data-shape='um-refused']::after { content: '✗'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--danger); }
+
+[data-sim="lnx-userns-mapping"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the title takes the first header row, the legend and the tools the second */
+[data-sim="lnx-userns-mapping"] .sd-titles { flex: 1 1 70rem; }
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-userns-mapping"] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: the stage grows with its content; the three columns stack row by row, so each process and
+   file reads container → line → host. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-userns-mapping"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-userns-mapping"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-userns-mapping"] .um { display: flex; flex-direction: column; height: auto; padding: 0.5rem; }
+  [data-sim="lnx-userns-mapping"] .um-bg { display: none; }
+  [data-sim="lnx-userns-mapping"] .um-cell.um-blank { display: none; }
+  [data-sim="lnx-userns-mapping"] .um-cell[data-col="c"] { border-left: 0.3rem solid var(--c2); }
+  [data-sim="lnx-userns-mapping"] .um-cell[data-col="h"] { border-left: 0.3rem solid var(--ink); }
+  [data-sim="lnx-userns-mapping"] .um-row { margin: 0; }
+  [data-sim="lnx-userns-mapping"] .um-arrow { min-height: 1.6rem; padding: 0 2rem; }
+  [data-sim="lnx-userns-mapping"] .um-mid.um-head h3 { justify-content: flex-start; }
+  [data-sim="lnx-userns-mapping"] .um-map { align-items: flex-start; }
+  /* the heads and the top row read per column: container, then the map, then the host; the rest row by row */
+  [data-sim="lnx-userns-mapping"] .um > * { order: 10; }
+  [data-sim="lnx-userns-mapping"] .um > .um-strip { order: 0; }
+  [data-sim="lnx-userns-mapping"] .um > [data-top="c"] { order: 1; }
+  [data-sim="lnx-userns-mapping"] .um > [data-top="m"] { order: 2; }
+  [data-sim="lnx-userns-mapping"] .um > [data-top="h"] { order: 3; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Kontejner bez root ovlasti: root unutra, običan vani</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var MSG = 'Permission denied';
+  var MAP_PID = 4321;   // the container's first process on the host: its uid_map is the container's
+
+  // ── small pieces ──
+
+  /** Data (numbers, names, paths, commands) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'um-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function code(text) { return h('code', { translate: 'no' }, String(text)); }
+  function has(s, key) { return s.changed.indexOf(key) >= 0; }
+  function badgeC() { return h('span', { class: 'um-badge-c', translate: 'no' }, 'C'); }
+
+  /** Caption parts: t.parts with every node placeholder cloned where it lands, *word* as <em lang="en"> and `x` as
+      code (from sims/lnx-namespaces/index.html); a number becomes data. */
+  var MARK = '\u0001';
+  function rich(key, vars) {
+    var nodes = [], flat = {};
+    Object.keys(vars || {}).forEach(function (k) {
+      var v = vars[k];
+      if (v && typeof v === 'object' && v.nodeType) { flat[k] = MARK + nodes.length + MARK; nodes.push(v); }
+      else if (typeof v === 'number') { flat[k] = MARK + nodes.length + MARK; nodes.push(data(v)); }
+      else flat[k] = v;
+    });
+    var out = [];
+    [].concat(t.parts(key, flat)).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/(\*[^*]+\*|`[^`]+`)/).forEach(function (bit) {
+        if (!bit) return;
+        if (/^\*[^*]+\*$/.test(bit)) { out.push(h('em', { lang: 'en' }, bit.slice(1, -1))); return; }
+        if (/^`[^`]+`$/.test(bit)) { out.push(code(bit.slice(1, -1))); return; }
+        bit.split(MARK).forEach(function (piece, j) {
+          if (j % 2) out.push(nodes[Number(piece)].cloneNode(true));
+          else if (piece) out.push(piece);
+        });
+      });
+    });
+    return out;
+  }
+  function sp(parts) { return [' '].concat(parts); }
+
+  /** A UID badge: side 'c' hatched, 'h' plain; unmapped dashed; the side's name for it (or none) after it. */
+  function uidBadge(side, uid, name, unmapped) {
+    return h('span', { class: 'um-uid' + (side === 'c' ? ' um-uid-c' : '') + (unmapped ? ' um-uid-un' : '') },
+      h('span', { translate: 'no' }, String(uid)), name ? h('small', { translate: 'no' }, name) : null);
+  }
+  function nameOf(name) { return name ? data(name, 'um-name') : h('span', { class: 'um-muted um-small' }, t('noName')); }
+
+  // ── the command strip ──
+
+  function cmdText(a) {
+    if (a.op === 'create') return 'touch /data/' + a.path;
+    if (a.op === 'ls') return 'ls -ln /data';
+    if (a.op === 'read') return 'cat /data/' + a.path;
+    return 'echo x >> /data/' + a.path;
+  }
+  function errText(a) {
+    if (a.op === 'read') return 'cat: /data/' + a.path + ': ' + MSG;
+    return 'sh: /data/' + a.path + ': ' + MSG;
+  }
+  function strip(s) {
+    var a = s.action;
+    if (!a) return h('div', { class: 'um-strip' }, h('span', { class: 'um-muted' }, t('before')));
+    var w = s.who;
+    var side = h('span', { class: 'um-side' + (a.side === 'c' ? ' um-side-c' : '') },
+      a.side === 'c' ? [badgeC(), ' '] : null, t(a.side === 'c' ? 'sideC' : 'sideH'), ' ',
+      h('span', null, t.parts('runsAs', { user: data(w.user), uid: data(a.side === 'c' ? w.uidIn : w.uidOut) })));
+    var root = a.side === 'c' ? w.uidIn === 0 : w.uidOut === 0;
+    var res;
+    if (!s.result.ok) res = h('span', { class: 'um-res um-res-err', translate: 'no' }, '✗ ' + errText(a));
+    else if (a.op === 'ls') res = h('span', { class: 'um-res-note' }, t.parts('resLs', { side: t(a.side === 'c' ? 'resLsC' : 'resLsH') }));
+    else res = h('span', { class: 'um-res-ok' }, '✓ ', t(a.op === 'create' ? 'resCreated' : 'resOk'));
+    return h('div', { class: 'um-strip' }, side,
+      h('span', { class: 'um-cmd' }, h('span', { class: 'um-prompt', translate: 'no' }, root ? '# ' : '$ '), h('span', { translate: 'no' }, cmdText(a))),
+      res);
+  }
+
+  // ── the grid ──
+
+  function cell(col, cls, kids) { return h('div', { class: 'um-cell' + (col === 'm' ? ' um-mid' : '') + (cls ? ' ' + cls : ''), dataset: { col: col } }, kids); }
+  function blank(col) { return cell(col, 'um-blank', null); }
+
+  function arrow(line, unmapped, now) {
+    var lab = unmapped ? t('arrowNone') : t('arrowLine', { n: line + 1 });
+    return h('div', { class: 'um-arrow' + (unmapped ? ' um-arrow-un' : '') + (now ? ' um-now' : '') },
+      h('span', { class: 'um-head-l', 'aria-hidden': 'true' }, '◀'), h('span', { class: 'um-lab' }, lab),
+      h('span', { class: 'um-head-r', 'aria-hidden': 'true' }, '▶'));
+  }
+
+  function mapBox(c) {
+    var s = c.state, now = c.n > 0;
+    var rows = s.map.map(function (l, i) {
+      var used = s.used.indexOf(i) >= 0;
+      return h('tr', { class: used ? 'um-used' + (now ? ' um-now' : '') : null },
+        h('td', null, t('mapLine', { n: i + 1 })),
+        h('td', { translate: 'no' }, String(l.inside)), h('td', { translate: 'no' }, String(l.outside)), h('td', { translate: 'no' }, String(l.count)));
+    });
+    var su = s.subuid;
+    return h('div', { class: 'um-map' },
+      h('h4', null, t.parts('mapHead', { pid: data(MAP_PID) })),
+      h('table', { class: 'um-maptab' },
+        h('thead', null, h('tr', null, h('th'), h('th', { colspan: 3 }, t('mapCols')))),
+        h('tbody', null, rows)),
+      s.rootless ? null : h('div', { class: 'um-mapnote' }, t('mapRootful')),
+      h('h4', null, data(t('subuidHead'))),
+      h('div', null, h('span', { class: 'um-subuid' + (s.rootless ? '' : ' um-off'), translate: 'no' }, su.user + ':' + su.start + ':' + su.count),
+        s.rootless ? null : [' ', h('span', { class: 'um-muted um-small' }, t('subuidUnused'))]));
+  }
+
+  function passwd(side) {
+    var names = L.NAMES[side];
+    var ids = Object.keys(names).map(Number).filter(function (u) { return u !== L.OVERFLOW; }).sort(function (a, b) { return a - b; });
+    return h('div', null, h('h4', null, data(t('passwd'))),
+      h('ul', { class: 'um-passwd', translate: 'no' }, ids.map(function (u) { return h('li', null, names[u] + ' ' + u); })));
+  }
+
+  function procRow(c, side, p) {
+    var s = c.state;
+    var now = c.n > 0 && has(s, 'proc:' + p.id);
+    return h('div', { class: 'um-row' + (now ? ' um-now sd-changed' : '') },
+      uidBadge(side, p.uid, null, false), nameOf(p.name),
+      h('span', { class: 'um-dim', translate: 'no' }, 'PID ' + p.pid), data(p.id, 'um-dim'));
+  }
+
+  function fileRow(c, side, f, actorSide) {
+    var s = c.state, a = s.action;
+    var now = c.n > 0 && has(s, 'file:' + f.path);
+    var listed = c.n > 0 && has(s, 'list:' + side);
+    var refused = s.result && !s.result.ok && a.path === f.path && side === actorSide;
+    var unmapped = side === 'c' && f.unmapped;
+    return h('div', { class: 'um-row' + (listed ? ' um-listed' : '') + (refused ? ' um-refused' : '') + (now || listed ? ' um-now sd-changed' : '') },
+      data(L.lsString(f.mode), 'um-dim um-mode'), uidBadge(side, f.uid, null, unmapped), nameOf(f.name),
+      data('/data/' + f.path, 'um-name'), f.isNew ? h('span', { class: 'um-tag' }, t('newTag')) : null,
+      refused ? h('span', { class: 'um-x', 'aria-label': t('legRefused') }, '✗') : null);
+  }
+
+  function render(c) {
+    var s = c.state, a = s.action;
+    var rows = [];                       // one entry per grid row: [container cell, middle cell, host cell]
+    rows.push([cell('c', 'um-head', h('h3', null, badgeC(), t('colC'), h('small', null, t('colC_note')))),
+      cell('m', 'um-head', h('h3', null, t('colMap'))),
+      cell('h', 'um-head', h('h3', null, t('colH'), h('small', null, t('colH_note'))))]);
+    rows.push([cell('c', null, passwd('c')), cell('m', null, mapBox(c)), cell('h', null, passwd('h'))]);
+    // processes
+    var pc = L.processes(s, 'c'), ph = L.processes(s, 'h');
+    rows.push([cell('c', 'um-sec', h('h4', null, t('secProcs'), code('ps -o user,pid,comm'))), blank('m'),
+      cell('h', 'um-sec', h('h4', null, t('secProcs'), code('ps -o user,pid,comm')))]);
+    pc.forEach(function (p, i) {
+      var now = c.n > 0 && has(s, 'proc:' + p.id);
+      rows.push([cell('c', null, procRow(c, 'c', p)), cell('m', null, arrow(p.line, false, now)), cell('h', null, procRow(c, 'h', ph[i]))]);
+    });
+    // files
+    var fc = L.listing(s, 'c'), fh = L.listing(s, 'h');
+    rows.push([cell('c', 'um-sec', h('h4', null, t('secFiles'), code('ls -ln /data'))),
+      cell('m', 'um-sec', h('div', { class: 'um-mapnote' }, t('secFilesNote'))),
+      cell('h', 'um-sec', h('h4', null, t('secFiles'), code('ls -ln /data')))]);
+    if (!fc.length) rows.push([cell('c', null, h('p', { class: 'um-empty' }, t('empty'))), blank('m'), cell('h', null, h('p', { class: 'um-empty' }, t('empty')))]);
+    fc.forEach(function (f, i) {
+      var now = c.n > 0 && (has(s, 'file:' + f.path) || has(s, 'list:c') || has(s, 'list:h'));
+      rows.push([cell('c', null, fileRow(c, 'c', f, a && a.side)), cell('m', null, arrow(f.line, f.unmapped, now)), cell('h', null, fileRow(c, 'h', fh[i], a && a.side))]);
+    });
+    // every cell placed explicitly: row 1 is the strip, the panels behind columns 1 and 3 span the rest and one more
+    var kids = [];
+    rows.forEach(function (r, i) {
+      r.forEach(function (el, j) {
+        el.style.gridRow = String(i + 2);
+        el.style.gridColumn = String(j + 1);
+        if (i < 2) el.dataset.top = el.dataset.col;          // the phone reads these per column
+        kids.push(el);
+      });
+    });
+    var last = rows.length + 2;
+    var strp = strip(s);
+    strp.style.gridRow = '1';
+    c.stage.replaceChildren(h('div', { class: 'um', style: { gridTemplateRows: 'repeat(' + (rows.length + 1) + ', auto) minmax(0.4rem, 1fr)' } },
+      strp,
+      h('div', { class: 'um-bg', style: { gridRow: '2 / ' + (last + 1) } }),
+      h('div', { class: 'um-bg um-bg-h', style: { gridRow: '2 / ' + (last + 1) } }),
+      kids));
+  }
+
+  // ── captions ──
+
+  function isInitial(p, path) { return L.SCRIPTS[p.script].files.some(function (f) { return f.path === path; }); }
+
+  function caption(c) {
+    var s = c.state, p = c.params, a = s.action;
+    if (!a) return rich(s.rootless ? 'capStart' : 'capStartRootful').concat(sp(rich('goal_' + p.script)));
+    var w = s.who;
+    var file = a.path ? L.findFile(s, a.path) : s.files[0];
+    var path = file ? data('/data/' + file.path) : null;
+    if (a.op === 'create') {
+      if (!s.rootless) return w.uidIn === 0 ? rich('capCreateRootful', { path: path }) : rich('capCreateSame', { in: w.uidIn, path: path });
+      var line = s.map[w.line];
+      if (line.count === 1) return rich('capCreateRoot', { proc: data(w.proc), out: w.uidOut, user: data(s.hostUser.name), path: path });
+      return rich('capCreateSub', { user: code(w.user), in: w.uidIn, ord: t('ord_' + w.line), start: line.outside, first: line.inside, out: w.uidOut });
+    }
+    if (a.op === 'ls') {
+      if (!file) return [t('empty')];
+      var inside = L.toInside(s.map, file.uidOut);
+      if (a.side === 'h') {
+        if (!s.rootless) {
+          if (file.uidOut === 0) return rich(isInitial(p, file.path) ? 'capLsHostRootFile' : 'capLsHostRootful', { path: path });
+          return rich('capLsHostSame', { path: path, out: file.uidOut });
+        }
+        if (file.uidOut === s.hostUser.uid) return rich('capLsHostOwn', { out: file.uidOut, user: data(s.hostUser.name) });
+        if (inside.unmapped) return rich('capLsHostRootFile', { path: path });
+        return rich('capLsHostSub', { out: file.uidOut, user: data(s.hostUser.name), line: code(s.subuid.user + ':' + s.subuid.start + ':' + s.subuid.count) });
+      }
+      if (inside.unmapped) return rich('capLsCUnmapped', { owner: file.uidOut, nobody: data('nobody') });
+      if (!s.rootless) return rich('capLsCSame', { path: path, out: file.uidOut });
+      return rich('capLsCMapped', { path: path, out: file.uidOut, in: inside.id });
+    }
+    // read / write
+    var k = s.result.check;
+    if (!s.result.ok) {
+      if (k.capDenied) return rich('capReadDenied', { proc: data(w.proc), out: k.uidOut, owner: file.uidOut, bits: code(k.bits) });
+      if (a.side === 'h') {
+        var out = rich('capWriteDenied', { user: data(w.user), uid: w.uidOut, out: file.uidOut, bits: code(k.bits) });
+        if (s.rootless && !L.toInside(s.map, file.uidOut).unmapped) out = out.concat(sp(rich('capEnterNs', { user: data(w.user), out: file.uidOut })));
+        return out;
+      }
+      return rich('capDenied', { cls: t('cls_' + k.cls), bits: code(k.bits), need: code(k.need) });
+    }
+    if (k.cls === 'root' && a.side === 'c') return rich('capReadRoot', { path: path });
+    return rich('capAccessOk', { cls: t('cls_' + k.cls) });
+  }
+
+  // ── mount ──
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'rootless', type: 'toggle', label: t('rootless') },
+      { key: 'subuidStart', type: 'choice', label: t('subuidStart'),
+        options: L.SUBUID_STARTS.map(function (x) { return [x, String(x)]; }) },
+      // the actions come with the preset; hidden so the panel fits one screen
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; },
+        options: L.SCRIPT_IDS.map(function (x) { return [x, t('preset_' + x)]; }) }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'um-in', label: t('legIn') },
+      { shape: 'um-out', label: t('legOut') },
+      { shape: 'um-line', label: t('legLine') },
+      { shape: 'um-un', label: t('legUnmapped') },
+      { shape: 'um-refused', label: t('legRefused') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
