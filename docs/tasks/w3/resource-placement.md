@@ -10,7 +10,7 @@
 | Size | S |
 | Priority | P2 |
 | Courses | NLA |
-| Topic / tags / level | `distributed` / `networking` / `advanced` |
+| Topic / tags / level | `distributed` / `fault-tolerance`, `scheduling` / `advanced` |
 | Languages | Croatian and English (COMMON.md §4) |
 | Licence | AGPL-3.0-or-later |
 | Depends on | wave 0 (foundation) merged |
