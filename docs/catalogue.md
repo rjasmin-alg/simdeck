@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **377 of 477 entries are live**, 70 w3, 19 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **378 of 477 entries are live**, 64 w3, 24 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 52 | 1 w3 · building, 2 w3 · queued |
+| §4.4 Linux | 55 | 53 | 2 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -357,7 +357,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 1 | 13 w3, 11 w3 · queued |
 | §4.15 Antennas and radiation | 12 | 12 | – |
-| §4.16 Arithmetic on paper | 6 | 0 | 6 w3 |
+| §4.16 Arithmetic on paper | 6 | 0 | 1 w3 · building, 5 w3 · queued |
 
 <!-- status:end -->
 
@@ -591,7 +591,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-userns-mapping` | live | Rootless containers | root inside maps to an unprivileged UID outside | create files, check owners on the host | step | S | P3 | NLA | NLA T17 |  |
 | `lnx-netns-veth-bridge` | live | Namespaces, veth and a bridge | how container networking is wired by hand | connect two namespaces step by step | step | M | P2 | NLA | NLA T06–08 |  |
 | `lnx-netfilter-path` | live | A packet through netfilter | prerouting, input, forward, output, postrouting; where NAT and filter happen | send inbound, forwarded and local packets | step | M | P1 | NLA | NLA T08 → §5.1 |  |
-| `lnx-policy-routing` | w3 · building | Policy routing | `ip rule` picks a table before the route lookup | add rules and tables, send from two sources | step | S | P3 | NLA | NLA T05 |  |
+| `lnx-policy-routing` | live | Policy routing | `ip rule` picks a table before the route lookup | add rules and tables, send from two sources | step | S | P3 | NLA | NLA T05 |  |
 | `lnx-bonding-modes` | w3 · queued | Bonding modes | active-backup vs balance vs 802.3ad | fail links, send flows | expl | S | P3 | NLA | NLA T06 → `net-link-aggregation` |  |
 | `lnx-lvm-snapshot` | live | LVM snapshot filling up | CoW snapshot space and invalidation when full | write to the origin, watch the snapshot fill | step | S | P2 | NLA | NLA T20 → §5.2 |  |
 | `lnx-thin-overcommit` | live | Thin provisioning and overcommit | promised vs real space; the pool fills under everyone | create thin volumes, write, run out | expl | S | P2 | NLA, DR | NLA T20 → §5.2 |  |
@@ -1387,12 +1387,12 @@ audience and base switches).
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `ari-place-value` | w3 | Place value: a digit is worth what its place says | a digit is worth the digit times the base to the power of its place; ten ones regroup into one ten (in base b, b of them into one of the next place); the same quantity written in base 10, 2, 8 and 16 has other digits but is the same number | build a number from blocks, regroup ones into tens, switch the base and watch the digits change while the blocks stay | expl | S | P2 | ARI | owner suggestion s-002; pairs with `arh-twos-complement` (number-representation) |  |
-| `ari-column-addition` | w3 | Column addition: carrying | add column by column from the right; a column whose sum reaches the base writes what is left over and carries the rest to the next column (more than 1 with three or more numbers); the carry is a regrouping, not a trick | type two to four numbers, step column by column, see the carry move, switch the base | step | M | P2 | ARI | owner suggestion s-002; pilot of kit view K5 |  |
-| `ari-column-subtraction` | w3 | Column subtraction: two methods side by side | when a top digit is smaller, either borrow (take one from the next column, it is worth the base here) or use equal additions (add the base to the top digit and one to the next digit taken away); both keep the difference unchanged, so they give the same answer | type two numbers, step both methods at once, compare what is written where; a zero in the top number | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition` |  |
-| `ari-column-multiplication` | w3 | Column multiplication: partial products | multiply by each digit of the second number, write each partial product one place further left (it is multiplied by the base), then add; an area model shows why; in base 2 every partial product is the number itself or zero, shifted: shift-and-add | type two numbers, step digit by digit, open the area model, switch to base 2 | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition`; base 2 pairs with `arh-twos-complement` |  |
-| `ari-long-division` | w3 | Long division, the Croatian way | take as few leading digits as can be divided, ask how many times, multiply, subtract, bring down the next digit, repeat; a 0 in the quotient when a step is too small; the remainder is less than the divisor | type a dividend and a divisor, step through, see a forgotten 0 in the quotient as a typical mistake | step | M | P2 | ARI | owner suggestion s-002; after `ari-column-multiplication` |  |
-| `ari-checking` | w3 | Is it right? Checking a result | the inverse operation checks a result (difference plus the number taken away gives the top number; quotient times divisor plus remainder gives the dividend), and an estimate from rounded numbers catches a result that is off by a place | check given results, find the wrong one, estimate before computing | expl | S | P3 | ARI | owner suggestion s-002; after `ari-long-division` |  |
+| `ari-place-value` | w3 · queued | Place value: a digit is worth what its place says | a digit is worth the digit times the base to the power of its place; ten ones regroup into one ten (in base b, b of them into one of the next place); the same quantity written in base 10, 2, 8 and 16 has other digits but is the same number | build a number from blocks, regroup ones into tens, switch the base and watch the digits change while the blocks stay | expl | S | P2 | ARI | owner suggestion s-002; pairs with `arh-twos-complement` (number-representation) |  |
+| `ari-column-addition` | w3 · building | Column addition: carrying | add column by column from the right; a column whose sum reaches the base writes what is left over and carries the rest to the next column (more than 1 with three or more numbers); the carry is a regrouping, not a trick | type two to four numbers, step column by column, see the carry move, switch the base | step | M | P2 | ARI | owner suggestion s-002; pilot of kit view K5 |  |
+| `ari-column-subtraction` | w3 · queued | Column subtraction: two methods side by side | when a top digit is smaller, either borrow (take one from the next column, it is worth the base here) or use equal additions (add the base to the top digit and one to the next digit taken away); both keep the difference unchanged, so they give the same answer | type two numbers, step both methods at once, compare what is written where; a zero in the top number | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition` |  |
+| `ari-column-multiplication` | w3 · queued | Column multiplication: partial products | multiply by each digit of the second number, write each partial product one place further left (it is multiplied by the base), then add; an area model shows why; in base 2 every partial product is the number itself or zero, shifted: shift-and-add | type two numbers, step digit by digit, open the area model, switch to base 2 | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition`; base 2 pairs with `arh-twos-complement` |  |
+| `ari-long-division` | w3 · queued | Long division, the Croatian way | take as few leading digits as can be divided, ask how many times, multiply, subtract, bring down the next digit, repeat; a 0 in the quotient when a step is too small; the remainder is less than the divisor | type a dividend and a divisor, step through, see a forgotten 0 in the quotient as a typical mistake | step | M | P2 | ARI | owner suggestion s-002; after `ari-column-multiplication` |  |
+| `ari-checking` | w3 · queued | Is it right? Checking a result | the inverse operation checks a result (difference plus the number taken away gives the top number; quotient times divisor plus remainder gives the dividend), and an estimate from rounded numbers catches a result that is off by a place | check given results, find the wrong one, estimate before computing | expl | S | P3 | ARI | owner suggestion s-002; after `ari-long-division` |  |
 
 **Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area before
 `lecturer`:
