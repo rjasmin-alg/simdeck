@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **370 of 477 entries are live**, 70 w3, 26 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **371 of 477 entries are live**, 70 w3, 25 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 45 | 1 w3 · building, 9 w3 · queued |
+| §4.4 Linux | 55 | 46 | 1 w3 · building, 8 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -568,7 +568,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-disk-full-mysteries` | live | "Disk full" with free space | inode exhaustion, and a deleted file still open | fill a disk both ways, find the cause | step | S | P2 | UL | UL ch11, ch23 |  |
 | `lnx-mirror-not-backup` | live | A mirror is not a backup | RAID protects against disk loss, not deletion or corruption | delete a file on a healthy mirror | step | S | P2 | UL, DR | UL ch12 (`granica-zastite-zrcala.svg`) → §5.3 |  |
 | `lnx-lvm-extend` | live | Extending an LV and its filesystem | PV → VG → LV → filesystem, in that order | add a disk, extend each layer | step | S | P2 | UL | UL ch12; stepper companion to `spl-lvm-lab` |  |
-| `lnx-quotas` | w3 · queued | Disk quotas | soft vs hard limit, grace period | users write files, time passes | step | S | P3 | UL | UL ch12 |  |
+| `lnx-quotas` | w3 · building | Disk quotas | soft vs hard limit, grace period | users write files, time passes | step | S | P3 | UL | UL ch12 |  |
 | `lnx-memory-swap-oom` | live | Memory, swap and the OOM killer | page cache vs used, swapping, who the OOM killer picks | start processes, watch memory and the kill | expl | S | P2 | UL, OS | UL ch12 |  |
 | `lnx-page-cache` | live | free vs available | the page cache is not lost memory; dirty pages and writeback | read and write files, watch the counters | expl | S | P2 | UL, NLA | NLA T42 |  |
 | `lnx-load-average` | live | Load average | load counts runnable and D-state tasks, not CPU percent | add CPU and I/O-bound tasks on 1–8 cores | expl | S | P2 | UL, NLA | NLA T41 |  |
@@ -581,7 +581,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-exit-status` | live | Exit status and `&&`, `\|\|`, `set -e`, `pipefail` | how failure propagates, and a pipeline that reports success while failing | run chains where one step fails | step | S | P2 | UL, DR | UL ch17 (`izlazni-status-spaja.svg`), DR S8 → §5.3 |  |
 | `lnx-subshell-trap` | w3 · queued | Subshells and traps | a `cd` in a subshell doesn't stick; cleanup on EXIT | run scripts with and without subshells | step | S | P3 | UL | UL ch17 (`podljuska-i-trap.svg`) |  |
 | `lnx-rsync-delete` | live | rsync, trailing slashes and `--delete` | `src` vs `src/`, and how `--delete` mirrors a mistake | sync, delete at source, sync again | step | S | P2 | UL, DR | UL ch15 |  |
-| `lnx-package-deps` | w3 · building | Package dependency resolution | repo metadata, dependency trees, conflicts | install packages into a small repo | step | S | P3 | UL | UL ch09 |  |
+| `lnx-package-deps` | live | Package dependency resolution | repo metadata, dependency trees, conflicts | install packages into a small repo | step | S | P3 | UL | UL ch09 |  |
 | `lnx-nfs-root-squash` | live | NFS and root squash | the server, not the client, decides who you are | access as root and as a user | step | S | P3 | UL | UL ch18 |  |
 | `lnx-namespaces` | live | A container is a process | PID, network and mount namespaces isolate one process tree | start a container, compare host and container views | step | M | P2 | NLA | NLA T07 → §5.17 |  |
 | `lnx-cgroups` | live | cgroups limits | CPU shares and memory limits; OOM inside a cgroup | set limits, run greedy workloads | expl | S | P2 | NLA | NLA T11 |  |
