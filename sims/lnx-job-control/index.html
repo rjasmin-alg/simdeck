@@ -1,0 +1,546 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-job-control: fg/bg, Ctrl-Z, process groups, what dies on logout. Top: the signals of this step, in order, each
+     from the terminal or the shell to a process group. Below, left: the terminal as bash prints it, with the keys and
+     the window's close button under it; right: the processes drawn in their process-group boxes (the foreground group
+     with its badge), and under them the shell's job table and the ps view.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-job-control">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upravljanje poslovima: fg, bg, Ctrl-Z i odjava · simdeck</title>
+<meta name="description" content="Pokreni poslove u prednjem planu i u pozadini, obustavi ih s Ctrl-Z, vrati s fg i bg, pa zatvori prozor ili upiši exit i pogledaj što preživi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-job-control",
+  "title": {
+    "hr": "Upravljanje poslovima: fg, bg, Ctrl-Z i odjava",
+    "en": "Job control: fg, bg, Ctrl-Z and logging out"
+  },
+  "concept": {
+    "hr": "Posao je grupa procesa; tipke idu prednjoj grupi, SIGHUP svim poslovima",
+    "en": "A job is a process group; keys go to the foreground group, SIGHUP to every job"
+  },
+  "summary": {
+    "hr": "Pokreni poslove naprijed i u pozadini, obustavi ih s Ctrl-Z, vrati s fg i bg, pa zatvori prozor ili upiši exit i vidi što preživi.",
+    "en": "Run jobs in the foreground and background, stop them with Ctrl-Z, bring them back with fg and bg, then close the window or type exit and see what survives."
+  },
+  "tags": [
+    "processes"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-job-control"]; colours only from kit tokens.
+   Layout: the signals of the step across the top; below them terminal + keys | process groups + job table + ps. */
+[data-sim="lnx-job-control"] .jc {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  height: 100%;
+  padding: 1cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-job-control"] .jc-mono { font-family: var(--mono); }
+[data-sim="lnx-job-control"] .jc-muted { color: var(--muted); }
+[data-sim="lnx-job-control"] h3 { margin: 0 0 0.25rem; font-size: var(--fs-md); }
+
+/* the signals of this step */
+[data-sim="lnx-job-control"] .jc-sigs { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+[data-sim="lnx-job-control"] .jc-none { color: var(--muted); border: var(--line-w) dashed var(--line); border-radius: var(--radius-sm); padding: 0.25rem 0.8rem; margin: 0; }
+[data-sim="lnx-job-control"] .jc-del {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.15rem 0.6rem;
+  min-width: 0;
+}
+[data-sim="lnx-job-control"] .jc-no { font-weight: 700; font-family: var(--mono); min-width: 1.4rem; text-align: center; border-radius: 50%; border: var(--line-w) solid var(--ink); background: var(--bg); }
+[data-sim="lnx-job-control"] .jc-env {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-weight: 700;
+  border: 0.15rem solid var(--c2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0 0.45rem;
+}
+[data-sim="lnx-job-control"] .jc-env-sig { font-family: var(--mono); font-size: 1.1rem; }
+[data-sim="lnx-job-control"] .jc-route { font-size: 1.05rem; }
+[data-sim="lnx-job-control"] .jc-route b { font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-res { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-left: auto; }
+[data-sim="lnx-job-control"] .jc-r {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 0.4rem;
+  font-size: var(--fs-sm);
+  background: var(--bg);
+}
+[data-sim="lnx-job-control"] .jc-r b { font-family: var(--mono); }
+[data-sim="lnx-job-control"] .jc-r-terminated, [data-sim="lnx-job-control"] .jc-r-released { border-color: var(--danger); border-width: 0.15rem; }
+[data-sim="lnx-job-control"] .jc-r-pending { border-style: dotted; border-width: 0.15rem; border-color: var(--ink); }
+[data-sim="lnx-job-control"] .jc-r-ignored { border-style: dashed; }
+
+/* body */
+[data-sim="lnx-job-control"] .jc-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 0.8rem;
+  min-height: 0;
+  align-items: start;
+}
+[data-sim="lnx-job-control"] .jc-left, [data-sim="lnx-job-control"] .jc-right { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+
+/* the terminal */
+[data-sim="lnx-job-control"] .jc-term {
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  min-width: 0;
+  overflow: hidden;
+}
+[data-sim="lnx-job-control"] .jc-term-bar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  border-bottom: var(--line-w) solid var(--line);
+  padding: 0.1rem 0.6rem;
+  font-weight: 700;
+}
+[data-sim="lnx-job-control"] .jc-term-bar span { font-weight: 400; font-size: var(--fs-sm); color: var(--muted); font-family: var(--mono); }
+[data-sim="lnx-job-control"] .jc-term-closed { border-style: dashed; }
+[data-sim="lnx-job-control"] .jc-lines { display: flex; flex-direction: column; padding: 0.25rem 0.4rem; }
+[data-sim="lnx-job-control"] .jc-ln {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0 0.25rem;
+  border-left: 0.3rem solid transparent;
+}
+[data-sim="lnx-job-control"] .jc-ln-cmd { font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-ln-err { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-ln-key { font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-ln-now { background: var(--hl); color: var(--on-hl); border-left-color: var(--ink); }
+[data-sim="lnx-job-control"] .jc-ln-now.jc-ln-err { color: var(--on-hl); }
+[data-sim="lnx-job-control"] .jc-prompt { font-weight: 400; }
+[data-sim="lnx-job-control"] .jc-cursor { font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-sep { text-align: center; color: var(--muted); font-family: var(--sans); font-size: var(--fs-sm); border-top: var(--line-w) dashed var(--line); margin: 0.2rem 0; padding-top: 0.1rem; }
+[data-sim="lnx-job-control"] .jc-sep.jc-ln-now { color: var(--on-hl); }
+
+/* keys under the terminal */
+[data-sim="lnx-job-control"] .jc-keys { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+[data-sim="lnx-job-control"] .jc-key {
+  font-family: var(--mono);
+  font-weight: 700;
+  border: var(--line-w) solid var(--line);
+  border-bottom-width: 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0.05rem 0.6rem;
+}
+[data-sim="lnx-job-control"] .jc-key-close { font-family: var(--sans); }
+[data-sim="lnx-job-control"] .jc-key.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+
+/* process groups */
+[data-sim="lnx-job-control"] .jc-tree { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+[data-sim="lnx-job-control"] .jc-parent {
+  border: 0.15rem solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.25rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="lnx-job-control"] .jc-parent-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; }
+[data-sim="lnx-job-control"] .jc-kids { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.1rem 1.2rem; }
+[data-sim="lnx-job-control"] .jc-group {
+  border: 0.18rem dashed var(--c1);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 0.15rem 0.45rem 0.3rem;
+  min-width: 0;
+}
+[data-sim="lnx-job-control"] .jc-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.45rem; font-size: 0.95rem; font-weight: 700; color: var(--c1); }
+[data-sim="lnx-job-control"] .jc-group-fg { border-style: solid; border-width: 0.25rem; }
+[data-sim="lnx-job-control"] .jc-fgb {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  background: var(--c3);
+  color: var(--on-series);
+  border-radius: var(--radius-sm);
+  padding: 0 0.35rem;
+}
+[data-sim="lnx-job-control"] .jc-sigb {
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: baseline;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  font-family: var(--mono);
+  border: 0.15rem solid var(--c2);
+  color: var(--ink);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 0 0.3rem;
+}
+[data-sim="lnx-job-control"] .jc-procs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.15rem; }
+[data-sim="lnx-job-control"] .jc-proc {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 0.05rem 0.4rem;
+}
+[data-sim="lnx-job-control"] .jc-proc.sd-changed, [data-sim="lnx-job-control"] .jc-parent-head.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-job-control"] .jc-proc.sd-changed .jc-muted, [data-sim="lnx-job-control"] .jc-parent-head.sd-changed .jc-muted { color: var(--on-hl); }
+[data-sim="lnx-job-control"] .jc-shape { font-weight: 700; font-size: 1.1em; line-height: 1; }
+[data-sim="lnx-job-control"] .jc-cmd { font-family: var(--mono); font-weight: 700; font-size: 1.15rem; }
+[data-sim="lnx-job-control"] .jc-pid { font-family: var(--mono); font-size: 0.95rem; }
+[data-sim="lnx-job-control"] .jc-gone { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-job-control"] .jc-gone .jc-cmd { text-decoration: line-through; text-decoration-thickness: 0.14em; }
+[data-sim="lnx-job-control"] .jc-pend { font-size: var(--fs-sm); border: 0.15rem dotted currentColor; border-radius: var(--radius-sm); padding: 0 0.3rem; }
+[data-sim="lnx-job-control"] .jc-tag { font-size: var(--fs-sm); border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); padding: 0 0.3rem; }
+
+/* tables */
+[data-sim="lnx-job-control"] .jc-tables { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 0.6rem; align-items: start; }
+[data-sim="lnx-job-control"] .jc-box { border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); padding: 0.25rem 0.5rem; min-width: 0; }
+[data-sim="lnx-job-control"] table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 1rem; }
+[data-sim="lnx-job-control"] th { text-align: left; color: var(--muted); font-weight: 700; padding: 0 0.4rem 0 0; }
+[data-sim="lnx-job-control"] td { padding: 0.05rem 0.4rem 0.05rem 0; white-space: nowrap; }
+[data-sim="lnx-job-control"] td:last-child { white-space: normal; padding-right: 0; }
+[data-sim="lnx-job-control"] tr.sd-changed { outline: none; box-shadow: none; }
+[data-sim="lnx-job-control"] tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-job-control"] tr.sd-changed td:first-child { box-shadow: inset 0.3rem 0 0 var(--ink); padding-left: 0.5rem; }
+[data-sim="lnx-job-control"] tr.jc-row-gone td { text-decoration: line-through; }
+[data-sim="lnx-job-control"] .jc-fgtag { font-family: var(--sans); font-weight: 700; }
+[data-sim="lnx-job-control"] .jc-empty { margin: 0; color: var(--muted); }
+
+/* kit 0.6.0: .sd-ctl's display: flex beats the hidden attribute that a param's visible() sets (see lnx-rsync-delete) */
+[data-sim="lnx-job-control"] .sd-ctl[hidden] { display: none; }
+
+/* legend swatches */
+[data-sim="lnx-job-control"] .sd-swatch[data-shape^='jc-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape^='jc-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-group'] { border: 0.15rem dashed var(--c1); border-radius: 0.3rem; }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-fg'] { background: var(--c3); border-color: var(--c3); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-fg']::after { content: '⌨'; color: var(--on-series); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-s']::after { content: '○'; }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-t']::after { content: '■'; }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-gone'] { border-style: dashed; border-color: var(--muted); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-gone']::after { content: '✕'; color: var(--muted); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-sig'] { border-color: var(--c2); }
+[data-sim="lnx-job-control"] .sd-swatch[data-shape='jc-sig']::after { content: '✉'; }
+
+/* Phone and portrait: one column; the stage grows with its content. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-job-control"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-job-control"] .jc { height: auto; padding: 0.5rem; }
+  [data-sim="lnx-job-control"] .jc-body, [data-sim="lnx-job-control"] .jc-tables { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-job-control"] .jc-res { margin-left: 0; }
+  [data-sim="lnx-job-control"] .jc-kids { margin-left: 0.4rem; }
+  [data-sim="lnx-job-control"] td { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Upravljanje poslovima: fg, bg, Ctrl-Z i odjava</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Data (PIDs, signal names, commands, what bash prints) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+
+  /** Caption parts: t.parts ([[terms]] in the kit's style), then *English term* in <em lang="en"> for terms the
+      glossary lacks (from sims/lnx-signals/index.html). */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var text = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (text === null) { out.push(p); return; }
+      text.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+
+  var PROMPT = '[student@' + L.HOST + ' ~]$ ';
+  var SHAPE = { S: '○', R: '●', T: '■', gone: '✕' };
+  var ACT = { terminated: 'actTerminated', stopped: 'actStopped', continued: 'actContinued', ignored: 'actIgnored',
+    nothing: 'actNothing', caught: 'actCaught', pending: 'actPending', released: 'actReleased' };
+
+  function changed(s, key) { return s.changed.indexOf(key) >= 0; }
+
+  // ── stage: the signals of this step ──
+
+  function delivery(d, k) {
+    var from = d.from === 'terminal' ? t('fromTerminal') : t('fromShell') + ' ' + L.SHELL.pid;
+    var to = d.kind === 'group' ? t('toGroup', { pgid: d.target }) : t('toPid', { pid: d.target });
+    var res = d.reached.length ? d.reached.map(function (r) {
+      return h('span', { class: 'jc-r jc-r-' + r.act }, h('b', { translate: 'no' }, String(r.pid)),
+        r.act === 'released' ? t.parts('actReleased', { sig: data('SIG' + r.sig) }) : t(ACT[r.act]));
+    }) : [h('span', { class: 'jc-r jc-r-ignored' }, t('reachedNone'))];
+    return h('div', { class: 'jc-del' },
+      h('span', { class: 'jc-no', translate: 'no' }, String(k + 1)),
+      h('span', { class: 'jc-env' }, h('span', { 'aria-hidden': 'true' }, '✉'), data('SIG' + d.sig + ' ' + d.num, 'jc-env-sig')),
+      h('span', { class: 'jc-route' }, h('b', null, from), h('span', { 'aria-hidden': 'true' }, ' → '), to),
+      h('span', { class: 'jc-res' }, res));
+  }
+
+  function signals(s) {
+    if (!s.deliveries.length) return h('div', { class: 'jc-sigs' }, h('p', { class: 'jc-none' }, t('sigNone')));
+    return h('div', { class: 'jc-sigs' }, s.deliveries.map(delivery));
+  }
+
+  // ── stage: the terminal and its keys ──
+
+  var MAX_LINES = 14;
+
+  function terminal(s, c) {
+    var now = {};
+    s.out.forEach(function (i) { now[i] = true; });
+    var rows = s.term.map(function (l, i) {
+      var cls = 'jc-ln' + (now[i] ? ' jc-ln-now' : '');
+      if (l.kind === 'sep') {
+        var key = l.text === 'closed' ? 'termClosed' : l.text === 'exited' ? 'termExited' : 'newTerm';
+        return h('div', { class: cls + ' jc-sep' }, '— ' + t(key) + ' —');
+      }
+      if (l.kind === 'cmd') return h('div', { class: cls + ' jc-ln-cmd', translate: 'no' }, h('span', { class: 'jc-prompt' }, PROMPT), l.text);
+      return h('div', { class: cls + (l.kind === 'err' ? ' jc-ln-err' : l.kind === 'key' ? ' jc-ln-key' : ''), translate: 'no' }, l.text || ' ');
+    });
+    var waiting = (s.shell.alive && s.terminal.open && s.terminal.fgPgid === s.shell.pid) || s.newTerm;
+    if (waiting) rows.push(h('div', { class: 'jc-ln', translate: 'no' }, h('span', { class: 'jc-prompt' }, PROMPT), h('span', { class: 'jc-cursor', 'aria-hidden': 'true' }, '▌')));
+    rows = rows.slice(Math.max(0, rows.length - MAX_LINES));
+    var closed = !s.terminal.open && !s.newTerm;
+    var a = c.n ? L.action(c.params, c.n) : null;
+    var pressed = a ? (a.op === 'key' ? a.key : a.op === 'close' ? 'X' : null) : null;
+    function key(id, label, cls) { return h('span', { class: 'jc-key' + (cls ? ' ' + cls : '') + (pressed === id ? ' sd-changed' : '') }, label); }
+    return [
+      h('div', { class: 'jc-term' + (closed ? ' jc-term-closed' : '') },
+        h('div', { class: 'jc-term-bar' }, t('termTitle'), data('student@' + L.HOST)),
+        h('div', { class: 'jc-lines' }, rows)),
+      h('div', { class: 'jc-keys', role: 'group', 'aria-label': t('keysLabel') },
+        key('C', data('Ctrl-C')), key('Z', data('Ctrl-Z')), key('X', ['✕ ', t('keyClose')], 'jc-key-close'))
+    ];
+  }
+
+  // ── stage: processes in their groups ──
+
+  function sigsTo(s, pgid, pid) {
+    return s.deliveries.filter(function (d) { return d.kind === 'group' ? d.target === pgid : d.target === pid; })
+      .map(function (d) { return h('span', { class: 'jc-sigb' }, h('span', { 'aria-hidden': 'true' }, '✉'), 'SIG' + d.sig); });
+  }
+  function fgBadge() { return h('span', { class: 'jc-fgb' }, h('span', { 'aria-hidden': 'true' }, '⌨'), t('fgBadge')); }
+
+  function procChip(s, p) {
+    var gone = p.state === 'gone';
+    return h('span', { class: 'jc-proc' + (gone ? ' jc-gone' : '') + (changed(s, p.pid) ? ' sd-changed' : '') },
+      h('span', { class: 'jc-shape', 'aria-hidden': 'true' }, SHAPE[p.state]),
+      data(p.cmd, 'jc-cmd'),
+      data(gone ? p.pid + (p.sig ? ' · SIG' + p.sig : '') : p.pid + ' · ' + L.stat(s, p), 'jc-pid jc-muted'),
+      p.pending && p.pending.length ? h('span', { class: 'jc-pend' }, t('pendingTag'), ' ', data(p.pending.map(function (x) { return 'SIG' + x; }).join(' '))) : null);
+  }
+
+  /** A job ended with its processes is still named in its step; one the shell lost (hang-up, exit) is not. */
+  function p0gone(ps) { return ps.every(function (p) { return p.state === 'gone'; }); }
+
+  function groups(s, kids) {
+    var order = [], by = {};
+    kids.forEach(function (p) { if (!by[p.pgid]) { by[p.pgid] = []; order.push(p.pgid); } by[p.pgid].push(p); });
+    return order.map(function (pgid) {
+      var ps = by[pgid];
+      var job = s.jobs.filter(function (j) { return j.pgid === pgid && (j.state !== 'gone' || p0gone(ps)); })[0];
+      var fg = s.terminal.open && s.terminal.fgPgid === pgid && ps.some(function (p) { return p.state !== 'gone'; });
+      return h('div', { class: 'jc-group' + (fg ? ' jc-group-fg' : '') },
+        h('div', { class: 'jc-group-head' }, t('groupOf', { pgid: pgid }),
+          job ? h('span', null, t('jobTag'), ' ', data('%' + job.n)) : null, fg ? fgBadge() : null, sigsTo(s, pgid)),
+        h('div', { class: 'jc-procs' }, ps.map(function (p) { return procChip(s, p); })));
+    });
+  }
+
+  function tree(s) {
+    var sh = L.find(s, s.shell.pid);
+    var shGone = sh.state === 'gone';
+    var shFg = s.terminal.open && s.terminal.fgPgid === sh.pid;
+    var mine = s.procs.filter(function (p) { return p.ppid === sh.pid; });
+    var orphans = s.procs.filter(function (p) { return p.ppid === 1; });
+    var out = [h('div', { class: 'jc-parent' + (shGone ? ' jc-gone' : '') },
+      h('div', { class: 'jc-parent-head' + (changed(s, sh.pid) ? ' sd-changed' : '') },
+        h('span', { class: 'jc-shape', 'aria-hidden': 'true' }, SHAPE[sh.state]),
+        data('bash', 'jc-cmd'), h('span', { class: 'jc-tag' }, t('shellTag')),
+        data(shGone ? 'PID ' + sh.pid + ' · PPID ' + sh.ppid + (sh.sig ? ' · SIG' + sh.sig : '') : 'PID ' + sh.pid + ' · PPID ' + sh.ppid + ' · ' + L.stat(s, sh), 'jc-pid jc-muted'),
+        shFg ? fgBadge() : null, sigsTo(s, -1, sh.pid)),
+      mine.length ? h('div', { class: 'jc-kids' }, groups(s, mine)) : null)];
+    if (orphans.length) {
+      out.push(h('div', { class: 'jc-parent' },
+        h('div', { class: 'jc-parent-head' }, h('b', null, t('initTitle'))),
+        h('div', { class: 'jc-kids' }, groups(s, orphans))));
+    }
+    return h('div', { class: 'jc-tree' }, h('h3', null, t('treeTitle')), out);
+  }
+
+  // ── stage: the job table and ps ──
+
+  function jobsTable(s) {
+    var body;
+    if (!s.shell.alive) body = h('p', { class: 'jc-empty' }, t('jobsNoShell'));
+    else if (!s.jobs.length) body = h('p', { class: 'jc-empty' }, t('jobsEmpty'));
+    else {
+      var m = L.marks(s);
+      body = h('table', null, h('tbody', null, s.jobs.map(function (j) {
+        var gone = j.state === 'gone';
+        var word = gone ? j.word || '' : j.state === 'stopped' ? 'Stopped' : 'Running';
+        return h('tr', { class: (changed(s, 'job:' + j.n) ? 'sd-changed' : '') + (gone ? ' jc-row-gone' : '') },
+          h('td', { translate: 'no' }, '[' + j.n + ']' + (gone ? ' ' : m[j.n] || ' ')),
+          h('td', { translate: 'no' }, word),
+          h('td', { translate: 'no' }, j.cmd + (j.state === 'running' && !j.fg ? ' &' : '')),
+          h('td', null, j.fg && !gone ? h('span', { class: 'jc-fgtag' }, '⌨ ', t('fgTag')) : null));
+      })));
+    }
+    return h('div', { class: 'jc-box' }, h('h3', null, t('jobsTitle')), body);
+  }
+
+  function psTable(s) {
+    var rows = s.procs.filter(function (p) { return p.state !== 'gone' || changed(s, p.pid); });
+    var cols = ['PID', 'PPID', 'PGID', 'STAT', 'CMD'];
+    return h('div', { class: 'jc-box' }, h('h3', null, t('psTitle')),
+      h('table', { translate: 'no' },
+        h('thead', null, h('tr', null, cols.map(function (c) { return h('th', null, c); }))),
+        h('tbody', null, rows.map(function (p) {
+          var gone = p.state === 'gone';
+          return h('tr', { class: (changed(s, p.pid) ? 'sd-changed' : '') + (gone ? ' jc-row-gone' : '') },
+            h('td', null, String(p.pid)), h('td', null, String(p.ppid)), h('td', null, String(p.pgid)),
+            h('td', null, gone ? '✕' : L.stat(s, p)), h('td', null, p.cmd));
+        }))));
+  }
+
+  function render(c) {
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'jc' },
+      signals(s),
+      h('div', { class: 'jc-body' },
+        h('div', { class: 'jc-left' }, terminal(s, c)),
+        h('div', { class: 'jc-right' }, tree(s), h('div', { class: 'jc-tables' }, jobsTable(s), psTable(s))))));
+  }
+
+  // ── captions ──
+
+  var CODE = { primjer1: 'P1', 'ctrl-z': 'Cz', 'zatvori-prozor': 'Zp', 'exit-ili-zatvori': 'Ez', cjevovod: 'Cj' };
+
+  function caption(c) {
+    var o = L.norm(c.params), key = 'cap' + CODE[o.script] + '_' + c.n;
+    if (o.script === 'zatvori-prozor' && !o.nohup && c.n >= 2) key += 'off';
+    if (o.script === 'exit-ili-zatvori' && o.login && o.huponexit && c.n >= 5) key += 'hup';
+    return rich(key);
+  }
+
+  // ── mount ──
+
+  function unused(key, reason) {
+    return function (p) { return L.uses(L.norm(p).script, key) ? false : t(reason); };
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      // the scenario is chosen with the presets; the select stays hidden so the panel fits
+      { key: 'script', type: 'select', label: t('script'), resets: true, visible: function () { return false; }, options: [
+        ['primjer1', t('presetP1')], ['ctrl-z', t('presetCz')], ['zatvori-prozor', t('presetZp')],
+        ['exit-ili-zatvori', t('presetEz')], ['cjevovod', t('presetCj')]] },
+      { key: 'nohup', type: 'toggle', label: t('nohup'), disabled: unused('nohup', 'notUsedNohup') },
+      { key: 'login', type: 'toggle', label: t('login'), disabled: unused('login', 'notUsedExit') },
+      { key: 'huponexit', type: 'toggle', label: t('huponexit'), disabled: unused('huponexit', 'notUsedExit') }
+    ],
+
+    presets: [
+      { id: 'primjer1', label: t('presetP1'), params: { script: 'primjer1' }, hint: t('presetP1Hint') },
+      { id: 'ctrl-z', label: t('presetCz'), params: { script: 'ctrl-z' }, hint: t('presetCzHint') },
+      { id: 'zatvori-prozor', label: t('presetZp'), params: { script: 'zatvori-prozor', nohup: true }, hint: t('presetZpHint') },
+      { id: 'exit-ili-zatvori', label: t('presetEz'), params: { script: 'exit-ili-zatvori', login: false, huponexit: false }, hint: t('presetEzHint') },
+      { id: 'cjevovod', label: t('presetCj'), params: { script: 'cjevovod' }, hint: t('presetCjHint') }
+    ],
+
+    legend: [
+      { shape: 'hl', label: t('legChanged') },
+      { shape: 'jc-group', label: t('legGroup') },
+      { shape: 'jc-fg', label: t('legFg') },
+      { shape: 'jc-s', label: t('legSleep') },
+      { shape: 'jc-t', label: t('legStopped') },
+      { shape: 'jc-gone', label: t('legGone') },
+      { shape: 'jc-sig', label: t('legSignal') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
