@@ -1,42 +1,615 @@
 <!doctype html>
-<html lang="hr">
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- disk-partitioning: MBR vs GPT on the same disk. Two horizontal strips of the disk's sectors, one per table type,
+     each with its start and end enlarged as insets above it and the whole disk to scale below them: MBR's sector 0 with
+     its four slots, partitions, an extended container with logical partitions behind their EBRs, and the area past
+     2^32 sectors hatched; GPT's protective MBR, header, 128-entry array, partitions from 1 MiB, and the backup entries
+     and header at the end. Under the strips, both partition tables side by side with the device names.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="disk-partitioning">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Particioniranje diska</title>
+<title>Tablice particija: MBR i GPT · simdeck</title>
+<meta name="description" content="Dodaj particije istom disku s tablicom MBR i s tablicom GPT: četiri mjesta, granica od 2 TiB, zaštitni MBR i kopija zaglavlja na kraju diska.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "disk-partitioning",
+  "title": {
+    "hr": "Tablice particija: MBR i GPT",
+    "en": "Partition tables: MBR vs GPT"
+  },
+  "concept": {
+    "hr": "Ograničenja particija, zaštitni MBR i kopija zaglavlja na kraju diska",
+    "en": "Partition limits, the protective MBR and the backup header"
+  },
+  "summary": {
+    "hr": "Dodaj particije istom disku s tablicom MBR i s tablicom GPT: četiri mjesta, granica od 2 TiB, zaštitni MBR i kopija zaglavlja na kraju diska.",
+    "en": "Add partitions to the same disk with an MBR and with a GPT table: four slots, the 2 TiB limit, the protective MBR and the backup header at the end."
+  },
+  "tags": [
+    "partitioning"
+  ],
+  "class": "explorer",
+  "entries": [
+    {
+      "preset": "four-tb"
+    },
+    {
+      "preset": "old-tool"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
 <style>
-  /* Placeholder only: the real look comes from the kit. */
-  body { font: 24px/1.4 system-ui, sans-serif; margin: 2rem; }
-  .disk { display: flex; height: 80px; border: 3px solid #333; margin: 2rem 0; }
-  .disk div { display: grid; place-items: center; border-right: 2px solid #333; overflow: hidden; }
-  .p1 { background: #9cc3ff; } .p2 { background: #ffd27f; } .free { background: #eee; flex: 1; }
-  label { display: block; margin: 0.5rem 0; }
+/* Page CSS: every selector starts with [data-sim="disk-partitioning"]; colours only from kit tokens.
+   Layout: the MBR strip, the GPT strip, then the two partition tables side by side. */
+[data-sim="disk-partitioning"] { --panel-w: minmax(17rem, 24rem); }
+[data-sim="disk-partitioning"] .dp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 100%;
+  padding: 0.3rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="disk-partitioning"] .dp-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+  flex: none;
+}
+[data-sim="disk-partitioning"] .dp-head { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; }
+[data-sim="disk-partitioning"] .dp-head h2 { margin: 0; font-size: 1.2em; }
+[data-sim="disk-partitioning"] .dp-facts { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="disk-partitioning"] .dp-mono,
+[data-sim="disk-partitioning"] .dp-lba { font-family: var(--mono); }
+
+/* the insets: the first and the last sectors, enlarged */
+[data-sim="disk-partitioning"] .dp-insets {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1.2rem;
+  font-size: var(--fs-sm);
+}
+[data-sim="disk-partitioning"] .dp-inset { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+[data-sim="disk-partitioning"] .dp-inset[data-at="end"] { align-items: stretch; text-align: right; }
+[data-sim="disk-partitioning"] .dp-inset-title { color: var(--muted); }
+[data-sim="disk-partitioning"] .dp-cells { display: flex; align-items: stretch; gap: 0.15rem; min-height: 2.9rem; }
+[data-sim="disk-partitioning"] .dp-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  flex: none;
+  padding: 0.15rem 0.35rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  line-height: 1.15;
+  text-align: left;
+}
+[data-sim="disk-partitioning"] .dp-cell[data-kind="meta"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="free"] { flex: 1 1 auto; border-style: dashed; color: var(--muted); }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="part"] { border-left: 0.5rem solid var(--sw); }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="lost"] { border-style: dashed; color: var(--muted); }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="unreach"] { flex: 1 1 auto; border-style: dashed; }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="read"] { background: var(--ink); color: var(--bg); outline: 0.2rem solid var(--accent); outline-offset: 0.1rem; }
+[data-sim="disk-partitioning"] .dp-cell[data-kind="free"],
+[data-sim="disk-partitioning"] .dp-cell[data-kind="unreach"] { min-width: 3.2rem; }
+/* a cell holding a range of sector numbers may shrink: the range breaks after its dash */
+[data-sim="disk-partitioning"] .dp-cell.dp-shrink { flex: 0 1 auto; }
+[data-sim="disk-partitioning"] .dp-cell .dp-row { display: flex; align-items: center; gap: 0.45rem; }
+[data-sim="disk-partitioning"] .dp-cell .dp-lba { overflow-wrap: normal; }
+[data-sim="disk-partitioning"] .dp-cell.sd-changed { box-shadow: 0 0 0 0.22rem var(--hl); outline-width: 0.15rem; outline-offset: 0.05rem; }
+[data-sim="disk-partitioning"] .dp-cell b { font-weight: 700; }
+
+/* × pattern: damaged */
+[data-sim="disk-partitioning"] .dp-cell.dp-x,
+[data-sim="disk-partitioning"] .dp-r.dp-x {
+  background-color: var(--bg) !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.52em),
+    repeating-linear-gradient(-45deg, transparent 0 0.4em, color-mix(in srgb, var(--danger) 35%, transparent) 0.4em 0.52em) !important;
+}
+[data-sim="disk-partitioning"] .dp-cell.dp-x .dp-row > *,
+[data-sim="disk-partitioning"] .dp-cell.dp-x > span { width: fit-content; padding: 0 0.15rem; border-radius: 0.15rem; background: var(--bg); }
+
+/* the four slots of an MBR sector 0 */
+[data-sim="disk-partitioning"] .dp-slots { display: flex; gap: 0.15rem; }
+[data-sim="disk-partitioning"] .dp-slot {
+  display: grid;
+  place-items: center;
+  min-width: 1.9rem;
+  height: 1.5rem;
+  padding: 0 0.2rem;
+  border-radius: var(--radius-sm);
+  border: 0.12rem solid var(--bg);
+  font-family: var(--mono);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="disk-partitioning"] .dp-slot[data-k="primary"] { background: var(--sw); color: var(--on-series); border-color: var(--bg); }
+[data-sim="disk-partitioning"] .dp-slot[data-k="extended"] { border-style: dashed; }
+[data-sim="disk-partitioning"] .dp-slot[data-k="ee"] { border-style: dotted; border-width: 0.18rem; }
+[data-sim="disk-partitioning"] .dp-slot[data-k="empty"] { opacity: 0.75; }
+[data-sim="disk-partitioning"] .dp-slot[data-k="lost"] { border: 0.12rem dashed var(--danger); background: var(--bg); }
+
+/* the 128-entry array as a small grid */
+[data-sim="disk-partitioning"] .dp-entries { display: grid; grid-template-columns: repeat(16, 0.4rem); gap: 0.06rem; }
+[data-sim="disk-partitioning"] .dp-entries i { display: block; height: 0.24rem; background: color-mix(in srgb, var(--bg) 35%, transparent); }
+[data-sim="disk-partitioning"] .dp-entries i[data-c] { background: var(--sw); outline: 0.06rem solid var(--bg); }
+
+/* the bar, to scale */
+[data-sim="disk-partitioning"] .dp-bar {
+  position: relative;
+  height: 2.1rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+[data-sim="disk-partitioning"] .dp-r {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  min-width: 0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  border-radius: 0.2rem;
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+[data-sim="disk-partitioning"] .dp-r[data-kind="part"] { background: var(--sw); color: var(--on-series); font-weight: 700; box-shadow: inset 0 0 0 0.08rem var(--bg); }
+[data-sim="disk-partitioning"] .dp-r[data-kind="meta"] { top: 0; bottom: 0; background: var(--ink); border-radius: 0; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="ebr"] { top: 0.12rem; bottom: 0.12rem; min-width: 0.22rem; background: var(--ink); border-radius: 0; z-index: 2; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="extended"] { top: 0.08rem; bottom: 0.08rem; border: 0.16rem dashed var(--ink); background: transparent; justify-content: flex-start; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="lost"] { border: 0.14rem dashed var(--muted); background: var(--bg); color: var(--muted); font-weight: 700; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="unreach"] { top: 0; bottom: 0; border-radius: 0; background-color: var(--bg); color: var(--ink); font-weight: 700; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="unreach"] span,
+[data-sim="disk-partitioning"] .dp-r[data-kind="beyond"] span { background: var(--bg); padding: 0 0.3rem; border-radius: var(--radius-sm); }
+[data-sim="disk-partitioning"] .dp-r[data-kind="ee"] { top: 0.1rem; bottom: 0.1rem; z-index: 3; background: var(--bg); border: 0.2rem dotted var(--ink); color: var(--ink); font-weight: 700; }
+[data-sim="disk-partitioning"] .dp-r[data-kind="beyond"] { top: 0; bottom: 0; z-index: 3; border-radius: 0; background-color: var(--panel); color: var(--ink); }
+[data-sim="disk-partitioning"] .dp-r.sd-changed { z-index: 4; outline-offset: -0.2rem; box-shadow: inset 0 0 0 0.3rem var(--hl); }
+[data-sim="disk-partitioning"] .dp-r[data-kind="extended"].sd-changed { box-shadow: none; }
+[data-sim="disk-partitioning"] .dp-cell.sd-changed,
+[data-sim="disk-partitioning"] .dp-slot.sd-changed { position: relative; z-index: 2; }
+[data-sim="disk-partitioning"] .dp-tick { position: absolute; top: -0.1rem; bottom: -0.1rem; width: 0; border-left: 0.2rem solid var(--danger); z-index: 5; }
+[data-sim="disk-partitioning"] .dp-axis { position: relative; height: 1.2rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="disk-partitioning"] .dp-axis > span { position: absolute; top: 0; white-space: nowrap; }
+[data-sim="disk-partitioning"] .dp-axis .dp-axis-limit { transform: translateX(-50%); color: var(--danger); font-weight: 700; }
+
+/* the tables */
+[data-sim="disk-partitioning"] .dp-tables { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.2rem; flex: none; }
+[data-sim="disk-partitioning"] .dp-table { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.2rem 0.6rem 0.3rem; min-width: 0; }
+[data-sim="disk-partitioning"] .dp-table h3 { margin: 0 0 0.15rem; font-size: 1em; display: flex; flex-wrap: wrap; gap: 0 0.6rem; }
+[data-sim="disk-partitioning"] .dp-table h3 small { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="disk-partitioning"] .dp-table h3 .dp-note { color: var(--accent); font-weight: 700; font-size: var(--fs-sm); }
+[data-sim="disk-partitioning"] .dp-table table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+[data-sim="disk-partitioning"] .dp-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 0 0.4rem 0.05rem 0; }
+[data-sim="disk-partitioning"] .dp-table table { line-height: 1.22; }
+[data-sim="disk-partitioning"] .dp-table td { padding: 0 0.4rem 0 0; white-space: nowrap; }
+[data-sim="disk-partitioning"] .dp-table td.dp-num { font-family: var(--mono); }
+/* a changed row: highlighter and an ink outline round the row (not per cell, so nothing covers the numbers) */
+[data-sim="disk-partitioning"] .dp-table tr.dp-chg td { background: var(--hl); color: var(--on-hl); }
+[data-sim="disk-partitioning"] .dp-table tr.dp-chg { outline: 0.15rem solid var(--ink); outline-offset: -0.08rem; }
+[data-sim="disk-partitioning"] .dp-table tr[data-kind="logical"] td:first-child { padding-left: 1rem; }
+[data-sim="disk-partitioning"] .dp-table tr[data-kind="extended"] td { font-style: italic; }
+[data-sim="disk-partitioning"] .dp-table tr[data-kind="missing"] td { color: var(--danger); }
+[data-sim="disk-partitioning"] .dp-dev { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--mono); font-weight: 700; }
+[data-sim="disk-partitioning"] .dp-dev i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 0.15rem; background: var(--sw); }
+[data-sim="disk-partitioning"] .dp-dev i[data-k="extended"] { background: transparent; border: 0.12rem dashed var(--ink); }
+[data-sim="disk-partitioning"] .dp-dev i[data-k="ee"] { background: transparent; border: 0.14rem dotted var(--ink); }
+[data-sim="disk-partitioning"] .dp-msg { margin: 0.2rem 0 0; color: var(--danger); font-weight: 700; }
+
+/* legend swatches of the page's own marks */
+[data-sim="disk-partitioning"] .sd-swatch[data-shape="dp-meta"] { background: var(--ink); border-color: var(--ink); }
+[data-sim="disk-partitioning"] .sd-swatch[data-shape="dp-ext"] { background: transparent; border: 0.15rem dashed var(--ink); }
+[data-sim="disk-partitioning"] .sd-swatch[data-shape="dp-ee"] { background: transparent; border: 0.18rem dotted var(--ink); }
+[data-sim="disk-partitioning"] .sd-swatch[data-shape="dp-unreach"] { background-color: var(--bg); background-image: repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--ink) 45%, transparent) 0.2em 0.32em); }
+[data-sim="disk-partitioning"] .sd-swatch[data-shape="dp-x"] {
+  border-color: var(--danger);
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 60%, transparent) 0.2em 0.3em),
+    repeating-linear-gradient(-45deg, transparent 0 0.2em, color-mix(in srgb, var(--danger) 60%, transparent) 0.2em 0.3em);
+}
+
+/* the panel: the presets in two columns so everything fits 1920×1080 */
+[data-sim="disk-partitioning"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="disk-partitioning"] [data-sd-controls] .sd-ctl-toggle .sd-switch { line-height: 1.2; }
+
+/* Phone and portrait: the stage grows with its content; everything stacks. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="disk-partitioning"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="disk-partitioning"] .dp { height: auto; padding: 0.5rem; }
+  [data-sim="disk-partitioning"] .dp-insets,
+  [data-sim="disk-partitioning"] .dp-tables { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="disk-partitioning"] .dp-cells { flex-wrap: wrap; }
+  [data-sim="disk-partitioning"] .dp-table { overflow-x: auto; }
+  [data-sim="disk-partitioning"] .dp-axis { height: auto; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 0.6rem; }
+  [data-sim="disk-partitioning"] .dp-axis > span { position: static; transform: none; }
+}
 </style>
 </head>
 <body>
-<a id="back" href="../../index.html">← simdeck</a>
-<h1 id="title"></h1>
-<label>/boot (GB) <input id="a" type="range" min="1" max="100" value="1"> <span id="av"></span></label>
-<label>/ (GB) <input id="b" type="range" min="10" max="400" value="100"> <span id="bv"></span></label>
-<div class="disk"><div class="p1" id="d1">sda1</div><div class="p2" id="d2">sda2</div><div class="free" id="df">slobodno</div></div>
-<p>R ispočetka</p>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Tablice particija: MBR i GPT</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
 <script>
-  // Placeholder explorer. The kit's controls replace all of this; only the meta read stays.
-  const meta = JSON.parse(document.getElementById('simdeck-meta')?.textContent ?? '{}');
-  document.getElementById('title').textContent = meta.title ?? document.title;
-  const DISK = 500, $ = (id) => document.getElementById(id);
-  const show = () => {
-    const a = +$('a').value, b = +$('b').value;
-    $('av').textContent = a; $('bv').textContent = b;
-    $('d1').style.width = `${(a / DISK) * 100}%`; $('d2').style.width = `${(b / DISK) * 100}%`;
-    $('df').textContent = `slobodno ${DISK - a - b} GB`;
-  };
-  $('a').oninput = $('b').oninput = show;
-  addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' && e.key !== 'r' && e.key !== 'R') return;
-    if (e.key === 'r' || e.key === 'R') { $('a').value = 1; $('b').value = 100; show(); }
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour of a requested partition: the same partition has the same colour in both tables. */
+  function colour(req) { return String((req - 1) % 8 + 1); }
+
+  // ── numbers ──
+
+  /** Sector numbers grouped by three with a narrow no-break space. */
+  function grp(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+  function range(a, b) { return a === b ? grp(a) : grp(a) + '–\u200b' + grp(b); }
+  var compact = L.compact, human = L.human;
+  function dec(x) { var s = x.toFixed(1).replace(/\.0$/, ''); return Simdeck.lang === 'hr' ? s.replace('.', ',') : s; }
+  /** A rounded decimal size for prose: ≈ 1,8 TB. */
+  function approx(b) { return b >= 1e12 ? '≈ ' + dec(b / 1e12) + ' TB' : '≈ ' + dec(b / 1e9) + ' GB'; }
+  function tib(b) { return (b / Math.pow(2, 40)) + ' TiB'; }
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function diskLabel(s) { return { '2GiB': '2 GiB', '1TB': '1 TB', '4TB': '4 TB' }[s.disk]; }
+
+  // ── the changed marks follow param changes ──
+
+  var lastKey = null, lastState = null, chg = { mbr: [], gpt: [] };
+  function track(c) {
+    var key = JSON.stringify(c.params);
+    if (key !== lastKey) {
+      chg = lastState ? L.changedRegions(lastState, c.state) : { mbr: [], gpt: [] };
+      lastKey = key;
+      lastState = c.state;
+    }
+  }
+  function mark(w, key) { return chg[w].indexOf(key) >= 0 ? ' sd-changed' : ''; }
+
+  // ── the insets ──
+
+  function cell(kind, lba, label, extra) {
+    var o = extra || {};
+    return h('div', { class: 'dp-cell' + (o.cls ? ' ' + o.cls : ''), dataset: Object.assign({ kind: kind }, o.c ? { c: o.c } : {}) },
+      lba != null ? data(lba, 'dp-lba') : null,
+      label != null ? h('span', null, label) : null,
+      o.more || null);
+  }
+
+  function slotsOf(slots, w, damaged) {
+    return h('div', { class: 'dp-slots' }, slots.map(function (s, i) {
+      var k = damaged ? 'lost' : s.type;
+      var txt = damaged ? t('lUnknown') : s.type === 'empty' ? '–' : s.type === 'ee' ? 'ee' : String(s.num);
+      var ds = { k: k };
+      if (!damaged && s.type === 'primary') ds.c = colour(s.req);
+      return h('span', { class: 'dp-slot' + mark(w, 'slot-' + (i + 1)), dataset: ds, translate: 'no', title: s.name || '' }, txt);
+    }));
+  }
+
+  function mbrStart(s) {
+    var m = s.mbr, first = m.parts[0];
+    var slots = m.slots.map(function (x) {
+      if (x.type === 'primary') { var p = m.parts.filter(function (q) { return q.num === x.num; })[0]; return Object.assign({ req: p ? p.req : 1 }, x); }
+      return x;
+    });
+    var gapEnd = first ? first.start - 1 : s.perMiB - 1;
+    var c0 = cell('meta', null, null, {
+      cls: (m.damaged ? 'dp-x' : '') + mark('mbr', 'mbr-0'),
+      more: [h('span', { class: 'dp-row' }, data('0', 'dp-lba'), m.damaged ? h('b', null, t('lMbr'), ' · ', t('lDamaged')) : h('span', null, t('lMbr'))),
+        slotsOf(slots, 'mbr', m.damaged)]
+    });
+    var cells = [c0, cell('free', range(1, gapEnd), t('lFree'))];
+    if (first) cells.push(partCell(first, m.readable, 'mbr', true));
+    return cells;
+  }
+
+  function partCell(p, readable, w, atStart) {
+    if (!readable) return cell('lost', atStart ? grp(p.start) + ' →' : '← ' + grp(p.end), t('lLost'));
+    var label = h('span', { class: 'dp-dev' }, data(p.name));
+    return cell('part', atStart ? grp(p.start) + ' →' : '← ' + grp(p.end), label, { c: colour(p.req), cls: mark(w, 'part-' + p.req).trim() });
+  }
+
+  function mbrEnd(s) {
+    var m = s.mbr, cells = [];
+    var last = m.parts.slice().sort(function (a, b) { return b.end - a.end; })[0];
+    if (last) cells.push(partCell(last, m.readable, 'mbr', false));
+    var endAt = last ? last.end : 0;
+    if (endAt < m.lastUsable) cells.push(cell('free', range(endAt + 1, m.lastUsable), t('lFree')));
+    if (m.unreachable) {
+      cells.push(cell('unreach', range(m.unreachable.start, m.unreachable.end),
+        h('b', null, t('lUnreach'), ' ', data(approx(m.unreachable.bytes))),
+        { cls: 'sd-hatch' + mark('mbr', 'unreach') }));
+    }
+    return cells;
+  }
+
+  function gptStart(s) {
+    var g = s.gpt;
+    var pslots = [{ type: 'ee', name: 'ee' }, { type: 'empty' }, { type: 'empty' }, { type: 'empty' }];
+    var grid = [];
+    for (var i = 0; i < g.entryCount; i++) {
+      var e = g.entries[i];
+      grid.push(h('i', e ? { dataset: { c: colour(e.req) } } : null));
+    }
+    var cells = [
+      cell('meta', null, null, { cls: mark('gpt', 'ee').trim(),
+        more: [h('span', { class: 'dp-row' }, data('0', 'dp-lba'), h('span', null, t('lPmbr'))), slotsOf(pslots, 'gpt', false)] }),
+      cell('meta', '1', g.primaryOk ? t('lHeader') : h('b', null, t('lHeader'), h('br'), t('lDamaged')), { cls: (g.primaryOk ? '' : 'dp-x') + mark('gpt', 'hdr') }),
+      cell('meta', null, null, { cls: mark('gpt', 'ent').trim(),
+        more: h('span', { class: 'dp-row' },
+          h('span', null, data(range(2, g.firstUsable - 1), 'dp-lba'), h('br'), t('lEntries', { n: g.entryCount })),
+          h('div', { class: 'dp-entries', 'aria-hidden': 'true' }, grid)) }),
+      cell('free', range(g.firstUsable, g.entries[0].start - 1), t('lFree'))
+    ];
+    cells.push(partCell(g.entries[0], true, 'gpt', true));
+    return cells;
+  }
+
+  function gptEnd(s) {
+    var g = s.gpt, cells = [];
+    var last = g.entries[g.entries.length - 1];
+    cells.push(partCell(last, true, 'gpt', false));
+    if (last.end < g.lastUsable) cells.push(cell('free', range(last.end + 1, g.lastUsable), t('lFree')));
+    cells.push(cell('meta', range(g.backupEntriesAt, g.backupAt - 1), t('lBackupEntries'), { cls: 'dp-shrink' }));
+    var read = g.readFrom === 'backup';
+    cells.push(cell(read ? 'read' : 'meta', grp(g.backupAt), read ? h('b', null, t('lBackupHeader'), ' · ', t('lReadHere')) : t('lBackupHeader'),
+      { cls: 'dp-shrink' + mark('gpt', 'bhdr') }));
+    return cells;
+  }
+
+  function insets(s, w) {
+    var start = w === 'mbr' ? mbrStart(s) : gptStart(s);
+    var end = w === 'mbr' ? mbrEnd(s) : gptEnd(s);
+    return h('div', { class: 'dp-insets' },
+      h('div', { class: 'dp-inset', dataset: { at: 'start' } },
+        h('span', { class: 'dp-inset-title' }, '↙ ', t('startInset'), ' · ', t('sectorWord'), ' 0 …'),
+        h('div', { class: 'dp-cells' }, start)),
+      h('div', { class: 'dp-inset', dataset: { at: 'end' } },
+        h('span', { class: 'dp-inset-title' }, t('endInset'), ' · … ', t('lLastSector'), ' ', data(grp(s.sectors - 1), 'dp-mono'), ' ↘'),
+        h('div', { class: 'dp-cells' }, end)));
+  }
+
+  // ── the bar, to scale ──
+
+  function bar(s, w) {
+    var S = s.sectors;
+    function pos(a, b) { return { left: (a / S * 100) + '%', width: ((b - a + 1) / S * 100) + '%' }; }
+    function share(a, b) { return (b - a + 1) / S * 100; }
+    var kids = [];
+    var regs = L.regions(s, w);
+    regs.forEach(function (r) {
+      var style = pos(r.start, r.end);
+      var cls = 'dp-r' + mark(w, r.key);
+      var text = null, ds = { kind: r.kind };
+      if (r.key.indexOf('slot-') === 0) return;
+      if (r.kind === 'primary' || r.kind === 'logical' || r.kind === 'part') {
+        ds.kind = 'part';
+        var p = (w === 'mbr' ? s.mbr.parts : s.gpt.entries).filter(function (q) { return 'part-' + q.req === r.key; })[0];
+        ds.c = colour(p.req);
+        if (share(r.start, r.end) > 4.5) text = data(r.name + (share(r.start, r.end) > 9 ? ' · ' + human((r.end - r.start + 1) * s.sectorSize) : ''));
+      } else if (r.kind === 'lost') {
+        if (share(r.start, r.end) > 3) text = t('lUnknown');
+      } else if (r.kind === 'extended') {
+        text = null;
+      } else if (r.kind === 'unreachable') {
+        ds.kind = 'unreach';
+        cls += ' sd-hatch';
+        text = h('span', null, t('lUnreach'), ' ', data(approx(s.mbr.unreachable.bytes)));
+      } else if (r.kind === 'protective') {
+        ds.kind = 'ee';
+        text = h('span', null, t('lEe'));
+      } else if (r.kind === 'damaged' || r.kind === 'read') {
+        ds.kind = 'meta';
+        if (r.kind === 'damaged') cls += ' dp-x';
+      } else if (r.kind === 'ebr') {
+        ds.kind = 'ebr';
+      } else ds.kind = 'meta';
+      // metadata at the end of the disk sits flush right
+      if (ds.kind === 'meta' && r.start > S / 2) { style = { right: '0', width: ((r.end - r.start + 1) / S * 100) + '%' }; }
+      kids.push(h('div', { class: cls, dataset: ds, style: style }, text));
+    });
+    if (w === 'gpt' && s.gpt.oldTool && s.gpt.protectiveShort) {
+      kids.push(h('div', { class: 'dp-r sd-hatch', dataset: { kind: 'beyond' }, style: pos(s.gpt.protective.end + 1, S - 1) },
+        h('span', null, t('lBeyond'))));
+    }
+    var limitAt = L.MBR_FIELD;
+    if (S > limitAt && (w === 'mbr' || s.gpt.oldTool)) kids.push(h('div', { class: 'dp-tick', style: { left: (limitAt / S * 100) + '%' } }));
+    return h('div', { class: 'dp-bar' }, kids);
+  }
+
+  function axis(s, w) {
+    var S = s.sectors, out = [h('span', { style: { left: '0' } }, '0 · ↑ ', t('toScale'))];
+    if (S > L.MBR_FIELD && (w === 'mbr' || s.gpt.oldTool)) {
+      out.push(h('span', { class: 'dp-axis-limit', style: { left: (L.MBR_FIELD / S * 100) + '%' } },
+        data('2³² · ' + tib(L.MBR_FIELD * s.sectorSize))));
+    }
+    out.push(h('span', { style: { right: '0' } }, data(diskLabel(s) + ' · ' + compact(s.bytes))));
+    return h('div', { class: 'dp-axis' }, out);
+  }
+
+  function strip(s, w) {
+    var title = w === 'mbr' ? t('mbrTitle') : t('gptTitle');
+    var facts = w === 'mbr' ? t('mbrFacts', { limit: tib(s.mbrLimitBytes) }) : t('gptFacts', { used: s.gpt.entries.length, n: s.gpt.entryCount });
+    return h('section', { class: 'dp-strip', dataset: { w: w } },
+      h('div', { class: 'dp-head' }, h('h2', null, title), h('span', { class: 'dp-facts' }, facts)),
+      insets(s, w),
+      bar(s, w),
+      axis(s, w));
+  }
+
+  // ── the tables ──
+
+  function row(w, key, kind, cells) {
+    return h('tr', { class: mark(w, key) ? 'dp-chg' : null, dataset: { kind: kind } }, cells.map(function (c, i) {
+      return h('td', { class: i > 0 && i < 5 ? 'dp-num' : null }, c);
+    }));
+  }
+  function devCell(name, k, req) {
+    var ds = { k: k };
+    if (req) ds.c = colour(req);
+    return h('span', { class: 'dp-dev' }, h('i', { dataset: ds }), data(name));
+  }
+  function pos3(s, a, b) {
+    var ss = s.sectorSize;
+    return [data(compact(a * ss)), data(compact((b + 1) * ss - 1)), data(compact((b - a + 1) * ss))];
+  }
+
+  function mbrTable(s) {
+    var m = s.mbr;
+    var head = h('h3', null, t('mbrTitle'), h('small', null, t.parts('tableHead', { label: data('msdos'), disk: data(compact(s.bytes)), ss: s.sectorSize })));
+    if (m.damaged) return h('div', { class: 'dp-table' }, head, h('p', { class: 'dp-msg' }, t('tUnrecognised')));
+    var rows = [];
+    var all = m.parts.slice();
+    if (m.extended) all.push({ name: m.extended.name, num: m.extended.num, type: 'extended', start: m.extended.start, end: m.extended.end });
+    all.sort(function (a, b) { return a.num - b.num; });
+    all.forEach(function (p) {
+      var type = t(p.type === 'primary' ? 'tPrimary' : p.type === 'extended' ? 'tExtended' : 'tLogical');
+      if (m.clipped.indexOf(p.req) >= 0) type = [type, ' · ', t('rowClipped')];
+      rows.push(row('mbr', p.type === 'extended' ? 'ext' : 'part-' + p.req, p.type,
+        [devCell(p.name, p.type, p.type === 'extended' ? null : p.req), data(p.num)].concat(pos3(s, p.start, p.end), [type])));
+    });
+    if (m.missing.length) {
+      rows.push(h('tr', { dataset: { kind: 'missing' } }, h('td', null, '✕'),
+        h('td', { colspan: '5' }, t.n('rowMissing', m.missing.length))));
+    }
+    return h('div', { class: 'dp-table' }, head, h('table', null,
+      h('thead', null, h('tr', null, ['colDev', 'colNum', 'colStart', 'colEnd', 'colSize', 'colType'].map(function (k) { return h('th', null, t(k)); }))),
+      h('tbody', null, rows)));
+  }
+
+  function gptTable(s) {
+    var g = s.gpt;
+    var note = [g.oldTool ? h('span', { class: 'dp-note' }, t('tOld')) : null,
+      g.readFrom === 'backup' && !g.oldTool ? h('span', { class: 'dp-note' }, t('tFromBackup')) : null];
+    var head = h('h3', null, t('gptTitle'), h('small', null, t.parts('tableHead', { label: data(g.oldTool ? 'msdos' : 'gpt'), disk: data(compact(s.bytes)), ss: s.sectorSize })), note);
+    var rows, cols;
+    if (g.oldTool) {
+      var pe = g.protective;
+      cols = ['colDev', 'colNum', 'colStart', 'colEnd', 'colSize', 'colType'];
+      rows = [row('gpt', 'ee', 'ee', [devCell(s.dev + '1', 'ee', null), data(1)].concat(pos3(s, pe.start, pe.end), [[data('ee'), ' · ', t('tEe')]]))];
+    } else {
+      cols = ['colDev', 'colNum', 'colStart', 'colEnd', 'colSize', 'colName'];
+      rows = g.entries.map(function (e) {
+        return row('gpt', 'part-' + e.req, 'part', [devCell(e.name, 'primary', e.req), data(e.num)].concat(pos3(s, e.start, e.end), [data(e.label)]));
+      });
+    }
+    return h('div', { class: 'dp-table' }, head, h('table', null,
+      h('thead', null, h('tr', null, cols.map(function (k) { return h('th', null, t(k)); }))),
+      h('tbody', null, rows)));
+  }
+
+  // ── render and caption ──
+
+  function render(c) {
+    track(c);
+    var s = c.state;
+    c.stage.replaceChildren(h('div', { class: 'dp' },
+      strip(s, 'mbr'), strip(s, 'gpt'),
+      h('div', { class: 'dp-tables' }, mbrTable(s), gptTable(s))));
+  }
+
+  function caption(c) {
+    var s = c.state;
+    var k = L.captionKey(s);
+    var limit = tib(s.mbrLimitBytes);
+    var g = s.gpt, m = s.mbr;
+    var gLast = g.entries[g.entries.length - 1];
+    var mLast = m.parts.slice().sort(function (a, b) { return b.end - a.end; })[0];
+    var back = g.entrySectors + 1;
+    var vars = {
+      disk: diskLabel(s), limit: limit, n: g.entries.length,
+      gEnd: data(compact((gLast.end + 1) * s.sectorSize - 1)),
+      mEnd: data(mLast ? compact((mLast.end + 1) * s.sectorSize - 1) : ''),
+      gap: t.n('gapSectors', s.sectors - 1 - gLast.end, { k: grp(s.sectors - 1 - gLast.end) }),   // plural from the raw count
+      back: t.n('backSectors', back, { k: back }),
+      ext: data(m.extended ? m.extended.name : ''),
+      g: data(g.entries[3] ? g.entries[3].name : ''),
+      m: data(m.logical[0] ? m.logical[0].name : '')
+    };
+    var out = t.parts(k.key, vars);
+    k.notes.forEach(function (nt) {
+      out.push(' ', nt.key === 'nMissing' ? t.n('nMissing', nt.n, { n: nt.n, limit: limit }) : t(nt.key, { limit: limit }));
+    });
+    return out;
+  }
+
+  var labels = { 'book-vdb': 'pBook', 'four-tb': 'pFour', 'five-parts': 'pFive', 'old-tool': 'pOld', 'damaged-header': 'pDamaged' };
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'disk', type: 'choice', value: L.defaults.disk, label: t('disk'), options: [['2GiB', t('d2g')], ['1TB', t('d1t')], ['4TB', t('d4t')]] },
+      { key: 'sector', type: 'choice', value: L.defaults.sector, label: t('sector'), options: [[512, t('s512')], [4096, t('s4k')]] },
+      { key: 'parts', type: 'range', value: L.defaults.parts, label: t('parts'), min: 1, max: L.MAX_PARTS, step: 1 },
+      { key: 'oldTool', type: 'toggle', label: t('oldTool') },
+      { key: 'damageHeader', type: 'toggle', label: t('damageHeader'), hint: t('damageHint') }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t(labels[x.id]), hint: t(labels[x.id] + 'Hint'), params: x.params }; }),
+    legend: [
+      { shape: 'dp-meta', label: t('legMeta') },
+      { shape: 'bg-fill', c: 1, label: t('legPart') },
+      { shape: 'dp-ext', label: t('legExt') },
+      { shape: 'dp-unreach', label: t('legUnreach') },
+      { shape: 'dp-ee', label: t('legProt') },
+      { shape: 'dp-x', label: t('legDamaged') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
   });
-  show();
+})();
 </script>
 </body>
 </html>
