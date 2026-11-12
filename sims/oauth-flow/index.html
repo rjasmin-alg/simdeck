@@ -1,0 +1,513 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- oauth-flow: who sees what in an OAuth 2.0 / OpenID Connect log-in (authorization code with PKCE). A stepper, one
+     message per step. Left: the messages as kit view K1 (kit/sequence.js), lanes browser, app, identity provider, API
+     and (with an attack) a third party, front-channel arrows dashed, back-channel solid, and the "what X sees" column
+     for the chosen viewer. Right: who holds which secret, and this step's messages written out.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="oauth-flow">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prijava preko davatelja identiteta (OAuth) · simdeck</title>
+<meta name="description" content="Prijava kodom i PKCE korak po korak: lozinku vidi samo davatelj identiteta, kod ide kroz preglednik, a žetoni mimo njega.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "oauth-flow",
+  "title": {
+    "hr": "Prijava preko davatelja identiteta (OAuth)",
+    "en": "Log in with an identity provider (OAuth)"
+  },
+  "concept": {
+    "hr": "Tko što vidi: preglednik, aplikacija, davatelj identiteta",
+    "en": "Who sees what: browser, app, identity provider"
+  },
+  "summary": {
+    "hr": "Prijava kodom i PKCE korak po korak: lozinku vidi samo davatelj identiteta, kod ide kroz preglednik, a žetoni mimo njega.",
+    "en": "Step a log-in with an authorization code and PKCE: only the identity provider sees the password, the code passes through the browser, the tokens do not."
+  },
+  "tags": [
+    "authentication"
+  ],
+  "class": "stepper",
+  "steps": 9
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="oauth-flow"]; colours only from kit tokens.
+   Layout: two columns. Left the K1 chart, right "who holds what" and this step's messages. Lanes: browser c1, app c2,
+   identity provider c6, API c4, third party c8. Token chips: code c7 (square, a thick bar on the left), access token
+   c3 (filled pill), ID token c5 (double border); the word or value is always on the chip, so colour never carries it alone. */
+[data-sim="oauth-flow"] .of {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 18.5rem);
+  gap: 1.1cqw;
+  height: 100%;
+  padding: 1.1cqh 0.9cqw;
+  font-size: 0.9rem;
+}
+[data-sim="oauth-flow"] .of-col { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+[data-sim="oauth-flow"] .of-mid > .sd-seq { flex: 1 1 0; min-height: 0; }
+[data-sim="oauth-flow"] .of-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.65rem 0.5rem;
+  min-height: 0;
+}
+[data-sim="oauth-flow"] .of-box h2 { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 700; }
+[data-sim="oauth-flow"] .of-msgs { flex: 1 1 0; overflow: hidden; }
+[data-sim="oauth-flow"] .of-mono { font-family: var(--mono); }
+[data-sim="oauth-flow"] .of-muted { color: var(--muted); }
+[data-sim="oauth-flow"] .of-sm { font-size: var(--fs-sm); }
+[data-sim="oauth-flow"] .of-box > p { margin: 0.2rem 0 0; line-height: 1.3; }
+
+/* message lines, as in http-exchange */
+[data-sim="oauth-flow"] .of-line {
+  display: block; padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--bg);
+  font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3;
+}
+[data-sim="oauth-flow"] .of-line + .of-line { margin-top: 0.08rem; }
+[data-sim="oauth-flow"] .of-line[data-secret="1"] { font-weight: 700; }
+[data-sim="oauth-flow"] .of-line--q { padding-left: 1.2rem; }
+[data-sim="oauth-flow"] .of-word { display: block; font-size: var(--fs-sm); line-height: 1.3; padding: 0 0.3rem; }
+[data-sim="oauth-flow"] .of-dir { margin: 0.3rem 0 0.1rem; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="oauth-flow"] .of-dir:first-of-type { margin-top: 0; }
+[data-sim="oauth-flow"] .of-dir b { font-weight: 700; }
+
+/* token chips */
+[data-sim="oauth-flow"] .of-chip {
+  --k: var(--ink);
+  display: inline-block; padding: 0 0.3rem; border: 0.16rem solid var(--k); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.25; white-space: nowrap; vertical-align: middle;
+}
+[data-sim="oauth-flow"] .of-chip + .of-chip { margin-left: 0.2rem; }
+[data-sim="oauth-flow"] .of-chip[data-kind="code"] { --k: var(--c7); border-radius: 0; border-left-width: 0.5rem; }
+[data-sim="oauth-flow"] .of-chip[data-kind="access"] { --k: var(--c3); border-radius: 1rem; background: var(--k); color: var(--on-series); font-weight: 700; }
+[data-sim="oauth-flow"] .of-chip[data-kind="id"] { --k: var(--c5); border-style: double; border-width: 0.3rem; border-radius: 0.4rem; padding: 0 0.25rem; }
+[data-sim="oauth-flow"] .of-chip[data-kind="password"] { border-style: dotted; }
+[data-sim="oauth-flow"] .of-chip[data-revoked="1"] { text-decoration: line-through; text-decoration-thickness: 0.14rem; }
+[data-sim="oauth-flow"] .of-param { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* "who holds what" */
+[data-sim="oauth-flow"] .of-tab { width: 100%; border-collapse: separate; border-spacing: 0.12rem; table-layout: fixed; }
+[data-sim="oauth-flow"] .of-tab th { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); padding: 0 0.2rem; line-height: 1.2; text-align: center; }
+[data-sim="oauth-flow"] .of-tab th:first-child { text-align: left; width: 44%; }
+[data-sim="oauth-flow"] .of-tab th[data-view="1"] { color: var(--ink); font-weight: 700; }
+[data-sim="oauth-flow"] .of-tab td { padding: 0 0.15rem; background: var(--bg); text-align: center; line-height: 1.35; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="oauth-flow"] .of-tab td:first-child { text-align: left; background: transparent; white-space: normal; line-height: 1.15; }
+[data-sim="oauth-flow"] .of-tab td[data-view="1"] { box-shadow: inset 0.14rem 0 0 var(--ink), inset -0.14rem 0 0 var(--ink); }
+[data-sim="oauth-flow"] .of-tab td[data-has="1"] { font-weight: 700; }
+[data-sim="oauth-flow"] .of-tab td[data-foreign="1"] { outline: 0.14rem dashed var(--ink); outline-offset: -0.2rem; }
+[data-sim="oauth-flow"] .of-tab td[data-revoked="1"] { text-decoration: line-through; color: var(--muted); }
+[data-sim="oauth-flow"] .of-tab td.sd-changed { --ink: var(--on-hl); --muted: var(--on-hl); background: var(--hl); color: var(--on-hl); outline: none; box-shadow: inset 0 0 0 0.16rem var(--on-hl); }
+[data-sim="oauth-flow"] .of-tab .of-chip { padding: 0 0.15rem; }
+
+/* lane cards */
+[data-sim="oauth-flow"] .of-card { margin: 0.1rem 0 0; font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="oauth-flow"] .of-card p { margin: 0; overflow-wrap: anywhere; }
+[data-sim="oauth-flow"] .of-card p + p { margin-top: 0.15rem; }
+[data-sim="oauth-flow"] .of-card .sd-changed { --ink: var(--on-hl); --muted: var(--on-hl); background: var(--hl); color: var(--on-hl); outline: 0.15rem solid var(--on-hl); box-shadow: none; padding: 0 0.2rem; border-radius: var(--radius-sm); }
+[data-sim="oauth-flow"] .of-card .of-url { border: 0.12rem solid var(--line); border-radius: var(--radius-sm); padding: 0 0.25rem; background: var(--bg); }
+[data-sim="oauth-flow"] .of-card .of-url.sd-changed { background: var(--hl); color: var(--on-hl); border-color: var(--on-hl); }
+[data-sim="oauth-flow"] .of-eye { display: inline-grid; place-items: center; width: 1.4em; height: 1.4em; border: 0.14rem solid var(--ink); border-radius: 50%; vertical-align: middle; }
+[data-sim="oauth-flow"] .of-ico { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="oauth-flow"] .sd-seq-cause { font-size: var(--fs-sm); }
+[data-sim="oauth-flow"] .of-seen { font-size: var(--fs-sm); line-height: 1.25; }
+
+/* legend swatches (the kit has line, dash and hl) */
+[data-sim="oauth-flow"] .sd-swatch[data-shape="of-code"] { background: transparent; border: 0.16rem solid var(--c7); border-left-width: 0.45rem; border-radius: 0; }
+[data-sim="oauth-flow"] .sd-swatch[data-shape="of-access"] { background: var(--c3); border-color: var(--c3); border-radius: 1rem; }
+[data-sim="oauth-flow"] .sd-swatch[data-shape="of-id"] { background: transparent; border: 0.3rem double var(--c5); border-radius: 0.3rem; }
+[data-sim="oauth-flow"] .sd-swatch[data-shape="of-eye"] { display: inline-grid; place-items: center; background: transparent; border: 0.12rem solid var(--ink); border-radius: 50%; color: var(--ink); }
+
+/* Phone and portrait: the stage grows with its content and the columns stack (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="oauth-flow"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="oauth-flow"] .of { height: auto; grid-template-columns: minmax(0, 1fr); padding: 0.4rem; gap: 0.7rem; font-size: 1rem; }
+  [data-sim="oauth-flow"] .of-col { gap: 0.7rem; }
+  [data-sim="oauth-flow"] .of-mid > .sd-seq { flex: none; }
+  [data-sim="oauth-flow"] .of-mid .sd-seq-list { padding-bottom: 1.5rem; }
+  [data-sim="oauth-flow"] .of-msgs { flex: none; overflow: visible; }
+  [data-sim="oauth-flow"] .of-seen { overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Prijava preko davatelja identiteta (OAuth)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var VERSION = 'HTTP/1.1';
+  var LANE_C = { B: 1, A: 2, I: 6, R: 4, X: 8 };
+  var HOST = { B: null, A: L.APP, I: L.IDP, R: L.API, X: L.OTHER };
+  var FOREIGN = [L.FORGED_CODE, L.FORGED_STATE];
+  var REASON = { 200: 'OK', 302: 'Found', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden' };
+
+  /** Data (host names, URLs, parameters and their values) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'of-mono' : cls || null }, String(text)); }
+  function B(text) { return h('b', null, data(text)); }
+  /** t.parts, with a placeholder node used twice cloned (appending the same node twice would move it). */
+  function parts(key, vars) {
+    var seen = [];
+    return t.parts(key, Object.assign(terms(), vars || {})).map(function (p) {
+      if (typeof p === 'string' || p.nodeType === 3) return p;
+      var out = seen.indexOf(p) >= 0 ? p.cloneNode(true) : p;
+      seen.push(p);
+      return out;
+    });
+  }
+  /** English terms in italics (the term rule; the Croatian follows in brackets in the hr strings). */
+  function terms() {
+    var o = {};
+    ['Front', 'Back', 'Code', 'Access', 'Id'].forEach(function (k) { o['t' + k] = h('em', null, t('term' + k)); });
+    return o;
+  }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  function shortVal(v) { return v.length > 12 ? v.slice(0, 8) + '…' : v; }
+  function lanesOf(c) { return L.attackOf(c.params) === 'none' ? ['B', 'A', 'I', 'R'] : ['B', 'A', 'I', 'R', 'X']; }
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var EYE = 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z';
+  function eyeIcon() {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'of-ico');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', EYE);
+    s.append(p);
+    return s;
+  }
+  function eye() { return h('span', { class: 'of-eye', role: 'img', 'aria-label': t('cardEye'), title: t('cardEye') }, eyeIcon()); }
+
+  /** A carried item as a chip (code, tokens, password) or a parameter name (state, challenge, verifier). */
+  function chip(item, value, revoked) {
+    if (item === 'state') return data('state=' + value, 'of-param');
+    if (item === 'challenge') return data('code_challenge', 'of-param');
+    if (item === 'verifier') return data('code_verifier', 'of-param');
+    return h('span', { class: 'of-chip', translate: 'no', dataset: { kind: item, revoked: revoked ? '1' : '0' },
+      title: item === 'password' ? t('item_password') : t('item_' + item) }, item === 'password' ? '••••••' : value);
+  }
+  function revokedIn(s, value) { return !!(s.idp.tokens[value] && s.idp.tokens[value].revoked); }
+
+  // ── the chart (K1) ──
+
+  /** What the chosen viewer sees of a row: the items it carries, or the bare message; "does not see" otherwise. */
+  function seenCell(c, r) {
+    var v = c.params.view;
+    if (!L.seenBy(r, v)) return h('span', { class: 'of-seen of-muted' }, t('seenNot'));
+    if (r.k === 'note') return h('span', { class: 'of-seen' }, t(r.what === 'copied' ? 'seenCopied' : 'seenCheck'));
+    if (!r.carries.length) return h('span', { class: 'of-seen' }, data(r.label, 'of-param'));
+    return h('span', { class: 'of-seen' }, r.carries.map(function (x, i) {
+      return [i ? ' ' : null, chip(x.item, x.value, revokedIn(c.state, x.value))];
+    }));
+  }
+
+  /** The token chips on an arrow (code, tokens, password); state and PKCE values are in the message box. */
+  function fields(c, r) {
+    var shown = r.carries.filter(function (x) { return ['password', 'code', 'access', 'id'].indexOf(x.item) >= 0; });
+    if (!shown.length) return undefined;
+    return h('span', null, shown.map(function (x) { return chip(x.item, x.value, revokedIn(c.state, x.value)); }));
+  }
+
+  function renderChart(c) {
+    var s = c.state, rows = [];
+    s.log.forEach(function (r) {
+      var changed = r.n === c.n;
+      if (r.k === 'note') {
+        rows.push({ kind: 'note', lane: r.lane, k: r.what === 'stateBad' ? 'fill' : 'solid', time: String(r.n), changed: changed,
+          text: t({ stateOk: 'noteOk', stateBad: 'noteBad', copied: 'noteCopied' }[r.what]), seen: seenCell(c, r) });
+        return;
+      }
+      var refused = r.from === 'I' && r.label === '400';
+      var re = refused ? {} : undefined;
+      if (refused) re[r.to] = t('reRefused');
+      rows.push({ from: r.from, to: r.to, label: r.label, c: LANE_C[r.from], line: r.channel === 'front' ? 'dashed' : undefined,
+        fields: fields(c, r), re: re, time: String(r.n), changed: changed, seen: seenCell(c, r) });
+    });
+    var view = c.params.view;
+    var lanes = lanesOf(c).map(function (id) {
+      // a host name breaks only after its first label
+      var host = HOST[id] ? h('span', { translate: 'no', class: 'of-mono of-sm' }, HOST[id].split('.')[0] + '.', h('wbr'), HOST[id].split('.').slice(1).join('.')) : null;
+      var tags = [host, id === view ? [' ', eye()] : null];
+      return { id: id, mark: id === 'B' ? t('markB') : id, c: LANE_C[id], shape: id === 'B' ? 'square' : undefined,
+        name: t('lane' + id), tags: tags, body: card(c, id), state: id === view ? 'active' : undefined };
+    });
+    return Simdeck.sequence({
+      dir: c.dir,
+      timeWidth: '2.2rem',
+      lanes: lanes,
+      rows: rows,
+      eve: { title: t('eve' + view), width: '10rem' },
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+  }
+
+  function hl(c, on, node) { return h('p', { class: on && c.n ? 'sd-changed' + anim(c) : null }, node); }
+
+  /** The lane cards: two short lines each. */
+  function card(c, id) {
+    var s = c.state, p = c.prev, lines;
+    if (id === 'B') {
+      var u = s.browser.url;
+      var shown = !u ? t('cardBlank') : data(u.length > 44 ? u.split('?')[0].replace('https://', '') + '?…' : u.replace('https://', ''), 'of-mono');
+      var withCode = s.browser.history.filter(function (x) { return x.indexOf('code=') >= 0; }).length;
+      lines = [h('p', { class: 'of-url' + (p && p.browser.url !== u && c.n ? ' sd-changed' + anim(c) : ''), title: t('cardUrl') }, shown),
+        h('p', { class: 'of-muted' }, t.n('cardHistory', s.browser.history.length), withCode ? [' · ', t.n('cardCodeIn', withCode)] : null)];
+    } else if (id === 'A') {
+      var a = s.app;
+      var who = a.error ? t(a.error === 'state' ? 'cardStateErr' : 'cardGrantErr')
+        : a.user ? t.parts('cardUser', { user: B(a.user) }) : t('cardUserUnknown');
+      lines = [hl(c, p && p.app.state !== a.state, a.state ? data('state=' + a.state) : data('state —')),
+        hl(c, p && (p.app.user !== a.user || p.app.error !== a.error), who)];
+    } else if (id === 'I') {
+      var i = s.idp, codes = Object.keys(i.codes);
+      var sess = i.session ? t.parts('cardSession', { user: B(i.session) }) : t('cardNoSession');
+      var code = codes.length ? t.parts('cardCode', { code: data(codes[codes.length - 1]), st: t(i.codes[codes[codes.length - 1]].used ? 'codeUsed' : 'codeFresh') })
+        : i.request && !i.request.ok ? t('cardRefused') : t('cardNoCode');
+      var pc = p ? JSON.stringify(p.idp.codes) + (p.idp.request && p.idp.request.ok) : '';
+      lines = [hl(c, p && p.idp.session !== i.session, sess), hl(c, p && pc !== JSON.stringify(i.codes) + (i.request && i.request.ok), code)];
+    } else if (id === 'R') {
+      var last = s.api.last;
+      lines = [hl(c, last && (!p || !p.api.last), last ? t.parts('cardApiLast', { status: data(last.status), albums: last.albums !== null ? t.n('albums', last.albums) : '' }) : t('cardApiIdle'))];
+    } else {
+      var th = s.thief, tok = th.tokens;
+      var revoked = tok && revokedIn(s, tok.access);
+      lines = [hl(c, p && p.thief.code !== th.code, th.code ? t.parts('cardThiefCode', { code: data(th.code) }) : t('cardThiefNone')),
+        tok ? hl(c, p && (!p.thief.tokens || revokedIn(p, tok.access) !== revoked), t(revoked ? 'cardThiefRevoked' : 'cardThiefTokens')) : null];
+    }
+    return h('div', { class: 'of-card' }, lines);
+  }
+
+  // ── right: who holds what ──
+
+  function renderHolds(c) {
+    var s = c.state, lanes = lanesOf(c), hd = L.holders(s), view = c.params.view;
+    var box = h('section', { class: 'of-box' }, h('h2', null, t('holdTitle')));
+    var label = { password: t('item_password'), state: data('state', 'of-param'), challenge: data('code_challenge', 'of-param'),
+      verifier: data('code_verifier', 'of-param'), code: t('item_code'), access: t('item_access'), id: t('item_id') };
+    box.append(h('table', { class: 'of-tab' },
+      h('thead', null, h('tr', null, h('th', null, ''), lanes.map(function (id) {
+        return h('th', { dataset: { view: id === view ? '1' : '0' }, title: t('lane' + id) }, id === 'B' ? t('markB') : data(id, ''));
+      }))),
+      h('tbody', null, L.ITEMS.map(function (it) {
+        return h('tr', null, h('td', null, label[it]), lanes.map(function (id) {
+          var vals = hd[it][id];
+          var changed = c.n > 0 && s.changed.indexOf(it + ':' + id) >= 0;
+          var rev = vals && vals.every(function (v) { return revokedIn(s, v); });
+          var foreign = vals && vals.every(function (v) { return FOREIGN.indexOf(v) >= 0; });
+          var text = !vals ? data('—', 'of-muted') : data('✓', '');
+          return h('td', { class: changed ? 'sd-changed' + anim(c) : null, title: vals ? vals.join(' ') + (rev ? ' (' + t('holdRevoked') + ')' : '') : t('holdNone'),
+            dataset: { view: id === view ? '1' : '0', has: vals ? '1' : '0', revoked: rev ? '1' : '0', foreign: foreign ? '1' : '0' } }, text);
+        }));
+      }))));
+    // the third party's own code and state (attack `state`) are not Ana's: dashed cells and a note
+    if (s.holds.some(function (x) { return FOREIGN.indexOf(x.value) >= 0; })) {
+      box.append(h('p', { class: 'of-sm' }, parts('holdForeign', { code: data(L.FORGED_CODE), state: data(L.FORGED_STATE) })));
+    }
+    return box;
+  }
+
+  // ── right: this step's messages written out ──
+
+  function line(text, secret, cls) { return h('span', { class: 'of-line' + (cls ? ' ' + cls : ''), translate: 'no', dataset: { secret: secret ? '1' : '0' } }, text); }
+
+  function linesOf(c, r, prevRow) {
+    var out = [];
+    if (r.k === 'note') {
+      if (r.what === 'copied') return [line('code=' + r.carries[0].value, true)];
+      return [line('state: ' + r.got + (r.what === 'stateOk' ? ' = ' : ' ≠ ') + r.sent, false)];
+    }
+    var status = /^\d+$/.test(r.label);
+    if (status) out.push(line(VERSION + ' ' + r.label + ' ' + REASON[r.label]));
+    else out.push(line((r.url && r.url.indexOf('?') >= 0 && !r.query ? r.label + r.url.slice(r.url.indexOf('?')) : r.label + (r.query ? '?…' : '')) + ' ' + VERSION),
+      line('Host: ' + HOST[r.to]));
+    if (r.location) {
+      if (r.query) {
+        out.push(line('Location: ' + r.location.split('?')[0] + '?'));
+        r.query.forEach(function (q) { out.push(line(q[0] + '=' + q[1], q[0] === 'redirect_uri' && q[1] !== L.REDIRECT, 'of-line--q')); });
+      } else out.push(line('Location: ' + r.location, true));
+    }
+    if (r.label === 'GET /authorize') {
+      if (!prevRow || prevRow.location !== r.url) r.query.forEach(function (q) { out.push(line(q[0] + '=' + q[1], q[0] === 'redirect_uri' && q[1] !== L.REDIRECT, 'of-line--q')); });
+    }
+    if (r.label === 'POST /login') out.push(line('user=' + L.USER), line('password=••••••', true));
+    if (r.label === 'POST /token') {
+      out.push(line('grant_type=authorization_code'), line('code=' + r.carries[0].value, true), line('redirect_uri=' + r.redirectUri),
+        line('client_id=' + r.clientId));
+      if (r.verifier) out.push(line('code_verifier=' + L.VERIFIER, true));
+    }
+    if (r.header) out.push(line('Authorization: ' + r.header, true));
+    if (status && r.from === 'I' && r.to !== 'B') {
+      if (r.label === '200') {
+        r.carries.forEach(function (x) { out.push(line((x.item === 'access' ? 'access_token' : 'id_token') + ': ' + x.value, true)); });
+        out.splice(2, 0, line('token_type: Bearer'));
+      } else out.push(line('error: ' + r.error));
+    }
+    if (r.refusal) out.push(h('span', { class: 'of-word' }, t('redirectNotReg')));
+    if (r.from === 'R' && r.albums !== null && r.albums !== undefined) out.push(h('span', { class: 'of-word' }, t.n('bodyAlbums', r.albums)));
+    return out;
+  }
+
+  function renderMsgs(c) {
+    var s = c.state;
+    var box = h('section', { class: 'of-box of-msgs' }, h('h2', null, t('msgTitle')));
+    var rows = s.log.filter(function (r) { return r.n === c.n; });
+    if (!rows.length) { box.append(h('p', { class: 'of-muted' }, t('msgStart'))); return box; }
+    rows.forEach(function (r, i) {
+      var head = r.k === 'note'
+        ? [h('b', null, t('lane' + r.lane)), ' · ', t(r.what === 'copied' ? 'copiedRow' : 'noteRow')]
+        : [h('b', null, t('lane' + r.from)), ' → ', h('b', null, t('lane' + r.to)), ' · ', t(r.channel)];
+      box.append(h('p', { class: 'of-dir' }, head), h('div', null, linesOf(c, r, i ? rows[i - 1] : null)));
+    });
+    return box;
+  }
+
+  // ── captions ──
+
+  function caption(c) {
+    var s = c.state, e = s.ev, p = c.params, out = [];
+    switch (e.kind) {
+      case 'start':
+        out = parts('capStart');
+        if (L.attackOf(p) !== 'none') out = out.concat(parts('capStartAttack', { attack: h('b', null, t('attack_' + L.attackOf(p))) }));
+        break;
+      case 'click': out = parts('capClick', { app: B(L.APP) }); break;
+      case 'toIdp':
+        out = parts('capToIdp', { state: B('state=' + L.STATE), c302: B('302') })
+          .concat(e.pkce ? parts('capToIdpPkce', { challenge: B('code_challenge'), verifier: B('code_verifier') }) : parts('capToIdpNoPkce'));
+        break;
+      case 'forgedLink': out = parts('capForgedLink', { uri: B(e.redirectUri) }); break;
+      case 'toIdpBad': out = parts('capRefused', { uri: B(e.redirectUri) }); break;
+      case 'login': out = parts('capLogin', { idp: B(L.IDP), scope: B(L.SCOPE), code: B(e.code) }); break;
+      case 'back': out = parts('capBack', { code: B(e.code) }).concat(e.stolen ? parts('capBackStolen') : []); break;
+      case 'forged': out = parts('capForged', { code: B(e.code), state: B('state=' + L.FORGED_STATE) }); break;
+      case 'check': out = parts(e.ok ? 'capCheckOk' : 'capCheckBad', { got: B(e.got), sent: B(e.sent) }); break;
+      case 'tokenRequest':
+        if (e.from === 'X') out = parts('capThiefReq');
+        else out = parts('capTokenReq').concat(e.verifier ? parts('capTokenReqPkce', { verifier: B('code_verifier') }) : []);
+        break;
+      case 'tokenAnswer':
+        if (e.to === 'X') out = parts(e.ok ? 'capThiefTokens' : 'capThiefPkce');
+        else if (e.ok) out = (p.pkce ? parts('capTokensPkce') : []).concat(parts('capTokens', { user: B(s.app.user) }));
+        else out = parts('capAppUsed');
+        break;
+      case 'api': out = parts('capApi', { auth: B('Authorization: Bearer ' + s.app.tokens.access) }); break;
+      case 'albums': out = parts('capAlbums', { albums: h('b', null, t.n('albums', e.albums)) }); break;
+      default: out = [];
+    }
+    // the other PKCE setting, run to its own end (lesson: show each variant's outcome)
+    if (c.last && L.attackOf(p) === 'steal') out = out.concat(parts(p.pkce ? 'capAltPkceOff' : 'capAltPkceOn'));
+    if (c.last && c.n > 0) out = out.concat(parts('capEnd'));
+    return out;
+  }
+
+  // ── controls ──
+
+  function attackKey(k, a) {
+    return { key: k, label: t('key' + k.toUpperCase()), run: function (sim) {
+      sim.set({ attack: sim.params.attack === a ? 'none' : a });
+      sim.first();
+    } };
+  }
+
+  var sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'pkce', type: 'toggle', label: t('pkce'), hint: t('pkceHint') },
+      { key: 'attack', type: 'choice', label: t('attack'), hint: t('attackHint'), resets: true,
+        options: L.ATTACKS.map(function (a) { return [a, t('attack_' + a)]; }) },
+      { key: 'view', type: 'choice', label: t('view'), hint: t('viewHint'),
+        options: L.VIEWS.map(function (v) { return [v, t('view' + v)]; }) }
+    ],
+
+    keys: [attackKey('t', 'state'), attackKey('x', 'steal'), attackKey('w', 'redirect')],
+
+    presets: [
+      { id: 'normal', label: t('presetNormal'), hint: t('presetNormalHint'), params: L.PRESETS.normal },
+      { id: 'state-mismatch', label: t('presetState'), hint: t('presetStateHint'), params: L.PRESETS['state-mismatch'] },
+      { id: 'stolen-code-pkce', label: t('presetPkce'), hint: t('presetPkceHint'), params: L.PRESETS['stolen-code-pkce'] },
+      { id: 'stolen-code-no-pkce', label: t('presetNoPkce'), hint: t('presetNoPkceHint'), params: L.PRESETS['stolen-code-no-pkce'] },
+      { id: 'wrong-redirect', label: t('presetRedirect'), hint: t('presetRedirectHint'), params: L.PRESETS['wrong-redirect'] }
+    ],
+
+    legend: [
+      { shape: 'dash', label: t('legFront') },
+      { shape: 'line', label: t('legBack') },
+      { shape: 'of-code', label: t('legCode') },
+      { shape: 'of-access', label: t('legAccess') },
+      { shape: 'of-id', label: t('legId') },
+      { shape: 'of-eye', label: t('legEye') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'of' },
+        h('div', { class: 'of-col of-mid' }, chart),
+        h('div', { class: 'of-col' }, renderHolds(c), renderMsgs(c))));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+
+  // the legend's eye swatch
+  var sw = document.querySelector('.sd-legend .sd-swatch[data-shape="of-eye"]');
+  if (sw && !sw.firstChild) sw.append(eyeIcon());
+  void sim;
+})();
+</script>
+</body>
+</html>
