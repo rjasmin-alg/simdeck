@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **371 of 477 entries are live**, 70 w3, 25 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-12** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **372 of 477 entries are live**, 70 w3, 24 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 46 | 1 w3 · building, 8 w3 · queued |
+| §4.4 Linux | 55 | 47 | 1 w3 · building, 7 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -568,7 +568,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-disk-full-mysteries` | live | "Disk full" with free space | inode exhaustion, and a deleted file still open | fill a disk both ways, find the cause | step | S | P2 | UL | UL ch11, ch23 |  |
 | `lnx-mirror-not-backup` | live | A mirror is not a backup | RAID protects against disk loss, not deletion or corruption | delete a file on a healthy mirror | step | S | P2 | UL, DR | UL ch12 (`granica-zastite-zrcala.svg`) → §5.3 |  |
 | `lnx-lvm-extend` | live | Extending an LV and its filesystem | PV → VG → LV → filesystem, in that order | add a disk, extend each layer | step | S | P2 | UL | UL ch12; stepper companion to `spl-lvm-lab` |  |
-| `lnx-quotas` | w3 · building | Disk quotas | soft vs hard limit, grace period | users write files, time passes | step | S | P3 | UL | UL ch12 |  |
+| `lnx-quotas` | live | Disk quotas | soft vs hard limit, grace period | users write files, time passes | step | S | P3 | UL | UL ch12 |  |
 | `lnx-memory-swap-oom` | live | Memory, swap and the OOM killer | page cache vs used, swapping, who the OOM killer picks | start processes, watch memory and the kill | expl | S | P2 | UL, OS | UL ch12 |  |
 | `lnx-page-cache` | live | free vs available | the page cache is not lost memory; dirty pages and writeback | read and write files, watch the counters | expl | S | P2 | UL, NLA | NLA T42 |  |
 | `lnx-load-average` | live | Load average | load counts runnable and D-state tasks, not CPU percent | add CPU and I/O-bound tasks on 1–8 cores | expl | S | P2 | UL, NLA | NLA T41 |  |
@@ -588,7 +588,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-overlayfs-layers` | live | Image layers and copy-up | read-only layers, a writable top, copy-up and whiteouts | edit and delete files inside a container | step | S | P1 | NLA | NLA T12–13 → §5.17 |  |
 | `lnx-container-volumes` | live | Where container data is lost | container layer vs volume vs bind mount on `rm` | write data, recreate the container | step | S | P2 | NLA | NLA T15 |  |
 | `lnx-container-ports` | live in `port-forwarding` | Publishing a container port | `-p` is DNAT on the host | publish ports, connect from outside | step | S | P2 | NLA | NLA T16 → §5.12 |  |
-| `lnx-userns-mapping` | w3 · queued | Rootless containers | root inside maps to an unprivileged UID outside | create files, check owners on the host | step | S | P3 | NLA | NLA T17 |  |
+| `lnx-userns-mapping` | w3 · building | Rootless containers | root inside maps to an unprivileged UID outside | create files, check owners on the host | step | S | P3 | NLA | NLA T17 |  |
 | `lnx-netns-veth-bridge` | live | Namespaces, veth and a bridge | how container networking is wired by hand | connect two namespaces step by step | step | M | P2 | NLA | NLA T06–08 |  |
 | `lnx-netfilter-path` | live | A packet through netfilter | prerouting, input, forward, output, postrouting; where NAT and filter happen | send inbound, forwarded and local packets | step | M | P1 | NLA | NLA T08 → §5.1 |  |
 | `lnx-policy-routing` | w3 · queued | Policy routing | `ip rule` picks a table before the route lookup | add rules and tables, send from two sources | step | S | P3 | NLA | NLA T05 |  |
