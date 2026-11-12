@@ -1,0 +1,621 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-timers-cron: cron vs systemd timers — missed runs, Persistent=, randomized delay.
+     Top: the clock and the machine's power. Middle: the timeline over days, the power band (solid on, hatched off)
+     and two lanes, the crontab line and the timer: a tick per scheduled time, a filled marker per run, a hollow one
+     with × per missed time, a catch-up marker with an arc back over what it makes up, a bracket for a random delay.
+     Bottom: the crontab line field by field, and the timer → service pair with its [Timer] lines, the record on disk
+     and what systemctl list-timers says. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-timers-cron">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cron i mjerači vremena: propušteni termini · simdeck</title>
+<meta name="description" content="Redak u crontabu i mjerač vremena rade isti posao dok je stroj ugašen: cron propušteno zaboravlja, a Persistent= ga nadoknađuje jednom.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-timers-cron",
+  "title": {
+    "hr": "cron i mjerači vremena: propušteni termini",
+    "en": "cron vs systemd timers: missed runs"
+  },
+  "concept": {
+    "hr": "Propušteni termini, Persistent= i nasumična odgoda",
+    "en": "Missed runs, Persistent= and randomized delay"
+  },
+  "summary": {
+    "hr": "Redak u crontabu i mjerač vremena rade isti posao dok je stroj ugašen: cron propušteno zaboravlja, a Persistent= ga nadoknađuje jednom.",
+    "en": "A crontab line and a timer do the same job while the machine is off: cron forgets the missed time, Persistent= makes it up once."
+  },
+  "tags": [
+    "services"
+  ],
+  "class": "stepper",
+  "steps": 9,
+  "entries": [
+    {
+      "preset": "long-weekend"
+    },
+    {
+      "preset": "cron-or-trap"
+    }
+  ]
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-timers-cron"]; colours only from kit tokens. */
+[data-sim="lnx-timers-cron"] .tc {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.5rem 0.8rem;
+  height: 100%;
+  padding: 0.5rem 0.8rem;
+  font-size: 1rem;
+}
+[data-sim="lnx-timers-cron"] .tc-mono { font-family: var(--mono); }
+[data-sim="lnx-timers-cron"] .tc-muted { color: var(--muted); }
+[data-sim="lnx-timers-cron"] .tc-sm { font-size: var(--fs-sm); }
+[data-sim="lnx-timers-cron"] .tc-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.4rem 0.6rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="lnx-timers-cron"] h3 { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; }
+
+/* clock */
+[data-sim="lnx-timers-cron"] .tc-clock { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem; }
+[data-sim="lnx-timers-cron"] .tc-now { font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; padding: 0 0.4rem; border-radius: var(--radius-sm); }
+[data-sim="lnx-timers-cron"] .tc-now::before { content: '⏱ '; font-family: var(--sans); }
+[data-sim="lnx-timers-cron"] .tc-pw { font-weight: 700; padding: 0 0.45rem; border: 0.18rem solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-timers-cron"] .tc-pw-on::before { content: '● '; color: var(--ok); }
+[data-sim="lnx-timers-cron"] .tc-pw-off { border-style: dashed; color: var(--muted); }
+[data-sim="lnx-timers-cron"] .tc-pw-off::before { content: '○ '; }
+[data-sim="lnx-timers-cron"] .tc-pw.sd-changed, [data-sim="lnx-timers-cron"] .tc-now.sd-changed { background: var(--hl); color: var(--on-hl); box-shadow: none; outline-offset: 0; }
+
+/* timeline */
+[data-sim="lnx-timers-cron"] .tc-tl {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  grid-template-rows: 1.5rem 1.8rem 4.4rem 5.4rem;
+  column-gap: 0.6rem;
+  padding: 0.4rem 1.4rem 0.3rem 0.6rem;
+}
+[data-sim="lnx-timers-cron"] .tc-lab { display: flex; flex-direction: column; justify-content: center; line-height: 1.15; min-width: 0; }
+[data-sim="lnx-timers-cron"] .tc-lab b { font-size: var(--fs-md); }
+[data-sim="lnx-timers-cron"] .tc-lab .tc-mono { font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-sim="lnx-timers-cron"] .tc-row { position: relative; grid-column: 2; min-width: 0; }
+[data-sim="lnx-timers-cron"] .tc-overlay { grid-column: 2; grid-row: 1 / -1; position: relative; pointer-events: none; z-index: 3; }
+[data-sim="lnx-timers-cron"] .tc-midnight { position: absolute; top: 0; bottom: 0; width: 0; border-left: 0.1rem solid var(--line); }
+[data-sim="lnx-timers-cron"] .tc-dlab { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; font-size: var(--fs-sm); color: var(--muted); background: var(--panel); padding: 0 0.2rem; z-index: 1; }
+[data-sim="lnx-timers-cron"] .tc-dlab-today { color: var(--ink); font-weight: 700; }
+[data-sim="lnx-timers-cron"] .tc-band { position: absolute; top: 0.2rem; bottom: 0.2rem; border: 0.15rem solid var(--ink); }
+[data-sim="lnx-timers-cron"] .tc-band-on { background: var(--c3); }
+[data-sim="lnx-timers-cron"] .tc-band-off { background-color: var(--bg); background-image: repeating-linear-gradient(45deg, var(--ink) 0 0.12em, transparent 0.12em 0.5em); }
+[data-sim="lnx-timers-cron"] .tc-shade { position: absolute; top: 0; bottom: 0; background-image: repeating-linear-gradient(45deg, var(--line) 0 0.08em, transparent 0.08em 0.6em); }
+[data-sim="lnx-timers-cron"] .tc-axis { position: absolute; left: 0; right: 0; top: 50%; border-top: 0.15rem solid var(--line); }
+[data-sim="lnx-timers-cron"] .tc-tick { position: absolute; top: calc(50% - 0.9rem); height: 1.8rem; width: 0; border-left: 0.2rem solid var(--ink); margin-left: -0.1rem; }
+[data-sim="lnx-timers-cron"] .tc-tick-future { border-left-style: dashed; border-left-color: var(--muted); }
+[data-sim="lnx-timers-cron"] .tc-mk {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  transform: translate(-50%, -50%);
+  border: 0.2rem solid var(--ink);
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  z-index: 2;
+}
+[data-sim="lnx-timers-cron"] .tc-mk-run { background: var(--sw); }
+[data-sim="lnx-timers-cron"] .tc-mk-miss { background: var(--bg); border-style: dashed; color: var(--danger); }
+[data-sim="lnx-timers-cron"] .tc-mk-catch { width: 2rem; height: 2rem; background: var(--sw); color: var(--on-series); border-width: 0.25rem; border-radius: 0.35rem; font-size: 1.3rem; }
+[data-sim="lnx-timers-cron"] .tc-mk-wait { background: var(--bg); border-style: dotted; }
+[data-sim="lnx-timers-cron"] .tc-mk.sd-changed { box-shadow: 0 0 0 0.4rem var(--hl); outline: none; }
+[data-sim="lnx-timers-cron"] .tc-arc {
+  position: absolute;
+  top: calc(50% - 2.3rem);
+  height: 1.5rem;
+  border: 0.2rem solid var(--ink);
+  border-bottom: 0;
+  border-radius: 1.2rem 1.2rem 0 0;
+}
+[data-sim="lnx-timers-cron"] .tc-arc::after { content: '▼'; position: absolute; right: -0.55rem; bottom: -0.65rem; font-size: 0.9rem; line-height: 1; color: var(--ink); }
+[data-sim="lnx-timers-cron"] .tc-arc-n { position: absolute; top: -1.35rem; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: var(--fs-sm); font-weight: 700; background: var(--panel); padding: 0 0.2rem; }
+[data-sim="lnx-timers-cron"] .tc-br {
+  position: absolute;
+  top: calc(50% + 1rem);
+  height: 0.55rem;
+  border: 0.18rem solid var(--ink);
+  border-top: 0;
+}
+[data-sim="lnx-timers-cron"] .tc-br-lab { position: absolute; top: 0.45rem; left: 0; white-space: nowrap; font-size: var(--fs-sm); font-family: var(--mono); }
+[data-sim="lnx-timers-cron"] .tc-nowline { position: absolute; top: -0.3rem; bottom: -0.2rem; width: 0; border-left: 0.25rem solid var(--accent); margin-left: -0.125rem; }
+[data-sim="lnx-timers-cron"] .tc-nowline::before { content: '▼'; position: absolute; top: -0.55rem; left: -0.62rem; font-size: 1rem; line-height: 1; color: var(--accent); }
+
+/* cards */
+[data-sim="lnx-timers-cron"] .tc-card { min-height: 0; }
+[data-sim="lnx-timers-cron"] .tc-badge { font-size: var(--fs-sm); font-weight: 700; padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-timers-cron"] .tc-badge-off { border-style: dashed; color: var(--muted); font-weight: 400; }
+[data-sim="lnx-timers-cron"] .tc-fields { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.25rem; }
+[data-sim="lnx-timers-cron"] .tc-field { display: flex; flex-direction: column; align-items: center; padding: 0.15rem 0.1rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); text-align: center; }
+[data-sim="lnx-timers-cron"] .tc-field b { font-family: var(--mono); font-size: var(--fs-lg); }
+[data-sim="lnx-timers-cron"] .tc-field span { font-size: var(--fs-sm); line-height: 1.1; }
+[data-sim="lnx-timers-cron"] .tc-field-or { border: 0.22rem solid var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="lnx-timers-cron"] .tc-ornote { font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="lnx-timers-cron"] .tc-ornote::before { content: '⚠ '; }
+[data-sim="lnx-timers-cron"] .tc-cmd { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="lnx-timers-cron"] .tc-note { font-size: var(--fs-sm); }
+[data-sim="lnx-timers-cron"] .tc-count { font-size: var(--fs-sm); display: flex; gap: 1rem; flex-wrap: wrap; }
+[data-sim="lnx-timers-cron"] .tc-count b { font-family: var(--mono); }
+[data-sim="lnx-timers-cron"] .tc-tw { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 0.45rem 0.8rem; min-height: 0; }
+[data-sim="lnx-timers-cron"] .tc-units { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+[data-sim="lnx-timers-cron"] .tc-unit { display: flex; flex-direction: column; padding: 0.15rem 0.4rem; border: 0.2rem solid var(--sw, var(--ink)); border-radius: var(--radius-sm); background: var(--bg); font-size: var(--fs-sm); line-height: 1.2; min-width: 0; }
+[data-sim="lnx-timers-cron"] .tc-unit b { font-family: var(--mono); font-size: 1rem; }
+[data-sim="lnx-timers-cron"] .tc-unit .tc-mono { white-space: nowrap; }
+[data-sim="lnx-timers-cron"] .tc-unit.sd-changed { box-shadow: 0 0 0 0.35rem var(--hl); outline-offset: 0; }
+[data-sim="lnx-timers-cron"] .tc-arrow { padding-left: 0.8rem; font-size: var(--fs-sm); line-height: 1.1; }
+[data-sim="lnx-timers-cron"] .tc-pre {
+  margin: 0;
+  padding: 0.2rem 0.45rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-sim="lnx-timers-cron"] .tc-pre .tc-prompt { color: var(--muted); }
+[data-sim="lnx-timers-cron"] .tc-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 0.6rem; }
+[data-sim="lnx-timers-cron"] .tc-kv dt { font-weight: 700; }
+[data-sim="lnx-timers-cron"] .tc-kv dd { margin: 0; }
+[data-sim="lnx-timers-cron"] .tc-ch { background: var(--hl); color: var(--on-hl); font-weight: 700; outline: 0.12rem solid var(--ink); }
+[data-sim="lnx-timers-cron"] .tc-stamp { font-size: var(--fs-sm); }
+[data-sim="lnx-timers-cron"] .tc-stamp .tc-mono { overflow-wrap: anywhere; }
+[data-sim="lnx-timers-cron"] .tc-stamp .tc-ch { white-space: nowrap; }
+
+/* legend swatches */
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape^='tc-'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape^='tc-']::after { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.8em; font-weight: 700; line-height: 1; color: var(--ink); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-on'] { background: var(--c3); border-radius: 0; }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-off'] { border-radius: 0; background-image: repeating-linear-gradient(45deg, var(--ink) 0 0.1em, transparent 0.1em 0.35em); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-tick'] { border: 0; background: transparent; }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-tick']::after { content: ''; left: 50%; right: auto; width: 0.2rem; margin-left: -0.1rem; background: var(--ink); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-run'] { border-radius: 50%; background: var(--c1); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-miss'] { border-radius: 50%; border-style: dashed; }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-miss']::after { content: '×'; color: var(--danger); font-size: 1em; }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-catch'] { background: var(--c1); border-width: 0.18rem; }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-catch']::after { content: '↶'; color: var(--on-series); }
+[data-sim="lnx-timers-cron"] .sd-swatch[data-shape='tc-delay'] { height: 0.55em; border-top: 0; border-radius: 0; background: transparent; }
+
+[data-sim="lnx-timers-cron"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-timers-cron"] .sd-titles { flex: 1 1 40rem; }
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets. */
+[data-sim="lnx-timers-cron"] .sd-ctl[hidden] { display: none; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-timers-cron"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-timers-cron"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="lnx-timers-cron"] .tc { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; padding: 0.45rem; }
+  [data-sim="lnx-timers-cron"] .tc-tl { grid-template-columns: 4.6rem minmax(0, 1fr); padding: 0.4rem 0.9rem 0.3rem 0.4rem; column-gap: 0.4rem; }
+  [data-sim="lnx-timers-cron"] .tc-lab .tc-mono { display: none; }
+  [data-sim="lnx-timers-cron"] .tc-dlab-alt { display: none; }
+  [data-sim="lnx-timers-cron"] .tc-mk { width: 1.2rem; height: 1.2rem; font-size: 0.8rem; }
+  [data-sim="lnx-timers-cron"] .tc-br-lab { display: none; }
+  [data-sim="lnx-timers-cron"] .tc-tw { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="lnx-timers-cron"] .tc-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">cron i mjerači vremena: propušteni termini</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var DAY = L.DAY, HOUR = L.HOUR, MIN = L.MIN;
+  var HR = Simdeck.lang === 'hr';
+  var LANE_C = { cron: '2', timer: '1' };
+  var LANE_SW = { cron: 'var(--c2)', timer: 'var(--c1)' };
+
+  /** Data (unit names, directives, timestamps, fields, commands) never gets translated. */
+  function data(text, cls) { return h('span', { class: 'tc-mono' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** t.parts with the values in `d` wrapped as data and the others (words, phrases) left as nodes or text. */
+  function parts(key, d, w) {
+    var out = {};
+    Object.keys(d || {}).forEach(function (k) { out[k] = typeof d[k] === 'object' ? d[k] : data(d[k]); });
+    Object.keys(w || {}).forEach(function (k) { out[k] = w[k]; });
+    return [].concat(t.parts(key, out));
+  }
+  function has(c, key) { return c.state.changed.indexOf(key) >= 0; }
+
+  // ── times in the page's language ──
+
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  /** 8:00 in Croatian, 08:00 in English; seconds only when there are any. */
+  function timeOf(x) {
+    var r = ((x % DAY) + DAY) % DAY, hh = Math.floor(r / HOUR), mm = Math.floor(r % HOUR / MIN), ss = r % MIN;
+    return (HR ? String(hh) : two(hh)) + ':' + two(mm) + (ss ? ':' + two(ss) : '');
+  }
+  function civ(x) { return L.civil(L.dayOf(x)); }
+  function dateOf(x) { var c = civ(x); return t('dateShort', { d: t('d' + c.dow), dom: c.dom, mon: t('mon_' + c.m) }); }
+  function dateTimeOf(x) { return t('dateTime', { date: dateOf(x), time: timeOf(x) }); }
+  function onDayAt(x) { return t('onDayAt', { day: t('da' + civ(x).dow), time: timeOf(x) }); }
+  function delayText(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m ? t('delayMS', { m: m, s: s }) : t('delayS', { s: s }); }
+  function maxDelay(s) { return L.job(s, 'timer').delay / HOUR + ' h'; }
+
+  // ── timeline ──
+
+  function pctOf(s) { return function (x) { return Math.max(0, Math.min(100, (x - s.start) / (s.end - s.start) * 100)) + '%'; }; }
+
+  function axisRow(s, pct) {
+    var out = [];
+    var d0 = Math.floor(s.start / DAY), d1 = Math.ceil(s.end / DAY);
+    var many = d1 - d0 > 10;
+    for (var d = d0; d < d1; d++) {
+      var a = Math.max(s.start, d * DAY), b = Math.min(s.end, (d + 1) * DAY);
+      if (d * DAY > s.start) out.push(h('span', { class: 'tc-midnight', style: { left: pct(d * DAY) } }));
+      var c = L.civil(d);
+      if (b - a < DAY / 3) continue;
+      if (many && c.dow !== 0 && c.dom !== 1) continue;
+      var today = L.dayOf(s.now) === d;
+      out.push(h('span', { class: 'tc-dlab' + (today ? ' tc-dlab-today' : '') + (!many && (d - d0) % 2 ? ' tc-dlab-alt' : ''),
+        style: { left: pct((a + b) / 2) } }, dateOf(d * DAY)));
+    }
+    return out;
+  }
+
+  function midnights(s, pct) {
+    var out = [];
+    for (var d = Math.floor(s.start / DAY) + 1; d * DAY < s.end; d++) out.push(h('span', { class: 'tc-midnight', style: { left: pct(d * DAY) } }));
+    return out;
+  }
+  function shades(s, pct) {
+    return s.power.filter(function (w) { return w.to > s.start && w.from < s.end; }).map(function (w) {
+      return h('span', { class: 'tc-shade', style: { left: pct(w.from), width: 'calc(' + pct(Math.min(w.to, s.end)) + ' - ' + pct(Math.max(w.from, s.start)) + ')' } });
+    });
+  }
+
+  function powerRow(c, pct) {
+    var s = c.state, segs = [], a = s.start;
+    var cuts = [];
+    s.power.forEach(function (w) { cuts.push([Math.max(s.start, w.from), Math.min(s.end, w.to)]); });
+    cuts.sort(function (x, y) { return x[0] - y[0]; });
+    function seg(x, y, on) {
+      if (y <= x) return;
+      segs.push(h('span', { class: 'tc-band ' + (on ? 'tc-band-on' : 'tc-band-off'),
+        style: { left: pct(x), width: 'calc(' + pct(y) + ' - ' + pct(x) + ')' }, title: t(on ? 'legOn' : 'legOff') }));
+    }
+    cuts.forEach(function (k) { if (k[1] > k[0]) { seg(a, k[0], true); seg(k[0], k[1], false); a = k[1]; } });
+    seg(a, s.end, true);
+    return segs;
+  }
+
+  function laneRow(c, pct, kind) {
+    var s = c.state, j = L.job(s, kind), out = [];
+    out.push(h('span', { class: 'tc-axis' }));
+    L.ticksIn(j.spec, s.start, s.end).forEach(function (x) {
+      out.push(h('span', { class: 'tc-tick' + (x > s.now ? ' tc-tick-future' : ''), style: { left: pct(x) } }));
+    });
+    var sw = { '--sw': LANE_SW[kind] };
+    j.missed.forEach(function (x) {
+      if (x < s.start) return;
+      out.push(h('span', { class: 'tc-mk tc-mk-miss' + (has(c, kind + ':missed:' + x) ? ' sd-changed' : ''), style: { left: pct(x) },
+        title: t('legMissed') + ': ' + dateTimeOf(x), 'aria-label': t('legMissed') }, '×'));
+    });
+    j.runs.forEach(function (r) {
+      var ch = has(c, kind + ':run:' + r.t);
+      if (r.delay && !r.catchup) out.push(bracket(pct, r.sched, r.t, r.delay));
+      if (r.catchup) {
+        if (r.delay) out.push(bracket(pct, r.sched, r.t, r.delay));
+        var from = r.covers.length ? Math.max(s.start, r.covers[0]) : r.sched;
+        out.push(h('span', { class: 'tc-arc', style: { left: pct(from), width: 'calc(' + pct(r.t) + ' - ' + pct(from) + ')' } },
+          r.covers.length > 1 ? h('span', { class: 'tc-arc-n', translate: 'no' }, r.covers.length + ' → 1') : null));
+        out.push(h('span', { class: 'tc-mk tc-mk-catch' + (ch ? ' sd-changed' : ''), style: Object.assign({ left: pct(r.t) }, sw),
+          title: t('legCatchup') + ': ' + dateTimeOf(r.t), 'aria-label': t('legCatchup') }, '↶'));
+      } else {
+        out.push(h('span', { class: 'tc-mk tc-mk-run sd-fill' + (ch ? ' sd-changed' : ''), dataset: { c: LANE_C[kind] }, style: { left: pct(r.t) },
+          title: t('legRun') + ': ' + dateTimeOf(r.t), 'aria-label': t('legRun') }));
+      }
+    });
+    if (kind === 'timer' && j.pending && s.on) {
+      var pd = j.pending;
+      if (pd.delay) out.push(bracket(pct, pd.sched, pd.at, pd.delay, true));
+      out.push(h('span', { class: 'tc-mk tc-mk-wait' + (has(c, 'timer:pending') ? ' sd-changed' : ''), style: { left: pct(Math.min(pd.at, s.end)) },
+        title: t('waitingFor', { at: dateTimeOf(pd.at) }) }, '…'));
+    }
+    return out;
+  }
+  function bracket(pct, a, b, delay, open) {
+    return h('span', { class: 'tc-br', style: { left: pct(a), width: 'calc(' + pct(b) + ' - ' + pct(a) + ')', borderRightStyle: open ? 'dashed' : 'solid' } },
+      h('span', { class: 'tc-br-lab' }, '+' + delayText(delay)));
+  }
+
+  function timeline(c) {
+    var s = c.state, pct = pctOf(s), cr = L.job(s, 'cron'), tm = L.job(s, 'timer');
+    var grid = [];
+    function lab(row, title, sub) { grid.push(h('div', { class: 'tc-lab', style: { gridColumn: '1', gridRow: String(row) } }, h('b', null, title), sub ? data(sub) : null)); }
+    function row(n, kids, extra) { grid.push(h('div', { class: 'tc-row', style: { gridRow: String(n) } }, extra || null, kids)); }
+    lab(2, t('lanePower'));
+    lab(3, t('laneCron'), cr.spec.fields.join(' '));
+    lab(4, t('laneTimer'), tm.name + '.timer');
+    row(1, axisRow(s, pct));
+    row(2, powerRow(c, pct));
+    row(3, laneRow(c, pct, 'cron'), [midnights(s, pct), shades(s, pct)]);
+    row(4, laneRow(c, pct, 'timer'), [midnights(s, pct), shades(s, pct)]);
+    grid.push(h('div', { class: 'tc-overlay' }, h('span', { class: 'tc-nowline', style: { left: pct(s.now) } })));
+    return h('div', { class: 'tc-box tc-tl' }, grid);
+  }
+
+  // ── clock ──
+
+  function clock(c) {
+    var s = c.state, moved = !!s.last;
+    return h('div', { class: 'tc-clock' },
+      h('span', { class: 'tc-now' + (moved ? ' sd-changed' : ''), translate: 'no' }, L.stamp(s.now)),
+      h('span', { class: 'tc-pw ' + (s.on ? 'tc-pw-on' : 'tc-pw-off') + (has(c, 'power') ? ' sd-changed' : '') },
+        t('lanePower'), ': ', t(s.on ? 'powerOn' : 'powerOff')),
+      // an outage picked outside this preset's timeline changes nothing here: say so
+      s.power.length && s.power.every(function (w) { return w.to <= s.start || w.from >= s.end; })
+        ? h('span', { class: 'tc-badge tc-badge-off' }, t('outsideNote')) : null);
+  }
+
+  // ── cron card ──
+
+  function cronCard(c) {
+    var s = c.state, cr = L.job(s, 'cron'), sp = cr.spec;
+    var both = sp.dom != null && sp.dow != null;
+    var names = ['fMin', 'fHour', 'fDom', 'fMon', 'fDow'];
+    var fields = sp.fields.map(function (v, i) {
+      var or = both && (i === 2 || i === 4);
+      return h('div', { class: 'tc-field' + (or ? ' tc-field-or' : '') }, h('b', { translate: 'no' }, v), h('span', null, t(names[i])));
+    });
+    return h('div', { class: 'tc-box tc-card' },
+      h('h3', null, t('cronTitle'),
+        s.on ? h('span', { class: 'tc-badge', translate: 'no' }, 'crond: active (running)') : h('span', { class: 'tc-badge tc-badge-off' }, t('machineOff'))),
+      h('div', { class: 'tc-fields' }, fields),
+      both ? h('div', { class: 'tc-ornote' }, t('orNote')) : null,
+      h('div', { class: 'tc-cmd' }, h('span', { class: 'tc-muted', style: { fontFamily: 'var(--sans)' } }, t('fCmd'), ': '), data(sp.cmd)),
+      h('div', { class: 'tc-note' }, t('cronMemory')),
+      h('div', { class: 'tc-count' }, h('span', null, '● ', t.n('runsCount', cr.runs.length)), h('span', null, '× ', t.n('missedCount', cr.missed.length))));
+  }
+
+  // ── timer card ──
+
+  function timerCard(c) {
+    var s = c.state, tm = L.job(s, 'timer');
+    var lastRun = tm.runs.length ? tm.runs[tm.runs.length - 1] : null;
+    var ranNow = lastRun && has(c, 'timer:run:' + lastRun.t);
+    var timerBox = h('div', { class: 'tc-unit', style: { '--sw': 'var(--c1)' } },
+      h('b', { translate: 'no' }, tm.name + '.timer'),
+      s.on ? data('enabled · active (waiting)') : h('span', null, data('enabled'), ' · ', h('span', { class: 'tc-muted' }, t('powerOff'))));
+    var svcState = !s.on ? h('span', null, data('static'), ' · ', h('span', { class: 'tc-muted' }, t('powerOff'))) : data('static · inactive (dead)');
+    var svcBox = h('div', { class: 'tc-unit' + (ranNow ? ' sd-changed' : '') },
+      h('b', { translate: 'no' }, tm.name + '.service'),
+      svcState,
+      lastRun ? h('span', null, t('ranAt', { at: dateTimeOf(lastRun.t) })) : h('span', { class: 'tc-muted' }, t('neverRan')));
+    var unitFile = h('pre', { class: 'tc-pre', translate: 'no' }, '[Timer]\n' + L.timerLines(tm).join('\n'));
+
+    var stampCh = has(c, 'stamp');
+    var stamp = h('div', { class: 'tc-stamp' }, h('b', null, t('stampTitle')), ': ',
+      tm.persistent
+        ? [data('/var/lib/systemd/timers/stamp-' + tm.name + '.timer'), ' → ', h('span', { class: 'tc-mono' + (stampCh ? ' tc-ch' : ''), translate: 'no' }, tm.stamp != null ? L.stamp(tm.stamp) : '-')]
+        : h('span', { class: 'tc-muted' }, t('stampNone')));
+
+    var list;
+    if (!s.on) list = h('div', { class: 'tc-pre tc-muted', style: { fontFamily: 'var(--sans)' } }, t('machineOff'));
+    else {
+      var lt = L.listTimers(s);
+      var plt = c.prev && c.prev.on ? L.listTimers(c.prev).cells : null;
+      var rows = [['NEXT', 'next'], ['LEFT', 'left'], ['LAST', 'last'], ['PASSED', 'passed']].map(function (k) {
+        var ch = plt && plt[k[1]] !== lt.cells[k[1]] && (k[1] === 'next' || k[1] === 'last');
+        return [h('dt', null, k[0]), h('dd', null, h('span', { class: ch ? 'tc-ch' : '' }, lt.cells[k[1]]))];
+      });
+      list = h('div', { class: 'tc-pre', translate: 'no' },
+        h('div', null, h('span', { class: 'tc-prompt' }, '$ '), 'systemctl list-timers ' + tm.name + '.timer'),
+        h('dl', { class: 'tc-kv', style: { margin: 0 } }, rows));
+    }
+    return h('div', { class: 'tc-box tc-card' },
+      h('h3', null, t('timerTitle')),
+      h('div', { class: 'tc-tw' },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 } },
+          h('div', { class: 'tc-units' }, timerBox, h('span', { class: 'tc-arrow' }, '↓ ', t('unitActivates'), ' ', data('Unit=' + tm.name + '.service')), svcBox),
+          unitFile),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 } },
+          stamp,
+          h('div', { class: 'tc-sm' }, h('b', null, t('listTitle'))),
+          list,
+          h('div', { class: 'tc-count' }, h('span', null, '● ', t.n('runsCount', tm.runs.length)), h('span', null, '× ', t.n('missedCount', tm.missed.length))))));
+  }
+
+  function render(c) {
+    c.stage.replaceChildren(h('div', { class: 'tc' }, clock(c), timeline(c), cronCard(c), timerCard(c)));
+  }
+
+  // ── captions: what happened at this event, lane by lane ──
+
+  function caption(c) {
+    var s = c.state, last = s.last, cr = L.job(s, 'cron'), tm = L.job(s, 'timer');
+    var timerN = tm.name + '.timer', serviceN = tm.name + '.service';
+    if (!last) {
+      var st = parts('cap_start', { crontab: 'crontab', timer: timerN }, { when: dateTimeOf(s.now) });
+      return s.on ? st : st.concat([' ', t('cap_startOff')]);
+    }
+    var out = [];
+    function add(x) { if (out.length) out.push(' '); out.push.apply(out, [].concat(x)); }
+    var T = last.t;
+
+    if (last.shutdown) {
+      add(parts('cap_off', { crond: 'crond' }, { time: timeOf(T) }));
+      if (last.lost != null) add(parts('cap_lost', null, { sched: timeOf(last.lost) }));
+    }
+    if (last.boot) {
+      add(parts('cap_boot', null, { time: timeOf(T) }));
+      var before = c.prev ? L.job(c.prev, 'timer').stamp : null;
+      var cronMissed = last.cronMissedInOutage;
+      if (last.timer === 'catchup' || last.timer === 'catchup-wait') {
+        var run = last.fired || tm.pending;
+        var n = run && run.covers ? run.covers.length : 1;
+        var onDay = before != null ? t('da' + civ(before).dow) : '';
+        if (last.timer === 'catchup-wait') {
+          add(parts('cap_catchupWait', { timer: timerN, persistent: 'Persistent=true', rds: 'RandomizedDelaySec=' }, { onDay: onDay, delay: delayText(tm.pending.delay), at: timeOf(tm.pending.at) }));
+        } else if (n <= 1) {
+          add(parts('cap_catchup1', { timer: timerN, persistent: 'Persistent=true' }, { onDay: onDay }));
+        } else {
+          add(parts('cap_catchupN', { timer: timerN, persistent: 'Persistent=true' }, { onDay: onDay }));
+          add([t.n('cap_missedN', n), '; ', t('cap_catchupOnce', { n: n })]);
+        }
+        if (cronMissed) add(parts('cap_cronNoField', { crontab: 'crontab' }));
+      } else if (!tm.persistent && last.missedInOutage) {
+        var nx = L.nextOf(s);
+        add(parts('cap_bootNoPersist', { timer: timerN, directive: 'Persistent=' }));
+        add([t.n('cap_lostN', last.missedInOutage)].concat(parts('cap_nextIs', null, { next: nx ? onDayAt(nx.at) : '-' })));
+        if (cronMissed) add(parts('cap_cronLostToo', { crontab: 'crontab' }));
+      } else {
+        add(parts('cap_bootNothing', { timer: timerN }));
+        if (cronMissed) add(parts('cap_cronLostOnly', { crontab: 'crontab' }));
+      }
+    }
+
+    // what the scheduled times at this very second did (also at a boot or a shutdown that falls on one)
+    var timerTick = last.absorbed || last.timer === 'missed' || last.timer === 'elapse' || (last.timer === 'run' && !(last.fired && last.fired.delay));
+    if (last.cron || timerTick) {
+      var head = parts('cap_tick', null, { day: capFirst(t('dn' + civ(T).dow)), time: timeOf(T) });
+      var body = [];
+      var more = function (x) { if (body.length) body.push(' '); body.push.apply(body, [].concat(x)); };
+      if (last.cron === 'run') {
+        var sp = cr.spec;
+        if (sp.dom != null && sp.dow != null) {
+          var cv = civ(T);
+          if (sp.dom.indexOf(cv.dom) >= 0) more(parts('cap_orDom', { crond: 'crond' }, { dayNom: t('dn' + cv.dow) }));
+          else more(parts('cap_orDow', { crond: 'crond' }));
+          more(t('cap_orCount', { n: cr.runs.length }));
+        } else more(parts('cap_cronRun', { crond: 'crond', crontab: 'crontab' }));
+      } else if (last.cron === 'missed') more(parts('cap_cronMissed', { crond: 'crond' }));
+
+      if (last.absorbed) more(parts(last.fired && last.fired.catchup ? 'cap_absorbedNow' : 'cap_absorbed', { timer: timerN }));
+      else if (last.timer === 'run') more(parts('cap_timerRun', { timer: timerN, service: serviceN }));
+      else if (last.timer === 'elapse') more(parts('cap_timerElapse', { timer: timerN, service: serviceN, rds: 'RandomizedDelaySec=' + maxDelay(s).replace(' ', '') }, { delay: delayText(last.pending.delay), at: timeOf(last.pending.at) }));
+      else if (last.timer === 'missed') {
+        more(parts('cap_timerMissed', { timer: timerN }));
+        more(tm.persistent ? parts('cap_timerMissedP', { persistent: 'Persistent=true' }) : parts('cap_timerMissedNP', { directive: 'Persistent=' }));
+      } else if (!timerTick && last.cron === 'run') {
+        if (cr.spec.dom != null && cr.spec.dow != null) {
+          if (cr.runs.length > 1 && c.n < c.steps) { add(head.concat([' '], body)); return out; }
+          var nx2 = L.nextOf(s);
+          more(parts('cap_orTimer', { timer: timerN, cal: 'OnCalendar=' + tm.spec.cal, next: nx2 ? L.stamp(nx2.at) : '-' }));
+        } else if (tm.pending && !last.boot) more(parts('cap_waiting', { service: serviceN }, { at: timeOf(tm.pending.at) }));
+        else if (!last.boot) more(parts('cap_timerNoDay', { timer: timerN, cal: 'OnCalendar=' + tm.spec.cal }));
+      }
+      add(head.concat([' '], body));
+    } else if (!last.boot && !last.shutdown && last.fired) {
+      var f = last.fired;
+      if (f.catchup) add(parts('cap_catchupRun', { service: serviceN }, { delay: delayText(f.delay) }));
+      else add(parts('cap_timerDelayed', { service: serviceN }, { delay: delayText(f.delay), sched: timeOf(f.sched), max: maxDelay(s) }));
+    }
+    return out;
+  }
+  function capFirst(x) { return x.charAt(0).toUpperCase() + x.slice(1); }
+
+  // ── mount ──
+
+  function offLabel(v) { return dateTimeOf(Number(v)); }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'persistent', type: 'toggle', label: t('persistent'), hint: t('persistentHint'), resets: true },
+      { key: 'delay', type: 'choice', label: t('delay'), resets: true, options: [[0, t('delayNone')], [HOUR, '1h']] },
+      { key: 'offFrom', type: 'select', label: t('offFrom'), resets: true,
+        options: [['none', t('offNone')]].concat(L.OFF_OPTIONS.map(function (x) { return [String(x), offLabel(x)]; })) },
+      { key: 'offTo', type: 'select', label: t('offTo'), resets: true,
+        disabled: function (p) { return p.offFrom === 'none' ? t('offToOff') : false; },
+        options: L.OFF_OPTIONS.map(function (x) { return [String(x), offLabel(x)]; }) },
+      { key: 'seed', type: 'range', label: t('seed'), min: 1, max: 99, step: 1, resets: true,
+        disabled: function (p) { return Number(p.delay) ? false : t('seedOff'); } },
+      // the jobs come with the preset; hidden so the panel fits one screen
+      { key: 'scene', type: 'select', label: t('scene'), resets: true, visible: function () { return false; },
+        options: L.SCENE_IDS.map(function (x) { return [x, x]; }) }
+    ],
+
+    presets: L.PRESETS.map(function (x) {
+      return { id: x.id, label: t('preset_' + x.id), params: x.params, hint: t('preset_' + x.id + '_hint') };
+    }),
+
+    legend: [
+      { shape: 'tc-on', label: t('legOn') },
+      { shape: 'tc-off', label: t('legOff') },
+      { shape: 'tc-tick', label: t('legTick') },
+      { shape: 'tc-run', label: t('legRun') },
+      { shape: 'tc-miss', label: t('legMissed') },
+      { shape: 'tc-catch', label: t('legCatchup') },
+      { shape: 'tc-delay', label: t('legDelay') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
