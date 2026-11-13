@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **400 of 477 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 2 w1 · held, 2 w3 · queued, 1 w3 · building.
+**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **401 of 477 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building, 1 w3 · queued.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -340,7 +340,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 55 | – |
-| §4.5.1 Active Directory | 21 | 18 | 1 w3 · building, 2 w3 · queued |
+| §4.5.1 Active Directory | 21 | 19 | 1 w3 · building, 1 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
 | §4.5.4 DHCP on Windows Server | 6 | 3 | 3 w3 |
@@ -633,9 +633,9 @@ instead of repeating them.
 | `win-ad-replication` | live | AD multi-master replication | USNs, up-to-dateness vector, attribute-level last writer wins | change one attribute on two DCs at once | step | M | P2 | WIN2 | → §5.7 (`ha-multimaster-conflict`) |  |
 | `win-ad-sites` | live | Sites, site links and the KCC | intra-site vs inter-site replication, cost and schedule; site-aware DC choice | add sites and links, change a password, wait | expl | M | P2 | WIN2 | `app-topologydrafter` two-sites |  |
 | `win-sysvol-dfsr` | live | SYSVOL replication | GPO version in AD vs in SYSVOL; a GPO that half-arrived at a branch | edit a GPO, cut the link to a site | step | S | P2 | WIN2 | → §5.21 |  |
-| `win-rodc` | w3 · queued | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN2, SEC | `app-topologydrafter` two-sites |  |
+| `win-rodc` | w3 · building | Read-only DC at a branch | password replication policy; what a stolen RODC exposes | log users in at the branch, steal the RODC | step | S | P3 | WIN2, SEC | `app-topologydrafter` two-sites |  |
 | `win-fsmo-roles` | live | FSMO roles | the single-master jobs and what breaks when a holder is gone; transfer vs seize | turn off role holders, try operations | step | S | P2 | WIN2 |  |  |
-| `win-functional-levels` | w3 · building | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | expl | S | P3 | WIN2 |  |  |
+| `win-functional-levels` | live | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | expl | S | P3 | WIN2 |  |  |
 | `win-fgpp` | live | Password policy and fine-grained policies | one domain policy from the Default Domain Policy GPO; PSOs override it by precedence | apply PSOs to users and groups, see the winner | step | S | P2 | WIN2 | → §5.1 |  |
 | `win-delegation` | live | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 |  |  |
 | `win-trusts` | w3 · queued | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 |  |  |
