@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **398 of 477 entries are live**, 64 w3, 5 not adopted, 4 w3 · queued, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **399 of 477 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 3 w3 · queued, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -340,7 +340,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 55 | – |
-| §4.5.1 Active Directory | 21 | 16 | 1 w3 · building, 4 w3 · queued |
+| §4.5.1 Active Directory | 21 | 17 | 1 w3 · building, 3 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
 | §4.5.4 DHCP on Windows Server | 6 | 3 | 3 w3 |
@@ -626,7 +626,7 @@ instead of repeating them.
 | `win-dc-promotion` | live | What promoting a DC does | AD DS, the DNS zone and SRV records, SYSVOL, the first replication | step a server becoming the first DC, then a second | step | S | P2 | WIN1 | → §5.21 |  |
 | `win-domain-join` | live | Joining a domain | DNS SRV lookup, computer account, secure channel; a broken secure channel after a snapshot revert | join a client, revert it, try to log in | step | S | P2 | WIN1 |  |  |
 | `win-domain-logon` | live | Domain logon | DC locator via DNS SRV, then Kerberos; cached credentials when no DC answers | log in on site, at a branch, offline | step | M | P2 | WIN1 | `app-topologydrafter` two-sites |  |
-| `win-account-lockout` | w3 · building | Account lockout | threshold, bad-password count checked at the PDC emulator, a stale password locking an account | mistype passwords from two machines, keep an old session | step | S | P3 | WIN1 |  |  |
+| `win-account-lockout` | live | Account lockout | threshold, bad-password count checked at the PDC emulator, a stale password locking an account | mistype passwords from two machines, keep an old session | step | S | P3 | WIN1 |  |  |
 | `win-kerberos` | live | Kerberos | AS → TGT, TGS → service ticket, AP; clock skew breaks it | step a user opening a file share; skew the clock | step | M | P1 | WIN2, NLA | NLA T57 → §5.6 |  |
 | `win-ntlm-vs-kerberos` | live | NTLM vs Kerberos | challenge-response vs tickets; when Windows falls back to NTLM; why pass-the-hash works | authenticate by name and by IP, capture the hash | step | S | P2 | WIN2, SEC |  |  |
 | `win-time-hierarchy` | live | Time in a domain | the PDC emulator is the source, members follow DCs, Kerberos fails past 5 minutes | drift clocks, move the PDC role | step | S | P2 | WIN2 | `inet-ntp-sync` → §5.21 |  |
@@ -637,7 +637,7 @@ instead of repeating them.
 | `win-fsmo-roles` | live | FSMO roles | the single-master jobs and what breaks when a holder is gone; transfer vs seize | turn off role holders, try operations | step | S | P2 | WIN2 |  |  |
 | `win-functional-levels` | w3 · queued | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | expl | S | P3 | WIN2 |  |  |
 | `win-fgpp` | live | Password policy and fine-grained policies | one domain policy from the Default Domain Policy GPO; PSOs override it by precedence | apply PSOs to users and groups, see the winner | step | S | P2 | WIN2 | → §5.1 |  |
-| `win-delegation` | w3 · queued | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 |  |  |
+| `win-delegation` | w3 · building | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 |  |  |
 | `win-trusts` | w3 · queued | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 |  |  |
 | `win-ad-recycle-bin` | live | Deleted objects: tombstone and recycle bin | tombstone lifetime, recycle bin, authoritative restore | mass-delete an OU, then recover | step | S | P2 | WIN2, DR | DR S15 |  |
 | `win-ad-backup-restore` | live | Restoring a DC, and USN rollback | non-authoritative vs authoritative restore; reverting a DC snapshot silently breaks replication | restore a DC each way, revert a VM snapshot | step | M | P2 | WIN2, DR | → §5.21 (`sto-backing-chains`) |  |
