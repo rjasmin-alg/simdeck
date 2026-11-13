@@ -1,0 +1,486 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-delegation: the OU tree of quillmoor.example with five users, the group Helpdesk (hd-mia) and Domain Admins.
+     A stepper, one admin action or one test as hd-mia per step. Left: the tree, each OU with its delegated entries
+     (explicit key), what passes on (key with an arrow), users with their badges (DA, protected shield, last test).
+     Right: "try as hd-mia": the focused user's ACL in canonical order as kit view K4 (first match: the first entry that
+     names the token and covers the right decides), the verdict, and the log of tests.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-delegation">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delegiranje ovlasti · simdeck</title>
+<meta name="description" content="Helpdesk dobiva resetiranje lozinki na OU-u: korisnici ispod nasljeđuju unos, oni izvan i zaštićeni administratori ne. Testiraj kao hd-mia.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-delegation",
+  "title": {
+    "hr": "Delegiranje ovlasti",
+    "en": "Delegation of control"
+  },
+  "concept": {
+    "hr": "Pravo na OU-u umjesto članstva u Domain Admins",
+    "en": "Granting rights on an OU instead of Domain Admins"
+  },
+  "summary": {
+    "hr": "Helpdesk dobiva resetiranje lozinki na OU-u: korisnici ispod nasljeđuju unos, oni izvan i zaštićeni administratori ne. Testiraj kao hd-mia.",
+    "en": "The helpdesk gets password resets on an OU: users below inherit the entry, users outside and protected admins do not. Test as hd-mia."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 5
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-delegation"]; colours only from kit tokens.
+   Layout: the tree and the groups on the left; the try panel (token, ACL table, verdict, tests) on the right. */
+[data-sim="win-delegation"] .dg { display: grid; grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.5fr); gap: 1.4cqh 1.2cqw; height: 100%;
+  padding: 1.4cqh 1.2cqw; font-size: 1rem; line-height: 1.3; }
+/* kit.css gives .sd-ctl display: flex, which beats the hidden attribute a param's visible() sets */
+[data-sim="win-delegation"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-delegation"] .sd-presets { gap: 0.25rem; }
+[data-sim="win-delegation"] .dg-col { display: flex; flex-direction: column; gap: 1.2cqh; min-width: 0; min-height: 0; }
+[data-sim="win-delegation"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-delegation"] h2 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-delegation"] .dg-box { border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0.4rem 0.7rem 0.5rem; min-width: 0; }
+[data-sim="win-delegation"] .dg-sub { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="win-delegation"] .dg-ico { width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.15em; }
+[data-sim="win-delegation"] .dg-ch { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 -0.18rem var(--ink); }
+
+/* tree */
+[data-sim="win-delegation"] .dg-tree { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+[data-sim="win-delegation"] .dg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; min-height: 1.9rem; padding: 0.05rem 0.4rem 0.05rem calc(0.3rem + var(--depth) * 1.1rem);
+  border-radius: var(--radius-sm); border: var(--line-w) solid transparent; }
+[data-sim="win-delegation"] .dg-row[data-kind="container"] .dg-dn { border-bottom: 0.12rem dashed var(--muted); }
+[data-sim="win-delegation"] .dg-row[data-kind="domain"] { font-weight: 700; }
+[data-sim="win-delegation"] .dg-dn { white-space: nowrap; }
+[data-sim="win-delegation"] .dg-badges { display: inline-flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+[data-sim="win-delegation"] .dg-b { display: inline-flex; align-items: center; gap: 0.15rem; padding: 0 0.25rem; border: 0.12rem solid var(--ink); border-radius: var(--radius-sm);
+  font-size: var(--fs-sm); font-weight: 700; line-height: 1.35; white-space: nowrap; }
+[data-sim="win-delegation"] .dg-b-inh { border-style: dotted; border-color: var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="win-delegation"] .dg-b-da { background: var(--ink); color: var(--bg); }
+[data-sim="win-delegation"] .dg-b-sh { border-color: var(--warn); color: var(--ink); }
+[data-sim="win-delegation"] .dg-b-ok { border-color: var(--ok); color: var(--ok); }
+[data-sim="win-delegation"] .dg-b-no { border-color: var(--danger); color: var(--danger); border-style: dashed; }
+[data-sim="win-delegation"] .dg-aces { list-style: none; margin: 0; padding: 0 0 0.1rem calc(1.9rem + var(--depth) * 1.1rem); display: flex; flex-direction: column; gap: 0.05rem; }
+[data-sim="win-delegation"] .dg-aces li { display: flex; gap: 0.3rem; align-items: center; font-size: var(--fs-sm); padding: 0 0.3rem; border-radius: var(--radius-sm); width: fit-content; }
+[data-sim="win-delegation"] button.dg-row { width: 100%; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+[data-sim="win-delegation"] button.dg-row:hover { border-color: var(--line); }
+[data-sim="win-delegation"] button.dg-row:focus-visible { outline: 0.25rem solid var(--focus); outline-offset: 0.05rem; }
+[data-sim="win-delegation"] .dg-row[aria-current="true"] { border-color: var(--accent); background: var(--bg); box-shadow: inset 0.3rem 0 var(--accent); }
+[data-sim="win-delegation"] .dg-row.dg-ch { border-color: var(--ink); background: var(--hl); color: var(--on-hl); }
+[data-sim="win-delegation"] .dg-groups { display: flex; flex-direction: column; gap: 0.2rem; }
+[data-sim="win-delegation"] .dg-grp { padding: 0 0.3rem; border-radius: var(--radius-sm); width: fit-content; }
+
+/* the try panel */
+[data-sim="win-delegation"] .dg-try { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; align-items: center; }
+[data-sim="win-delegation"] .dg-try h2 { font-size: var(--fs-md); }
+[data-sim="win-delegation"] .dg-token { display: inline-flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+[data-sim="win-delegation"] .dg-sid { padding: 0 0.35rem; border: 0.12rem solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); }
+[data-sim="win-delegation"] .dg-sid[data-k="da"] { background: var(--ink); color: var(--bg); }
+[data-sim="win-delegation"] .dg-act { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; align-items: baseline; }
+[data-sim="win-delegation"] .dg-act b { font-size: var(--fs-md); }
+[data-sim="win-delegation"] .dg-mode { font-size: var(--fs-sm); padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; }
+[data-sim="win-delegation"] .dg-mode[data-k="preview"] { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+[data-sim="win-delegation"] .dg .sd-rt { flex: 0 1 auto; }
+[data-sim="win-delegation"] .sd-rt tr.dg-inh td:not(.sd-rt-mark):not(.sd-rt-ptr) { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, var(--panel)); }
+[data-sim="win-delegation"] .sd-rt tr.dg-new td { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-delegation"] .dg-type { font-weight: 700; font-size: 1.2em; }
+[data-sim="win-delegation"] .dg-src .dg-ico { margin-right: 0.2rem; }
+[data-sim="win-delegation"] .dg-status { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; align-items: center; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-delegation"] .dg-status b { color: var(--ink); }
+[data-sim="win-delegation"] .dg-status .dg-off { color: var(--danger); font-weight: 700; }
+[data-sim="win-delegation"] .dg-log { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+[data-sim="win-delegation"] .dg-log ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+[data-sim="win-delegation"] .dg-log li { display: inline-flex; gap: 0.3rem; align-items: center; padding: 0.05rem 0.45rem; border: 0.15rem solid var(--ok); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-delegation"] .dg-log li[data-ok="false"] { border-color: var(--danger); border-style: dashed; }
+[data-sim="win-delegation"] .dg-log li.dg-ch { border-color: var(--ink); border-style: solid; }
+[data-sim="win-delegation"] .dg-log .dg-empty { color: var(--muted); }
+
+/* legend swatches of the page's own: the icon goes inside */
+[data-sim="win-delegation"] .sd-swatch[data-shape^="dg-"] { position: relative; display: inline-grid; place-items: center; background: var(--bg); color: var(--ink); }
+[data-sim="win-delegation"] .sd-swatch[data-shape="dg-inh"] { border-style: dotted; border-color: var(--muted); color: var(--muted); }
+[data-sim="win-delegation"] .sd-swatch[data-shape="dg-sh"] { border-color: var(--warn); }
+[data-sim="win-delegation"] .sd-swatch .dg-ico { width: 0.8em; height: 0.8em; }
+
+/* Phone and portrait: one column; the stage grows with its content; the table scrolls inside its box. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-delegation"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-delegation"] .dg { grid-template-columns: minmax(0, 1fr); height: auto; padding: 0.5rem; gap: 0.8rem; }
+  [data-sim="win-delegation"] .dg-row { flex-wrap: wrap; padding-left: calc(0.3rem + var(--depth) * 0.6rem); }
+  [data-sim="win-delegation"] .dg-aces { padding-left: calc(1rem + var(--depth) * 0.6rem); }
+  [data-sim="win-delegation"] .dg-aces li { flex-wrap: wrap; width: auto; }
+  [data-sim="win-delegation"] .dg-dn { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Delegiranje ovlasti</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var RT = Simdeck.ruleTable;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PRESET_KEY = { 'delegate-staff': 'presetStaff', narrow: 'presetNarrow', 'protected-admin': 'presetProtected', 'move-user': 'presetMove', quillmoor: 'presetQuillmoor' };
+
+  /** Data (names of users, groups, containers, attributes, rights) is not language: the word check skips translate="no". */
+  function data(text) { return h('span', { translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Placeholder nodes are
+      cloned, so one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return h('span', null, out);
+  }
+  function dn(cid) { return data(L.container(cid).dn); }
+  function rightName(r) {
+    if (r === 'full') return h('span', null, t('rightFull'));
+    if (r === 'reset') return data('Reset Password');
+    return rich('writeAttr', { a: data(r) });
+  }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+  // ── icons: inline SVG, stroke only ──
+  var NS = 'http://www.w3.org/2000/svg';
+  var PATHS = {
+    key: 'M10 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0z M10 12h11 M17.5 12v3.5 M20.5 12v2.5',
+    inh: 'M9 7a3 3 0 1 1-6 0a3 3 0 1 1 6 0z M9 7h10 M15.5 7v3 M18.5 7v2 M12 12.5v9 M8.5 18l3.5 3.5 3.5-3.5',
+    shield: 'M12 2.5l8 3v6c0 5-3.4 8.6-8 10.5-4.6-1.9-8-5.5-8-10.5v-6z M8.5 12l2.5 2.5 4.5-5',
+    folder: 'M2 6.5h7l2 2.2h11V20H2z',
+    box: 'M3 5h18v15H3z',
+    domain: 'M12 2.5a9.5 9.5 0 1 0 0 19a9.5 9.5 0 1 0 0-19z M2.5 12h19 M12 2.5c3 3 3 16 0 19 M12 2.5c-3 3-3 16 0 19',
+    user: 'M12 12a4 4 0 1 0 0-8a4 4 0 1 0 0 8z M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7'
+  };
+  function icon(name) {
+    var s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'dg-ico');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', PATHS[name]);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', 'currentColor');
+    p.setAttribute('stroke-width', '2');
+    p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
+    s.appendChild(p);
+    return s;
+  }
+
+  // ── left: the tree ──
+  function lastTest(s, u) { var x = s.log.filter(function (e) { return e.user === u; }); return x.length ? x[x.length - 1] : null; }
+  function delegatedRows(s, u) { return L.aclOf(s, u).filter(function (r) { return r.inherited; }); }
+
+  function userRow(c, u, depth, focusUser) {
+    var s = c.state, prev = c.prev, x = s.users[u];
+    var badges = [];
+    var inh = delegatedRows(s, u);
+    if (inh.length) {
+      var froms = inh.map(function (r) { return r.from; }).filter(function (f, i, a) { return a.indexOf(f) === i; });
+      var lbl = t('inhLong', { from: L.container(froms[0]).dn });
+      badges.push(h('span', { class: 'dg-b dg-b-inh', title: lbl, 'aria-label': lbl }, icon('inh')));
+    }
+    if (s.da.indexOf(u) >= 0) badges.push(h('span', { class: 'dg-b dg-b-da', title: t('daLong'), 'aria-label': t('daLong') }, t('daBadge')));
+    if (x.adminCount === 1) badges.push(h('span', { class: 'dg-b dg-b-sh', title: t('shieldLong'), 'aria-label': t('shieldLong') }, icon('shield')));
+    var lt = lastTest(s, u);
+    if (lt) {
+      var v = t(lt.ok ? 'outOk' : 'outNo');
+      badges.push(h('span', { class: 'dg-b ' + (lt.ok ? 'dg-b-ok' : 'dg-b-no'), title: v, 'aria-label': v }, lt.ok ? '✓' : '✕'));
+    }
+    var changed = c.n > 0 && prev && (!same(prev.users[u], x) || (prev.da.indexOf(u) >= 0) !== (s.da.indexOf(u) >= 0) ||
+      !same(delegatedRows(prev, u), inh) ||
+      (s.last && s.last.kind === 'test' && s.last.user === u));
+    return h('li', null, h('button', {
+      type: 'button', class: 'dg-row' + (changed ? ' dg-ch' : ''), style: { '--depth': String(depth) }, dataset: { kind: 'user' },
+      'aria-current': u === focusUser ? 'true' : 'false',
+      onclick: function () { window.simdeck.set({ target: u }); }
+    }, icon('user'), h('span', { class: 'dg-dn' }, data(u)), h('span', { class: 'dg-badges' }, badges)));
+  }
+
+  function treeBox(c, focusUser) {
+    var s = c.state, prev = c.prev;
+    var depth = {};
+    var items = [];
+    L.CONTAINERS.forEach(function (k) {
+      depth[k.id] = k.parent ? depth[k.parent] + 1 : 0;
+      var d = depth[k.id];
+      var own = s.aces[k.id] || [];
+      var newAces = c.n > 0 && prev && !same(prev.aces[k.id] || [], own);
+      var badges = [];
+      if (own.length) {
+        var kl = t('keyLong', { g: L.GROUP });
+        badges.push(h('span', { class: 'dg-b', title: kl, 'aria-label': kl }, icon('key'), data(L.GROUP)));
+      }
+      var from = L.reachedBy(s, k.id);
+      var reachCh = c.n > 0 && prev && k.kind === 'ou' && !same(L.reachedBy(prev, k.id), from);
+      if (from.length && k.kind === 'ou') {
+        var il = t('inhLong', { from: L.container(from[0]).dn });
+        badges.push(h('span', { class: 'dg-b dg-b-inh', title: il, 'aria-label': il }, icon('inh'), t('passesOn')));
+      }
+      items.push(h('li', null, h('div', { class: 'dg-row' + (newAces || reachCh ? ' dg-ch' : ''), style: { '--depth': String(d) }, dataset: { kind: k.kind } },
+        icon(k.kind === 'domain' ? 'domain' : k.kind === 'ou' ? 'folder' : 'box'), h('span', { class: 'dg-dn' }, data(k.dn)),
+        h('span', { class: 'dg-badges' }, badges))));
+      if (own.length) {
+        items.push(h('li', null, h('ul', { class: 'dg-aces', style: { '--depth': String(d) } }, own.map(function (a) {
+          return h('li', { class: newAces ? 'dg-ch' : null }, icon('key'),
+            rich('aceLine', { g: data(a.trustee), r: rightName(a.right), ap: h('span', null, t(a.appliesTo === 'users' ? 'apUsers' : 'apThis')) }));
+        }))));
+      }
+      L.USERS.filter(function (u) { return s.users[u].container === k.id; }).forEach(function (u) { items.push(userRow(c, u, d + 1, focusUser)); });
+    });
+    return h('section', { class: 'dg-box' }, h('h2', null, t('treeTitle'), ' ', h('span', { class: 'dg-sub' }, data('quillmoor.example'))),
+      h('ul', { class: 'dg-tree' }, items));
+  }
+
+  function groupsBox(c) {
+    var s = c.state, prev = c.prev;
+    var da = s.da.slice().concat(s.helpdeskInDA ? [L.GROUP] : []);
+    var daCh = c.n > 0 && prev && (!same(prev.da, s.da) || prev.helpdeskInDA !== s.helpdeskInDA);
+    function line(g, m, changed) {
+      return h('div', { class: 'dg-grp' + (changed ? ' dg-ch' : '') },
+        rich('members', { g: h('b', { translate: 'no' }, g), m: m.length ? data(m.join(', ')) : h('span', null, t('noMembers')) }));
+    }
+    return h('section', { class: 'dg-box dg-groups' }, h('h2', null, t('groupsTitle')),
+      line(L.DA, da, daCh), line(L.GROUP, [L.TESTER], false));
+  }
+
+  // ── right: try as hd-mia ──
+  function tryBox(c, f, chk) {
+    var s = c.state;
+    var sids = L.sidsOf(s).map(function (x) { return h('span', { class: 'dg-sid', dataset: { k: x === L.DA ? 'da' : 'sid' }, translate: 'no' }, x); });
+    return h('section', { class: 'dg-box dg-try' },
+      h('h2', null, rich('tryTitle', { u: data(L.TESTER) })),
+      h('span', { class: 'dg-token' }, h('span', { class: 'dg-sub' }, t('token')), sids),
+      h('div', { class: 'dg-act' }, h('b', null, rich(f.action === 'unlock' ? 'actUnlock' : 'actReset', { u: data(f.user) })),
+        h('span', { class: 'dg-mode', dataset: { k: f.tested ? 'tested' : 'preview' } }, t(f.tested ? 'tested' : 'preview')),
+        h('span', { class: 'dg-sub' }, rich('needs', { r: rightName(chk.need) }))));
+  }
+
+  function srcCell(r) {
+    if (r.inherited) return h('span', { class: 'dg-src' }, icon('inh'), rich('srcFrom', { c: dn(r.from) }));
+    return h('span', { class: 'dg-src' }, icon('key'), h('span', null, t(r.from === 'adminsdholder' ? 'srcSdh' : 'srcDefault')));
+  }
+  function rowKey(r) { return [r.trustee, r.type, r.right, r.inherited, r.from].join('|'); }
+
+  function aclTable(c, f, chk) {
+    var s = c.state, u = s.users[f.user];
+    var prevKeys = null;
+    if (c.n > 0 && c.prev) prevKeys = L.aclOf(c.prev, f.user).map(rowKey);
+    var table = RT({
+      mode: 'first',
+      title: rich('aclTitle', { u: data(f.user), c: dn(u.container) }),
+      columns: [{ key: 'who', label: t('colTrustee') }, { key: 'right', label: t('colRight') },
+        { key: 'ap', label: t('colApplies'), wrap: true }, { key: 'src', label: t('colSource'), wrap: true }],
+      actionLabel: t('colType'),
+      markLabel: data(L.TESTER),
+      rows: chk.rows.map(function (r, i) {
+        var tw = t(r.type === 'deny' ? 'deny' : 'allow');
+        return {
+          no: i + 1,
+          cells: { who: r.trustee, right: rightName(r.right), ap: h('span', null, t(r.appliesTo === 'users' ? 'apUsers' : 'apThis')), src: srcCell(r) },
+          action: h('span', { class: 'dg-type', title: tw, 'aria-label': tw }, r.type === 'deny' ? '✕' : '✓'), effect: r.type,
+          hit: r.match
+        };
+      }),
+      implicit: { text: t('implicit'), action: h('span', { class: 'dg-type', title: t('outNo'), 'aria-label': t('outNo') }, '✕'), effect: 'deny' },
+      at: 'all',
+      done: true,
+      outcome: function () { return RT.verdict(chk.ok, t(chk.ok ? 'outOk' : 'outNo')); },
+      words: { win: t('wordWin'), skip: t('wordSkip') },
+      stickyMark: true
+    });
+    var trs = table.querySelectorAll('tbody tr');
+    chk.rows.forEach(function (r, i) {
+      if (!trs[i]) return;
+      if (r.inherited) trs[i].classList.add('dg-inh');
+      if (prevKeys && prevKeys.indexOf(rowKey(r)) < 0) trs[i].classList.add('dg-new');
+    });
+    var status = h('div', { class: 'dg-status' },
+      u.adminCount === 1 ? h('span', { class: 'dg-off' }, icon('shield'), ' ', t('inhOff')) : h('span', null, icon('inh'), ' ', t('inhOn')));
+    return [status, table];
+  }
+
+  function logBox(c) {
+    var s = c.state;
+    var items = s.log.map(function (x, i) {
+      var now = i === s.log.length - 1 && s.last && s.last.kind === 'test';
+      return h('li', { class: now ? 'dg-ch' : null, dataset: { ok: String(x.ok) } }, data(x.user),
+        h('span', null, t(x.action === 'unlock' ? 'logUnlock' : 'logReset')), h('b', { 'aria-label': t(x.ok ? 'outOk' : 'outNo') }, x.ok ? '✓' : '✕'));
+    });
+    return h('div', { class: 'dg-box dg-log' }, h('b', null, t('logTitle')), items.length ? h('ol', null, items) : h('span', { class: 'dg-empty' }, t('logEmpty')));
+  }
+
+  // ── captions ──
+  function delegatedOus(s) { return L.CONTAINERS.filter(function (k) { return (s.aces[k.id] || []).length; }).map(function (k) { return k.id; }); }
+  function ouList(ids) { return data(ids.map(function (id) { return L.container(id).dn; }).join(', ')); }
+
+  function capStart(c) {
+    var p = c.params, s = c.state;
+    var ou = dn(p.scope);
+    var v = { t: data(L.TESTER), g: data(L.GROUP), da: data(L.DA), ou: ou };
+    switch (p.scenario) {
+      case 'narrow': return rich('capStartNarrow', v);
+      case 'protected-admin': return rich('capStartProtected', Object.assign(v, { u: data('tbrennan-adm'), c: dn(s.users['tbrennan-adm'].container) }));
+      case 'move-user': return rich('capStartMove', Object.assign(v, { u: data('aashdown'), to: dn('disabled') }));
+      case 'quillmoor': return rich('capStartQuillmoor', v);
+      default: return rich('capStartStaff', v);
+    }
+  }
+
+  function whyNot(c, e) {
+    var s = c.state, u = s.users[e.user];
+    var v = { u: data(e.user), c: dn(u.container), g: data(L.GROUP), da: data(L.DA) };
+    if (e.decider && e.decider.type === 'deny') return rich('capDenied', { g: data(e.decider.trustee), r: rightName(e.decider.right) });
+    if (e.action === 'unlock' && L.check(s, e.user, 'reset').ok) return rich('capWhyUnlock', { a: data('lockoutTime'), r: data('Reset Password'), b: data('pwdLastSet') });
+    if (u.adminCount === 1) return rich('capWhyProtected', v);
+    var ous = delegatedOus(s);
+    if (!ous.length) return rich('capNoneYet');
+    var home = L.initial(c.params).users[e.user].container;
+    var wasIn = ous.filter(function (o) { return L.ancestors(home).indexOf(o) >= 0; });
+    if (home !== u.container && wasIn.length) return rich('capWhyMoved', Object.assign(v, { ou: ouList(wasIn) }));
+    return rich('capWhyOutside', Object.assign(v, { ou: ouList(ous) }));
+  }
+
+  function capTest(c, e) {
+    var s = c.state;
+    var verdict = RT.verdict(e.ok, t(e.ok ? 'outOk' : 'outNo'));
+    var out = [rich(e.action === 'unlock' ? 'capTryUnlock' : 'capTryReset', { t: data(L.TESTER), u: data(e.user), v: verdict })];
+    if (e.ok) {
+      var d = e.decider;
+      if (d.trustee === L.DA) out.push(rich('capOkDa', { da: data(L.DA), src: h('span', null, t(d.from === 'adminsdholder' ? 'srcSdh' : 'srcDefault')) }));
+      else out.push(rich('capOkInh', { g: data(d.trustee), r: rightName(d.right), from: dn(d.from) }));
+      if (d.inherited && s.da.indexOf(e.user) >= 0 && s.users[e.user].adminCount !== 1) out.push(rich('capOkEdge', { u: data(e.user), da: data(L.DA) }));
+    } else {
+      out.push(whyNot(c, e));
+    }
+    return out;
+  }
+
+  function capPanel(c) {
+    var p = c.params, chk = L.check(c.state, p.target, 'reset');
+    return rich('capPanel', { u: data(p.target), v: h('span', null, t(chk.ok ? 'capPanelOk' : 'capPanelNo')) });
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.last, p = c.params;
+    if (!e) return capStart(c);
+    var out = [];
+    if (e.kind === 'test') out = capTest(c, e);
+    else if (e.kind === 'wizard') out = [rich('capWizard', { ou: dn(e.ou), g: data(L.GROUP) }),
+      rich(L.CONTAINERS.some(function (k) { return k.parent === e.ou && k.kind === 'ou'; }) ? 'capWizardMore' : 'capWizardLeaf', { a: data('pwdLastSet'), ou: dn(e.ou) })];
+    else if (e.kind === 'daAdd') out = [rich('capDaAdd', { u: data(e.user), da: data(L.DA) })];
+    else if (e.kind === 'sdprop') out = e.stamped.length ? e.stamped.map(function (u) { return rich(delegatedRows(c.prev, u).length ? 'capSdprop' : 'capSdpropOff', { u: data(u) }); }) : [rich('capSdpropNone')];
+    else if (e.kind === 'daRemoveHelpdesk') out = [rich('capDaRemove', { g: data(L.GROUP), da: data(L.DA), t: data(L.TESTER) })];
+    else if (e.kind === 'move') {
+      var from = L.ancestors(e.from).filter(function (o) { return (s.aces[o] || []).length; });
+      out = [rich('capMove', { u: data(e.user), from: dn(e.from), to: dn(e.to), ou: from.length ? ouList(from) : dn(p.scope) })];
+    }
+    if (e.kind !== 'test') out.push(capPanel(c));
+    var joined = [];
+    out.forEach(function (x, i) { if (i) joined.push(' '); joined.push(x); });
+    return joined;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    steps: L.steps,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('pScenario'), options: L.SCENARIOS.map(function (id) { return [id, t(PRESET_KEY[id])]; }),
+        visible: function () { return false; }, resets: true },
+      { key: 'scope', type: 'choice', label: t('pScope'), hint: t('pScopeHint'), options: [['staff', data('OU=Staff')], ['brack', data('OU=Brackenridge')]] },
+      { key: 'target', type: 'choice', label: t('pTarget'), hint: t('pTargetHint'), options: L.USERS.map(function (u) { return [u, data(u)]; }) }
+    ],
+
+    presets: [
+      { id: 'delegate-staff', label: t('presetStaff'), hint: t('presetStaffHint'), params: { scenario: 'delegate-staff', scope: 'staff', target: 'aashdown' } },
+      { id: 'narrow', label: t('presetNarrow'), hint: t('presetNarrowHint'), params: { scenario: 'narrow', scope: 'brack', target: 'eyardley' } },
+      { id: 'protected-admin', label: t('presetProtected'), hint: t('presetProtectedHint'), params: { scenario: 'protected-admin', scope: 'staff', target: 'tbrennan-adm' } },
+      { id: 'move-user', label: t('presetMove'), hint: t('presetMoveHint'), params: { scenario: 'move-user', scope: 'staff', target: 'aashdown' } },
+      { id: 'quillmoor', label: t('presetQuillmoor'), hint: t('presetQuillmoorHint'), params: { scenario: 'quillmoor', scope: 'staff', target: 'aashdown' } }
+    ],
+
+    legend: [
+      { shape: 'dg-key', label: t('legExplicit') },
+      { shape: 'dg-inh', label: t('legInherited') },
+      { shape: 'dg-sh', label: t('legProtected') },
+      { shape: 'rt-verdict', label: t('legVerdict') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var f = L.focus(c.state, c.params);
+      var chk = L.check(c.state, f.user, f.action);
+      c.stage.replaceChildren(h('div', { class: 'dg' },
+        h('div', { class: 'dg-col' }, treeBox(c, f.user), groupsBox(c)),
+        h('div', { class: 'dg-col' }, tryBox(c, f, chk), aclTable(c, f, chk), logBox(c))));
+    },
+
+    caption: caption
+  });
+
+  // The legend's icons (the kit draws plain swatches; the page adds its icons once).
+  [['dg-key', 'key'], ['dg-inh', 'inh'], ['dg-sh', 'shield']].forEach(function (x) {
+    var sw = document.querySelector('[data-sd-legend] .sd-swatch[data-shape="' + x[0] + '"]');
+    if (sw && !sw.firstChild) sw.appendChild(icon(x[1]));
+  });
+})();
+</script>
+</body>
+</html>
