@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **385 of 477 entries are live**, 64 w3, 17 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **386 of 477 entries are live**, 64 w3, 16 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 54 | 1 w3 · building |
+| §4.4 Linux | 55 | 55 | – |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -350,7 +350,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.6 Storage, backup and disaster recovery | 22 | 20 | 2 w3 |
 | §4.7 High availability and distributed systems | 13 | 8 | 5 w3 |
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
-| §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 5 w3, 1 w3 · queued |
+| §4.9 Computer architecture, OS gaps and automata | 8 | 2 | 5 w3, 1 w3 · building |
 | §4.10 Radio and crisis communications | 17 | 13 | 4 w3 |
 | §4.11 Reference posters and classroom tools | 6 | 6 | – |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
@@ -592,7 +592,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-netns-veth-bridge` | live | Namespaces, veth and a bridge | how container networking is wired by hand | connect two namespaces step by step | step | M | P2 | NLA | NLA T06–08 |  |
 | `lnx-netfilter-path` | live | A packet through netfilter | prerouting, input, forward, output, postrouting; where NAT and filter happen | send inbound, forwarded and local packets | step | M | P1 | NLA | NLA T08 → §5.1 |  |
 | `lnx-policy-routing` | live | Policy routing | `ip rule` picks a table before the route lookup | add rules and tables, send from two sources | step | S | P3 | NLA | NLA T05 |  |
-| `lnx-bonding-modes` | w3 · building | Bonding modes | active-backup vs balance vs 802.3ad | fail links, send flows | expl | S | P3 | NLA | NLA T06 → `net-link-aggregation` |  |
+| `lnx-bonding-modes` | live | Bonding modes | active-backup vs balance vs 802.3ad | fail links, send flows | expl | S | P3 | NLA | NLA T06 → `net-link-aggregation` |  |
 | `lnx-lvm-snapshot` | live | LVM snapshot filling up | CoW snapshot space and invalidation when full | write to the origin, watch the snapshot fill | step | S | P2 | NLA | NLA T20 → §5.2 |  |
 | `lnx-thin-overcommit` | live | Thin provisioning and overcommit | promised vs real space; the pool fills under everyone | create thin volumes, write, run out | expl | S | P2 | NLA, DR | NLA T20 → §5.2 |  |
 | `lnx-cow-filesystem` | live | Copy-on-write filesystems | snapshots share blocks; writes go to new blocks | write, snapshot, write, see shared and owned blocks | step | S | P2 | NLA | NLA T22–23 → §5.2 |  |
@@ -795,7 +795,7 @@ ossimulator covers the OS course; these fill small gaps or extend the imported a
 | `arh-mesi` | w3 | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` |  |
 | `arh-twos-complement` | w3 | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH |  |  |
 | `arh-floating-point` | w3 | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH |  |  |
-| `arh-endianness` | w3 · queued | Endianness | byte order in memory and on the wire | write values, read them as bytes | expl | S | P3 | ARH, URM |  |  |
+| `arh-endianness` | w3 · building | Endianness | byte order in memory and on the wire | write values, read them as bytes | expl | S | P3 | ARH, URM |  |  |
 | `os-context-switch-cost` | w3 | What a context switch costs | saved state, TLB and cache warmup | switch at different rates | expl | S | P3 | OS | ossim covers mode vs process switch |  |
 | `aut-regex-to-nfa` | w3 | Regex to NFA to DFA | Thompson construction and subset construction | type a regex, step the constructions | step | M | P3 | AUT | pairs with `spl-automata`, `lnx-regex-match` |  |
 
