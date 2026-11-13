@@ -46,6 +46,9 @@
       mNone: 'nema',
       mZero: 'zaboravljena 0',
       mDropped: 'ostatak izgubljen',
+      layout: 'Zapis',
+      layShort: 'kraći način',
+      layLong: 'dulji način',
 
       // presets
       pThree: 'Troznamenkasti djeljenik',
@@ -60,6 +63,10 @@
       pTwoHint: '9876 : 12',
       pBin: 'Baza 2',
       pBinHint: '101110 : 101: stane ili ne stane',
+      pLong: 'Dulji način',
+      pLongHint: '846 : 3, s potpisanim umnošcima',
+      pLongTwo: 'Dulji način s procjenom',
+      pLongTwoHint: '5517 : 28: dvoznamenkasti djelitelj, procjena',
 
       // legend
       legBand: 'na čemu radim',
@@ -83,6 +90,7 @@
       cellRest: 'ostatak {v}',
       cellDown: 'spuštena znamenka {v}',
       cellQuot: 'znamenka količnika {v}',
+      cellProd: 'djelomični umnožak {v}',
 
       // place units, with counts (plural forms)
       u0: ['{n} jedinica', '{n} jedinice', '{n} jedinica'],
@@ -112,6 +120,14 @@
       boxInBase: 'brojevi u bazi {b}',
       invHead: 'Što je već podijeljeno',
       invNames: 'djeljenik = djelitelj · podijeljeno + još dijelim',
+      // the estimate (a two-digit divisor)
+      estRound: 'Zaokružujem na desetice: {n} ≈ {nr}, {d} ≈ {dr}.',
+      estAsk: 'Procijeni, pa provjeri množenjem.',
+      estLine: 'Procjena: {nr} : {dr} = {e}. Provjeravam množenjem:',
+      estLineBig: 'Procjena: {nr} : {dr} = {e}, a to nije znamenka: probam 9.',
+      boxSmall: 'premalo',
+      estLabel: 'Probe procjene: kad je previše, smanjujem za 1; kad je premalo, povećavam za 1; dok ne stane.',
+      estKey: '✓ stane · ✗ previše · ↑ premalo (ostatak nije manji od djelitelja)',
 
       // mistake card
       mtHead: 'Tipična pogreška',
@@ -143,6 +159,8 @@
       askFirstC: '{lead} je premalo. Uzimam {n}.',
       askC: 'Koliko puta {d} stane u {n}? {q} puta. Pišem {q}.',
       askZeroC: '{d} ne stane u {n}. Pišem 0.',
+      estT: 'Procjena: {nr} : {dr} = {e}; probam {tries}.',
+      estA: 'Procjenjujem zaokruženim brojevima: {nr} : {dr} = {e}. Procjena je proba: provjerim je množenjem i popravim za 1 ({tries}).',
 
       // captions: multiply and subtract (sub)
       subT: '{q} · {d} = {p}, {n} − {p} = {r}.',
@@ -151,6 +169,14 @@
       subZeroA: '0 · {d} = 0: ništa se ne oduzima, ostatak je {ru}.',
       subC: '{q} puta {d} je {p}. Od {p} do {n} je {r}.',
       subZeroC: '0 puta {d} je 0. Ostaje {r}.',
+      subLongT: '{q} · {d} = {p}, potpisujem {p} ispod {n}; {n} − {p} = {r}.',
+      subLastLongT: '{q} · {d} = {p}, potpisujem {p} ispod {n}; {n} − {p} = {r}: ostatak je {r}.',
+      subLongA: '{q} · {d} = {p}. Potpisujem {pu} ispod {nu} i oduzimam pismeno: ostatak je {ru}. {r} je manje od {d}, pa {d} ne stane još jednom.',
+      subZeroLongA: '0 · {d} = 0: potpisujem 0, ništa se ne oduzima, ostatak je {ru}.',
+      subLongC: '{q} puta {d} je {p}. Pišem {p} ispod {n}. {n} manje {p} je {r}.',
+      subZeroLongC: '0 puta {d} je 0. Pišem 0. Ostaje {r}.',
+      shortWhyA: 'Kraći način umnožak ne piše: oduzimanje {n} − {p} radi se u glavi, pa se piše samo ostatak.',
+      longWhyA: 'Dulji način piše umnožak da se oduzimanje vidi; kraći ga radi u glavi i piše samo ostatak.',
 
       // captions: bring down (down)
       downT: 'Spuštam {x}: {m}.',
@@ -182,9 +208,14 @@
         'za svako mjesto, pa pišem 0. Bez nje bi 2 stotice postale 2 desetice: 26 umjesto 206.</p>' +
         '<p><b>Ostatak</b> je uvijek manji od djelitelja; da nije, djelitelj bi stao još jednom. Provjera: količnik · ' +
         'djelitelj + ostatak = djeljenik.</p>' +
-        '<p>U nas pišemo 846 : 3 = 282 i ispod djeljenika samo ostatke, a umnožak izgovorimo. U nekim zemljama se ' +
-        'piše drukčije i umnošci se zapisuju; postupak je isti. U bazi 2 znamenka količnika je 0 ili 1: djelitelj ' +
-        'stane ili ne stane.</p>'
+        '<p><b>Dva zapisa.</b> Pisano dijeljenje uvodi se na dulji način, s potpisivanjem djelomičnoga umnoška: ispod ' +
+        'broja koji dijelim pišem umnožak s minusom, povučem crtu i oduzmem. Kraći način umnožak ne piše: oduzimanje se ' +
+        'radi u glavi i piše se samo ostatak. Koraci su isti; kraći način preporučuje se kad ga učenik svlada.</p>' +
+        '<p><b>Dvoznamenkasti djelitelj:</b> djelomični količnik procjenjujem. 98 : 12: zaokružim na desetice, 100 : 10 = 10; ' +
+        'to nije znamenka, pa probam 9: 9 · 12 = 108 je previše; 8 · 12 = 96 stane. Ako ostatak nije manji od djelitelja, ' +
+        'procjena je premala i povećam je za 1.</p>' +
+        '<p>U nekim zemljama se piše drukčije (dijeljenje „u zagradi”); postupak je isti. U bazi 2 znamenka količnika je 0 ' +
+        'ili 1: djelitelj stane ili ne stane.</p>'
     },
     en: {
       stage: 'Long division',
@@ -223,6 +254,9 @@
       mNone: 'none',
       mZero: 'a 0 forgotten',
       mDropped: 'remainder dropped',
+      layout: 'Layout',
+      layShort: 'shorter way',
+      layLong: 'longer way',
 
       // presets
       pThree: 'Three-digit dividend',
@@ -237,6 +271,10 @@
       pTwoHint: '9876 : 12',
       pBin: 'Base 2',
       pBinHint: '101110 : 101: it fits or it does not',
+      pLong: 'Longer way',
+      pLongHint: '846 : 3, the products written',
+      pLongTwo: 'Longer way, estimate',
+      pLongTwoHint: '5517 : 28: a two-digit divisor, an estimate',
 
       // legend
       legBand: 'what this step works on',
@@ -260,6 +298,7 @@
       cellRest: 'remainder {v}',
       cellDown: 'digit brought down {v}',
       cellQuot: 'quotient digit {v}',
+      cellProd: 'partial product {v}',
 
       // place units, with counts (plural forms)
       u0: ['{n} one', '{n} ones'],
@@ -289,6 +328,14 @@
       boxInBase: 'numbers in base {b}',
       invHead: 'What is divided so far',
       invNames: 'dividend = divisor · divided + still to divide',
+      // the estimate (a two-digit divisor)
+      estRound: 'Round to the tens: {n} ≈ {nr}, {d} ≈ {dr}.',
+      estAsk: 'Estimate, then check by multiplying.',
+      estLine: 'Estimate: {nr} : {dr} = {e}. Check by multiplying:',
+      estLineBig: 'Estimate: {nr} : {dr} = {e}, which is not a digit: try 9.',
+      boxSmall: 'too small',
+      estLabel: 'Tries of the estimate: too big, go down by 1; too small, go up by 1; until it fits.',
+      estKey: '✓ fits · ✗ too big · ↑ too small (the remainder is not less than the divisor)',
 
       // mistake card
       mtHead: 'Typical mistake',
@@ -320,6 +367,8 @@
       askFirstC: '{lead} is too small. Take {n}.',
       askC: 'How many times does {d} go into {n}? {q} times. Write {q}.',
       askZeroC: '{d} does not go into {n}. Write 0.',
+      estT: 'Estimate: {nr} : {dr} = {e}; try {tries}.',
+      estA: 'Estimate with rounded numbers: {nr} : {dr} = {e}. The estimate is a try: check it by multiplying and correct it by 1 ({tries}).',
 
       // captions: multiply and subtract (sub)
       subT: '{q} · {d} = {p}, {n} − {p} = {r}.',
@@ -328,6 +377,14 @@
       subZeroA: '0 · {d} = 0: nothing is taken away, the remainder is {ru}.',
       subC: '{q} times {d} is {p}. From {p} to {n} is {r}.',
       subZeroC: '0 times {d} is 0. {r} is left.',
+      subLongT: '{q} · {d} = {p}, write {p} under {n}; {n} − {p} = {r}.',
+      subLastLongT: '{q} · {d} = {p}, write {p} under {n}; {n} − {p} = {r}: the remainder is {r}.',
+      subLongA: '{q} · {d} = {p}. Write the {pu} under the {nu} and subtract on paper: the remainder is {ru}. {r} is less than {d}, so {d} does not go in once more.',
+      subZeroLongA: '0 · {d} = 0: write 0, nothing is taken away, the remainder is {ru}.',
+      subLongC: '{q} times {d} is {p}. Write {p} under {n}. {n} take away {p} is {r}.',
+      subZeroLongC: '0 times {d} is 0. Write 0. {r} is left.',
+      shortWhyA: 'The shorter way does not write the product: the subtraction {n} − {p} is done in the head, so only the remainder is written.',
+      longWhyA: 'The longer way writes the product so the subtraction can be seen; the shorter way does it in the head and writes only the remainder.',
 
       // captions: bring down (down)
       downT: 'Bring down {x}: {m}.',
@@ -359,9 +416,15 @@
         'digit for every place, so write 0. Without it the 2 hundreds would become 2 tens: 26 instead of 206.</p>' +
         '<p><b>The remainder</b> is always less than the divisor; otherwise the divisor would go in once more. Check: ' +
         'quotient · divisor + remainder = dividend.</p>' +
-        '<p>This page uses the Croatian layout: 846 : 3 = 282 on one line, only the remainders under the dividend, the ' +
-        'products said aloud. English-speaking schools write the bracket and the products; the steps are the same. In ' +
-        'base 2 a quotient digit is 0 or 1: the divisor fits or it does not.</p>'
+        '<p><b>Two layouts.</b> Croatian schools introduce long division the longer way, with the partial product written: ' +
+        'under the number being divided goes the product with a minus sign, a rule, and the subtraction. The shorter way ' +
+        'leaves the product out: the subtraction is done in the head and only the remainder is written. The steps are ' +
+        'the same; the shorter way is recommended once a pupil can do it.</p>' +
+        '<p><b>A two-digit divisor:</b> estimate the partial quotient. 98 : 12: round to the tens, 100 : 10 = 10; that is ' +
+        'not a digit, so try 9: 9 · 12 = 108 is too big; 8 · 12 = 96 fits. If the remainder is not less than the divisor, ' +
+        'the estimate was too small: go up by 1.</p>' +
+        '<p>Both layouts keep 846 : 3 = 282 on one line. English-speaking schools write the bracket; the steps are the ' +
+        'same. In base 2 a quotient digit is 0 or 1: the divisor fits or it does not.</p>'
     }
   };
 

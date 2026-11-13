@@ -41,6 +41,9 @@
     },
     {
       "preset": "base-2"
+    },
+    {
+      "preset": "long-two-digit"
     }
   ]
 }
@@ -86,6 +89,9 @@
 [data-sim="ari-long-division"] .ld-mult [data-fit='no'] { color: var(--muted); }
 [data-sim="ari-long-division"] .ld-mult [data-fit='no'] .ld-v { text-decoration: line-through 0.1em; }
 [data-sim="ari-long-division"] .ld-mult .ld-cur { border-color: var(--ink); background: color-mix(in srgb, var(--c1) 18%, var(--bg)); font-weight: 700; }
+[data-sim="ari-long-division"] .ld-mult [data-fit='low'] { color: var(--muted); }
+[data-sim="ari-long-division"] .ld-mult .ld-then { align-self: center; font-weight: 700; }
+[data-sim="ari-long-division"] .ld-est { font-size: 1.1em; }
 [data-sim="ari-long-division"] .ld-rest { font-size: 1.15em; }
 [data-sim="ari-long-division"] .ld-inv { margin-top: auto; padding-top: 0.4em; border-top: var(--line-w) solid var(--line); }
 [data-sim="ari-long-division"] .ld-invline { font-family: var(--mono); font-size: 1.1em; padding: 0.05em 0.3em; display: inline-block; border: max(3px, 0.2rem) solid transparent; border-radius: var(--radius); }
@@ -116,6 +122,11 @@
 [data-sim="ari-long-division"] .ld-quick button { min-height: 2.4rem; font-family: var(--mono); }
 [data-sim="ari-long-division"] .ld-quick button[aria-disabled='true'] { opacity: 0.45; text-decoration: line-through; }
 
+/* eight presets in two columns, the layout switch on one row: the panel fits at 1920×1080 */
+[data-sim="ari-long-division"] [data-sd-presets] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="ari-long-division"] .sd-preset { line-height: 1.15; }
+[data-sim="ari-long-division"] .sd-ctl[data-key='layout'] { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.3rem 0.6rem; }
+
 /* the hidden params (the numbers, set from the field) keep their wrapper hidden */
 [data-sim="ari-long-division"] .sd-ctl[hidden] { display: none; }
 
@@ -130,6 +141,7 @@
   [data-sim="ari-long-division"] .ld-mult { overflow-x: auto; }
   [data-sim="ari-long-division"] .ld-invline { white-space: normal; overflow-wrap: anywhere; }
   [data-sim="ari-long-division"] .ld-mc { display: flex; flex-direction: column; }
+  [data-sim="ari-long-division"] [data-sd-presets] .sd-presets { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -177,7 +189,7 @@
   var sim = null;
 
   var PRESET_KEY = { 'three-digit': 'pThree', 'first-two': 'pFirst', zero: 'pZero', remainder: 'pRem',
-    'two-digit': 'pTwo', 'base-2': 'pBin' };
+    'two-digit': 'pTwo', 'base-2': 'pBin', long: 'pLong', 'long-two-digit': 'pLongTwo' };
   var MISTAKE_KEY = { none: 'mNone', zero: 'mZero', dropped: 'mDropped' };
   var MISTAKE_TITLE = { zero: 'mtZero', dropped: 'mtDropped' };
   var QUICK = [2, 8, 10, 16];
@@ -257,22 +269,32 @@
 
   // ── the paper (kit view K5) ──
   function paper(c, plan) {
-    var s = c.state, b = c.params.base;
+    var s = c.state, p = c.params, b = p.base;
     var G = geo(plan);
+    var W = L.workingOf(p);
     var quotCells = s.quot.map(function (q, i) {
       return { text: L.DIGITS[q], now: s.phase === 'ask' && s.i === i, label: t('cellQuot', { v: L.DIGITS[q] }) };
     });
     var rows = [lineRow(plan, quotCells)];
-    plan.steps.forEach(function (st, i) {
-      var r = s.rows[i];
+    W.rows.forEach(function (wr) {
+      var i = wr.i, r = s.rows[i];
       // a row not written yet keeps its height with a blank square (an empty row would collapse)
       if (!r.rest) { rows.push({ cells: [' '] }); return; }
+      var now = s.phase === 'sub' && s.i === i;
+      if (wr.role === 'prod') {
+        // the longer way: the partial product under the number, the minus in the square left of the number
+        var prodText = rowText(wr.digits);
+        var cells = wr.digits.map(function (d) { return { text: L.DIGITS[d], now: now, label: t('cellProd', { v: prodText }) }; });
+        while (cells.length < wr.minus - wr.end) cells.push(null);
+        cells.push('−');
+        rows.push({ at: wr.end, cells: cells });
+        return;
+      }
       var restText = rowText(r.rest);
-      var rest = r.rest.map(function (d) {
-        return { text: L.DIGITS[d], now: s.phase === 'sub' && s.i === i, label: t('cellRest', { v: restText }) };
-      });
+      var rest = r.rest.map(function (d) { return { text: L.DIGITS[d], now: now, label: t('cellRest', { v: restText }) }; });
       var down = r.down == null ? null : { text: L.DIGITS[r.down], now: s.phase === 'down' && s.i === i, label: t('cellDown', { v: L.DIGITS[r.down] }) };
-      var row = workRow(st.end, rest, down);
+      var row = workRow(wr.end, rest, down);
+      if (wr.rule) row.rule = wr.rule;
       if (i === plan.Q - 1) row.kind = 'result';
       rows.push(row);
     });
@@ -280,21 +302,19 @@
     var band = [];
     if (s.phase !== 'start') {
       var st = plan.steps[s.i];
-      var numRow = s.i === 0 ? 0 : s.i;
-      // the number divided: on the line (digit 0) or the remainder before it and the digit brought down
-      var numLo = st.end, numHi = s.i === 0 ? plan.n - 1 : st.end + L.digitsOf(plan.steps[s.i - 1].rest, b).length;
+      var numRow = W.numRow[s.i];
       if (s.phase === 'ask' || s.phase === 'sub') {
-        var to = s.phase === 'sub' ? s.i + 1 : numRow;
-        for (var k = numLo; k <= numHi; k++) band.push({ k: k, from: numRow, to: to });
+        var to = s.phase === 'sub' ? W.restRow[s.i] : numRow;
+        for (var k = st.end; k <= W.hi[s.i]; k++) band.push({ k: k, from: numRow, to: to });
         for (var j = 0; j < G.e; j++) band.push({ k: -2 - j, from: 0, to: 0 });
         band.push({ k: G.qAt(s.i), from: 0, to: 0 });
       } else {
-        band.push({ k: st.end - 1, from: 0, to: s.i + 1 });
+        band.push({ k: st.end - 1, from: 0, to: W.restRow[s.i] });
       }
     }
     var pl = placeLabels(b, plan.n);
     return P({
-      cols: plan.n, right: G.right, big: audience === 'child', label: t('paper'),
+      cols: W.cols, right: G.right, big: audience === 'child', label: t('paper'),
       places: pl.labels, placeTitles: pl.titles, band: band, rows: rows
     });
   }
@@ -311,19 +331,41 @@
       h('span', { class: 'ld-small' }, asking ? t('boxNext') : b !== 10 ? t('boxInBase', { b: b }) : ''))];
     // the question lists every digit's multiple, unmarked (stopping at q + 1 would give the answer away);
     // the answer stops at the first that is too big, each marked ✓ or ✗ (and struck): never colour alone
-    var ms = asking
-      ? Array.apply(null, Array(b - 1)).map(function (x, i) { return { k: i + 1, value: (i + 1) * plan.d }; })
-      : L.multiplesOf(p, j);
-    if (!asking && st.q === 0) ms = [{ k: 0, value: 0, fits: true }].concat(ms);
-    kids.push(h('div', { class: 'ld-mult', role: 'img', 'aria-label': t('boxLabel') },
-      ms.map(function (m) {
-        var cur = !asking && m.k === st.q;
-        return h('div', { class: cur ? 'ld-cur' : null, dataset: asking ? {} : { fit: m.fits ? 'yes' : 'no' } },
-          h('span', { translate: 'no' }, L.DIGITS[m.k] + '·' + L.textOf(plan.d, b) + '='),
-          h('span', { class: 'ld-v', translate: 'no' }, L.textOf(m.value, b)),
-          asking ? null : h('span', { class: 'ld-mark', 'aria-label': m.fits ? t('boxFits') : t('boxTooBig') }, m.fits ? '✓' : '✗'));
-      })));
-    if (!asking) kids.push(h('div', { class: 'ld-small' }, t('boxKey')));
+    var est = L.estimateOf(p, j);
+    if (est) {
+      // a two-digit divisor: round both to the tens and estimate; the estimate is a try, corrected by one until it fits
+      kids.push(h('div', { class: 'ld-est' }, tp('estRound', { n: plain(st.num), nr: plain(est.nr), d: plain(plan.d), dr: plain(est.dr) })));
+      if (asking) {
+        kids.push(h('div', { class: 'ld-small' }, t('estAsk')));
+      } else {
+        kids.push(h('div', { class: 'ld-est' }, tp(est.digit ? 'estLine' : 'estLineBig', { nr: plain(est.nr), dr: plain(est.dr), e: plain(est.raw) })));
+        var MARK = { big: '✗', small: '↑', fits: '✓' }, WORD = { big: 'boxTooBig', small: 'boxSmall', fits: 'boxFits' };
+        var chips = [];
+        est.tries.forEach(function (x, n) {
+          if (n) chips.push(h('span', { class: 'ld-then', 'aria-hidden': 'true' }, '→'));
+          chips.push(h('div', { class: x.verdict === 'fits' ? 'ld-cur' : null, dataset: { fit: x.verdict === 'big' ? 'no' : x.verdict === 'small' ? 'low' : 'yes' } },
+            h('span', { translate: 'no' }, x.k + '·' + plan.d + '='),
+            h('span', { class: 'ld-v', translate: 'no' }, String(x.value)),
+            h('span', { class: 'ld-mark', 'aria-label': t(WORD[x.verdict]) }, MARK[x.verdict])));
+        });
+        kids.push(h('div', { class: 'ld-mult', role: 'img', 'aria-label': t('estLabel') }, chips));
+        kids.push(h('div', { class: 'ld-small' }, t('estKey')));
+      }
+    } else {
+      var ms = asking
+        ? Array.apply(null, Array(b - 1)).map(function (x, i) { return { k: i + 1, value: (i + 1) * plan.d }; })
+        : L.multiplesOf(p, j);
+      if (!asking && st.q === 0) ms = [{ k: 0, value: 0, fits: true }].concat(ms);
+      kids.push(h('div', { class: 'ld-mult', role: 'img', 'aria-label': t('boxLabel') },
+        ms.map(function (m) {
+          var cur = !asking && m.k === st.q;
+          return h('div', { class: cur ? 'ld-cur' : null, dataset: asking ? {} : { fit: m.fits ? 'yes' : 'no' } },
+            h('span', { translate: 'no' }, L.DIGITS[m.k] + '·' + L.textOf(plan.d, b) + '='),
+            h('span', { class: 'ld-v', translate: 'no' }, L.textOf(m.value, b)),
+            asking ? null : h('span', { class: 'ld-mark', 'aria-label': m.fits ? t('boxFits') : t('boxTooBig') }, m.fits ? '✓' : '✗'));
+        })));
+      if (!asking) kids.push(h('div', { class: 'ld-small' }, t('boxKey')));
+    }
     if (s.phase === 'sub') {
       kids.push(h('div', { class: 'ld-rest' }, tp('boxRest', { n: plain(L.textOf(st.num, b)), p: plain(L.textOf(st.prod, b)),
         r: plain(L.textOf(st.rest, b)), d: plain(L.textOf(plan.d, b)) })));
@@ -439,16 +481,28 @@
           var lead = Math.floor(st.num / b);
           add(tp('askFirst' + X, { lead: plain(L.textOf(lead, b)), d: dT(), n: nT(), nu: units(b, st.end, st.num) }));
         }
+        var es = X !== 'C' ? L.estimateOf(p, s.i) : null;
+        if (es) {
+          add(tp('est' + X, { nr: plain(es.nr), dr: plain(es.dr), e: plain(es.raw),
+            tries: plain(es.tries.map(function (x) { return x.k; }).join(', ')) }));
+        }
         if (X === 'A') {
           add(tp('askA', { nu: units(b, st.end, st.num), d: dT(), qu: units(b, st.end, st.q), q: qty(st.q, b), p: plain(L.textOf(st.prod, b)),
             n: nT(), q1: qty(st.q + 1, b), p1: plain(L.textOf((st.q + 1) * plan.d, b)) }));
         } else add(tp('ask' + X, { n: nT(), d: dT(), q: plain(L.DIGITS[st.q]) }));
       }
     } else if (s.phase === 'sub') {
-      var args = { q: plain(L.DIGITS[st.q]), d: dT(), p: plain(L.textOf(st.prod, b)), n: nT(), r: plain(L.textOf(st.rest, b)),
-        nu: units(b, st.end, st.num), ru: units(b, st.end, st.rest), pu: units(b, st.end, st.prod) };
-      if (X === 'T') add(tp(s.i === plan.Q - 1 ? 'subLastT' : 'subT', args));
-      else add(tp(st.q === 0 ? 'subZero' + X : 'sub' + X, args));
+      // fresh nodes per sentence: a node appended to a second sentence would leave the first
+      var subArgs = function () {
+        return { q: plain(L.DIGITS[st.q]), d: dT(), p: plain(L.textOf(st.prod, b)), n: nT(), r: plain(L.textOf(st.rest, b)),
+          nu: units(b, st.end, st.num), ru: units(b, st.end, st.rest), pu: units(b, st.end, st.prod) };
+      };
+      var args = subArgs();
+      var lw = p.layout === 'long' ? 'Long' : '';
+      if (X === 'T') add(tp((s.i === plan.Q - 1 ? 'subLast' : 'sub') + lw + 'T', args));
+      else add(tp((st.q === 0 ? 'subZero' : 'sub') + lw + X, args));
+      // the adult view says once why the shorter way can leave the product out
+      if (X === 'A' && s.i === 0) add(tp(lw ? 'longWhyA' : 'shortWhyA', subArgs()));
     } else if (s.phase === 'down') {
       var k = st.end - 1, mv = st.rest * b + st.down;
       if (X === 'A') {
@@ -588,6 +642,8 @@
       { key: 'base', type: 'range', label: t('base'), value: L.defaults.base, min: function (p) { return Math.min(L.MAX_BASE, L.minBase(L.numbersOf(p))); }, max: L.MAX_BASE,
         format: function (v) { return NAMED[v] ? v + ' (' + t(NAMED[v]) + ')' : String(v); },
         visible: function () { return audience !== 'child'; } },
+      { key: 'layout', type: 'choice', label: t('layout'), value: L.defaults.layout,
+        options: L.LAYOUTS.map(function (v) { return [v, t(v === 'long' ? 'layLong' : 'layShort')]; }) },
       { key: 'why', type: 'toggle', label: t('why'), value: L.defaults.why,
         visible: function () { return audience !== 'child'; } },
       { key: 'mistake', type: 'select', label: t('mistake'), value: L.defaults.mistake,

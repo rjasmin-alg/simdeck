@@ -206,6 +206,114 @@ test('limits: dividend 6 digits, divisor 3, divisor not 0; typed input refused w
   assert.deepEqual(logic.parseList('2 2 2', 2), { error: 'digit', at: '2' }, 'a wrong count still names a bad digit first');
 });
 
+// ── the two layouts and the estimate ──
+
+/** The working rows of a layout as [role, numeral, end, minus or down, rule]. */
+const working = (p) => logic.workingOf(p).rows.map((r) => [r.role, logic.textOf(logic.valueOf(r.digits, p.base), p.base) +
+  (r.role === 'rest' && r.down != null ? D[r.down] : ''), r.end, r.role === 'prod' ? r.minus : (r.down == null ? null : r.down),
+  r.rule ? [r.rule.from, r.rule.to] : null]);
+
+test('layout tie-break: short is the default and writes only the remainders, as before', () => {
+  assert.equal(logic.defaults.layout, 'short');
+  const w = logic.workingOf(nums(846, 3));
+  assert.equal(w.cols, 3);
+  assert.deepEqual(w.rows.map((r) => r.role), ['rest', 'rest', 'rest']);
+  assert.ok(w.rows.every((r) => r.rule === null));
+  assert.deepEqual(w.numRow, [0, 1, 2]);
+  assert.deepEqual(w.restRow, [1, 2, 3]);
+  assert.deepEqual(working(nums(846, 3)).map((r) => r[1]), rows(nums(846, 3)), 'the same rows as the plan');
+});
+
+test('layout long: the partial product under the number, a minus left of it, a rule, then the remainder (846 : 3)', () => {
+  const p = nums(846, 3, { layout: 'long' });
+  assert.deepEqual(working(p), [
+    ['prod', '6', 2, 3, null], ['rest', '24', 2, 4, [2, 2]],
+    ['prod', '24', 1, 3, null], ['rest', '06', 1, 6, [2, 1]],
+    ['prod', '6', 0, 2, null], ['rest', '0', 0, null, [1, 0]]]);
+  const w = logic.workingOf(p);
+  assert.equal(w.cols, 4, 'one square left of the dividend for the first minus');
+  assert.deepEqual(w.numRow, [0, 2, 4], 'the number divided: on the line, then on the remainder rows');
+  assert.deepEqual(w.restRow, [2, 4, 6]);
+  assert.deepEqual(w.hi, [2, 2, 1]);
+});
+
+test('layout long: a two-digit divisor and a 0 in the quotient (5517 : 28; 618 : 3 writes −0)', () => {
+  assert.deepEqual(working(nums(5517, 28, { layout: 'long' })).map((r) => r.slice(0, 2).concat([r[2], r[4]])), [
+    ['prod', '28', 2, null], ['rest', '271', 2, [3, 2]], ['prod', '252', 1, null], ['rest', '197', 1, [3, 1]],
+    ['prod', '196', 0, null], ['rest', '1', 0, [2, 0]]]);
+  assert.deepEqual(logic.workingOf(nums(5517, 28, { layout: 'long' })).rows.filter((r) => r.role === 'prod').map((r) => r.minus), [4, 4, 3]);
+  assert.deepEqual(working(nums(618, 3, { layout: 'long' })).filter((r) => r[0] === 'prod').map((r) => r[1]), ['6', '0', '18']);
+  assert.deepEqual(working(nums(2023, 4, { layout: 'long' })).filter((r) => r[0] === 'prod').map((r) => [r[1], r[3]]), [['20', 4], ['0', 3], ['20', 2]],
+    'the first number of two digits: its minus one square further left');
+});
+
+test('layout long: the same steps and states; every product fits under its number and the minus stays on the paper', () => {
+  let seed = 17;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let t = 0; t < 200; t++) {
+    const b = 2 + rnd(15);
+    const p = nums(rnd(b ** 6), 1 + rnd(b ** 3 - 1), { base: b });
+    const q = Object.assign({}, p, { layout: 'long' });
+    assert.equal(logic.steps(q), logic.steps(p));
+    assert.deepEqual(last(q), last(p), 'the state does not depend on the layout');
+    const w = logic.workingOf(q), pl = plan(q);
+    assert.equal(w.rows.length, 2 * pl.Q);
+    for (const r of w.rows) {
+      const st = pl.steps[r.i];
+      if (r.role === 'prod') {
+        assert.equal(logic.valueOf(r.digits, b), st.prod);
+        assert.ok(r.end + r.digits.length - 1 <= w.hi[r.i], 'the product is no wider than the number');
+        assert.ok(r.minus === w.hi[r.i] + 1 && r.minus < w.cols, 'the minus left of the number, on the paper');
+      } else {
+        assert.equal(logic.valueOf(r.digits, b), st.rest);
+        assert.deepEqual(r.rule, { from: w.hi[r.i], to: st.end });
+      }
+    }
+  }
+});
+
+test('estimate tie-break: only a two-digit divisor in base 10', () => {
+  assert.equal(logic.estimateOf(nums(846, 3), 0), null, 'one digit: the multiples');
+  assert.equal(logic.estimateOf(nums(9876, 123), 0), null, 'three digits: the multiples');
+  assert.equal(logic.estimateOf(nums(846, 12, { base: 16 }), 0), null, 'base 16: the multiples');
+  assert.notEqual(logic.estimateOf(nums(98, 10), 0), null, '10 is two-digit');
+  assert.notEqual(logic.estimateOf(nums(980, 99), 0), null, '99 is two-digit');
+});
+
+test('estimate: round to the tens, at most 9, then correct by one (98 : 12 ≈ 100 : 10 = 10 → 9 too big → 8)', () => {
+  const tries = (e) => e.tries.map((x) => [x.k, x.value, x.verdict]);
+  const e = logic.estimateOf(nums(9876, 12), 0);
+  assert.deepEqual([e.nr, e.dr, e.raw, e.digit], [100, 10, 10, false]);
+  assert.deepEqual(tries(e), [[9, 108, 'big'], [8, 96, 'fits']]);
+  assert.deepEqual(tries(logic.estimateOf(nums(9876, 12), 1)), [[3, 36, 'big'], [2, 24, 'fits']], '27 ≈ 30');
+  const p = nums(5517, 28);
+  assert.deepEqual([0, 1, 2].map((i) => { const x = logic.estimateOf(p, i); return [x.nr, x.dr, x.raw]; }), [[60, 30, 2], [270, 30, 9], [200, 30, 6]]);
+  assert.deepEqual(tries(logic.estimateOf(p, 0)), [[2, 56, 'big'], [1, 28, 'fits']]);
+  assert.deepEqual(tries(logic.estimateOf(p, 1)), [[9, 252, 'fits']], 'right at once');
+  assert.equal(logic.estimateOf(p, 1).digit, true, 'an estimate of 9 is a digit');
+  assert.deepEqual(tries(logic.estimateOf(p, 2)), [[6, 168, 'small'], [7, 196, 'fits']], 'too small: the remainder 29 ≥ 28');
+  assert.deepEqual(tries(logic.estimateOf(nums(80, 16), 0)), [[4, 64, 'small'], [5, 80, 'fits']], '16 ≈ 20, half up');
+  assert.deepEqual(tries(logic.estimateOf(nums(95, 12), 0)), [[9, 108, 'big'], [8, 96, 'big'], [7, 84, 'fits']], '95 ≈ 100, half up');
+  assert.deepEqual(tries(logic.estimateOf(nums(4, 12), 0)), [[0, 0, 'fits']], '4 ≈ 0: the quotient 0');
+  assert.deepEqual(tries(logic.estimateOf(nums(75, 13), 0)), [[8, 104, 'big'], [7, 91, 'big'], [6, 78, 'big'], [5, 65, 'fits']], 'the most tries');
+});
+
+test('estimate: the last try is always the quotient digit, at most 4 tries, each a step of one', () => {
+  for (let d = 10; d <= 99; d++) {
+    for (let n = 0; n < 10 * d; n++) {
+      const e = logic.estimateOf(nums(n, d), 0);
+      const q = Math.floor(n / d);
+      const ts = e.tries;
+      assert.equal(ts[ts.length - 1].k, q, `${n}:${d}`);
+      assert.equal(ts[ts.length - 1].verdict, 'fits');
+      assert.equal(ts[0].k, Math.min(e.raw, 9));
+      assert.ok(ts.length <= 4);
+      for (let j = 1; j < ts.length; j++) assert.equal(Math.abs(ts[j].k - ts[j - 1].k), 1);
+      assert.ok(ts.slice(0, -1).every((x) => x.verdict === ts[0].verdict), 'corrections go one way');
+    }
+  }
+});
+
 // ── typical mistakes ──
 
 test('mistake zero: a 0 in the quotient left out (618 : 3 → 26; 2023 : 4 → 55; 630 : 3 → 21)', () => {
@@ -256,7 +364,7 @@ test('mistake tie-break: a mistake that changes nothing here marks nothing (846 
 
 test('presets: the numbers and step counts of SPEC.md', () => {
   const want = { 'three-digit': ['282', 0, 8], 'first-two': ['248', 0, 8], zero: ['206', 0, 8], remainder: ['505', 3, 8],
-    'two-digit': ['823', 0, 8], 'base-2': ['1001', 1, 11] };
+    'two-digit': ['823', 0, 8], 'base-2': ['1001', 1, 11], long: ['282', 0, 8], 'long-two-digit': ['197', 1, 8] };
   for (const pr of logic.PRESETS) {
     const p = P(pr.params);
     assert.deepEqual([qtxt(plan(p).quot), plan(p).remainder, logic.steps(p)], want[pr.id], pr.id);

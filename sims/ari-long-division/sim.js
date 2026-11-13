@@ -14,6 +14,7 @@
   var MIN_BASE = 2;
   var MAX_BASE = 16;
   var MISTAKES = ['none', 'zero', 'dropped'];
+  var LAYOUTS = ['short', 'long']; // kraći način (only the remainders) and dulji način (the partial products written)
   var MAX_A = Math.pow(16, MAX_DIVIDEND) - 1;
   var MAX_B = Math.pow(16, MAX_DIVISOR) - 1;
 
@@ -217,6 +218,56 @@
     return res;
   }
 
+  /**
+   * The working under the line, row by row, for the layout (SPEC.md, Scene and Layouts): short: one row per quotient
+   * digit, the remainder ending at end with the digit brought down beside it; long: before each remainder row the
+   * partial product q · d, right-aligned under the number divided, a minus sign in the square left of that number, and
+   * a rule over the remainder row under the number. Returns { cols (place squares: n, or n + 1 for the minus of the
+   * first product), rows: [{ role: 'prod'|'rest', i, end, digits (ones first), minus (place) | down, rule { from, to }
+   * | null }], numRow: [the row (0 = the line) holding the number divided by quotient digit i], restRow: [the row of
+   * remainder i], hi: [the dividend place of the number's first digit] }. The steps are the same in both layouts.
+   */
+  function workingOf(p) {
+    var plan = planOf(p), base = p.base, long = p.layout === 'long';
+    var rows = [], numRow = [], restRow = [], hi = [];
+    plan.steps.forEach(function (s, i) {
+      // the number divided: on the line (digit 0), else the previous remainder with the digit brought down
+      hi.push(i === 0 ? plan.n - 1 : s.end + digitsOf(plan.steps[i - 1].rest, base).length);
+      numRow.push(i === 0 ? 0 : restRow[i - 1]);
+      if (long) rows.push({ role: 'prod', i: i, end: s.end, digits: digitsOf(s.prod, base), minus: hi[i] + 1 });
+      rows.push({ role: 'rest', i: i, end: s.end, digits: digitsOf(s.rest, base), down: s.down,
+        rule: long ? { from: hi[i], to: s.end } : null });
+      restRow.push(rows.length);
+    });
+    return { cols: long ? plan.n + 1 : plan.n, rows: rows, numRow: numRow, restRow: restRow, hi: hi };
+  }
+
+  /** v rounded half up to a multiple of place. */
+  function roundTo(v, place) { return Math.floor((v + place / 2) / place) * place; }
+
+  /**
+   * The estimated partial quotient for quotient digit i (SPEC.md, rule 12): only for a two-digit divisor in base 10
+   * (grade 4), else null. The number and the divisor are rounded half up to the tens (the divisor's leading place):
+   * 98 : 12 → 100 : 10 = 10. The first try is that estimate, at most 9; a try whose product is too big is lowered by
+   * one, a try that leaves a remainder ≥ the divisor is raised by one, until it fits. Returns { place, nr, dr, raw (the
+   * estimate, maybe 10 or more), digit (raw is a digit), tries: [{ k, value (k · d), verdict: 'big'|'small'|'fits' }] }.
+   */
+  function estimateOf(p, i) {
+    var plan = planOf(p);
+    if (p.base !== 10 || plan.d < 10 || plan.d > 99) return null;
+    var s = plan.steps[i], d = plan.d, place = 10;
+    var nr = roundTo(s.num, place), dr = roundTo(d, place);
+    var raw = Math.floor(nr / dr);
+    var k = Math.min(raw, 9), tries = [];
+    for (;;) {
+      var v = k * d;
+      if (v > s.num) { tries.push({ k: k, value: v, verdict: 'big' }); k--; }
+      else if (s.num - v >= d) { tries.push({ k: k, value: v, verdict: 'small' }); k++; }
+      else { tries.push({ k: k, value: v, verdict: 'fits' }); break; }
+    }
+    return { place: place, nr: nr, dr: dr, raw: raw, digit: raw <= 9, tries: tries };
+  }
+
   function stepsOf(p) { return planOf(p).seq.length; }
 
   var logic = {
@@ -226,11 +277,12 @@
     MIN_BASE: MIN_BASE,
     MAX_BASE: MAX_BASE,
     MISTAKES: MISTAKES,
+    LAYOUTS: LAYOUTS,
     /** The largest dividend and divisor a param may hold: six and three hexadecimal digits. */
     MAX_A: MAX_A,
     MAX_B: MAX_B,
 
-    defaults: { a: 846, b: 3, base: 10, why: true, mistake: 'none' },
+    defaults: { a: 846, b: 3, base: 10, why: true, mistake: 'none', layout: 'short' },
 
     PRESETS: [
       { id: 'three-digit', params: { a: 846, b: 3 } },
@@ -238,7 +290,9 @@
       { id: 'zero', params: { a: 618, b: 3, mistake: 'zero' } },
       { id: 'remainder', params: { a: 2023, b: 4 } },
       { id: 'two-digit', params: { a: 9876, b: 12 } },
-      { id: 'base-2', params: { a: 46, b: 5, base: 2 } }
+      { id: 'base-2', params: { a: 46, b: 5, base: 2 } },
+      { id: 'long', params: { a: 846, b: 3, layout: 'long' } },
+      { id: 'long-two-digit', params: { a: 5517, b: 28, layout: 'long' } }
     ],
 
     /** Steps depend on the numbers: three per quotient digit (ask, subtract, bring down), the last without bring down. */
@@ -277,7 +331,9 @@
     planOf: planOf,
     invariantOf: invariantOf,
     multiplesOf: multiplesOf,
-    mistakeOf: mistakeOf
+    mistakeOf: mistakeOf,
+    workingOf: workingOf,
+    estimateOf: estimateOf
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;

@@ -6,11 +6,40 @@ on paper", drawn with kit view **K5, paper columns**. Rules and expected numbers
 
 ## Decisions
 
-- **The Croatian layout** *(check)*: the line `846:3=282` on one row, one sign or digit per square, the dividend's ones
-  at place 0 so its place labels stay over it; under the dividend **only the remainders**, each ending under the last
-  digit of the number divided, with the next digit brought down beside it (`24`, `06`, `0`). The products are said in
-  the caption, not written (the "short" form the task's "remainders under the dividend" describes). This is the
-  layout the K5 sketch (`library/t-0406/k5-consumer-sketch.html`) drew for this page.
+- **The Croatian layout**: the line `846:3=282` on one row, one sign or digit per square, the dividend's ones at place
+  0 so its place labels stay over it. Under the dividend, **two layouts, both in the curriculum** (resolved in t-0435;
+  this was *(check)* "the products are said, not written"): the curriculum (NN 7/2019, MAT OŠ A.3.4 and A.4.3, as
+  quoted in the task) introduces written division "na dulji način (s potpisivanjem djelomičnoga umnoška) ili na kraći
+  način" and recommends the shorter once pupils can. **Kraći način** (default, as before): only the remainders, each
+  ending under the last digit of the number divided, with the next digit brought down beside it (`24`, `06`, `0`); the
+  product is said and the subtraction done in the head. **Dulji način**: above each remainder row the partial product,
+  a minus and a rule (below).
+- **The longer way** (t-0435), drawn with what K5 offers (no kit change): the product is a row of cells right-aligned
+  under the number divided (`at: end`), the minus is a plain cell `'−'` in the square left of **the number** (not of
+  the product: for `06 − 6` the minus stands left of `06`, so it never sits under a digit, like the sign column of a
+  column subtraction), and the rule is the remainder row's `rule: { from, to }` over the number's squares. The paper
+  gets one more place square on the left (`cols: n + 1`, unlabelled) for the first minus; K5's sign column was not used
+  because it sits left of the whole paper, two squares away from later products. The steps are the same: the `sub` step
+  writes the product row and the remainder row together, so the step count (3Q − 1), the state and every existing
+  preset's steps are unchanged; the model's `workingOf` gives the rows (tested), the page only draws them. A 0 in the
+  quotient writes `−0` (one rule for every digit, as the shorter way writes the unchanged remainder again) *(check:
+  whether textbooks skip the `−0` row)*. Teacher caption: "2 · 3 = 6, potpisujem 6 ispod 8; 8 − 6 = 2"; child: "Pišem
+  6 ispod 8. 8 manje 6 je 2." *(check)*. The adult view, on the first subtraction, says why the shorter way can leave
+  the product out (the subtraction is done in the head; the longer way writes it so the subtraction can be seen).
+- **The estimated partial quotient** (t-0435; the curriculum's grade-4 "procjenjuje djelomični količnik"): only for a
+  two-digit divisor in base 10. Both numbers are rounded half up to the tens, the divisor's leading place, as the
+  task's example (98 : 12 → about 100 : 10 = 10); "round the number to its own leading place" was rejected because
+  273 : 34 would become 300 : 30 = 10 instead of the usual 270 : 30 = 9. The first try is the estimate, at most 9 ("10
+  is not a digit: try 9"), then down by one while too big, up by one while the remainder is not less than the divisor
+  (at most 4 tries, script). In the box the estimate replaces the list of multiples (the question view shows only the
+  rounding); the teacher and adult captions add "Procjena: 100 : 10 = 10; probam 9, 8."; the child view has no box and
+  its captions are unchanged. One- and three-digit divisors and other bases keep the multiples (three digits are not
+  in the curriculum, and rounding to the hundreds needs up to 5 tries). This changes what preset 5 (9876 : 12) shows
+  in the box (tries 9 → 8, 3 → 2, 4 → 3) but not its numbers or steps.
+- **The mistake card stays in the shorter way** whatever the layout: it is a small second paper, the longer way would
+  double its rows, and both mistakes are in the quotient and the remainders, not in the products.
+- **Panel fit:** eight presets did not fit at 1920×1080 (1103 px against 926); they sit in two columns (one on a phone),
+  and the layout switch shares a row with its label.
 - **A remainder of 0 is written** (`06`, `00`, the last `0`) *(check: whether pupils write the 0 before a brought-down
   digit or leave the square empty)*.
 - **A 0 in the quotient gets a full cycle of its own** (ask: 1 : 3 = 0, write 0; sub: 0 · 3 = 0, 1 − 0 = 1, write 1;
@@ -62,12 +91,22 @@ on paper", drawn with kit view **K5, paper columns**. Rules and expected numbers
 
 ## Deviations from the task
 
+- t-0435: the task asked to set `sim.json` `updated`; the manifest has no such field (`lib/manifest.mjs`: unknown
+  fields are errors), so it was not added. `status` stays `ready`.
+- t-0435: the estimate is limited to base 10 (the curriculum's case); the new preset labels are short ("Dulji način s
+  procjenom") so two columns fit.
+
 - Task file "Model and presets" was empty; SPEC.md fills it.
 - A second typical mistake (`dropped`) next to the task's forgotten 0.
 - `related` lists `ari-column-multiplication`, `ari-column-subtraction` and `ari-place-value`; `ari-checking` and
   `arh-twos-complement` do not exist yet.
 
 ## Sources
+
+- Two layouts and the estimate (t-0435): the national curriculum for mathematics, Narodne novine 7/2019
+  (https://narodne-novine.nn.hr/clanci/sluzbeni/2019_01_7_146.html), outcomes MAT OŠ A.3.4 and A.4.3, as quoted in the
+  task file (the page was not opened in this session). The rounding rule and the order of tries are general knowledge
+  of how the estimate is taught *(check against a grade-4 textbook)*.
 
 - Phrasing and layout: the owner (s-002), the task file and the K5 sketch. Croatian textbooks for grades 3–4 and the
   curriculum (NN 7/2019) were not read (not available offline): the layout (only remainders, the 0 remainder written,
@@ -122,6 +161,9 @@ Tests added for the reviewer's surviving mutants (above).
 
 | en | hr |
 |---|---|
+| the longer way / the shorter way (of written division) | dulji način / kraći način |
+| partial product (written under the number) | djelomični umnožak (potpisivanje djelomičnoga umnoška) |
+| estimating the partial quotient | procjena djelomičnoga količnika |
 | long division | pisano dijeljenje |
 | dividend | djeljenik |
 | divisor | djelitelj |
@@ -136,8 +178,33 @@ Tests added for the reviewer's surviving mutants (above).
   give the paper `grid-template-rows: repeat(<first + rows − 1>, var(--pc-cell))` instead of relying on implicit rows.
 - **K5 row labels / remainder mark:** a way to mark a row as "remainder" (a small label beside it) would let the paper
   name the final remainder without words in the data cells.
+- **K5 sign at a place** (t-0435): the longer way writes its minus as a plain cell, because the sign column sits left of
+  the whole paper. A row option `signAt: <place>` (the sign drawn in that square, in the sign style) would let any
+  page put a sign next to a shifted number. Not needed now: the plain cell reads the same.
 - Still open from the siblings: a text param type and a base control with per-value refusal (the page's `buildQuick`,
   `pickBase`, copied); the kit's `t.parts` returning one node for two placeholders (the page's `tp`).
+
+## t-0435 checks (the longer way and the estimate)
+
+- Numbers: a Python script independent of `sim.js` computed the longer way's rows (product, minus place, rule, remainder)
+  for 846 : 3, 5517 : 28, 618 : 3, 2023 : 4 and 9876 : 12, and the estimate's tries for every number < 10 · d, d = 10 …
+  999 (two-digit: at most 4 tries, 75 : 13; three-digit: 5, 850 : 142, hence two-digit only); preset 8 (5517 : 28 = 197
+  r 1, estimates too big, right, too small) was chosen by a search over 4-digit dividends. The values are in SPEC.md
+  rules 11–12 and the tests.
+- Tests: 29 (7 new: the short layout as before, the long rows of 846 : 3, 5517 : 28, 618 : 3 and 2023 : 4, the layout
+  changing no state or step over 200 random divisions in every base, the estimate's applicability, its tries, and the
+  exhaustive two-digit check). 20 mutations of the new code (minus at the number's first place, the rule shifted or
+  drawn in the short layout, `cols` n, the number's row, `hi` from the number, the product's digits from the remainder,
+  rounding down or half down, no cap at 9, "too small" as >, "too big" as ≥, three-digit or one-digit divisors or any
+  base estimated, the "is a digit" flag at 9, rounding to the hundreds, the long default, preset 8's divisor): all fail
+  a test; the "is a digit" flag survived the first run and got its test.
+- Found in the screenshots: the adult caption lost its product ("2 · 3 = .") when the same node was used in the added
+  sentence; each sentence now gets fresh nodes.
+- `npm run gate -- ari-long-division`: pass. Screenshots reviewed: the gate's set (1920×1080 light, dark, grayscale,
+  375×812, hr and en) plus the longer way at steps 2 and 8, 5517 : 28 at steps 1, 3, 7, 8 (hr, en, adult, child),
+  9876 : 12 step 1 (shorter way, the estimate with "not a digit"), 999999 : 999 and 999999 : 1 the longer way (13
+  rows, 17 steps), 618 : 3 with the mistake card, base 2 the longer way, and the phone.
+- Time for t-0435: 22:52–23:45, about 55 minutes.
 
 ## Time
 
