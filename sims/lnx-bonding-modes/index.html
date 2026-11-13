@@ -1,0 +1,537 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- lnx-bonding-modes: server S sends flows to clients through bond0 over 2–4 member links (eth0…) of 1 Gbit/s to switch
+     SW. An explorer: mode, members, a failed link, hash policy, the switch's config, flows and the gateway recompute
+     which link carries each flow and the rates at once. The stage is link-aggregation's (copied): left S's flow list
+     (one row per flow), then the strands, the lanes (each a pipe of 1 Gbit/s whose bands are the flows' rates, the rest
+     hatched) and SW with its config badge; above the bond's label and rule, below the warnings and the totals.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="lnx-bonding-modes">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Načini rada bonda · simdeck</title>
+<meta name="description" content="Ugasi vezu, pošalji tokove, promijeni postavku preklopnika: jedna veza i pričuva, okvir po okvir ili tok po tok uz LACP.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "lnx-bonding-modes",
+  "title": {
+    "hr": "Načini rada bonda",
+    "en": "Bonding modes"
+  },
+  "concept": {
+    "hr": "active-backup, balance ili 802.3ad: što koji način rada žrtvuje",
+    "en": "active-backup vs balance vs 802.3ad: what each gives up"
+  },
+  "summary": {
+    "hr": "Ugasi vezu, pošalji tokove, promijeni postavku preklopnika: jedna veza i pričuva, okvir po okvir ili tok po tok uz LACP.",
+    "en": "Fail a link, send flows, change the switch config: one link and a backup, frame by frame, or flow by flow with LACP."
+  },
+  "tags": [
+    "link-aggregation"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="lnx-bonding-modes"]; colours only from kit tokens.
+   Layout: the bond line, the fabric (S's flow list | strands | lanes | SW), the warnings and totals. Inside the fabric
+   every vertical position is a percentage of its height (as on link-aggregation), so the strands (an SVG stretched over
+   its column) meet the table rows and the lane bands without measuring anything. */
+[data-sim="lnx-bonding-modes"] .sd-legend { flex: 0 1 46rem; justify-content: flex-end; }
+[data-sim="lnx-bonding-modes"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="lnx-bonding-modes"] .sd-preset { line-height: 1.15; }
+[data-sim="lnx-bonding-modes"] .sd-panel { gap: 0.5rem; }
+/* The kit's .sd-ctl { display: flex } outranks [hidden]: the policy control (hidden in modes 0 and 1) needs this. */
+[data-sim="lnx-bonding-modes"] .sd-ctl[hidden] { display: none; }
+/* The settings' reset button repeats the transport bar's (an explorer's only transport button, same R key). */
+[data-sim="lnx-bonding-modes"] [data-sd-controls] .sd-group > .sd-btn { display: none; }
+
+[data-sim="lnx-bonding-modes"] .bm {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 1cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1rem;
+}
+[data-sim="lnx-bonding-modes"] .bm-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.8rem; margin: 0; line-height: 1.3; }
+[data-sim="lnx-bonding-modes"] .bm-pill { padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-pill.bm-mode { background: var(--ink); color: var(--bg); }
+[data-sim="lnx-bonding-modes"] .bm-note { padding: 0 0.4rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="lnx-bonding-modes"] .bm-head .bm-f { font-family: var(--mono); }
+[data-sim="lnx-bonding-modes"] .bm-head .bm-no { color: var(--muted); font-family: var(--mono); }
+
+[data-sim="lnx-bonding-modes"] .bm-fab {
+  display: grid;
+  grid-template-columns: 33rem minmax(2.5rem, 6%) minmax(0, 1fr) 12rem;
+  min-height: 0;
+}
+[data-sim="lnx-bonding-modes"] .bm-col { position: relative; min-width: 0; }
+
+/* ── S's flow list: header slot 0, flows in slots 1…8 of 9 ── */
+[data-sim="lnx-bonding-modes"] .bm-tbl { border: var(--line-w) solid var(--ink); border-radius: var(--radius); background: var(--panel); }
+[data-sim="lnx-bonding-modes"] .bm-row {
+  position: absolute;
+  left: 0.2rem;
+  right: 0.3rem;
+  display: grid;
+  grid-template-columns: 5.4rem 2.6rem 2.6rem 3.9rem minmax(0, 1fr) 3.4rem;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.1rem 0.3rem;
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+[data-sim="lnx-bonding-modes"] .bm-row.bm-th { font-family: var(--sans); font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+[data-sim="lnx-bonding-modes"] .bm-row.sd-changed { outline: 0; box-shadow: none; background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="lnx-bonding-modes"] .bm-row > * { overflow: hidden; text-overflow: ellipsis; }
+[data-sim="lnx-bonding-modes"] .bm-fl { display: flex; align-items: center; gap: 0.35rem; font-family: var(--sans); }
+[data-sim="lnx-bonding-modes"] .bm-fchip { padding: 0 0.35rem; border: var(--line-w) solid; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-cl { font-size: var(--fs-sm); }
+[data-sim="lnx-bonding-modes"] .bm-off { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+[data-sim="lnx-bonding-modes"] .bm-row.sd-changed .bm-off { color: var(--on-hl); }
+[data-sim="lnx-bonding-modes"] .bm-lk { display: grid; place-items: center; height: 1.7rem; padding: 0 0.3rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-lk[data-all] { border-style: double; border-width: 4px; }
+
+/* ── strands ── */
+[data-sim="lnx-bonding-modes"] .bm-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="lnx-bonding-modes"] .bm-svg path { fill: none; stroke: var(--sw, var(--ink)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+[data-sim="lnx-bonding-modes"] .bm-svg path.bm-zig { stroke-width: 3; }
+[data-sim="lnx-bonding-modes"] .bm-svg path.bm-under { stroke: var(--hl); stroke-width: 13; }
+
+/* ── lanes: label band, then the pipe (1 Gbit/s high), bands = flows, hatch = idle ── */
+[data-sim="lnx-bonding-modes"] .bm-lbl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-left: 0.3rem;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-lk { flex: 0 0 auto; height: 1.5rem; font-size: var(--fs-sm); }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-load { font-family: var(--mono); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-ids { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-state { padding: 0 0.35rem; border: var(--line-w) dashed var(--muted); border-radius: var(--radius-sm); }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-state[data-k='down'] { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-star { padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-lbl .bm-star.sd-changed { background: var(--hl); color: var(--on-hl); outline: 0; box-shadow: none; }
+[data-sim="lnx-bonding-modes"] .bm-pipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg);
+}
+[data-sim="lnx-bonding-modes"] .bm-pipe[data-idle] { border-style: dotted; border-width: 3px; }
+[data-sim="lnx-bonding-modes"] .bm-pipe[data-down] { border: var(--line-w) dashed var(--danger); background-image: none; display: grid; place-items: center; }
+[data-sim="lnx-bonding-modes"] .bm-pipe[data-down]::after { content: '✕'; color: var(--danger); font-size: 2rem; font-weight: 700; line-height: 1; }
+[data-sim="lnx-bonding-modes"] .bm-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 0.5rem;
+  box-shadow: inset 0 -2px 0 var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+[data-sim="lnx-bonding-modes"] .bm-band[data-zig] { background-image: repeating-linear-gradient(135deg, transparent 0 0.5em, color-mix(in srgb, var(--bg) 55%, transparent) 0.5em 0.7em); }
+[data-sim="lnx-bonding-modes"] .bm-band.sd-changed { z-index: 2; outline-offset: -3px; box-shadow: inset 0 0 0 0.4rem var(--hl); }
+
+/* ── switch ── */
+[data-sim="lnx-bonding-modes"] .bm-box {
+  position: absolute;
+  inset: 0;
+  margin-left: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+[data-sim="lnx-bonding-modes"] .bm-box b { font-size: 1.6rem; }
+[data-sim="lnx-bonding-modes"] .bm-box .bm-sub { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="lnx-bonding-modes"] .bm-badge { display: grid; gap: 0.1rem; padding: 0.3rem 0.5rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="lnx-bonding-modes"] .bm-badge b { font-size: 1rem; }
+[data-sim="lnx-bonding-modes"] .bm-badge .bm-sub { color: var(--ink); }
+[data-sim="lnx-bonding-modes"] .bm-badge[data-k='bad'] { border-style: dashed; border-color: var(--danger); }
+[data-sim="lnx-bonding-modes"] .bm-badge[data-k='bad'] .bm-sub { color: var(--danger); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-to { font-family: var(--mono); font-size: var(--fs-sm); }
+
+/* ── warnings and totals ── */
+[data-sim="lnx-bonding-modes"] .bm-warn { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin: 0; min-height: 2rem; }
+[data-sim="lnx-bonding-modes"] .bm-w { padding: 0 0.5rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-weight: 700; }
+[data-sim="lnx-bonding-modes"] .bm-w::before { content: '⚠ '; }
+[data-sim="lnx-bonding-modes"] .bm-w[data-k='none'] { border-color: var(--muted); color: var(--muted); font-weight: 400; }
+[data-sim="lnx-bonding-modes"] .bm-w[data-k='none']::before { content: '✓ '; }
+[data-sim="lnx-bonding-modes"] .bm-sum { display: flex; flex-wrap: wrap; gap: 0.3rem 1.6rem; margin: 0; }
+[data-sim="lnx-bonding-modes"] .bm-sum b { font-family: var(--mono); }
+[data-sim="lnx-bonding-modes"] .bm-sum .bm-cap { color: var(--muted); }
+[data-sim="lnx-bonding-modes"] .bm-sum [data-unreliable] b { text-decoration: line-through; text-decoration-thickness: 2px; }
+[data-sim="lnx-bonding-modes"] .bm-unrel { margin-left: 0.4rem; padding: 0 0.35rem; border: var(--line-w) dashed var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-weight: 700; }
+
+/* legend swatches */
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-lane'] { background: var(--bg); border-color: var(--ink); border-radius: 0; }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-backup'] { background: var(--bg); border: 3px dotted var(--ink); border-radius: 0; }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-down'] { position: relative; background: var(--bg); border-style: dashed; border-color: var(--danger); border-radius: 0; }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-down']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--danger); content: '✕'; }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-star'] { position: relative; background: var(--bg); border-color: var(--ink); }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-star']::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; color: var(--ink); content: '★'; }
+[data-sim="lnx-bonding-modes"] .sd-swatch[data-shape='bm-zig'] { background-color: var(--c1); border-color: var(--ink); border-radius: 0; background-image: repeating-linear-gradient(135deg, transparent 0 0.25em, color-mix(in srgb, var(--bg) 55%, transparent) 0.25em 0.38em); }
+
+/* Phone and portrait: the fabric gets a fixed height; the list keeps the flow and its link. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="lnx-bonding-modes"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="lnx-bonding-modes"] .bm { height: auto; padding: 0.5rem; gap: 0.6rem; }
+  [data-sim="lnx-bonding-modes"] .bm-fab { height: 26rem; grid-template-columns: 6.6rem 1.2rem minmax(0, 1fr) 5.4rem; }
+  [data-sim="lnx-bonding-modes"] .bm-row { grid-template-columns: minmax(0, 1fr) 3.2rem; gap: 0.2rem; padding: 0 0.1rem; left: 0; right: 0.1rem; }
+  [data-sim="lnx-bonding-modes"] .bm-row > .bm-x { display: none; }
+  [data-sim="lnx-bonding-modes"] .bm-cl { display: none; }
+  [data-sim="lnx-bonding-modes"] .bm-box { padding: 0.2rem; margin-left: 0.15rem; }
+  [data-sim="lnx-bonding-modes"] .bm-box .bm-sub,
+  [data-sim="lnx-bonding-modes"] .bm-box .bm-to,
+  [data-sim="lnx-bonding-modes"] .bm-badge .bm-sub { display: none; }
+  [data-sim="lnx-bonding-modes"] .bm-badge { padding: 0.1rem; }
+  [data-sim="lnx-bonding-modes"] .bm-badge b { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-sim="lnx-bonding-modes"] .bm-star-t { display: none; }
+  [data-sim="lnx-bonding-modes"] .bm-box b { font-size: 1.1rem; }
+  [data-sim="lnx-bonding-modes"] .bm-lbl .bm-ids,
+  [data-sim="lnx-bonding-modes"] .bm-lbl .bm-load { display: none; }
+  [data-sim="lnx-bonding-modes"] .bm-band { padding-left: 0.2rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Načini rada bonda</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SLOTS = 9;          // flow list: header + up to 8 flows
+  var LBL = 8;            // lane label band, % of the fabric's height
+  var GAP = 3;            // gap under each pipe, %
+  var BAND_LABEL = 4.5;   // a band shows its label from this height (% of the fabric) up
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /** Data (addresses, ports, ids, member and mode names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  function eth(id) { return 'eth' + id; }
+  function colourOf(fid) { return String(((Number(fid.slice(1)) - 1) % 8) + 1); }
+  /** Mbit/s → Gbit/s, at most 3 decimals, decimal comma in Croatian. */
+  function G(mbit) {
+    var s = String(Math.round(mbit) / 1000);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  /** "eth0", "eth0 i eth2", "eth0, eth1 i eth2" as data. */
+  function list(ids) {
+    var names = ids.map(eth);
+    if (names.length < 2) return data(names.join(''));
+    return data(names.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + names[names.length - 1]);
+  }
+  function rowY(i) { return (i + 0.5) * 100 / SLOTS; }
+  function lane(p, id) {
+    var slot = 100 / p.members, top = id * slot;
+    return { top: top, pipeTop: top + LBL, pipeH: slot - LBL - GAP };
+  }
+  /** Where each flow's band sits in each pipe: { memberId: { flowId: { top, h } } }, in % of the fabric. */
+  function bands(s, p) {
+    var out = {}, n = s.up.length;
+    s.members.forEach(function (m) {
+      var g = lane(p, m.id), cum = 0;
+      out[m.id] = {};
+      s.perMember[m.id].forEach(function (fid) {
+        var r = s.how === 'rr' ? s.rate[fid] / n : s.rate[fid];
+        out[m.id][fid] = { top: g.pipeTop + g.pipeH * cum / L.CAPACITY, h: g.pipeH * r / L.CAPACITY };
+        cum += r;
+      });
+    });
+    return out;
+  }
+
+  // ── "changed": against the state before the last input (SPEC.md "Changed") ──
+  var lastParams = null, lastState = null, delta = { moved: [], star: false };
+  function sameParams(a, b) { return Object.keys(L.defaults).every(function (k) { return a[k] === b[k]; }); }
+  function track(c) {
+    if (lastParams && sameParams(lastParams, c.params)) return;
+    delta = { moved: L.changed(lastState, c.state), star: L.activeChanged(lastState, c.state) };
+    lastParams = Object.assign({}, c.params);
+    lastState = c.state;
+  }
+  function isMoved(fid) { return delta.moved.indexOf(fid) >= 0; }
+
+  // ── stage ──
+
+  function head(s, p) {
+    var kids = [data('bond0', 'bm-pill'), data(p.mode, 'bm-pill bm-mode'), data(t('modeNo', { n: L.MODE_NO[p.mode] }), 'bm-no')];
+    if (s.how === 'active') kids.push(h('span', { class: 'bm-f' }, t('rule_active-backup')), data(t('primary'), 'bm-note'));
+    else if (s.how === 'rr') kids.push(h('span', { class: 'bm-f' }, t.parts('rule_balance-rr', { list: list(s.up) })));
+    else if (s.how === 'single') kids.push(h('span', { class: 'bm-f' }, t('rule_single')));
+    else {
+      kids.push(h('span', { class: 'bm-f' }, t('formula_' + p.policy)), h('span', { class: 'bm-note' }, t('simplified')),
+        h('span', { class: 'bm-f' }, t.parts('rule_hash', { m: s.up.length, list: list(s.up) })));
+    }
+    return h('p', { class: 'bm-head' }, kids);
+  }
+
+  function table(s, p) {
+    var used = s.how === 'hash' ? L.INPUTS[p.policy] : [];
+    var off = function (k) { return used.indexOf(k) < 0 ? ' bm-off' : ''; };
+    var m = s.up.length;
+    var rows = [h('div', { class: 'bm-row bm-th', style: { top: rowY(0) + '%' } },
+      h('span', null, t('thFlow')), h('span', { class: 'bm-x' + off('mac') }, t('thMac')), h('span', { class: 'bm-x' + off('ip') }, t('thIp')),
+      h('span', { class: 'bm-x' + off('port') }, t('thPort')),
+      h('span', { class: 'bm-x' + (s.how === 'hash' ? '' : ' bm-off') }, s.how === 'hash' ? t('thHash', { m: m }) : t('thHashOff')),
+      h('span', null, t('thLink')))];
+    s.flows.forEach(function (f, i) {
+      var link = s.assignment[f.id];
+      rows.push(h('div', { class: 'bm-row' + (isMoved(f.id) ? ' sd-changed' : ''), style: { top: rowY(i + 1) + '%' } },
+        h('span', { class: 'bm-fl' },
+          h('span', { class: 'bm-fchip sd-fill', dataset: { c: colourOf(f.id) }, translate: 'no' }, f.id),
+          data(f.client, 'bm-cl')),
+        data('…' + f.dstMac.slice(-2), 'bm-x' + off('mac')),
+        data('.' + L.lastOctet(f.dstIp), 'bm-x' + off('ip')),
+        data(f.dstPort, 'bm-x' + off('port')),
+        s.how === 'hash' ? data(s.hash[f.id] + ' mod ' + m + ' = ' + s.index[f.id], 'bm-x') : data('—', 'bm-x bm-off'),
+        link === 'all' ? h('span', { class: 'bm-lk', dataset: { all: '' } }, t('cellAll')) : data(eth(link), 'bm-lk')));
+    });
+    return h('div', { class: 'bm-col bm-tbl', 'aria-label': t('server') }, rows);
+  }
+
+  /** A zigzag from (0, y1) to (100, y2): the strand of a flow whose frames are spread and reordered (balance-rr). */
+  function zigzag(y1, y2) {
+    var d = 'M0,' + y1, n = 12;
+    for (var k = 1; k <= n; k++) {
+      var x = k * 100 / n, y = y1 + (y2 - y1) * k / n + (k < n ? (k % 2 ? -1.2 : 1.2) : 0);
+      d += ' L' + x + ',' + y;
+    }
+    return d;
+  }
+
+  function strands(s, p, b) {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'bm-svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+    function path(d, cls, colour) {
+      var e = document.createElementNS(SVG_NS, 'path');
+      e.setAttribute('d', d);
+      e.setAttribute('vector-effect', 'non-scaling-stroke');
+      if (cls) e.setAttribute('class', cls);
+      if (colour) e.setAttribute('data-c', colour);
+      svg.appendChild(e);
+    }
+    s.flows.forEach(function (f, i) {
+      var y1 = rowY(i + 1);
+      var targets = s.assignment[f.id] === 'all' ? s.up : [s.assignment[f.id]];
+      targets.forEach(function (id) {
+        var x = b[id] && b[id][f.id];
+        if (!x) return;
+        var y2 = x.top + x.h / 2;
+        var d = s.how === 'rr' && s.up.length > 1 ? zigzag(y1, y2) : 'M0,' + y1 + ' C55,' + y1 + ' 45,' + y2 + ' 100,' + y2;
+        if (isMoved(f.id)) path(d, 'bm-under');
+        path(d, s.how === 'rr' && s.up.length > 1 ? 'bm-zig' : null, colourOf(f.id));
+      });
+    });
+    return h('div', { class: 'bm-col' }, svg);
+  }
+
+  function lanes(s, p, b) {
+    var kids = [], zig = s.warnings.indexOf('reorder') >= 0;
+    s.members.forEach(function (m) {
+      var g = lane(p, m.id), ids = s.perMember[m.id];
+      var lbl = [data(eth(m.id), 'bm-lk')];
+      if (s.active === m.id) lbl.push(h('span', { class: 'bm-star' + (delta.star ? ' sd-changed' : '') }, '★', h('span', { class: 'bm-star-t' }, ' ' + t('laneActive'))));
+      if (!m.up) lbl.push(h('span', { class: 'bm-state', dataset: { k: 'down' } }, t('laneFailed')));
+      else {
+        lbl.push(h('span', { class: 'bm-load' }, t('gbit', { v: G(s.memberLoad[m.id]) + ' / 1' })));
+        if (ids.length > 5) lbl.push(h('span', { class: 'bm-ids' }, t.n('nFlows', ids.length)));
+        else if (ids.length) lbl.push(data(ids.join(' '), 'bm-ids'));
+        else lbl.push(h('span', { class: 'bm-state' }, t(s.how === 'active' ? 'laneBackup' : 'laneIdle')));
+      }
+      kids.push(h('div', { class: 'bm-lbl', style: { top: g.top + '%', height: LBL + '%' } }, lbl));
+      var ds = !m.up ? { down: '' } : ids.length ? {} : { idle: '' };
+      kids.push(h('div', { class: 'bm-pipe' + (m.up ? ' sd-hatch' : ''), style: { top: g.pipeTop + '%', height: g.pipeH + '%' }, dataset: ds }));
+      ids.forEach(function (fid) {
+        var x = b[m.id][fid];
+        kids.push(h('div', {
+          class: 'bm-band sd-fill' + (isMoved(fid) ? ' sd-changed' : ''), dataset: zig ? { c: colourOf(fid), zig: '' } : { c: colourOf(fid) },
+          style: { top: x.top + '%', height: x.h + '%' }, translate: 'no'
+        }, x.h >= BAND_LABEL ? (zig ? fid : fid + ' · ' + G(s.rate[fid])) : ''));
+      });
+    });
+    return h('div', { class: 'bm-col bm-lanes' }, kids);
+  }
+
+  function sw(s, p) {
+    var need = s.switchNeeds;
+    var k = need === null ? 'na' : s.switchOk ? 'ok' : 'bad';
+    var verdict = k === 'na' ? t('badgeNotNeeded') : k === 'ok' ? '✓ ' + t('badgeOk') : '⚠ ' + t('badgeNeeds_' + need);
+    return h('div', { class: 'bm-col' }, h('div', { class: 'bm-box' },
+      h('b', { translate: 'no' }, 'SW'), h('span', { class: 'bm-sub' }, t('sw')),
+      h('span', { class: 'bm-badge', dataset: { k: k } }, h('b', null, t('badge_' + p.switchCfg)), h('span', { class: 'bm-sub' }, verdict)),
+      h('span', { class: 'bm-to' }, p.gateway ? t('toGateway') : t.n('toClients', s.flows.length))));
+  }
+
+  function warnings(s) {
+    if (!s.warnings.length) return h('p', { class: 'bm-warn' }, h('span', { class: 'bm-w', dataset: { k: 'none' } }, t('warnNone')));
+    return h('p', { class: 'bm-warn' }, s.warnings.map(function (w) { return h('span', { class: 'bm-w', dataset: { k: w } }, t('warn_' + w)); }));
+  }
+
+  function totals(s) {
+    var item = function (key, v, extra) {
+      return h('span', extra ? { dataset: { unreliable: '' } } : null, t.parts(key, { v: h('b', null, t('gbit', { v: v })) }),
+        extra ? h('span', { class: 'bm-unrel' }, t('unreliable')) : null);
+    };
+    return h('p', { class: 'bm-sum' },
+      h('span', { class: 'bm-cap' }, t('sumCapacity', { n: s.up.length })),
+      item('sumDelivered', G(s.delivered), s.unreliable), item('sumFastest', G(s.fastest), s.unreliable));
+  }
+
+  // ── caption ──
+
+  function movedText(fo) {
+    var out = fo.moved.length ? t.n('moved', fo.moved.length) : t('movedNone');
+    if (fo.fromHealthy.length) out += ' (' + t.n('movedHealthy', fo.fromHealthy.length) + ')';
+    return out;
+  }
+
+  function modeCaption(s, p) {
+    var failed = s.failover ? s.failover.failed[0] : null;
+    var out = [];
+    if (s.how === 'active') {
+      if (s.failover && s.failover.activeMoved) out = t.parts('capABFail', { failed: data(eth(failed)), active: data(eth(s.active)), d: G(s.delivered) });
+      else if (s.failover) out = t.parts('capABBackup', { failed: data(eth(failed)), active: data(eth(s.active)) });
+      else {
+        var waiting = s.up.filter(function (id) { return id !== s.active; });
+        out = t.parts('capAB', { active: data(eth(s.active)), active2: data(eth(s.active)), next: data(eth(L.firstUp(waiting))),
+            waits: h('span', null, t.parts('waits', { n: waiting.length, list: list(waiting) })) });
+      }
+      if (p.switchCfg !== 'none') out = out.concat(' ', t('capABSwitch'));
+      return out;
+    }
+    if (s.how === 'single') return t.parts('capNoPartner', { k: data(eth(s.single)), d: G(s.delivered) });
+    if (s.how === 'rr') {
+      if (s.failover) out = t.parts('capRRFail', { failed: data(eth(failed)) }).concat(' ');
+      out = out.concat(s.up.length === 1
+        ? t.parts('capRROne', { k: data(eth(s.up[0])), d: G(s.delivered) })
+        : t.parts('capRR', { n: s.flows.length, list: list(s.up), r: G(s.fastest), d: G(s.delivered) }));
+    } else {
+      var prefix = t(p.mode === '802.3ad' ? 'capLacp' : 'capXor');
+      var hashes = s.flows.map(function (f) { return s.hash[f.id]; });
+      var sameHash = s.flows.length > 1 && s.up.length > 1 && hashes.every(function (x) { return x === hashes[0]; });
+      if (s.failover) {
+        out = [prefix].concat(t.parts('capRehash', { failed: data(eth(failed)), list: list(s.up), m: s.up.length, moved: movedText(s.failover) }));
+      } else if (sameHash) {
+        out = t.parts('capHashSame', { lacp: prefix, k: data(eth(s.used[0])), policy: data(p.policy), inputs: t('inputs_' + p.policy) });
+      } else {
+        out = t.parts('capHash', { lacp: prefix, m: s.up.length, f: G(s.fastest), d: G(s.delivered), cap: G(s.capacity) });
+      }
+    }
+    if (s.unreliable) out = out.concat(' ', t.parts('capFlap', { cfg: t('badge_' + p.switchCfg) }));
+    return out;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'mode', type: 'choice', label: t('mode'), options: L.MODES.map(function (x) { return [x, t('mode_' + x)]; }) },
+      { key: 'members', type: 'range', label: t('members'), min: L.RANGES.members[0], max: L.RANGES.members[1], step: 1 },
+      { key: 'fail', type: 'choice', label: t('fail'), options: L.FAILS.map(function (x) { return [x, t('fail_' + x)]; }) },
+      { key: 'policy', type: 'choice', label: t('policy'), options: L.POLICIES.map(function (x) { return [x, t('pol_' + x)]; }),
+        visible: function (p) { return p.mode === 'balance-xor' || p.mode === '802.3ad'; } },
+      { key: 'switchCfg', type: 'choice', label: t('switchCfg'), options: L.SWITCH.map(function (x) { return [x, t('sw_' + x)]; }) },
+      { key: 'flows', type: 'range', label: t('flows'), min: L.RANGES.flows[0], max: L.RANGES.flows[1], step: 1 },
+      { key: 'gateway', type: 'toggle', label: t('gateway') }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'bm-lane', label: t('legLane') },
+      { shape: 'bm-backup', label: t('legBackup') },
+      { shape: 'bm-down', label: t('legFailed') },
+      { shape: 'bm-star', label: t('legActive') },
+      { shape: 'bm-zig', label: t('legReorder') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: function (c) {
+      track(c);
+      var s = c.state, p = c.params, b = bands(s, p);
+      c.stage.replaceChildren(h('div', { class: 'bm' },
+        head(s, p),
+        h('div', { class: 'bm-fab' }, table(s, p), strands(s, p, b), lanes(s, p, b), sw(s, p)),
+        warnings(s),
+        totals(s)));
+    },
+    caption: function (c) {
+      track(c);
+      var s = c.state, p = c.params, out = [];
+      if (delta.moved.length && !s.failover) out.push(t.n('capMoved', delta.moved.length), ' ');
+      return out.concat(modeCaption(s, p));
+    }
+  });
+})();
+</script>
+</body>
+</html>
