@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **383 of 477 entries are live**, 64 w3, 19 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **384 of 477 entries are live**, 64 w3, 18 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -339,7 +339,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
-| §4.4 Linux | 55 | 53 | 2 w3 · queued |
+| §4.4 Linux | 55 | 53 | 1 w3 · building, 1 w3 · queued |
 | §4.5.1 Active Directory | 21 | 16 | 5 w3 · queued |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
@@ -357,7 +357,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
 | §4.14 Working on a film set | 25 | 1 | 13 w3, 11 w3 · queued |
 | §4.15 Antennas and radiation | 12 | 12 | – |
-| §4.16 Arithmetic on paper | 6 | 5 | 1 w3 · building |
+| §4.16 Arithmetic on paper | 6 | 6 | – |
 
 <!-- status:end -->
 
@@ -606,7 +606,7 @@ Uvod u Linux (UL) chapters and Napredna Linux administracija (NLA) topics.
 | `lnx-alert-states` | live | Alert states: pending and firing | scrape, `for:` duration, pending → firing, flapping | feed a metric, tune the rule | step | S | P2 | NLA | NLA T36–37 |  |
 | `lnx-live-migration` | live | Live migration | pre-copy rounds converge only if dirtying is slower than copying | slider for dirty rate and bandwidth | expl | M | P2 | NLA | NLA T02 |  |
 | `lnx-pam-stack` | live | The PAM stack | required/requisite/sufficient/optional decide a login | reorder modules, fail some, log in | step | S | P2 | NLA | NLA T58 → §5.1 |  |
-| `lnx-hypervisor-types` | w3 · queued | Type 1 vs type 2, containers vs VMs | where the kernel and the hypervisor sit | compare stacks, click layers | ref | S | P3 | NLA | NLA T01, T07 |  |
+| `lnx-hypervisor-types` | w3 · building | Type 1 vs type 2, containers vs VMs | where the kernel and the hypervisor sit | compare stacks, click layers | ref | S | P3 | NLA | NLA T01, T07 |  |
 
 ### 4.5 Windows administration
 
@@ -1392,7 +1392,7 @@ audience and base switches).
 | `ari-column-subtraction` | live | Column subtraction: two methods side by side | when a top digit is smaller, either borrow (take one from the next column, it is worth the base here) or use equal additions (add the base to the top digit and one to the next digit taken away); both keep the difference unchanged, so they give the same answer | type two numbers, step both methods at once, compare what is written where; a zero in the top number | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition` |  |
 | `ari-column-multiplication` | live | Column multiplication: partial products | multiply by each digit of the second number, write each partial product one place further left (it is multiplied by the base), then add; an area model shows why; in base 2 every partial product is the number itself or zero, shifted: shift-and-add | type two numbers, step digit by digit, open the area model, switch to base 2 | step | S | P2 | ARI | owner suggestion s-002; after `ari-column-addition`; base 2 pairs with `arh-twos-complement` |  |
 | `ari-long-division` | live | Long division, the Croatian way | take as few leading digits as can be divided, ask how many times, multiply, subtract, bring down the next digit, repeat; a 0 in the quotient when a step is too small; the remainder is less than the divisor | type a dividend and a divisor, step through, see a forgotten 0 in the quotient as a typical mistake | step | M | P2 | ARI | owner suggestion s-002; after `ari-column-multiplication` |  |
-| `ari-checking` | w3 · building | Is it right? Checking a result | the inverse operation checks a result (difference plus the number taken away gives the top number; quotient times divisor plus remainder gives the dividend), and an estimate from rounded numbers catches a result that is off by a place | check given results, find the wrong one, estimate before computing | expl | S | P3 | ARI | owner suggestion s-002; after `ari-long-division` |  |
+| `ari-checking` | live | Is it right? Checking a result | the inverse operation checks a result (difference plus the number taken away gives the top number; quotient times divisor plus remainder gives the dividend), and an estimate from rounded numbers catches a result that is off by a place | check given results, find the wrong one, estimate before computing | expl | S | P3 | ARI | owner suggestion s-002; after `ari-long-division` |  |
 
 **Suggested `learn.json` placement** (outline only; add nodes as their sims become ready). A new area before
 `lecturer`:
