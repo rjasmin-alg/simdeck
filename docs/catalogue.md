@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **402 of 477 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 2 w1 · held, 1 w3 · building.
+**Status, 2026-11-13** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **403 of 477 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 2 w1 · held.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -340,7 +340,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 55 | – |
-| §4.5.1 Active Directory | 21 | 20 | 1 w3 · building |
+| §4.5.1 Active Directory | 21 | 21 | – |
 | §4.5.2 Group Policy | 9 | 4 | 5 w3 |
 | §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
 | §4.5.4 DHCP on Windows Server | 6 | 3 | 3 w3 |
@@ -638,7 +638,7 @@ instead of repeating them.
 | `win-functional-levels` | live | Functional levels | what raising the domain and forest level unlocks, and what it rules out | raise levels with old DCs present | expl | S | P3 | WIN2 |  |  |
 | `win-fgpp` | live | Password policy and fine-grained policies | one domain policy from the Default Domain Policy GPO; PSOs override it by precedence | apply PSOs to users and groups, see the winner | step | S | P2 | WIN2 | → §5.1 |  |
 | `win-delegation` | live | Delegation of control | granting rights on an OU instead of Domain Admins | delegate password resets, test as a helpdesk user | step | S | P3 | WIN2 |  |  |
-| `win-trusts` | w3 · building | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 |  |  |
+| `win-trusts` | live | Trusts | direction, transitivity, forest vs external trusts; who can access what | build trusts between forests, test access | step | M | P3 | WIN2 |  |  |
 | `win-ad-recycle-bin` | live | Deleted objects: tombstone and recycle bin | tombstone lifetime, recycle bin, authoritative restore | mass-delete an OU, then recover | step | S | P2 | WIN2, DR | DR S15 |  |
 | `win-ad-backup-restore` | live | Restoring a DC, and USN rollback | non-authoritative vs authoritative restore; reverting a DC snapshot silently breaks replication | restore a DC each way, revert a VM snapshot | step | M | P2 | WIN2, DR | → §5.21 (`sto-backing-chains`) |  |
 
