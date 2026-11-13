@@ -1,0 +1,490 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-rodc: HQ's writable DC01, the IPsec tunnel, the branch's read-only DC RODC01 and the branch PC BR-PC01.
+     A stepper, one event per step: a logon at the branch (the RODC answers, forwards or fails), a WAN cut, or one
+     theft/response action. Kit view K2 draws the logon and the forwarded request on the wire; three cards below: the
+     password replication policy of RODC01, the domain's accounts at DC01, and what RODC01 holds. A log of the steps
+     at the bottom. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-rodc">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RODC u podružnici · simdeck</title>
+<meta name="description" content="Prijave u podružnici: RODC sprema samo dopuštene lozinke, administratore nikad. Ukradeni RODC otkriva samo njih i svoj ključ, pa se samo one resetiraju.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-rodc",
+  "title": {
+    "hr": "RODC u podružnici",
+    "en": "Read-only DC at a branch"
+  },
+  "concept": {
+    "hr": "Pravilo replikacije lozinki i što otkriva ukradeni RODC",
+    "en": "Password replication policy, and what a stolen RODC exposes"
+  },
+  "summary": {
+    "hr": "Prijave u podružnici: RODC sprema samo dopuštene lozinke, administratore nikad. Ukradeni RODC otkriva samo njih i svoj ključ, pa se samo one resetiraju.",
+    "en": "Logons at the branch: the RODC caches only allowed passwords, never admins'. A stolen RODC exposes just those and its own key, so only those are reset."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-rodc"]; colours only from kit tokens.
+   Layout: kit view K2 in a 12-column grid on top, the three cards in the middle, the log of steps below. */
+[data-sim="win-rodc"] .ro { height: 100%; padding: 1cqh 1.2cqw; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.7rem; font-size: 1rem; }
+[data-sim="win-rodc"] .sd-topo-card { min-width: 0; }
+[data-sim="win-rodc"] [translate="no"].ro-d { font-family: var(--mono); }
+[data-sim="win-rodc"] .ro-ch { background: var(--hl); color: var(--on-hl); box-shadow: inset 0 -0.18rem var(--ink); }
+[data-sim="win-rodc"] .ro-ico { width: 1em; height: 1em; vertical-align: -0.12em; fill: currentColor; flex: none; }
+
+/* the RODC is hatched: its card and its mark */
+[data-sim="win-rodc"] .sd-topo-card[data-id="RODC01"] { background-image: repeating-linear-gradient(45deg, transparent 0 0.55em, color-mix(in srgb, var(--ink) 12%, transparent) 0.55em 0.75em); }
+[data-sim="win-rodc"] .sd-topo-card[data-id="RODC01"] .sd-topo-mark { background-image: repeating-linear-gradient(45deg, transparent 0 0.3em, color-mix(in srgb, var(--bg) 45%, transparent) 0.3em 0.5em); }
+[data-sim="win-rodc"] .ro-head { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+[data-sim="win-rodc"] .ro-head b { font-size: var(--fs-lg); }
+[data-sim="win-rodc"] .ro-role { color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+[data-sim="win-rodc"] .sd-topo-badge .ro-d { font-family: inherit; }
+
+/* the cards */
+[data-sim="win-rodc"] .ro-cards { display: grid; grid-template-columns: 1.3fr 1.1fr 0.9fr; gap: 0.7rem; min-height: 0; }
+[data-sim="win-rodc"] .ro-card { padding: 0.4rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+  display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; overflow: hidden; }
+[data-sim="win-rodc"] .ro-card > h3 { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; gap: 0 0.6rem; align-items: baseline; }
+[data-sim="win-rodc"] .ro-card > h3 small { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-rodc"] .ro-card[data-k="stolen"] { border: 0.22rem solid var(--danger); }
+[data-sim="win-rodc"] .ro-row { display: flex; flex-wrap: wrap; gap: 0.25rem 0.35rem; align-items: center; }
+[data-sim="win-rodc"] .ro-row > .ro-lab { color: var(--muted); font-size: var(--fs-sm); margin-right: 0.2rem; }
+[data-sim="win-rodc"] .ro-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  font-size: var(--fs-sm); line-height: 1.5; white-space: nowrap; }
+[data-sim="win-rodc"] .ro-chip small { color: var(--muted); font-size: 1em; }
+[data-sim="win-rodc"] .ro-chip.ro-ch small { color: var(--on-hl); }
+[data-sim="win-rodc"] .ro-chip[data-k="cached"] { border-color: var(--ink); }
+[data-sim="win-rodc"] .ro-chip[data-k="deny"] { border-style: dashed; }
+[data-sim="win-rodc"] .ro-chip[data-k="gone"] { text-decoration: line-through; border-style: dashed; color: var(--muted); }
+[data-sim="win-rodc"] .ro-chip[data-exp="1"] { border: 0.2rem solid var(--danger); }
+[data-sim="win-rodc"] .ro-chip .ro-tag { font-size: 1em; font-weight: 700; color: var(--danger); }
+[data-sim="win-rodc"] .ro-chip .ro-tag[data-k="reset"] { color: var(--ok); }
+[data-sim="win-rodc"] .ro-key { color: var(--c2); }
+[data-sim="win-rodc"] .ro-grp { font-size: var(--fs-sm); padding: 0 0.3rem; }
+[data-sim="win-rodc"] .ro-grp[data-hit="allow"], [data-sim="win-rodc"] .ro-grp[data-hit="deny"] { border: 0.2rem solid var(--ink); font-weight: 700; }
+[data-sim="win-rodc"] .ro-grp[data-hit="beaten"] { border: 0.2rem dashed var(--ink); text-decoration: line-through; }
+[data-sim="win-rodc"] .ro-side { font-weight: 700; min-width: 6.5rem; }
+[data-sim="win-rodc"] .ro-check { margin-top: auto; padding-top: 0.3rem; border-top: var(--line-w) solid var(--line); display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.5rem; align-items: baseline; }
+[data-sim="win-rodc"] .ro-check > .ro-lab { grid-row: span 2; }
+[data-sim="win-rodc"] .ro-check > .ro-row, [data-sim="win-rodc"] .ro-check > .ro-muted:only-child { grid-column: 2; }
+[data-sim="win-rodc"] .ro-check > .ro-muted:only-child { grid-column: 1 / -1; }
+[data-sim="win-rodc"] .ro-check .ro-row { gap: 0.1rem 0.4rem; font-size: var(--fs-sm); }
+[data-sim="win-rodc"] .ro-check .ro-grp { padding: 0 0.25rem; line-height: 1.3; }
+[data-sim="win-rodc"] .ro-muted { color: var(--muted); }
+[data-sim="win-rodc"] .ro-note { font-weight: 700; color: var(--danger); }
+
+/* the log */
+[data-sim="win-rodc"] .ro-log { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
+[data-sim="win-rodc"] .ro-log ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+[data-sim="win-rodc"] .ro-log li { padding: 0.05rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+[data-sim="win-rodc"] .ro-log li[data-k="fail"] { border-color: var(--danger); border-width: 0.2rem; }
+[data-sim="win-rodc"] .ro-log li[data-k="ok"] { border-color: var(--ink); }
+[data-sim="win-rodc"] .ro-log li.ro-now { outline: 0.2rem solid var(--ink); outline-offset: 0.1rem; background: var(--hl); color: var(--on-hl); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-rodc"] .sd-swatch[data-shape="ro-dc"] { background: var(--c1); border-color: var(--c1); }
+[data-sim="win-rodc"] .sd-swatch[data-shape="ro-rodc"] { background-color: var(--c2); border-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.15em, color-mix(in srgb, var(--bg) 55%, transparent) 0.15em 0.3em); }
+[data-sim="win-rodc"] .sd-swatch[data-shape^="ro-g"] { position: relative; background: transparent; border: 0; }
+[data-sim="win-rodc"] .sd-swatch[data-shape^="ro-g"]::after { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; line-height: 1; }
+[data-sim="win-rodc"] .sd-swatch[data-shape="ro-gkey"]::after { content: '⚿'; color: var(--c2); font-size: 1.1em; }
+[data-sim="win-rodc"] .sd-swatch[data-shape="ro-gdeny"]::after { content: '⛔'; font-size: 0.9em; }
+[data-sim="win-rodc"] .sd-swatch[data-shape="ro-exp"] { background: var(--bg); border: 0.2rem solid var(--danger); }
+
+[data-sim="win-rodc"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="win-rodc"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the kit's card list; the cards stack, nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-rodc"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-rodc"] .ro { height: auto; padding: 0.5rem; }
+  [data-sim="win-rodc"] .ro-cards { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-rodc"] .ro-chip { white-space: normal; }
+  [data-sim="win-rodc"] .ro-side { min-width: 0; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">RODC u podružnici</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PC = L.PCS[0];
+  var ALL = L.ACCOUNTS.length;
+
+  /** Data (host names, account and group names, addresses) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'ro-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Placeholder nodes are
+      cloned, so one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function icon(d, cls) {
+    var s = document.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'ro-ico' + (cls ? ' ' + cls : ''));
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(SVGNS, 'path');
+    p.setAttribute('d', d);
+    s.append(p);
+    return s;
+  }
+  function keyIcon() { return icon('M7.5 17a5.5 5.5 0 1 1 5.2-7.3H23v3.6h-2.4V16h-3.2v-2.7h-4.7A5.5 5.5 0 0 1 7.5 17zm0-3.4a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2z', 'ro-key'); }
+  function deny() { return h('span', { 'aria-hidden': 'true' }, '⛔'); }
+
+  function users(s) { return s.filter(function (id) { return L.kindOf(id) === 'user'; }); }
+  function computers(s) { return s.filter(function (id) { return L.kindOf(id) === 'computer'; }); }
+  function forwarded(r) { return r && (r.result === 'cached' || r.result === 'forwarded'); }
+  function newlyCached(c) { return c.prev ? c.state.rodc.cached.filter(function (id) { return c.prev.rodc.cached.indexOf(id) < 0; }) : []; }
+
+  // ── the drawing (kit view K2) ──
+
+  function head(name, role) { return h('span', { class: 'ro-head' }, h('b', null, data(name)), h('span', { class: 'ro-role' }, role)); }
+
+  function topo(c) {
+    var s = c.state, e = s.last;
+    var logon = e && e.kind === 'logon' && !e.gone ? e : null;
+    var fwd = logon && (forwarded(logon.pcRes) || forwarded(logon.userRes));
+    var fresh = newlyCached(c);
+    var bDC = [], bWan = [], bRodc = [], bPc = [];
+    bWan.push({ text: t(s.wan ? 'wanUp' : 'wanDown'), k: s.wan ? 'solid' : 'fill' });
+    if (fwd) { bDC.push({ text: t('bChecks'), k: 'fill' }); if (fresh.length) bDC.push({ text: t('bSends'), k: 'solid' }); }
+    if (e && e.kind === 'list') bDC.push({ text: t('bLists'), k: 'fill' });
+    if (e && e.kind === 'delete') bDC.push({ text: t('bDeletes'), k: 'fill' });
+    if (e && (e.kind === 'resetUsers' || e.kind === 'resetComputers')) bDC.push({ text: t('bResets'), k: 'fill' });
+    if (s.stolen) bRodc.push({ text: t('bStolen'), k: 'fill' });
+    if (logon) {
+      var results = [logon.pcRes.result, logon.userRes ? logon.userRes.result : 'local'];
+      if (results.indexOf('failed') >= 0) bRodc.push({ text: t('bFails'), k: 'fill' });
+      else if (fwd) bRodc.push({ text: t('bForwards'), k: 'fill' });
+      else bRodc.push({ text: t('bAnswers'), k: 'fill' });
+      if (fresh.length) bRodc.push({ text: t('bCaches'), k: 'solid' });
+      bPc.push({ text: [data(logon.user), ' ', t('logsOn')], k: 'fill' });
+      if (logon.ok) bPc.push({ text: t('bOk'), k: 'solid' });
+      else bPc.push({ text: t('chipFail'), k: 'dashed' });
+      if (logon.pcLocal) bPc.push({ text: t('bLocalLogon'), k: 'dashed' });
+    }
+    var act = function (id) {
+      if (id === 'RODC01' && s.stolen) return 'down';
+      if (!e) return null;
+      if (logon) return id === 'DC01' ? (fwd ? 'active' : null) : id === 'WAN' ? (fwd ? 'active' : null) : 'active';
+      if (e.kind === 'steal') return id === 'RODC01' ? 'down' : null;
+      if (e.kind === 'cut') return id === 'WAN' ? 'active' : null;
+      return id === 'DC01' ? 'active' : null;
+    };
+    var nodes = [
+      { id: 'DC01', kind: 'server', col: 0, row: 0, span: 4, c: 1, mark: 'DC', name: head('DC01', t('dcRole')),
+        lines: [{ text: '10.10.0.10', kind: 'sub' }], badges: bDC, state: act('DC01') },
+      { id: 'WAN', kind: 'cloud', col: 6, row: 0, span: 3, name: t('wanName'), badges: bWan, state: act('WAN'),
+        changed: !!(c.prev && c.n > 0 && c.prev.wan !== s.wan) },
+      { id: 'RODC01', kind: 'server', col: 11, row: 0, span: 4, c: 2, mark: 'RO', name: head('RODC01', t('rodcRole')),
+        lines: [{ text: '10.20.0.10', kind: 'sub' }], badges: bRodc, state: act('RODC01'),
+        changed: !!(e && e.kind === 'steal') },
+      { id: PC, kind: 'host', col: 17, row: 0, span: 3, c: 3, mark: 'PC', name: head(PC, t('pcRole')), badges: bPc, state: act(PC) }
+    ];
+    var wanState = s.wan ? 'up' : 'down';
+    var links = [
+      { id: 'hq', a: 'DC01', b: 'WAN', state: wanState, active: !!fwd },
+      { id: 'br', a: 'WAN', b: 'RODC01', state: wanState, active: !!fwd },
+      { id: 'lan', a: 'RODC01', b: PC, state: s.stolen ? 'off' : 'up', active: !!logon }
+    ];
+    var packets = [];
+    if (logon) {
+      packets.push({ from: PC, to: 'RODC01', label: t('chipLogon'), c: 3, drop: !logon.ok && !fwd, at: 0.5 });
+      if (fwd) {
+        packets.push({ from: 'RODC01', to: 'WAN', label: t('chipFwd'), c: 2, cast: 'broadcast', at: 0.5 });
+        packets.push({ from: 'WAN', to: 'DC01', chip: false, c: 2, cast: 'broadcast' });
+      }
+      if (fresh.length) {
+        packets.push({ from: 'DC01', to: 'WAN', label: [keyIcon(), ' ', data(fresh.join(' + '))], c: 1, at: 0.5 });
+        packets.push({ from: 'WAN', to: 'RODC01', chip: false, c: 1 });
+      }
+    }
+    return Simdeck.topology({ cols: 20, rows: ['auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '0.4cqw' });
+  }
+
+  // ── the PRP card ──
+
+  function grp(name, hit) { return h('span', { class: 'ro-chip ro-grp', translate: 'no', dataset: hit ? { hit: hit } : {} }, name); }
+
+  function prpCard(c) {
+    var p = c.params, e = c.state.last;
+    var checks = [];
+    if (e && e.kind === 'logon' && !e.gone) [e.pcRes, e.userRes].forEach(function (r) { if (r && r.prp) checks.push(r); });
+    function hitOf(g) {
+      var out = null;
+      checks.forEach(function (r) {
+        if (r.prp.by === g) out = r.prp.verdict === 'deny' ? 'deny' : 'allow';
+        if (r.prp.alsoAllowed === g) out = 'beaten';
+      });
+      return out;
+    }
+    var allow = L.ALLOW_OF[p.allowGroup];
+    var allowRow = h('div', { class: 'ro-row' }, h('span', { class: 'ro-side' }, '✓ ', t('allowed')),
+      grp('Allowed RODC Password Replication Group'), h('span', { 'aria-hidden': 'true' }, '⊃'),
+      allow.length ? allow.map(function (g) { return grp(g, hitOf(g)); }) : h('span', { class: 'ro-muted' }, t('noMembers')));
+    var denyRow = h('div', { class: 'ro-row' }, h('span', { class: 'ro-side' }, deny(), ' ', t('denied')),
+      grp('Denied RODC Password Replication Group'), h('span', { 'aria-hidden': 'true' }, '⊃'),
+      L.DENIED_GROUP.map(function (g) { return grp(g, hitOf(g)); }), h('span', { class: 'ro-lab' }, t('andPolicy')),
+      L.DENIED_POLICY.map(function (g) { return grp(g, hitOf(g)); }));
+    var check = h('div', { class: 'ro-check' }, checks.length ? h('span', { class: 'ro-lab' }, t('prpChecked')) : null, checks.length ? checks.map(function (r) {
+      var v = r.prp.verdict;
+      return h('div', { class: 'ro-row' }, h('b', null, data(r.id)),
+        r.prp.by ? ['→', grp(r.prp.by)] : null,
+        h('span', { class: v === 'allow' ? null : 'ro-note' }, v === 'deny' ? [deny(), ' ', t('vDeny')] : t(v === 'allow' ? 'vAllow' : 'vNone')),
+        r.prp.alsoAllowed ? h('span', null, '(', t('vDenyWins'), ')') : null);
+    }) : h('span', { class: 'ro-muted' }, t('prpIdle')));
+    return h('div', { class: 'ro-card' }, h('h3', null, t('prpTitle')), allowRow, denyRow, check);
+  }
+
+  // ── the accounts card ──
+
+  function acctChip(c, id) {
+    var s = c.state, prev = c.prev;
+    var cached = s.rodc.cached.indexOf(id) >= 0;
+    var denied = L.prp(id, c.params).verdict === 'deny';
+    var exp = s.exposed.indexOf(id) >= 0;
+    var changed = c.n > 0 && prev && ((cached && prev.rodc.cached.indexOf(id) < 0) || s.pwdVer[id] !== prev.pwdVer[id]);
+    return h('span', { class: 'ro-chip' + (changed ? ' ro-ch' : ''), dataset: { k: cached ? 'cached' : denied ? 'deny' : 'plain', exp: exp ? '1' : '0' } },
+      cached ? keyIcon() : null, denied ? deny() : null, data(id), h('small', { translate: 'no' }, 'v' + s.pwdVer[id]),
+      exp ? h('span', { class: 'ro-tag' }, '!') : null);
+  }
+
+  function acctCard(c) {
+    var s = c.state;
+    function row(label, ids) {
+      return h('div', { class: 'ro-row' }, h('span', { class: 'ro-lab', translate: 'no' }, label), ids.map(function (id) { return acctChip(c, id); }));
+    }
+    var rodcKeyGone = !s.rodc.account;
+    var keyChanged = c.n > 0 && c.prev && c.prev.rodc.account !== s.rodc.account;
+    var keyRow = h('div', { class: 'ro-row' }, h('span', { class: 'ro-lab' }, t('keys')),
+      acctChip(c, 'krbtgt'), h('span', { class: 'ro-muted' }, t('domainKey')),
+      h('span', { class: 'ro-chip' + (keyChanged ? ' ro-ch' : ''), dataset: { k: rodcKeyGone ? 'gone' : 'cached', exp: s.stolen ? '1' : '0' } },
+        keyIcon(), data('RODC01$ · ' + L.RODC_KRBTGT)),
+      h('span', { class: 'ro-muted' }, rodcKeyGone ? t('deleted') : t('rodcKey')));
+    return h('div', { class: 'ro-card' }, h('h3', null, t('acctTitle'), h('small', null, t('verHint'))),
+      row('BRK-Staff', L.BRANCH_USERS), row('HQ-Staff', ['marko']), row('Domain Admins · BRK-Staff', ['tbrennan']),
+      row('BRK-PCs', L.PCS), keyRow);
+  }
+
+  // ── what RODC01 holds ──
+
+  function rodcCard(c) {
+    var s = c.state;
+    var fresh = newlyCached(c);
+    var order = L.ACCOUNTS.map(function (a) { return a.id; }).filter(function (id) { return s.rodc.cached.indexOf(id) >= 0; });
+    var chips = order.map(function (id) {
+      var reset = s.reset.indexOf(id) >= 0;
+      var justReset = reset && c.prev && c.prev.reset.indexOf(id) < 0;
+      return h('span', { class: 'ro-chip' + (fresh.indexOf(id) >= 0 || justReset ? ' ro-ch' : ''), dataset: { k: 'cached', exp: s.stolen ? '1' : '0' } },
+        keyIcon(), data(id), reset ? h('span', { class: 'ro-tag', dataset: { k: 'reset' }, 'aria-hidden': 'true' }, '↻') : null);
+    });
+    var keyGone = !s.rodc.account;
+    return h('div', { class: 'ro-card', dataset: { k: s.stolen ? 'stolen' : 'held' } },
+      h('h3', null, t('rodcTitle'), s.stolen ? h('span', { class: 'ro-note' }, t('stolenNote')) : null),
+      h('div', { class: 'ro-row ro-muted' }, t('rodcCopy')),
+      h('div', { class: 'ro-row' }, h('b', null, t('cachedTitle')), data('msDS-RevealedList', 'ro-muted'),
+        h('span', { class: 'ro-muted' }, t('ofAccounts', { n: order.length, all: ALL })),
+        s.reset.length ? h('span', { class: 'ro-tag', dataset: { k: 'reset' } }, '↻ ', t('reset'), ' ', data(s.reset.length)) : null),
+      h('div', { class: 'ro-row' }, chips.length ? chips : h('span', { class: 'ro-muted' }, t('none'))),
+      h('div', { class: 'ro-row' }, h('b', null, t('ownKey')),
+        h('span', { class: 'ro-chip', dataset: { k: keyGone ? 'gone' : 'cached', exp: s.stolen ? '1' : '0' } }, keyIcon(), data(L.RODC_KRBTGT)),
+        keyGone ? h('span', { class: 'ro-muted' }, t('deleted')) : null));
+  }
+
+  // ── the log ──
+
+  var RES = { local: 'rLocal', cached: 'rCached', forwarded: 'rForwarded', failed: 'rFailed' };
+  var KIND = { cut: 'logCut', steal: 'logSteal', list: 'logList', 'delete': 'logDelete', resetUsers: 'logResetU', resetComputers: 'logResetC' };
+  function logLine(c) {
+    var s = c.state;
+    var items = s.log.map(function (x, i) {
+      var body;
+      if (x.kind === 'logon') body = [data(x.user || t('logPcOnly')), ' ', x.ok ? '✓ ' : '✕ ', t(RES[x.result] || 'rFailed')];
+      else body = t(KIND[x.kind]);
+      return h('li', { class: i === s.log.length - 1 ? 'ro-now' : null, dataset: { k: x.kind === 'logon' ? (x.ok ? 'ok' : 'fail') : 'act' } },
+        data(x.n + '.'), ' ', body);
+    });
+    return h('div', { class: 'ro-log' }, h('b', null, t('logTitle')), items.length ? h('ol', null, items) : h('span', { class: 'ro-muted' }, t('logStart')));
+  }
+
+  // ── captions ──
+
+  function counts(list) { return { u: t.n('nUsers', users(list).length), c: t.n('nComputers', computers(list).length) }; }
+
+  function capStart(c) {
+    var p = c.params, s = c.state, U = data(p.user);
+    var out = [rich('startCommon')];
+    if (p.scenario === 'stolen') out.push(rich('startStolen', counts(s.rodc.cached)));
+    else if (!p.wan) out.push(rich('startNoWan'));
+    else if (p.scenario === 'wan-down') out.push(rich('startWan', { u: U }));
+    else if (p.scenario === 'first-logon') out.push(rich('startFirst', { u: U }));
+    else out.push(rich('startTwice', { u: U }));
+    if (p.user === 'tbrennan' && p.scenario !== 'stolen') out.push(rich('startAdmin'));
+    if (p.allowGroup === 'empty') out.push(rich('startEmpty'));
+    return join(out);
+  }
+
+  function before(c, user, result) {
+    return c.prev.log.some(function (x) { return x.kind === 'logon' && x.user === user && x.result === result; });
+  }
+
+  function capLogon(c) {
+    var s = c.state, e = s.last, p = c.params;
+    if (e.gone) return rich('gone');
+    var U = data(e.user), pr = e.pcRes, ur = e.userRes, out = [];
+    if (!s.wan) {
+      if (e.ok) out.push(rich('wanOkLocal', { u: U }));
+      else if (pr.result === 'failed' && ur.result === 'failed') out.push(rich('wanFailAll', { u: U }));
+      else if (pr.result === 'failed') out.push(rich('wanFailPc', { u: U }));
+      else out.push(rich('wanFailUser', { u: U }));
+      if (e.pcLocal) out.push(rich('pcLocalLogon'));
+      return join(out);
+    }
+    if (ur.result === 'cached') out.push(rich('firstCached', { u: U, g: data(ur.prp.by) }));
+    else if (ur.result === 'local') out.push(rich('userLocal', { u: U }));
+    else if (ur.prp.verdict === 'deny') {
+      if (before(c, e.user, 'forwarded')) out.push(rich('userDenyAgain', { u: U }));
+      else out.push(rich(ur.prp.alsoAllowed ? 'userDeny' : 'userDenyPlain', { u: U, g: data(ur.prp.by), a: data(ur.prp.alsoAllowed || '') }));
+    } else if (p.allowGroup === 'empty') out.push(rich('userNoneEmpty', { u: U }));
+    else if (before(c, e.user, 'forwarded')) out.push(rich('userNoneAgain', { u: U }));
+    else out.push(rich('userNone', { u: U }));
+    if (pr.result === 'cached') out.push(rich(ur.result === 'cached' ? 'pcCached' : 'pcCachedAlone', { g: data(pr.prp.by) }));
+    else if (pr.result === 'forwarded' && !before(c, e.user, 'forwarded')) out.push(rich('pcNoneEmpty'));
+    return join(out);
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.last;
+    if (!e) return capStart(c);
+    switch (e.kind) {
+      case 'logon': return capLogon(c);
+      case 'cut': return e.already ? rich('cutAlready') : rich('cut', { n: t.n('nPasswords', s.rodc.cached.length) });
+      case 'steal': return s.exposed.length ? rich('steal', counts(s.exposed)) : rich('stealNone');
+      case 'list': return rich('list', { n: t.n('nAccounts', s.toReset.length) });
+      case 'delete': return rich('del');
+      case 'resetUsers': return e.done.length ? rich('resetU', { u: t.n('nUsers', e.done.length) }) : rich('resetNone');
+      case 'resetComputers':
+        if (!s.exposed.length) return rich('resetNone');
+        return join([e.done.length ? rich('resetC', { c: t.n('nComputers', e.done.length) }) : [], rich('stolenEnd', counts(s.exposed))]);
+      default: return '';
+    }
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('scenario'), options: L.SCENARIOS.map(function (x) { return [x, x]; }), resets: true,
+        visible: function () { return false; } },
+      { key: 'allowGroup', type: 'choice', label: t('allowGroup'), hint: t('allowHint'),
+        options: [['empty', t('allowEmpty')], ['brk', t('allowBrk')]] },
+      { key: 'user', type: 'choice', label: t('user'), hint: t('userHint'),
+        options: [['ana', t('uAna')], ['marko', t('uMarko')], ['tbrennan', t('uTbrennan')]],
+        visible: function (p) { return p.scenario !== 'stolen'; } },
+      { key: 'wan', type: 'toggle', label: t('wan') }
+    ],
+
+    presets: [
+      { id: 'first-logon', label: t('presetFirst'), hint: t('presetFirstHint'), params: { scenario: 'first-logon' } },
+      { id: 'wan-down', label: t('presetWan'), hint: t('presetWanHint'), params: { scenario: 'wan-down' } },
+      { id: 'admin-at-branch', label: t('presetAdmin'), hint: t('presetAdminHint'), params: { scenario: 'admin-at-branch', user: 'tbrennan' } },
+      { id: 'default-empty', label: t('presetEmpty'), hint: t('presetEmptyHint'), params: { scenario: 'default-empty', allowGroup: 'empty' } },
+      { id: 'stolen', label: t('presetStolen'), hint: t('presetStolenHint'), params: { scenario: 'stolen' } }
+    ],
+
+    legend: [
+      { shape: 'ro-dc', label: t('legendDc') },
+      { shape: 'ro-rodc', label: t('legendRodc') },
+      { shape: 'ro-gkey', label: t('legendKey') },
+      { shape: 'ro-gdeny', label: t('legendDeny') },
+      { shape: 'dash', label: t('legendFwd') },
+      { shape: 'ro-exp', label: t('legendExposed') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'ro' }, topo(c), h('div', { class: 'ro-cards' }, prpCard(c), acctCard(c), rodcCard(c)), logLine(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
