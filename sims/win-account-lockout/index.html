@@ -1,0 +1,489 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-account-lockout: three clients (PC-A, PC-B, the phone) and two DCs (DC02, and DC01 the PDC emulator), user ana.
+     A stepper, one event per step: a logon attempt, a stale session's retry, a password change or a pause. Kit view K2
+     draws the attempt on the wire, the chaining to the PDC dashed; each DC card holds its own badPwdCount,
+     badPasswordTime and lockoutTime. The policy strip and the clock sit on top, the timeline of attempts below.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-account-lockout">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaključavanje računa · simdeck</title>
+<meta name="description" content="Krive lozinke s dva računala i mobitel sa starom lozinkom: svaki DC broji za sebe, PDC broji sve, a prag zaključava račun na svim DC-ovima.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/topology.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-account-lockout",
+  "title": {
+    "hr": "Zaključavanje računa",
+    "en": "Account lockout"
+  },
+  "concept": {
+    "hr": "Prag, brojač na emulatoru PDC-a i zastarjela lozinka koja zaključa račun",
+    "en": "Threshold, bad-password count at the PDC emulator, a stale password locking it"
+  },
+  "summary": {
+    "hr": "Krive lozinke s dva računala i mobitel sa starom lozinkom: svaki DC broji za sebe, PDC broji sve, a prag zaključava račun na svim DC-ovima.",
+    "en": "Wrong passwords from two PCs and a phone with an old one: each DC counts its own, the PDC counts them all, and the threshold locks the account everywhere."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-account-lockout"]; colours only from kit tokens.
+   Layout: the strip on top, kit view K2 in an 8-column grid (clients left, DCs right), the timeline below. */
+[data-sim="win-account-lockout"] .lk { height: 100%; padding: 1cqh 1.2cqw; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.8rem; font-size: 1rem; }
+[data-sim="win-account-lockout"] .lk .sd-topo { height: 100%; align-content: space-between; row-gap: 0.6rem; }
+[data-sim="win-account-lockout"] .sd-topo-card { min-width: 0; }
+[data-sim="win-account-lockout"] [translate="no"].lk-d { font-family: var(--mono); white-space: nowrap; }
+/* changed in this step: the kit's highlight colour plus an ink underline, so it survives grayscale */
+[data-sim="win-account-lockout"] .lk-ch { background: var(--hl); color: var(--on-hl); border-radius: 0.15em; box-shadow: inset 0 -0.18rem var(--ink); }
+[data-sim="win-account-lockout"] .lk-lock { width: 1.05em; height: 1.05em; vertical-align: -0.15em; fill: currentColor; flex: none; }
+
+/* the strip: policy, account, clock */
+[data-sim="win-account-lockout"] .lk-top { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: stretch; }
+[data-sim="win-account-lockout"] .lk-box { padding: 0.3rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.9rem; }
+[data-sim="win-account-lockout"] .lk-box > b { font-size: var(--fs-md); }
+[data-sim="win-account-lockout"] .lk-kv { white-space: nowrap; }
+[data-sim="win-account-lockout"] .lk-kv > span:first-child { color: var(--muted); margin-right: 0.3rem; }
+[data-sim="win-account-lockout"] .lk-kv b { font-family: var(--mono); }
+[data-sim="win-account-lockout"] .lk-pol { flex: 1 1 auto; }
+[data-sim="win-account-lockout"] .lk-acct { flex: 1 1 auto; }
+[data-sim="win-account-lockout"] .lk-state { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.45rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-weight: 700; }
+[data-sim="win-account-lockout"] .lk-state[data-k="locked"] { background: var(--danger); border-color: var(--danger); color: var(--bg); }
+[data-sim="win-account-lockout"] .lk-state[data-k="open"] { border-style: dashed; font-weight: 400; }
+[data-sim="win-account-lockout"] .lk-clock { font-size: var(--fs-lg); align-items: center; }
+[data-sim="win-account-lockout"] .lk-clock b { font-family: var(--mono); font-size: var(--fs-lg); }
+
+/* the DC cards */
+[data-sim="win-account-lockout"] .lk-head { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+[data-sim="win-account-lockout"] .lk-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; }
+[data-sim="win-account-lockout"] .lk-title b { font-size: var(--fs-lg); }
+[data-sim="win-account-lockout"] .lk-role { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-account-lockout"] .lk-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; min-height: 1.9rem; }
+[data-sim="win-account-lockout"] .lk-extra { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem 1.2rem; align-items: center; margin-top: 0.3rem; }
+[data-sim="win-account-lockout"] .lk-times { display: grid; grid-template-columns: auto auto; gap: 0 0.6rem; align-items: baseline; }
+[data-sim="win-account-lockout"] .lk-attr { font-family: var(--mono); color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-account-lockout"] .lk-count { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+[data-sim="win-account-lockout"] .lk-num { display: inline-grid; place-items: center; min-width: 2.2em; padding: 0 0.3rem; font-family: var(--mono); font-size: var(--fs-xl);
+  font-weight: 700; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); line-height: 1.25; }
+[data-sim="win-account-lockout"] .lk-num[data-k="full"] { background: var(--danger); border-color: var(--danger); color: var(--bg); }
+[data-sim="win-account-lockout"] .lk-num.lk-ch { background: var(--hl); color: var(--on-hl); border-color: var(--ink); }
+[data-sim="win-account-lockout"] .lk-val { font-family: var(--mono); display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 0.15rem; }
+[data-sim="win-account-lockout"] .lk-val[data-k="locked"] { color: var(--danger); font-weight: 700; }
+
+/* the timeline */
+[data-sim="win-account-lockout"] .lk-tl { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+[data-sim="win-account-lockout"] .lk-tl > b { flex: none; }
+[data-sim="win-account-lockout"] .lk-tl ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+[data-sim="win-account-lockout"] .lk-tl li { display: flex; flex-direction: column; align-items: center; padding: 0.05rem 0.45rem; border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm); font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="win-account-lockout"] .lk-tl li[data-k="bad"] { border-color: var(--ink); }
+[data-sim="win-account-lockout"] .lk-tl li[data-k="locked"] { border-color: var(--danger); border-width: 0.2rem; }
+[data-sim="win-account-lockout"] .lk-tl li[data-k="ok"] { border-color: var(--ok); border-width: 0.2rem; }
+[data-sim="win-account-lockout"] .lk-tl li[data-k="old"], [data-sim="win-account-lockout"] .lk-tl li[data-k="tick"],
+[data-sim="win-account-lockout"] .lk-tl li[data-k="changed"] { border-style: dashed; }
+[data-sim="win-account-lockout"] .lk-tl li.lk-now { outline: 0.2rem solid var(--ink); outline-offset: 0.1rem; background: var(--hl); color: var(--on-hl); }
+[data-sim="win-account-lockout"] .lk-tl .lk-sym { font-weight: 700; }
+[data-sim="win-account-lockout"] .lk-tl .lk-empty { color: var(--muted); }
+
+/* legend swatches the kit lacks: a counter and a lock */
+[data-sim="win-account-lockout"] .sd-swatch[data-shape="lk-count"] { position: relative; background: var(--bg); border: 0.15rem solid var(--ink); }
+[data-sim="win-account-lockout"] .sd-swatch[data-shape="lk-count"]::after { content: '3'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em;
+  font-weight: 700; font-family: var(--mono); color: var(--ink); line-height: 1; }
+[data-sim="win-account-lockout"] .sd-swatch[data-shape="lk-lock"] { position: relative; background: transparent; border: 0; }
+[data-sim="win-account-lockout"] .sd-swatch[data-shape="lk-lock"]::before { content: ''; position: absolute; left: 22%; right: 22%; top: 0; height: 55%;
+  border: 0.15rem solid var(--danger); border-bottom: 0; border-radius: 0.5em 0.5em 0 0; }
+[data-sim="win-account-lockout"] .sd-swatch[data-shape="lk-lock"]::after { content: ''; position: absolute; left: 8%; right: 8%; bottom: 0; height: 58%;
+  background: var(--danger); border-radius: 0.12em; }
+
+[data-sim="win-account-lockout"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+[data-sim="win-account-lockout"] .sd-presets { grid-template-columns: 1fr 1fr; }
+
+/* Phone and portrait: the kit's card list; the strip and the timeline wrap, nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-account-lockout"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-account-lockout"] .lk { height: auto; padding: 0.5rem; }
+  [data-sim="win-account-lockout"] .lk .sd-topo { height: auto; }
+  [data-sim="win-account-lockout"] .lk-kv { white-space: normal; }
+  [data-sim="win-account-lockout"] .lk-tl { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Zaključavanje računa</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Series colour per party; grid places [col, row] in an 8-column grid, cards span 3. */
+  var COLOUR = { 'PC-A': '1', 'PC-B': '2', phone: '3', DC01: '4', DC02: '5' };
+  var POS = { 'PC-A': [0, 0], phone: [0, 1], 'PC-B': [0, 2], DC02: [4, 0], DC01: [4, 2] };
+  var LINKS = [['PC-A', 'DC02'], ['phone', 'DC02'], ['PC-B', 'DC01'], ['DC02', 'DC01']];
+  var USER = 'ana';
+
+  /** Data (host names, attribute names, password labels, times) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'lk-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  function min(n) { return data('t = ' + n + ' min'); }
+  /** A client's name in a sentence: PC-A and PC-B are data, the phone is a word. */
+  function who(id) { return id === 'phone' ? h('span', null, t('phoneShort')) : data(id); }
+  /** A password label: P0…P3 are data, a typo is a word. */
+  function pwd(pw) { return pw === 'typo' ? h('span', null, t('typoWord')) : data(pw); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Placeholder nodes are
+      cloned, so one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  /** Highlight a value that differs from the step before. */
+  function ch(c, get) {
+    if (!c.prev || c.n === 0) return false;
+    return JSON.stringify(get(c.state)) !== JSON.stringify(get(c.prev));
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function lockIcon() {
+    var s = document.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'lk-lock');
+    s.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(SVGNS, 'path');
+    p.setAttribute('d', 'M7 10V7a5 5 0 0 1 10 0v3h1.5A1.5 1.5 0 0 1 20 11.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 20.5v-9A1.5 1.5 0 0 1 5.5 10zm2.5 0h5V7a2.5 2.5 0 0 0-5 0z');
+    s.append(p);
+    return s;
+  }
+  function eff(p) { return Object.assign({}, p, { resetMin: L.resetOf(p) }); }
+
+  // ── the strip on top ──
+
+  function kv(label, value, changed) {
+    return h('span', { class: 'lk-kv' }, h('span', null, label), h('b', { class: changed ? 'lk-ch' : null, translate: 'no' }, value));
+  }
+  function strip(c) {
+    var p = eff(c.params), s = c.state;
+    var thr = p.threshold === 0 ? '0 (' + t('never') + ')' : String(p.threshold);
+    var dur = p.durationMin === 0 ? '0 (' + t('untilAdmin') + ')' : p.durationMin + ' min';
+    var pol = h('div', { class: 'lk-box lk-pol', 'aria-label': t('policy') },
+      kv(t('polThreshold'), thr), kv(t('polReset'), p.resetMin + ' min'), kv(t('polDuration'), dur),
+      h('span', { class: 'lk-kv' }, h('span', null, t('polHistory')), h('b', null, t(p.historyCheck ? 'on' : 'off'))));
+    var locked = !!s.locked;
+    var acct = h('div', { class: 'lk-box lk-acct' }, h('b', null, t('account'), ' ', data(USER)),
+      kv(t('pwdNow'), s.pwd.current, ch(c, function (x) { return x.pwd.current; })),
+      kv(t('pwdHistory'), s.pwd.history.join(' '), ch(c, function (x) { return x.pwd.history; })),
+      h('span', { class: 'lk-state' + (ch(c, function (x) { return !!x.locked; }) ? ' lk-ch' : ''), dataset: { k: locked ? 'locked' : 'open' } },
+        locked ? lockIcon() : null, t(locked ? 'stateLocked' : 'stateOpen')));
+    var clock = h('div', { class: 'lk-box lk-clock' }, h('span', null, t('clock')), h('b', { translate: 'no', class: ch(c, function (x) { return x.t; }) ? 'lk-ch' : null }, 't = ' + s.t + ' min'));
+    return h('div', { class: 'lk-top' }, clock, pol, acct);
+  }
+
+  // ── the cards (kit view K2) ──
+
+  /** A card's head beside the mark: the name, a muted role and this step's badges, in one block. */
+  function head(name, role, badges) {
+    return h('div', { class: 'lk-head' }, h('div', { class: 'lk-title' }, name, h('span', { class: 'lk-role' }, role)),
+      h('div', { class: 'lk-badges' }, badges.map(function (b) { return h('span', { class: 'sd-topo-badge', dataset: { k: b.k } }, b.text); })));
+  }
+
+  function clientBadges(c, id) {
+    var s = c.state, e = s.last, out = [];
+    if (e && e.client === id) {
+      if (e.kind === 'change') out.push({ text: t('bChange'), k: 'fill' });
+      else if (e.typed === 'typo') out.push({ text: t('bTypo'), k: 'fill' });
+      else out.push({ text: t('bTypes', { pw: e.typed }), k: 'fill' });
+    }
+    if (id === 'phone') {
+      var ss = s.sessions[0];
+      out.push(ss ? { text: t('bStale', { pw: ss.pwdUsed, r: ss.retryMin }), k: 'dashed' } : { text: t('bNoSession'), k: 'muted' });
+    }
+    return out;
+  }
+
+  function dcBadges(c, id) {
+    var e = c.state.last, out = [];
+    if (id === L.PDC) out.push({ text: t('pdc'), k: 'solid' });
+    if (!e || e.kind === 'tick') { if (e && e.unlocked) out.push({ text: t('bUnlocked'), k: 'dashed' }); return out; }
+    if (e.unlocked) out.push({ text: t('bUnlocked'), k: 'dashed' });
+    var mine = e.dc === id, pdcHere = id === L.PDC && e.chained;
+    if (e.kind === 'change') { if (mine) out.push({ text: t('bForwards'), k: 'fill' }); return out; }
+    if (e.result === 'locked' && mine) out.push({ text: t('bLockedOut'), k: 'fill' });
+    if (e.result === 'ok' && mine) out.push({ text: t('bAccepts'), k: 'fill' });
+    if ((e.result === 'bad' || e.result === 'old') && (mine || pdcHere)) {
+      out.push({ text: t('bRejects'), k: 'fill' });
+      if (e.result === 'bad') out.push({ text: t('bCounts'), k: 'solid' });
+      else out.push({ text: t('bNotCounted'), k: 'dashed' });
+      if (e.lockedBy === id) out.push({ text: t('bLocks'), k: 'fill' });
+    }
+    return out;
+  }
+
+  function dcExtra(c, id) {
+    var p = c.params, d = c.state.dcs[id];
+    var full = p.threshold > 0 && d.bad >= p.threshold;
+    var numCh = ch(c, function (x) { return x.dcs[id].bad; });
+    return h('div', { class: 'lk-extra' },
+      h('div', { class: 'lk-count' },
+        h('span', { class: 'lk-attr', translate: 'no' }, 'badPwdCount'),
+        h('b', { class: 'lk-num' + (numCh ? ' lk-ch' : ''), translate: 'no', dataset: { k: full ? 'full' : 'below' } }, String(d.bad)),
+        h('span', null, p.threshold > 0 ? t('ofThreshold', { th: p.threshold }) : t('noLimit'))),
+      h('div', { class: 'lk-times' },
+      h('span', { class: 'lk-attr', translate: 'no' }, 'badPasswordTime'),
+      h('span', { class: 'lk-val' + (ch(c, function (x) { return x.dcs[id].lastBad; }) ? ' lk-ch' : '') },
+        d.lastBad === null ? t('none') : min(d.lastBad)),
+      h('span', { class: 'lk-attr', translate: 'no' }, 'lockoutTime'),
+      h('span', { class: 'lk-val' + (ch(c, function (x) { return x.dcs[id].lockoutTime; }) ? ' lk-ch' : ''), dataset: { k: d.lockoutTime !== null ? 'locked' : 'none' } },
+        d.lockoutTime === null ? t('none') : [lockIcon(), min(d.lockoutTime)])));
+  }
+
+  function topo(c) {
+    var s = c.state, e = s.last;
+    var active = [];
+    if (e && e.client) active.push(e.client, e.dc);
+    if (e && (e.chained || e.pdcReset)) active.push(L.PDC);
+    var nodes = L.CLIENTS.map(function (id) {
+      var role = t(id === 'phone' ? 'phoneName' : id === 'PC-A' ? 'pcaName' : 'pcbName') + ' · ' + t('via', { dc: L.DC_OF[id] });
+      return { id: id, kind: 'host', col: POS[id][0], row: POS[id][1], span: 3, c: COLOUR[id], mark: id === 'phone' ? t('phoneMark') : id.slice(-1),
+        name: head(id === 'phone' ? h('b', null, t('phoneShort')) : h('b', null, data(id)), role, clientBadges(c, id)),
+        state: active.indexOf(id) >= 0 ? 'active' : null };
+    }).concat(L.DCS.map(function (id) {
+      return { id: id, kind: 'server', col: POS[id][0], row: POS[id][1], span: 4, c: COLOUR[id], mark: id.slice(-1),
+        name: head(h('b', null, data(id)), t('dcName'), dcBadges(c, id)),
+        state: active.indexOf(id) >= 0 ? 'active' : null, extra: dcExtra(c, id) };
+    }));
+    var links = LINKS.map(function (l) {
+      var on = e && e.client && ((l[0] === e.client && l[1] === e.dc) || (l[0] === 'DC02' && (e.chained || e.pdcReset || !!e.lockedBy)));
+      return { id: l.join('-'), a: l[0], b: l[1], state: 'up', active: !!on };
+    });
+    var packets = [];
+    if (e && e.client) {
+      var label;
+      if (e.kind === 'change') label = t('chipChange', { pw: e.typed });
+      else if (e.result === 'locked') label = t('chipLocked');
+      else if (e.result === 'ok') label = t('chipOk', { pw: e.typed });
+      else if (e.typed === 'typo') label = t('chipTypo');
+      else label = t('chipBad', { pw: e.typed });
+      packets.push({ from: e.client, to: e.dc, label: label, c: COLOUR[e.client], at: 0.5 });
+      if (e.chained) packets.push({ from: e.dc, to: L.PDC, label: t(e.kind === 'change' ? 'chipChainPwd' : 'chipChain'), c: COLOUR[e.dc], cast: 'broadcast', at: 0.5 });
+      if (e.pdcReset) packets.push({ from: e.dc, to: L.PDC, label: t('chipZero'), c: COLOUR[e.dc], cast: 'broadcast', at: 0.5 });
+      if (e.lockedBy) {
+        var other = e.lockedBy === 'DC01' ? 'DC02' : 'DC01';
+        packets.push({ from: e.lockedBy, to: other, label: t('chipLock'), c: COLOUR[e.lockedBy], at: 0.5 });
+      }
+    }
+    return Simdeck.topology({ cols: 8, rows: ['auto', 'auto', 'auto'], dir: c.dir, nodes: nodes, links: links, packets: packets, gap: '1cqw' });
+  }
+
+  // ── the timeline ──
+
+  var SYM = { bad: '✕', old: '–', ok: '✓', locked: '✕', changed: '⇄', tick: '…' };
+  function timeline(c) {
+    var s = c.state;
+    var items = s.log.map(function (x, i) {
+      var head = [data('t=' + x.t), ' '];
+      if (x.kind === 'tick') head.push(h('span', null, t('tlPause')));
+      else if (x.kind === 'change') head.push(h('span', null, t('tlChange')));
+      else head.push(x.client === 'phone' ? h('span', null, t('phoneShort')) : data(x.client), ' ', h('span', { class: 'lk-sym', 'aria-hidden': 'true' }, SYM[x.result]));
+      return h('li', { class: i === s.log.length - 1 ? 'lk-now' : null, dataset: { k: x.result } },
+        h('span', null, head),
+        h('span', null, x.locked ? lockIcon() : null, data(x.DC02 + ' · ' + x.DC01)));
+    });
+    return h('div', { class: 'lk-tl' }, h('b', null, t('timeline'), ' ', data('(DC02 · DC01)')),
+      items.length ? h('ol', null, items) : h('span', { class: 'lk-empty' }, t('tlStart')));
+  }
+
+  // ── captions ──
+
+  function capStart(c) {
+    var p = eff(c.params);
+    var key = { 'one-pc': 'startOnePc', 'two-pcs': 'startTwoPcs', 'stale-phone': 'startStale', 'old-password': 'startOld', 'reset-window': 'startReset' }[p.scenario];
+    var out = [rich(key, { th: data(p.threshold), r: data(p.scenario === 'stale-phone' ? p.retryMin : p.resetMin), pw: data('P1') })];
+    if (p.scenario === 'two-pcs' && p.threshold === 5) out.push(rich('startTwoPcsAsk', {}));
+    out.push(rich('startCommon', {}));
+    if (p.threshold === 0) out.push(rich('startNever', {}));
+    if (!p.historyCheck && (p.scenario === 'stale-phone' || p.scenario === 'old-password')) out.push(rich('startHistoryOff', {}));
+    return join(out);
+  }
+
+  function capAttempt(c) {
+    var p = eff(c.params), s = c.state, e = s.last;
+    var a = data(s.dcs.DC02.bad), b = data(s.dcs.DC01.bad), th = data(p.threshold);
+    var v = { c: who(e.client), dc: data(e.dc), pw: e.typed === 'typo' ? null : data(e.typed), a: a, b: b, th: th };
+    var out = [];
+    if (e.unlocked) out.push(rich('unlockedNow', { s: data(c.prev.locked.since), d: data(p.durationMin) }));
+    if (e.reset.length && e.result === 'locked') out.push(rich('resetLocked', { r: data(p.resetMin) }));
+    else if (e.reset.length) out.push(rich(e.reset.length > 1 ? 'resetFirstBoth' : 'resetFirst', { r: data(p.resetMin), dc: data(e.reset[0]) }));
+    var send = e.kind === 'retry' ? 'sendRetry' : e.typed === 'typo' ? 'sendTypo' : e.result === 'ok' || e.typed === s.pwd.current ? 'sendRight' : 'sendOld';
+    if (e.result === 'locked') {
+      out.push(rich(send, v));
+      out.push(rich(e.typed === s.pwd.current ? 'refusedRight' : 'refused', { dc: data(e.dc), s: data(s.locked.since) }));
+      out.push(rich(p.durationMin > 0 ? 'unlockAt' : 'unlockAdmin', { u: data(s.locked.since + p.durationMin) }));
+      if (s.sessions.length) out.push(rich('relock', {}));
+      return join(out);
+    }
+    if (e.result === 'ok') {
+      var had = c.prev.dcs[e.dc].bad > 0 && e.reset.indexOf(e.dc) < 0;
+      out.push(rich(send, v), rich(had ? 'okDone' : 'okZero', v));
+      if (e.pdcReset) out.push(rich('okPdc', v));
+      if (s.sessions.length && p.historyCheck && p.threshold > 0) {
+        // only when the same run without the check would have locked the account
+        var off = Simdeck.stateAt(L, Object.assign({}, c.params, { historyCheck: false }), c.n);
+        if (off.log.some(function (x) { return x.locked; })) out.push(rich('noLockHistory', { pw: data(s.sessions[0].pwdUsed) }));
+      }
+      return join(out);
+    }
+    out.push(rich(send, v));
+    if (e.result === 'old') {
+      out.push(rich(e.chained ? 'oldChainedPdc' : 'atPdc', v), rich('oldNotCounted', v));
+      return join(out);
+    }
+    var before = c.prev.log.some(function (x) { return x.client && L.DC_OF[x.client] !== L.PDC && (x.result === 'bad' || x.result === 'old'); });
+    out.push(rich(!e.chained ? 'atPdc' : before ? 'chainedAgain' : 'chained', v));
+    if (e.lockedBy) {
+      // the task's caption counts the phone's failures: only when every one of them is still in the count
+      var phoneBad = s.log.filter(function (x) { return x.client === 'phone' && x.result === 'bad'; }).length;
+      if (e.kind === 'retry' && phoneBad === s.dcs[e.lockedBy].bad && phoneBad <= 10) out.push(rich('lockedStale', { r: data(p.retryMin), t: data(e.t), k: h('span', null, t('ordinals').split(',')[phoneBad - 1]) }));
+      else if (e.lockedBy === L.PDC && s.dcs.DC02.bad < p.threshold) out.push(rich('lockedSplit', v));
+      else out.push(rich('lockedPlain', { dc: data(e.lockedBy), th: th }));
+      out.push(rich(e.kind === 'retry' ? 'lockSpreadMail' : 'lockSpread', { t: data(e.t) }));
+    } else {
+      out.push(rich(p.threshold === 0 ? 'countedNever' : 'counted', v));
+    }
+    return join(out);
+  }
+
+  function capTick(c) {
+    var p = eff(c.params), s = c.state, e = s.last, prev = c.prev;
+    var last = prev.dcs.DC01.lastBad;
+    if (last === null) return rich('tickNothing', { t: data(e.t) });
+    var vars = { t: data(e.t), last: data(last), d: data(e.t - last), r: data(p.resetMin), a: data(s.dcs.DC02.bad), b: data(s.dcs.DC01.bad) };
+    var out = [];
+    if (e.unlocked) out.push(rich('unlockedNow', { s: data(prev.locked.since), d: data(p.durationMin) }));
+    if (prev.dcs.DC01.bad === 0 && prev.dcs.DC02.bad === 0) out.push(rich('tickNothing', vars));
+    else out.push(rich(e.reset.length ? 'tickReset' : 'tickKeep', vars));
+    return join(out);
+  }
+
+  function caption(c) {
+    var s = c.state, e = s.last;
+    if (!e) return capStart(c);
+    var out;
+    if (e.kind === 'tick') out = capTick(c);
+    else if (e.kind === 'change') out = rich('changeDone', { old: data(e.old), 'new': data(e.typed) });
+    else out = capAttempt(c);
+    if (c.last && !s.log.some(function (x) { return x.locked; })) {
+      var max = 0;
+      s.log.forEach(function (x) { max = Math.max(max, x.DC01, x.DC02); });
+      if (c.params.threshold > 0 && e.result !== 'ok') out = join([out, rich('endOpen', { max: data(max), th: data(c.params.threshold) })]);
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('stage'), options: L.SCENARIOS.map(function (x) { return [x, x]; }), resets: true,
+        visible: function () { return false; } },
+      { key: 'threshold', type: 'range', label: t('threshold'), min: 0, max: 10,
+        format: function (v) { return v === 0 ? '0 (' + t('never') + ')' : String(v); } },
+      { key: 'durationMin', type: 'range', label: t('durationMin'), min: 0, max: 60,
+        format: function (v) { return v === 0 ? t('untilAdmin') : t('minutes', { n: v }); } },
+      { key: 'resetMin', type: 'range', label: t('resetMin'), hint: t('resetHint'), min: 1,
+        max: function (p) { return p.durationMin > 0 ? p.durationMin : 60; },
+        format: function (v) { return t('minutes', { n: v }); } },
+      { key: 'retryMin', type: 'range', label: t('retryMin'), min: 1, max: 30, resets: true,
+        format: function (v) { return t('minutes', { n: v }); },
+        visible: function (p) { return p.scenario === 'stale-phone'; } },
+      { key: 'historyCheck', type: 'toggle', label: t('historyCheck'), hint: t('historyHint') }
+    ],
+
+    presets: [
+      { id: 'one-pc', label: t('presetOnePc'), hint: t('presetOnePcHint'), params: { scenario: 'one-pc' } },
+      { id: 'two-pcs', label: t('presetTwoPcs'), hint: t('presetTwoPcsHint'), params: { scenario: 'two-pcs' } },
+      { id: 'stale-phone', label: t('presetStale'), hint: t('presetStaleHint'), params: { scenario: 'stale-phone', historyCheck: false } },
+      { id: 'old-password', label: t('presetOld'), hint: t('presetOldHint'), params: { scenario: 'old-password' } },
+      { id: 'reset-window', label: t('presetReset'), hint: t('presetResetHint'), params: { scenario: 'reset-window' } }
+    ],
+
+    legend: [
+      { shape: 'line', label: t('legendTry') },
+      { shape: 'dash', label: t('legendChain') },
+      { shape: 'lk-count', label: t('legendCount') },
+      { shape: 'lk-lock', label: t('legendLock') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'lk' }, strip(c), topo(c), timeline(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
