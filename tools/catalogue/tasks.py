@@ -78,6 +78,10 @@ PRESET_OF = {
 BUILDS_ON = {
     "ari-column-subtraction": "ari-column-addition", "ari-column-multiplication": "ari-column-addition",
     "ari-long-division": "ari-column-multiplication", "ari-checking": "ari-long-division",
+    "ari-mental-strategies": "ari-constant-difference", "ari-unknown-term": "ari-constant-difference",
+    "ari-times-ten": "ari-place-value", "ari-big-numbers": "ari-place-value", "geo-compass": "geo-lines",
+    "geo-angles": "geo-lines", "geo-triangles": "geo-compass", "geo-perimeter-area": "geo-lines",
+    "geo-units": "ari-times-ten", "dat-dice-sums": "dat-charts",
     "net-osi-tcpip-map": "net-encapsulation", "net-nominal-vs-actual": "net-delay-components",
     "net-ethernet-frame": "net-encapsulation", "net-domains": "urm-mac-table", "net-mac-flooding": "urm-mac-table",
     "net-vlan-trunk": "urm-vlan", "net-intervlan-routing": "urm-vlan", "net-arp-spoofing": "net-arp-local-remote",
@@ -223,7 +227,7 @@ def topic_of(cid, area):
         "win": "windows-admin", "sto": "storage", "dr": "storage", "ha": "distributed", "perf": "distributed",
         "arh": "architecture", "os": "os", "ossim": "os", "aut": "theory", "ham": "radio", "kk": "radio",
         "50ohm": "radio", "tool": "classroom", "app": "distributed", "fin": "finance",
-        "cmp": "compliance", "set": "film-set", "ant": "radio", "ari": "arithmetic",
+        "cmp": "compliance", "set": "film-set", "ant": "radio", "ari": "arithmetic", "geo": "arithmetic", "dat": "arithmetic",
     }.get(pre, "networks")
 
 
@@ -312,6 +316,14 @@ TAGS_OVERRIDE = {"win-ntfs-mft": ["filesystems"],
     "ari-place-value": ["number-representation"], "ari-column-addition": ["column-arithmetic", "number-representation"],
     "ari-column-subtraction": ["column-arithmetic"], "ari-column-multiplication": ["column-arithmetic"],
     "ari-long-division": ["column-arithmetic"], "ari-checking": ["column-arithmetic"], "ham-multiple-access": ["modulation"],
+    "ari-constant-difference": ["mental-arithmetic"], "ari-mental-strategies": ["mental-arithmetic"],
+    "ari-unknown-term": ["mental-arithmetic"], "ari-remainder": ["mental-arithmetic"],
+    "ari-times-ten": ["number-representation", "mental-arithmetic"], "ari-distributive": ["mental-arithmetic"],
+    "ari-order-of-operations": ["mental-arithmetic"], "ari-parts-of-number": ["mental-arithmetic"],
+    "ari-big-numbers": ["number-representation"], "geo-lines": ["school-geometry"], "geo-compass": ["school-geometry"],
+    "geo-angles": ["school-geometry"], "geo-triangles": ["school-geometry"], "geo-solids": ["school-geometry"],
+    "geo-perimeter-area": ["school-geometry", "measurement"], "geo-units": ["measurement"],
+    "geo-liquid-volume": ["measurement"], "dat-charts": ["data-and-chance"], "dat-dice-sums": ["data-and-chance"],
     "fin-capex-opex": ["accounting", "budgeting"], "fin-depreciation": ["accounting"],
     "fin-refresh-cycle": ["costs", "accounting"], "fin-accruals-cash": ["accounting"],
     "fin-budget-variance": ["budgeting"], "fin-tco": ["costs"], "fin-npv-discounting": ["investment"],
@@ -699,6 +711,38 @@ ARI_NOTES = ["## Paper arithmetic notes (all `ari-` tasks)", "",
     "`arithmetic` area.", ""]
 
 
+SCHOOL_IDS = ("ari-constant-difference", "ari-mental-strategies", "ari-unknown-term", "ari-remainder", "ari-times-ten",
+              "ari-distributive", "ari-order-of-operations", "ari-parts-of-number", "ari-big-numbers", "geo-lines",
+              "geo-compass", "geo-angles", "geo-triangles", "geo-solids", "geo-perimeter-area", "geo-units",
+              "geo-liquid-volume", "dat-charts", "dat-dice-sums")
+
+SCHOOL_NOTES = ["## Grades 3 and 4 notes (catalogue §4.17; these override the paper arithmetic notes where they differ)", "",
+    "- **From the curriculum:** owner request 2026-11-13, \"everything in grades 3 and 4 where a sim makes sense\". "
+    "The row names the outcomes (MAT OŠ A.3.2 …); read their razrada, sadržaj and preporuka in Narodne novine 7/2019 "
+    "before the SPEC, and use the curriculum's own examples as presets where it gives them. Keep out what it leaves to "
+    "later grades: no fraction notation (\"ne spominje se pojam razlomka\"), no degrees for angles, no formulas for "
+    "perimeter or area (o and P are counted and written as o = 12 cm, P = 8 cm²).",
+    "- **Who it is for:** the same three audiences as the paper arithmetic pages, through the same switch: load "
+    "`../../kit/papercolumns.js` after kit.js and call `Simdeck.paperColumns.audience(…)` (docs/sim-ui.md §14) with the "
+    "default key, so one choice holds across the whole area; teacher is the default. The child view is a grade 3 pupil: "
+    "big, few words, one thing per click.",
+    "- **Base:** base 10 only, unless the row says \"any base\"; then the base control of the paper arithmetic notes.",
+    "- **The look:** squared paper and the school's instruments (ruler, set square, compass, a clock face, a balance, "
+    "vessels) drawn plainly in SVG, not photographs and not cartoons; the kit's colours. Kit view K5 only where the row "
+    "or §5.27 says so (`ari-times-ten`, `ari-big-numbers`); the paper arithmetic note that the other `ari-` pages use "
+    "K5 does not apply to these.",
+    "- **Shared models (catalogue §5.27):** the number line (hub `ari-constant-difference`) and squared-paper geometry "
+    "(hub `geo-lines`) are pure modules in the hub's folder; the pages that build on a hub copy its module (COMMON.md §6).",
+    "- **Croatian terms first:** the words of the lesson (umanjenik, umanjitelj, razlika, nepoznati član, pravac, "
+    "polupravac, dužina, sjecište, usporedni, okomiti, kružnica, krug, polumjer, središte, kut, vrh, krakovi, šiljasti, "
+    "pravi, tupi, jednakostranični, jednakokračni, raznostranični, pravokutni, opseg, površina, brid, vrh, strana, "
+    "redak, stupac, piktogram, stupčasti dijagram, siguran, moguć, nemoguć događaj); the English textbook terms in the "
+    "English strings. Mark a term you could not confirm with *(check)*.",
+    "- **Randomness** (`dat-dice-sums`): the model takes a seeded generator, so tests and screenshots are repeatable; "
+    "the page seeds from the clock unless `?seed=` is given.",
+    "- **Learn tree:** catalogue §4.17 has the leaves; the `npm run check` warning \"in no leaf yet\" is expected.", ""]
+
+
 SET_NOTES = ["## Film set notes (all `set-` tasks)", "",
     "- **Who it is for:** people learning to work on a film set (trainees, new crew, day players, film students), "
     "taught by a colleague who trains film crews; they know neither the equipment nor the jobs. Each page puts one "
@@ -874,7 +918,11 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         srcs.append("The primary texts under \"Film set notes\" below (EUR-Lex, Narodne novine, published film and TV "
                     "safety guidance); mark every number and rule you could not check with *(check)* and list it in "
                     "`NOTES.md`.")
-    if cid.startswith("ari-"):
+    if cid in SCHOOL_IDS:
+        srcs.append("The national curriculum for mathematics, Narodne novine 7/2019 "
+                    "(https://narodne-novine.nn.hr/clanci/sluzbeni/2019_01_7_146.html): the outcomes this entry names, "
+                    "their razrada, sadržaj and preporuka; it says what grades 3 and 4 do and do not use.")
+    if cid.startswith(("ari-", "geo-", "dat-")):
         srcs.append("Croatian primary-school mathematics textbooks for grades 2 to 4 (the layout and the phrasing a "
                     "child hears, \"pišem 7, pamtim 1\") and the national curriculum for mathematics (Narodne novine "
                     "7/2019); mark every phrasing and layout you could not check with *(check)* and list it in `NOTES.md`.")
@@ -900,6 +948,8 @@ def render(cid, r, wave, group, by_id, sids, clusters):
         lines += ANT_NOTES
     if cid.startswith("ari-"):
         lines += ARI_NOTES
+    if cid in SCHOOL_IDS:
+        lines += SCHOOL_NOTES
     if clusters.get(cid):
         lines += ["## Overlaps (catalogue §5)", ""]
         for num, name, rec in clusters[cid]:
@@ -984,7 +1034,12 @@ VIEWS = [
 
 VIEW_OVERRIDE = {"ari-place-value": "K5 paper columns", "ari-column-subtraction": "K5 paper columns",
                  "ari-column-multiplication": "K5 paper columns", "ari-long-division": "K5 paper columns",
-                 "ari-checking": "K5 paper columns",
+                 "ari-checking": "K5 paper columns", "ari-times-ten": "K5 paper columns", "ari-big-numbers": "K5 paper columns",
+                 # grades 3-4 pages (catalogue §4.17) draw their own number line, squared-paper geometry or chart
+                 **{k: None for k in ("ari-constant-difference", "ari-mental-strategies", "ari-unknown-term",
+                    "ari-remainder", "ari-distributive", "ari-order-of-operations", "ari-parts-of-number", "geo-lines",
+                    "geo-compass", "geo-angles", "geo-triangles", "geo-solids", "geo-perimeter-area", "geo-units",
+                    "geo-liquid-volume", "dat-charts", "dat-dice-sums")},
                  "net-osi-tcpip-map": None, "sec-digital-signature": None, "win-gpo-processing": None,
                  "win-gpo-software-install": None, "win-gpo-slow-link": None, "kk-backup-ncs": None,
                  "win-ad-backup-restore": "K2 topology with moving packets", "sto-ec-vs-replication": "K3 block grid",
