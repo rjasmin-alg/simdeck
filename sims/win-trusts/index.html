@@ -1,0 +1,647 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-trusts: three forests (Quillmoor with three domains, Pellucid, Carrow), the trusts between their domains, and
+     access tests "a user of domain U opens a share in domain R". A stepper, one step per admin action (create a trust,
+     grant "Allowed to Authenticate"), per hop of a test's path (one Kerberos referral) or per verdict at the resource.
+     The scene: forests as outlines, domains as boxes, trusts as arrows from the trusting to the trusted domain, access
+     arrows the other way along the test's path. Below: the test card (path and the checks at the resource) and the
+     user's tickets (boxes and padlocks as in win-kerberos). Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-trusts">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odnosi povjerenja · simdeck</title>
+<meta name="description" content="Tko kome vjeruje i tko smije kamo: smjer, tranzitivnost, povjerenje između šuma i vanjsko povjerenje, selektivna autentifikacija i filtriranje SID-ova.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-trusts",
+  "title": {
+    "hr": "Odnosi povjerenja",
+    "en": "Trusts between domains and forests"
+  },
+  "concept": {
+    "hr": "Smjer, tranzitivnost, povjerenje između šuma i vanjsko: tko smije kamo",
+    "en": "Direction, transitivity, forest vs external trusts: who can access what"
+  },
+  "summary": {
+    "hr": "Gradi povjerenja između šuma i testiraj pristup: pristup ide suprotno od strelice, vanjsko povjerenje nije tranzitivno, a povjerenje nije dozvola.",
+    "en": "Build trusts between forests and test access: access flows against the arrow, an external trust is not transitive, and a trust is not a permission."
+  },
+  "tags": [
+    "active-directory"
+  ],
+  "class": "stepper",
+  "steps": 4
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-trusts"]; colours only from kit tokens.
+   Layout: the scene (forests, domains, arrows) on top, the test card and the ticket card below, the log at the bottom. */
+[data-sim="win-trusts"] .tr { height: 100%; padding: 0.8cqh 1cqw; display: grid; grid-template-rows: minmax(0, 1.5fr) minmax(0, 1fr) auto; gap: 0.6rem; font-size: 1rem; }
+[data-sim="win-trusts"] [translate="no"].tr-d { font-family: var(--mono); }
+[data-sim="win-trusts"] .tr-ch { background: var(--hl); color: var(--on-hl); box-shadow: 0 0 0 0.18rem var(--ink); }
+[data-sim="win-trusts"] .tr-muted { color: var(--muted); }
+[data-sim="win-trusts"] .tr-ico { width: 1em; height: 1em; vertical-align: -0.12em; fill: currentColor; flex: none; }
+
+/* the scene */
+[data-sim="win-trusts"] .tr-scene { position: relative; min-height: 0; }
+[data-sim="win-trusts"] .tr-forest { position: absolute; border: 0.2rem solid var(--muted); border-radius: 1.6rem; }
+[data-sim="win-trusts"] .tr-forest > b { position: absolute; left: 1rem; top: 0.25rem; font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="win-trusts"] .tr-forest[data-f="Carrow"] > b { top: auto; bottom: 0.25rem; left: auto; right: 1rem; }
+[data-sim="win-trusts"] .tr-dom { position: absolute; transform: translate(-50%, -50%); z-index: 2; padding: 0.25rem 0.6rem; border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm); background: var(--bg); display: flex; flex-direction: column; align-items: center; gap: 0.15rem; white-space: nowrap; }
+[data-sim="win-trusts"] .tr-dom > b { font-family: var(--mono); font-size: 1rem; }
+[data-sim="win-trusts"] .tr-dom > small { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="win-trusts"] .tr-dom[data-on] { border-width: 0.22rem; }
+[data-sim="win-trusts"] .tr-who { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
+[data-sim="win-trusts"] .tr-tag { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0 0.4rem; border-radius: var(--radius-sm); font-size: var(--fs-sm);
+  line-height: 1.45; white-space: nowrap; border: var(--line-w) solid var(--c3); }
+[data-sim="win-trusts"] .tr-tag[data-k="user"] { background: var(--c3); color: var(--on-series); }
+[data-sim="win-trusts"] .tr-tag[data-k="res"] { border-style: solid; border-color: var(--ink); }
+[data-sim="win-trusts"] .tr-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; pointer-events: none; }
+[data-sim="win-trusts"] .tr-svg .tr-trust { stroke: var(--ink); stroke-width: 3; fill: none; }
+[data-sim="win-trusts"] .tr-svg .tr-trust[data-cross] { stroke: var(--c1); }
+[data-sim="win-trusts"] .tr-svg .tr-trust[data-nt] { stroke-dasharray: 12 8; }
+[data-sim="win-trusts"] .tr-svg .tr-under { stroke: var(--hl); stroke-width: 15; fill: none; stroke-linecap: round; }
+[data-sim="win-trusts"] .tr-svg .tr-acc { stroke: var(--c3); stroke-width: 2.5; fill: none; }
+[data-sim="win-trusts"] .tr-svg .tr-acc[data-k="pending"] { stroke: var(--muted); stroke-dasharray: 3 6; }
+[data-sim="win-trusts"] .tr-svg .tr-acc[data-k="blocked"] { stroke: var(--danger); stroke-dasharray: 8 6; }
+[data-sim="win-trusts"] .tr-svg .tr-acc[data-k="now"] { stroke-width: 4; }
+[data-sim="win-trusts"] .tr-svg .tr-mk-ink { fill: var(--ink); }
+[data-sim="win-trusts"] .tr-svg .tr-mk-c1 { fill: var(--c1); }
+[data-sim="win-trusts"] .tr-svg .tr-mk-acc { fill: var(--c3); }
+[data-sim="win-trusts"] .tr-svg .tr-mk-mut { fill: var(--muted); }
+[data-sim="win-trusts"] .tr-svg .tr-mk-dan { fill: var(--danger); }
+[data-sim="win-trusts"] .tr-tl { position: absolute; transform: translate(-50%, -50%); z-index: 3; padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--panel); font-size: var(--fs-sm); line-height: 1.3; text-align: center; max-width: 13rem; }
+[data-sim="win-trusts"] .tr-tl[data-cross] { border-color: var(--c1); }
+[data-sim="win-trusts"] .tr-tl small { display: block; font-size: 1em; font-weight: 700; }
+[data-sim="win-trusts"] .tr-x { position: absolute; transform: translate(-50%, -50%); z-index: 4; width: 2rem; height: 2rem; display: grid; place-items: center;
+  border-radius: 50%; background: var(--danger); color: var(--bg); font-weight: 700; font-size: 1.2rem; }
+[data-sim="win-trusts"] .tr-list { display: none; }
+
+/* the cards */
+[data-sim="win-trusts"] .tr-cards { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 0.7rem; min-height: 0; }
+[data-sim="win-trusts"] .tr-card { padding: 0.35rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel);
+  display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; min-height: 0; overflow: hidden; }
+[data-sim="win-trusts"] .tr-card > h3 { margin: 0; font-size: var(--fs-md); display: flex; flex-wrap: wrap; gap: 0.2rem 0.45rem; align-items: center; }
+[data-sim="win-trusts"] .tr-row { display: flex; flex-wrap: wrap; gap: 0.25rem 0.4rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="win-trusts"] .tr-lab { color: var(--muted); }
+[data-sim="win-trusts"] .tr-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.3rem 0.7rem; align-items: center; font-size: var(--fs-sm); }
+[data-sim="win-trusts"] .tr-grid > .tr-row { gap: 0.2rem 0.35rem; }
+[data-sim="win-trusts"] .tr-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); line-height: 1.45; white-space: nowrap; }
+[data-sim="win-trusts"] .tr-chip[data-k="gone"] { text-decoration: line-through; border-style: dashed; color: var(--muted); }
+[data-sim="win-trusts"] .tr-chip[data-k="hit"] { border: 0.2rem solid var(--ink); font-weight: 700; }
+[data-sim="win-trusts"] .tr-chip[data-k="hist"] { border-style: dashed; }
+[data-sim="win-trusts"] .tr-hop { font-weight: 700; padding: 0 0.15rem; }
+[data-sim="win-trusts"] .tr-hop[data-k="pending"] { color: var(--muted); font-weight: 400; }
+[data-sim="win-trusts"] .tr-hop[data-k="blocked"] { color: var(--danger); }
+[data-sim="win-trusts"] .tr-ok, [data-sim="win-trusts"] .tr-no { font-weight: 700; }
+[data-sim="win-trusts"] .tr-no { color: var(--danger); }
+[data-sim="win-trusts"] .tr-verdict { margin-left: auto; padding: 0 0.6rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; background: var(--bg); }
+[data-sim="win-trusts"] .tr-verdict[data-bad] { border-color: var(--danger); border-style: dashed; }
+
+/* tickets: boxes with a padlock naming the key that locks them (from sims/win-kerberos/index.html) */
+[data-sim="win-trusts"] .tr-tk { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 0.6rem; align-items: baseline; padding: 0.05rem 0.5rem;
+  border: 0.22rem solid var(--ink); border-radius: var(--radius); background: var(--bg); font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="win-trusts"] .tr-tk[data-k="none"] { border-style: dashed; border-width: var(--line-w); color: var(--danger); font-weight: 700; }
+[data-sim="win-trusts"] .tr-tk.tr-ch, [data-sim="win-trusts"] .tr-chip.tr-ch, [data-sim="win-trusts"] .tr-tl.tr-ch, [data-sim="win-trusts"] .tr-verdict.tr-ch { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-trusts"] .tr-tk.tr-ch .tr-muted { color: var(--on-hl); }
+[data-sim="win-trusts"] .tr-tk b { font-family: var(--mono); }
+[data-sim="win-trusts"] .tr-lock { display: inline-flex; align-items: baseline; gap: 0.1rem; font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-trusts"] .tr-lock .sd-seq-lock { margin-top: 0; }
+
+/* the log */
+[data-sim="win-trusts"] .tr-log { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
+[data-sim="win-trusts"] .tr-log ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+[data-sim="win-trusts"] .tr-log li { padding: 0.05rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-sm); background: var(--bg); }
+[data-sim="win-trusts"] .tr-log li[data-k="no"] { border-color: var(--danger); border-width: 0.2rem; }
+[data-sim="win-trusts"] .tr-log li[data-k="ok"] { border-color: var(--ink); border-width: 0.2rem; }
+[data-sim="win-trusts"] .tr-log li.tr-now { background: var(--hl); color: var(--on-hl); outline: 0.2rem solid var(--ink); outline-offset: 0.1rem; }
+
+/* legend swatches the kit lacks */
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-forest"] { background: transparent; border: 0.18rem solid var(--muted); border-radius: 0.5rem; }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-dom"] { background: var(--bg); border: var(--line-w) solid var(--ink); border-radius: 0.2rem; }
+[data-sim="win-trusts"] .sd-swatch[data-shape^="tr-ar"] { height: 0.3rem; border: 0; border-radius: 0; position: relative; overflow: visible; background: var(--c1); }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-arnt"] { background: repeating-linear-gradient(90deg, var(--c1) 0 0.35em, transparent 0.35em 0.55em); }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-aracc"] { height: 0.18rem; background: var(--c3); }
+[data-sim="win-trusts"] .sd-swatch[data-shape^="tr-ar"]::after { content: ''; position: absolute; right: -0.1em; top: 50%; margin-top: -0.3em; border: 0.3em solid transparent;
+  border-left: 0.45em solid var(--c1); border-right: 0; }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-aracc"]::after { border-left-color: var(--c3); }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-x"] { border-radius: 50%; background: var(--danger); border-color: var(--danger); position: relative; }
+[data-sim="win-trusts"] .sd-swatch[data-shape="tr-x"]::after { content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--bg); font-size: 0.7em; font-weight: 700; }
+
+[data-sim="win-trusts"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="win-trusts"] [data-sd-controls] .sd-ctl[hidden] { display: none; }
+
+/* Phone and portrait: no arrows; the forests stack and the trusts are a list. Nothing scrolls sideways. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-trusts"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-trusts"] .tr { height: auto; padding: 0.5rem; grid-template-rows: auto; }
+  [data-sim="win-trusts"] .tr-scene { display: flex; flex-direction: column; gap: 0.4rem; }
+  [data-sim="win-trusts"] .tr-forest { position: relative; left: auto !important; top: auto !important; width: auto !important; height: auto !important;
+    padding: 1.6rem 0.5rem 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  [data-sim="win-trusts"] .tr-forest[data-f="Carrow"] > b { top: 0.25rem; bottom: auto; left: 1rem; right: auto; }
+  [data-sim="win-trusts"] .tr-dom { position: static; transform: none; white-space: normal; max-width: 100%; }
+  [data-sim="win-trusts"] .tr-dom > b { overflow-wrap: anywhere; }
+  [data-sim="win-trusts"] .tr-svg, [data-sim="win-trusts"] .tr-tl, [data-sim="win-trusts"] .tr-x { display: none; }
+  [data-sim="win-trusts"] .tr-list { display: flex; flex-direction: column; gap: 0.2rem; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+  [data-sim="win-trusts"] .tr-list li { overflow-wrap: anywhere; }
+  [data-sim="win-trusts"] .tr-cards { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-trusts"] .tr-chip, [data-sim="win-trusts"] .tr-tag { white-space: normal; overflow-wrap: anywhere; }
+  [data-sim="win-trusts"] .tr-lab { min-width: 0; }
+  [data-sim="win-trusts"] .tr-grid { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Odnosi povjerenja</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Where things sit in the scene, in % of its width and height: domain centres and forest outlines. */
+  var POS = { 'quillmoor.example': [43, 26], 'brk.quillmoor.example': [43, 76], 'emberline.example': [12, 26], 'pfx.internal': [82, 26], 'carrow.example': [82, 76] };
+  var FPOS = { Quillmoor: [0.3, 1, 59, 98], Pellucid: [65, 1, 34.6, 46], Carrow: [65, 53, 34.6, 46] };
+  var KEY = { 'quillmoor.example': 'Q', 'brk.quillmoor.example': 'Brk', 'emberline.example': 'Emb', 'pfx.internal': 'Pfx', 'carrow.example': 'Car' };
+
+  /** Data (domain, host, account and group names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { class: 'tr-d' + (cls ? ' ' + cls : ''), translate: 'no' }, String(text)); }
+  /** Parts of a string with *English term* turned into <em lang="en"> (the Croatian term rule). Placeholder nodes are
+      cloned, so one vars object may serve several sentences. */
+  function rich(key, vars) {
+    var out = [];
+    t.parts(key, vars || {}).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p.cloneNode(true)); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function join(list) {
+    var out = [];
+    list.forEach(function (x, i) { if (i) out.push(' '); out = out.concat(x); });
+    return out;
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svg(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function icon(d) {
+    var s = svg('svg', { viewBox: '0 0 24 24', class: 'tr-ico', 'aria-hidden': 'true' });
+    s.append(svg('path', { d: d }));
+    return s;
+  }
+  function userIcon() { return icon('M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 6v2h18v-2c0-3.5-4-6-9-6z'); }
+  function shareIcon() { return icon('M2 5a2 2 0 0 1 2-2h6l2 2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z'); }
+
+  function D(id) { return L.domain(id); }
+  function nb(id) { return D(id).netbios; }
+  function userName(id) { return nb(id) + '\\' + D(id).user; }
+  function shareName(id) { return '\\\\' + D(id).server + '\\' + D(id).share; }
+  function realm(id) { return id.toUpperCase(); }
+  function fGen(id) { return t('gen' + D(id).forest); }
+  function fLoc(id) { return t('loc' + D(id).forest); }
+  function trustOf(s, id) { return L.trustById(s.trusts, id); }
+  function isCross(tr) { return tr.type === 'forest' || tr.type === 'external'; }
+
+  /** The test the run is at, or the next one in the script. */
+  function nextTest(c) {
+    var sc = L.script(c.params);
+    for (var i = c.state.ev; i < sc.length; i++) if (sc[i].kind === 'test') return sc[i];
+    return null;
+  }
+
+  // ── the scene ──
+
+  function domBox(c, id, focus) {
+    var d = D(id), tags = [];
+    if (focus && focus.user === id) tags.push(h('span', { class: 'tr-tag', dataset: { k: 'user' } }, userIcon(), data(userName(id))));
+    if (focus && focus.resource === id) tags.push(h('span', { class: 'tr-tag', dataset: { k: 'res' } }, shareIcon(), data(shareName(id))));
+    var on = focus && (focus.user === id || focus.resource === id);
+    var f = FPOS[d.forest];                                                       // POS is in the scene; the box sits in its forest
+    var left = (POS[id][0] - f[0]) / f[2] * 100, top = (POS[id][1] - f[1]) / f[3] * 100;
+    return h('div', { class: 'tr-dom', dataset: on ? { id: id, on: '' } : { id: id }, style: { left: left + '%', top: top + '%' } },
+      h('b', { translate: 'no' }, id), h('small', null, t('place_' + d.place)), tags.length ? h('div', { class: 'tr-who' }, tags) : null);
+  }
+
+  function trustText(tr) {
+    var flags = [];
+    if (!tr.transitive) flags.push(t('nonTransitive'));
+    if (isCross(tr) && !tr.sidFiltering) flags.push(t('sidOff'));
+    if (tr.selectiveAuth) flags.push(t('selectiveShort'));
+    if (!tr.twoWay) flags.push(t('oneWay'));
+    return { type: t('ty_' + tr.type), flags: flags.join(' · ') };
+  }
+
+  function trustList(c) {
+    return h('ul', { class: 'tr-list' }, c.state.trusts.map(function (tr) {
+      var x = trustText(tr);
+      return h('li', null, data(tr.from), tr.twoWay ? ' ⇄ ' : ' → ', data(tr.to), ' · ', x.type, x.flags ? ' · ' + x.flags : '');
+    }));
+  }
+
+  function scene(c) {
+    var s = c.state, T = s.test || nextTest(c);
+    var focus = T ? { user: T.user, resource: T.resource } : null;
+    var forests = L.FORESTS.map(function (f) {
+      var r = FPOS[f];
+      return h('div', { class: 'tr-forest', dataset: { f: f }, style: { left: r[0] + '%', top: r[1] + '%', width: r[2] + '%', height: r[3] + '%' } },
+        h('b', null, t('forest'), ' ', t('name' + f)),
+        L.DOMAINS.filter(function (d) { return d.forest === f; }).map(function (d) { return domBox(c, d.id, focus); }));
+    });
+    return h('div', { class: 'tr-scene' }, forests, trustList(c));
+  }
+
+  /** The arrows: drawn in pixels from the boxes' measured positions, after the boxes are laid out. */
+  function marker(id, cls) {
+    var m = svg('marker', { id: id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '5', markerHeight: '5', orient: 'auto-start-reverse', markerUnits: 'strokeWidth' });
+    m.append(svg('path', { d: 'M0 0 L10 5 L0 10 z', class: cls }));
+    return m;
+  }
+
+  function arrows(sceneEl, c) {
+    if (!sceneEl || !sceneEl.isConnected) return;
+    sceneEl.querySelectorAll('.tr-svg, .tr-tl, .tr-x').forEach(function (el) { el.remove(); });
+    if (getComputedStyle(sceneEl).display !== 'block') return;                    // phone layout: the list instead
+    var sr = sceneEl.getBoundingClientRect();
+    if (!sr.width || !sr.height) return;
+    var box = {};
+    sceneEl.querySelectorAll('.tr-dom').forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      box[el.dataset.id] = { cx: r.left - sr.left + r.width / 2, cy: r.top - sr.top + r.height / 2, w: r.width / 2 + 6, h: r.height / 2 + 6 };
+    });
+    function edge(a, b) {                                                        // where the line from a's centre to b's leaves a
+      var A = box[a], B = box[b], dx = B.cx - A.cx, dy = B.cy - A.cy;
+      var k = Math.min(dx ? A.w / Math.abs(dx) : Infinity, dy ? A.h / Math.abs(dy) : Infinity);
+      return [A.cx + dx * k, A.cy + dy * k];
+    }
+    function seg(a, b, off) {
+      var p = edge(a, b), q = edge(b, a), dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy) || 1;
+      var nx = -dy / len * off, ny = dx / len * off;
+      return { x1: p[0] + nx, y1: p[1] + ny, x2: q[0] + nx, y2: q[1] + ny, mx: p[0] + dx * 0.45 + nx, my: p[1] + dy * 0.45 + ny,
+        xx: p[0] + dx * 0.88 + nx, xy: p[1] + dy * 0.88 + ny };
+    }
+    var s = c.state, e = s.last, T = s.test;
+    var root = svg('svg', { class: 'tr-svg', width: sr.width, height: sr.height, viewBox: '0 0 ' + sr.width + ' ' + sr.height, 'aria-hidden': 'true' });
+    var defs = svg('defs');
+    [['ink', 'tr-mk-ink'], ['c1', 'tr-mk-c1'], ['acc', 'tr-mk-acc'], ['mut', 'tr-mk-mut'], ['dan', 'tr-mk-dan']].forEach(function (m) { defs.append(marker('tr-h-' + m[0], m[1])); });
+    root.append(defs);
+    var layer = [];
+    // trusts: from the trusting to the trusted domain
+    s.trusts.forEach(function (tr) {
+      var g = seg(tr.from, tr.to, 0), cross = isCross(tr);
+      var changed = e && e.kind === 'create' && e.trust === tr.id;
+      if (changed) root.append(svg('line', { class: 'tr-under', x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2 }));
+      var head = 'url(#tr-h-' + (cross ? 'c1' : 'ink') + ')';
+      root.append(svg('line', { class: 'tr-trust', x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2, 'data-cross': cross ? '' : null, 'data-nt': tr.transitive ? null : '',
+        'marker-end': head, 'marker-start': tr.twoWay ? head : null }));
+      var x = trustText(tr);
+      layer.push(h('div', { class: 'tr-tl' + (changed ? ' tr-ch' : ''), dataset: cross ? { cross: '' } : {}, style: { left: g.mx + 'px', top: g.my + 'px' } },
+        x.type, x.flags ? h('small', null, x.flags) : null));
+    });
+    // access: from the user's domain to the resource's, beside the trust, along the test's path
+    function access(a, b, k, now) {
+      var g = seg(a, b, 13);
+      if (now) root.append(svg('line', { class: 'tr-under', x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2 }));
+      var mk = k === 'pending' ? 'mut' : k === 'blocked' ? 'dan' : 'acc';
+      root.append(svg('line', { class: 'tr-acc', 'data-k': now ? 'now' : k, x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2, 'marker-end': 'url(#tr-h-' + mk + ')' }));
+      return g;
+    }
+    function cross(g) { layer.push(h('div', { class: 'tr-x', style: { left: g.xx + 'px', top: g.xy + 'px' } }, '✕')); }
+    if (T && T.path) {
+      for (var i = 0; i < T.hops.length; i++) {
+        var done = i < T.done;
+        var now = e && e.kind === 'hop' && e.i === i;
+        access(T.path[i], T.path[i + 1], done ? 'done' : 'pending', now);
+      }
+      if (T.verdict === 'deny' && T.path.length > 1) cross(seg(T.path[T.path.length - 2], T.path[T.path.length - 1], 13));
+      else if (T.verdict === 'deny' && box[T.user]) layer.push(h('div', { class: 'tr-x', style: { left: box[T.user].cx + 'px', top: (box[T.user].cy - box[T.user].h) + 'px' } }, '✕'));
+    } else if (T && T.why) {
+      var w = T.why;
+      if ((w.rule === 'external' || w.rule === 'third-forest') && w.path) {
+        for (var j = 0; j <= w.at; j++) {
+          var g = access(w.path[j], w.path[j + 1], j === w.at ? 'blocked' : 'done', false);
+          if (j === w.at) cross(g);
+        }
+      } else cross(access(T.user, T.resource, 'blocked', false));
+    }
+    sceneEl.append(root);
+    layer.forEach(function (el) { sceneEl.append(el); });
+  }
+
+  // ── the test card ──
+
+  function lock(text) { return h('span', { class: 'tr-lock' }, h('span', { class: 'sd-seq-lock', 'aria-hidden': 'true' }), data(text)); }
+
+  /** One line of the test card's grid: a label and its content. */
+  function line(label, content) { return [h('span', { class: 'tr-lab' }, label), h('div', { class: 'tr-row' }, content)]; }
+
+  function testCard(c) {
+    var s = c.state, T = s.test, e = s.last;
+    var title = [h('span', null, t('testTitle'))];
+    var rows = [];
+    var subject = T || nextTest(c);
+    if (subject) title.push(data(s.test ? s.tests + '.' : ''), h('span', { class: 'tr-tag', dataset: { k: 'user' } }, userIcon(), data(userName(subject.user))), t('opens'),
+      h('span', { class: 'tr-tag', dataset: { k: 'res' } }, shareIcon(), data(shareName(subject.resource))));
+    if (T && T.verdict) title.push(h('span', { class: 'tr-verdict' + (e && (e.kind === 'verdict' || e.kind === 'blocked') ? ' tr-ch' : ''), dataset: T.verdict === 'deny' ? { bad: '' } : {} },
+      T.verdict === 'allow' ? '✓ ' + t('vAllow') : '✕ ' + t('vDeny_' + T.block)));
+    if (!T) {
+      return h('div', { class: 'tr-card' }, h('h3', null, title), h('div', { class: 'tr-row tr-muted' }, subject ? t('testNext') : t('testNone')),
+        h('div', { class: 'tr-grid' }, grantLine(c)));
+    }
+    // the path
+    var path = [];
+    if (T.path) {
+      if (T.path.length === 1) path.push(data(T.path[0], 'tr-chip'), h('span', { class: 'tr-muted' }, t('sameDomain')));
+      T.path.forEach(function (d, i) {
+        if (T.path.length === 1) return;
+        if (i) {
+          var k = i - 1 < T.done ? (T.cached[i - 1] ? 'cached' : 'done') : 'pending';
+          var now = e && e.kind === 'hop' && e.i === i - 1;
+          path.push(h('span', { class: 'tr-hop' + (now ? ' tr-ch' : ''), dataset: { k: k } }, '→', k === 'cached' ? ' ' + t('fromCache') : k === 'done' ? ' ✓' : ''));
+        }
+        path.push(data(d, 'tr-chip'));
+      });
+    } else if (T.why.path && (T.why.rule === 'external' || T.why.rule === 'third-forest')) {
+      T.why.path.forEach(function (d, i) {
+        if (i > T.why.at + 1) return;
+        if (i) path.push(h('span', { class: 'tr-hop', dataset: { k: i - 1 === T.why.at ? 'blocked' : 'done' } }, i - 1 === T.why.at ? '✕ ' + t('ty_' + trustOf(s, T.why.hops[i - 1]).type) : '→'));
+        path.push(data(d, 'tr-chip'));
+      });
+    } else path.push(h('span', { class: 'tr-no' }, '✕ ', t('noPath')));
+    rows.push(line(t('path'), path));
+    // the checks at the resource
+    var k = T.checks;
+    if (k) {
+      var R = T.resource;
+      rows.push(line(t('chkToken'), [k.token.map(function (x) {
+          return h('span', { class: 'tr-chip', dataset: { k: !x.kept ? 'gone' : x.kind === 'history' ? 'hist' : 'plain' } }, data(x.sid),
+            x.kind === 'history' ? h('span', { class: 'tr-muted' }, t('history')) : null);
+        }),
+        h('span', { class: 'tr-muted' }, k.filtered ? t('filteredBy', { ty: t('ty_' + trustOf(s, k.crossed).type) })
+          : k.token.some(function (x) { return x.forestSpecific; }) ? t('forestSpecificNote') : k.crossed ? t('notFiltered') : t('inForestNoFilter'))]));
+      var sel = [];
+      if (!k.selective.applies) sel.push(h('span', { class: 'tr-muted' }, t('selNA')));
+      else sel.push(h('span', { class: 'tr-chip', dataset: { k: k.selective.granted ? 'hit' : 'plain' } }, t('ata'), ' ', data(D(R).server + ' → ' + nb(T.user) + '\\Domain Users')),
+        k.selective.ok ? h('span', { class: 'tr-ok' }, '✓', k.selective.granted ? '' : [' ', t('viaAdmins')]) : h('span', { class: 'tr-no' }, '✕ ', t('selMissing')));
+      rows.push(line(t('chkSelective'), sel));
+      var acl = [h('span', { class: 'tr-chip', dataset: { k: k.viaAdmin ? 'hit' : 'plain' } }, data(nb(R) + '\\Domain Admins'), ': ', t('fullControl'))];
+      if (k.ace.granted) acl.push(h('span', { class: 'tr-chip', dataset: { k: k.ace.ok && !k.viaAdmin && k.selective.ok ? 'hit' : 'plain' } },
+        data(D(T.user).group + ' ⊃ ' + nb(T.user) + '\\Domain Users'), ': ', t('modify')));
+      else acl.push(h('span', { class: 'tr-no' }, t.parts('noAce', { u: data(nb(T.user)) })));
+      rows.push(line(t('chkAcl'), acl));
+    } else if (!T.verdict) rows.push(line('', h('span', { class: 'tr-muted' }, t('chkWaiting'))));
+    rows.push(grantLine(c));
+    return h('div', { class: 'tr-card' }, h('h3', null, title), h('div', { class: 'tr-grid' }, rows));
+  }
+
+  function grantLine(c) {
+    var s = c.state, e = s.last;
+    if (!s.grants.length) return null;
+    return line(t('grants'), s.grants.map(function (g) {
+      return h('span', { class: 'tr-chip' + (e && e.kind === 'grant' ? ' tr-ch' : ''), dataset: { k: 'hit' } }, t('ata'), ' ', data(D(g.server).server + ' → ' + nb(g.user) + '\\Domain Users'));
+    }));
+  }
+
+  // ── the ticket card (rule 9) ──
+
+  function ticket(name, sub, key, changed, kind) {
+    return h('div', { class: 'tr-tk' + (changed ? ' tr-ch' : ''), dataset: kind ? { k: kind } : {} },
+      h('span', null, typeof name === 'string' ? h('b', { translate: 'no' }, name) : h('span', null, name), sub ? [' ', h('span', { class: 'tr-muted' }, sub)] : null), key ? lock(key) : null);
+  }
+
+  function ticketCard(c) {
+    var s = c.state, T = s.test, e = s.last;
+    var who = T || nextTest(c);
+    var head = h('h3', null, t('ticketsTitle'), who ? data(userName(who.user)) : null);
+    if (!who) return h('div', { class: 'tr-card' }, head);
+    var U = who.user;
+    var rows = [ticket('krbtgt/' + realm(U), t('tgtSub'), 'krbtgt · ' + nb(U), false)];
+    if (T && T.path) {
+      for (var i = 0; i < T.done; i++) {
+        var a = T.path[i], b = T.path[i + 1];
+        rows.push(ticket('krbtgt/' + realm(b), T.cached[i] ? t.parts('refCached', { kdc: data(nb(a)) }) : t.parts('refSub', { kdc: data(nb(a)) }), nb(a) + ' ⇄ ' + nb(b),
+          e && e.kind === 'hop' && e.i === i));
+      }
+      if (T.checks) {
+        var R = T.resource;
+        if (T.checks.selective.ok) rows.push(ticket('cifs/' + D(R).server, t.parts('stSub', { kdc: data(nb(R)) }), D(R).server + '$', e && e.kind === 'verdict'));
+        else rows.push(ticket(t.parts('stRefused', { kdc: data(nb(R)) }), null, null, e && e.kind === 'verdict', 'none'));
+      } else if (T.done < T.hops.length) rows.push(h('div', { class: 'tr-row tr-muted' }, t('tkNext', { n: T.hops.length - T.done })));
+    } else if (T && T.why) rows.push(ticket([t('noReferral')], null, null, e && e.kind === 'blocked', 'none'));
+    else rows.push(h('div', { class: 'tr-row tr-muted' }, t('tkIdle')));
+    return h('div', { class: 'tr-card' }, head, rows);
+  }
+
+  // ── the log ──
+
+  function logLine(c) {
+    var s = c.state;
+    var items = s.log.map(function (x, i) {
+      var body;
+      if (x.kind === 'create') { var tr = trustOf(s, x.trust); body = [t('logCreate'), ' ', t('ty_' + tr.type)]; }
+      else if (x.kind === 'grant') body = t('logGrant');
+      else if (x.kind === 'hop') body = [data(nb(x.from)), ' → ', data(nb(x.to))];
+      else body = [x.ok ? '✓ ' : '✕ ', data(D(x.user).user), ' → ', data(nb(x.resource))];
+      return h('li', { class: i === s.log.length - 1 ? 'tr-now' : null, dataset: { k: x.ok === null ? 'act' : x.ok ? 'ok' : 'no' } }, data(x.n + '.'), ' ', body);
+    });
+    return h('div', { class: 'tr-log' }, h('b', null, t('logTitle')), items.length ? h('ol', null, items) : h('span', { class: 'tr-muted' }, t('logStart')));
+  }
+
+  // ── captions ──
+
+  function q(id) { return data(id); }
+
+  function capStart(c) {
+    var p = c.params, U = L.script(p).filter(function (x) { return x.kind === 'test'; }).pop();   // the test from the params
+    var vars = U ? { u: data(userName(U.user)), r: data(shareName(U.resource)) } : {};
+    var out = [rich('start_' + p.scenario, vars)];
+    if (p.shortcut) out.push(rich('startShortcut'));
+    return join(out);
+  }
+
+  function capCreate(c) {
+    var tr = trustOf(c.state, c.state.last.trust);
+    var out = [rich('created', { a: q(tr.from), b: q(tr.to), bf: fGen(tr.to), af: fLoc(tr.from) })];
+    if (tr.twoWay && tr.type === 'external') out.push(rich('createdTwoWayExt', { a: q(tr.from), b: q(tr.to) }));
+    else if (tr.twoWay) out.push(rich('createdTwoWay', { a: fGen(tr.from), bf: fLoc(tr.to) }));
+    out.push(rich('createdType_' + tr.type));
+    if (!tr.sidFiltering) out.push(rich('createdSidOff_' + tr.type));
+    if (tr.selectiveAuth) out.push(rich('createdSelective'));
+    return join(out);
+  }
+
+  function capHop(c) {
+    var e = c.state.last, T = c.state.test, tr = trustOf(c.state, e.trust);
+    var out = [rich(T.hops.length > 1 ? 'hopOf' : 'hopOne', { i: e.i + 1, k: T.hops.length, a: q(e.from), b: q(e.to), u: data(D(T.user).user), ty: t('tyGen_' + tr.type) })];
+    if (tr.type === 'forest') out.push(rich('hopForest'));
+    if (tr.type === 'external') out.push(rich('hopExternal'));
+    if (tr.type === 'shortcut') out.push(rich('hopShortcut'));
+    var skipped = T.cached.filter(function (x) { return x; }).length;
+    if (e.i === 0 && skipped) out.push(rich('hopSkipped'));
+    return join(out);
+  }
+
+  function capVerdict(c) {
+    var T = c.state.test, k = T.checks, R = T.resource, U = T.user;
+    var vars = { u: data(userName(U)), r: data(shareName(R)), srv: data(D(R).server), g: data(D(U).group), un: data(nb(U)), rn: data(nb(R)), rd: q(R) };
+    var out = [];
+    if (T.cached.length && T.cached.every(function (x) { return x; })) out.push(rich('verdictCached'));
+    if (k.ok) {
+      if (U === R) out.push(rich('okSame', vars));
+      else if (k.viaAdmin && !k.ace.granted) out.push(rich(k.crossed ? 'okAdminCross' : 'okAdminForest', vars));
+      else {
+        out.push(rich('okAce', vars));
+        if (k.viaAdmin) out.push(rich('okAlsoAdmin', vars));
+      }
+      if (k.selective.applies && k.selective.granted) out.push(rich('okSelective', vars));
+    } else if (k.block === 'selective') out.push(rich('noSelective', vars));
+    else {
+      out.push(rich(U === R ? 'capNoAceSame' : 'capNoAce', vars));
+      if (k.token.some(function (x) { return x.forestSpecific; })) out.push(rich('capNoAceForest', vars));
+      else if (k.filtered && k.token.some(function (x) { return !x.kept; })) out.push(rich('capNoAceFiltered', vars));
+    }
+    return join(out);
+  }
+
+  function capBlocked(c) {
+    var T = c.state.test, w = T.why, s = c.state;
+    var vars = { u: data(userName(T.user)), ud: q(T.user), rd: q(T.resource) };
+    if (w.rule === 'external') return rich('blockExternal', vars);
+    if (w.rule === 'third-forest') {
+      var f1 = D(w.path[0]).forest;
+      var mid = D(w.path[w.at]).forest;
+      return rich('blockThird', { a: t('name' + f1), b: t('name' + mid), c: t('name' + D(T.resource).forest), u: vars.u, rd: vars.rd });
+    }
+    if (w.rule === 'direction') return rich('blockDirection', { ud: vars.ud, rd: vars.rd, rf: fGen(T.resource), uf: fLoc(T.user) });
+    return rich('blockNone', vars);
+  }
+
+  function caption(c) {
+    var e = c.state.last;
+    if (!e) return capStart(c);
+    switch (e.kind) {
+      case 'create': return capCreate(c);
+      case 'grant': return rich(e.already ? 'grantAgain' : 'grant', { srv: data(D(e.server).server), un: data(nb(e.user)), rd: q(e.server) });
+      case 'hop': return capHop(c);
+      case 'verdict': return capVerdict(c);
+      case 'blocked': return capBlocked(c);
+      default: return '';
+    }
+  }
+
+  // ── mount ──
+
+  var current = null;
+  function relayout() { if (current) arrows(current.el, current.c); }
+
+  var domainOptions = L.IDS.map(function (id) { return [id, t('opt' + KEY[id])]; });
+
+  var sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'scenario', type: 'select', label: t('scenario'), options: L.SCENARIOS.map(function (x) { return [x, x]; }), resets: true,
+        visible: function () { return false; } },
+      { key: 'userDomain', type: 'select', label: t('userDomain'), options: domainOptions, resets: true },
+      { key: 'resourceDomain', type: 'select', label: t('resourceDomain'), options: domainOptions, resets: true },
+      { key: 'aceGranted', type: 'toggle', label: t('aceGranted') },
+      { key: 'selective', type: 'toggle', label: t('selective') },
+      { key: 'sidFilter', type: 'toggle', label: t('sidFilter') },
+      { key: 'sidHistory', type: 'toggle', label: t('sidHistory') },
+      { key: 'shortcut', type: 'toggle', label: t('shortcut'), resets: true }
+    ],
+
+    presets: [
+      { id: 'in-forest', label: t('presetInForest'), hint: t('presetInForestHint'),
+        params: { scenario: 'in-forest', userDomain: 'brk.quillmoor.example', resourceDomain: 'emberline.example' } },
+      { id: 'quillmoor-pellucid', label: t('presetEstate'), hint: t('presetEstateHint'),
+        params: { scenario: 'quillmoor-pellucid', userDomain: 'brk.quillmoor.example', resourceDomain: 'pfx.internal', sidFilter: false } },
+      { id: 'one-way', label: t('presetOneWay'), hint: t('presetOneWayHint'),
+        params: { scenario: 'one-way', userDomain: 'carrow.example', resourceDomain: 'quillmoor.example' } },
+      { id: 'no-third-forest', label: t('presetThird'), hint: t('presetThirdHint'),
+        params: { scenario: 'no-third-forest', userDomain: 'quillmoor.example', resourceDomain: 'carrow.example' } },
+      { id: 'selective', label: t('presetSelective'), hint: t('presetSelectiveHint'),
+        params: { scenario: 'selective', userDomain: 'carrow.example', resourceDomain: 'quillmoor.example', selective: true } }
+    ],
+
+    legend: [
+      { shape: 'tr-ar', label: t('legendTrust') },
+      { shape: 'tr-arnt', label: t('legendNonTransitive') },
+      { shape: 'tr-aracc', label: t('legendAccess') },
+      { shape: 'tr-x', label: t('legendBlocked') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var sc = scene(c);
+      c.stage.replaceChildren(h('div', { class: 'tr' }, sc, h('div', { class: 'tr-cards' }, testCard(c), ticketCard(c)), logLine(c)));
+      current = { el: sc, c: c };
+      arrows(sc, c);
+    },
+
+    caption: caption
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(function () { relayout(); }).observe(document.querySelector('[data-sd-stage]'));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  window.addEventListener('resize', relayout);
+  void sim;
+})();
+</script>
+</body>
+</html>
