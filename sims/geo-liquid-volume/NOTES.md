@@ -117,8 +117,26 @@ drove the page headless over 30+ URLs and key and click sequences (no console er
   (20 bisection steps instead of 60).
 - Cosmetic: the cup field's aria label capitalised; a dead `l < 10` condition dropped (SPEC rule 13 with it).
 
+The same reviewer's second, deeper pass (61 mutants, 24 surviving, most equivalent) found, all fixed:
+
+- **A Croatian case error**: "Ulili smo 1 čaša" (and "prima" with the nominative); the counts after "ulili smo" and
+  "prima" now take accusative forms (`uacc_`: 1 čašu, 2 čaše, 21 mjericu).
+- **The unit-change comparison was hidden while asking first**, though the count is shown once the vessel is full;
+  now it shows. The child view gets one short line ("Manja posuda, veći broj.") instead of the adult sentence.
+- **"7 dl = 7 dl"** below a litre: the readout is now the amount alone, and the child caption says it is not a litre.
+- **Partial pours**: a partial pour that keeps the level got the full-pour wording (now `cPartSame`); "dio vode" is
+  said only when water stayed behind ("svu vodu" otherwise).
+- **"The taller holds more"** is now also named when the lower vessel wins by keeping water (`overflow`: the 16.8 cm
+  jug against the 26 cm bottle).
+- Wording: "koliko puta stane" in the explanation; "Druga posuda dala bi drugi broj" (not "šalica") with any unit;
+  the legend's "ulivena posuda" (a longer one wrapped the header and made the panel scroll); the unit buttons capitalised; room under the labels on a phone.
+- **Test gaps closed**: a 'ba' pour's patch; pouring onto water (the layer, not the level); `fb` clamped to the right
+  vessel and missing → 0; the 0.05 cm tolerance on a real case (low glass 8 cm → bottle 7.96 cm, 'same'); the pour
+  state's totals, fullness and heights; `done` one unit short. SPEC rule 5 now says that only the "same" fallback
+  depends on order.
+
 ## Time
 
 Started 05:22 (2026-11-14): curriculum read, design, Python check, SPEC, model and tests, strings, page, gate and
-screenshots by 05:34; the fresh review ran alongside, and its fixes and the last checks took until 05:43. About
-21 minutes, one session.
+screenshots by 05:34; the fresh review ran alongside, its first fixes and checks took until 05:43, and its second
+pass's fixes until 06:00. About 38 minutes, one session.

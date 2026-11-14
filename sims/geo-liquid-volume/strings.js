@@ -53,6 +53,10 @@
       ua_cup: 'šalicu',
       ua_wide: 'čašu',
       ua_dl: 'mjericu',
+      // after "ulili smo" and "prima": the accusative
+      uacc_cup: ['{n} šalicu', '{n} šalice', '{n} šalica'],
+      uacc_wide: ['{n} čašu', '{n} čaše', '{n} čaša'],
+      uacc_dl: ['{n} mjericu', '{n} mjerice', '{n} mjerica'],
 
       hide: 'Najprije procijeni',
       hideHint: 'Sakrij količine i najprije pitaj razred (V).',
@@ -114,6 +118,8 @@
       cPartLower: '{x} → {y}: prelili smo {m}. Ta voda sada stoji niže ({h1} → {h2}), a ima je jednako.',
       cPartHigher: '{x} → {y}: prelili smo {m}. Ta voda sada stoji više ({h1} → {h2}), a ima je jednako.',
       partW: 'dio vode',
+      allW: 'svu vodu',
+      cPartSame: '{x} → {y}: prelili smo {m}. Ta voda stoji jednako visoko ({h}) i ima je jednako.',
       cPouredC: 'Ista voda, druga visina.',
       cPouredSameC: 'Ista voda, ista visina.',
       cVFrom: 'Više nema mjesta, a ostalo je {left}: {x} prima više.',
@@ -136,10 +142,12 @@
       cCupPart: 'Posljednja {u} nije stala cijela: {big} prima više od {a}, a manje od {b}.',
       cCupDoneC: '{big}: {n}.',
       cDlUnit: 'Mjerica od 1 dl je dogovorena jedinica, ista za sve: {big} prima {c}.',
-      cOtherUnit: 'Druga šalica dala bi drugi broj; zato se dogovaramo o jedinici: decilitar i litra.',
+      cOtherUnit: 'Druga posuda dala bi drugi broj; zato se dogovaramo o jedinici: decilitar i litra.',
       cMistUnit: 'Veća posuda za mjerenje ne daje veći broj.',
       cUnitBigger: '{u1}: {n1}; {u2}: {n2}. Veća posuda za mjerenje stane manje puta.',
       cUnitSmaller: '{u1}: {n1}; {u2}: {n2}. Manja posuda za mjerenje stane više puta.',
+      cUnitBiggerC: 'Veća posuda, manji broj.',
+      cUnitSmallerC: 'Manja posuda, veći broj.',
       whyCup: 'Mjeriti znači brojiti koliko puta stane manja posuda; što je ona manja, to je broj veći.',
 
       // captions: litre
@@ -151,6 +159,7 @@
       cLWhole: '{n} = {r}: {full}; u punoj boci je 10 dl.',
       cLMixed: '{n} = {r}: {full} i {d} u sljedećoj.',
       cLC: '{n} = {r}',
+      cLLessC: '{n}: još nije litra.',
       cMistL100: '1 l = 10 dl, a ne 100 dl.',
       cMistAdd: '{r} nije {sum}: litre i decilitri se ne zbrajaju kao da su isto.',
       cLimitTop: 'Svih pet boca je puno: više ne stane.',
@@ -174,12 +183,12 @@
 
       legWater: 'voda',
       legBefore: 'razina prije prelijevanja',
-      legUnit: 'jedna ulivena šalica',
+      legUnit: 'ulivena posuda',
 
       explain: '<p>Prelijevanjem se <b>količina vode ne mijenja</b>, mijenja se samo koliko visoko stoji: u užoj posudi ' +
         'stoji više, u široj niže. Zato visina vode sama ne govori koliko je vode. Dvije posude usporedimo tako da jednu ' +
         'napunimo do vrha i prelijemo u drugu, praznu: ako nešto ostane, prva prima više; ako ima još mjesta, druga.</p>' +
-        '<p>Mjerimo tako da odaberemo manju posudu i brojimo koliko je puta stane: vrč prima 8 šalica, ali samo 4 čaše. ' +
+        '<p>Mjerimo tako da odaberemo manju posudu i brojimo koliko puta stane: vrč prima 8 šalica, ali samo 4 čaše. ' +
         'Druga posuda daje drugi broj, pa smo se dogovorili o jedinicama: <b>litra</b> (l ili L) i <b>decilitar</b> (dl). ' +
         'Deset decilitara napuni litru: 1 l = 10 dl, pa je 23 dl = 2 l 3 dl.</p>' +
         '<p>Volumen se zove i obujam ili zapremnina. Prije mjerenja uvijek procijeni.</p>'
@@ -228,6 +237,9 @@
       ua_cup: 'cup',
       ua_wide: 'glass',
       ua_dl: 'measure',
+      uacc_cup: ['{n} cup', '{n} cups'],
+      uacc_wide: ['{n} glass', '{n} glasses'],
+      uacc_dl: ['{n} measure', '{n} measures'],
 
       hide: 'Estimate first',
       hideHint: 'Hide the amounts and ask the class first (V).',
@@ -285,6 +297,8 @@
       cPartLower: '{x} → {y}: we poured {m}. That water now stands lower ({h1} → {h2}), and there is just as much of it.',
       cPartHigher: '{x} → {y}: we poured {m}. That water now stands higher ({h1} → {h2}), and there is just as much of it.',
       partW: 'part of the water',
+      allW: 'all the water',
+      cPartSame: '{x} → {y}: we poured {m}. That water stands just as high ({h}), and there is just as much of it.',
       cPouredC: 'The same water, a different height.',
       cPouredSameC: 'The same water, the same height.',
       cVFrom: 'There is no more room, and {left} is left: the {x} holds more.',
@@ -306,10 +320,12 @@
       cCupPart: 'The last {u} did not go in completely: the {big} holds more than {a} and fewer than {b}.',
       cCupDoneC: '{big}: {n}.',
       cDlUnit: 'The 1 dl measure is an agreed unit, the same for everyone: the {big} holds {c}.',
-      cOtherUnit: 'Another cup would give another number; that is why we agree on units: the decilitre and the litre.',
+      cOtherUnit: 'Another vessel would give another number; that is why we agree on units: the decilitre and the litre.',
       cMistUnit: 'A bigger measuring vessel does not give a bigger number.',
       cUnitBigger: '{u1}: {n1}; {u2}: {n2}. A bigger measuring vessel fits fewer times.',
       cUnitSmaller: '{u1}: {n1}; {u2}: {n2}. A smaller measuring vessel fits more times.',
+      cUnitBiggerC: 'A bigger vessel, a smaller number.',
+      cUnitSmallerC: 'A smaller vessel, a bigger number.',
       whyCup: 'Measuring is counting how many times the smaller vessel fits; the smaller it is, the bigger the number.',
 
       cL0: 'Pour in 1 dl (P) and watch the bottle fill. Ten decilitres fill a 1 l bottle.',
@@ -320,6 +336,7 @@
       cLWhole: '{n} = {r}: {full}; a full bottle holds 10 dl.',
       cLMixed: '{n} = {r}: {full} and {d} in the next one.',
       cLC: '{n} = {r}',
+      cLLessC: '{n}: not a litre yet.',
       cMistL100: '1 l = 10 dl, not 100 dl.',
       cMistAdd: '{r} is not {sum}: litres and decilitres are not added as if they were the same.',
       cLimitTop: 'All five bottles are full: nothing more fits.',
@@ -343,7 +360,7 @@
 
       legWater: 'water',
       legBefore: 'the level before pouring',
-      legUnit: 'one cup poured in',
+      legUnit: 'a vessel poured in',
 
       explain: '<p>Pouring <b>does not change the amount of water</b>, only how high it stands: higher in a narrower ' +
         'vessel, lower in a wider one. So the height of the water alone does not tell how much there is. Two vessels ' +

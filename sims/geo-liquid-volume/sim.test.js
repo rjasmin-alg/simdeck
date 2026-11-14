@@ -33,7 +33,9 @@ test('rule 5 order: something left decides before room is looked at; room left m
   assert.equal(room.verdict, 'to');
   assert.deepEqual(room.patch, { fa: 0, fb: 8 });
   // back the other way: the bottle full into the empty jug, the jug holds more
-  assert.equal(logic.pour(P({ a: 'jug', b: 'bottle', fa: 0, fb: 10 }), 'ba').verdict, 'to');
+  const back = logic.pour(P({ a: 'jug', b: 'bottle', fa: 0, fb: 10 }), 'ba');
+  assert.equal(back.verdict, 'to');
+  assert.deepEqual(back.patch, { fa: 10, fb: 0 });
 });
 
 test('rule 5: no verdict unless the first was full and the second empty', () => {
@@ -47,6 +49,10 @@ test('rule 4 tie-break: the same vessel twice is "same" (within 0.05 cm)', () =>
   assert.equal(r.change, 'same');
   near(r.hFrom, 20); near(r.hTo, 20);
   assert.equal(logic.SAME_LEVEL, 0.05);
+  // different vessels within the tolerance: the low glass's 8 cm become 7.96 cm in the bottle
+  const near8 = logic.pour(P({ a: 'wide', b: 'bottle', fa: 4, fb: 0 }), 'ab');
+  near(near8.hTo, 7.9594);
+  assert.equal(near8.change, 'same');
 });
 
 test('rule 1 tie-break: a missing fa takes the default, a present non-number is 0; the same vessel twice is allowed', () => {
@@ -57,6 +63,8 @@ test('rule 1 tie-break: a missing fa takes the default, a present non-number is 
   assert.equal(S({ fa: true }).fa, 0);
   assert.equal(S({ fa: null }).fa, 0);
   assert.equal(S({ fb: null }).fb, 0);
+  assert.equal(logic.initial({ mode: 'pour' }).fb, 0, 'a missing fb is 0');
+  assert.equal(S({ a: 'tall', b: 'pot', fb: 20 }).fb, 20, 'fb is clamped to the right vessel');
   // the default 4 is cut to a smaller vessel
   assert.equal(logic.initial({ mode: 'pour', a: 'cup' }).fa, 2);
 });
@@ -132,8 +140,18 @@ test('rule 4: the layer the poured water made, and makes', () => {
   const higher = logic.pour(P({ a: 'tall', b: 'wide', fa: 0, fb: 4 }), 'ba');
   assert.equal(higher.change, 'higher'); near(higher.hFrom, 8); near(higher.hTo, 20);
   // only the top 10 dl of the jug move: 16.8 − 6.3 = 10.5 cm become 26 cm
+  // into a vessel that already has water: the layer, not the level
+  const onto = logic.pour(P({ a: 'tall', b: 'wide', fa: 2, fb: 2 }), 'ab');
+  assert.equal(onto.change, 'lower'); near(onto.hFrom, 10); near(onto.hTo, 4);
   const jug = logic.pour(P({ a: 'jug', b: 'bottle', fa: 16, fb: 0 }), 'ab');
   assert.equal(jug.change, 'higher'); near(jug.hFrom, 10.5); near(jug.hTo, 26);
+});
+
+test('pour state: totals, fullness, heights and levels the page reads', () => {
+  const s = S({ a: 'jug', b: 'bottle', fa: 6, fb: 10 });
+  assert.deepEqual([s.total, s.fullA, s.fullB, s.heightA, s.heightB], [16, false, true, 16.8, 26]);
+  near(s.levelA, 6.3); near(s.levelB, 26);
+  assert.equal(S({ a: 'jug', fa: 16, fb: 0 }).fullA, true);
 });
 
 test('rule 6: fill and empty', () => {
@@ -163,6 +181,8 @@ test('rule 7: measuring with a unit: whole units, the rest, the most to pour', (
   assert.equal(mid.done, false);
   assert.equal(mid.left, 0);
   near(S({ mode: 'cup', big: 'jug', unit: 'cup', k: 3 }).level, 6.3);
+  assert.equal(S({ mode: 'cup', big: 'jug', unit: 'dl', k: 15 }).done, false);
+  assert.equal(S({ mode: 'cup', big: 'jug', unit: 'dl', k: 16 }).done, true);
 });
 
 test('rule 8: one more unit is refused when the big vessel is full; fill up and empty', () => {

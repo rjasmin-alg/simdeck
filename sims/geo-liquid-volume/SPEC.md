@@ -89,7 +89,8 @@ Pour mode offers all but `dl`; cup mode fills `bottle`, `jug` or `pot` with `cup
    `same` (within 0.05 cm). tall 4 → wide: 20 cm → 8 cm, lower; wide 4 → tall: 8 → 20, higher; tall 4 → tall:
    same; jug 16 → bottle: the top 10 dl of the jug, 16.8 − 6.3 = 10.5 cm, become 26 cm in the bottle, higher. When
    only part of the water moved (some stayed in X, or Y had water), the caption speaks of the poured amount alone.
-5. **Comparing by pouring** (tie-break order). When X was full and Y empty before the pour, the pour decides which
+5. **Comparing by pouring** (tie-break: the same only when neither of the first two holds; water left in X
+   already means Y is full, so those two never meet). When X was full and Y empty before the pour, the pour decides which
    holds more: something left in X → X holds more; else Y not full → Y holds more; else (Y exactly full, nothing left)
    **the same**. Otherwise there is no verdict (the page says to start full into empty). Presets: tall 4 → wide 4:
    same; vase 8 → bowl: bowl 8 of 9, bowl holds more (though 5 cm high against 25 cm); jug 16 → bottle: bottle full,
