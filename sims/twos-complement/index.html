@@ -1,0 +1,635 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- twos-complement: two n-bit operands and their sum as rows of bit cells (each column labelled with its weight, the
+     top one negative), the carries above the columns, each row read unsigned, signed and in hex; a number wheel of
+     the 2^n patterns (unsigned outside, signed inside) with an arrow for each reading of a + b; and the N, Z, C, V
+     flags with their rules. An explorer: width, a, b and the reading redraw at once; operand bits can be clicked and
+     the ± buttons negate an operand (~x + 1).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="twos-complement">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dvojni komplement i preljev · simdeck</title>
+<meta name="description" content="Zbroji dva broja od 4, 8 ili 16 bitova i gledaj prijenose, kotač brojeva i zastavice N, Z, C, V: prijenos nije preljev.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "twos-complement",
+  "title": {
+    "hr": "Dvojni komplement i preljev",
+    "en": "Two's complement and overflow"
+  },
+  "concept": {
+    "hr": "Isto zbrajalo, dva čitanja: prijenos C i preljev V",
+    "en": "One adder, two readings: the carry C and the overflow V"
+  },
+  "summary": {
+    "hr": "Zbroji dva broja od 4, 8 ili 16 bitova i gledaj prijenose, kotač brojeva i zastavice N, Z, C, V: prijenos nije preljev.",
+    "en": "Add two 4-, 8- or 16-bit numbers and watch the carries, the number wheel and the N, Z, C, V flags: a carry is not an overflow."
+  },
+  "tags": [
+    "number-representation"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="twos-complement"]; colours only from kit tokens.
+   Layout: left, the rows (weights, carries, a, b, r, each operand row followed by its readings) and the flag panel;
+   right, the number wheel (an SVG of lines and arcs, its labels in HTML so text keeps its size). Every row is a flex
+   line of the same boxes (label, the carry-out column, n bit columns with a wider gap between nibbles), so columns
+   line up without a grid. */
+[data-sim="twos-complement"] .tc {
+  display: flex;
+  gap: 2cqw;
+  height: 100%;
+  padding: 1.2cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="twos-complement"] .tc-left {
+  container-type: inline-size;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 1cqh;
+  min-width: 0;
+}
+[data-sim="twos-complement"] .tc-right {
+  display: flex;
+  flex: 0 0 min(44cqw, 88cqh);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+/* 16 bits need the room for their columns: the wheel gives some up */
+[data-sim="twos-complement"] .tc[data-n='16'] .tc-right { flex-basis: min(34cqw, 80cqh); }
+[data-sim="twos-complement"] sup { font-size: max(0.9rem, 0.75em); }
+[data-sim="twos-complement"] .tc-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+[data-sim="twos-complement"] .tc-muted { color: var(--muted); }
+
+/* ── rows ── */
+[data-sim="twos-complement"] .tc-rows {
+  --lbl: 5.4rem;
+  --gap: 0.22rem;
+  --nib: 0.6rem;
+  --cell: min(4.2rem, calc((100cqw - var(--lbl) - (var(--n) + 1) * var(--gap) - var(--nibs) * var(--nib)) / (var(--n) + 1)));
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+[data-sim="twos-complement"] .tc-row { display: flex; align-items: center; gap: var(--gap); }
+[data-sim="twos-complement"] .tc-lbl {
+  display: flex;
+  flex: 0 0 var(--lbl);
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding-right: 0.4rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="twos-complement"] .tc-lbl-small { color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="twos-complement"] .tc-name { font-family: var(--mono); font-size: 1.5rem; }
+[data-sim="twos-complement"] .tc-col { display: grid; flex: 0 0 var(--cell); place-items: center; width: var(--cell); }
+[data-sim="twos-complement"] .tc-col.tc-nib { margin-left: var(--nib); }
+[data-sim="twos-complement"] .tc-w { color: var(--muted); font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="twos-complement"] .tc-w.tc-sign { color: var(--ink); font-weight: 700; }
+/* each weight is written twice, decimal and as a power of two; 16 bits (and 8 on a phone) show the shorter one */
+[data-sim="twos-complement"] .tc-w-pow { display: none; }
+[data-sim="twos-complement"] .tc-rows[data-n='16'] .tc-w-dec { display: none; }
+[data-sim="twos-complement"] .tc-rows[data-n='16'] .tc-w-pow { display: inline; }
+[data-sim="twos-complement"] .tc-bit {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: min(3.3rem, calc(var(--cell) * 1.1));
+  padding: 0;
+  border: max(2px, 0.14rem) solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--sw);
+  color: var(--on-series);
+  font-family: var(--mono);
+  font-size: max(1rem, min(1.7rem, calc(var(--cell) * 0.6)));
+  font-weight: 700;
+}
+[data-sim="twos-complement"] button.tc-bit { cursor: pointer; }
+[data-sim="twos-complement"] .tc-bit[data-v='0'] { border-style: dashed; background: var(--bg); color: var(--ink); font-weight: 400; }
+[data-sim="twos-complement"] .tc-bit.tc-sign { border-width: max(4px, 0.3rem); border-style: solid; border-color: var(--ink); }
+[data-sim="twos-complement"] .tc-bit:focus-visible, [data-sim="twos-complement"] .tc-negb:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="twos-complement"] .tc-bit.sd-changed { position: relative; z-index: 1; }
+[data-sim="twos-complement"] .tc-ghost { border-style: dashed; border-color: var(--muted); background: transparent; color: var(--muted); }
+[data-sim="twos-complement"] .tc-carry {
+  display: grid;
+  place-items: center;
+  width: min(1.9rem, calc(var(--cell) * 0.9));
+  height: min(1.9rem, calc(var(--cell) * 0.9));
+  border-radius: 50%;
+  background: var(--c7);
+  color: var(--on-series);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+[data-sim="twos-complement"] .tc-carry[data-top] { box-shadow: 0 0 0 0.18rem var(--bg), 0 0 0 0.32rem var(--ink); }
+[data-sim="twos-complement"] .tc-sum { border-top: max(3px, 0.18rem) solid var(--ink); padding-top: 0.35rem; }
+[data-sim="twos-complement"] .tc-negb {
+  min-width: 2.2rem;
+  min-height: 2.2rem;
+  padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+[data-sim="twos-complement"] .tc-read {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 1.4rem;
+  margin: 0 0 0.25rem calc(var(--lbl) + var(--gap));
+  font-size: var(--fs-sm);
+}
+[data-sim="twos-complement"] .tc-read b { font-family: var(--mono); font-size: 1.15rem; }
+[data-sim="twos-complement"] .tc-read-k { color: var(--muted); }
+[data-sim="twos-complement"] .tc-fit {
+  padding: 0 0.35rem;
+  border: var(--line-w) solid var(--ok);
+  border-radius: var(--radius-sm);
+  color: var(--ok);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="twos-complement"] .tc-fit[data-fit='0'] { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+
+/* ── flags ── */
+[data-sim="twos-complement"] .tc-flags {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.3rem 0.8rem;
+  padding-top: 0.5rem;
+  border-top: var(--line-w) solid var(--line);
+}
+[data-sim="twos-complement"] .tc-flags-title { grid-column: 1 / -1; font-weight: 700; }
+[data-sim="twos-complement"] .tc-flag {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: max(2px, 0.14rem) solid var(--c3);
+  border-radius: 50%;
+  background: var(--c3);
+  color: var(--on-series);
+  font-family: var(--mono);
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+[data-sim="twos-complement"] .tc-flag[data-v='0'] { border-style: dashed; border-color: var(--muted); background: var(--bg); color: var(--muted); }
+[data-sim="twos-complement"] .tc-flag-name { font-weight: 700; white-space: nowrap; }
+[data-sim="twos-complement"] .tc-flag-rule { font-size: var(--fs-sm); }
+[data-sim="twos-complement"] .tc-flag-ev { color: var(--muted); font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* ── the wheel ── */
+[data-sim="twos-complement"] .tc-wheel { position: relative; width: 100%; aspect-ratio: 1; }
+[data-sim="twos-complement"] .tc-wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="twos-complement"] .tc-ring { fill: none; stroke: var(--ink); stroke-width: 0.5; }
+[data-sim="twos-complement"] .tc-tick { stroke: var(--ink); stroke-width: 0.35; }
+[data-sim="twos-complement"] .tc-tick-major { stroke-width: 0.6; }
+[data-sim="twos-complement"] .tc-seam { stroke: var(--ink); stroke-width: 0.7; stroke-dasharray: 1.4 1; }
+[data-sim="twos-complement"] .tc-arc { fill: none; stroke-width: 1.3; stroke-linecap: round; }
+[data-sim="twos-complement"] .tc-arc-u { stroke: var(--c5); }
+[data-sim="twos-complement"] .tc-arc-s { stroke: var(--c6); stroke-dasharray: 2.6 1.2; }
+[data-sim="twos-complement"] .tc-head-u { fill: var(--c5); }
+[data-sim="twos-complement"] .tc-head-s { fill: var(--c6); }
+[data-sim="twos-complement"] .tc-wl {
+  position: absolute;
+  padding: 0 0.15rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  transform: translate(-50%, -50%);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+[data-sim="twos-complement"] .tc-wl-in { color: var(--c6); font-weight: 700; }
+[data-sim="twos-complement"] .tc-wl-out { color: var(--c5); font-weight: 700; }
+[data-sim="twos-complement"] .tc-mark {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0.15rem solid var(--bg);
+  border-radius: 50%;
+  background: var(--sw);
+  color: var(--on-series);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+[data-sim="twos-complement"] .tc-seamlbl {
+  padding: 0 0.3rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+[data-sim="twos-complement"] .tc-seamlbl[data-on='1'] { background: var(--c3); border-color: var(--c3); color: var(--on-series); }
+[data-sim="twos-complement"] .tc-wkey { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.1rem 1.2rem; font-size: var(--fs-sm); }
+[data-sim="twos-complement"] .tc-wkey-u { color: var(--c5); font-weight: 700; }
+[data-sim="twos-complement"] .tc-wkey-s { color: var(--c6); font-weight: 700; }
+[data-sim="twos-complement"] .sd-swatch[data-shape='tc-sign'] { border: 0.25rem solid var(--ink); background: var(--bg); }
+[data-sim="twos-complement"] .sd-swatch[data-shape='tc-carry'] { border-radius: 50%; background: var(--c7); border-color: var(--c7); }
+
+/* Below the projector size (not a contract target) the stage gets short: tighten. */
+@container (max-height: 640px) {
+  [data-sim="twos-complement"] .tc-rows { gap: 0.15rem; }
+  [data-sim="twos-complement"] .tc-bit { height: min(2.4rem, var(--cell)); }
+  [data-sim="twos-complement"] .tc-flags { gap: 0.1rem 0.6rem; }
+  [data-sim="twos-complement"] .tc-flag { width: 2rem; height: 2rem; }
+}
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="twos-complement"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="twos-complement"] .tc { flex-direction: column; height: auto; padding: 0.8rem 0.5rem; }
+  [data-sim="twos-complement"] .tc-right { flex: none; width: 100%; max-width: 30rem; align-self: center; }
+  [data-sim="twos-complement"] .tc-rows { --lbl: 4.4rem; --nib: 0.3rem; --gap: 0.12rem; overflow-x: auto; padding-bottom: 0.3rem; }
+  [data-sim="twos-complement"] .tc-rows[data-n='8'] .tc-w-dec { display: none; }
+  [data-sim="twos-complement"] .tc-rows[data-n='8'] .tc-w-pow { display: inline; }
+  [data-sim="twos-complement"] .tc-lbl { gap: 0.2rem; padding-right: 0.2rem; }
+  [data-sim="twos-complement"] .tc-name { font-size: 1.2rem; }
+  [data-sim="twos-complement"] .tc-negb { min-width: 1.8rem; }
+  [data-sim="twos-complement"] .tc-rows[data-n='16'] { --cell: 2.4rem; }
+  [data-sim="twos-complement"] .tc-lbl-small { white-space: normal; text-align: right; }
+  [data-sim="twos-complement"] .tc-flags { grid-template-columns: max-content minmax(0, 1fr); }
+  [data-sim="twos-complement"] .tc-flag-rule, [data-sim="twos-complement"] .tc-flag-ev { grid-column: 2; }
+  [data-sim="twos-complement"] .tc-flag-ev { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Dvojni komplement i preljev</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  // ── formatting (data, not language: shown in translate="no" elements) ──
+  function minus(v) { return String(v).replace(/-/g, '−'); }
+  var SUP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+  var SUB = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉' };
+  function sup(k) { return String(k).replace(/\d/g, function (d) { return SUP[d]; }); }
+  function sub(k) { return String(k).replace(/\d/g, function (d) { return SUB[d]; }); }
+  /** A column's weight, decimal (−128, 64 … 1) and as a power of two (−2⁷ … 2⁰); CSS shows the one that fits the cell. */
+  function weightNodes(i, n) {
+    return [h('span', { class: 'tc-w-dec' }, minus(L.weightOf(i, n))), h('span', { class: 'tc-w-pow' }, (i === n - 1 ? '−' : '') + '2' + sup(i))];
+  }
+  /** Bits as text in groups of four: 1001 0110. */
+  function bitText(bits) {
+    var s = '';
+    for (var k = 0; k < bits.length; k++) s += (k && k % 4 === 0 ? ' ' : '') + bits[k];
+    return s;
+  }
+  function b(text) { return h('b', { translate: 'no' }, minus(text)); }
+  function num(text) { return h('span', { class: 'tc-num', translate: 'no' }, minus(text)); }
+  function showsSigned(v) { return v !== 'unsigned'; }
+  function showsUnsigned(v) { return v !== 'signed'; }
+
+  // ── state the page keeps: the previous state for "changed", and a negation just clicked ──
+  var sim = null, ready = false, prev = null, cur = null;
+  var neg = null;   // { which, x, n, key }: the ± click whose result the caption explains while params stay put
+  function keyOf(p) { return [p.width, p.a, p.b].join(','); }
+
+  // ── rows ──
+  /** The boxes every row shares: the label, the carry-out column, then n bit columns (k = 0 is the top bit). */
+  function rowNode(cls, label, out, cells, n) {
+    var cols = [h('div', { class: 'tc-col' }, out)];
+    for (var k = 0; k < n; k++) cols.push(h('div', { class: 'tc-col' + (k && k % 4 === 0 ? ' tc-nib' : '') }, cells(k)));
+    return h('div', { class: 'tc-row' + (cls ? ' ' + cls : '') }, h('div', { class: 'tc-lbl' }, label), cols);
+  }
+
+  function bitCell(row, bits, k, n, changed, clickable, which, value) {
+    var v = bits[k], i = n - 1 - k;
+    var attrs = {
+      class: 'tc-bit' + (k === 0 ? ' tc-sign' : '') + (changed.indexOf(k) >= 0 ? ' sd-changed' : ''),
+      dataset: { c: String(row === 'a' ? 1 : row === 'b' ? 2 : 3), v: String(v) }, translate: 'no',
+      'aria-label': t('bitLabel', { row: t('row' + row.toUpperCase()), i: i, v: v, w: minus(L.weightOf(i, n)) })
+    };
+    if (!clickable) return h('span', attrs, String(v));
+    attrs.type = 'button';
+    attrs.onmousedown = function (e) { e.preventDefault(); };
+    attrs.onclick = function () { var o = {}; o[which] = L.flipBit(value, i, n); sim.set(o); };
+    return h('button', attrs, String(v));
+  }
+
+  function negButton(which, s) {
+    var label = t('negate', { name: t(which === 'a' ? 'rowA' : 'rowB') });
+    return h('button', {
+      type: 'button', class: 'tc-negb', 'aria-label': label, title: label, translate: 'no',
+      onmousedown: function (e) { e.preventDefault(); },
+      onclick: function () {
+        var x = s[which], r = L.negate(x, s.n);
+        var p = Object.assign({}, sim.params);
+        p[which] = r.value;
+        neg = { which: which, x: x, n: s.n, key: keyOf(p) };
+        var o = {}; o[which] = r.value;
+        sim.set(o);   // the kit renders even when the value stays (−(−128))
+      }
+    }, '±');
+  }
+
+  function readNode(s, which, view) {
+    var items = [];
+    if (showsUnsigned(view)) items.push(h('span', null, h('span', { class: 'tc-read-k' }, t('readUnsigned')), ' ', b(s.unsigned[which])));
+    if (showsSigned(view)) items.push(h('span', null, h('span', { class: 'tc-read-k' }, t('readSigned')), ' ', b(s.signed[which])));
+    items.push(h('span', null, h('span', { class: 'tc-read-k' }, t('readHex')), ' ', b('0x' + s.hex[which])));
+    return h('div', { class: 'tc-read' }, items);
+  }
+
+  function fitBadge(ok) {
+    return h('span', { class: 'tc-fit', dataset: { fit: ok ? '1' : '0' } }, (ok ? '✓ ' : '✗ ') + t(ok ? 'fits' : 'noFit'));
+  }
+
+  function exactNode(s, view) {
+    var m = Math.pow(2, s.n), items = [h('span', { class: 'tc-read-k' }, t('exactSum'))];
+    if (showsUnsigned(view)) items.push(h('span', null, h('span', { class: 'tc-read-k' }, t('readUnsigned')), ' ', b(s.trueSum.unsigned), ' ', fitBadge(s.trueSum.unsigned < m), ' ', num('0 … ' + (m - 1))));
+    if (showsSigned(view)) items.push(h('span', null, h('span', { class: 'tc-read-k' }, t('readSigned')), ' ', b(s.trueSum.signed), ' ', fitBadge(!s.flags.V), ' ', num(s.range.min + ' … ' + s.range.max)));
+    return h('div', { class: 'tc-read' }, items);
+  }
+
+  function rowsNode(s, view, ch) {
+    var n = s.n;
+    var weights = rowNode('', h('span', { class: 'tc-lbl-small' }, t('weight')), null, function (k) {
+      return h('span', { class: 'tc-w' + (k === 0 ? ' tc-sign' : ''), translate: 'no' }, weightNodes(n - 1 - k, n));
+    }, n);
+    var carries = rowNode('', h('span', { class: 'tc-lbl-small' }, t('carryRow')),
+      s.carryOut ? h('span', { class: 'tc-carry', 'data-top': '', translate: 'no', title: t('carryOutLabel', { v: 1 }) }, '1') : null,
+      function (k) {
+        if (!s.carries[k]) return null;
+        var attrs = { class: 'tc-carry', translate: 'no', title: t('carryLabel', { i: n - 1 - k }) };
+        if (k === 0) attrs['data-top'] = '';
+        return h('span', attrs, '1');
+      }, n);
+    var aRow = rowNode('', [negButton('a', s), h('span', { class: 'tc-name', translate: 'no' }, t('rowA'))], null, function (k) {
+      return bitCell('a', s.aBits, k, n, ch.a, true, 'a', s.a);
+    }, n);
+    var bRow = rowNode('', [negButton('b', s), h('span', { class: 'tc-name', translate: 'no' }, t('plus') + ' ' + t('rowB'))], null, function (k) {
+      return bitCell('b', s.bBits, k, n, ch.b, true, 'b', s.b);
+    }, n);
+    var rRow = rowNode('tc-sum', h('span', { class: 'tc-name', translate: 'no' }, '= ' + t('rowR')),
+      s.carryOut ? h('span', { class: 'tc-bit tc-ghost', dataset: { v: '1' }, translate: 'no', title: t('carryOutLabel', { v: 1 }), 'aria-label': t('carryOutLabel', { v: 1 }) }, '1') : null,
+      function (k) { return bitCell('r', s.sumBits, k, n, ch.r, false); }, n);
+    return h('div', { class: 'tc-rows', dataset: { n: String(n) }, style: { '--n': String(n), '--nibs': String(Math.max(0, n / 4 - 1)) } },
+      weights, carries, aRow, readNode(s, 'a', view), bRow, readNode(s, 'b', view), rRow, readNode(s, 'r', view), exactNode(s, view));
+  }
+
+  function flagsNode(s, ch) {
+    var n = s.n, top = sub(n - 1), out = sub(n);
+    var ev = {
+      N: 'r' + top + ' = ' + s.sumBits[0],
+      Z: 'r = 0x' + s.hex.r,
+      C: 'c' + out + ' = ' + s.carryOut,
+      V: 'c' + top + ' = ' + s.carries[0] + (s.flags.V ? ' ≠ ' : ', ') + 'c' + out + ' = ' + s.carryOut
+    };
+    var cells = [h('div', { class: 'tc-flags-title' }, t('flags'))];
+    ['N', 'Z', 'C', 'V'].forEach(function (f) {
+      var v = s.flags[f];
+      cells.push(
+        h('span', { class: 'tc-flag' + (ch.flags.indexOf(f) >= 0 ? ' sd-changed' : ''), dataset: { v: String(v) },
+          'aria-label': t('flag' + f) + ' = ' + v + ', ' + t(v ? 'flagOn' : 'flagOff') }, t('flag' + f)),
+        h('span', { class: 'tc-flag-name' }, h('span', { class: 'tc-num', translate: 'no' }, '= ' + v), ' ', t('name' + f)),
+        h('span', { class: 'tc-flag-rule' }, t('rule' + f)),
+        h('span', { class: 'tc-flag-ev', translate: 'no' }, ev[f]));
+    });
+    return h('div', { class: 'tc-flags' }, cells);
+  }
+
+  // ── the wheel: 0 at the top, clockwise; viewBox −50 … 50, so one unit is 1 % of the box ──
+  var R = 33, RO = 38.5, RI = 27.5, LO = 45.5, LI = 19.5, RS = 47.5;
+  function polar(r, deg) { var a = deg * Math.PI / 180; return [r * Math.sin(a), -r * Math.cos(a)]; }
+  function svg(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function fmt(x) { return String(Math.round(x * 100) / 100); }
+  /** An arc on radius r from angle `from` turning `turn` degrees (positive: clockwise). */
+  function arcPath(r, from, turn) {
+    var p1 = polar(r, from), p2 = polar(r, from + turn);
+    return 'M' + fmt(p1[0]) + ' ' + fmt(p1[1]) + ' A' + r + ' ' + r + ' 0 ' + (Math.abs(turn) > 180 ? 1 : 0) + ' ' + (turn > 0 ? 1 : 0) + ' ' + fmt(p2[0]) + ' ' + fmt(p2[1]);
+  }
+  /** A filled arrowhead at the end of an arc (drawn, not an SVG marker, so its colour is a class). */
+  function head(r, deg, turn, cls) {
+    var dir = turn > 0 ? 1 : -1, tip = polar(r, deg), back = deg - dir * 3.2;
+    var b1 = polar(r + 2.2, back), b2 = polar(r - 2.2, back);
+    return svg('path', { class: cls, d: 'M' + fmt(tip[0]) + ' ' + fmt(tip[1]) + ' L' + fmt(b1[0]) + ' ' + fmt(b1[1]) + ' L' + fmt(b2[0]) + ' ' + fmt(b2[1]) + ' Z' });
+  }
+  function at(el, r, deg) {
+    var p = polar(r, deg);
+    el.style.left = (50 + p[0]) + '%';
+    el.style.top = (50 + p[1]) + '%';
+    return el;
+  }
+
+  function wheelNode(s, view) {
+    var n = s.n, m = Math.pow(2, n), deg = function (u) { return u / m * 360; };
+    var g = svg('svg', { viewBox: '-50 -50 100 100', 'aria-hidden': 'true', focusable: 'false' });
+    g.appendChild(svg('circle', { class: 'tc-ring', cx: 0, cy: 0, r: R }));
+    var tickStep = n === 4 ? 1 : m / 32, major = n === 4 ? 1 : m / 8;
+    for (var u = 0; u < m; u += tickStep) {
+      var big = u % major === 0, p1 = polar(R - (big ? 2.4 : 1.2), deg(u)), p2 = polar(R + (big ? 2.4 : 1.2), deg(u));
+      g.appendChild(svg('line', { class: 'tc-tick' + (big ? ' tc-tick-major' : ''), x1: fmt(p1[0]), y1: fmt(p1[1]), x2: fmt(p2[0]), y2: fmt(p2[1]) }));
+    }
+    // the seams: between 2^n − 1 and 0 (top, unsigned wraps: C) and between 2^(n−1) − 1 and −2^(n−1) (bottom: V)
+    var half = 0.5 * 360 / m;
+    var seams = [];
+    if (showsUnsigned(view)) seams.push({ f: 'C', deg: -half });
+    if (showsSigned(view)) seams.push({ f: 'V', deg: 180 - half });
+    seams.forEach(function (sm) {
+      var a = polar(LI + 3, sm.deg), z = polar(RS - 3, sm.deg);
+      g.appendChild(svg('line', { class: 'tc-seam', x1: fmt(a[0]), y1: fmt(a[1]), x2: fmt(z[0]), y2: fmt(z[1]) }));
+    });
+    // the arrows: unsigned outside (clockwise by b's unsigned value), signed inside (by b's signed value)
+    var from = deg(s.unsigned.a);
+    if (showsUnsigned(view) && s.unsigned.b) {
+      var tu = deg(s.unsigned.b);
+      g.appendChild(svg('path', { class: 'tc-arc tc-arc-u', d: arcPath(RO, from, tu - (tu > 4 ? 2.5 : 0)) }));
+      g.appendChild(head(RO, from + tu, tu, 'tc-head-u'));
+    }
+    if (showsSigned(view) && s.signed.b) {
+      var ts = s.signed.b / m * 360;
+      var back = Math.abs(ts) > 4 ? (ts > 0 ? 2.5 : -2.5) : 0;
+      g.appendChild(svg('path', { class: 'tc-arc tc-arc-s', d: arcPath(RI, from, ts - back) }));
+      g.appendChild(head(RI, from + ts, ts, 'tc-head-s'));
+    }
+
+    var labels = [];
+    var lstep = n === 4 ? 1 : m / 8;
+    for (var v = 0; v < m; v += lstep) {
+      if (showsUnsigned(view)) labels.push(at(h('span', { class: 'tc-wl tc-wl-out', translate: 'no' }, String(v)), LO, deg(v)));
+      if (showsSigned(view)) labels.push(at(h('span', { class: 'tc-wl tc-wl-in', translate: 'no' }, minus(L.signedOf(v, n))), LI, deg(v)));
+    }
+    seams.forEach(function (sm) {
+      var on = s.flags[sm.f];
+      labels.push(at(h('span', { class: 'tc-wl tc-seamlbl', dataset: { on: String(on) }, translate: 'no', title: t(sm.f === 'C' ? 'seamC' : 'seamV') },
+        sm.f), RS, sm.deg + (n === 4 ? 0 : sm.f === 'C' ? -9 : 9)));   // 4 bits: the seam is half a step off the 0 label, room enough
+    });
+    // a and r sit on the ring; when they are close (b small) a moves inwards and r outwards so both stay readable
+    var gap = Math.abs(deg(s.unsigned.a) - deg(s.unsigned.r)), close = Math.min(gap, 360 - gap) < 12;
+    labels.push(at(h('span', { class: 'tc-wl tc-mark', dataset: { c: '1' }, translate: 'no' }, t('markA')), close ? R - 5 : R, deg(s.unsigned.a)));
+    labels.push(at(h('span', { class: 'tc-wl tc-mark', dataset: { c: '3' }, translate: 'no' }, t('markR')), close ? R + 5 : R, deg(s.unsigned.r)));
+
+    var keyItems = [];
+    if (showsUnsigned(view)) keyItems.push(h('span', { class: 'tc-wkey-u' }, '— ' + t('wheelOuter')));
+    if (showsSigned(view)) keyItems.push(h('span', { class: 'tc-wkey-s' }, '- - ' + t('wheelInner')));
+    return [
+      h('div', { class: 'tc-wheel', role: 'img', 'aria-label': t('wheel', { m: m }) }, g, labels),
+      h('div', { class: 'tc-wkey' }, keyItems)
+    ];
+  }
+
+  // ── captions ──
+  /** t.parts with a node used twice puts it in the second place only; give each later use a copy. */
+  function fresh(parts) {
+    var seen = [];
+    return parts.map(function (x) {
+      if (!x || typeof x !== 'object' || !x.cloneNode) return x;
+      if (seen.indexOf(x) >= 0) return x.cloneNode(true);
+      seen.push(x);
+      return x;
+    });
+  }
+  function caption(s, p) {
+    var n = s.n, out = [];
+    var bitsS = t.n('bitsSigned', n), bitsU = t.n('bitsN', n);
+    if (neg && neg.key !== keyOf(p)) neg = null;   // any other change ends the negation's caption
+    if (neg) {
+      var r = L.negate(neg.x, n);
+      var nv = {
+        x: b(neg.x < 0 ? '(' + neg.x + ')' : neg.x), xbits: b(bitText(r.bits)), inv: b(bitText(r.inverted)), rbits: b(bitText(r.resultBits)), v: b(r.value),
+        abs: b(Math.abs(neg.x)), bits: bitsS
+      };
+      out = out.concat(t.parts(r.overflow ? 'capNegMin' : 'capNeg', nv), [' ']);
+    }
+    var A = b(s.a), B = b(s.b < 0 ? '(' + s.b + ')' : s.b);   // 5 + (−3), as the task writes it
+    var u = { ua: b(s.unsigned.a), ub: b(s.unsigned.b), usum: b(s.trueSum.unsigned), ur: b(s.unsigned.r), ubits: bitsU };
+    if (s.flags.V) {
+      var vars = { a: A, b: B, sum: b(s.trueSum.signed), bits: bitsS, rbits: b(bitText(s.sumBits)), r: b(s.signed.r) };
+      out = out.concat(t.parts(s.a >= 0 ? 'capVPos' : 'capVNeg', vars));
+      if (s.flags.C) out = out.concat([' '], t.parts('capAlsoC', u));
+    } else if (s.flags.C) {
+      out = out.concat(t.parts('capC', Object.assign({ a: A, b: B, r: b(s.signed.r) }, u)));
+      // capSub names a, b and −b twice each: a node can be placed once, so every placeholder gets a fresh copy
+      if (s.b < 0 && s.b > s.range.min) out = out.concat([' '], fresh(t.parts('capSub', { a: b(s.a), b: b(s.b), nb: b(-s.b) })));
+    } else {
+      out = out.concat(t.parts('capNone', Object.assign({ a: A, b: B, r: b(s.signed.r), bits: bitsS }, u)));
+    }
+    if (s.flags.Z) out = out.concat([' '], t.parts('capZero'));
+    return fresh(out);
+  }
+
+  var presetList = L.presets.map(function (pr) {
+    return { id: pr.id, label: t('preset_' + pr.id), hint: t('hint_' + pr.id), params: pr.params };
+  });
+  var root = h('div', { class: 'tc' });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'width', type: 'choice', label: t('width'), options: L.WIDTHS.map(function (w) { return [w, t.n('bitsN', w)]; }) },
+      { key: 'a', type: 'range', label: t('a'), step: 1, format: minus, value: L.defaults.a,
+        min: function (p) { return L.rangeOf(L.widthOf(p.width)).min; }, max: function (p) { return L.rangeOf(L.widthOf(p.width)).max; } },
+      { key: 'b', type: 'range', label: t('b'), step: 1, format: minus, value: L.defaults.b,
+        min: function (p) { return L.rangeOf(L.widthOf(p.width)).min; }, max: function (p) { return L.rangeOf(L.widthOf(p.width)).max; } },
+      { key: 'view', type: 'choice', label: t('view'), options: L.VIEWS.map(function (v) { return [v, t('view_' + v)]; }) }
+    ],
+
+    presets: presetList,
+
+    legend: [
+      { c: 8, label: t('legendOne') },
+      { shape: 'hollow', label: t('legendZero') },
+      { shape: 'tc-sign', label: t('legendSign') },
+      { shape: 'tc-carry', label: t('legendCarry') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      // "changed" compares with the state before the last input; loading the page (defaults, then the URL) is no input
+      if (!ready) { prev = null; cur = s; }
+      else if (!cur || keyOf({ width: s.n, a: s.a, b: s.b }) !== keyOf({ width: cur.n, a: cur.a, b: cur.b })) { prev = cur; cur = s; }
+      var ch = {
+        a: prev ? L.changedBits(prev.aBits, s.aBits) : [],
+        b: prev ? L.changedBits(prev.bBits, s.bBits) : [],
+        r: prev ? L.changedBits(prev.sumBits, s.sumBits) : [],
+        flags: prev && prev.n === s.n ? L.changedFlags(prev.flags, s.flags) : []   // a width change is a new number, not a change
+      };
+      root.dataset.n = String(s.n);
+      root.replaceChildren(
+        h('div', { class: 'tc-left' }, rowsNode(s, s.view, ch), flagsNode(s, ch)),
+        h('div', { class: 'tc-right' }, wheelNode(s, s.view)));
+      if (root.parentNode !== c.stage) c.stage.replaceChildren(root);
+    },
+
+    caption: function (c) { return caption(c.state, c.params); }
+  });
+  ready = true;
+})();
+</script>
+</body>
+</html>
