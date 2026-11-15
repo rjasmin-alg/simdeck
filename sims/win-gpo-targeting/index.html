@@ -1,0 +1,479 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-gpo-targeting: a stepper. Top, the GPO "Drive Maps" (linked at the domain root, applies to the user) and the
+     event strip (the logon, then the laptop moves or the user is moved to another group, a refresh, a new logon). Left,
+     the user on the laptop (groups in the directory, groups in the token, IP address, OS) and the network drives in an
+     Explorer-like column. Right, the GPO's four drive-map items as a rule table (kit view K4, kit/ruletable.js,
+     docs/sim-ui.md §12, with the page's own marks: every item is evaluated, a match maps its drive, the terms that do
+     not hold are struck). With targeting on, the logon walks one item per step; every later event is one pass.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-gpo-targeting">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPO: ciljanje na razini stavke · simdeck</title>
+<meta name="description" content="Četiri mapiranja pogona u jednom GPO-u, svako sa svojim uvjetom. Prijenosno računalo u podružnici dobiva X: pri osvježavanju; nova grupa vrijedi tek od prijave.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/ruletable.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-gpo-targeting",
+  "title": {
+    "hr": "GPO: ciljanje na razini stavke",
+    "en": "GPO item-level targeting"
+  },
+  "concept": {
+    "hr": "Jedan GPO, preference koje vrijede po grupi, rasponu IP adresa i OS-u",
+    "en": "One GPO, preferences that apply per group, IP range and OS"
+  },
+  "summary": {
+    "hr": "Četiri mapiranja pogona u jednom GPO-u, svako sa svojim uvjetom. Prijenosno računalo u podružnici dobiva X: pri osvježavanju; nova grupa vrijedi tek od prijave.",
+    "en": "Four drive maps in one GPO, each with its own targeting. A laptop at Branch gets X: at the next refresh; a new group counts only after a logon."
+  },
+  "tags": [
+    "group-policy"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-gpo-targeting"]; colours only from kit tokens.
+   Layout: the GPO line and event strip across the top; the item table (K4) across the middle; the client and its
+   drives side by side at the bottom. */
+[data-sim="win-gpo-targeting"] .tg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: start;
+  gap: 0.7rem 1.4cqw;
+  height: 100%;
+  padding: 1.2cqh 1.4cqw;
+  font-size: 1.1rem;
+}
+[data-sim="win-gpo-targeting"] .tg-table .sd-rt-act { white-space: nowrap; }
+[data-sim="win-gpo-targeting"] [translate="no"] { font-family: var(--mono); }
+[data-sim="win-gpo-targeting"] .tg-top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.6rem 1rem; }
+[data-sim="win-gpo-targeting"] .tg-gpo {
+  display: flex; flex-direction: column; justify-content: center; gap: 0.1rem;
+  padding: 0.35rem 0.8rem; border: 0.2rem solid var(--ink); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-gpo-targeting"] .tg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; font-weight: 700; }
+[data-sim="win-gpo-targeting"] .tg-kind {
+  display: inline-grid; place-items: center; height: 1.5rem; padding: 0 0.35rem;
+  border: var(--line-w) solid currentColor; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700;
+}
+[data-sim="win-gpo-targeting"] .tg-line { font-size: var(--fs-sm); line-height: 1.35; }
+
+/* event strip: done solid, now highlighted, next dashed */
+[data-sim="win-gpo-targeting"] .tg-strip { flex: 1 1 32rem; display: flex; align-items: center; gap: 0.4rem; min-width: 0; list-style: none; margin: 0; padding: 0; }
+[data-sim="win-gpo-targeting"] .tg-ev {
+  flex: 1 1 0; min-width: 0; padding: 0.3rem 0.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius);
+  background: var(--panel); line-height: 1.25;
+}
+[data-sim="win-gpo-targeting"] .tg-ev b { display: block; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="win-gpo-targeting"] .tg-ev[data-st="next"] { border-style: dashed; border-color: var(--muted); background: var(--bg); color: var(--muted); }
+[data-sim="win-gpo-targeting"] .tg-ev[data-st="now"] { border-width: 0.3rem; background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-targeting"] .tg-arrow { flex: none; color: var(--muted); font-weight: 700; }
+
+/* the client and its drives */
+[data-sim="win-gpo-targeting"] .tg-client, [data-sim="win-gpo-targeting"] .tg-ex { align-self: start; min-width: 0; }
+[data-sim="win-gpo-targeting"] .tg-client, [data-sim="win-gpo-targeting"] .tg-ex {
+  padding: 0.4rem 0.8rem 0.5rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="win-gpo-targeting"] .tg-client h3, [data-sim="win-gpo-targeting"] .tg-ex h3 { margin: 0 0 0.3rem; font-size: 1.05em; }
+[data-sim="win-gpo-targeting"] .tg-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.15rem 0.8rem; margin: 0; font-size: var(--fs-sm); line-height: 1.35; }
+[data-sim="win-gpo-targeting"] .tg-facts dt { color: var(--muted); }
+[data-sim="win-gpo-targeting"] .tg-facts dd { margin: 0; overflow-wrap: anywhere; }
+[data-sim="win-gpo-targeting"] .tg-facts dd.sd-changed { margin: 0 -0.3rem; padding: 0 0.3rem; border-radius: var(--radius-sm); background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-targeting"] .tg-facts .tg-until { color: var(--muted); }
+
+[data-sim="win-gpo-targeting"] .tg-drives { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+[data-sim="win-gpo-targeting"] .tg-drive {
+  display: flex; align-items: center; gap: 0.6rem; min-height: 2.1rem; padding: 0.05rem 0.5rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); line-height: 1.25;
+}
+[data-sim="win-gpo-targeting"] .tg-drive.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-gpo-targeting"] .tg-drive[data-state="removed"] { border-style: dashed; }
+[data-sim="win-gpo-targeting"] .tg-drive[data-state="removed"] .tg-share { text-decoration: line-through; }
+[data-sim="win-gpo-targeting"] .tg-tile {
+  flex: none; display: inline-grid; place-items: center; width: 2.6rem; height: 1.8rem;
+  border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink);
+  font-family: var(--mono); font-weight: 700;
+}
+[data-sim="win-gpo-targeting"] .tg-drive[data-state="removed"] .tg-tile { border-style: dashed; }
+[data-sim="win-gpo-targeting"] .tg-share { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+[data-sim="win-gpo-targeting"] .tg-flag { margin-left: auto; display: inline-flex; align-items: center; gap: 0.3rem; flex: none; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="win-gpo-targeting"] .tg-empty { color: var(--muted); font-style: italic; }
+
+/* icons: pencil (preference item), funnel (targeting), ink drop (tattoo); also the legend swatches */
+[data-sim="win-gpo-targeting"] .tg-ico { position: relative; display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: -0.12em; }
+[data-sim="win-gpo-targeting"] .tg-ico[data-i="pencil"]::after,
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-pencil"]::after {
+  content: ''; position: absolute; left: 0.02em; top: 0.38em; width: 0.8em; height: 0.26em; background: currentColor;
+  transform: rotate(-45deg); border-radius: 0.04em;
+}
+[data-sim="win-gpo-targeting"] .tg-ico[data-i="pencil"]::before,
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-pencil"]::before {
+  content: ''; position: absolute; left: 0; bottom: 0; width: 0; height: 0;
+  border-left: 0.22em solid currentColor; border-top: 0.22em solid transparent;
+}
+[data-sim="win-gpo-targeting"] .tg-ico[data-i="funnel"]::before,
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-funnel"]::before {
+  content: ''; position: absolute; left: 0.05em; top: 0.1em; width: 0; height: 0;
+  border-left: 0.45em solid transparent; border-right: 0.45em solid transparent; border-top: 0.45em solid currentColor;
+}
+[data-sim="win-gpo-targeting"] .tg-ico[data-i="funnel"]::after,
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-funnel"]::after {
+  content: ''; position: absolute; left: 0.4em; top: 0.5em; width: 0.2em; height: 0.42em; background: currentColor;
+}
+[data-sim="win-gpo-targeting"] .tg-ico[data-i="drop"]::after,
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-stale"]::after {
+  content: ''; position: absolute; left: 0.17em; top: 0.2em; width: 0.66em; height: 0.66em; background: var(--c3);
+  border: 0.08em solid var(--ink); border-radius: 0 50% 50% 50%; transform: rotate(45deg); box-sizing: border-box;
+}
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape^="tg-"] { position: relative; border: 0; background: transparent; color: var(--ink); }
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-tile"],
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-stale"] { width: 1.5em; border: 0.15em solid var(--ink); border-radius: 0.15em; background: var(--panel); }
+[data-sim="win-gpo-targeting"] .sd-swatch[data-shape="tg-stale"]::after { left: 0.1em; top: 0.1em; width: 0.55em; height: 0.55em; }
+
+/* the item table */
+[data-sim="win-gpo-targeting"] .tg-table { grid-column: 1 / -1; grid-row: 2; min-width: 0; align-self: start; }
+[data-sim="win-gpo-targeting"] .tg-rk { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 700; }
+[data-sim="win-gpo-targeting"] .tg-colh { display: inline-flex; align-items: center; gap: 0.3rem; }
+[data-sim="win-gpo-targeting"] .tg-none { color: var(--muted); font-style: italic; }
+[data-sim="win-gpo-targeting"] .tg-note { display: flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+[data-sim="win-gpo-targeting"] .tg-table td[data-col="ip"] { white-space: nowrap; }
+[data-sim="win-gpo-targeting"] .tg-table td, [data-sim="win-gpo-targeting"] .tg-table th { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+[data-sim="win-gpo-targeting"] .tg-table .sd-rt-mark { white-space: normal; }
+
+/* Phone and portrait: the stage grows with its content; everything stacked. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-gpo-targeting"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-gpo-targeting"] .tg { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+  [data-sim="win-gpo-targeting"] .tg-table { grid-row: auto; }
+  [data-sim="win-gpo-targeting"] .tg-strip { flex-direction: column; align-items: stretch; flex-basis: 100%; }
+  [data-sim="win-gpo-targeting"] .tg-arrow { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">GPO: ciljanje na razini stavke</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var GPO = 'Drive Maps';
+  var N = L.ITEMS.length;
+  var PRESET_WORDS = { 'quillmoor-as-is': 'presetAsIs', targeted: 'presetTargeted', 'branch-laptop': 'presetBranch', 'group-change': 'presetGroup', 'remove-flag': 'presetRemove' };
+  var OUT_WORDS = { map: 'outMap', same: 'outSame', skip: 'outSkip', stale: 'outStale', remove: 'outRemove', noGpo: 'outNoGpo' };
+  var SITE_WORDS = { hq: 'siteHq', branch: 'siteBranch' };
+  var MARK_WORDS = { logon: 'evLogon', moveRefresh: 'markRefresh', groupRefresh: 'markRefresh', relogon: 'markRelogon' };
+  var OTHER = { Projects: 'Cinematics', Cinematics: 'Projects' };
+
+  /** Data (names, letters, paths, addresses) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** Caption parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function sentence(key, vars) { return [' '].concat(rich(key, vars)); }
+  function ico(i) { return h('span', { class: 'tg-ico', dataset: { i: i }, 'aria-hidden': 'true' }); }
+  function anim(c) { return c.dir === 'forward' ? ' sd-anim-in' : ''; }
+  /** A share path with %USERNAME% resolved for this user (the drive as Explorer shows it). */
+  function resolved(path, user) { return path.replace('%USERNAME%', user); }
+  function driveList(s) {
+    var letters = L.ITEMS.map(function (it) { return it.letter; }).filter(function (l, i, a) { return a.indexOf(l) === i && s.mapped[l]; });
+    return letters.length ? data(letters.join(' ')) : h('span', null, t('exEmpty'));
+  }
+
+  // ── top: the GPO and the event strip ──
+
+  function eventWord(ev, s, p) {
+    if (ev.kind === 'logon') return t('evLogon');
+    if (ev.kind === 'moveRefresh') {
+      var to = p.location === 'hq' ? 'branch' : 'hq';
+      return t.parts('evMove', { site: t(SITE_WORDS[to]) });
+    }
+    if (ev.kind === 'groupRefresh') return t.parts('evGroup', { user: data(p.user), group: data(OTHER[L.USERS[p.user].group]) });
+    return t('evRelogon');
+  }
+
+  function renderTop(c) {
+    var s = c.state, p = c.params;
+    var evs = L.events(p);
+    var gpo = h('section', { class: 'tg-gpo' },
+      h('div', { class: 'tg-head' }, h('span', { class: 'tg-kind' }, t('gpoKind')), data(GPO)),
+      h('div', { class: 'tg-line' }, t('gpoLinked')),
+      h('div', { class: 'tg-line' }, t.parts('gpoApplies', { user: data(p.user) })),
+      h('div', { class: 'tg-line' }, t('gpoPrefs'), ' · ', t('colAct'), ': ', data(s.items[0].action)));
+    // the logon walk is one box; each later event its own
+    var boxes = [];
+    evs.forEach(function (ev, i) {
+      if (ev.kind === 'logon' && boxes.length) { boxes[0].last = i + 1; return; }
+      boxes.push({ ev: ev, first: i + 1, last: i + 1 });
+    });
+    var strip = h('ol', { class: 'tg-strip' });
+    boxes.forEach(function (b, k) {
+      if (k) strip.appendChild(h('li', { class: 'tg-arrow', 'aria-hidden': 'true' }, '→'));
+      var st = b.last < c.n ? 'done' : b.first <= c.n ? 'now' : 'next';
+      var when = b.ev.kind === 'relogon' ? t('evNextDay') : t('evTime', { t: b.ev.t });
+      var word = b.ev.kind === 'logon' && st === 'now' && s.event && s.event.cursor !== 'all'
+        ? t('evLogonItem', { i: s.event.cursor + 1, n: N })
+        : eventWord(b.ev, s, p);
+      strip.appendChild(h('li', { class: 'tg-ev' + (st === 'now' ? ' sd-changed' + anim(c) : ''), dataset: { st: st } },
+        h('b', null, when), h('span', null, word)));
+    });
+    return h('div', { class: 'tg-top' }, gpo, strip);
+  }
+
+  // ── bottom: the client and its drives ──
+
+  function renderClient(c) {
+    var s = c.state, prev = c.prev;
+    var tok = s.user.tokenGroups;
+    var dirChanged = prev && prev.user.groups.join() !== s.user.groups.join();
+    var tokChanged = prev && String(prev.user.tokenGroups) !== String(tok);
+    var ipChanged = prev && prev.pc.ip !== s.pc.ip;
+    var stale = tok && tok.join() !== s.user.groups.join();
+    function dd(changed, kids) { return h('dd', { class: changed ? 'sd-changed' + anim(c) : null }, kids); }
+    var facts = h('dl', { class: 'tg-facts' },
+      h('dt', null, t('rowGroups')), dd(dirChanged, data(s.user.groups.join(', '))),
+      h('dt', null, t('rowToken')), dd(tokChanged, tok ? [data(tok.join(', ')), stale ? h('span', { class: 'tg-until' }, ' (', t('tokenUntil'), ')') : null] : h('span', { class: 'tg-empty' }, t('tokenNone'))),
+      h('dt', null, t('rowIp')), dd(ipChanged, [data(s.pc.ip), ' (', t(SITE_WORDS[s.pc.site]), ')']),
+      h('dt', null, t('rowOs')), dd(false, [t('osWorkstation'), ', ', t('osNotServer')]));
+    return h('section', { class: 'tg-client' }, h('h3', null, t.parts('clientOn', { user: data(s.user.name), pc: data(s.pc.name) })), facts);
+  }
+
+  function renderDrives(c) {
+    var s = c.state, prev = c.prev;
+    var list = h('ul', { class: 'tg-drives' });
+    var any = false;
+    L.ITEMS.forEach(function (it, i) {
+      if (L.ITEMS.map(function (x) { return x.letter; }).indexOf(it.letter) !== i) return;
+      var m = s.mapped[it.letter], was = prev ? prev.mapped[it.letter] : null;
+      if (!m && !was) return;
+      any = true;
+      var state = !m ? 'removed' : m.stale ? 'stale' : 'mapped';
+      var isNew = m && !was;
+      var changed = (isNew || !m) && c.n > 0;
+      var share = resolved(m ? m.path : was.path, s.user.name);
+      var flag = state === 'stale' ? h('span', { class: 'tg-flag' }, ico('drop'), t('tileStale'))
+        : state === 'removed' ? h('span', { class: 'tg-flag' }, '✕ ', t('tileRemoved'))
+          : isNew ? h('span', { class: 'tg-flag' }, '+ ', t('tileNew')) : null;
+      list.appendChild(h('li', { class: 'tg-drive' + (changed ? ' sd-changed' + anim(c) : ''), dataset: { state: state } },
+        h('span', { class: 'tg-tile', translate: 'no' }, it.letter), h('span', { class: 'tg-share', translate: 'no' }, share), flag));
+    });
+    if (!any) list.appendChild(h('li', { class: 'tg-empty' }, t('exEmpty')));
+    return h('section', { class: 'tg-ex' }, h('h3', null, t('exTitle')), list);
+  }
+
+  // ── middle: the items as a rule table ──
+
+  function outcomeNode(r, action) {
+    if (r.code !== 'map' && r.code !== 'same') return null;
+    return Simdeck.ruleTable.verdict(true, t(r.code === 'same' && action === 'Replace' ? 'outSameReplace' : OUT_WORDS[r.code]));
+  }
+
+  function renderTable(c) {
+    var s = c.state, p = c.params, ev = s.event;
+    var cursor = ev ? ev.cursor : -1;
+    var header = !ev ? t('markStart') : t.parts('markFor', { user: data(s.user.name), event: t(MARK_WORDS[ev.kind]) });
+    var colh = function (key) { return h('span', { class: 'tg-colh' }, ico('funnel'), t(key)); };
+    return Simdeck.ruleTable({
+      dir: c.dir,
+      mode: 'first',
+      className: 'tg-table',
+      stickyMark: true,
+      title: t('tableTitle'),
+      noLabel: t('colNo'),
+      columns: [
+        { key: 'group', label: colh('colGroup') },
+        { key: 'ip', label: colh('colIp') },
+        { key: 'os', label: colh('colOs'), wrap: true }
+      ],
+      actionLabel: t('colPath'),
+      markLabel: header,
+      rows: s.items.map(function (it, i) {
+        var r = s.results[i];
+        var cells = {};
+        var tg = s.targeting ? it.target : [];
+        tg.forEach(function (term) {
+          if (term.type === 'group') cells.group = term.value;
+          else if (term.type === 'ip') cells.ip = term.value[0] + ' – ' + term.value[1];
+          else if (term.type === 'os') cells.os = h('span', null, t('cellNotServer'));
+        });
+        if (!tg.length) cells.group = h('span', { class: 'tg-none' }, t('cellNone'));
+        var mark = 'pending', hit = null, note = null, miss = [];
+        if (r && r.code !== 'noGpo') {
+          hit = r.match;
+          mark = r.match ? 'win' : 'no';
+          if (!r.match) {
+            miss = r.fails;
+            var k = r.code === 'stale' ? 'outStale' : r.code === 'remove' ? 'outRemove' : 'outSkip';
+            note = [h('span', { class: 'tg-note' }, r.code === 'stale' ? ico('drop') : null, Simdeck.ruleTable.verdict(false, t(k)))];
+          }
+        }
+        return {
+          no: h('span', { class: 'tg-rk', 'aria-label': t('legItem') }, ico('pencil'), data(it.letter)),
+          cells: cells,
+          action: data(it.path),
+          hit: hit,
+          miss: miss,
+          mark: mark,
+          note: note
+        };
+      }),
+      at: cursor === 'all' ? 'all' : cursor,
+      subject: { mark: s.user.name, c: 1 },
+      done: !!ev,
+      changed: cursor !== 'all',
+      outcome: function (i) { return outcomeNode(s.results[i], s.items[i].action); },
+      words: { win: '', skip: '' }
+    });
+  }
+
+  // ── captions ──
+
+  function itemCaption(s, i) {
+    var it = s.items[i], r = s.results[i];
+    var letter = data(it.letter), user = data(s.user.name);
+    var term = it.target[0];
+    if (!term) return rich('capNone', { letter: letter, path: data(resolved(it.path, s.user.name)) });
+    if (term.type === 'group') return rich(r.match ? 'capGroupYes' : 'capGroupNo', { letter: letter, group: data(term.value), user: user });
+    return rich(r.match ? 'capIpYes' : 'capIpNo', { letter: letter, ip: data(s.pc.ip), pc: data(s.pc.name) });
+  }
+
+  function caption(c) {
+    var s = c.state, p = c.params, ev = s.event;
+    var user = data(s.user.name), pc = data(s.pc.name);
+    if (!ev) return rich(p.targeting ? 'capStart' : 'capStartOff', { gpo: data(GPO), user: user, pc: pc });
+    var out;
+    if (ev.kind === 'logon' && ev.cursor === 'all') return rich('capOff', { t: ev.t, drives: driveList(s) });
+    if (ev.kind === 'logon') {
+      out = ev.cursor === 0 ? rich('capToken', { t: ev.t, user: user, group: data(s.user.tokenGroups.join(', ')) }).concat([' ']) : [];
+      out = out.concat(itemCaption(s, ev.cursor));
+      if (ev.cursor === N - 1) out = out.concat(sentence('capWalkEnd', { user: user, drives: driveList(s) }));
+      if (ev.cursor === 0 && p.removeFlag) out = out.concat(sentence('capReplace'));
+      return out;
+    }
+    var codes = s.results.map(function (r) { return r.code; });
+    if (ev.kind === 'moveRefresh') {
+      out = rich('capMove', { t: ev.t, pc: pc, site: t(s.pc.site === 'hq' ? 'toHq' : 'toBranch'), ip: data(s.pc.ip) });
+      if (!s.targeting) return out.concat(sentence('capNoTargeting'));
+      s.results.forEach(function (r, i) {
+        var letter = data(s.items[i].letter);
+        if (r.code === 'map') out = out.concat(sentence('capMoveX', { letter: letter }));
+        if (r.code === 'stale') out = out.concat(sentence('capMoveStale', { letter: letter }));
+        if (r.code === 'remove') out = out.concat(sentence('capMoveRemoved', { letter: letter }));
+      });
+      return out;
+    }
+    var oldG = L.USERS[p.user].group, newG = OTHER[oldG];
+    if (ev.kind === 'groupRefresh') {
+      out = rich('capGroup', { user: user, old: data(oldG), new: data(newG) });
+      out = out.concat(sentence(s.targeting ? 'capGroupToken' : 'capNoTargeting', { t: ev.t, old: data(oldG) }));
+      return s.targeting && p.removeFlag ? out.concat(sentence('capReplace')) : out;
+    }
+    // relogon
+    if (!s.targeting) return rich('capRelogonOff', { new: data(newG) }).concat(sentence('capNoTargeting'));
+    var mapped = codes.indexOf('map'), lost = codes.indexOf('stale') >= 0 ? codes.indexOf('stale') : codes.indexOf('remove');
+    out = rich('capRelogon', { new: data(newG), letter: data(s.items[mapped].letter) });
+    if (lost >= 0) {
+      var lv = { user: user, old: data(oldG), letter: data(s.items[lost].letter) };
+      out = out.concat(sentence(codes[lost] === 'stale' ? 'capStale' : 'capRemoved', lv));
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'user', type: 'choice', label: t('user'), resets: true, options: [['ana', 'ana'], ['eyardley', 'eyardley']] },
+      { key: 'location', type: 'choice', label: t('location'), resets: true, options: [['hq', t('locHq')], ['branch', t('locBranch')]] },
+      { key: 'script', type: 'select', label: t('script'), resets: true,
+        options: [['none', t('scrNone')], ['move', t('scrMove')], ['group', t('scrGroup')]] },
+      { key: 'targeting', type: 'toggle', label: t('targeting'), resets: true },
+      { key: 'removeFlag', type: 'toggle', label: t('removeFlag'), resets: true }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { shape: 'tg-pencil', label: t('legItem') },
+      { shape: 'tg-funnel', label: t('legFunnel') },
+      { shape: 'rt-verdict', label: t('legMatch') },
+      { shape: 'rt-no', label: t('legNoMatch') },
+      { shape: 'tg-tile', label: t('legDrive') },
+      { shape: 'tg-stale', label: t('legStale') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      c.stage.replaceChildren(h('div', { class: 'tg' }, renderTop(c), renderTable(c), renderClient(c), renderDrives(c)));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
