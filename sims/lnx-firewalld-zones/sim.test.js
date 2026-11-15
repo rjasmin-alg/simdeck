@@ -234,7 +234,7 @@ test('rule 6: reject → an answer that says no; drop → a timeout; accept → 
 // ── the steps and the presets' numbers ──
 
 test('seven steps: the packet (arrived, zoned, judged), one command, the same packet again', () => {
-  assert.equal(logic.steps, 7);
+  assert.equal(logic.steps(P({})), 7);
   const p = P({});
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((n) => at(p, n).phase),
     ['idle', 'arrived', 'zoned', 'judged', 'config', 'arrived', 'zoned', 'judged']);
@@ -291,13 +291,149 @@ test('preset default-zone: enp2s0 is judged by public, then by home; enp1s0 does
     ['public/default', 'reject:target:-', 'home/default', 'reject:target:-']);
 });
 
-test('sim.json steps and the page\'s presets: four presets, each with its scenario', () => {
+test('sim.json steps and the page\'s presets: four firewalld presets and four Windows ones, each with its scenario', () => {
   const sim = JSON.parse(fs.readFileSync(path.join(__dirname, 'sim.json'), 'utf8'));
-  assert.equal(sim.steps, logic.steps);
+  assert.equal(sim.steps, logic.steps(logic.defaults));
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const ids = [...html.matchAll(/\{ id: '([a-z-]+)', label:/g)].map((m) => m[1]);
-  assert.deepEqual(ids, ['book', 'by-source', 'drop-vs-block', 'default-zone']);
+  assert.deepEqual(ids, ['book', 'by-source', 'drop-vs-block', 'default-zone', 'win-office', 'win-home', 'win-cafe', 'win-vpn']);
   for (const e of sim.entries || []) assert.ok(ids.includes(e.preset), e.preset);
+});
+
+// ── the Windows flow (preset task win-firewall-profiles; SPEC.md "Windows profiles") ──
+
+const W = (over) => P(Object.assign({ scenario: 'win' }, over));
+/** One line per step of the Windows flow: what each step decided. */
+const wstory = (p) => {
+  const out = [];
+  for (let n = 1; n <= logic.steps(p); n++) {
+    const s = at(p, n);
+    if (s.phase === 'connect') out.push(`${s.adapters[s.focus].name}=${s.profile}`);
+    else if (s.phase === 'arrived') out.push(`${s.packet.src}@${s.packet.iif}=${s.profile}`);
+    else if (s.phase === 'checked') out.push(`${s.check.by}:${s.check.item || '-'}`);
+    else out.push(`${s.verdict}/${s.client}`);
+  }
+  return out;
+};
+const adapter = (over) => Object.assign({ name: 'Wi-Fi', network: 'x', addr: '10.0.0.1', category: null, dcReachable: false, profile: null }, over);
+const wpkt = (profile, spec) => ({ spec, proto: spec === 'icmp' ? 'icmp' : 'tcp', profile });
+
+test('W tie-break: a reachable domain controller beats the category the network was given', () => {
+  assert.deepEqual(logic.pickProfile(adapter({ category: 'private', dcReachable: true })), { profile: 'domain', row: 0, hits: [true] });
+  assert.deepEqual(logic.pickProfile(adapter({ category: 'public', dcReachable: true })), { profile: 'domain', row: 0, hits: [true] });
+});
+
+test('W tie-break: a network given the category Public is decided by its row, not by the implicit new-network row', () => {
+  assert.deepEqual(logic.pickProfile(adapter({ category: 'public' })), { profile: 'public', row: 2, hits: [false, false, true] });
+  assert.deepEqual(logic.pickProfile(adapter({ category: null })), { profile: 'public', row: -1, hits: [false, false, false] });
+});
+
+test('W tie-break: a source on the Wi-Fi network and inside a VPN route comes in on the Wi-Fi (the direct network first)', () => {
+  const ads = logic.adaptersOf(W({ wifi: 'home', vpn: true }));
+  // fake an office-like Wi-Fi network that the VPN route also covers
+  const both = [Object.assign({}, ads[1]), Object.assign({}, ads[0], { network: 'office' })];
+  assert.equal(logic.winIif(both, '10.10.20.31'), 1, 'office Wi-Fi contains it directly; the VPN only routes it');
+  assert.equal(logic.winIif(ads, '10.10.20.31'), 1, 'from home it comes through the VPN');
+  assert.equal(logic.winIif(ads, '192.168.1.40'), 0);
+  assert.equal(logic.winIif(ads, '172.20.5.14'), -1, 'no adapter reaches the café from home');
+});
+
+test('W1: every profile blocks inbound by default and allows outbound; a block drops without a reply', () => {
+  assert.deepEqual(logic.PROFILE_DEFAULTS, { inbound: 'block', outbound: 'allow' });
+  for (const pr of logic.PROFILES) {
+    const r = logic.judgeProfile(pr, wpkt(pr, '8080/tcp'));
+    assert.deepEqual([r.verdict, r.by, r.item], ['drop', 'default', null], pr);
+    assert.equal(logic.clientOf(r.verdict), 'timeout');
+  }
+});
+
+test('W2: the profile by detection: domain controller → Domain, category Private → Private, new network → Public', () => {
+  const p = (net) => logic.pickProfile(logic.adaptersOf(W({ wifi: net }))[0]);
+  assert.deepEqual([p('office').profile, p('office').row], ['domain', 0]);
+  assert.deepEqual([p('home').profile, p('home').row], ['private', 1]);
+  assert.deepEqual([p('cafe').profile, p('cafe').row], ['public', -1]);
+  assert.deepEqual(logic.pickProfile(logic.adaptersOf(W({ wifi: 'cafe', vpn: true }))[1]).profile, 'domain');
+});
+
+test('W2: the profile is chosen when the adapter connects, before any packet, and stays with the adapter', () => {
+  const p = W({ wifi: 'cafe', vpn: true });
+  assert.deepEqual(at(p, 0).adapters.map((a) => a.profile), [null, null]);
+  assert.deepEqual(at(p, 1).adapters.map((a) => a.profile), ['public', null]);
+  assert.deepEqual(at(p, 2).adapters.map((a) => a.profile), ['public', 'domain']);
+  assert.equal(at(p, 1).packet, null);
+  for (let n = 3; n <= 8; n++) assert.deepEqual(at(p, n).adapters.map((a) => a.profile), ['public', 'domain'], `step ${n}`);
+});
+
+test('W3: two adapters, two profiles at once; each packet is judged by the profile of the adapter it comes in on', () => {
+  const p = W({ wifi: 'cafe', vpn: true });
+  assert.deepEqual(wstory(p), ['Wi-Fi=public', 'VPN=domain',
+    '172.20.5.14@Wi-Fi=public', 'default:-', 'drop/timeout',
+    '10.10.20.31@VPN=domain', 'rule:smb', 'accept/answer']);
+  assert.equal(at(p, 6).packet.dst, '10.10.250.7', 'through the VPN the packet goes to the VPN address');
+  assert.equal(at(p, 3).packet.dst, '172.20.5.77');
+});
+
+test('W3: the same laptop and packet give a different verdict on another network (the profile follows the network)', () => {
+  const v = (wifi) => at(W({ wifi }), 4);
+  assert.deepEqual(['office', 'home', 'cafe'].map((w) => v(w).verdict), ['accept', 'accept', 'drop']);
+});
+
+test('W4: rules are scoped to profiles: SMB and echo for Domain and Private, remote desktop for Domain only', () => {
+  const j = (pr, spec) => { const r = logic.judgeProfile(pr, wpkt(pr, spec)); return `${r.verdict}:${r.item || '-'}`; };
+  assert.deepEqual(logic.PROFILES.map((pr) => j(pr, '445/tcp')), ['accept:smb', 'accept:smb', 'drop:-']);
+  assert.deepEqual(logic.PROFILES.map((pr) => j(pr, 'icmp')), ['accept:echo', 'accept:echo', 'drop:-']);
+  assert.deepEqual(logic.PROFILES.map((pr) => j(pr, '3389/tcp')), ['accept:rdp', 'drop:-', 'drop:-']);
+  // a rule that matches the port but is not enabled for the profile is shown so, and does not decide
+  const r = logic.judgeProfile('public', wpkt('public', '445/tcp'));
+  assert.deepEqual(r.lines.find((l) => l.id === 'smb'), { id: 'smb', match: true, enabled: false });
+  // protocol counts: ICMP does not match a TCP rule
+  assert.equal(logic.judgeProfile('domain', wpkt('domain', 'icmp')).item, 'echo');
+});
+
+test('W steps: each adapter connects in one step, each packet in three (arrived, checked, judged)', () => {
+  assert.equal(logic.steps(W({ wifi: 'office' })), 4);
+  assert.equal(logic.steps(W({ wifi: 'cafe', vpn: true })), 8);
+  assert.equal(logic.steps(W({ wifi: 'office', vpn: true })), 4, 'no VPN in the office');
+  const p = W({ wifi: 'home' });
+  assert.deepEqual([0, 1, 2, 3, 4].map((n) => at(p, n).phase), ['idle', 'connect', 'arrived', 'checked', 'judged']);
+  assert.equal(at(p, 2).check, null, 'the rules are read a step after the packet arrives');
+  assert.equal(at(p, 3).verdict, null, 'the verdict comes a step after the rules');
+});
+
+test('W presets: win-office, win-home, win-cafe, win-vpn', () => {
+  assert.deepEqual(wstory(W({ wifi: 'office' })), ['Wi-Fi=domain', '10.10.20.31@Wi-Fi=domain', 'rule:smb', 'accept/answer']);
+  assert.deepEqual(wstory(W({ wifi: 'home' })), ['Wi-Fi=private', '192.168.1.40@Wi-Fi=private', 'rule:smb', 'accept/answer']);
+  assert.deepEqual(wstory(W({ wifi: 'cafe' })), ['Wi-Fi=public', '172.20.5.14@Wi-Fi=public', 'default:-', 'drop/timeout']);
+  assert.equal(wstory(W({ wifi: 'cafe', vpn: true })).length, 8);
+  // the other packets one click away
+  assert.deepEqual(wstory(W({ wifi: 'home', wport: '3389/tcp' })).slice(2), ['default:-', 'drop/timeout']);
+  assert.deepEqual(wstory(W({ wifi: 'office', wport: '3389/tcp' })).slice(2), ['rule:rdp', 'accept/answer']);
+  assert.deepEqual(wstory(W({ wifi: 'cafe', wport: 'icmp' })).slice(2), ['default:-', 'drop/timeout']);
+});
+
+test('W off: the firewalld scenarios ignore the Windows params', () => {
+  const base = P({ scenario: 'by-source', source: ADMIN });
+  const withWin = Object.assign({}, base, { wifi: 'cafe', vpn: true, wport: '3389/tcp' });
+  for (let n = 0; n <= 7; n++) assert.deepEqual(at(withWin, n), at(base, n));
+  assert.equal(logic.steps(withWin), 7);
+  assert.equal(at(base, 0).scene, undefined, 'the firewalld state has no scene field');
+});
+
+test('W generic: JSON-safe, deterministic, step back = replay, input not mutated, unknown params fall back', () => {
+  for (const wifi of logic.WIFI_NETS) for (const vpn of [false, true]) for (const wport of logic.WPORTS) {
+    const p = W({ wifi, vpn, wport });
+    let s = logic.initial(p);
+    const forward = [s];
+    for (let n = 1; n <= logic.steps(p); n++) {
+      const copy = structuredClone(s);
+      const next = logic.step(s, n, p);
+      assert.deepEqual(s, copy);
+      assert.deepEqual(JSON.parse(JSON.stringify(next)), next);
+      s = next; forward.push(s);
+    }
+    for (let n = logic.steps(p); n >= 0; n--) assert.deepEqual(kit.stateAt(logic, p, n), forward[n]);
+  }
+  assert.deepEqual(wstory(W({ wifi: 'moon', wport: '9/udp' })), wstory(W({ wifi: 'office' })));
 });
 
 // ── generic checks every sim keeps ──
@@ -305,7 +441,7 @@ test('sim.json steps and the page\'s presets: four presets, each with its scenar
 test('state is JSON-safe at every step', () => {
   for (const scenario of logic.SCENARIO_IDS) {
     const p = P({ scenario, source: OUT, dport: 'icmp' });
-    for (let n = 0; n <= logic.steps; n++) {
+    for (let n = 0; n <= logic.steps(p); n++) {
       const s = at(p, n);
       assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
     }
@@ -318,15 +454,15 @@ test('replay is deterministic and step back equals replay', () => {
     const forward = [];
     let s = logic.initial(p);
     forward.push(s);
-    for (let n = 1; n <= logic.steps; n++) { s = logic.step(s, n, p); forward.push(s); }
-    for (let n = logic.steps; n >= 0; n--) assert.deepEqual(kit.stateAt(logic, p, n), forward[n]);
+    for (let n = 1; n <= logic.steps(p); n++) { s = logic.step(s, n, p); forward.push(s); }
+    for (let n = logic.steps(p); n >= 0; n--) assert.deepEqual(kit.stateAt(logic, p, n), forward[n]);
   }
 });
 
 test('step does not mutate its input', () => {
   const p = P({ scenario: 'drop-vs-block' });
   let s = logic.initial(p);
-  for (let n = 1; n <= logic.steps; n++) {
+  for (let n = 1; n <= logic.steps(p); n++) {
     const copy = structuredClone(s);
     const next = logic.step(s, n, p);
     assert.deepEqual(s, copy);
@@ -345,13 +481,17 @@ test('both languages: same keys, plural forms and placeholders; every [[term]] i
 test('every preset in the page is valid for the model', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const meta = JSON.parse(html.match(/<script type="application\/json" id="simdeck-meta">([\s\S]*?)<\/script>/)[1]);
-  assert.equal(meta.steps, logic.steps, 'meta.steps matches the model');
+  assert.equal(meta.steps, logic.steps(logic.defaults), 'meta.steps matches the model');
   const sets = [...html.matchAll(/params:\s*\{([^}]*)\}/g)].map((m) => m[1]);
   assert.ok(sets.length > 0, 'found preset params');
   for (const set of sets) {
     for (const k of [...set.matchAll(/(\w+):/g)].map((x) => x[1])) assert.ok(k in logic.defaults, `preset param ${k} is a model param`);
     const sc = set.match(/scenario:\s*'([^']+)'/);
-    if (sc) assert.ok(logic.SCENARIO_IDS.includes(sc[1]), sc[1]);
+    if (sc) assert.ok(logic.SCENARIO_IDS.includes(sc[1]) || sc[1] === 'win', sc[1]);
+    const wf = set.match(/wifi:\s*'([^']+)'/);
+    if (wf) assert.ok(logic.WIFI_NETS.includes(wf[1]), wf[1]);
+    const wp = set.match(/wport:\s*'([^']+)'/);
+    if (wp) assert.ok(logic.WPORTS.includes(wp[1]), wp[1]);
     const src = set.match(/source:\s*'([^']+)'/);
     if (src) assert.ok(logic.SOURCES.includes(src[1]), src[1]);
     const dp = set.match(/dport:\s*'([^']+)'/);

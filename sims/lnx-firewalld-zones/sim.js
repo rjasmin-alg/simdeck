@@ -4,6 +4,8 @@
    the default zone; bindings are read in dispatch order (ingress priority, sources before interfaces, zone name).
    In the zone, a listed service or port accepts; otherwise the zone's target decides. Rules and numbers: SPEC.md.
    Builds on lnx-netfilter-path only in vocabulary (the packet card, accept / reject / drop); the zone picker is new.
+   Scenario 'win' (preset task win-firewall-profiles) is a second, opt-in flow: Windows Firewall profiles picked per
+   network connection; the firewalld scenarios do not touch it.
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. */
 (function (root) {
@@ -242,21 +244,194 @@
     return s;
   }
 
+
+  // ── the Windows flow (preset task win-firewall-profiles; SPEC.md "Windows profiles") ──
+  // Opt-in: scenario 'win' hands initial, step and steps to it; every other scenario is the firewalld flow above,
+  // unchanged. A profile is picked per network connection when the laptop joins a network (rule W2), not per packet;
+  // each packet is judged by the profile of the adapter it arrives on (W3), by the rules enabled for that profile (W4).
+
+  var WIN_DOMAIN = 'quillmoor.example';
+  var WIN_HOST = 'PC07';
+  /**
+   * The networks PC07 can join (derived): PC07's address there, the network, prefixes routed through it (the VPN
+   * reaches the office), the category it was given (null: a new network, never given one) and whether a domain
+   * controller of the joined domain is reachable and authenticated through it.
+   */
+  var WIN_NETS = {
+    office: { addr: '10.10.20.57', net: '10.10.20.0/24', routes: [], category: null, dcReachable: true },
+    home: { addr: '192.168.1.23', net: '192.168.1.0/24', routes: [], category: 'private', dcReachable: false },
+    cafe: { addr: '172.20.5.77', net: '172.20.5.0/24', routes: [], category: null, dcReachable: false },
+    vpn: { addr: '10.10.250.7', net: '10.10.250.0/24', routes: ['10.10.0.0/16'], category: null, dcReachable: true }
+  };
+  var WIFI_NETS = ['office', 'home', 'cafe'];
+  /** The senders: address → host id. The colleague PC12 sits in the office; at home a family PC; in the café a guest. */
+  var WIN_HOSTS = { '10.10.20.31': 'pc12', '192.168.1.40': 'homepc', '172.20.5.14': 'guest' };
+  /** Who sends from the Wi-Fi network PC07 is on. */
+  var WIFI_SENDER = { office: '10.10.20.31', home: '192.168.1.40', cafe: '172.20.5.14' };
+  /** Through the VPN the colleague in the office sends. */
+  var VPN_SENDER = '10.10.20.31';
+  var WPORTS = ['445/tcp', '3389/tcp', 'icmp'];
+  var PROFILES = ['domain', 'private', 'public'];
+  /** Every profile: inbound connections that match no rule are blocked, outbound allowed (Windows defaults, check). */
+  var PROFILE_DEFAULTS = { inbound: 'block', outbound: 'allow' };
+  /** Inbound allow rules and the profiles each is enabled for (derived rule set, SPEC.md). */
+  var WIN_RULES = [
+    { id: 'smb', spec: '445/tcp', profiles: ['domain', 'private'] },
+    { id: 'echo', spec: 'icmp', profiles: ['domain', 'private'] },
+    { id: 'rdp', spec: '3389/tcp', profiles: ['domain'] }
+  ];
+  /** The rows of the profile picker (rule W2), read top down; the implicit last row is a new network → public. */
+  var DETECT_ROWS = [
+    { id: 'dc', profile: 'domain' },
+    { id: 'private', profile: 'private' },
+    { id: 'public', profile: 'public' }
+  ];
+
+  function isWin(p) { return !!p && p.scenario === 'win'; }
+  function wifiOf(p) { return WIFI_NETS.indexOf(p.wifi) >= 0 ? p.wifi : 'office'; }
+  /** The VPN is used only away from the office (in the office the domain controller is reachable directly). */
+  function vpnOn(p) { return !!p.vpn && wifiOf(p) !== 'office'; }
+  function wportOf(p) { return WPORTS.indexOf(p.wport) >= 0 ? p.wport : '445/tcp'; }
+
+  /** PC07's adapters for these params: Wi-Fi, plus the VPN adapter when it is on. */
+  function adaptersOf(p) {
+    var out = [{ name: 'Wi-Fi', network: wifiOf(p) }];
+    if (vpnOn(p)) out.push({ name: 'VPN', network: 'vpn' });
+    return out.map(function (a) {
+      var n = WIN_NETS[a.network];
+      return { name: a.name, network: a.network, addr: n.addr, category: n.category, dcReachable: n.dcReachable, profile: null };
+    });
+  }
+
+  /**
+   * The profile of one adapter (rule W2): the first detection row that holds, else the implicit row (a new network).
+   * Returns { profile, row (index into DETECT_ROWS, -1 = the implicit row), hits (per row read, up to the decider) }.
+   */
+  function pickProfile(a) {
+    var hits = [];
+    for (var i = 0; i < DETECT_ROWS.length; i++) {
+      var r = DETECT_ROWS[i];
+      var hit = r.id === 'dc' ? !!a.dcReachable : a.category === r.id;
+      hits.push(hit);
+      if (hit) return { profile: r.profile, row: i, hits: hits };
+    }
+    return { profile: 'public', row: -1, hits: hits };
+  }
+
+  /** The adapter a packet from src comes in on: the one whose network, or a prefix routed through it, contains src. */
+  function winIif(adapters, src) {
+    for (var i = 0; i < adapters.length; i++) if (inNet(src, WIN_NETS[adapters[i].network].net)) return i;
+    for (var j = 0; j < adapters.length; j++) {
+      var routes = WIN_NETS[adapters[j].network].routes;
+      for (var k = 0; k < routes.length; k++) if (inNet(src, routes[k])) return j;
+    }
+    return -1;
+  }
+  function winPacketOf(adapters, src, wport) {
+    var i = winIif(adapters, src), icmp = wport === 'icmp';
+    return { src: src, iif: i >= 0 ? adapters[i].name : null, adapter: i, dst: i >= 0 ? adapters[i].addr : null,
+      proto: icmp ? 'icmp' : wport.split('/')[1], dport: icmp ? null : Number(wport.split('/')[0]), spec: wport };
+  }
+
+  /**
+   * The verdict of a profile for a packet (rule W4): an inbound rule enabled for the profile that matches the packet
+   * allows it; otherwise the profile's inbound default (block) drops it without a reply. Returns { verdict, by:
+   * 'rule' | 'default', item (the deciding rule's id), lines: per rule { id, match (protocol and port), enabled (for
+   * this profile) } }.
+   */
+  function judgeProfile(profile, pkt) {
+    var lines = WIN_RULES.map(function (r) {
+      return { id: r.id, match: r.spec === pkt.spec, enabled: r.profiles.indexOf(profile) >= 0 };
+    });
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].match && lines[i].enabled) return { verdict: 'accept', by: 'rule', item: lines[i].id, profile: profile, lines: lines };
+    }
+    return { verdict: PROFILE_DEFAULTS.inbound === 'block' ? 'drop' : 'accept', by: 'default', item: null, profile: profile, lines: lines };
+  }
+
+  /** The steps for these params: each adapter connects (one step each), then each packet in three steps. */
+  function winPlan(p) {
+    var ads = adaptersOf(p), out = [];
+    ads.forEach(function (a, i) { out.push({ phase: 'connect', adapter: i }); });
+    var senders = [WIFI_SENDER[wifiOf(p)]];
+    if (vpnOn(p)) senders.push(VPN_SENDER);
+    senders.forEach(function (src, r) {
+      out.push({ phase: 'arrived', round: r + 1, src: src });
+      out.push({ phase: 'checked', round: r + 1 });
+      out.push({ phase: 'judged', round: r + 1 });
+    });
+    return out;
+  }
+  function winSteps(p) { return winPlan(p).length; }
+
+  function winInitial(p) {
+    return { scene: 'win', scenario: 'win', wifi: wifiOf(p), vpn: vpnOn(p), adapters: adaptersOf(p), rounds: vpnOn(p) ? 2 : 1,
+      phase: 'idle', round: 0, focus: -1, packet: null, pick: null, profile: null, check: null, verdict: null,
+      client: null, changed: [], event: { kind: 'start' } };
+  }
+
+  function winStep(s0, n, p) {
+    var s = clone(s0);
+    var plan = winPlan(p);
+    var at = plan[n - 1] || plan[plan.length - 1];
+    s.phase = at.phase;
+    s.changed = [];
+    if (at.phase === 'connect') {
+      var a = s.adapters[at.adapter];
+      var pk = pickProfile(a);
+      a.profile = pk.profile;
+      s.focus = at.adapter;
+      s.pick = pk;
+      s.profile = pk.profile;
+      s.packet = null; s.check = null; s.verdict = null; s.client = null;
+      s.changed = ['adapter:' + at.adapter, 'pick'];
+      s.event = { kind: 'connect', adapter: at.adapter, row: pk.row };
+    } else if (at.phase === 'arrived') {
+      s.round = at.round;
+      s.packet = winPacketOf(s.adapters, at.src, wportOf(p));
+      s.focus = s.packet.adapter;
+      // the profile was chosen when the adapter connected; the packet only looks it up (rule W3)
+      s.pick = s.focus >= 0 ? pickProfile(s.adapters[s.focus]) : null;
+      s.profile = s.focus >= 0 ? s.adapters[s.focus].profile : null;
+      s.check = null; s.verdict = null; s.client = null;
+      s.changed = ['profile'];
+      s.event = { kind: 'arrived' };
+    } else if (at.phase === 'checked') {
+      s.check = judgeProfile(s.profile, s.packet);
+      s.changed = ['check'];
+      s.event = { kind: 'checked', by: s.check.by };
+    } else if (at.phase === 'judged') {
+      s.verdict = s.check.verdict;
+      s.client = clientOf(s.verdict);
+      s.changed = ['verdict'];
+      s.event = { kind: 'judged', verdict: s.verdict };
+    }
+    return s;
+  }
+
   var logic = {
-    /** Parameter defaults (task: source .186, 8991/tcp). */
-    defaults: { scenario: 'book', source: '192.168.122.186', dport: '8991/tcp' },
+    /** Parameter defaults (task: source .186, 8991/tcp); wifi, vpn and wport belong to the Windows flow. */
+    defaults: { scenario: 'book', source: '192.168.122.186', dport: '8991/tcp', wifi: 'office', vpn: false, wport: '445/tcp' },
 
-    /** The packet, one command, the same packet again: 3 + 1 + 3 in every scenario. */
-    steps: STEPS,
+    /** The packet, one command, the same packet again: 3 + 1 + 3 in every firewalld scenario; Windows: winPlan. */
+    steps: function (p) { return isWin(p) ? winSteps(p) : STEPS; },
 
-    initial: initial,
-    step: step,
+    initial: function (p) { return isWin(p) ? winInitial(p) : initial(p); },
+    step: function (s, n, p) { return isWin(p) ? winStep(s, n, p) : step(s, n, p); },
 
     // pure helpers, for the page and the tests
     IFACES: IFACES, IFACE_IDS: IFACE_IDS, HOSTS: HOSTS, SOURCES: SOURCES, DPORTS: DPORTS, SERVICE_DEFS: SERVICE_DEFS,
     TARGETS: TARGETS, SCENARIOS: SCENARIOS, SCENARIO_IDS: SCENARIO_IDS, PHASES: PHASES,
     firewallOf: firewallOf, inNet: inNet, iifOf: iifOf, packetOf: packetOf, bindings: bindings, bindingHit: bindingHit,
-    pickZone: pickZone, judge: judge, clientOf: clientOf, apply: apply, holderOf: holderOf, unbound: unbound
+    pickZone: pickZone, judge: judge, clientOf: clientOf, apply: apply, holderOf: holderOf, unbound: unbound,
+    STEPS: STEPS,
+
+    // the Windows flow
+    WIN_DOMAIN: WIN_DOMAIN, WIN_HOST: WIN_HOST, WIN_NETS: WIN_NETS, WIFI_NETS: WIFI_NETS, WIN_HOSTS: WIN_HOSTS,
+    WIFI_SENDER: WIFI_SENDER, VPN_SENDER: VPN_SENDER, WPORTS: WPORTS, PROFILES: PROFILES, PROFILE_DEFAULTS: PROFILE_DEFAULTS,
+    WIN_RULES: WIN_RULES, DETECT_ROWS: DETECT_ROWS,
+    isWin: isWin, vpnOn: vpnOn, adaptersOf: adaptersOf, pickProfile: pickProfile, winIif: winIif, winPacketOf: winPacketOf,
+    judgeProfile: judgeProfile, winPlan: winPlan
   };
 
   if (typeof module === 'object' && module.exports) module.exports = logic;

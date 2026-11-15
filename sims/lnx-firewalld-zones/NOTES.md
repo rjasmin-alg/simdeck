@@ -119,3 +119,102 @@ in italics with the Croatian): for the coordinator to add with `"src": "simdeck"
 ## Time
 
 Start 2026-11-03 17:08, done 17:28 (CET): one session, including the fresh review.
+
+## Preset task `win-firewall-profiles` (Windows Firewall profiles)
+
+Task `docs/tasks/w3/win-firewall-profiles.md`, thread t-0464. Four presets (`win-office`, `win-home`, `win-cafe`,
+`win-vpn`); rules and numbers in `SPEC.md` "Windows profiles".
+
+### Decisions
+
+- **The host model could not express it, so it was extended additively**, as `win-failover-cluster` did on
+  `quorum-split-brain` (and `win-boot`, `win-update-rings` on theirs). The task says "write the change under Shared
+  requests and stop"; running unattended, with the change contained in this folder, I made it instead. What was
+  missing: a binding decided by detection (DC reachable / location / new network) instead of an address, one active
+  rule set per adapter with several at once, rules scoped to rule sets, and steps where the laptop connects. The new
+  flow is opt-in (scenario `win`): `initial`, `step` and `steps` hand over to it only then, and every firewalld result
+  is unchanged (test `W off`; all 28 host tests kept, 15 added).
+- **One scenario `win` plus three params** instead of four scenarios: `wifi` (office / home / café, a live choice:
+  moving the laptop recomputes the same step, which is the task's "move a laptop between networks"), `vpn` (toggle,
+  resets; disabled in the office with the reason shown), `wport` (`445/tcp`, `3389/tcp`, ICMP echo). The presets set
+  them. The firewalld controls (`source`, `dport`) are hidden in this flow and the Windows ones in the other.
+- **Same stage, three columns**: the senders, PC07's adapters (network, DC reachable, location, profile) and the packet;
+  the profile picker as **K4** (first match: three detection rows and the implicit "new network" row, for the adapter
+  that connects or that the packet came in on) with the connections under it; the profiles with the adapters that use
+  each, the chosen profile's card (inbound / outbound default, the three rules with their profiles, the deciding rule
+  or the default line marked; rules not enabled for the profile struck) and the verdict with what the sender sees.
+- **Profile icons**: building = Domain, house = Private, globe = Public, drawn as inline SVG beside the name everywhere
+  (never the icon alone). The legend shows them in the Windows flow and the firewalld items in the other (the page
+  hides the other flow's legend items after each render).
+- **Verdict mapping**: Windows' block is the host's `drop` (silent, the sender times out) *(check)*.
+- **Sender's view**: SMB → "the shared folder opens `\\PC07\projekti`" or, after waiting, "The network path was not
+  found." *(check)*; remote desktop → the sign-in opens / "Cannot connect to the remote computer."; ICMP → the Windows
+  ping lines (`Reply from … TTL=128`, `Request timed out.`). No product or tool named beyond Windows itself (the WIN1
+  course's topic) and the ping lines the host already uses.
+- **Entries**: `win-cafe` (new network → Public) and `win-vpn` (two profiles at once).
+- **Kit K4 exists**, so the picker uses it (no own drawing).
+
+### Deviations from the task
+
+- Host model changed (additive, see Decisions) instead of stopping with a shared request.
+- **`win-vpn` has 8 steps, not 6**: both connections (2) and both packets with the same three steps as the other
+  presets (3 + 3). Six would need the rule check and the verdict merged for this preset only. The others have 4, as
+  asked (connect, packet, rules, verdict: the profile pick happens at connect, before the packet, because that is when
+  Windows picks it).
+- Presets are a scenario plus params, not four scenarios (see Decisions).
+- The page's title and subtitle stay the host's ("Zone vatrozida", a packet's zone…); the Windows flow is reached by
+  its presets, its scenario and the two entries.
+- **Host defect fixed** (one line): `cArrived` passed an array to `t.parts`, which stringifies it, so step 1 of every
+  firewalld preset showed `[object HTMLSpanElement], (,klijent,)`. The value is now wrapped in a span; the Windows
+  captions do the same.
+
+### Sources
+
+- Microsoft Learn "Windows Firewall overview", "Windows Firewall profiles", "Configure Windows Firewall rules", Network
+  Location Awareness: titles and contents **from memory, not read during this task** *(check all)*: the detection
+  order (DC authenticated → Domain, else the location, new → Public); defaults block inbound / allow outbound; a block
+  is a silent drop; one profile per adapter since Windows 7 / Server 2008 R2; the rule names; the SMB timeout message
+  "The network path was not found." (error 53); `TTL=128` in a Windows ping reply.
+- *Uvod u Linux* ch. 15 for the host's terms (*zona*, *zadana zona*, *vatrozid*).
+- Every scene value (addresses, networks, which rules are enabled for which profile, the RDP rule for Domain only) is
+  derived for the lesson, not captured.
+
+### Checks
+
+- Numbers printed by the model before the page (eight param combinations), asserted in `sim.test.js` (43 tests; the
+  Windows tie-breaks first: DC beats location, Public by its row not the implicit one, direct network before a route).
+- **Mutations**: 19 one-at-a-time mutations of the Windows code (DC ignored, location before DC, new network →
+  Private, Public row removed, one profile for the whole machine, routes before direct networks, profile scope
+  ignored, port ignored, default allow, block as reject, VPN allowed in the office, VPN ignored, no VPN packet, profile
+  not set at connect, the flow never or always on, RDP enabled for Private, home set to Public, another fallback
+  network): **19 fail a test**.
+- `npm run gate -- lnx-firewalld-zones`: pass. A local Playwright script stepped every Windows preset through every
+  step in hr (light and dark) and en: no stage, panel or page overflow at 1920×1080, no console errors; 375×812 no
+  sideways scroll (the K4 table scrolls in its box, as the kit specifies). Screenshots reviewed. Fixed from them: the
+  panel overflowing by ~400 px (eight presets in two columns; the hidden controls still took space because `.sd-ctl`'s
+  `display` beats `[hidden]`), sender names rendered as `[object HTMLSpanElement]`, Croatian case after "na"
+  ("na uredsku mrežu"), "the" before adapter names in English, translated labels in the monospace data font, the highlighted connection line covering the one above.
+- No fresh reviewer (preset task; not required by §8 for presets).
+
+### Term pairs (missing from `kit/glossary.js`; written out by hand)
+
+| en | hr | source |
+|---|---|---|
+| firewall profile | profil vatrozida | task |
+| domain controller | kontroler domene | task |
+| network location | mrežna lokacija *(check)* | task |
+| inbound rule | ulazno pravilo | task |
+
+### Shared requests
+
+- Kit (`kit.css`): `.sd-ctl { display: flex }` overrides the `hidden` attribute the kit sets for a param's `visible`,
+  so a hidden control still takes space; pages add `.sd-ctl[hidden] { display: none; }` (this one, `amdahl`,
+  `ari-big-numbers`, `ari-checking`). One line in the kit would fix them all.
+- Kit (`t.parts`): an array placeholder value is stringified; accepting arrays (flattening like `Simdeck.h`) would
+  remove a class of caption bugs (this page had one since it landed).
+- Kit (legend): a way to show legend items per param (here hidden by the page after each render).
+- Coordinator: the previous shared request (a binding kind for the Windows preset) is answered by this flow.
+
+### Time
+
+Start 2026-11-15 15:59, done 16:15 (CET): one session.
