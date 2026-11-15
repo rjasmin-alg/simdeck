@@ -1,0 +1,461 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- poe-budget: a 48-port PoE switch (two rows of 24 ports; each port shows its number, the device letter and the watts
+     reserved, its state by fill, ✕, hatching or ▲), the budget gauge (powered allocations stacked in port order, the
+     denied and shed requests outlined past the budget line), a table of the ports in runs, and the class table with
+     the port type's cap. An explorer: every param recomputes the allocation from scratch.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="poe-budget">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proračun snage PoE preklopnika · simdeck</title>
+<meta name="description" content="Dodaj telefone, access pointove i kamere na PoE preklopnik: klase, proračun, mjerena potrošnja, prioriteti i tip priključka.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "poe-budget",
+  "title": {
+    "hr": "Proračun snage PoE preklopnika",
+    "en": "PoE power budget"
+  },
+  "concept": {
+    "hr": "Preklopnik rezervira snagu klase, a ne potrošnju uređaja",
+    "en": "The switch reserves each device's class, not its draw"
+  },
+  "summary": {
+    "hr": "Dodaj telefone, access pointove i kamere na PoE preklopnik: klase, proračun, mjerena potrošnja, prioriteti i tip priključka.",
+    "en": "Add phones, access points and cameras to a PoE switch: classes, the budget, measured draw, priorities and the port type."
+  },
+  "tags": [
+    "ethernet"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="poe-budget"]; colours only from kit tokens.
+   Layout: the switch on top, the gauge under it, then the port table (left) and the class table (right). */
+[data-sim="poe-budget"] .pb {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1.4cqh;
+  height: 100%;
+  padding: 1.2cqh 1.5cqw;
+  font-size: 1rem;
+}
+[data-sim="poe-budget"] .pb-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+[data-sim="poe-budget"] .pb-muted { color: var(--muted); }
+[data-sim="poe-budget"][lang="hr"] .pb-kn[data-k='ap'] { font-style: italic; }
+
+/* ── the switch ── */
+[data-sim="poe-budget"] .pb-switch {
+  padding: 0.45rem 0.7rem 0.6rem;
+  border: max(3px, 0.18rem) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="poe-budget"] .pb-swhead { margin-bottom: 0.4rem; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="poe-budget"] .pb-ports { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 0.6rem 0.25rem; }
+[data-sim="poe-budget"] .pb-port {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 3.9rem;
+  padding: 0.1rem 0 0.15rem;
+  border: max(2px, 0.12rem) dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  line-height: 1.1;
+}
+[data-sim="poe-budget"] .pb-pn { align-self: flex-start; padding-left: 0.2rem; font-family: var(--mono); font-size: var(--fs-sm); }
+[data-sim="poe-budget"] .pb-pl { font-size: 1.15rem; font-weight: 700; }
+[data-sim="poe-budget"] .pb-pw { font-family: var(--mono); font-size: var(--fs-sm); white-space: nowrap; }
+[data-sim="poe-budget"] .pb-port[data-st='powered'],
+[data-sim="poe-budget"] .pb-port[data-st='limited'] { border-style: solid; border-color: var(--sw); background: var(--sw); color: var(--on-series); }
+[data-sim="poe-budget"] .pb-port[data-st='denied'] { border-style: dashed; border-color: var(--sw); color: var(--ink); }
+[data-sim="poe-budget"] .pb-port[data-st='shed'] {
+  border-style: solid;
+  border-color: var(--sw);
+  background: repeating-linear-gradient(135deg, var(--sw) 0 0.22rem, var(--bg) 0.22rem 0.55rem);
+  color: var(--ink);
+}
+[data-sim="poe-budget"] .pb-port[data-st='shed'] .pb-pl,
+[data-sim="poe-budget"] .pb-port[data-st='shed'] .pb-pw,
+[data-sim="poe-budget"] .pb-port[data-st='shed'] .pb-pn { padding: 0 0.15rem; border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="poe-budget"] .pb-mark {
+  position: absolute;
+  top: -0.6rem;
+  right: -0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: max(2px, 0.12rem) solid currentColor;
+  border-radius: 50%;
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+[data-sim="poe-budget"] .pb-mark[data-m='denied'] { color: var(--danger); }
+[data-sim="poe-budget"] .pb-mark[data-m='limited'] { color: var(--warn); }
+[data-sim="poe-budget"] .pb-port.sd-changed { z-index: 1; }
+
+/* ── the gauge ── */
+[data-sim="poe-budget"] .pb-ghead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 1.2rem; margin-bottom: 0.3rem; }
+[data-sim="poe-budget"] .pb-ghead b { font-size: 1.2rem; }
+[data-sim="poe-budget"] .pb-gover { color: var(--danger); font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="poe-budget"] .pb-gbudget { margin-left: auto; font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="poe-budget"] .pb-bar {
+  position: relative;
+  display: flex;
+  height: 2.2rem;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+[data-sim="poe-budget"] .pb-seg { flex: none; height: 100%; border-right: max(2px, 0.1rem) solid var(--bg); background: var(--sw); }
+[data-sim="poe-budget"] .pb-seg.pb-gap { border-right: 0; background: none; }
+[data-sim="poe-budget"] .pb-seg[data-over] {
+  border: max(2px, 0.12rem) dashed var(--sw);
+  background: repeating-linear-gradient(135deg, var(--sw) 0 0.15rem, var(--bg) 0.15rem 0.45rem);
+}
+[data-sim="poe-budget"] .pb-budgetline {
+  position: absolute;
+  top: -0.45rem;
+  bottom: -0.45rem;
+  width: max(4px, 0.25rem);
+  margin-left: max(-2px, -0.125rem);
+  background: var(--ink);
+}
+
+/* ── the tables ── */
+[data-sim="poe-budget"] .pb-bottom { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1.6cqw; min-height: 0; }
+[data-sim="poe-budget"] .pb-col { display: flex; flex-direction: column; gap: 0.4rem; min-height: 0; }
+[data-sim="poe-budget"] .pb-thead { font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="poe-budget"] table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+[data-sim="poe-budget"] th { padding: 0.1rem 0.4rem; border-bottom: var(--line-w) solid var(--ink); color: var(--muted); font-size: var(--fs-sm); font-weight: 700; text-align: left; white-space: nowrap; }
+[data-sim="poe-budget"] td { padding: 0.12rem 0.4rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+[data-sim="poe-budget"] td.pb-r, [data-sim="poe-budget"] th.pb-r { text-align: right; }
+[data-sim="poe-budget"] .pb-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  margin-right: 0.35rem;
+  border: max(2px, 0.12rem) solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--sw);
+  color: var(--on-series);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+[data-sim="poe-budget"] .pb-badge { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 700; }
+[data-sim="poe-budget"] .pb-badge[data-st='denied'] { color: var(--danger); }
+[data-sim="poe-budget"] .pb-badge[data-st='limited'] { color: var(--warn); }
+[data-sim="poe-budget"] .pb-badge[data-st='shed'] { color: var(--muted); }
+[data-sim="poe-budget"] tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="poe-budget"] tr.sd-changed { outline: none; box-shadow: none; }
+[data-sim="poe-budget"] tr.sd-changed .pb-badge { color: inherit; }
+[data-sim="poe-budget"] tr.pb-over td { color: var(--muted); border-bottom-style: dashed; }
+[data-sim="poe-budget"] tr.pb-capline td { border-top: max(3px, 0.18rem) dashed var(--warn); }
+[data-sim="poe-budget"] .pb-note { margin: 0.2rem 0 0; color: var(--muted); font-size: var(--fs-sm); }
+[data-sim="poe-budget"] .pb-capnote { color: var(--warn); font-weight: 700; }
+
+[data-sim="poe-budget"] .sd-swatch[data-shape='pb-denied'] { border: 0.15rem dashed var(--danger); background: var(--bg); }
+[data-sim="poe-budget"] .sd-swatch[data-shape='pb-shed'] { border: 0.15rem solid var(--ink); background: repeating-linear-gradient(135deg, var(--ink) 0 0.15rem, var(--bg) 0.15rem 0.38rem); }
+[data-sim="poe-budget"] .sd-swatch[data-shape='pb-limited'] { border: 0.15rem solid var(--warn); background: var(--c8); }
+
+/* the panel: presets in two columns, the four device counts as a 2 × 2 grid, so it fits without its own scroll */
+[data-sim="poe-budget"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="poe-budget"] [data-sd-controls] .sd-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 1rem; }
+[data-sim="poe-budget"] [data-sd-controls] .sd-group > * { grid-column: 1 / -1; }
+[data-sim="poe-budget"] [data-sd-controls] .sd-group > .sd-ctl[data-key='phones'],
+[data-sim="poe-budget"] [data-sd-controls] .sd-group > .sd-ctl[data-key='aps'],
+[data-sim="poe-budget"] [data-sd-controls] .sd-group > .sd-ctl[data-key='cams'],
+[data-sim="poe-budget"] [data-sd-controls] .sd-group > .sd-ctl[data-key='ptz'] { grid-column: auto; }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="poe-budget"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="poe-budget"] .pb { height: auto; padding: 0.8rem 0.5rem; }
+  [data-sim="poe-budget"] .pb-ports { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 0.6rem 0.15rem; }
+  [data-sim="poe-budget"] .pb-port { min-height: 2.8rem; }
+  [data-sim="poe-budget"] .pb-pw { display: none; }
+  [data-sim="poe-budget"] .pb-mark { width: 1.1rem; height: 1.1rem; right: -0.3rem; }
+  [data-sim="poe-budget"] .pb-bottom { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="poe-budget"] .pb-col { overflow-x: auto; }
+  [data-sim="poe-budget"] td, [data-sim="poe-budget"] th { padding: 0.1rem 0.2rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Proračun snage PoE preklopnika</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var COLOUR = { phone: 1, ap: 3, cam: 2, ptz: 4 };   // series colour per device kind; the letter carries it too
+  var KIND = {};
+  L.KINDS.forEach(function (k) { KIND[k.id] = k; });
+
+  // ── formatting: numbers in the page's language (15,4 / 15.4), data in translate="no" ──
+  function fmt(x) {
+    var s = String(Math.round(x * 100) / 100);
+    return Simdeck.lang === 'hr' ? s.replace('.', ',') : s;
+  }
+  function b(text) { return h('b', { class: 'pb-num', translate: 'no' }, text); }
+  function kindName(id) { return h('span', { class: 'pb-kn', dataset: { k: id } }, t('kind_' + id)); }
+  function chip(id) { return h('span', { class: 'pb-chip', dataset: { c: String(COLOUR[id]) }, 'aria-hidden': 'true' }, t('letter_' + id)); }
+
+  // ── "changed": the state before the last param change (none on load) ──
+  var ready = false, prev = null, cur = null, curKey = null;
+  function keyOf(params) { return JSON.stringify(params); }
+
+  // ── the switch ──
+  function switchNode(s, changed) {
+    var ports = s.result.map(function (r) {
+      var on = changed.indexOf(r.n) >= 0 ? ' sd-changed' : '';
+      if (!r.device) {
+        return h('div', { class: 'pb-port' + on, dataset: { st: 'empty' }, role: 'img', 'aria-label': t('portEmpty', { n: r.n }) },
+          h('span', { class: 'pb-pn', translate: 'no' }, String(r.n)), h('span', { class: 'pb-pl' }, ' '), h('span', { class: 'pb-pw' }, ' '));
+      }
+      var mark = r.state === 'denied' ? '✕' : r.state === 'limited' ? '▲' : null;
+      var shown = r.state === 'powered' || r.state === 'limited' ? r.allocated : r.want;
+      return h('div', {
+        class: 'pb-port' + on, dataset: { st: r.state, c: String(COLOUR[r.device]) }, role: 'img',
+        'aria-label': t('portLabel', { n: r.n, kind: t('kind_' + r.device), cls: KIND[r.device].cls, state: t('state_' + r.state), w: fmt(r.allocated) })
+      },
+        h('span', { class: 'pb-pn', translate: 'no' }, String(r.n)),
+        h('span', { class: 'pb-pl' }, t('letter_' + r.device)),
+        h('span', { class: 'pb-pw', translate: 'no' }, fmt(shown)),
+        mark ? h('span', { class: 'pb-mark', dataset: { m: r.state }, 'aria-hidden': 'true' }, mark) : null);
+    });
+    return h('div', { class: 'pb-switch' },
+      h('div', { class: 'pb-swhead' }, t('switchHead', { type: s.portType, cap: fmt(s.cap) })),
+      h('div', { class: 'pb-ports' }, ports));
+  }
+
+  // ── the gauge: powered allocations in port order, then what was asked for and not given, past the budget line ──
+  function gaugeNode(s) {
+    var over = s.result.filter(function (r) { return r.state === 'denied' || r.state === 'shed'; });
+    var overW = over.reduce(function (a, r) { return a + r.want; }, 0);
+    var scale = s.budget + overW;   // the bar draws total, the free part (together the budget), then the requests
+    var segs = [];
+    s.result.forEach(function (r) {
+      if (r.allocated > 0) segs.push(h('span', { class: 'pb-seg', dataset: { c: String(COLOUR[r.device]) }, style: { width: (r.allocated / scale * 100) + '%' } }));
+    });
+    var gap = s.left;   // the empty part of the budget, then the requests that did not get it
+    if (over.length && gap > 0) segs.push(h('span', { class: 'pb-seg pb-gap', style: { width: (gap / scale * 100) + '%' } }));
+    over.forEach(function (r) {
+      segs.push(h('span', { class: 'pb-seg', dataset: { c: String(COLOUR[r.device]), over: '' }, style: { width: (r.want / scale * 100) + '%' } }));
+    });
+    segs.push(h('span', { class: 'pb-budgetline', style: { left: (s.budget / scale * 100) + '%' } }));
+    return h('div', { class: 'pb-gauge' },
+      h('div', { class: 'pb-ghead' },
+        h('b', null, t('gaugeHead', { total: fmt(s.total), budget: fmt(s.budget) })),
+        h('span', null, t('gaugeLeft', { left: fmt(s.left) })),
+        overW > 0 ? h('span', { class: 'pb-gover' }, t('gaugeOver', { w: fmt(overW) })) : null,
+        h('span', { class: 'pb-gbudget' }, '▌ ' + t('gaugeBudget', { budget: fmt(s.budget) }))),
+      h('div', { class: 'pb-bar', role: 'img', 'aria-label': t('gaugeLabel', { total: fmt(s.total), budget: fmt(s.budget), left: fmt(s.left) }) }, segs));
+  }
+
+  // ── the port table: runs of consecutive ports ──
+  function badge(st) {
+    var m = { powered: '●', denied: '✕', shed: '▨', limited: '▲' }[st];
+    return h('span', { class: 'pb-badge', dataset: { st: st } }, h('span', { 'aria-hidden': 'true' }, m), t('state_' + st));
+  }
+  function portTable(s, changed) {
+    var g = L.groups(s);
+    var head = h('tr', null, [
+      h('th', null, t('thPorts')), h('th', null, t('thDevice')), h('th', { class: 'pb-r' }, t('thClass')), h('th', null, t('thPrio')),
+      h('th', { class: 'pb-r' }, t('thAlloc')), h('th', { class: 'pb-r' }, t('thPd')), h('th', null, t('thState'))
+    ]);
+    var rows = g.map(function (x) {
+      var ch = false;
+      for (var n = x.from; n <= x.to; n++) if (changed.indexOf(n) >= 0) ch = true;
+      var w = x.state === 'powered' || x.state === 'limited' ? x.allocated : x.want;
+      var alloc = x.count > 1 ? t('allocMany', { count: x.count, w: fmt(w) }) : t('allocOne', { w: fmt(w) });
+      return h('tr', { class: ch ? 'sd-changed' : '' },
+        h('td', { class: 'pb-num', translate: 'no' }, x.from === x.to ? String(x.from) : x.from + '–' + x.to),
+        h('td', null, chip(x.device), kindName(x.device)),
+        h('td', { class: 'pb-r pb-num', translate: 'no' }, String(x.cls)),
+        h('td', null, t('prio_' + (x.priority || 'none'))),
+        h('td', { class: 'pb-r pb-num' + (x.allocated ? '' : ' pb-muted') }, x.allocated ? alloc : '0 W'),
+        h('td', { class: 'pb-r pb-num' + (x.allocated ? '' : ' pb-muted'), translate: 'no' }, x.allocated ? fmt(x.pd) + ' W' : '0 W'),
+        h('td', null, badge(x.state)));
+    });
+    var draws = {};
+    L.KINDS.forEach(function (k) { draws[k.id] = fmt(k.draw); });
+    return h('div', { class: 'pb-col' },
+      h('div', { class: 'pb-thead' }, t('tableHead')),
+      rows.length ? h('table', null, h('thead', null, head), h('tbody', null, rows)) : h('p', { class: 'pb-muted' }, t('noDevices')),
+      h('p', { class: 'pb-note' }, t('examples', draws)));
+  }
+
+  // ── the class table, the classes in use marked, the port type's cap drawn ──
+  function classTable(s) {
+    var used = {};
+    L.KINDS.forEach(function (k) {
+      if (s.result.some(function (r) { return r.device === k.id; })) (used[k.cls] = used[k.cls] || []).push(k.id);
+    });
+    var firstOver = true;
+    var rows = L.CLASSES.map(function (c) {
+      var over = c.pse > s.cap, cls = over ? 'pb-over' : '';
+      if (over && firstOver) { cls += ' pb-capline'; firstOver = false; }
+      return h('tr', { class: cls },
+        h('td', { class: 'pb-num', translate: 'no' }, String(c.cls)),
+        h('td', { class: 'pb-num', translate: 'no' }, c.std),
+        h('td', { class: 'pb-r pb-num', translate: 'no' }, fmt(c.pse)),
+        h('td', { class: 'pb-r pb-num', translate: 'no' }, fmt(c.pd)),
+        h('td', { class: 'pb-r pb-num', translate: 'no' }, fmt(c.pse - c.pd)),
+        h('td', null, (used[c.cls] || []).map(chip)));
+    });
+    var head = h('tr', null,
+      h('th', null, t('thClass')), h('th', null, t('thStd')),
+      h('th', { class: 'pb-r' }, t('thPse'), ' ', h('span', { translate: 'no' }, 'W')),
+      h('th', { class: 'pb-r' }, t('thPdc'), ' ', h('span', { translate: 'no' }, 'W')),
+      h('th', { class: 'pb-r' }, t('thLoss'), ' ', h('span', { translate: 'no' }, 'W')),
+      h('th', null, ' '));
+    return h('div', { class: 'pb-col' },
+      h('div', { class: 'pb-thead' }, t('classHead')),
+      h('table', null, h('thead', null, head), h('tbody', null, rows)),
+      h('p', { class: 'pb-note pb-capnote' }, t('classCap', { cap: fmt(s.cap), type: s.portType })));
+  }
+
+  // ── caption ──
+  function caption(s, params) {
+    var placed = s.result.filter(function (r) { return r.device; });
+    if (!placed.length) return t('capEmpty');
+    var out = [];
+    if (s.allocMode === 'measured') {
+      var cd = L.derive(Object.assign({}, params, { allocMode: 'class' })).demand;
+      if (cd !== s.demand) out = out.concat(t.parts('capMeasured', { devices: t.n('devices', placed.length), demand: b(fmt(s.demand)), classDemand: b(fmt(cd)) }), [' ']);
+    }
+    out = out.concat(t.parts('capClass', { total: b(fmt(s.total)), budget: b(fmt(s.budget)), left: b(fmt(s.left)) }));
+    var shed = s.events.filter(function (e) { return e.type === 'shed'; });
+    var deny = s.events.filter(function (e) { return e.type === 'deny'; });
+    if (shed.length) {
+      var e = shed[0];
+      out = out.concat([' '], t.parts(e.ports.length > 1 ? 'capShedMany' : 'capShed', {
+        n: b(String(e.n)), kind: kindName(s.result[e.n - 1].device), left: b(fmt(e.left)), ports: b(e.ports.join(', ')), freed: b(fmt(e.freed))
+      }));
+    }
+    if (deny.length) {
+      var d = deny[0], dk = s.result[d.n - 1].device;
+      out = out.concat([' '], t.parts('capDeny', { n: b(String(d.n)), kind: kindName(dk), need: b(fmt(d.need)), cls: b(String(KIND[dk].cls)), left: b(fmt(d.left)) }));
+      if (deny.length > 1) out.push(' ', t.n('capDenyMore', deny.length - 1));
+    }
+    if (!shed.length && !deny.length) {
+      var lim = s.result.filter(function (r) { return r.state === 'limited'; })[0];
+      if (lim) {
+        var k = KIND[lim.device];
+        out = out.concat([' '], t.parts('capLimited', {
+          n: b(String(lim.n)), kind: kindName(lim.device), cls: b(String(k.cls)), pse: b(fmt(L.CLASSES[k.cls].pse)), type: b(s.portType), cap: b(fmt(s.cap))
+        }));
+      } else if (s.allocMode === 'class') {
+        out = out.concat([' '], t.parts('capAllFine', { draw: b(fmt(s.draw)) }));
+      }
+    }
+    return out;
+  }
+
+  var root = h('div', { class: 'pb' });
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'budget', type: 'range', label: t('budget'), min: L.BUDGET.min, max: L.BUDGET.max, step: L.BUDGET.step, unit: 'W' },
+      { key: 'allocMode', type: 'choice', label: t('allocMode'), options: L.MODES.map(function (m) { return [m, t('mode_' + m)]; }) },
+      { key: 'phones', type: 'range', label: t('phones'), min: 0, max: 24, step: 1 },
+      { key: 'aps', type: 'range', label: t('aps'), min: 0, max: 8, step: 1 },
+      { key: 'cams', type: 'range', label: t('cams'), min: 0, max: 8, step: 1 },
+      { key: 'ptz', type: 'range', label: t('ptz'), min: 0, max: 2, step: 1 },
+      { key: 'portType', type: 'choice', label: t('portType'), options: L.TYPES.map(function (x) { return [x, t('type_' + x)]; }) },
+      { key: 'priorities', type: 'toggle', label: t('priorities') }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      return { id: pr.id, label: t('preset_' + pr.id), hint: t('hint_' + pr.id), params: pr.params };
+    }),
+
+    legend: [
+      { c: 1, label: t('legend_phone') },
+      { c: 3, label: t('legend_ap') },
+      { c: 2, label: t('legend_cam') },
+      { c: 4, label: t('legend_ptz') },
+      { c: 8, label: t('legendPowered') },
+      { shape: 'pb-denied', label: t('legendDenied') },
+      { shape: 'pb-shed', label: t('legendShed') },
+      { shape: 'pb-limited', label: t('legendLimited') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state;
+      var k = keyOf(c.params);
+      if (!ready) { prev = null; cur = s; curKey = k; }
+      else if (k !== curKey) { prev = cur; cur = s; curKey = k; }
+      var changed = L.changedPorts(prev, s);
+      root.replaceChildren(
+        switchNode(s, changed),
+        gaugeNode(s),
+        h('div', { class: 'pb-bottom' }, portTable(s, changed), classTable(s)));
+      if (root.parentNode !== c.stage) c.stage.replaceChildren(root);
+    },
+
+    caption: function (c) { return caption(c.state, c.params); }
+  });
+  ready = true;
+})();
+</script>
+</body>
+</html>
