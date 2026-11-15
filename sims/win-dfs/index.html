@@ -1,0 +1,515 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-dfs: part 1, a client resolves the DFS namespace folder by a referral from its own site's namespace server
+     (own-site target first), caches it for the TTL, fails over to the other site and, without failback, sticks there;
+     part 2, DFS Replication carries a saved file in the next window, and a file changed on both members is a conflict
+     that the later save wins. A stepper, one message or event per step. Drawn with kit view K1 (message sequence chart,
+     kit/sequence.js): six lanes, Zagreb on the left (client, file server, namespace server), Split mirrored on the
+     right, so replication and failover arrows cross the middle, the WAN. Under the chart the clients' referral caches
+     (part 1) or the servers' copies of plan.xlsx with ConflictAndDeleted (part 2). Model: sim.js; rules: SPEC.md;
+     words: strings.js. -->
+<html lang="hr" data-sim="win-dfs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DFS: imenski prostor i replikacija · simdeck</title>
+<meta name="description" content="Dva sjedišta: klijent dobiva uputu s poslužiteljem svojeg sjedišta na vrhu, prelazi na rezervu i tamo ostaje; datoteka promijenjena na oba poslužitelja.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/sequence.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-dfs",
+  "title": {
+    "hr": "DFS: imenski prostor i replikacija",
+    "en": "DFS: namespace and replication"
+  },
+  "concept": {
+    "hr": "Uputa na najbliže odredište; u sukobu replikacije pobjeđuje kasnije spremanje",
+    "en": "Referrals to the nearest target; in a DFS-R conflict the later save wins"
+  },
+  "summary": {
+    "hr": "Dva sjedišta: klijent dobiva uputu s poslužiteljem svojeg sjedišta na vrhu, prelazi na rezervu i tamo ostaje; datoteka promijenjena na oba poslužitelja.",
+    "en": "Two sites: each client's referral lists its own site's server first; it fails over and stays there; a file changed on both servers before replication."
+  },
+  "tags": [
+    "file-sharing"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-dfs"]; colours only from kit tokens.
+   Layout: the K1 chart on top, full width (six lanes); under it two cards side by side (the two clients' referral
+   caches, or the two servers' copies of the file with the WAN link between them). */
+[data-sim="win-dfs"] .df {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1cqh;
+  height: 100%;
+  padding: 1.2cqh 1cqw;
+  font-size: 1rem;
+}
+[data-sim="win-dfs"] .df-sub { font-size: var(--fs-sm); color: var(--muted); line-height: 1.25; }
+[data-sim="win-dfs"] .df-mono { font-family: var(--mono); }
+[data-sim="win-dfs"] .sd-presets { grid-template-columns: 1fr 1fr; }
+/* the params of the other part are hidden (visible: …); the kit's .sd-ctl display overrides [hidden] */
+[data-sim="win-dfs"] .sd-ctl[hidden] { display: none; }
+[data-sim="win-dfs"] .df-badge { padding: 0 0.35rem; border: var(--line-w) solid var(--ink); border-radius: 1rem; font-size: var(--fs-sm); font-weight: 700; line-height: 1.4; }
+[data-sim="win-dfs"] .df-badge[data-k="down"] { background: var(--ink); color: var(--bg); }
+
+/* replication: a double arrow (K1 has double only with the lock; NOTES.md, "Shared requests") */
+[data-sim="win-dfs"] .sd-seq-arrow[data-double] { top: calc(1.95rem - 0.1rem); border-top: 0.45rem double var(--ink); }
+
+/* legend swatches the kit lacks */
+[data-sim="win-dfs"] .sd-swatch[data-shape="dot"] { height: 0.3rem; border: 0; border-radius: 0; background: repeating-linear-gradient(90deg, var(--ink) 0 0.15rem, transparent 0.15rem 0.4rem); }
+[data-sim="win-dfs"] .sd-swatch[data-shape="double"] { height: 0.45rem; border: 0; border-radius: 0; border-top: 0.15rem solid var(--ink); border-bottom: 0.15rem solid var(--ink); background: transparent; }
+[data-sim="win-dfs"] .sd-swatch[data-shape="ring"] { border-radius: 50%; background: var(--bg); border: 0.22rem double var(--ink); }
+[data-sim="win-dfs"] .sd-swatch[data-shape="card"] { background: var(--bg); border-left-width: 0.35rem; }
+[data-sim="win-dfs"] .sd-swatch[data-shape="lost"] { background: repeating-linear-gradient(45deg, var(--ink) 0 0.15rem, var(--bg) 0.15rem 0.4rem); }
+
+/* the two cards under the chart */
+[data-sim="win-dfs"] .df-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.8rem; }
+[data-sim="win-dfs"] .df-cards[data-part="replication"] { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+[data-sim="win-dfs"] .df-box {
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem 0.5rem;
+  min-width: 0;
+}
+[data-sim="win-dfs"] .df-box h2 { margin: 0 0 0.3rem; font-size: 1em; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 0.5rem; align-items: baseline; }
+[data-sim="win-dfs"] .df-box h2 .df-sub { font-weight: 400; }
+[data-sim="win-dfs"] .df-box.sd-changed { outline: var(--line-w) solid var(--ink); }
+
+/* referral cache: the path, the ordered targets, TTL bar */
+[data-sim="win-dfs"] .df-path { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="win-dfs"] .df-targets { margin: 0.2rem 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
+[data-sim="win-dfs"] .df-target { display: inline-flex; gap: 0.35rem; align-items: center; padding: 0.05rem 0.45rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+[data-sim="win-dfs"] .df-target[data-own] { border: 0.22rem double var(--ink); border-radius: 1rem; }
+[data-sim="win-dfs"] .df-target[data-conn] { font-weight: 700; }
+[data-sim="win-dfs"] .df-rank { font-family: var(--mono); color: var(--muted); }
+[data-sim="win-dfs"] .df-conn { font-size: var(--fs-sm); padding: 0 0.3rem; background: var(--ink); color: var(--bg); border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="win-dfs"] .df-bar { height: 0.45rem; margin-top: 0.2rem; border: 1px solid var(--line); background: var(--bg); }
+[data-sim="win-dfs"] .df-bar > span { display: block; height: 100%; background: var(--c3); }
+[data-sim="win-dfs"] .df-cache[data-expired] .df-targets { opacity: 0.7; }
+[data-sim="win-dfs"] .df-cache[data-expired] .df-bar { border-style: dashed; }
+[data-sim="win-dfs"] .df-ttl { display: flex; justify-content: space-between; gap: 0.5rem; font-size: var(--fs-sm); }
+
+/* file copies: the current version card, pending badge, the ConflictAndDeleted bin */
+[data-sim="win-dfs"] .df-file { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: center; }
+[data-sim="win-dfs"] .df-card {
+  display: inline-flex; flex-direction: column; padding: 0.1rem 0.5rem 0.15rem;
+  border: var(--line-w) solid var(--ink); border-left-width: 0.4rem; border-radius: var(--radius-sm); background: var(--bg); line-height: 1.3;
+}
+[data-sim="win-dfs"] .df-card b { font-family: var(--mono); }
+[data-sim="win-dfs"] .df-card.sd-changed { background: var(--hl); color: var(--on-hl); }
+[data-sim="win-dfs"] .df-card.sd-changed .df-sub { color: var(--on-hl); }
+[data-sim="win-dfs"] .df-card[data-lost] { background: repeating-linear-gradient(45deg, var(--panel) 0 0.35rem, var(--bg) 0.35rem 0.7rem); border-style: dashed; }
+[data-sim="win-dfs"] .df-card[data-lost].sd-changed { background: repeating-linear-gradient(45deg, var(--hl) 0 0.35rem, var(--bg) 0.35rem 0.7rem); color: var(--ink); }
+[data-sim="win-dfs"] .df-card[data-lost].sd-changed .df-sub { color: var(--ink); }
+[data-sim="win-dfs"] .df-pending { font-size: var(--fs-sm); padding: 0 0.35rem; border: var(--line-w) dashed var(--ink); border-radius: 1rem; }
+[data-sim="win-dfs"] .df-bin { margin-top: 0.35rem; padding-top: 0.25rem; border-top: var(--line-w) dashed var(--line); display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; align-items: center; }
+[data-sim="win-dfs"] .df-bin-title { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="win-dfs"] .df-wan { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.15rem; text-align: center; padding: 0.3rem 0.5rem; max-width: 13rem; }
+[data-sim="win-dfs"] .df-wan-line { width: 100%; min-width: 6rem; height: 0.45rem; border-top: 0.15rem solid var(--ink); border-bottom: 0.15rem solid var(--ink); }
+[data-sim="win-dfs"] .df-wan[data-down] .df-wan-line { border-style: dashed; border-color: var(--muted); }
+
+/* Phone and portrait: the stage grows with its content; the cards stack under the chart (the kit stacks the lanes). */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-dfs"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-dfs"] .df { height: auto; grid-template-rows: none; padding: 0.4rem; gap: 0.7rem; }
+  [data-sim="win-dfs"] .df-cards, [data-sim="win-dfs"] .df-cards[data-part="replication"] { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-dfs"] .df-wan { max-width: none; }
+  [data-sim="win-dfs"] .sd-presets { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">DFS: imenski prostor i replikacija</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var COLOUR = { ZG: '1', ST: '2' };
+  var MARK = { 'CL-ZG': 'A', 'DC-ZG': 'N', 'FS-ZG': 'F', 'FS-ST': 'F', 'DC-ST': 'N', 'CL-ST': 'M' };
+  var ROLE = { CL: 'roleClient', DC: 'roleNs', FS: 'roleFs' };
+
+  /** Data (server names, paths, times, versions) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls === undefined ? 'df-mono' : cls || null }, String(text)); }
+  function q(text) { return h('b', { translate: 'no' }, String(text)); }
+  /** Parts with *English term* turned into <em lang="en"> (the Croatian term rule). */
+  function rich(key, vars) {
+    var out = [], seen = [];
+    t.parts(key, vars).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(seen.indexOf(p) >= 0 ? p.cloneNode(true) : p); seen.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) {
+        if (!bit) return;
+        out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit);
+      });
+    });
+    return out;
+  }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function hm(sec) { return two(Math.floor(sec / 3600)) + ':' + two(Math.floor(sec % 3600 / 60)); }
+  function secs(v) { return v + ' s'; }
+  function verText(s, id) { var v = s.versions[id]; return v.writer ? v.writer + ' ' + hm(v.mtime) : 'v1 ' + hm(v.mtime); }
+  function ver(s, id) { return q(verText(s, id)); }
+  function userOf(id) { return L.USER[id]; }
+  function lastMsg(s) { return s.msgs[s.msgs.length - 1]; }
+  /** FS-ST is down in part 1 with fsStUp off, until its "up" note. */
+  function stDownAt(s, p, index) {
+    if (s.part !== 'namespace' || p.fsStUp) return false;
+    for (var i = 0; i <= index && i < s.msgs.length; i++) if (s.msgs[i].kind === 'up') return false;
+    return true;
+  }
+
+  // ── lanes ──
+  function lanes(c) {
+    var s = c.state, cur = lastMsg(s), fresh = cur && cur.n === c.n;
+    return L.LANES.map(function (id) {
+      var kind = id.slice(0, 2), site = L.SITE[id];
+      var fs = kind === 'FS' ? L.server(s, id) : null;
+      var active = fresh && (cur.from === id || cur.to === id || cur.lane === id);
+      var tags = null;
+      if (kind === 'CL') tags = data(id, 'df-sub');
+      if (fs) tags = h('span', { class: 'df-badge', dataset: { k: fs.up ? 'up' : 'down' } }, t(fs.up ? 'up' : 'down'));
+      return {
+        id: id, mark: MARK[id], c: COLOUR[site], shape: kind === 'CL' ? 'square' : null,
+        name: kind === 'CL' ? t(id === 'CL-ZG' ? 'laneAna' : 'laneMarko') : data(id, ''),
+        tags: tags,
+        state: fs && !fs.up ? 'down' : active ? 'active' : null,
+        changed: fresh && cur.kind === 'up' && cur.lane === id,
+        body: [h('div', { class: 'df-sub' }, t(ROLE[kind])), h('div', { class: 'df-sub' }, t(site === 'ZG' ? 'siteZG' : 'siteST'))]
+      };
+    });
+  }
+
+  // ── chart rows ──
+  var RE = { 'replace': 'reReplace', 'conflict-in': 'reWins', 'conflict-local': 'reLoses', 'same': 'reSame', 'older': 'reSame' };
+  function rows(c) {
+    var s = c.state, p = c.params, out = [], dbl = [];
+    s.msgs.forEach(function (m, i) {
+      var r = { time: hm(m.t), changed: m.n === c.n };
+      var down = stDownAt(s, p, i) && m.kind !== 'up' ? ['FS-ST'] : undefined;
+      if (down) r.down = down;
+      var col = COLOUR[L.SITE[m.from || m.lane]];
+      switch (m.kind) {
+        case 'refReq':
+          Object.assign(r, { from: m.from, to: m.to, label: t('kRefReq'), c: col, fields: 'projekti' });
+          break;
+        case 'referral':
+          Object.assign(r, { from: m.from, to: m.to, label: t('kReferral'), c: col, line: 'dotted', fields: m.targets.join(', ') + ' · ' + secs(m.ttl) });
+          break;
+        case 'connect': {
+          var re = {};
+          re[m.to] = t(!m.ok ? 'reNoAnswer' : m.how === 'stick' ? 'reStays' : m.how === 'failback' ? 'reBack' : 'reConnected');
+          Object.assign(r, { from: m.from, to: m.to, label: t('kConnect'), c: col, re: re });
+          if (!m.ok) r.lost = [m.to];
+          break;
+        }
+        case 'up':
+          Object.assign(r, { kind: 'note', lane: m.lane, k: 'solid', text: h('span', null, t.parts('noteUp', { fs: data(m.lane, '') })) });
+          break;
+        case 'save':
+          Object.assign(r, { from: m.from, to: m.to, label: t('kSave'), c: col, fields: verText(s, m.version) });
+          break;
+        case 'open':
+          Object.assign(r, { from: m.from, to: m.to, label: t('kOpen'), c: col, fields: verText(s, m.version) });
+          break;
+        case 'window':
+          Object.assign(r, { kind: 'note', lane: m.lane, k: m.blocked ? 'fill' : 'solid', text: t(m.blocked ? 'noteBlocked' : 'noteWindow') });
+          break;
+        case 'repl': {
+          var re2 = {};
+          re2[m.to] = t(RE[m.result]);
+          Object.assign(r, { from: m.from, to: m.to, label: t('kRepl'), c: col, fields: verText(s, m.version), re: re2 });
+          dbl.push(out.length);
+          break;
+        }
+        case 'log':
+          Object.assign(r, { kind: 'note', lane: m.lane, k: 'solid', text: t('noteLog') });
+          break;
+        default:
+          break;
+      }
+      out.push(r);
+    });
+    return { rows: out, dbl: dbl };
+  }
+  function renderChart(c) {
+    var r = rows(c);
+    var chart = Simdeck.sequence({
+      dir: c.dir,
+      lanes: lanes(c),
+      rows: r.rows,
+      timeWidth: '4.4rem',
+      empty: t('chartEmpty'),
+      earlier: function (n) { return t.n('earlier', n); }
+    });
+    var rowEls = chart.querySelectorAll('.sd-seq-row');
+    r.dbl.forEach(function (i) { var a = rowEls[i] && rowEls[i].querySelector('.sd-seq-arrow'); if (a) a.dataset.double = ''; });
+    return chart;
+  }
+
+  // ── part 1: the referral caches ──
+  function touchedClient(s, id) { return s.touched.some(function (x) { return x.client === id; }); }
+  function renderCache(c, id) {
+    var s = c.state, cl = L.client(s, id), e = cl.cache[0];
+    var changed = c.n > 0 && touchedClient(s, id);
+    var box = h('section', { class: 'df-box df-cache' + (changed ? ' sd-changed' : ''), dataset: e && !L.valid(e, s.t) ? { expired: '' } : {} },
+      h('h2', null, t(id === 'CL-ZG' ? 'laneAna' : 'laneMarko'), ' ', data(id, 'df-sub'), ' ',
+        h('span', { class: 'df-sub' }, t('cacheTitle'), ' ', t.parts('cacheAt', { t: data(hm(s.t), '') }))));
+    if (!e) {
+      box.append(h('div', { class: 'df-sub' }, t('cacheEmpty')));
+      if (cl.connectedTo) box.append(h('div', null, h('span', { class: 'df-conn' }, t('connected')), ' ', data(cl.connectedTo)));
+      return box;
+    }
+    box.append(h('div', { class: 'df-path', translate: 'no' }, e.path));
+    var list = h('ol', { class: 'df-targets' });
+    e.targets.forEach(function (fs, i) {
+      var own = L.SITE[fs] === cl.site, conn = cl.connectedTo === fs;
+      var ds = {};
+      if (own) ds.own = '';
+      if (conn) ds.conn = '';
+      list.append(h('li', { class: 'df-target', dataset: ds }, data((i + 1) + '.', 'df-rank'), data(fs, ''),
+        own ? h('span', { class: 'df-sub' }, t('ownSite')) : null,
+        conn ? h('span', { class: 'df-conn' }, t('connected')) : null));
+    });
+    box.append(list);
+    var valid = L.valid(e, s.t), leftNow = L.left(e, s.t);
+    box.append(h('div', { class: 'df-ttl' },
+      h('span', null, valid ? t.parts('cacheLeft', { left: data(secs(leftNow), ''), ttl: data(secs(e.ttl), '') }) : t.parts('cacheExpired', { t: data(hm(e.expiresAt), '') })),
+      data('TTL', 'df-sub')));
+    box.append(h('div', { class: 'df-bar' }, h('span', { style: { width: (valid ? Math.round(leftNow / e.ttl * 1000) / 10 : 0) + '%' } })));
+    return box;
+  }
+
+  // ── part 2: the copies of the file ──
+  function touchedServer(s, id, what) { return s.touched.some(function (x) { return x.server === id && (!what || x.what === what); }); }
+  function card(s, id, opts) {
+    var v = s.versions[id];
+    var ds = {};
+    if (opts.lost) ds.lost = '';
+    return h('div', { class: 'df-card' + (opts.changed ? ' sd-changed' : ''), dataset: ds },
+      h('b', { translate: 'no' }, L.FILE + ' · ' + verText(s, id)),
+      h('span', { class: 'df-sub' }, v.base ? t.parts('fileBase', { base: data(verText(s, v.base), '') }) : t('fileOriginal')));
+  }
+  function renderFiles(c, id) {
+    var s = c.state, fs = L.server(s, id);
+    var fileChanged = c.n > 0 && touchedServer(s, id, 'file');
+    var binChanged = c.n > 0 && touchedServer(s, id, 'bin');
+    var box = h('section', { class: 'df-box df-files' },
+      h('h2', null, data(id, ''), ' ', h('span', { class: 'df-sub' }, t(fs.site === 'ZG' ? 'siteZG' : 'siteST'))));
+    box.append(h('div', { class: 'df-file' }, card(s, fs.file, { changed: fileChanged }),
+      fs.pending.length ? h('span', { class: 'df-pending' }, t('pending')) : null));
+    var bin = h('div', { class: 'df-bin' }, h('span', { class: 'df-bin-title', translate: 'no' }, t('binTitle')));
+    if (fs.bin.length) fs.bin.forEach(function (vid) { bin.append(card(s, vid, { lost: true, changed: binChanged })); });
+    else bin.append(h('span', { class: 'df-sub' }, t('binEmpty')));
+    box.append(bin);
+    return box;
+  }
+  function renderWan(c) {
+    var s = c.state, p = c.params, r = s.replication;
+    var pend = [];
+    s.servers.forEach(function (x) { pend = pend.concat(x.pending); });
+    var next = null;
+    if (pend.length && p.linkUp) next = L.nextWindow(Math.max.apply(null, pend.map(function (x) { return x.mtime; })), r.lastWindow, p.replicateAfter);
+    var changed = c.n > 0 && lastMsg(s) && lastMsg(s).n === c.n && lastMsg(s).kind === 'window';
+    return h('section', { class: 'df-box df-wan' + (changed ? ' sd-changed' : ''), dataset: p.linkUp ? {} : { down: '' } },
+      h('b', null, t('wanTitle')),
+      h('div', { class: 'df-wan-line', 'aria-hidden': 'true' }),
+      h('span', { class: 'df-badge', dataset: { k: p.linkUp ? 'up' : 'down' } }, t(p.linkUp ? 'linkUp' : 'linkDown')),
+      h('span', { class: 'df-sub' }, t.n('every', p.replicateAfter / 60)),
+      h('span', { class: 'df-sub' }, next !== null ? t.parts('nextWindow', { t: data(hm(next), '') }) : pend.length ? t('pending') : t('noneWaiting')));
+  }
+  function renderCards(c) {
+    if (c.state.part === 'namespace') return h('div', { class: 'df-cards', dataset: { part: 'namespace' } }, renderCache(c, 'CL-ZG'), renderCache(c, 'CL-ST'));
+    return h('div', { class: 'df-cards', dataset: { part: 'replication' } }, renderFiles(c, 'FS-ZG'), renderWan(c), renderFiles(c, 'FS-ST'));
+  }
+
+  // ── captions ──
+  function caption(c) {
+    var s = c.state, p = c.params, n = c.n;
+    if (c.first) {
+      if (s.part === 'namespace') {
+        var parts = rich('capStart1', { path: q(L.PATH), a: q(L.TARGETS[0].share), b: q(L.TARGETS[1].share) });
+        if (!p.fsStUp) parts.push(' ', rich('capStart1Down', { fs: q('FS-ST') }));
+        return parts;
+      }
+      var p2 = rich('capStart2', { file: q(L.FILE), v1: ver(s, 'v1'), every: q(t.n('everyIn', p.replicateAfter / 60)) });
+      if (!p.linkUp) p2.push(' ', t('capStart2Down'));
+      return p2;
+    }
+    var m = lastMsg(s);
+    var cl = m.from && L.client(s, m.from);
+    switch (m.kind) {
+      case 'refReq': {
+        if (m.expired) {
+          var prev = c.prev && L.client(c.prev, m.from).cache[0];
+          return rich('capRefReqAgain', { n: n, time: q(hm(m.t)), user: q(userOf(m.from)), exp: q(hm(prev.expiresAt)), ns: q(m.to) });
+        }
+        return rich('capRefReq', { n: n, user: q(userOf(m.from)), path: q(L.PATH), ns: q(m.to) });
+      }
+      case 'referral': {
+        var out = rich('capReferral', { n: n, ns: q(m.from), first: q(m.targets[0]), second: q(m.targets[1]), ttl: q(secs(m.ttl)) });
+        var downs = m.targets.filter(function (x) { return !L.server(s, x).up; });
+        if (downs.length) out.push(' ', rich('capReferralDown', { fs: q(downs[0]) }));
+        return out;
+      }
+      case 'connect': {
+        var to = q(m.to);
+        if (!m.ok) return rich(m.attempt > 0 && !L.client(s, m.from).connectedTo ? 'capConnectNone' : 'capConnectFail', { n: n, fs: to });
+        if (m.how === 'next') return rich('capConnectNext', { n: n, fs: to });
+        if (m.how === 'stick') return rich('capConnectStick', { n: n, fs: to, first: q(cl.cache[0].targets[0]) });
+        if (m.how === 'failback') return rich('capConnectBack', { n: n, fs: to });
+        if (m.how === 'cached') return rich('capConnectCached', { n: n, fs: to, left: q(secs(L.left(cl.cache[0], s.t))) });
+        return rich('capConnect', { n: n, fs: to, share: q(m.share) });
+      }
+      case 'up': {
+        var who = L.client(s, 'CL-ST');
+        return rich('capUp', { n: n, time: q(hm(m.t)), fs: q(m.lane), cur: q(who.connectedTo), left: q(secs(L.left(who.cache[0], s.t))) });
+      }
+      case 'save': {
+        var sv = rich('capSave', { n: n, time: q(hm(m.t)), user: q(userOf(m.from)), file: q(L.FILE), fs: q(m.to), base: ver(s, m.base) });
+        if (p.linkUp) sv.push(' ', rich('capSaveNext', { t: q(hm(L.nextWindow(m.t, s.replication.lastWindow, p.replicateAfter))) }));
+        else sv.push(' ', t('capSaveDown'));
+        return sv;
+      }
+      case 'open': {
+        var other = m.to === 'FS-ZG' ? 'FS-ST' : 'FS-ZG';
+        if (m.final) {
+          var fin = rich('capFinal', { n: n, user: q(userOf(m.from)), file: q(L.FILE), fs: q(m.to), v: ver(s, m.version) });
+          var own = s.versions.ana;
+          if (L.server(s, 'FS-ZG').bin.indexOf('ana') >= 0) fin.push(' ', rich('capFinalLost', { time2: q(hm(own.mtime)) }));
+          else if (m.version !== 'ana' && L.ancestors(s.versions, m.version).indexOf('ana') >= 0) fin.push(' ', rich('capFinalKept', { base: ver(s, s.versions[m.version].base), time2: q(hm(own.mtime)) }));
+          else if (m.version === 'ana') fin.push(' ', t('capFinalOwn'));
+          var ofile = L.server(s, other).file;
+          if (ofile !== m.version) fin.push(' ', rich('capFinalDiffer', { other: q(other), ov: ver(s, ofile) }));
+          return fin;
+        }
+        var op = rich('capOpen', { n: n, time: q(hm(m.t)), user: q(userOf(m.from)), file: q(L.FILE), fs: q(m.to), v: ver(s, m.version) });
+        var otherFile = L.server(s, other).file;
+        if (otherFile !== m.version && L.ancestors(s.versions, otherFile).indexOf(m.version) >= 0) op.push(' ', rich('capOpenStale', { other: q(other) }));
+        else if (s.versions[m.version].server === other) op.push(' ', rich('capOpenFresh', { other: q(other) }));
+        return op;
+      }
+      case 'window':
+        if (m.blocked) return rich('capBlocked', { n: n, time: q(hm(m.t)) });
+        return rich('capWindow', { n: n, time: q(hm(m.t)) }).concat([' ', t.n('capWindowCount', m.count)]);
+      case 'repl': {
+        var vars = { n: n, from: q(m.from), to: q(m.to), v: ver(s, m.version), local: ver(s, m.local) };
+        if (m.result === 'replace') return rich('capReplReplace', vars);
+        if (m.result === 'same' || m.result === 'older') return rich('capReplSame', vars);
+        var I = s.versions[m.version], Lv = s.versions[m.local];
+        var res;
+        if (I.mtime === Lv.mtime) {
+          // equal save times: the model's tie-break, said as such (SPEC rule 7)
+          vars.win = ver(s, m.result === 'conflict-in' ? m.version : m.local);
+          res = rich('capReplTie', vars);
+          if (m.result === 'conflict-in') res.push(' ', rich('capTieBin', { local: ver(s, m.local), to: q(m.to) }));
+          return res;
+        }
+        if (m.result === 'conflict-local') {
+          vars.base = ver(s, I.base);
+          res = rich('capReplLocal', vars);
+        } else {
+          vars.time2 = q(hm(I.mtime));
+          res = rich('capReplIn', vars);
+        }
+        return res;
+      }
+      case 'log':
+        return rich('capLog', { n: n, fs: q(m.lane), v: ver(s, m.loser) });
+      default:
+        return '';
+    }
+  }
+
+  var part1 = function (p) { return p.part === 'namespace'; };
+  var part2 = function (p) { return p.part === 'replication'; };
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'part', type: 'choice', label: t('part'), resets: true, options: [['namespace', t('partNs')], ['replication', t('partRepl')]] },
+      { key: 'fsStUp', type: 'toggle', label: t('fsStUp'), hint: t('fsStUpHint'), resets: true, visible: part1 },
+      { key: 'failback', type: 'toggle', label: t('failback'), hint: t('failbackHint'), visible: part1 },
+      { key: 'linkUp', type: 'toggle', label: t('linkUpLabel'), resets: true, visible: part2 },
+      { key: 'secondEditDelay', type: 'choice', label: t('delay'), resets: true, options: [[120, t('delay2')], [1200, t('delay20')]], visible: part2 },
+      { key: 'replicateAfter', type: 'choice', label: t('replicateAfter'), resets: true, options: [[60, t('every1')], [900, t('every15')]], visible: part2 }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = { referral: 'presetReferral', failover: 'presetFailover', conflict: 'presetConflict', 'no-conflict': 'presetNoConflict' }[pr.id];
+      return { id: pr.id, label: t(w), hint: t(w + 'Hint'), params: pr.params };
+    }),
+
+    legend: [
+      { shape: 'dot', label: t('legendReferral') },
+      { shape: 'line', label: t('legendSmb') },
+      { shape: 'double', label: t('legendRepl') },
+      { shape: 'ring', label: t('legendOwn') },
+      { shape: 'card', label: t('legendCard') },
+      { shape: 'lost', label: t('legendLoser') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var chart = renderChart(c);
+      c.stage.replaceChildren(h('div', { class: 'df' }, chart, renderCards(c)));
+      chart.fit();
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
