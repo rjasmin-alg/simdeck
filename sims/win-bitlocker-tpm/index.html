@@ -1,0 +1,454 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- win-bitlocker-tpm: a stepper. Above, the boot chain as five stage boxes (what each measures into which PCR, filled
+     once measured). Below, left: the TPM with PCR 0, 2, 4, 7, 11 (8-hex toy values, a ring on the profile's PCRs) and
+     the settings of this boot against seal time; right: the sealed VMK with its lock and the compare table, and the
+     screen (Windows starts, or the recovery key prompt).
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="win-bitlocker-tpm">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BitLocker i TPM · simdeck</title>
+<meta name="description" content="Svaki dio podizanja izmjeri se u registar TPM-a; ključ se otpušta samo ako se registri iz profila poklapaju. Secure Boot, firmver, suspenzija i drugo računalo.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "win-bitlocker-tpm",
+  "title": {
+    "hr": "BitLocker i TPM",
+    "en": "BitLocker and the TPM"
+  },
+  "concept": {
+    "hr": "Mjerenja u registre PCR i što izaziva traženje ključa za oporavak",
+    "en": "PCR measurements, and what triggers the recovery key"
+  },
+  "summary": {
+    "hr": "Svaki dio podizanja izmjeri se u registar TPM-a; ključ se otpušta samo ako se registri iz profila poklapaju. Secure Boot, firmver, suspenzija i drugo računalo.",
+    "en": "Each boot stage is measured into a TPM register; the key is released only if the profile's registers match. Secure Boot, firmware, suspend, another PC."
+  },
+  "tags": [
+    "boot"
+  ],
+  "class": "stepper",
+  "steps": 6
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="win-bitlocker-tpm"]; colours only from kit tokens. */
+[data-sim="win-bitlocker-tpm"] .bl {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1.2cqh;
+  height: 100%;
+  padding: 1.4cqh 1.2cqw;
+  font-size: 1.05rem;
+}
+[data-sim="win-bitlocker-tpm"] .bl h2,
+[data-sim="win-bitlocker-tpm"] .bl h3 { margin: 0; font-size: 1em; font-weight: 700; }
+[data-sim="win-bitlocker-tpm"] .bl small { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+[data-sim="win-bitlocker-tpm"] .bl-mono { font-family: var(--mono); }
+[data-sim="win-bitlocker-tpm"] .bl-box {
+  padding: 0.4rem 0.7rem 0.5rem;
+  border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--panel);
+  min-width: 0;
+}
+[data-sim="win-bitlocker-tpm"] .bl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; margin-bottom: 0.25rem; }
+
+/* the chain */
+[data-sim="win-bitlocker-tpm"] .bl-chain { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.9rem; }
+[data-sim="win-bitlocker-tpm"] .bl-st {
+  position: relative; display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.35rem 0.55rem 0.4rem; border: var(--line-w) solid var(--line); border-radius: var(--radius); background: var(--bg);
+  min-width: 0;
+}
+[data-sim="win-bitlocker-tpm"] .bl-st + .bl-st::before {
+  content: '→'; position: absolute; left: -0.95rem; top: 50%; transform: translateY(-50%); font-weight: 700; color: var(--ink);
+}
+[data-sim="win-bitlocker-tpm"] .bl-st[data-st="wait"], [data-sim="win-bitlocker-tpm"] .bl-st[data-st="off"] { border-style: dashed; color: var(--muted); }
+[data-sim="win-bitlocker-tpm"] .bl-st[data-st="never"] {
+  border-style: dashed; color: var(--muted);
+  background-image: repeating-linear-gradient(45deg, transparent 0 0.35em, color-mix(in srgb, var(--ink) 14%, transparent) 0.35em 0.5em);
+}
+[data-sim="win-bitlocker-tpm"] .bl-st.sd-fill { background: var(--c1); border-color: var(--c1); color: var(--on-series); }
+[data-sim="win-bitlocker-tpm"] .bl-st.sd-fill small { color: var(--on-series); }
+[data-sim="win-bitlocker-tpm"] .bl-st-name { display: flex; align-items: baseline; gap: 0.4rem; font-weight: 700; line-height: 1.15; }
+[data-sim="win-bitlocker-tpm"] .bl-st-no { font-family: var(--mono); }
+[data-sim="win-bitlocker-tpm"] .bl-st-m { font-size: var(--fs-sm); line-height: 1.25; }
+[data-sim="win-bitlocker-tpm"] .bl-st-label { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+[data-sim="win-bitlocker-tpm"] .bl-st-mark { font-size: var(--fs-sm); font-weight: 700; margin-top: auto; }
+
+/* the lower part */
+[data-sim="win-bitlocker-tpm"] .bl-low { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; min-height: 0; }
+[data-sim="win-bitlocker-tpm"] .bl-col { display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
+
+/* tables */
+[data-sim="win-bitlocker-tpm"] .bl-tab { width: 100%; border-collapse: separate; border-spacing: 0 0.18rem; }
+[data-sim="win-bitlocker-tpm"] .bl-tab th { text-align: left; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); padding: 0 0.4rem; }
+[data-sim="win-bitlocker-tpm"] .bl-tab td { padding: 0.05rem 0.4rem; background: var(--bg); border-top: var(--line-w) solid transparent; border-bottom: var(--line-w) solid transparent; }
+[data-sim="win-bitlocker-tpm"] .bl-tab td:first-child { border-left: var(--line-w) solid transparent; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+[data-sim="win-bitlocker-tpm"] .bl-tab td:last-child { border-right: var(--line-w) solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+[data-sim="win-bitlocker-tpm"] .bl-tab tr.bl-bad td { border-color: var(--danger); }
+[data-sim="win-bitlocker-tpm"] .bl-tab tr.bl-bad td:not(:first-child):not(:last-child) { border-left-color: transparent; border-right-color: transparent; }
+[data-sim="win-bitlocker-tpm"] .bl-tab .bl-val { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+[data-sim="win-bitlocker-tpm"] .bl-tab .bl-val.sd-hl { padding: 0 0.25rem; }
+[data-sim="win-bitlocker-tpm"] .bl-tab .bl-null { color: var(--muted); font-weight: 400; }
+
+/* PCR name with the profile ring */
+[data-sim="win-bitlocker-tpm"] .bl-pcr {
+  display: inline-block; padding: 0 0.45rem; border: 0.2rem solid transparent; border-radius: 999px; font-weight: 700; white-space: nowrap;
+}
+[data-sim="win-bitlocker-tpm"] .bl-pcr[data-ring] { border-color: var(--ink); }
+[data-sim="win-bitlocker-tpm"] .bl-yes, [data-sim="win-bitlocker-tpm"] .bl-no { font-weight: 700; white-space: nowrap; }
+[data-sim="win-bitlocker-tpm"] .bl-no { color: var(--danger); }
+
+/* the lock */
+[data-sim="win-bitlocker-tpm"] .bl-state { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; margin-top: 0.3rem; font-weight: 700; }
+[data-sim="win-bitlocker-tpm"] .bl-state small { flex-basis: 100%; }
+[data-sim="win-bitlocker-tpm"] .bl-lock,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape^="bl-lock"] {
+  position: relative; display: inline-block; width: 1.1em; height: 1.25em; flex: none; box-sizing: border-box;
+  border: 0; border-radius: 0; background: transparent; color: var(--ink); vertical-align: -0.2em;
+}
+[data-sim="win-bitlocker-tpm"] .bl-lock::before, [data-sim="win-bitlocker-tpm"] .bl-lock::after,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape^="bl-lock"]::before,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape^="bl-lock"]::after { content: ''; position: absolute; box-sizing: border-box; }
+[data-sim="win-bitlocker-tpm"] .bl-lock::before,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape^="bl-lock"]::before {
+  left: 0.2em; top: 0; width: 0.7em; height: 0.75em; border: 0.15em solid currentColor; border-bottom: 0; border-radius: 0.35em 0.35em 0 0;
+}
+[data-sim="win-bitlocker-tpm"] .bl-lock::after,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape^="bl-lock"]::after {
+  left: 0; bottom: 0; width: 1.1em; height: 0.65em; background: currentColor; border-radius: 0.12em;
+}
+[data-sim="win-bitlocker-tpm"] .bl-lock[data-open]::before,
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape="bl-lock-open"]::before { left: 0.55em; top: -0.25em; }
+[data-sim="win-bitlocker-tpm"] .bl-lock[data-wait]::after { background: transparent; border: 0.15em dashed currentColor; }
+/* mismatch: a cross in a red outline */
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape="bl-bad"] { position: relative; background: var(--bg); border: 0.2rem solid var(--danger); }
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape="bl-bad"]::after {
+  content: '✕'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.75em; font-weight: 700; color: var(--danger); line-height: 1;
+}
+[data-sim="win-bitlocker-tpm"] .sd-swatch[data-shape="bl-ring"] { background: var(--bg); border: 0.2rem solid var(--ink); border-radius: 999px; width: 1.6rem; }
+
+/* settings */
+[data-sim="win-bitlocker-tpm"] .bl-diff { padding: 0 0.4rem; border: 0.2rem solid var(--ink); border-radius: var(--radius-sm); font-weight: 700; }
+
+/* the screen */
+[data-sim="win-bitlocker-tpm"] .bl-screen {
+  display: flex; flex-direction: column; justify-content: center; gap: 0.3rem; flex: 1 1 auto; min-height: 6rem;
+  padding: 0.5rem 0.8rem; border-radius: var(--radius); background: var(--ink); color: var(--bg);
+}
+[data-sim="win-bitlocker-tpm"] .bl-screen[data-k="recovery"] { border: 0.3rem solid var(--danger); }
+[data-sim="win-bitlocker-tpm"] .bl-screen b { font-size: 1.1em; }
+[data-sim="win-bitlocker-tpm"] .bl-digits { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 0.3rem 0.8rem; font-family: var(--mono); }
+[data-sim="win-bitlocker-tpm"] .bl-screen small { color: var(--bg); }
+
+/* Phone and portrait: the stage grows with its content; one column. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="win-bitlocker-tpm"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="win-bitlocker-tpm"] .bl { height: auto; padding: 0.5rem; gap: 0.8rem; font-size: 1rem; }
+  [data-sim="win-bitlocker-tpm"] .bl-chain { grid-template-columns: minmax(0, 1fr); gap: 0.4rem; }
+  [data-sim="win-bitlocker-tpm"] .bl-st + .bl-st::before { content: none; }
+  [data-sim="win-bitlocker-tpm"] .bl-low { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="win-bitlocker-tpm"] .bl-tab { font-size: var(--fs-sm); }
+  [data-sim="win-bitlocker-tpm"] .bl-tab td, [data-sim="win-bitlocker-tpm"] .bl-tab th { padding: 0 0.15rem; }
+  [data-sim="win-bitlocker-tpm"] .bl-pcr { padding: 0 0.25rem; }
+  [data-sim="win-bitlocker-tpm"] .bl-yes, [data-sim="win-bitlocker-tpm"] .bl-no { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">BitLocker i TPM</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  var PRESET_WORDS = { normal: 'presetNormal', 'secure-boot-off': 'presetSbOff', 'firmware-update': 'presetFw',
+    suspended: 'presetSusp', 'disk-moved': 'presetMoved' };
+  var SUB = { firmware: null, secureboot: 'sub_secureboot', bootmgr: null, bitlocker: 'sub_bitlocker', winload: 'sub_winload' };
+
+  /** Data (hex values, measurement labels, versions, machine names) is not language: the word check skips translate="no". */
+  function data(text, cls) { return h('span', { translate: 'no', class: cls || null }, String(text)); }
+  /** *English term* → <em lang="en"> (the Croatian term rule); takes a string or t.parts output. */
+  function rich(parts) {
+    var out = [];
+    (Array.isArray(parts) ? parts : [parts]).forEach(function (p) {
+      var s = typeof p === 'string' ? p : p && p.nodeType === 3 ? p.textContent : null;
+      if (s === null) { out.push(p); return; }
+      s.split(/\*([^*]+)\*/).forEach(function (bit, i) { if (bit) out.push(i % 2 ? h('em', { lang: 'en' }, bit) : bit); });
+    });
+    return out;
+  }
+  function T(key, vars) { return rich(t(key, vars)); }
+  function short(hex) { return hex ? hex.slice(0, 8) : null; }
+  function list(nums) {
+    if (nums.length < 2) return nums.join('');
+    return nums.slice(0, -1).join(', ') + t('and') + nums[nums.length - 1];
+  }
+  function pcrName(i, ring) {
+    return h('span', { class: 'bl-pcr', dataset: ring ? { ring: '1' } : {} }, t('pcr'), ' ', data(i));
+  }
+  function lock(kind) {
+    var ds = {};
+    if (kind === 'open') ds.open = '1';
+    if (kind === 'wait') ds.wait = '1';
+    return h('span', { class: 'bl-lock', dataset: ds, 'aria-hidden': 'true' });
+  }
+
+  // ── the chain ──
+
+  function stageBox(c, st, i) {
+    var s = c.state;
+    var state = !s.power ? 'off' : s.done.indexOf(st.id) >= 0 ? (s.changed === st.id ? 'now' : 'done')
+      : (s.recovery && st.id === 'winload') ? 'never' : 'wait';
+    var measured = state === 'now' || state === 'done';
+    var cls = 'bl-st' + (measured ? ' sd-fill' : '') + (state === 'now' ? ' sd-changed' + (c.dir === 'forward' ? ' sd-anim-in' : '') : '');
+    var into;
+    if (st.measures.length) into = [t('measuresInto'), ' ', t('pcr'), ' ', data(st.measures.map(function (m) { return m.pcr; }).join(', '))];
+    else if (st.id === 'bitlocker') into = [t('capsInto'), ' ', t('pcr'), ' ', data('11')];
+    else into = [t('measuresNone')];
+    var labels = st.measures.map(function (m) { return m.label; });
+    if (st.id === 'bitlocker' && s.capped) labels = [L.CAP];
+    var mark = { off: '– ' + t('mOff'), wait: '· ' + t('mWait'), now: '▶ ' + t(st.measures.length ? 'mNow' : 'mRun'), done: '✓ ' + t('mDone'), never: '✕ ' + t('mNever') }[state];
+    if (st.id === 'secureboot' && measured && !s.settings.secureBoot) mark = '✓ ' + t('mNoCheck');      // measured, signature not checked
+    if (st.id === 'bitlocker' && measured && s.unlocked === false) mark = '✕ ' + t('lockHeld');
+    var sub = SUB[st.id];
+    return h('div', { class: cls, dataset: { st: state, c: '1' } },
+      h('div', { class: 'bl-st-name' }, data(i + 1, 'bl-st-no'), h('span', null, t('st_' + st.id))),
+      sub ? h('small', null, T(sub)) : null,
+      h('div', { class: 'bl-st-m' }, into),
+      measured && labels.length ? h('div', { class: 'bl-st-label' }, data(labels.join(' · '))) : null,
+      h('div', { class: 'bl-st-mark' }, mark));
+  }
+
+  // ── the TPM ──
+
+  function renderTpm(c) {
+    var s = c.state, prof = s.sealed.profile;
+    return h('div', { class: 'bl-box' },
+      h('div', { class: 'bl-head' }, h('h3', null, t('tpmTitle')), h('small', null, t.parts('tpmOf', { m: data(s.settings.board) }))),
+      h('table', { class: 'bl-tab' },
+        h('tbody', null, L.PCRS.map(function (i) {
+          var v = s.pcr[i], ext = s.extended.indexOf(i) >= 0;
+          return h('tr', null,
+            h('td', null, pcrName(i, prof.indexOf(i) >= 0)),
+            h('td', null, T('pcrWhat' + i)),
+            h('td', null, v === null ? h('span', { class: 'bl-val bl-null' }, t('pcrOff'))
+              : h('span', { class: 'bl-val' + (ext ? ' sd-hl' : '') }, data(short(v)))));
+        }))));
+  }
+
+  // ── the seal ──
+
+  function renderSeal(c) {
+    var s = c.state, cmp = s.compare, prev = c.prev;
+    var rows = s.sealed.profile.map(function (i) {
+      var now = cmp ? cmp.pcr[i].now : s.pcr[i];
+      // the clear key skipped the TPM: show the would-be result until the reseal, then nothing (no TPM check ran)
+      var match = !cmp || s.resealed ? null : cmp.pcr[i].match;
+      var resealed = prev && prev.sealed.values[i] !== s.sealed.values[i];
+      return h('tr', { class: match === false ? 'bl-bad' : null },
+        h('td', null, pcrName(i, true)),
+        h('td', null, h('span', { class: 'bl-val' + (resealed ? ' sd-hl' : '') }, data(short(s.sealed.values[i])))),
+        h('td', null, now === null ? h('span', { class: 'bl-val bl-null' }, '–') : h('span', { class: 'bl-val' }, data(short(now)))),
+        h('td', null, match === null ? '' : match ? h('span', { class: 'bl-yes' }, '✓ ', t('matchYes')) : h('span', { class: 'bl-no' }, '✕ ', t('matchNo'))));
+    });
+    var tpmNow = s.settings.sameTpm ? 'A' : 'B';
+    var tpmOk = cmp && !s.resealed ? cmp.sameTpm : null;
+    var tpmMoved = prev && prev.sealed.tpm !== s.sealed.tpm;
+    rows.push(h('tr', { class: tpmOk === false ? 'bl-bad' : null },
+      h('td', null, h('span', { class: 'bl-pcr' }, t('tpmRow'))),
+      h('td', null, h('span', { class: 'bl-val' + (tpmMoved ? ' sd-hl' : '') }, data(s.sealed.tpm))),
+      h('td', null, s.power ? h('span', { class: 'bl-val' }, data(tpmNow)) : h('span', { class: 'bl-val bl-null' }, '–')),
+      h('td', null, tpmOk === null ? '' : tpmOk ? h('span', { class: 'bl-yes' }, '✓ ', t('tpmSame')) : h('span', { class: 'bl-no' }, '✕ ', t('tpmOther')))));
+
+    var kind = s.unlocked === true ? 'open' : s.unlocked === false ? 'held' : 'wait';
+    var notes = [];
+    if (s.how === 'tpm') notes.push(t('byTpm'));
+    if (s.how === 'clearKey') notes.push(t('byClear'));
+    else if (s.suspended) notes.push(t('clearKeyOnDisk'));
+    if (s.resealed) notes.push(t('resealedNote'));
+    return h('div', { class: 'bl-box' },
+      h('div', { class: 'bl-head' }, h('h3', null, t('sealTitle')),
+        h('small', null, t.parts('sealProfile', { list: data(s.sealed.profile.join(', ')), m: data(s.sealed.tpm) }))),
+      h('table', { class: 'bl-tab' },
+        h('thead', null, h('tr', null, h('th', null, t('colPcr')), h('th', null, t('colSealed')), h('th', null, t(cmp ? 'colAtCompare' : 'colNow')),
+          h('th', null, s.how === 'clearKey' ? t('ignored') : t('colMatch')))),
+        h('tbody', null, rows)),
+      h('div', { class: 'bl-state' + (s.compare && c.n === 5 ? ' sd-anim-in' : '') },
+        lock(kind), h('span', null, t(kind === 'open' ? 'lockReleased' : kind === 'held' ? 'lockHeld' : 'lockWaiting')),
+        notes.length ? h('small', null, notes.join(' · ')) : null));
+  }
+
+  // ── settings and the screen ──
+
+  function renderSettings(c) {
+    var s = c.state, a = L.SEAL_SETTINGS, b = s.settings;
+    function onOff(v) { return t(v ? 'vOn' : 'vOff'); }
+    var rows = [
+      ['setFirmware', data(a.board + ' ' + a.firmware), data(b.board + ' ' + b.firmware), a.board + a.firmware !== b.board + b.firmware],
+      ['setSecureBoot', onOff(a.secureBoot), onOff(b.secureBoot), a.secureBoot !== b.secureBoot],
+      ['setBootmgr', data(a.bootManager), data(b.bootManager), a.bootManager !== b.bootManager],
+      ['setMachine', data(a.board), data(b.board), a.board !== b.board],
+      ['setBitlocker', t('vActive'), t(s.suspended ? 'vSuspended' : 'vActive'), s.suspended]
+    ];
+    return h('div', { class: 'bl-box' },
+      h('div', { class: 'bl-head' }, h('h3', null, t('setTitle'))),
+      h('table', { class: 'bl-tab' },
+        h('thead', null, h('tr', null, h('th'), h('th', null, t('setAtSeal')), h('th', null, t('setNow')))),
+        h('tbody', null, rows.map(function (r) {
+          return h('tr', null, h('td', null, T(r[0])), h('td', null, r[1]),
+            h('td', null, h('span', { class: r[3] ? 'bl-diff' : null }, r[2])));
+        }))));
+  }
+
+  function renderScreen(c) {
+    var s = c.state, body, k = 'plain';
+    if (!s.power) body = h('span', null, t('scrOff'));
+    else if (s.recovery) {
+      k = 'recovery';
+      var groups = [];
+      for (var g = 0; g < 8; g++) groups.push(data('______'));
+      body = [h('b', null, t('scrRecTitle')), h('span', null, t('scrRecAsk')), h('div', { class: 'bl-digits' }, groups),
+        h('small', null, t('scrRecWhere'))];
+    } else if (s.done.indexOf('winload') >= 0) body = h('b', null, t('scrWindows'));
+    else body = h('span', null, t('scrBooting'));
+    return h('div', { class: 'bl-box', style: { display: 'flex', flexDirection: 'column', flex: '1 1 auto' } },
+      h('div', { class: 'bl-head' }, h('h3', null, t('scrTitle'))),
+      h('div', { class: 'bl-screen' + (s.recovery && c.dir === 'forward' ? ' sd-anim-in' : ''), dataset: { k: k } }, body));
+  }
+
+  // ── captions ──
+
+  /** PCRs not in the profile whose value at the unlock moment differs from a seal-time boot (rule 5). */
+  function outside(s) {
+    if (!s.atUnlock) return [];
+    var ref = L.pcrsAtUnlock(L.SEAL_SETTINGS);
+    return L.PCRS.filter(function (i) { return s.sealed.profile.indexOf(i) < 0 && s.atUnlock[i] !== ref[i]; });
+  }
+  function bad(s) { return s.sealed.profile.filter(function (i) { return !s.compare.pcr[i].match; }); }
+
+  function caption(c) {
+    var s = c.state, n = c.n, out = [];
+    function add(key, vars) { out = out.concat(T(key, vars)); }
+    function addN(key, k, vars) { out = out.concat(rich(t.n(key, k, vars))); }
+    if (n === 0) { add('capStart', { list: list(s.sealed.profile) }); if (s.suspended) add('capStartSusp'); return out; }
+    if (n === 1) { add('capPower'); return out; }
+    if (n === 2) {
+      add('capFirmware');
+      if (!s.settings.sameTpm) add('capFirmwareOther');
+      else if (s.settings.firmware !== L.SEAL_SETTINGS.firmware) add('capFirmwareDiff');
+      return out;
+    }
+    if (n === 3) { add(s.settings.secureBoot ? 'capSecureOn' : 'capSecureOff'); return out; }
+    if (n === 4) { add('capBootmgr'); if (s.settings.bootManager !== L.SEAL_SETTINGS.bootManager) add('capBootmgrNew'); return out; }
+    if (n === 5) {
+      var b = bad(s);
+      if (s.how === 'clearKey') {
+        add('capClear');
+        if (b.length) addN('capClearWould', b.length, { list: list(b) });
+        if (!s.compare.sameTpm) add('capClearOther');
+      } else if (!s.compare.sameTpm) add('capOtherTpm');
+      else if (b.length) addN('capMismatch', b.length, { list: list(b) });
+      else {
+        add('capUnlock', { list: list(s.sealed.profile) });
+        var o = outside(s);
+        if (o.length) addN('capOutside', o.length, { list: list(o) });
+      }
+      return out;
+    }
+    if (s.recovery) { add('capRecovery'); return out; }
+    add('capWindows');
+    if (s.resealed) add('capResealed');
+    return out;
+  }
+
+  Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+
+    params: [
+      { key: 'profile', type: 'choice', label: t('pProfile'), options: [['7,11', '7, 11'], ['0,2,4,11', '0, 2, 4, 11']] },
+      { key: 'secureBoot', type: 'toggle', label: t('pSecureBoot') },
+      { key: 'firmwareUpdate', type: 'toggle', label: t('pFirmwareUpdate') },
+      { key: 'bootManager', type: 'choice', label: t('pBootManager'), options: [['original', t('optOriginal')], ['changed', t('optChanged')]] },
+      { key: 'suspend', type: 'toggle', label: t('pSuspend') },
+      { key: 'otherMachine', type: 'toggle', label: t('pOtherMachine') }
+    ],
+
+    presets: L.presets.map(function (pr) {
+      var w = PRESET_WORDS[pr.id];
+      return { id: pr.id, label: t(w), params: pr.params, hint: t(w + 'Hint') };
+    }),
+
+    legend: [
+      { c: 1, label: t('legMeasured') },
+      { shape: 'bl-ring', label: t('legProfile') },
+      { shape: 'bl-bad', label: t('legMismatch') },
+      { shape: 'bl-lock-open', label: t('legReleased') },
+      { shape: 'bl-lock', label: t('legHeld') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+
+    render: function (c) {
+      var stages = L.stagesOf(c.state.settings);
+      c.stage.replaceChildren(h('div', { class: 'bl' },
+        h('div', { class: 'bl-chain', 'aria-label': t('chainTitle') }, stages.map(function (st, i) { return stageBox(c, st, i); })),
+        h('div', { class: 'bl-low' },
+          h('div', { class: 'bl-col' }, renderTpm(c), renderSettings(c)),
+          h('div', { class: 'bl-col' }, renderSeal(c), renderScreen(c)))));
+    },
+
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
