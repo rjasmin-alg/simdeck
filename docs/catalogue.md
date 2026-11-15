@@ -327,7 +327,7 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 
 <!-- status:begin (tools/catalogue/status.py) -->
 
-**Status, 2026-11-14** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **422 of 496 entries are live**, 64 w3, 5 not adopted, 3 w3 · held, 2 w1 · held.
+**Status, 2026-11-15** (the Status column after each ID; `python3 tools/catalogue/status.py` rewrites it): **437 of 496 entries are live**, 28 w3, 21 w3 · queued, 5 not adopted, 3 w3 · held, 2 w1 · held.
 
 | Area | Entries | Live | To build (wave) |
 |---|---|---:|---|
@@ -336,22 +336,22 @@ ratings. Re-rank by filling in Int; the ranking page does the sorting.
 | §2.3 ossimulator → import the built pages (16 pages and the map) | 17 | 17 | – |
 | §2.4 Larger apps → port | 5 | 3 | – |
 | §2.5 50ohm applets → port (29 applets, CC BY 4.0; 3 maps not adopted) | 32 | 29 | – |
-| §4.1 Networking basics and LAN protocols | 52 | 48 | 1 w3, 3 w3 · held |
-| §4.2 Internet and application protocols | 30 | 24 | 6 w3 |
+| §4.1 Networking basics and LAN protocols | 52 | 49 | 3 w3 · held |
+| §4.2 Internet and application protocols | 30 | 24 | 6 w3 · queued |
 | §4.3 Security and cryptography | 17 | 15 | 2 w3 |
 | §4.4 Linux | 55 | 55 | – |
 | §4.5.1 Active Directory | 21 | 21 | – |
-| §4.5.2 Group Policy | 9 | 4 | 5 w3 |
-| §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 |
-| §4.5.4 DHCP on Windows Server | 6 | 3 | 3 w3 |
-| §4.5.5 IPAM | 5 | 3 | 2 w3 |
-| §4.5.6 WSUS and updates | 7 | 5 | 2 w3 |
-| §4.5.7 Files, identity and the rest | 18 | 8 | 10 w3 |
+| §4.5.2 Group Policy | 9 | 9 | – |
+| §4.5.3 DNS on Windows Server | 7 | 6 | 1 w3 · queued |
+| §4.5.4 DHCP on Windows Server | 6 | 3 | 3 w3 · queued |
+| §4.5.5 IPAM | 5 | 3 | 2 w3 · queued |
+| §4.5.6 WSUS and updates | 7 | 5 | 2 w3 · queued |
+| §4.5.7 Files, identity and the rest | 18 | 12 | 6 w3 · queued |
 | §4.6 Storage, backup and disaster recovery | 22 | 20 | 2 w3 |
 | §4.7 High availability and distributed systems | 13 | 8 | 5 w3 |
 | §4.8 Performance and capacity | 10 | 7 | 3 w3 |
-| §4.9 Computer architecture, OS gaps and automata | 8 | 3 | 5 w3 |
-| §4.10 Radio and crisis communications | 17 | 13 | 4 w3 |
+| §4.9 Computer architecture, OS gaps and automata | 8 | 8 | – |
+| §4.10 Radio and crisis communications | 17 | 13 | 3 w3, 1 w3 · queued |
 | §4.11 Reference posters and classroom tools | 6 | 6 | – |
 | §4.12 Finance basics for IT managers | 20 | 20 | – |
 | §4.13 Compliance and procedures for IT managers | 23 | 23 | – |
@@ -488,7 +488,7 @@ decides the final grouping axes (§7.1).
 | `net-qos-queues` | live | QoS queues | priority queue vs weighted fair queuing, tail drop | set traffic mix and queue weights | expl | M | P3 | URM, NLA |  |  |
 | `net-multicast-igmp` | live | Multicast and IGMP | joins, IGMP snooping keeps the stream off other ports | hosts join and leave a group | step | M | P3 | URM, NLA |  |  |
 | `net-packet-journey` | live | The whole journey: from URL to page | DNS, ARP, TCP, TLS, HTTP in order, across the real path | step the capstone, open each part's own simulator | step | L | P2 | URM | URM card ch16-put-podataka-detaljno → §5.9 |  |
-| `net-poe-budget` | w3 | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
+| `net-poe-budget` | live | PoE power budget | class per device vs switch budget | add devices to a switch | expl | S | P3 | URM |  |  |
 
 ### 4.2 Internet and application protocols
 
@@ -499,8 +499,8 @@ decides the final grouping axes (§7.1).
 | `inet-dns-records` | live | DNS record types | A/AAAA/CNAME/MX/TXT/NS resolve differently; no CNAME at the apex | build a small zone, query it | expl | S | P2 | UL, URM, WIN1 | UL ch19 |  |
 | `inet-dns-secondary-expiry` | live | A secondary is a cache with a timer | SOA serial, refresh, retry, expire; a dead primary takes the zone down later | kill the primary, run time | step | S | P2 | UL, DR | DR S6 (student timeline); DR caveat CV-02 → §5.4 |  |
 | `inet-dns-split-brain` | live in `dns-secondary-expiry` | Two primaries are two zones | split-brain primaries answer differently | edit one primary, query both | step | S | P3 | DR | DR caveat CV-01 |  |
-| `inet-dnssec-chain` | w3 | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC |  |  |
-| `inet-dns-poisoning` | w3 | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC |  |  |
+| `inet-dnssec-chain` | w3 · queued | DNSSEC chain of trust | DS → DNSKEY → RRSIG from the root down | step validation; break a signature | step | M | P3 | UL, SEC |  |  |
+| `inet-dns-poisoning` | w3 · queued | DNS cache poisoning | forged answers race the real one; TXID and port randomisation | step the race at different entropy | step | M | P3 | SEC |  |  |
 | `inet-http-exchange` | live | One HTTP exchange | request line, headers, status codes, body | send requests, read responses | step | S | P2 | URM, UL | URM ch14 |  |
 | `inet-http-versions` | live | HTTP/1.1 vs HTTP/2 vs HTTP/3 | multiplexing, and head-of-line blocking at TCP vs QUIC | load a page with loss on each version | expl | M | P2 | URM |  |  |
 | `inet-http-caching` | live | HTTP caching | Cache-Control, ETag, 304, what a CDN edge keeps | request repeatedly, change headers | step | S | P2 | URM, UL |  |  |
@@ -513,17 +513,17 @@ decides the final grouping axes (§7.1).
 | `inet-acme-renewal` | live in `cert-chain` | ACME certificate renewal | HTTP-01 vs DNS-01 challenge, 90-day automation | step a renewal; break port 80 | step | S | P3 | UL |  |  |
 | `inet-email-path` | live | The path of an e-mail | MUA → MSA → MTA → MDA → IMAP; envelope vs header | send a mail across two domains | step | M | P2 | UL, URM | UL ch20, URM card ch14 (mail send vs fetch) |  |
 | `inet-email-auth` | live | SPF, DKIM and DMARC | three checks, alignment, and the DMARC verdict | send legitimate, forwarded and spoofed mails | step | M | P1 | UL, SEC | UL ch20 |  |
-| `inet-smtp-dialogue` | w3 | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL |  |  |
-| `inet-ftp-active-passive` | w3 | Active vs passive FTP | the second connection and why NAT breaks active mode | connect through NAT in both modes | step | S | P3 | URM | URM ch14 |  |
+| `inet-smtp-dialogue` | w3 · queued | An SMTP session | HELO/MAIL FROM/RCPT TO/DATA and reply codes | type commands, read replies | step | S | P3 | UL |  |  |
+| `inet-ftp-active-passive` | w3 · queued | Active vs passive FTP | the second connection and why NAT breaks active mode | connect through NAT in both modes | step | S | P3 | URM | URM ch14 |  |
 | `inet-ssh-key-auth` | live | SSH host and user keys | known_hosts, key auth vs password, the first-connection warning | connect, change the host key, add a key | step | S | P2 | UL | UL ch15 |  |
 | `inet-ssh-tunnels` | live | SSH port forwarding | local, remote and dynamic forwarding | build each tunnel, send traffic | step | S | P2 | UL, NLA |  |  |
 | `inet-ntp-sync` | live | NTP offset and delay | four timestamps give offset and delay; stratum | step an exchange with asymmetric delay | step | S | P2 | UL | UL ch18 |  |
 | `inet-bgp-path-selection` | live | BGP path selection | AS path, local preference, prefix propagation between ASes | step announcements across a small internet | step | M | P2 | NLA, URM | NLA T10 → §5.11 |  |
 | `inet-bgp-hijack` | live | BGP hijack and RPKI | a more-specific prefix wins; route origin validation | announce a hijack, then turn on ROV | step | M | P2 | NLA, SEC |  |  |
-| `inet-peering-transit` | w3 | Transit vs peering | who pays whom, tier-1, IXPs | connect networks, follow the money and the traffic | expl | S | P3 | URM |  |  |
+| `inet-peering-transit` | w3 · queued | Transit vs peering | who pays whom, tier-1, IXPs | connect networks, follow the money and the traffic | expl | S | P3 | URM |  |  |
 | `inet-ddos-amplification` | live | DRDoS amplification | spoofed small requests become large replies at the victim | pick protocols, see the amplification factor | expl | S | P2 | URM, SEC | URM card ch18 (DRDoS) |  |
 | `inet-oauth-flow` | live | OAuth 2.0 / OIDC authorization code flow | who sees what: browser, app, identity provider | step a login with a third-party IdP | step | M | P3 | SEC |  |  |
-| `inet-websocket` | w3 | WebSocket upgrade | from HTTP request to a persistent two-way channel | step the upgrade, then push messages | step | S | P3 | URM |  |  |
+| `inet-websocket` | w3 · queued | WebSocket upgrade | from HTTP request to a persistent two-way channel | step the upgrade, then push messages | step | S | P3 | URM |  |  |
 
 ### 4.3 Security and cryptography
 
@@ -650,12 +650,12 @@ instead of repeating them.
 | `win-gpo-precedence` | live | GPO precedence | local → site → domain → OU, link order, enforced, block inheritance; the winning setting | link GPOs, toggle flags, see the winning setting | step | M | P1 | WIN1 |  |  |
 | `win-gpo-processing` | live | When policy applies | computer at boot, user at logon, background refresh every 90 ± 30 min, `gpupdate`; settings that need a foreground pass | change a GPO, run time, log off and on | step | S | P2 | WIN1 |  |  |
 | `win-gpo-security-filtering` | live | Security and WMI filtering | who a GPO applies to; the computer account needs Read too | filter a GPO to a group, add a WMI filter | step | S | P2 | WIN2 |  |  |
-| `win-gpo-loopback` | w3 | Loopback processing | user policy from the computer's OU, replace vs merge | log users into a kiosk OU | step | S | P3 | WIN2 | extends `win-gpo-precedence` |  |
+| `win-gpo-loopback` | live | Loopback processing | user policy from the computer's OU, replace vs merge | log users into a kiosk OU | step | S | P3 | WIN2 | extends `win-gpo-precedence` |  |
 | `win-gpo-tattooing` | live | Policies vs preferences | a policy reverts when the GPO goes away; a preference stays (tattooing) | apply both kinds, unlink the GPO | step | S | P2 | WIN2 |  |  |
-| `win-gpo-targeting` | w3 | Item-level targeting | one GPO, preferences that apply per group, OS, IP range | target drive maps, move a user | step | S | P3 | WIN2 | extends `win-gpo-tattooing` |  |
-| `win-gpo-software-install` | w3 | Software installation | assigned vs published, computer vs user, why it needs a reboot or a logon | deploy an MSI each way | step | S | P3 | WIN1 |  |  |
-| `win-gpo-slow-link` | w3 | Slow links | which extensions skip over a slow link, and why a branch behaves differently | change the link speed, refresh | expl | S | P3 | WIN2 |  |  |
-| `win-admx-store` | w3 | ADMX and the central store | where templates come from and why editors disagree | edit from two admin machines with and without a central store | expl | S | P3 | WIN2 |  |  |
+| `win-gpo-targeting` | live | Item-level targeting | one GPO, preferences that apply per group, OS, IP range | target drive maps, move a user | step | S | P3 | WIN2 | extends `win-gpo-tattooing` |  |
+| `win-gpo-software-install` | live | Software installation | assigned vs published, computer vs user, why it needs a reboot or a logon | deploy an MSI each way | step | S | P3 | WIN1 |  |  |
+| `win-gpo-slow-link` | live | Slow links | which extensions skip over a slow link, and why a branch behaves differently | change the link speed, refresh | expl | S | P3 | WIN2 |  |  |
+| `win-admx-store` | live | ADMX and the central store | where templates come from and why editors disagree | edit from two admin machines with and without a central store | expl | S | P3 | WIN2 |  |  |
 
 #### 4.5.3 DNS on Windows Server
 
@@ -667,28 +667,28 @@ instead of repeating them.
 | `win-dns-client-order` | live | How a Windows client resolves a name | hosts file, cache, DNS with suffix search, then LLMNR/NetBIOS; why a short name goes wrong | resolve short and full names with different settings | step | S | P2 | WIN1 |  |  |
 | `win-dns-dynamic-update` | live | Secure dynamic updates | clients register their own records; record ownership and why a renamed machine can't update | join, rename, move machines | step | S | P2 | WIN1 | → §5.21 |  |
 | `win-dns-scavenging` | live | Aging and scavenging | timestamps, no-refresh and refresh intervals, which stale records disappear and when | run months of client activity, enable scavenging | step | S | P1 | WIN2 | → §5.21 |  |
-| `win-dns-policies` | w3 | DNS policies and zone scopes | split-horizon answers by client subnet | query from inside and outside | step | S | P3 | WIN2 |  |  |
+| `win-dns-policies` | w3 · queued | DNS policies and zone scopes | split-horizon answers by client subnet | query from inside and outside | step | S | P3 | WIN2 |  |  |
 
 #### 4.5.4 DHCP on Windows Server
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `win-dhcp-scope-options` | live | Scopes, reservations and option precedence | exclusions, reservations; server, scope, class and reservation options, the most specific wins | set options at each level, renew a client | expl | S | P1 | WIN1 | builds on `net-dhcp-dora` → §5.1 |  |
-| `win-dhcp-authorization` | w3 | Authorizing a DHCP server | an unauthorized Windows server stays silent; rogue servers that aren't Windows don't | add servers with and without authorization | step | S | P3 | WIN1 | → `net-dhcp-rogue` |  |
+| `win-dhcp-authorization` | w3 · queued | Authorizing a DHCP server | an unauthorized Windows server stays silent; rogue servers that aren't Windows don't | add servers with and without authorization | step | S | P3 | WIN1 | → `net-dhcp-rogue` |  |
 | `win-dhcp-dns-update` | live | DHCP updating DNS for clients | the server registers records, name protection, DnsUpdateProxy | renew leases for old and new clients | step | S | P2 | WIN2 | → §5.21 |  |
 | `win-dhcp-failover` | live | DHCP failover | load balance vs hot standby, MCLT, partner down; the old 80/20 split scope | fail a server, renew leases | step | S | P2 | WIN2 |  |  |
-| `win-dhcp-policies` | w3 | Policy-based assignment | addresses and options by vendor class, MAC or user class | connect phones and laptops | step | S | P3 | WIN2 |  |  |
-| `win-dhcp-superscope` | w3 | Superscopes | several logical subnets on one segment | grow a scope past its subnet | step | S | P3 | WIN2 |  |  |
+| `win-dhcp-policies` | w3 · queued | Policy-based assignment | addresses and options by vendor class, MAC or user class | connect phones and laptops | step | S | P3 | WIN2 |  |  |
+| `win-dhcp-superscope` | w3 · queued | Superscopes | several logical subnets on one segment | grow a scope past its subnet | step | S | P3 | WIN2 |  |  |
 
 #### 4.5.5 IPAM
 
 | ID | Status | Title | Concept | Student does | Class | Size | Pri | Courses | Seed / overlap | Int |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `win-ipam-address-plan` | live | Planning the address space | blocks → ranges → addresses for sites and VLANs, with room to grow | allocate a block to sites, run out, re-plan | expl | S | P2 | WIN1, URM | `urm-vlsm` → §5.21 |  |
-| `win-ipam-discovery` | w3 | IPAM discovery and provisioning | IPAM finds DHCP, DNS and DC servers and gets access through GPO | add servers, provision access, see what IPAM sees | step | S | P3 | WIN2 |  |  |
+| `win-ipam-discovery` | w3 · queued | IPAM discovery and provisioning | IPAM finds DHCP, DNS and DC servers and gets access through GPO | add servers, provision access, see what IPAM sees | step | S | P3 | WIN2 |  |  |
 | `win-ipam-utilisation` | live | Utilisation and thresholds | scope fill across servers, alerts before a range runs out | let leases grow over a term | expl | S | P2 | WIN2 |  |  |
 | `win-ipam-audit` | live | Who had this IP at 14:32? | correlating leases and logon events to find a machine and a user | answer an incident question from the audit trail | step | S | P2 | WIN2, SEC |  |  |
-| `win-ipam-reconcile` | w3 | IPAM vs reality | records drift from the DHCP and DNS servers; stale reservations, overlapping ranges | make changes outside IPAM, reconcile | step | S | P3 | WIN2 |  |  |
+| `win-ipam-reconcile` | w3 · queued | IPAM vs reality | records drift from the DHCP and DNS servers; stale reservations, overlapping ranges | make changes outside IPAM, reconcile | step | S | P3 | WIN2 |  |  |
 
 #### 4.5.6 WSUS and updates
 
@@ -698,8 +698,8 @@ instead of repeating them.
 | `win-wsus-groups` | live | Computer groups and approvals | approve per group, deadlines; server-side vs client-side targeting by GPO | approve for test, then production | step | S | P2 | WIN1 | → §5.22 |  |
 | `win-wsus-client-cycle` | live | The client update cycle | detect, download, install, reboot; scan interval, deadlines, active hours | run days of client time with different settings | step | S | P2 | WIN1 |  |  |
 | `win-wsus-cloned-id` | live | Clients that never report | cloned images share one SusClientId, so many machines show as one | deploy clones, check reporting, fix the id | step | S | P2 | WIN2 |  |  |
-| `win-wsus-supersedence` | w3 | Superseded updates and cleanup | superseded updates pile up; declining and cleanup keep WSUS alive | run a year of releases with and without cleanup | step | S | P3 | WIN2 |  |  |
-| `win-wsus-delivery` | w3 | Delivering updates over a WAN | express vs full files, BITS, delivery optimization peers at a branch | update a branch over a slow link | expl | S | P3 | WIN2 |  |  |
+| `win-wsus-supersedence` | w3 · queued | Superseded updates and cleanup | superseded updates pile up; declining and cleanup keep WSUS alive | run a year of releases with and without cleanup | step | S | P3 | WIN2 |  |  |
+| `win-wsus-delivery` | w3 · queued | Delivering updates over a WAN | express vs full files, BITS, delivery optimization peers at a branch | update a branch over a slow link | expl | S | P3 | WIN2 |  |  |
 | `win-update-rings` | live in `win-wsus-groups` | Update rings | approval rings and deferrals; a bad patch stopped at ring 1 | release patches through rings | step | S | P2 | WIN2 | → §5.22 |  |
 
 #### 4.5.7 Files, identity and the rest
@@ -711,19 +711,19 @@ instead of repeating them.
 | `win-access-token` | live | The access token | SIDs and groups are fixed at logon; why you log off after a group change | add a user to a group, test before and after logon | step | S | P2 | WIN1 |  |  |
 | `win-uac` | live | UAC and the split token | admins run with a filtered token until elevated | run tasks as admin with and without elevation | step | S | P2 | WIN1, SEC |  |  |
 | `win-powershell-objects` | live | PowerShell pipes objects, bash pipes text | the same task in both pipelines | step each stage, inspect what flows | step | S | P2 | WIN1, UL | → §5.14 |  |
-| `win-firewall-profiles` | w3 | Windows Firewall profiles | domain/private/public profile selection by network | move a laptop between networks | step | S | P3 | WIN1 | → §5.16 |  |
+| `win-firewall-profiles` | live in `lnx-firewalld-zones` | Windows Firewall profiles | domain/private/public profile selection by network | move a laptop between networks | step | S | P3 | WIN1 | → §5.16 |  |
 | `win-boot` | live in `lnx-boot-chain` | Windows boot chain | UEFI → Boot Manager → winload → kernel → smss → winlogon | step a boot; break the BCD | step | S | P2 | WIN1 | → §5.15 |  |
-| `win-services` | w3 | Services and dependencies | start types, dependencies, delayed start, recovery actions | configure services, boot, fail one | expl | S | P3 | WIN1 | → §5.15 |  |
-| `win-registry` | w3 | The registry | hives, HKLM vs HKCU, where policy writes | browse hives, apply a policy, find the key | ref | S | P3 | WIN1 |  |  |
+| `win-services` | w3 · queued | Services and dependencies | start types, dependencies, delayed start, recovery actions | configure services, boot, fail one | expl | S | P3 | WIN1 | → §5.15 |  |
+| `win-registry` | w3 · queued | The registry | hives, HKLM vs HKCU, where policy writes | browse hives, apply a policy, find the key | ref | S | P3 | WIN1 |  |  |
 | `win-vss` | live in `lnx-cow-filesystem` | Volume Shadow Copy | copy-on-write snapshots behind "Previous Versions" | write files, take shadows, restore | step | S | P2 | WIN1 | → §5.2 |  |
-| `win-smb-session` | w3 | An SMB session | negotiate, session setup, tree connect, signing | connect with different SMB versions | step | S | P3 | WIN2 |  |  |
-| `win-dfs` | w3 | DFS namespace and replication | referrals to the nearest target; DFS-R conflicts | open a share from two sites; edit on both | step | M | P3 | WIN2 |  |  |
-| `win-hyperv-checkpoints` | w3 | Hyper-V checkpoints | AVHDX chain, merge on delete | take checkpoints, delete the middle one | step | S | P3 | WIN2 | → §5.2 (`sto-backing-chains` preset) |  |
+| `win-smb-session` | w3 · queued | An SMB session | negotiate, session setup, tree connect, signing | connect with different SMB versions | step | S | P3 | WIN2 |  |  |
+| `win-dfs` | live | DFS namespace and replication | referrals to the nearest target; DFS-R conflicts | open a share from two sites; edit on both | step | M | P3 | WIN2 |  |  |
+| `win-hyperv-checkpoints` | live in `backing-chains` | Hyper-V checkpoints | AVHDX chain, merge on delete | take checkpoints, delete the middle one | step | S | P3 | WIN2 | → §5.2 (`sto-backing-chains` preset) |  |
 | `win-failover-cluster` | live in `quorum-split-brain` | Failover cluster quorum | node majority, disk and file-share witness | fail nodes and the witness | step | S | P2 | WIN2 | → §5.7 (`ha-quorum-split-brain` preset) |  |
-| `win-storage-spaces` | w3 | Storage Spaces | mirror vs parity, columns, how many disks you can lose | build a pool, fail disks | expl | S | P3 | WIN2 |  |  |
-| `win-bitlocker-tpm` | w3 | BitLocker and the TPM | PCR measurements; what triggers the recovery key | change firmware/boot settings, reboot | step | S | P3 | WIN2, SEC |  |  |
-| `win-laps` | w3 | LAPS | unique rotated local admin passwords stop lateral movement | compromise one machine with and without LAPS | step | S | P3 | WIN2, SEC | → `sec-lateral-movement` |  |
-| `win-ntfs-mft` | w3 | NTFS MFT | MFT records, resident vs non-resident data, alternate data streams | create small and large files, add an ADS | ref | S | P3 | WIN2 |  |  |
+| `win-storage-spaces` | w3 · queued | Storage Spaces | mirror vs parity, columns, how many disks you can lose | build a pool, fail disks | expl | S | P3 | WIN2 |  |  |
+| `win-bitlocker-tpm` | live | BitLocker and the TPM | PCR measurements; what triggers the recovery key | change firmware/boot settings, reboot | step | S | P3 | WIN2, SEC |  |  |
+| `win-laps` | w3 · queued | LAPS | unique rotated local admin passwords stop lateral movement | compromise one machine with and without LAPS | step | S | P3 | WIN2, SEC | → `sec-lateral-movement` |  |
+| `win-ntfs-mft` | w3 · queued | NTFS MFT | MFT records, resident vs non-resident data, alternate data streams | create small and large files, add an ADS | ref | S | P3 | WIN2 |  |  |
 
 ### 4.6 Storage, backup and disaster recovery
 
@@ -793,12 +793,12 @@ ossimulator covers the OS course; these fill small gaps or extend the imported a
 |---|---|---|---|---|---|---|---|---|---|---|
 | `arh-cache-mapping` | live | Cache mapping | direct-mapped vs set-associative; conflict misses | feed addresses, change associativity | step | M | P2 | ARH, OS |  |  |
 | `arh-pipeline-hazards` | live | Pipeline hazards | data hazards, stalls, forwarding, branch flush | step instructions through five stages | step | M | P2 | ARH | pairs with `spl-spectre-meltdown` |  |
-| `arh-mesi` | w3 | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` |  |
-| `arh-twos-complement` | w3 | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH |  |  |
-| `arh-floating-point` | w3 | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH |  |  |
+| `arh-mesi` | live | MESI coherence on its own | the states of one cache line across cores | issue reads and writes per core | step | S | P3 | ARH | split from `spl-multicore-mesi` |  |
+| `arh-twos-complement` | live | Two's complement and overflow | signed integers and the wrap | add numbers, watch flags | expl | S | P3 | ARH |  |  |
+| `arh-floating-point` | live | IEEE 754 | sign/exponent/mantissa; why 0.1 + 0.2 ≠ 0.3 | toggle bits, type numbers | expl | S | P3 | ARH |  |  |
 | `arh-endianness` | live | Endianness | byte order in memory and on the wire | write values, read them as bytes | expl | S | P3 | ARH, URM |  |  |
-| `os-context-switch-cost` | w3 | What a context switch costs | saved state, TLB and cache warmup | switch at different rates | expl | S | P3 | OS | ossim covers mode vs process switch |  |
-| `aut-regex-to-nfa` | w3 | Regex to NFA to DFA | Thompson construction and subset construction | type a regex, step the constructions | step | M | P3 | AUT | pairs with `spl-automata`, `lnx-regex-match` |  |
+| `os-context-switch-cost` | live | What a context switch costs | saved state, TLB and cache warmup | switch at different rates | expl | S | P3 | OS | ossim covers mode vs process switch |  |
+| `aut-regex-to-nfa` | live | Regex to NFA to DFA | Thompson construction and subset construction | type a regex, step the constructions | step | M | P3 | AUT | pairs with `spl-automata`, `lnx-regex-match` |  |
 
 ### 4.10 Radio and crisis communications
 
@@ -818,7 +818,7 @@ Mostly covered by the 50ohm applets and the radio labs (§2.1, §2.5). New ideas
 | `ham-ctcss` | live | CTCSS tone squelch | a sub-audible tone opens the receiver | key up with and without the tone | step | S | P3 | HAM | HamMonitor `ctcss.py` |  |
 | `ham-lora-css` | live | LoRa chirp spread spectrum | chirps, spreading factor vs airtime vs range | change SF and bandwidth | expl | S | P3 | HAM | idea only (Lora-Wideband-Decoder is noncommercial) |  |
 | `ham-fsk-psk-ask` | live | ASK, FSK and PSK | three ways to put bits on a carrier | type bits, switch modulation | expl | S | P3 | HAM, URM | SigDigger (idea only) |  |
-| `ham-adsb-frame` | w3 | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) |  |
+| `ham-adsb-frame` | w3 · queued | Decoding an ADS-B frame | Mode S frame fields, CPR position | step through one frame | step | S | P3 | HAM | intercept (idea only) |  |
 | `kk-directed-net` | live | Directed net vs free-for-all | an NCS turns contention into a queue | let stations call with and without an NCS | step | S | P3 | KK | KK1 slides |  |
 | `kk-priority-traffic` | live | Priority traffic and ACK | routine/priority/emergency preemption, acknowledgement and retry | inject traffic of each priority | step | S | P3 | KK | KK1/KK2, `KK_Operativni_Prirucnik.docx` |  |
 | `kk-backup-ncs` | live | Backup NCS takeover | the net survives losing its control station | silence the NCS mid-traffic | step | S | P3 | KK | KK2 slides |  |
