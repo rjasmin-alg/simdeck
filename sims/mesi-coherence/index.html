@@ -1,0 +1,501 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- mesi-coherence: the MESI states of one cache line X in 2–4 cores on a snooping bus, one read or write per step.
+     A stepper on the simdeck kit (docs/sim-ui.md): the model is in sim.js (rules: SPEC.md), the words in strings.js. -->
+<html lang="hr" data-sim="mesi-coherence">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Koherencija predmemorija: MESI · simdeck</title>
+<meta name="description" content="Stanja M, E, S i I jedne linije predmemorije u 2 do 4 jezgre, poruke na sabirnici, poništavanja i pisanja natrag.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{"id":"mesi-coherence","title":{"hr":"Koherencija predmemorija: MESI","en":"Cache coherence: MESI"},"concept":{"hr":"Stanja jedne linije predmemorije u više jezgri","en":"The states of one cache line across cores"},"summary":{"hr":"Jezgre čitaju i pišu istu liniju: stanja M, E, S i I, poruke na sabirnici, poništavanja, pisanja natrag i zastarjeli RAM, za 2 do 4 jezgre.","en":"Cores read and write one line: the states M, E, S and I, the bus messages, invalidations, write-backs and stale RAM, for 2 to 4 cores."},"tags":["caches"],"class":"stepper","steps":4}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="mesi-coherence"]; colours only from kit tokens. */
+/* Workaround: kit.css gives .sd-ctl display: flex, which beats the hidden attribute (the operation slots are hidden
+   params). Shared request in NOTES.md. */
+[data-sim="mesi-coherence"] .sd-ctl[hidden] { display: none; }
+
+/* state patterns: M solid, E dotted, S striped, I hollow (dashed). Colour is a second carrier only. */
+[data-sim="mesi-coherence"] [data-st='M'] { --sw: var(--c2); }
+[data-sim="mesi-coherence"] [data-st='E'] { --sw: var(--c3); }
+[data-sim="mesi-coherence"] [data-st='S'] { --sw: var(--c1); }
+[data-sim="mesi-coherence"] [data-st='I'] { --sw: var(--line); }
+[data-sim="mesi-coherence"] .mx-pat[data-st='M'] { background: var(--sw); }
+[data-sim="mesi-coherence"] .mx-pat[data-st='E'] {
+  background-color: var(--bg);
+  background-image: radial-gradient(circle, var(--sw) 0 32%, transparent 36%);
+  background-size: 0.5em 0.5em;
+}
+[data-sim="mesi-coherence"] .mx-pat[data-st='S'] {
+  background-color: var(--bg);
+  background-image: repeating-linear-gradient(45deg, var(--sw) 0 0.16em, transparent 0.16em 0.36em);
+}
+[data-sim="mesi-coherence"] .mx-pat[data-st='I'] { background: var(--bg); border-style: dashed; }
+[data-sim="mesi-coherence"] .sd-swatch.mx-pat { border-color: var(--ink); font-size: 1.1rem; }
+[data-sim="mesi-coherence"] .sd-swatch.mx-pat[data-st='I'] { border-color: var(--ink); }
+[data-sim="mesi-coherence"] .sd-swatch[data-shape='mx-wb'] { height: 0.3rem; border: 0; border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--c2) 0 0.3em, transparent 0.3em 0.48em); }
+[data-sim="mesi-coherence"] .sd-swatch[data-shape='mx-bus'] { height: 0.4rem; border: 0; border-radius: 0; background: var(--ink); }
+
+/* layout: the machine on the left, the diagram and counters on the right */
+[data-sim="mesi-coherence"] .mx {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 30%);
+  gap: 2cqw;
+  height: 100%;
+  padding: 2cqh 2cqw;
+  font-size: max(16px, 1rem);
+}
+[data-sim="mesi-coherence"] .mx-main {
+  display: grid;
+  grid-template-rows: auto 3.2rem auto 4.6rem minmax(0, 1fr) auto;
+  min-height: 0;
+}
+[data-sim="mesi-coherence"] .mx-ramrow { display: flex; justify-content: center; }
+[data-sim="mesi-coherence"] .mx-ram {
+  display: flex; align-items: baseline; gap: 0.8rem;
+  padding: 0.45rem 1.2rem;
+  border: 0.2rem solid var(--ink); border-radius: var(--radius);
+  background: var(--panel);
+}
+[data-sim="mesi-coherence"] .mx-ram b { font-size: 1.2rem; }
+[data-sim="mesi-coherence"] .mx-ram .mx-x { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; }
+[data-sim="mesi-coherence"] .mx-ram .mx-x s { text-decoration: none; }
+[data-sim="mesi-coherence"] .mx-ram[data-stale='true'] .mx-x s { text-decoration: line-through; text-decoration-thickness: 0.15em; color: var(--muted); }
+[data-sim="mesi-coherence"] .mx-ram .mx-tag { font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="mesi-coherence"] .mx-ram[data-stale='true'] .mx-tag { color: var(--danger); font-weight: 700; }
+
+/* a link between a box and the bus: a thin line, or an arrow for a transaction (solid) or a write-back (dashed) */
+[data-sim="mesi-coherence"] .mx-link { position: relative; display: flex; justify-content: center; min-height: 0; }
+[data-sim="mesi-coherence"] .mx-link::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+  border-left: 0.15rem solid var(--line); transform: translateX(-50%);
+}
+[data-sim="mesi-coherence"] .mx-link[data-kind='bus']::before { border-left: 0.45rem solid var(--ink); }
+[data-sim="mesi-coherence"] .mx-link[data-kind='wb']::before { border-left: 0.45rem dashed var(--c2); }
+[data-sim="mesi-coherence"] .mx-link[data-kind]::after {
+  content: ''; position: absolute; top: -0.2rem; left: 50%; transform: translateX(-50%);
+  border: 0.7rem solid transparent; border-top: 0; border-bottom: 1rem solid var(--ink);
+}
+[data-sim="mesi-coherence"] .mx-link[data-kind='wb']::after { border-bottom-color: var(--c2); }
+[data-sim="mesi-coherence"] .mx-pill {
+  position: relative; z-index: 1; align-self: center;
+  padding: 0.1rem 0.6rem; border: 0.15rem solid var(--ink); border-radius: 999px;
+  background: var(--bg); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap;
+}
+[data-sim="mesi-coherence"] .mx-pill[data-kind='wb'] { border-style: dashed; border-color: var(--c2); }
+[data-sim="mesi-coherence"] .mx-pill i { font-style: italic; }
+
+[data-sim="mesi-coherence"] .mx-bus {
+  display: flex; align-items: center; justify-content: flex-start;
+  height: 0.9rem; border-radius: 999px; background: var(--ink);
+}
+[data-sim="mesi-coherence"] .mx-bus span {
+  margin-left: 1rem; padding: 0 0.5rem; background: var(--bg); color: var(--ink);
+  font-size: var(--fs-sm); line-height: 1.2; border-radius: var(--radius-sm);
+}
+
+[data-sim="mesi-coherence"] .mx-cores { display: contents; }
+[data-sim="mesi-coherence"] .mx-links, [data-sim="mesi-coherence"] .mx-cards {
+  display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 1.2cqw; min-height: 0;
+}
+[data-sim="mesi-coherence"] .mx-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 0.4rem;
+  min-height: 0; padding: 0.5rem; border: 0.15rem solid var(--line); border-radius: var(--radius); background: var(--panel);
+}
+[data-sim="mesi-coherence"] .mx-card[data-req='true'] { border-color: var(--ink); border-width: 0.25rem; }
+[data-sim="mesi-coherence"] .mx-head { display: flex; align-items: baseline; gap: 0.5rem; font-weight: 700; }
+[data-sim="mesi-coherence"] .mx-head b { font-size: 1.3rem; }
+[data-sim="mesi-coherence"] .mx-op { padding: 0 0.4rem; border-radius: var(--radius-sm); background: var(--ink); color: var(--bg); font-size: var(--fs-sm); }
+[data-sim="mesi-coherence"] .mx-letter {
+  display: grid; place-items: center;
+  width: min(100%, 22cqh); aspect-ratio: 1; flex: 0 1 auto; min-height: 0;
+  border: 0.25rem solid var(--sw); border-radius: var(--radius);
+  font-size: min(9cqh, 4.5rem);
+}
+[data-sim="mesi-coherence"] .mx-letter span {
+  display: grid; place-items: center; width: 1.35em; height: 1.35em; border-radius: 50%;
+  background: var(--bg); color: var(--ink); font-weight: 700; line-height: 1;
+  border: 0.06em solid var(--ink);
+}
+[data-sim="mesi-coherence"] .mx-letter[data-st='I'] span { color: var(--muted); border-style: dashed; }
+[data-sim="mesi-coherence"] .mx-val { font-family: var(--mono); font-weight: 700; }
+[data-sim="mesi-coherence"] .mx-val[data-none='true'] { font-family: var(--sans); font-weight: 400; color: var(--muted); }
+[data-sim="mesi-coherence"] .mx-val .mx-hit { margin-left: 0.4rem; font-family: var(--sans); font-size: var(--fs-sm); color: var(--ok); }
+[data-sim="mesi-coherence"] .mx-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.3rem; }
+[data-sim="mesi-coherence"] .mx-btns .sd-btn { min-height: 2.2rem; padding: 0.1rem 0.6rem; }
+
+/* the sequence strip */
+[data-sim="mesi-coherence"] .mx-seq { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.4rem; padding-top: 0.8rem; font-size: var(--fs-sm); }
+[data-sim="mesi-coherence"] .mx-seq > span:first-child { margin-right: 0.4rem; color: var(--muted); }
+[data-sim="mesi-coherence"] .mx-chip {
+  display: inline-flex; gap: 0.25rem; padding: 0.05rem 0.45rem;
+  border: 0.12rem solid var(--line); border-radius: var(--radius-sm); font-family: var(--mono); white-space: nowrap;
+}
+[data-sim="mesi-coherence"] .mx-chip small { font-size: 1em; color: var(--muted); }
+[data-sim="mesi-coherence"] .mx-chip[data-when='done'] { border-color: var(--ink); }
+[data-sim="mesi-coherence"] .mx-chip[data-when='now'] { border-color: var(--ink); background: var(--hl); color: var(--on-hl); font-weight: 700; }
+[data-sim="mesi-coherence"] .mx-chip[data-when='now'] small { color: var(--on-hl); }
+[data-sim="mesi-coherence"] .mx-chip[data-when='todo'] { border-style: dashed; color: var(--muted); }
+
+/* the side: state diagram, this step's transitions, counters */
+[data-sim="mesi-coherence"] .mx-side { display: flex; flex-direction: column; gap: 0.8rem; min-height: 0; }
+[data-sim="mesi-coherence"] .mx-side h3 { margin: 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+[data-sim="mesi-coherence"] .mx-diag { position: relative; width: min(100%, 40cqh); aspect-ratio: 1; align-self: center; flex: 0 0 auto; }
+[data-sim="mesi-coherence"] .mx-diag svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="mesi-coherence"] .mx-edge { fill: none; stroke: var(--line); stroke-width: 2; }
+[data-sim="mesi-coherence"] .mx-edge[data-on='req'] { stroke: var(--ink); stroke-width: 5; }
+[data-sim="mesi-coherence"] .mx-edge[data-on='snoop'] { stroke: var(--ink); stroke-width: 5; stroke-dasharray: 7 5; }
+[data-sim="mesi-coherence"] .mx-head-mark { fill: var(--line); }
+[data-sim="mesi-coherence"] .mx-head-mark[data-on] { fill: var(--ink); }
+[data-sim="mesi-coherence"] .mx-node {
+  position: absolute; display: grid; place-items: center;
+  width: 24%; aspect-ratio: 1; transform: translate(-50%, -50%);
+  border: 0.2rem solid var(--ink); border-radius: 50%;
+  font-size: 1.4rem;
+}
+[data-sim="mesi-coherence"] .mx-node span {
+  display: grid; place-items: center; width: 1.5em; height: 1.5em; border-radius: 50%;
+  background: var(--bg); color: var(--ink); font-weight: 700; line-height: 1;
+}
+[data-sim="mesi-coherence"] .mx-node.sd-changed { box-shadow: 0 0 0 0.45rem var(--hl); }
+[data-sim="mesi-coherence"] .mx-who { position: absolute; transform: translateX(-50%); font-size: var(--fs-sm); font-family: var(--mono); white-space: nowrap; }
+[data-sim="mesi-coherence"] .mx-trans { margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+[data-sim="mesi-coherence"] .mx-trans li { display: flex; gap: 0.5rem; align-items: baseline; }
+[data-sim="mesi-coherence"] .mx-trans .mx-dash { display: inline-block; width: 1.6rem; border-top: 0.25rem solid var(--ink); transform: translateY(-0.2em); }
+[data-sim="mesi-coherence"] .mx-trans .mx-dash[data-on='snoop'] { border-top-style: dashed; }
+[data-sim="mesi-coherence"] .mx-counts { border-collapse: collapse; font-size: var(--fs-sm); width: 100%; }
+[data-sim="mesi-coherence"] .mx-counts td { padding: 0.08rem 0.3rem; border-bottom: 0.1rem solid var(--line); }
+[data-sim="mesi-coherence"] .mx-counts td:last-child { text-align: right; font-family: var(--mono); font-weight: 700; font-size: 1.1rem; }
+[data-sim="mesi-coherence"] .mx-counts tr.sd-changed td { background: var(--hl); color: var(--on-hl); }
+[data-sim="mesi-coherence"] .mx-counts tr.sd-changed { outline-width: 0.15rem; box-shadow: none; }
+
+@container (max-width: 44rem) {
+  [data-sim="mesi-coherence"] .mx { display: flex; flex-direction: column; gap: 1rem; padding: 0.5rem; overflow: auto; }
+  [data-sim="mesi-coherence"] .mx-main { grid-template-rows: auto 1.6rem auto 2.8rem auto auto; min-height: auto; }
+  [data-sim="mesi-coherence"] .mx-side, [data-sim="mesi-coherence"] .mx-cards, [data-sim="mesi-coherence"] .mx-card { min-height: auto; }
+  [data-sim="mesi-coherence"] .mx-diag { width: min(100%, 14rem); }
+  [data-sim="mesi-coherence"] .mx-letter { width: 4.2rem; font-size: 2rem; }
+  [data-sim="mesi-coherence"] .mx-links, [data-sim="mesi-coherence"] .mx-cards { gap: 0.3rem; }
+  [data-sim="mesi-coherence"] .mx-card { padding: 0.25rem; }
+  [data-sim="mesi-coherence"] .mx-btns .sd-btn kbd { display: none; }
+  [data-sim="mesi-coherence"] .mx-pill { padding: 0 0.3rem; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Koherencija predmemorija: MESI</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var NS = 'http://www.w3.org/2000/svg';
+  var KEYS = [['q', 'w'], ['u', 'i'], ['a', 's'], ['j', 'k']];   // read / write per core
+  var sim = null;
+
+  function s(tag, attrs) {
+    var el = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function nt(text) { return h('span', { translate: 'no' }, text); }          // data, not language
+  function cn(k) { return 'C' + k; }
+  function busNode(name) { return h('i', { translate: 'no' }, name); }
+  function list(cores) {
+    var names = cores.map(cn);
+    if (names.length < 2) return names.join('');
+    return names.slice(0, -1).join(', ') + t('and') + names[names.length - 1];
+  }
+
+  /** Add an operation after the current step and show it (SPEC.md "Appending an operation"). */
+  function doOp(core, op) {
+    if (!sim) return;
+    var patch = L.appendAt(sim.params, sim.n, core + op);
+    if (!patch) return;
+    sim.set(patch);
+    sim.next();
+  }
+  function canAppend(c) { return c.n < L.MAX_OPS; }
+
+  // ── state diagram: four nodes at the corners, ten directed edges, two per pair of states ──
+  var POS = { M: [22, 24], E: [78, 24], S: [22, 76], I: [78, 76] };
+  var EDGES = [['I', 'E'], ['E', 'I'], ['I', 'S'], ['S', 'I'], ['I', 'M'], ['M', 'I'], ['S', 'M'], ['M', 'S'], ['E', 'M'], ['E', 'S']];
+  var R = 13, BEND = 7, TILT = 0.45;
+  function edgePath(a, b) {
+    var p = POS[a], q = POS[b];
+    var dx = q[0] - p[0], dy = q[1] - p[1], len = Math.sqrt(dx * dx + dy * dy);
+    var ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+    var c = Math.cos(TILT), sn = Math.sin(TILT);
+    var x1 = p[0] + (ux * c + nx * sn) * R, y1 = p[1] + (uy * c + ny * sn) * R;
+    var x2 = q[0] - (ux * c - nx * sn) * (R + 3), y2 = q[1] - (uy * c - ny * sn) * (R + 3);
+    var mx = (p[0] + q[0]) / 2 + nx * BEND, my = (p[1] + q[1]) / 2 + ny * BEND;
+    return { d: 'M' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' Q' + mx.toFixed(2) + ' ' + my.toFixed(2) + ' ' + x2.toFixed(2) + ' ' + y2.toFixed(2),
+      tip: [x2, y2], dir: [x2 - mx, y2 - my] };
+  }
+  function arrowHead(e, on) {
+    var tip = e.tip, d = e.dir, len = Math.sqrt(d[0] * d[0] + d[1] * d[1]);
+    var ux = d[0] / len, uy = d[1] / len, size = on ? 5.5 : 4;
+    var bx = tip[0] - ux * size * 1.4, by = tip[1] - uy * size * 1.4;
+    var pts = [tip, [bx - uy * size * 0.7, by + ux * size * 0.7], [bx + uy * size * 0.7, by - ux * size * 0.7]];
+    var poly = s('polygon', { class: 'mx-head-mark', points: pts.map(function (x) { return x[0].toFixed(2) + ',' + x[1].toFixed(2); }).join(' ') });
+    if (on) poly.setAttribute('data-on', on);
+    return poly;
+  }
+  function diagram(st, last) {
+    var taken = {};
+    if (last) last.transitions.forEach(function (x) { taken[x.from + x.to] = x.core === last.core ? 'req' : 'snoop'; });
+    var svg = s('svg', { viewBox: '0 0 100 100', 'aria-hidden': 'true', focusable: 'false' });
+    // the active edges last, so they are drawn on top
+    var order = EDGES.slice().sort(function (a, b) { return (taken[a[0] + a[1]] ? 1 : 0) - (taken[b[0] + b[1]] ? 1 : 0); });
+    order.forEach(function (ed) {
+      var e = edgePath(ed[0], ed[1]), on = taken[ed[0] + ed[1]];
+      var path = s('path', { class: 'mx-edge', d: e.d });
+      if (on) path.setAttribute('data-on', on);
+      svg.append(path, arrowHead(e, on));
+    });
+    var box = h('div', { class: 'mx-diag', role: 'img', 'aria-label': t('diagram') }, svg);
+    var hitState = last && last.hit && !last.transitions.length ? st.cores[last.core].state : null;   // a hit with no change: ring the state
+    ['M', 'E', 'S', 'I'].forEach(function (k) {
+      var who = [];
+      st.cores.forEach(function (e, i) { if (e.state === k) who.push(cn(i)); });
+      var top = POS[k][1] < 50;
+      box.append(h('div', { class: 'mx-node mx-pat' + (hitState === k ? ' sd-changed' : ''), dataset: { st: k },
+        style: { left: POS[k][0] + '%', top: POS[k][1] + '%' } }, h('span', { translate: 'no' }, k)));
+      box.append(h('div', { class: 'mx-who', translate: 'no',
+        style: { left: POS[k][0] + '%', top: top ? 'calc(' + (POS[k][1] - 13) + '% - 1.6em)' : 'calc(' + (POS[k][1] + 13) + '% + 0.2em)' } },
+        who.join(' ')));
+    });
+    return box;
+  }
+
+  function counts(m, prev) {
+    var rows = [['hits', 'cntHits'], ['busTx', 'cntBus'], ['invalidations', 'cntInval'], ['downgrades', 'cntDown'], ['writebacks', 'cntWb']];
+    return h('table', { class: 'mx-counts' }, h('tbody', null, rows.map(function (r) {
+      var changed = prev && prev.counts[r[0]] !== m.counts[r[0]];
+      return h('tr', { class: changed ? 'sd-changed' : null }, h('td', null, t(r[1])), h('td', null, String(m.counts[r[0]])));
+    })));
+  }
+
+  function transitions(m) {
+    var last = m.last;
+    if (!last) return null;
+    var items = last.transitions.map(function (x) {
+      var mine = x.core === last.core;
+      return h('li', null, h('span', { class: 'mx-dash', dataset: { on: mine ? 'req' : 'snoop' }, 'aria-hidden': 'true' }),
+        h('span', { translate: 'no' }, cn(x.core) + ': ' + x.from + ' → ' + x.to),
+        h('span', null, mine ? t(last.op === 'R' ? 'reads' : 'writes') : t('snoops')));
+    });
+    if (!items.length) items.push(h('li', null, h('span', null, t('noChange'))));
+    return h('div', null, h('h3', null, t('thisStep')), h('ul', { class: 'mx-trans' }, items));
+  }
+
+  function card(c, k) {
+    var m = c.state, e = m.cores[k], last = m.last;
+    var req = !!last && last.core === k;
+    var changed = !!last && last.transitions.some(function (x) { return x.core === k; });
+    var full = !canAppend(c);
+    function btn(op, label, key) {
+      return h('button', { type: 'button', class: 'sd-btn', 'aria-disabled': full ? 'true' : 'false',
+        'aria-keyshortcuts': key, title: full ? t('full') : null,
+        onmousedown: function (ev) { ev.preventDefault(); },
+        onclick: function () { if (!full) doOp(k, op); } },
+        h('span', null, label), h('kbd', null, key.toUpperCase()));
+    }
+    return h('div', { class: 'mx-card' + (changed ? ' sd-changed' : '') + (changed && c.dir === 'forward' ? ' sd-anim-in' : ''),
+        dataset: { req: String(req) }, 'aria-label': t('stateLabel', { core: cn(k), st: e.state }) },
+      h('div', { class: 'mx-head' }, h('b', { translate: 'no' }, cn(k)),
+        req ? h('span', { class: 'mx-op' }, t(last.op === 'R' ? 'reads' : 'writes')) : null),
+      h('div', { class: 'mx-letter mx-pat', dataset: { st: e.state } }, h('span', { translate: 'no' }, e.state)),
+      e.value === null
+        ? h('div', { class: 'mx-val', dataset: { none: 'true' } }, t('noCopy'))
+        : h('div', { class: 'mx-val' }, nt('X = ' + e.value), req && last.hit ? h('span', { class: 'mx-hit' }, t('hit')) : null),
+      h('div', { class: 'mx-btns' }, btn('R', t('read'), KEYS[k][0]), btn('W', t('write'), KEYS[k][1])));
+  }
+
+  function link(c, k) {
+    var last = c.state.last;
+    if (last && last.core === k && last.bus) {
+      return h('div', { class: 'mx-link', dataset: { kind: 'bus' } }, h('span', { class: 'mx-pill' }, busNode(last.bus)));
+    }
+    if (last && last.flush === k) {
+      return h('div', { class: 'mx-link', dataset: { kind: 'wb' } },
+        h('span', { class: 'mx-pill', dataset: { kind: 'wb' } }, nt('X = ' + c.state.mem), ' ', t('wb')));
+    }
+    return h('div', { class: 'mx-link' });
+  }
+
+  function strip(c) {
+    var ops = L.opsOf(c.params);
+    var items = ops.map(function (o, i) {
+      var when = i + 1 < c.n ? 'done' : i + 1 === c.n ? 'now' : 'todo';
+      return h('span', { class: 'mx-chip', dataset: { when: when },
+          'aria-label': t('opLabel', { n: i + 1, core: cn(o[0]), op: t(o[1] === 'R' ? 'reads' : 'writes') }) },
+        h('small', { translate: 'no' }, String(i + 1)), h('span', { translate: 'no' }, cn(o[0])), h('span', null, t(o[1] === 'R' ? 'opR' : 'opW')));
+    });
+    return h('div', { class: 'mx-seq' }, h('span', null, ops.length ? t('seqTitle') : t('seqNone')), items);
+  }
+
+  function render(c) {
+    var m = c.state, n = m.cores.length, last = m.last;
+    var stale = L.isStale(m);
+    var wb = !!last && last.flush !== null;
+    var ks = []; for (var k = 0; k < n; k++) ks.push(k);
+    c.stage.replaceChildren(h('div', { class: 'mx', style: { '--n': String(n) } },
+      h('div', { class: 'mx-main' },
+        h('div', { class: 'mx-ramrow' },
+          h('div', { class: 'mx-ram' + (wb ? ' sd-changed' : ''), dataset: { stale: String(stale) } },
+            h('b', null, t('ram')), h('span', { class: 'mx-x', translate: 'no' }, 'X = ', h('s', null, String(m.mem))),
+            h('span', { class: 'mx-tag' }, stale ? t('stale') : t('fresh')))),
+        wb ? h('div', { class: 'mx-link', dataset: { kind: 'wb' } }) : h('div', { class: 'mx-link' }),
+        h('div', { class: 'mx-bus' }, h('span', null, t('bus'))),
+        h('div', { class: 'mx-links' }, ks.map(function (k) { return link(c, k); })),
+        h('div', { class: 'mx-cards' }, ks.map(function (k) { return card(c, k); })),
+        strip(c)),
+      h('div', { class: 'mx-side' },
+        h('h3', null, t('diagram')),
+        diagram(m, last),
+        transitions(m),
+        h('h3', null, t('counts')),
+        counts(m, c.prev))));
+  }
+
+  function caption(c) {
+    var m = c.state, last = m.last;
+    var out;
+    if (!c.steps) return t('capNone');
+    if (!last) {
+      out = t.parts('capStart', { x: 'X', mem: nt(String(m.mem)) });
+    } else {
+      var core = cn(last.core), before = c.prev.cores[last.core].state;
+      var snoop = last.transitions.filter(function (x) { return x.core !== last.core; });
+      var inv = snoop.filter(function (x) { return x.to === 'I'; }).map(function (x) { return x.core; });
+      var flushV = last.flush !== null ? nt(String(m.mem)) : null;
+      var bus = last.bus ? busNode(last.bus) : null;
+      var add = function (key, vals) { out.push(' '); out = out.concat(t.parts(key, vals)); };
+      if (last.op === 'R') {
+        if (last.hit) out = t.parts('capReadHit', { core: core, st: nt(before) });
+        else {
+          out = t.parts('capReadMiss', { core: core, bus: bus });
+          snoop.forEach(function (x) {
+            if (x.from === 'M') add('capFlushS', { other: cn(x.core), x: 'X', v: flushV });
+            else if (x.from === 'E') add('capDownE', { other: cn(x.core) });
+          });
+          add(m.cores[last.core].state === 'S' ? 'capGetS' : 'capGetE', { core: cn(last.core) });
+        }
+      } else if (before === 'M') {
+        out = t.parts('capWriteM', { core: core, x: 'X', v: nt(String(last.value)) });
+      } else if (before === 'E') {
+        out = t.parts('capWriteE', { core: core });
+      } else if (before === 'S') {
+        out = t.parts('capWriteS', { core: core, bus: bus, inv: t(inv.length > 1 ? 'invMany' : 'invOne', { list: list(inv) }) });
+      } else {
+        out = t.parts('capWriteMiss', { core: core, bus: bus });
+        if (last.flush !== null) add('capFlushI', { other: cn(last.flush), x: 'X', v: flushV });
+        if (inv.length) add('capInvalMiss', { inv: t(inv.length > 1 ? 'invManyCap' : 'invOneCap', { list: list(inv) }) });
+        else add('capAlone', {});
+        add('capNowM', { core: cn(last.core), x: 'X', v: nt(String(last.value)) });
+      }
+    }
+    if (!canAppend(c)) { out.push(' '); out.push(h('span', { class: 'sd-hl' }, t('full'))); }
+    return out;
+  }
+
+  var params = [
+    { key: 'cores', type: 'choice', label: t('cores'), hint: t('coresHint'), options: [[2, '2'], [3, '3'], [4, '4']] }
+  ];
+  for (var i = 1; i <= L.MAX_OPS; i++) {
+    params.push({ key: 'o' + i, type: 'select', label: t('opLabel', { n: i, core: '', op: '' }), visible: function () { return false; },
+      options: [['', '–']].concat(L.OPS.map(function (o) { return [o, o]; })) });
+  }
+
+  var keys = [];
+  KEYS.forEach(function (pair, k) {
+    keys.push({ key: pair[0], label: t('keyRead', { k: k }), run: function () { if (k < sim.params.cores) doOp(k, 'R'); } });
+    keys.push({ key: pair[1], label: t('keyWrite', { k: k }), run: function () { if (k < sim.params.cores) doOp(k, 'W'); } });
+  });
+
+  var labels = { 'classic': ['presetClassic', 'presetClassicHint'], 'silent-upgrade': ['presetSilent', 'presetSilentHint'],
+    'ping-pong': ['presetPing', 'presetPingHint'], 'readers-writer': ['presetReaders', 'presetReadersHint'] };
+
+  sim = Simdeck.mount({
+    steps: L.steps,
+    defaults: L.defaults,
+    initial: L.initial,
+    step: L.step,
+    params: params,
+    presets: L.presets.map(function (p) { return { id: p.id, label: t(labels[p.id][0]), hint: t(labels[p.id][1]), params: p.params }; }),
+    legend: [
+      { shape: 'mx-st', label: 'M' },
+      { shape: 'mx-st', label: 'E' },
+      { shape: 'mx-st', label: 'S' },
+      { shape: 'mx-st', label: 'I' },
+      { shape: 'mx-bus', label: t('legBus') },
+      { shape: 'mx-wb', label: t('legWb') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    keys: keys,
+    render: render,
+    caption: caption
+  });
+
+  // The state swatches: the kit draws a plain swatch per legend item; give the four state items their pattern,
+  // letter and name (M, E, S, I are not language; the names are).
+  var names = { M: 'legM', E: 'legE', S: 'legS', I: 'legI' };
+  document.querySelectorAll('[data-sd-legend] li').forEach(function (li) {
+    var sw = li.querySelector('.sd-swatch[data-shape="mx-st"]');
+    if (!sw) return;
+    var k = li.textContent.trim();
+    sw.classList.add('mx-pat');
+    sw.dataset.st = k;
+    li.replaceChildren(sw, h('span', null, h('b', { translate: 'no' }, k), ' ', t(names[k])));
+  });
+})();
+</script>
+</body>
+</html>
