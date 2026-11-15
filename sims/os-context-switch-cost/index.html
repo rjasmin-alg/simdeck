@@ -1,0 +1,394 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- os-context-switch-cost: what a context switch costs. Every switch has a direct cost (save and restore the processor
+     state, run the scheduler); then the incoming process runs slowly while it warms the cache and, after a change of
+     address space, the TLB. The shorter the quantum, the more switches and the more warm-ups.
+     The stage: on top, a CPU timeline of six quanta, A and B taking turns, each slot a switch (D, solid dark), the
+     warm-up (W, striped) and full speed (U, solid); below, the useful share as a gauge with where one quantum's time
+     goes and switches per second, a chart of the useful share against the quantum on a log axis, and a card of what is
+     saved and what goes cold. Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="os-context-switch-cost">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Koliko košta promjena konteksta · simdeck</title>
+<meta name="description" content="Mijenjaj kvant od 10 µs do 10 ms: izravni trošak promjene, zagrijavanje priručne memorije i TLB-a, korisni udio procesora i promjene u sekundi.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+<script src="../../kit/glossary.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "os-context-switch-cost",
+  "title": {
+    "hr": "Koliko košta promjena konteksta",
+    "en": "What a context switch costs"
+  },
+  "concept": {
+    "hr": "Spremljeno stanje, a zatim zagrijavanje priručne memorije i TLB-a",
+    "en": "The saved state, then the cache and TLB warm-up"
+  },
+  "summary": {
+    "hr": "Mijenjaj kvant od 10 µs do 10 ms: izravni trošak promjene, zagrijavanje priručne memorije i TLB-a, korisni udio procesora i promjene u sekundi.",
+    "en": "Change the quantum from 10 µs to 10 ms: the direct switch cost, the cache and TLB warm-up, the useful CPU share and switches per second."
+  },
+  "tags": [
+    "processes",
+    "operating-systems"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="os-context-switch-cost"]; colours only from kit tokens. */
+[data-sim="os-context-switch-cost"] .cs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem 1.4rem;
+  height: 100%;
+  padding: 0.6rem 1rem 0.5rem;
+  font-size: var(--fs-md);
+}
+[data-sim="os-context-switch-cost"] .cs-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-sim="os-context-switch-cost"] .cs-head { margin: 0; font-size: var(--fs-sm); font-weight: 700; line-height: 1.2; color: var(--muted); }
+[data-sim="os-context-switch-cost"] .cs-col { display: flex; flex-direction: column; gap: 0.45rem; min-height: 0; min-width: 0; }
+
+/* the timeline */
+[data-sim="os-context-switch-cost"] .cs-tl { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.3rem; }
+[data-sim="os-context-switch-cost"] .cs-procs, [data-sim="os-context-switch-cost"] .cs-track { display: flex; width: 100%; }
+[data-sim="os-context-switch-cost"] .cs-procs > span {
+  display: flex; justify-content: center; min-width: 0; padding-bottom: 0.1rem;
+  font-weight: 700; font-size: var(--fs-lg); border-bottom: 0.2rem solid var(--ink); margin: 0 0.15rem;
+}
+[data-sim="os-context-switch-cost"] .cs-procs > span[data-p="A"] { color: var(--c1); }
+[data-sim="os-context-switch-cost"] .cs-procs > span[data-p="B"] { color: var(--c2); }
+[data-sim="os-context-switch-cost"] .cs-track { height: 4.6rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg); }
+[data-sim="os-context-switch-cost"] .cs-seg {
+  display: grid; place-items: center; min-width: 0; overflow: hidden;
+  font-weight: 700; font-size: var(--fs-md); line-height: 1;
+}
+[data-sim="os-context-switch-cost"] .cs-seg[data-k="D"] { min-width: 0.3rem; background: var(--ink); color: var(--bg); }
+[data-sim="os-context-switch-cost"] .cs-seg[data-k="W"] {
+  background: repeating-linear-gradient(45deg, var(--pc) 0 0.35rem, var(--bg) 0.35rem 0.7rem);
+}
+[data-sim="os-context-switch-cost"] .cs-seg[data-k="W"] > span { background: var(--bg); color: var(--ink); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+[data-sim="os-context-switch-cost"] .cs-seg[data-k="U"] { background: var(--pc); color: var(--on-series); }
+[data-sim="os-context-switch-cost"] [data-p="A"] { --pc: var(--c1); }
+[data-sim="os-context-switch-cost"] [data-p="B"] { --pc: var(--c2); }
+[data-sim="os-context-switch-cost"] .cs-axis { position: relative; height: 1.3rem; }
+[data-sim="os-context-switch-cost"] .cs-axis > span { position: absolute; top: 0; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--muted); }
+[data-sim="os-context-switch-cost"] .cs-axis > span:first-child { transform: none; }
+
+/* the gauge */
+[data-sim="os-context-switch-cost"] .cs-big { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.2rem 0.8rem; }
+[data-sim="os-context-switch-cost"] .cs-pct {
+  font-size: 3.4rem; font-weight: 700; line-height: 1; padding: 0.1rem 0.4rem; border-radius: var(--radius-sm);
+  border: var(--line-w) solid transparent;
+}
+[data-sim="os-context-switch-cost"] .cs-pct[data-band="low"] { color: var(--danger); }
+[data-sim="os-context-switch-cost"] .cs-crossed { font-size: var(--fs-sm); font-weight: 700; }
+[data-sim="os-context-switch-cost"] .cs-gbar { position: relative; margin-bottom: 1.4rem; }
+[data-sim="os-context-switch-cost"] .cs-bar { display: flex; height: 2.2rem; border: var(--line-w) solid var(--ink); border-radius: 0.25rem; overflow: hidden; background: var(--bg); }
+[data-sim="os-context-switch-cost"] .cs-bar > span { display: block; height: 100%; }
+[data-sim="os-context-switch-cost"] [data-g="D"] { background: var(--ink); }
+[data-sim="os-context-switch-cost"] [data-g="W"] { background: repeating-linear-gradient(45deg, var(--c8) 0 0.3rem, var(--bg) 0.3rem 0.55rem); }
+[data-sim="os-context-switch-cost"] [data-g="U"] { background: var(--c3); }
+[data-sim="os-context-switch-cost"] .cs-mark { position: absolute; top: -0.3rem; height: calc(100% + 0.6rem); border-left: 0.2rem dashed var(--ink); }
+[data-sim="os-context-switch-cost"] .cs-mark > span { position: absolute; top: 100%; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--ink); white-space: nowrap; }
+[data-sim="os-context-switch-cost"] .cs-split { margin: 0; display: grid; grid-template-columns: auto 1fr auto; gap: 0.15rem 0.5rem; align-items: center; }
+[data-sim="os-context-switch-cost"] .cs-split .cs-head { grid-column: 1 / -1; }
+[data-sim="os-context-switch-cost"] .cs-sw { display: inline-block; width: 1.1rem; height: 1.1rem; border: 1px solid var(--ink); }
+[data-sim="os-context-switch-cost"] .cs-split b { text-align: right; }
+[data-sim="os-context-switch-cost"] .cs-rate { margin-top: 0.4rem; display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; border-top: var(--line-w) solid var(--line); padding-top: 0.3rem; }
+[data-sim="os-context-switch-cost"] .cs-rate b { font-size: var(--fs-xl); }
+
+/* the chart */
+[data-sim="os-context-switch-cost"] .cs-cbox { flex: 1; min-height: 10rem; position: relative; margin: 0.3rem 0.8rem 1.8rem 3.6rem; }
+[data-sim="os-context-switch-cost"] .cs-cbox svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+[data-sim="os-context-switch-cost"] .cs-frame { fill: none; stroke: var(--ink); stroke-width: 1.5px; }
+[data-sim="os-context-switch-cost"] .cs-grid { fill: none; stroke: var(--line); stroke-width: 1px; }
+[data-sim="os-context-switch-cost"] .cs-thr { fill: none; stroke: var(--muted); stroke-width: 1.5px; stroke-dasharray: 6 6; }
+[data-sim="os-context-switch-cost"] .cs-curve { fill: none; stroke: var(--c3); stroke-width: 4px; stroke-linejoin: round; }
+[data-sim="os-context-switch-cost"] .cs-drop { fill: none; stroke: var(--ink); stroke-width: 2px; stroke-dasharray: 3 4; }
+[data-sim="os-context-switch-cost"] .cs-dot {
+  position: absolute; width: 1.3rem; height: 1.3rem; transform: translate(-50%, -50%);
+  border-radius: 50%; background: var(--hl); border: 0.22rem solid var(--ink);
+}
+[data-sim="os-context-switch-cost"] .cs-now {
+  position: absolute; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; line-height: 1.1;
+  background: var(--bg); border: var(--line-w) solid var(--ink); border-radius: 0.2rem; padding: 0.05rem 0.3rem;
+}
+[data-sim="os-context-switch-cost"] .cs-tick { position: absolute; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; line-height: 1; }
+[data-sim="os-context-switch-cost"] .cs-tick[data-ax="y"] { right: calc(100% + 0.35rem); transform: translateY(-50%); }
+[data-sim="os-context-switch-cost"] .cs-tick[data-ax="x"] { top: calc(100% + 0.3rem); transform: translateX(-50%); }
+
+/* the card */
+[data-sim="os-context-switch-cost"] .cs-card { padding: 0.4rem 0.7rem; border: var(--line-w) solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
+[data-sim="os-context-switch-cost"] .cs-list { list-style: none; margin: 0.1rem 0 0.35rem; padding: 0; display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; gap: 0.05rem 0.4rem; font-size: var(--fs-sm); line-height: 1.3; }
+[data-sim="os-context-switch-cost"] .cs-list li { display: contents; }
+[data-sim="os-context-switch-cost"] .cs-mk { font-weight: 700; text-align: center; }
+[data-sim="os-context-switch-cost"] .cs-st { color: var(--muted); text-align: right; }
+[data-sim="os-context-switch-cost"] [data-st="flushed"] .cs-mk, [data-sim="os-context-switch-cost"] [data-st="cold"] .cs-mk { color: var(--danger); }
+[data-sim="os-context-switch-cost"] [data-st="flushed"] .cs-st, [data-sim="os-context-switch-cost"] [data-st="cold"] .cs-st { color: var(--ink); font-weight: 700; }
+[data-sim="os-context-switch-cost"] [data-st="kept"] .cs-mk, [data-sim="os-context-switch-cost"] [data-st="tagged"] .cs-mk,
+[data-sim="os-context-switch-cost"] [data-st="saved"] .cs-mk { color: var(--ok); }
+[data-sim="os-context-switch-cost"] .cs-note { margin: auto 0 0; font-size: var(--fs-sm); padding: 0.3rem 0.5rem; border-left: 0.3rem solid var(--warn); }
+
+/* the panel: presets in two columns so six settings fit at 1920×1080 */
+[data-sim="os-context-switch-cost"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="os-context-switch-cost"] .sd-preset { line-height: 1.15; }
+
+/* legend swatches */
+[data-sim="os-context-switch-cost"] .sd-swatch[data-shape="cs-d"] { background: var(--ink); }
+[data-sim="os-context-switch-cost"] .sd-swatch[data-shape="cs-w"] { background: repeating-linear-gradient(45deg, var(--c1) 0 0.2rem, var(--bg) 0.2rem 0.4rem); }
+[data-sim="os-context-switch-cost"] .sd-swatch[data-shape="cs-u"] { background: var(--c1); }
+[data-sim="os-context-switch-cost"] .sd-swatch[data-shape="cs-ab"] { background: linear-gradient(90deg, var(--c1) 0 50%, var(--c2) 50% 100%); }
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="os-context-switch-cost"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="os-context-switch-cost"] .cs { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; padding: 0.4rem; }
+  [data-sim="os-context-switch-cost"] .cs-cbox { flex: none; height: 13rem; }
+  [data-sim="os-context-switch-cost"] .cs-pct { font-size: 2.6rem; }
+  [data-sim="os-context-switch-cost"] .sd-presets { grid-template-columns: 1fr; }
+  [data-sim="os-context-switch-cost"] .cs-seg { font-size: var(--fs-sm); }
+  [data-sim="os-context-switch-cost"] .cs-axis > span[data-minor="true"] { display: none; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Koliko košta promjena konteksta</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+  var LOCALE = Simdeck.lang === 'hr' ? 'hr-HR' : 'en-GB';
+  var NS = 'http://www.w3.org/2000/svg';
+
+  function dec(x, d, min) { return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: d, minimumFractionDigits: min || 0 }).format(x); }
+  /** a time in µs: "50 µs", "2,5 µs", "1 ms", "6,012 ms" */
+  function time(us) { return us >= 1000 ? t('ms', { v: dec(us / 1000, 3) }) : t('us', { v: dec(us, 1) }); }
+  function pct(v, d) { return t('pct', { v: dec(v, d == null ? 1 : d, d == null ? 1 : 0) }); }
+  function b(text) { return h('b', { translate: 'no' }, String(text)); }
+
+  function svg(tag, attrs) {
+    var el = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, String(attrs[k])); });
+    return el;
+  }
+
+  // ── the timeline: six slots, true to scale (a switch is drawn at least a hairline wide) ──
+
+  /** round ticks: a 1-2-5 step giving about six intervals over the window */
+  function ticks(window) {
+    var raw = window / 6, p = Math.pow(10, Math.floor(Math.log10(raw))), step = p;
+    [1, 2, 5, 10].some(function (m) { step = m * p; return step >= raw; });
+    var out = [];
+    for (var i = 0; i * step <= window + 1e-9; i++) out.push(i * step);
+    return out;
+  }
+
+  function timeline(s) {
+    var W = s.window;
+    var procs = h('div', { class: 'cs-procs', 'aria-hidden': 'true' }, s.timeline.map(function (x) {
+      return h('span', { dataset: { p: x.proc }, style: { flex: (x.direct + x.warm + x.full) + ' 1 0px' } }, t('proc_' + x.proc));
+    }));
+    function seg(k, len, proc) {
+      if (len <= 0) return null;
+      var show = len / W > (k === 'D' ? 0.012 : 0.02);
+      return h('span', { class: 'cs-seg', dataset: { k: k, p: proc }, style: { flex: len + ' 1 0px' } },
+        show ? h('span', null, t('seg' + k)) : null);
+    }
+    var track = h('div', { class: 'cs-track', role: 'img',
+      'aria-label': t('tlLabel', { d: time(s.direct), wt: time(s.warmTime), f: time(s.fullTime) }) },
+      s.timeline.map(function (x) { return [seg('D', x.direct, x.proc), seg('W', x.warm, x.proc), seg('U', x.full, x.proc)]; }));
+    var tk = ticks(W);
+    var axis = h('div', { class: 'cs-axis', 'aria-hidden': 'true' }, tk.map(function (x, i) {
+      var left = x / W * 100;
+      return h('span', { class: 'cs-num', translate: 'no', dataset: { minor: String(i % 2 === 1) },
+        style: { left: left + '%', transform: left > 96 ? 'translateX(-100%)' : null } }, time(x));
+    }));
+    return h('div', { class: 'cs-tl' },
+      h('p', { class: 'cs-head' }, t('tlHead', { Q: time(s.Q), w: time(W) })), procs, track, axis);
+  }
+
+  // ── the gauge ──
+
+  var lastBand = null;
+  function crossed(from, to) {
+    if (!from || from === to) return null;
+    var lim = [];
+    if ((from === 'high') !== (to === 'high')) lim.push(pct(90, 0));
+    if ((from === 'low') !== (to === 'low')) lim.push(pct(50, 0));
+    return lim.join(' · ');
+  }
+
+  function gauge(s, cross) {
+    var pq = s.perQuantum, all = s.Q + s.direct;
+    function w(v) { return (v / all * 100) + '%'; }
+    var bar = h('div', { class: 'cs-gbar', 'aria-hidden': 'true' },
+      h('div', { class: 'cs-bar' },
+        h('span', { dataset: { g: 'U' }, style: { width: w(pq.useful) } }),
+        h('span', { dataset: { g: 'W' }, style: { width: w(pq.warm) } }),
+        h('span', { dataset: { g: 'D' }, style: { width: w(pq.direct) } })),
+      [50, 90].map(function (m) {
+        return h('span', { class: 'cs-mark', style: { left: m + '%' } }, h('span', { class: 'cs-num', translate: 'no' }, pct(m, 0)));
+      }));
+    function row(k, label, v) {
+      return [h('span', { class: 'cs-sw', dataset: { g: k } }), h('span', null, label), b(time(v))];
+    }
+    return h('div', { class: 'cs-col' },
+      h('p', { class: 'cs-head' }, t('gHead')),
+      h('div', { class: 'cs-big' },
+        h('span', { class: 'cs-pct cs-num' + (cross ? ' sd-changed' : ''), translate: 'no', dataset: { band: s.band },
+          role: 'img', 'aria-label': t('gLabel', { p: pct(s.pct1) }) }, pct(s.pct1)),
+        cross ? h('span', { class: 'cs-crossed sd-hl' }, t('gCrossed', { b: cross })) : null),
+      bar,
+      h('div', { class: 'cs-split' }, h('p', { class: 'cs-head' }, t('gSplit', { t: time(all) })),
+        row('U', t('gU', { r: pct(s.rate * 100, 0) }), pq.useful), row('W', t('gW'), pq.warm), row('D', t('gD'), pq.direct)),
+      h('div', { class: 'cs-rate' }, h('span', null, t('gRate')), h('b', { class: 'cs-num', translate: 'no' }, dec(Math.round(s.switchesPerSec), 0))));
+  }
+
+  // ── the chart: useful % (0 … 100) against Q (10 µs … 10 ms, log) ──
+
+  var X0 = 1, X1 = 4, VW = 1000, VH = 1000;
+  function px(Q) { return (Math.log10(Q) - X0) / (X1 - X0) * VW; }
+  function py(p) { return VH - p / 100 * VH; }
+  function chart(s) {
+    var g = svg('svg', { viewBox: '0 0 ' + VW + ' ' + VH, preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+    function ln(cls, x1, y1, x2, y2) { g.append(svg('line', { class: cls, x1: x1, y1: y1, x2: x2, y2: y2, 'vector-effect': 'non-scaling-stroke' })); }
+    var e;
+    for (e = X0; e <= X1; e++) ln('cs-grid', px(Math.pow(10, e)), 0, px(Math.pow(10, e)), VH);
+    [50, 90].forEach(function (m) { ln('cs-thr', 0, py(m), VW, py(m)); });
+    g.append(svg('polyline', { class: 'cs-curve', 'vector-effect': 'non-scaling-stroke',
+      points: s.curve.map(function (c) { return px(c.Q) + ',' + py(c.usefulPct); }).join(' ') }));
+    ln('cs-drop', px(s.Q), VH, px(s.Q), py(s.usefulPct));
+    g.append(svg('rect', { class: 'cs-frame', x: 0, y: 0, width: VW, height: VH, 'vector-effect': 'non-scaling-stroke' }));
+    var lab = [];
+    [0, 50, 90, 100].forEach(function (m) {
+      lab.push(h('span', { class: 'cs-tick cs-num', translate: 'no', dataset: { ax: 'y' }, style: { top: (py(m) / VH * 100) + '%' } }, pct(m, 0)));
+    });
+    for (e = X0; e <= X1; e++) {
+      lab.push(h('span', { class: 'cs-tick cs-num', translate: 'no', dataset: { ax: 'x' },
+        style: { left: (px(Math.pow(10, e)) / VW * 100) + '%', transform: e === X1 ? 'translateX(-85%)' : null } }, time(Math.pow(10, e))));
+    }
+    var left = px(s.Q) / VW * 100, top = py(s.usefulPct) / VH * 100;
+    lab.push(h('span', { class: 'cs-dot', style: { left: left + '%', top: top + '%' } }));
+    lab.push(h('span', { class: 'cs-now', translate: 'no', style: { left: left + '%', top: top + '%',
+      transform: (left > 60 ? 'translate(-110%, ' : 'translate(0.9rem, ') + (top < 25 ? '40%)' : '-130%)') } },
+      t('cNow') + ' ' + pct(s.pct1)));
+    return h('div', { class: 'cs-col' }, h('p', { class: 'cs-head' }, t('cHead')),
+      h('div', { class: 'cs-cbox', role: 'img', 'aria-label': t('cLabel', { Q: time(s.Q), p: pct(s.pct1) }) }, g, lab));
+  }
+
+  // ── the card ──
+
+  var MARK = { saved: '✓', same: '=', flushed: '✗', kept: '✓', tagged: '✓', cold: '✗' };
+  function list(items) {
+    return h('ul', { class: 'cs-list' }, items.map(function (x) {
+      return h('li', { dataset: { st: x.status } },
+        h('span', { class: 'cs-mk', 'aria-hidden': 'true' }, MARK[x.status]),
+        h('span', null, t('item_' + x.id)),
+        h('span', { class: 'cs-st' }, t('st_' + x.status)));
+    }));
+  }
+  function card(s) {
+    return h('div', { class: 'cs-col cs-card' },
+      h('p', { class: 'cs-head' }, t('kSaved')), list(s.saved),
+      h('p', { class: 'cs-head' }, t('kCold')), list(s.cold),
+      h('p', { class: 'cs-note' }, t('note')));
+  }
+
+  function render(c) {
+    var s = c.state;
+    var cross = crossed(lastBand, s.band);
+    lastBand = s.band;
+    c.stage.replaceChildren(h('div', { class: 'cs' }, timeline(s), gauge(s, cross), chart(s), card(s)));
+  }
+
+  function caption(c) {
+    var s = c.state, out;
+    if (s.regime === 'nowarm') out = t.parts('cap_nowarm', { Q: b(time(s.Q)), D: b(time(s.direct)) });
+    else if (s.regime === 'thrash') out = t.parts('cap_thrash', { Q: b(time(s.Q)), W: b(time(s.warm.total)), r: b(pct(s.rate * 100, 0)) });
+    else {
+      out = t.parts('cap_warm', { Q: b(time(s.Q)), D: b(time(s.direct)), W: b(time(s.warm.total)),
+        fill: t(s.kind === 'process' ? 'fill_both' : 'fill_cache') });
+    }
+    out.push(' ');
+    out = out.concat(t.parts(s.band === 'high' ? 'cap_high' : 'cap_low', { p: h('b', { class: s.band === 'high' ? null : 'sd-hl', translate: 'no' }, pct(s.pct1)) }));
+    var n = Math.round(s.switchesPerSec);
+    out.push(' ', t('cap_rate', { n: n, s: dec(n, 0) }));
+    if (s.perQuantum.warm >= 2 * s.direct) {
+      out.push(' ');
+      out = out.concat(t.parts('cap_more', { x: b(dec(s.perQuantum.warm / s.direct, 1)) }));
+    }
+    return out;
+  }
+
+  Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+    params: [
+      { key: 'q', type: 'range', label: t('q'), min: 0, max: L.Q_STEPS.length - 1, step: 1, format: function (v) { return time(L.Q_STEPS[v]); } },
+      { key: 'kind', type: 'choice', label: t('kind'), hint: t('kindHint'), options: L.KINDS.map(function (k) { return [k, t('kind_' + k)]; }) },
+      { key: 'direct', type: 'range', label: t('direct'), min: 0.5, max: 10, step: 0.5, format: time },
+      { key: 'wCache', type: 'range', label: t('wCache'), min: 0, max: 200, step: 5, format: time },
+      { key: 'wTlb', type: 'range', label: t('wTlb'), min: 0, max: 50, step: 5, format: time,
+        disabled: function (p) { return p.kind !== 'process' ? t('wTlbOff') : false; } },
+      { key: 'rate', type: 'range', label: t('rate'), min: 0.1, max: 0.9, step: 0.05, format: function (v) { return pct(Math.round(v * 100), 0); } }
+    ],
+    presets: L.presets.map(function (x) { return { id: x.id, label: t('preset_' + x.id), hint: t('hint_' + x.id), params: x.params }; }),
+    legend: [
+      { shape: 'cs-d', label: t('legD') },
+      { shape: 'cs-w', label: t('legW') },
+      { shape: 'cs-u', label: t('legU') },
+      { shape: 'cs-ab', label: t('legAB') },
+      { shape: 'hl', label: t('legChanged') }
+    ],
+    render: render,
+    caption: caption
+  });
+})();
+</script>
+</body>
+</html>
