@@ -1,0 +1,528 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- floating-point: one IEEE 754 binary32 or binary64 value as a strip of clickable bits (sign, exponent, fraction),
+     decoded underneath with its exact decimal value and ULP, and a second panel that adds two decimal operands:
+     each rounded on input, the exact sum rounded once, compared with the number nearest the expected decimal.
+     An explorer: the format, the value, a and b redraw at once; a stage field takes a typed decimal.
+     Model: sim.js; rules: SPEC.md; words: strings.js. -->
+<html lang="hr" data-sim="floating-point">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomični zarez (IEEE 754) · simdeck</title>
+<meta name="description" content="Klikni bitove ili upiši broj: točna spremljena vrijednost, ULP, ±0, ∞, NaN i subnormalni brojevi, te zašto se 0.1 + 0.2 zaokruži iznad 0.3.">
+<link rel="stylesheet" href="../../kit/kit.css">
+<script src="../../kit/kit.js"></script>
+
+<!-- #simdeck-meta placeholder. sims/<id>/sim.json is the source (docs/site-structure.md §2); the build replaces this
+     block with one generated from it, and new-sim.sh and the admin write it from sim.json. Unbuilt, the kit takes the
+     header title and subtitle (title, concept) from here, and warns when id, class or steps differ from the page. -->
+<script type="application/json" id="simdeck-meta">
+{
+  "id": "floating-point",
+  "title": {
+    "hr": "Pomični zarez (IEEE 754)",
+    "en": "Floating point (IEEE 754)"
+  },
+  "concept": {
+    "hr": "Predznak, eksponent i mantisa; zašto 0.1 + 0.2 ≠ 0.3",
+    "en": "Sign, exponent and fraction; why 0.1 + 0.2 ≠ 0.3"
+  },
+  "summary": {
+    "hr": "Klikni bitove ili upiši broj: točna spremljena vrijednost, ULP, ±0, ∞, NaN i subnormalni brojevi, te zašto se 0.1 + 0.2 zaokruži iznad 0.3.",
+    "en": "Click bits or type a number: the exact stored value, the ULP, ±0, ∞, NaN and subnormals, and why 0.1 + 0.2 rounds to a number above 0.3."
+  },
+  "tags": [
+    "number-representation"
+  ],
+  "class": "explorer"
+}
+</script>
+<!-- Contract exceptions: [{"rule": "<rule id>", "why": "<reason>"}]. Empty means the page follows every rule. -->
+<script type="application/json" id="simdeck-exceptions">[]</script>
+
+<style>
+/* Page CSS: every selector starts with [data-sim="floating-point"]; colours only from kit tokens.
+   Layout, top to bottom: the value head with the typed field, the bit strip (one row of 32 for binary32, two for
+   binary64; each row is groups s | e | f of cells, a coloured labelled band above and the bit numbers below), the
+   decoding as label | value lines, and the sum panel as label | exact value | hex rows. */
+[data-sim="floating-point"] .fp {
+  --cell: min(2.9rem, calc((100cqw - 4cqw - 1.6rem - 6.2rem) / 32));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 1cqh;
+  height: 100%;
+  padding: 1cqh 2cqw;
+  font-size: 1rem;
+}
+[data-sim="floating-point"] .fp-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+[data-sim="floating-point"] .fp-muted { color: var(--muted); }
+
+/* ── value head and the typed field ── */
+[data-sim="floating-point"] .fp-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 2rem; }
+[data-sim="floating-point"] .fp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.9rem; }
+[data-sim="floating-point"] .fp-head-lbl { font-weight: 700; }
+[data-sim="floating-point"] .fp-hex { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; }
+[data-sim="floating-point"] .fp-badge {
+  padding: 0 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-sim="floating-point"] .fp-badge[data-kind='subnormal'] { border-style: dashed; }
+[data-sim="floating-point"] .fp-badge[data-kind='inf'],
+[data-sim="floating-point"] .fp-badge[data-kind='nan'] { background: var(--ink); color: var(--bg); }
+[data-sim="floating-point"] .fp-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; font-weight: 700; }
+[data-sim="floating-point"] .fp-entry input {
+  width: calc(19ch + 1.4rem);
+  min-height: var(--hit);
+  padding: 0 0.5rem;
+  border: var(--line-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+[data-sim="floating-point"] .fp-entry input::placeholder { color: var(--muted); font-weight: 400; }
+[data-sim="floating-point"] .fp-entry input:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="floating-point"] .fp-entry input[aria-invalid='true'] { border-color: var(--danger); border-style: dashed; }
+[data-sim="floating-point"] .fp-err { color: var(--danger); font-size: var(--fs-sm); }
+
+/* ── the strip ── */
+[data-sim="floating-point"] .fp-strip { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5cqh; align-self: center; }
+[data-sim="floating-point"] .fp-row { display: flex; gap: 0.8rem; }
+[data-sim="floating-point"] .fp-group { display: flex; flex-direction: column; gap: 0.15rem; min-width: var(--cell); }
+[data-sim="floating-point"] .fp-band {
+  overflow: hidden;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-sim="floating-point"] .fp-cells { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+[data-sim="floating-point"] .fp-bit {
+  display: grid;
+  place-items: center;
+  width: var(--cell);
+  height: calc(var(--cell) * 1.2);
+  padding: 0;
+  border: max(2px, 0.14rem) solid var(--sw);
+  border-radius: var(--radius-sm);
+  background: var(--sw);
+  color: var(--on-series);
+  font-family: var(--mono);
+  font-size: max(1rem, calc(var(--cell) * 0.62));
+  font-weight: 700;
+  cursor: pointer;
+}
+[data-sim="floating-point"] .fp-bit[data-v='0'] { border-style: dashed; background: var(--bg); color: var(--ink); font-weight: 400; }
+[data-sim="floating-point"] .fp-bit:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="floating-point"] .fp-bit.sd-changed { position: relative; z-index: 1; }
+[data-sim="floating-point"] .fp-idx { display: flex; justify-content: space-between; color: var(--muted); font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.2; }
+
+/* ── decoding and the sum: label | value (| hex) ── */
+[data-sim="floating-point"] .fp-box { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.15rem 1rem; align-items: baseline; }
+[data-sim="floating-point"] .fp-box.fp-sum { grid-template-columns: max-content minmax(0, 1fr) max-content; padding-top: 0.6cqh; border-top: var(--line-w) solid var(--ink); }
+[data-sim="floating-point"] .fp-title { grid-column: 1 / -1; font-weight: 700; font-size: 1.1rem; }
+[data-sim="floating-point"] .fp-lbl { color: var(--muted); font-weight: 700; white-space: nowrap; }
+[data-sim="floating-point"] .fp-lbl .fp-mono { color: var(--ink); }
+[data-sim="floating-point"] .fp-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; min-width: 0; }
+[data-sim="floating-point"] .fp-num { font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+[data-sim="floating-point"] .fp-num.fp-strong { font-weight: 700; }
+[data-sim="floating-point"] .fp-all { max-height: 6.5em; overflow-y: auto; word-break: break-all; }
+[data-sim="floating-point"] .fp-more { padding: 0 0.4rem; border: var(--line-w) dashed var(--ink); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; }
+[data-sim="floating-point"] .fp-more:focus-visible { outline: 4px solid var(--focus); outline-offset: 2px; }
+[data-sim="floating-point"] sup { font-size: max(0.9rem, 0.75em); }
+[data-sim="floating-point"] .fp-note { font-size: var(--fs-sm); }
+[data-sim="floating-point"] .fp-hexcol { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+[data-sim="floating-point"] .fp-s { color: var(--c1); font-weight: 700; }
+[data-sim="floating-point"] .fp-e { color: var(--c2); font-weight: 700; }
+[data-sim="floating-point"] .fp-f { color: var(--c3); font-weight: 700; }
+[data-sim="floating-point"] .fp-flag { padding: 0 0.4rem; border: var(--line-w) solid var(--ink); border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; }
+[data-sim="floating-point"] .fp-flag[data-tie] { background: var(--hl); color: var(--on-hl); }
+[data-sim="floating-point"] .fp-verdict { display: inline-grid; place-items: center; min-width: 1.8em; border: var(--line-w) solid; border-radius: var(--radius-sm); font-weight: 700; }
+[data-sim="floating-point"] .fp-verdict[data-eq='1'] { border-color: var(--ok); color: var(--ok); }
+[data-sim="floating-point"] .fp-verdict[data-eq='0'] { border-color: var(--danger); border-style: dashed; color: var(--danger); }
+[data-sim="floating-point"] .fp-code { font-family: var(--mono); font-weight: 700; }
+
+/* Below the projector size (not a contract target) the stage gets short: tighten. */
+@container (max-height: 700px) {
+  [data-sim="floating-point"] .fp { gap: 0.4cqh; padding: 0.5cqh 1.5cqw; justify-content: flex-start; }
+  [data-sim="floating-point"] .fp-hex { font-size: 1.3rem; }
+  [data-sim="floating-point"] .fp-bit { height: var(--cell); }
+  [data-sim="floating-point"] .fp-entry input { min-height: 2.2rem; }
+}
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  [data-sim="floating-point"] .sd-stage { height: auto; container-type: inline-size; }
+  [data-sim="floating-point"] .fp { --cell: 2.2rem; height: auto; padding: 0.8rem 0.5rem; }
+  [data-sim="floating-point"] .fp-strip { align-items: stretch; align-self: stretch; }
+  [data-sim="floating-point"] .fp-row { flex-wrap: wrap; gap: 0.4rem; }
+  [data-sim="floating-point"] .fp-group { max-width: 100%; }
+  [data-sim="floating-point"] .fp-box, [data-sim="floating-point"] .fp-box.fp-sum { grid-template-columns: minmax(0, 1fr); }
+  [data-sim="floating-point"] .fp-lbl { white-space: normal; }
+  [data-sim="floating-point"] .fp-hexcol { white-space: normal; overflow-wrap: anywhere; }
+  [data-sim="floating-point"] .fp-flag, [data-sim="floating-point"] .fp-more { white-space: normal; }
+  [data-sim="floating-point"] .fp-hex { font-size: 1.25rem; overflow-wrap: anywhere; }
+}
+</style>
+</head>
+<body>
+<!-- Text in the page comes from strings.js: [data-t] text, [data-t-html] markup, [data-t-label] aria-label. The kit fills
+     the title and subtitle (from #simdeck-meta), the back link, the "Ideja" summary and its own controls. -->
+<div class="sd-page">
+  <header class="sd-header">
+    <a class="sd-back" data-sd-back href="../../index.html">Popis</a>
+    <div class="sd-titles">
+      <h1 class="sd-title">Pomični zarez (IEEE 754)</h1>
+      <p class="sd-subtitle"></p>
+    </div>
+    <ul class="sd-legend" data-sd-legend></ul>
+    <div class="sd-tools" data-sd-tools></div>
+  </header>
+
+  <main class="sd-main">
+    <div class="sd-stagecol">
+      <section class="sd-stage" data-sd-stage data-t-label="stage"></section>
+      <p class="sd-caption" data-sd-caption aria-live="polite"></p>
+    </div>
+    <aside class="sd-panel">
+      <div data-sd-presets></div>
+      <div data-sd-controls></div>
+      <details class="sd-explain">
+        <summary></summary>
+        <div data-t-html="explain"></div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="sd-bar" data-sd-transport></footer>
+</div>
+
+<script src="strings.js"></script>
+<script src="sim.js"></script>
+<script>
+(function () {
+  'use strict';
+  var L = window.SimLogic;
+  var h = Simdeck.h;
+  var t = Simdeck.useStrings(window.SimStrings);
+
+  /** Long exact values: the page shows at most this many characters, start … end, until "every digit" is on. */
+  var LONG = 64, HEAD = 40, TAIL = 16;
+  /** Captions quote an exact value up to this many characters (the task's "0.1000000000000000055511…"). */
+  var CAP = 24;
+
+  // ── formatting (data, not language: shown in translate="no" elements) ──
+  function minus(s) { return String(s).replace(/-/g, '−'); }
+  function grouped(n) { return minus(String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')); }
+  function data(text, cls) { return h('span', { class: 'fp-num' + (cls ? ' ' + cls : ''), translate: 'no' }, minus(text)); }
+  function b(text) { return h('b', { translate: 'no' }, minus(text)); }
+  function pow2(k) { return h('span', { class: 'fp-mono', translate: 'no' }, '2', h('sup', null, minus(k))); }
+  function signed(v, sign) { return (sign ? '−' : '+') + v; }
+  function approx(a) { return minus(a); }
+  /** An exact decimal: whole when short (or when every digit is wanted), else start … (n more digits) … end. */
+  function exactNode(str, all, strong) {
+    if (str === null) return null;
+    var cls = 'fp-num' + (strong ? ' fp-strong' : '');
+    if (str.length <= LONG) return h('span', { class: cls, translate: 'no' }, minus(str));
+    if (all) return [h('span', { class: cls + ' fp-all', translate: 'no', tabindex: '0' }, minus(str)), digitsButton(t('fewer'))];
+    var hidden = str.slice(HEAD, str.length - TAIL).replace(/\D/g, '').length;
+    return h('span', { class: cls },
+      h('span', { translate: 'no' }, minus(str.slice(0, HEAD)) + '…'), ' ',
+      digitsButton(t.n('elided', hidden)), ' ',
+      h('span', { translate: 'no' }, '…' + str.slice(str.length - TAIL)));
+  }
+  /** The "n more digits" / "shorten" button: switches every long value between elided and whole (key D too). */
+  function digitsButton(text) {
+    return h('button', {
+      type: 'button', class: 'fp-more', title: t('digitsTitle'), 'aria-keyshortcuts': 'D',
+      onmousedown: function (e) { e.preventDefault(); },
+      onclick: function () { sim.set({ digits: !sim.params.digits }); }
+    }, text);
+  }
+  /**
+   * An exact value quoted in a caption. Whole up to CAP + 4 characters; longer, cut after CAP characters and ended
+   * with "…" when the cut still shows at least five significant digits and the whole integer part (the task's
+   * "0.1000000000000000055511…"); otherwise (a tiny or a huge number) "≈" and three digits. `end` follows a value
+   * that is not cut.
+   */
+  function capNum(str, end) {
+    if (str.length <= CAP + 4) return str + (end || '');
+    var head = str.slice(0, CAP), lead = head.search(/[1-9]/), dot = str.indexOf('.');
+    if (lead >= 0 && head.length - lead >= 5 && (dot < 0 ? str.length : dot) <= CAP) return head + '…';
+    return '≈ ' + L.approxOf(str) + (end || '');
+  }
+  function midNum(str) { return capNum(str, ''); }
+  function fmtName(f) { return t('fmt_' + f); }
+  function infText(sign) { return sign ? '−∞' : '+∞'; }
+
+  // ── stage: the typed field is built once (so typing keeps focus); everything else is redrawn ──
+  var sim = null;
+  var urlQuery = new URLSearchParams(window.location.search);
+  var prevBits = null, curBits = null, ready = false;
+  var input = h('input', {
+    type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', maxlength: String(L.MAX_TEXT),
+    'aria-label': t('typedLabel'), placeholder: t('typedPlaceholder'), translate: 'no',
+    oninput: function () { if (sim) sim.set({ value: 'typed', text: input.value.slice(0, L.MAX_TEXT) }); }
+  });
+  var err = h('span', { class: 'fp-err', hidden: '' }, t('typedError'));
+  var entry = h('label', { class: 'fp-entry' }, h('span', { 'data-t': 'typedLabel' }, t('typedLabel')), input, err);
+  var head = h('div', { class: 'fp-head' });
+  var body = h('div', { class: 'fp-body', style: { display: 'contents' } });
+  var root = h('div', { class: 'fp' }, h('div', { class: 'fp-top' }, head, entry), body);
+
+  /** The strip's rows: groups of bit positions (0 = sign, from the left). binary64: s, e, f 51…32, then f 31…0. */
+  function rowsOf(s) {
+    var n = s.bits.length, w = s.w;
+    var first = [{ g: 's', c: 1, from: 0, to: 1 }, { g: 'e', c: 2, from: 1, to: 1 + w }];
+    if (n === 32) return [first.concat([{ g: 'f', c: 3, from: 1 + w, to: 32 }])];
+    return [first.concat([{ g: 'f', c: 3, from: 1 + w, to: 32 }]), [{ g: 'fc', c: 3, from: 32, to: 64 }]];
+  }
+
+  function stripNode(s, changed) {
+    var n = s.bits.length;
+    var F = L.FORMATS[s.format];
+    var bandText = { s: t('groupS'), e: t('groupE'), f: t('groupF'), fc: t('groupFcont') };
+    var gName = { s: t('gS'), e: t('gE'), f: t('gF'), fc: t('gF') };
+    var rows = rowsOf(s).map(function (row) {
+      return h('div', { class: 'fp-row' }, row.map(function (grp) {
+        var cells = [];
+        for (var pos = grp.from; pos < grp.to; pos++) {
+          var v = s.bits.charAt(pos), idx = n - 1 - pos;
+          cells.push(h('button', {
+            type: 'button', class: 'fp-bit' + (changed.indexOf(pos) >= 0 ? ' sd-changed' : ''),
+            dataset: { c: String(grp.c), v: v, pos: String(pos) }, translate: 'no',
+            'aria-label': t('bitLabel', { i: idx, g: gName[grp.g], v: v }),
+            onmousedown: function (e) { e.preventDefault(); },
+            onclick: (function (i) { return function () { sim.set({ value: 'bits', hex: L.flipBit(s.hex, i, F) }); }; })(idx)
+          }, v));
+        }
+        var hi = n - 1 - grp.from, lo = n - grp.to;
+        return h('div', { class: 'fp-group', dataset: { g: grp.g } },
+          h('div', { class: 'fp-band sd-fill', dataset: { c: String(grp.c) } }, bandText[grp.g]),
+          h('div', { class: 'fp-cells' }, cells),
+          h('div', { class: 'fp-idx', translate: 'no' }, h('span', null, String(hi)), hi !== lo ? h('span', null, String(lo)) : null));
+      }));
+    });
+    return h('div', { class: 'fp-strip' }, rows);
+  }
+
+  function line(label, content) {
+    return [h('span', { class: 'fp-lbl' }, label), h('span', { class: 'fp-val' }, content)];
+  }
+
+  function decodeNode(s, p) {
+    var sup = function (x) { return h('sup', null, minus(x)); };
+    var sgn = h('span', { class: 'fp-s' }, String(s.sign));
+    var formula;
+    if (s.kind === 'normal') {
+      formula = h('span', { class: 'fp-num', translate: 'no' }, '(−1)', h('sup', null, sgn), ' × 1.',
+        h('span', { class: 'fp-f' }, s.fractionBits), '₂ × 2',
+        h('sup', null, h('span', { class: 'fp-e' }, String(s.expStored)), ' − ' + s.bias));
+    } else if (s.kind === 'subnormal') {
+      formula = h('span', { class: 'fp-num', translate: 'no' }, '(−1)', h('sup', null, sgn), ' × 0.',
+        h('span', { class: 'fp-f' }, s.fractionBits), '₂ × 2', sup(String(s.expUnbiased)));
+    } else if (s.kind === 'zero') {
+      formula = [t('zeroWords'), ' → ', b(s.sign ? '−0' : '+0')];
+    } else if (s.kind === 'inf') {
+      formula = [t('infWords'), ' → ', b(infText(s.sign))];
+    } else {
+      formula = [t('nanWords'), ' → ', b('NaN')];
+    }
+
+    var signPart = [h('span', { class: 'fp-num', translate: 'no' }, 's = ', h('span', { class: 'fp-s' }, String(s.sign))), ' → ', t(s.sign ? 'minus' : 'plus')];
+    var expPart = [t('stored'), ' ', h('span', { class: 'fp-num', translate: 'no' }, 'e = ', h('span', { class: 'fp-e' }, String(s.expStored)), ' = ' + s.expBits + '₂')];
+    if (s.kind === 'normal') expPart.push(' → ', t('unbiased'), ' ', data(s.expStored + ' - ' + s.bias + ' = ' + s.expUnbiased));
+    else if (s.kind === 'subnormal') expPart.push(' (', t('allZeros'), ') → ', t('noHidden'), ' ', data(String(s.expUnbiased)));
+    else if (s.kind === 'zero') expPart.push(' (', t('allZeros'), ')');
+    else expPart.push(' (', t('allOnes'), ')');
+
+    var fracPart = [h('span', { class: 'fp-num', translate: 'no' }, 'f = ', h('span', { class: 'fp-f' }, grouped(s.fraction))), ' ', t('ofWhich'), ' ', pow2(s.p)];
+    if (s.kind === 'normal') fracPart.push(' → ', data('1.f = ' + s.significand));
+    else if (s.kind === 'subnormal') fracPart.push(' → ', data('0.f = ' + s.significand));
+
+    var exactPart;
+    if (s.exact === null) exactPart = [t('noValue')];
+    else {
+      exactPart = [exactNode(minusZero(s), p.digits, true)];
+      var src = s.source;
+      if ((src.from === 'decimal' || src.from === 'typed') && !src.error && !src.empty && src.diff !== null && src.diff !== undefined) {
+        exactPart.push(src.inexact
+          ? h('span', { class: 'fp-flag' }, t.parts('exactDiff', { dec: data(src.text.trim()) }), ' ', data((src.diff.charAt(0) === '-' ? '' : '+') + src.diffApprox))
+          : h('span', { class: 'fp-flag' }, t('exactSame')));
+      }
+    }
+    var ulpPart = s.ulp
+      ? [t(s.isMax ? 'ulpMax' : 'ulpOf'), ' ', pow2(s.ulp.exp), ' ', data('≈ ' + approx(s.ulp.approx)), ' · ', t('printed'), ' ', h('code', { class: 'fp-code', translate: 'no' }, s.shortest)]
+      : [t('printed'), ' ', h('code', { class: 'fp-code', translate: 'no' }, s.shortest)];
+
+    return h('div', { class: 'fp-box fp-dec' },
+      line(t('lineValue'), formula),
+      line(t('lineSign'), [signPart, h('span', { class: 'fp-muted' }, '·'), h('b', { class: 'fp-lbl' }, t('lineExp')), expPart]),
+      line(t('lineFrac'), fracPart),
+      line(t('lineExact'), exactPart),
+      line(t('lineUlp'), ulpPart));
+  }
+  /** −0's exact value is written "−0", not "0". */
+  function minusZero(s) { return s.kind === 'zero' && s.sign ? '-0' : s.exact; }
+
+  function sumNode(s, p) {
+    var m = s.sum;
+    var row = function (label, value, hex) {
+      return [h('span', { class: 'fp-lbl' }, label), h('span', { class: 'fp-val' }, value), h('span', { class: 'fp-hexcol', translate: 'no' }, hex ? '0x' + hex : '')];
+    };
+    var flag = function (text, attrs) { return h('span', Object.assign({ class: 'fp-flag' }, attrs || {}), text); };
+    var exactFlags = [];
+    if (m.rounded.tie) exactFlags.push(flag(t('tieBadge'), { 'data-tie': '' }));
+    else if (!m.rounded.inexact) exactFlags.push(flag(t('exactOp')));
+    else exactFlags.push(h('span', { class: 'fp-muted fp-note' }, t('roundedOnce')));
+    var expr = m.a.dec + ' + ' + m.b.dec + ' == ' + m.expected.dec + ' → ' + (m.equal ? 'true' : 'false');
+    var verdict = [
+      h('span', { class: 'fp-verdict', dataset: { eq: m.equal ? '1' : '0' }, translate: 'no' }, m.equal ? '=' : '≠'),
+      h('code', { class: 'fp-code', translate: 'no' }, expr),
+      h('span', null, m.equal ? t('verdictEq') : t.n('verdictNe', Math.abs(m.ulpsApart))),
+      m.absorbed ? flag(t(m.absorbed === 'b' ? 'lostB' : 'lostA')) : null,
+      h('span', { class: 'fp-muted' }, '·'), t('printed'), h('code', { class: 'fp-code', translate: 'no' }, m.rounded.shortest)
+    ];
+    return h('div', { class: 'fp-box fp-sum' },
+      h('div', { class: 'fp-title' }, t('sumHead'), ' ', h('span', { translate: 'no' }, fmtName(s.format))),
+      row([t('rowA'), ' = ', h('span', { class: 'fp-mono', translate: 'no' }, m.a.dec)], [h('span', { class: 'fp-muted fp-note' }, t('storedAs')), exactNode(m.a.exact, p.digits)], m.a.hex),
+      row([t('rowB'), ' = ', h('span', { class: 'fp-mono', translate: 'no' }, m.b.dec)], [h('span', { class: 'fp-muted fp-note' }, t('storedAs')), exactNode(m.b.exact, p.digits)], m.b.hex),
+      row(t('rowExact'), [exactNode(m.exactSum, p.digits)].concat(exactFlags), null),
+      row(t('rowRounded'), [exactNode(m.rounded.exact, p.digits, true)], m.rounded.hex),
+      row([t('rowExpected'), ' ', h('span', { class: 'fp-mono', translate: 'no' }, m.expected.dec)], [exactNode(m.expected.exact, p.digits)], m.expected.hex),
+      row(t('verdict'), verdict, null));
+  }
+
+  function renderHead(s) {
+    head.replaceChildren(
+      h('span', { class: 'fp-head-lbl' }, t('valueHead'), ' ', h('span', { translate: 'no' }, fmtName(s.format))),
+      h('span', { class: 'fp-hex', translate: 'no' }, '0x' + s.hex),
+      h('span', { class: 'fp-badge', dataset: { kind: s.kind } }, t('kind_' + s.kind)));
+  }
+
+  function syncInput(s, p) {
+    var want = p.value === 'typed' ? (p.text || '') : '';
+    var bad = p.value === 'typed' && !!s.source.error;
+    input.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    if (bad) err.removeAttribute('hidden'); else err.setAttribute('hidden', '');
+    if (document.activeElement === input && p.value === 'typed') return;
+    if (input.value !== want) input.value = want;
+  }
+
+  // ?text= and ?hex= are the page's own state (the kit keeps only its params in the URL and leaves other keys alone)
+  function writeOwnUrl(p) {
+    try {
+      var u = new URLSearchParams(window.location.search);
+      if (p.value === 'typed' && p.text) u.set('text', p.text); else u.delete('text');
+      if (p.value === 'bits' && p.hex) u.set('hex', p.hex); else u.delete('hex');
+      var qs = u.toString();
+      window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    } catch (e) { /* file:// in some browsers */ }
+  }
+
+  // ── captions: the strip's value, then the sum ──
+  function capStrip(s) {
+    var src = s.source, f = fmtName(s.format);
+    if (src.from === 'typed' && src.error) return t.parts('capTypedError', { text: b(src.text.trim()) });
+    if (src.from === 'typed' && src.empty) return t.parts('capTypedEmpty');
+    if (src.from === 'sum') return t.parts('capSumValue', { hex: b('0x' + s.hex) });
+    if (src.from === 'decimal' || src.from === 'typed') {
+      var dec = b(src.text.trim());
+      if (src.overflow) return t.parts('capOverflow', { dec: dec, f: f, v: b(infText(s.sign)) });
+      if (src.underflow) return t.parts('capUnderflow', { dec: dec, f: f, v: b(s.sign ? '−0' : '+0') });
+      if (src.special === 'inf') return t.parts('capInf', { v: b(infText(s.sign)) });
+      if (src.special === 'nan') return t.parts('capNan');
+      if (src.inexact) return t.parts(src.dyadic ? 'capInexactBits' : 'capInexact', { dec: dec, f: f, exact: b(capNum(s.exact, '.')) });
+      if (s.isMax) return t.parts('capMax', { exact: b(midNum(s.exact)) });
+      return t.parts('capExactDec', { dec: dec, exact: b(midNum(minusZero(s))), ulp: pow2(s.ulp.exp) });
+    }
+    if (s.kind === 'inf') return t.parts('capInf', { v: b(infText(s.sign)) });
+    if (s.kind === 'nan') return t.parts('capNan');
+    if (s.kind === 'zero') return t.parts('capZero', { v: b(s.sign ? '−0' : '+0') });
+    if (s.kind === 'subnormal') return t.parts('capSub', { exact: b(midNum(s.exact)) });
+    if (s.isMax) return t.parts('capMax', { exact: b(midNum(s.exact)) });
+    if (src.special === 'minNormal') return t.parts('capMinNormal', { exact: b(midNum(s.exact)) });
+    return t.parts('capNormal', { hex: b('0x' + s.hex), exact: b(midNum(s.exact)), ulp: pow2(s.ulp.exp) });
+  }
+  function capSum(s) {
+    var m = s.sum, A = b(m.a.dec), B = b(m.b.dec);
+    if (m.absorbed) {
+      var lost = b(m.absorbed === 'b' ? m.b.dec : m.a.dec), lost2 = b(m.absorbed === 'b' ? m.b.dec : m.a.dec);
+      var vars = { a: A, b: B, x: b(midNum(m.exactSum)), ulp: pow2(m.rounded.ulp.exp), r: b(midNum(m.rounded.exact)), lost: lost };
+      if (m.rounded.tie) return t.parts('capAbsorbTie', vars);
+      // capAbsorb names the lost operand twice: a node can be placed once, so the second is its own copy
+      var parts = t.parts('capAbsorb', vars), seen = false;
+      return parts.map(function (x) { if (x === lost) { if (seen) return lost2; seen = true; } return x; });
+    }
+    if (!m.equal) {
+      var n = Math.abs(m.ulpsApart), dir = t(m.ulpsApart > 0 ? 'above' : 'below'), e = b(m.expected.dec);
+      return n === 1 ? t.parts('capSumNe1', { a: A, b: B, dir: dir, e: e }) : t.parts('capSumNe', { a: A, b: B, dir: dir, e: e, n: n });
+    }
+    if (!m.rounded.inexact && !m.a.inexact && !m.b.inexact) return t.parts('capSumEqExact', { a: A, b: B, r: b(midNum(m.rounded.exact)) });
+    if (!m.rounded.inexact) return t.parts('capSumEqOpExact', { a: A, b: B, e: b(m.expected.dec) });
+    return t.parts('capSumEq', { a: A, b: B, e: b(m.expected.dec) });
+  }
+
+  var presetList = L.presets.map(function (pr) {
+    return { id: pr.id, label: t('preset_' + pr.id), hint: t('hint_' + pr.id), params: pr.params };
+  });
+
+  sim = Simdeck.mount({
+    defaults: L.defaults,
+    initial: L.initial,
+
+    params: [
+      { key: 'format', type: 'choice', label: t('format'), options: L.FORMAT_IDS.map(function (f) { return [f, fmtName(f)]; }) },
+      { key: 'value', type: 'select', label: t('value'), options: L.VALUE_IDS.map(function (v) { return [v, t('value_' + v)]; }) },
+      { key: 'a', type: 'select', label: t('a'), options: L.OPERANDS.map(function (v) { return [v, v]; }) },
+      { key: 'b', type: 'select', label: t('b'), options: L.OPERANDS.map(function (v) { return [v, v]; }) }
+    ],
+    keys: [{ key: 'd', label: t('digits'), run: function (sm) { sm.set({ digits: !sm.params.digits }); } }],
+
+    presets: presetList,
+
+    legend: [
+      { c: 1, label: t('legendS') },
+      { c: 2, label: t('legendE') },
+      { c: 3, label: t('legendF') },
+      { c: 8, label: t('legendOne') },
+      { c: 8, shape: 'hollow', label: t('legendZero') },
+      { shape: 'hl', label: t('legendChanged') }
+    ],
+
+    render: function (c) {
+      var s = c.state, p = c.params;
+      // "changed" compares with the strip before the last input; loading the page (defaults, then the URL) is no input
+      if (!ready) { prevBits = null; curBits = s.bits; }
+      else if (s.bits !== curBits) { prevBits = curBits; curBits = s.bits; }
+      var changed = L.changedBits(prevBits, curBits);
+      renderHead(s);
+      syncInput(s, p);
+      body.replaceChildren(stripNode(s, changed), decodeNode(s, p), sumNode(s, p));
+      if (root.parentNode !== c.stage) c.stage.replaceChildren(root);
+      writeOwnUrl(p);
+    },
+
+    caption: function (c) {
+      return capStrip(c.state).concat([' '], capSum(c.state));
+    }
+  });
+
+  // A link with ?value=typed&text= or ?value=bits&hex= opens on that value (read before the first render rewrote the URL).
+  if (urlQuery.get('value') === 'typed' && urlQuery.get('text')) sim.set({ text: urlQuery.get('text').slice(0, L.MAX_TEXT) });
+  if (urlQuery.get('value') === 'bits' && urlQuery.get('hex')) sim.set({ hex: L.cleanHex(urlQuery.get('hex')) });
+  ready = true;
+})();
+</script>
+</body>
+</html>
