@@ -16,6 +16,7 @@
       roleActive: 'aktivni',
       roleRO: 'samo za čitanje',
       roleRemoved: 'uklonjen',
+      roleDropped: 'odbačen',
       roleMissing: 'datoteke nema',
       roleBroken: 'prekinut',
       cntAlloc: ['zauzet {n} blok', 'zauzeta {n} bloka', 'zauzeto {n} blokova'],
@@ -26,11 +27,13 @@
 
       // params
       format: 'Format',
-      ending: 'Srednji sloj na kraju',
+      ending: 'Na kraju',
       endNone: 'ništa',
       endCommit: 'spoji',
       endStream: 'povuci',
       endDelete: 'obriši',
+      endApply: 'vrati',
+      endKeep: 'spremi + vrati',
       compact: 'Lanac u jednom koraku',
       showView: 'Što VM vidi',
 
@@ -47,6 +50,12 @@
       presetVhdxHint: 'Brisanje kontrolne točke spaja njezin AVHDX.',
       presetVmdk: 'Delta-datoteke (VMDK)',
       presetVmdkHint: 'Brisanje snimke spaja njezinu datoteku u roditelja.',
+      presetApply: 'Vraćanje na C1 (VHDX)',
+      presetApplyHint: 'Natrag na C1: novi AVHDX, trenutno stanje odbačeno.',
+      presetKeep: 'Spremi pa vrati (VHDX)',
+      presetKeepHint: 'Trenutno stanje ostaje kao C3; lanac se grana.',
+      presetAvhdx: 'AVHDX obrisan rukom',
+      presetAvhdxHint: 'Datoteka obrisana mimo Hyper-V-a: VM se ne pokreće.',
 
       // legend
       legChanged: 'promijenjen u ovom koraku',
@@ -70,6 +79,23 @@
       what_vhdx: 'kontrolne točke',
       what_vmdk: 'snimke',
       what_qcow2: 'snimke',
+      none_qcow2: 'nijedna snimka',
+      none_vhdx: 'nijedna kontrolna točka',
+      none_vmdk: 'nijedna snimka',
+      second_qcow2: 'druga snimka',
+      second_vhdx: 'druga kontrolna točka',
+      second_vmdk: 'druga snimka',
+      third_qcow2: 'treća snimka',
+      third_vhdx: 'treća kontrolna točka, C3',
+      third_vmdk: 'treća snimka',
+      applyHead_qcow2: 'Povratak na prvu snimku: nad {base} nastaje novi prazni *overlay* {new}, pa VM opet vidi disk iz te snimke.',
+      applyHead_vhdx: 'Vraćanje na prvi [[checkpoint]], C1: Hyper-V stvara novi AVHDX {new} nad {base}, pa VM opet vidi disk ' +
+        'iz C1.',
+      applyHead_vmdk: 'Povratak na prvu snimku: nad {base} nastaje nova prazna delta-datoteka {new}, pa VM opet vidi disk iz ' +
+        'te snimke.',
+      kept_qcow2: '{old} ostaje za treću snimku, a {s1} za drugu',
+      kept_vhdx: '{old} ostaje za treću kontrolnu točku, a {s1} za drugu',
+      kept_vmdk: '{old} ostaje za treću snimku, a {s1} za drugu',
       commitHead_qcow2: 'Spajanje prema dolje (*commit*) sloja {L} u {P}.',
       commitHead_vhdx: 'Prvi [[=checkpoint]] se briše: Hyper-V spaja (*merge*) {L} u {P}.',
       commitHead_vmdk: 'Prvi *snapshot* se briše: njegova datoteka {L} spaja se (*merge*) u {P}.',
@@ -117,6 +143,15 @@
       capReadOlder: ['Niži sloj ima stariji sadržaj ({old}), ali čitanje do njega ne dolazi.', 'Niži slojevi imaju starije sadržaje ({old}), ali čitanje do njih ne dolazi.',
         'Niži slojevi imaju starije sadržaje ({old}), ali čitanje do njih ne dolazi.'],
       capReadZero: 'Čitanje bloka {b}: ni {file} ga nema, a ispod nema ničega: blok se čita kao nule.',
+      capKeep: 'Prvo se trenutno stanje sprema: {third}. {old} postaje samo za čitanje i više se ne mijenja, a VM vidi isto.',
+      capApplyDrop: ['Trenutno stanje u {old} ({n} blok: {list}) odbacuje se: ne čuva ga {none}.',
+        'Trenutno stanje u {old} ({n} bloka: {list}) odbacuje se: ne čuva ga {none}.',
+        'Trenutno stanje u {old} ({n} blokova: {list}) odbacuje se: ne čuva ga {none}.'],
+      capApplyBranch: '{s1} ostaje jer ga treba {second}, pa {base} sada ima dvoje djece: lanac se grana.',
+      capApplyKept: '{kept}, pa {base} sada ima dvoje djece: lanac se grana. Ništa nije izgubljeno.',
+      capReadBranch: ['Vrijednost {vals} na drugoj grani ne čita se: taj sloj nije ispod {top}.',
+        'Vrijednosti {vals} na drugoj grani ne čitaju se: ti slojevi nisu ispod {top}.',
+        'Vrijednosti {vals} na drugoj grani ne čitaju se: ti slojevi nisu ispod {top}.'],
 
       explain: '<p>Disk virtualnog stroja može biti <b>lanac datoteka</b>. Na dnu je osnovna slika, a svaka snimka ' +
         '(<em lang="en">snapshot</em>) dodaje prazan prekrivni sloj (<em lang="en">overlay</em>) kojemu je dotadašnji vrh ' +
@@ -131,8 +166,14 @@
         'datoteka ne zna tko se na nju oslanja.</p>' +
         '<p>Datoteka obrisana <b>bez spajanja</b> prekida lanac: svaki sloj iznad nje ostaje bez podloge, a slika se ne može ' +
         'otvoriti. Zato brisanje kontrolne točke ili snimke u upravitelju spaja upise nastale nakon nje, a ne briše ih.</p>' +
+        '<p><b>Hyper-V:</b> kontrolna točka je stanje diska prije AVHDX-a koji nastaje uz nju. Brisanje kontrolne točke ' +
+        'spaja AVHDX u roditelja. <b>Vraćanje na točku</b> (<em lang="en">Apply</em>) stvara novi AVHDX nad diskom te ' +
+        'točke i odbacuje trenutno stanje, osim ako se ono prije spremi kao nova točka; tada roditelj ima dvoje djece i ' +
+        'lanac se grana. AVHDX obrisan rukom, mimo Hyper-V-a, prekida lanac kao i svaka druga datoteka. Produkcijska ' +
+        'kontrolna točka traži od gosta da disk dovede u dosljedno stanje i ne sprema memoriju; standardna sprema i ' +
+        'memoriju. Na blokovima diska razlike nema.</p>' +
         '<p>Česte zablude: snimka nije kopija diska (prazan je sloj koji raste); brisanje snimke ne briše upise nastale nakon nje ' +
-        '(oni se spajaju dolje, nestaje samo povratak na nju); snimka nije sigurnosna kopija, jer nestaje s osnovnom slikom.</p>'
+        '(oni se spajaju dolje, nestaje samo povratak na nju); snimka nije sigurnosna kopija, jer nestaje s osnovnom slikom; „suvišan“ AVHDX ne smije se samo obrisati da se oslobodi prostor, jer ga trebaju slojevi iznad njega.</p>'
     },
     en: {
       stage: 'Disk image chain',
@@ -142,6 +183,7 @@
       roleActive: 'active',
       roleRO: 'read-only',
       roleRemoved: 'removed',
+      roleDropped: 'discarded',
       roleMissing: 'file missing',
       roleBroken: 'broken',
       cntAlloc: ['{n} block allocated', '{n} blocks allocated'],
@@ -151,11 +193,13 @@
       fmt_vmdk: 'VMDK',
 
       format: 'Format',
-      ending: 'Middle layer at the end',
+      ending: 'At the end',
       endNone: 'none',
       endCommit: 'merge',
       endStream: 'stream',
       endDelete: 'delete',
+      endApply: 'apply',
+      endKeep: 'take + apply',
       compact: 'Chain in one step',
       showView: 'What the VM sees',
 
@@ -171,6 +215,12 @@
       presetVhdxHint: 'Deleting a checkpoint merges its AVHDX.',
       presetVmdk: 'Delta files (VMDK)',
       presetVmdkHint: 'Deleting a snapshot merges its file into the parent.',
+      presetApply: 'Apply C1 (VHDX)',
+      presetApplyHint: 'Back to C1: a new AVHDX; the current state is discarded.',
+      presetKeep: 'Take and apply (VHDX)',
+      presetKeepHint: 'The current state stays as C3; the chain branches.',
+      presetAvhdx: 'AVHDX deleted by hand',
+      presetAvhdxHint: 'The file deleted outside Hyper-V: the VM does not start.',
 
       legChanged: 'changed in this step',
       legBlock: 'block allocated in a layer',
@@ -192,6 +242,24 @@
       what_vhdx: 'the checkpoint',
       what_vmdk: 'the snapshot',
       what_qcow2: 'the snapshot',
+      none_qcow2: 'no snapshot',
+      none_vhdx: 'no checkpoint',
+      none_vmdk: 'no snapshot',
+      second_qcow2: 'the second snapshot',
+      second_vhdx: 'the second checkpoint',
+      second_vmdk: 'the second snapshot',
+      third_qcow2: 'a third snapshot',
+      third_vhdx: 'a third checkpoint, C3',
+      third_vmdk: 'a third snapshot',
+      applyHead_qcow2: 'Revert to the first snapshot: a new empty overlay {new} on {base}, so the VM sees the disk of that ' +
+        'snapshot again.',
+      applyHead_vhdx: 'Apply the first [[checkpoint]], C1: Hyper-V creates a new AVHDX {new} on {base}, so the VM sees the ' +
+        'disk of C1 again.',
+      applyHead_vmdk: 'Revert to the first snapshot: a new empty delta file {new} on {base}, so the VM sees the disk of that ' +
+        'snapshot again.',
+      kept_qcow2: '{old} stays for the third snapshot and {s1} for the second',
+      kept_vhdx: '{old} stays for the third checkpoint and {s1} for the second',
+      kept_vmdk: '{old} stays for the third snapshot and {s1} for the second',
       commitHead_qcow2: 'Commit (merge down) of {L} into {P}.',
       commitHead_vhdx: 'The first checkpoint is deleted: Hyper-V merges {L} into {P}.',
       commitHead_vmdk: 'The first snapshot is deleted: its file {L} is merged into {P}.',
@@ -234,6 +302,13 @@
       capVisited: ['Layers visited: {n}.', 'Layers visited: {n}.'],
       capReadOlder: ['A lower layer holds an older value ({old}), but the read never gets there.', 'Lower layers hold older values ({old}), but the read never gets there.'],
       capReadZero: 'Read block {b}: {file} does not have it either, and there is nothing below: the block reads as zeros.',
+      capKeep: 'First the current state is kept: {third}. {old} becomes read-only and never changes again; the VM sees the same.',
+      capApplyDrop: ['The current state in {old} ({n} block: {list}) is discarded: {none} keeps it.',
+        'The current state in {old} ({n} blocks: {list}) is discarded: {none} keeps it.'],
+      capApplyBranch: '{s1} stays, because {second} needs it, so {base} now has two children: the chain branches.',
+      capApplyKept: '{kept}, so {base} now has two children: the chain branches. Nothing is lost.',
+      capReadBranch: ['{vals} on the other branch is not read: that layer is not below {top}.',
+        '{vals} on the other branch are not read: those layers are not below {top}.'],
 
       explain: '<p>A virtual machine\'s disk can be a <b>chain of files</b>. The base image sits at the bottom, and each ' +
         'snapshot adds an empty overlay whose backing file is the old top. The VM writes only to the top, active layer: ' +
@@ -247,8 +322,14 @@
         '<p>A file deleted <b>without a merge</b> breaks the chain: every layer above it loses its footing and the image ' +
         'cannot be opened. That is why deleting a checkpoint or snapshot in the manager merges the writes made after ' +
         'it rather than deleting them.</p>' +
+        '<p><b>Hyper-V:</b> a checkpoint is the state of the disk before the AVHDX made with it. Deleting a checkpoint ' +
+        'merges the AVHDX into its parent. <b>Applying</b> a checkpoint creates a new AVHDX on that checkpoint\'s disk and ' +
+        'discards the current state, unless it is first kept as a new checkpoint; then the parent has two children and ' +
+        'the chain branches. An AVHDX deleted by hand, outside Hyper-V, breaks the chain like any other file. A production ' +
+        'checkpoint asks the guest to bring its disk to a consistent state and saves no memory; a standard checkpoint saves ' +
+        'the memory too. The disk blocks are the same either way.</p>' +
         '<p>Common mistakes: a snapshot is not a copy of the disk (it is an empty layer that grows); deleting a snapshot ' +
-        'does not delete the writes made after it (they merge down; only the way back to it is gone); a snapshot is not a backup, because it dies with its base image.</p>'
+        'does not delete the writes made after it (they merge down; only the way back to it is gone); a snapshot is not a backup, because it dies with its base image; an orphaned AVHDX cannot simply be deleted to save space, because the layers above it need it.</p>'
     }
   };
 

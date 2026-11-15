@@ -133,3 +133,90 @@ Fixed from the review:
 ## Time
 
 Start 2026-10-04 10:22 CEST, done 10:45 CEST (about 23 minutes, including the review and its fixes).
+
+## win-hyperv-checkpoints presets (task `docs/tasks/w3/win-hyperv-checkpoints.md`, t-0465)
+
+Three presets on this page (keys 7–9) and one `entries` line (`hv-apply`), for WIN2 (Hyper-V checkpoints). Rules 10–13
+in `SPEC.md`.
+
+### Decisions
+
+- **Built here, not only filed.** The task asks for an `apply` op and branches and says to file that request here. They
+  are additive, so they are in this folder's model: two new pure functions (`keepState`, `apply`), two new `ending`
+  values (`apply`, `keep`), a layer `s3` and a `dropped` state field. The six earlier presets give the same states
+  and step counts as before (their tests are unchanged and pass). Same route as `win-firewall-profiles` on
+  `lnx-firewalld-zones`.
+- **`hv-delete-middle` is the existing preset 5 `vhdx-checkpoints`**, not a copy. The task writes "delete checkpoint C2,
+  whose disk is the middle `_1.avhdx`, merged into its parent". But merging `_1` into `Disk.vhdx` changes C1's state
+  (`Disk.vhdx` alone), so that delete is checkpoint **C1**. The task's numbers (base `A B1 C D E1`, view unchanged) are
+  those of deleting C1, as in preset 5. Deleting C2 would merge `_1` with `_2` and leave `Disk.vhdx` as it is. Not
+  modelled; *(check)* which way Hyper-V merges.
+- **`hv-avhdx-deleted`** is `broken-link` with `format: vhdx` (4 steps). The host's `capByHand` sentence already says
+  that deleting the checkpoint would have merged.
+- **Apply always goes to C1** (`APPLY.target = 'base'`, new overlay `s3` = `disk_e27a.avhdx`). Apply in one step (new
+  overlay and discard together), so `hv-apply` is 6 steps and `hv-take-and-apply` 7, as the task asks. The reads after
+  an apply are blocks 1 (`B` from the base, 2 layers) and 4 (zeros, 2 layers). When the block also sits on the other
+  branch, the caption says so (`capReadBranch`): "B1 on the other branch is not read".
+- **Row order for the apply endings** is view, s3, base, s1, s2, not s3, s2, s1, base. K3 starts every layer arrow at
+  its row label, so two children of one parent stacked above it share one line, and the branch looked like a straight
+  chain. With the new overlay above the base and the old chain below it, the base's two arrows come from both sides.
+  The host's presets keep their order. During the build of these presets the chain grows downwards.
+- **Keep step:** the active layer is read-only for one step (C3 holds it) and no layer is active; its aside says
+  "read-only" (render: active only when writable).
+- **Panel fit:** nine presets did not fit at 1920×1080 (1017 > 837 px). The presets are now in two columns (as
+  `wireguard`, `xss`, `yagi`; one column on a phone), and `ending` is a select (six options). The param label
+  "Srednji sloj na kraju" / "Middle layer at the end" is now "Na kraju" / "At the end", because apply is not about the
+  middle layer.
+- **Captions per format:** apply also works on qcow2 and VMDK (revert to a snapshot) with their own words
+  (`applyHead_*`, `none_*`, `second_*`, `third_*`, `kept_*`). The presets use VHDX.
+- **Explanation:** one Hyper-V paragraph (checkpoint = the state before its AVHDX; delete = merge; apply; branches; an
+  AVHDX deleted by hand; production vs standard, which changes no block). The misconception line gains "an orphaned
+  AVHDX cannot simply be deleted". "Windows Server 2016" and "VSS" stay out of the page (concepts, not tools). The
+  page says "asks the guest to bring its disk to a consistent state".
+- **Not shown:** checkpoint names on the rows (C1, C2, C3 appear in captions only); `.vmrs` memory files, export and
+  import, Replica (out of scope).
+
+### Sources (t-0465)
+
+- Microsoft Learn, *Using checkpoints to revert virtual machines to a previous state* (apply creates a new
+  differencing disk; the current state is lost unless a checkpoint is taken first; "Take Checkpoint and Apply"),
+  *Choose between standard or production checkpoints in Hyper-V* (production uses the guest's backup technology and
+  no memory state; default since Windows Server 2016), *Enable or disable checkpoints in Hyper-V*. From memory, not
+  re-read online; titles unchecked *(check)*.
+- Do not delete `.avhdx` files directly (Microsoft Learn checkpoint guidance) *(check)*.
+
+### Unchecked *(check)*
+
+- Hyper-V merges into the parent or into the child when a checkpoint is deleted (the view is the same either way).
+- The merge can run while the VM is running.
+- "Apply" without "take" discards the running state; "Take Checkpoint and Apply" keeps it as a new checkpoint.
+- What Hyper-V does when a deleted checkpoint's disk has two children (rule 12 / host rule 7).
+- Production checkpoints are the default since Windows Server 2016.
+
+### Term pairs (t-0465; written out in both tables, not in `kit/glossary.js`)
+
+| en | hr |
+|---|---|
+| apply (revert) a checkpoint | vraćanje na kontrolnu točku *(check)* |
+| production checkpoint | produkcijska kontrolna točka *(check)* |
+| differencing disk | diferencijalni disk *(check; only in aliases, not on the page)* |
+| branch (of a chain) | grana |
+
+### Shared requests (t-0465)
+
+- K3 (`blockgrid.js`): a lane offset for whole-layer links (e.g. `lane: 1` moves the vertical leg right of the label
+  column), so two children above one parent can each have their own arrow. Worked around by the row order above.
+
+### Checks (t-0465)
+
+- `node --test sims/backing-chains/sim.test.js`: 23 tests pass (5 new: the apply tie-break, rules 10, 11, 12, the
+  Hyper-V presets; the step test gained the new counts). Seven mutants of the new code (discard always, discard never,
+  no read-only on keep, wrong backing, active not moved, one read short, reads counted from the old top) were all
+  caught.
+- `npm run gate -- backing-chains`: pass (63/63 browser checks). Screenshots looked at: the gate's 1920×1080 light, dark,
+  grayscale and 375×812 in both languages, plus `hv-apply` steps 2 and 4, `hv-take-and-apply` steps 2, 3 and 7, and
+  `hv-take-and-apply` step 3 on a phone.
+
+### Time (t-0465)
+
+Start 2026-11-15 16:17 CET, done 16:27 CET.

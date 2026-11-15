@@ -2,7 +2,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- backing-chains: a virtual disk of eight blocks as a chain of image files (base, s1, s2). Snapshots add empty
      overlays, writes go to the active layer only, reads fall down the chain; then the middle layer is committed,
-     streamed or its file deleted, which breaks the layer above it. Drawn on kit view K3 (block grid).
+     streamed or its file deleted, which breaks the layer above it; or the VM goes back to the first snapshot (apply), a
+     new overlay s3 on the base, and the chain branches. Drawn on kit view K3 (block grid).
      Model: sim.js; rules: SPEC.md; words: strings.js. -->
 <html lang="hr" data-sim="backing-chains">
 <head>
@@ -41,6 +42,9 @@
   "entries": [
     {
       "preset": "vhdx-checkpoints"
+    },
+    {
+      "preset": "hv-apply"
     }
   ]
 }
@@ -68,6 +72,9 @@
 [data-sim="backing-chains"] .bc-bad { color: var(--danger); font-weight: 700; }
 [data-sim="backing-chains"] .bc-gone { color: var(--muted); text-decoration: line-through; }
 [data-sim="backing-chains"] .bc-to { color: var(--muted); }
+/* nine presets (six of the host, three Hyper-V ones) fit the panel in two columns */
+[data-sim="backing-chains"] .sd-presets { grid-template-columns: 1fr 1fr; }
+[data-sim="backing-chains"] .sd-preset { line-height: 1.15; }
 
 /* legend: an empty slot (an unallocated block) */
 [data-sim="backing-chains"] .sd-swatch[data-shape="slot"] { background: var(--bg); border: 1px solid var(--line); }
@@ -77,6 +84,7 @@
   [data-sim="backing-chains"] .sd-stage { height: auto; container-type: inline-size; }
   [data-sim="backing-chains"] .bc { height: auto; padding: 0.5rem; }
   [data-sim="backing-chains"] .bc .sd-bg-grid { --bg-row-gap: 1rem; }
+  [data-sim="backing-chains"] .sd-presets { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -120,14 +128,18 @@
   var L = window.SimLogic;
   var h = Simdeck.h;
   var t = Simdeck.useStrings(window.SimStrings);
-  var COLOUR = { base: '1', s1: '2', s2: '3' };      // series colour per layer; rows also differ by label and place
-  var IDS = ['s2', 's1', 'base'];                     // top to bottom
+  var COLOUR = { base: '1', s1: '2', s2: '3', s3: '4' };   // series colour per layer; rows also differ by label and place
+  var IDS = ['s2', 's1', 'base'];                           // top to bottom
+  /** Apply endings: the base in the middle, the new overlay s3 above it and the old chain below it, so the base's two
+      children sit on its two sides (K3 starts every layer arrow at its row label: two children above one parent would
+      share one line). */
+  var IDS_BRANCH = ['s3', 'base', 's1', 's2'];
   var BLOCK_IDS = [0, 1, 2, 3, 4, 5, 6, 7];
   /** In the view row's small line: the part of the file name that tells the layers apart. */
   var SHORT = {
-    qcow2: { base: 'base', s1: 's1', s2: 's2' },
-    vhdx: { base: 'vhdx', s1: '9c1e', s2: '4b7d' },
-    vmdk: { base: 'vmdk', s1: '000001', s2: '000002' }
+    qcow2: { base: 'base', s1: 's1', s2: 's2', s3: 's3' },
+    vhdx: { base: 'vhdx', s1: '9c1e', s2: '4b7d', s3: 'e27a' },
+    vmdk: { base: 'vmdk', s1: '000001', s2: '000002', s3: '000003' }
   };
 
   /** Data (block numbers, contents, file names) is not language: the word check skips translate="no". */
@@ -184,20 +196,20 @@
         })
       });
     }
-    IDS.forEach(function (id) {
+    (p.ending === 'apply' || p.ending === 'keep' ? IDS_BRANCH : IDS).forEach(function (id) {
       var l = find(s, id);
       var everMade = id === 'base' || s.snaps >= Number(id.slice(1));
       if (!everMade) return;
       var name = L.FILES[s.format][id];
       if (!l) {                                         // removed by commit or stream: an empty band keeps its place
         rows.push({ id: id, label: h('span', { class: 'bc-gone', translate: 'no' }, name),
-          aside: h('span', { class: 'bc-role' }, t('roleRemoved')), cells: BLOCK_IDS.map(function () { return null; }) });
+          aside: h('span', { class: 'bc-role' }, t(s.dropped === id ? 'roleDropped' : 'roleRemoved')), cells: BLOCK_IDS.map(function () { return null; }) });
         return;
       }
       var broken = s.broken.indexOf(id) >= 0;
       var role = l.missing ? h('span', { class: 'bc-bad' }, '✕ ' + t('roleMissing'))
         : broken ? h('span', { class: 'bc-bad' }, '✕ ' + t('roleBroken'))
-        : id === s.active ? h('span', { class: 'bc-role', dataset: { on: 'true' } }, t('roleActive'))
+        : id === s.active && !l.readOnly ? h('span', { class: 'bc-role', dataset: { on: 'true' } }, t('roleActive'))
         : h('span', { class: 'bc-role' }, t('roleRO'));
       var aside = l.backing ? h('span', null, role, h('span', { class: 'bc-to' }, ' → '), file(s, l.backing)) : role;
       var changed = s.changed.filter(function (x) { return x.layer === id; }).map(function (x) { return x.b; });
@@ -293,6 +305,31 @@
     return out;
   }
 
+  /** Apply (win-hyperv-checkpoints): keep the current state as a third snapshot, then go back to the first. */
+  function capKeep(s) {
+    return rich('capKeep', { third: fv('third', s), old: file(s, s.active) });
+  }
+
+  function capApply(c) {
+    var s = c.state, prev = c.prev, v = { new: file(s, s.active), base: file(s, 'base'), s1: file(s, 's1') };
+    var out = rich('applyHead_' + s.format, v);
+    if (s.dropped) {
+      var lost = idx(find(prev, s.dropped).blocks);
+      out = out.concat(sp(rich('capApplyDrop', { old: file(s, s.dropped), n: lost.length, list: data(joinList(lost)), none: fv('none', s) })));
+      return out.concat(sp(rich('capApplyBranch', Object.assign({ second: fv('second', s) }, v))));
+    }
+    var kept = h('span', null, rich('kept_' + s.format, { old: file(s, 's2'), s1: v.s1 }));
+    return out.concat(sp(rich('capApplyKept', { kept: kept, base: v.base })));
+  }
+
+  /** After a branch: the values of block b on layers the read cannot reach from the active layer. */
+  function otherBranch(s, b) {
+    var below = [], id = s.active;
+    while (id) { below.push(id); id = find(s, id).backing; }
+    return s.layers.filter(function (l) { return below.indexOf(l.id) < 0 && b in l.blocks; })
+      .map(function (l) { return l.blocks[b]; });
+  }
+
   function capRead(s) {
     var q = s.probe, at = q.at, l = find(s, at);
     var v = { b: data(q.block), file: file(s, at) };
@@ -305,7 +342,10 @@
       while (id) { var x = find(s, id); if (q.block in x.blocks) older.push(x.blocks[q.block]); id = x.backing; }
       if (older.length) out = out.concat(sp(rich('capReadOlder', { n: older.length, old: data(joinList(older)) })));
     }
-    return out.concat(sp(rich('capVisited', { n: q.path.length })));
+    out = out.concat(sp(rich('capVisited', { n: q.path.length })));
+    var away = otherBranch(s, q.block);
+    if (away.length) out = out.concat(sp(rich('capReadBranch', { n: away.length, vals: data(joinList(away)), top: file(s, s.active) })));
+    return out;
   }
 
   Simdeck.mount({
@@ -317,8 +357,9 @@
     params: [
       { key: 'format', type: 'choice', label: t('format'),
         options: [['qcow2', 'qcow2'], ['vhdx', 'VHDX'], ['vmdk', 'VMDK']] },
-      { key: 'ending', type: 'choice', label: t('ending'), resets: true,
-        options: [['none', t('endNone')], ['commit', t('endCommit')], ['stream', t('endStream')], ['delete', t('endDelete')]] },
+      { key: 'ending', type: 'select', label: t('ending'), resets: true,
+        options: [['none', t('endNone')], ['commit', t('endCommit')], ['stream', t('endStream')], ['delete', t('endDelete')],
+          ['apply', t('endApply')], ['keep', t('endKeep')]] },
       { key: 'compact', type: 'toggle', label: t('compact'), resets: true },
       { key: 'showView', type: 'toggle', label: t('showView') }
     ],
@@ -329,7 +370,11 @@
       { id: 'stream-middle', label: t('presetStream'), params: { ending: 'stream', compact: true }, hint: t('presetStreamHint') },
       { id: 'broken-link', label: t('presetBroken'), params: { ending: 'delete', compact: true }, hint: t('presetBrokenHint') },
       { id: 'vhdx-checkpoints', label: t('presetVhdx'), params: { format: 'vhdx', ending: 'commit' }, hint: t('presetVhdxHint') },
-      { id: 'vmdk-delta', label: t('presetVmdk'), params: { format: 'vmdk', ending: 'commit' }, hint: t('presetVmdkHint') }
+      { id: 'vmdk-delta', label: t('presetVmdk'), params: { format: 'vmdk', ending: 'commit' }, hint: t('presetVmdkHint') },
+      // win-hyperv-checkpoints: apply, take and apply (the chain branches), an AVHDX deleted by hand
+      { id: 'hv-apply', label: t('presetApply'), params: { format: 'vhdx', ending: 'apply', compact: true }, hint: t('presetApplyHint') },
+      { id: 'hv-take-and-apply', label: t('presetKeep'), params: { format: 'vhdx', ending: 'keep', compact: true }, hint: t('presetKeepHint') },
+      { id: 'hv-avhdx-deleted', label: t('presetAvhdx'), params: { format: 'vhdx', ending: 'delete', compact: true }, hint: t('presetAvhdxHint') }
     ],
 
     legend: [
@@ -352,6 +397,8 @@
       if (s.phase === 'write') return capWrite(s);
       if (s.phase === 'delete') return capDelete(s);
       if (s.phase === 'read') return capRead(s);
+      if (s.phase === 'keep') return capKeep(s);
+      if (s.phase === 'apply') return capApply(c);
       return capCommit(c);
     }
   });

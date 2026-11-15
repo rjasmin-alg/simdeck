@@ -61,6 +61,28 @@ Ids: `base`, `s1` (the overlay the first snapshot created), `s2` (the second). F
    Microsoft Learn "Using checkpoints to revert virtual machines to a previous state"; VMware vSphere "Delete a
    Snapshot" / "Consolidate Snapshots" *(check titles and the file ↔ checkpoint mapping)*.
 
+### Apply and branches (win-hyperv-checkpoints presets, task `docs/tasks/w3/win-hyperv-checkpoints.md`)
+
+A snapshot / checkpoint k is the state of the chain below the overlay it created (`s_k`): checkpoint C1 is `base`
+alone, C2 is `base` + `s1`, C3 (take and apply) is `base` + `s1` + `s2`. The overlay `s_k` holds the changes made after
+checkpoint k (Hyper-V rule 1 of the task, derived from rule 3).
+
+10. **Apply (revert) to a checkpoint** (`apply(layers, active, target, id, file)`): a new empty overlay `id` backing on
+    the checkpoint's top layer `target` becomes active; the VM then sees exactly the checkpoint's state. **Tie-break:**
+    the active layer is discarded only when it is writable (no checkpoint holds it); every read-only layer stays,
+    because a checkpoint needs it (`s1` stays for C2). The model always applies C1 (`target` = `base`, new overlay
+    `s3`). Source: Microsoft Learn "Using checkpoints to revert virtual machines to a previous state" (apply creates a
+    new differencing disk; the current state is lost unless saved first) *(check)*.
+11. **Take and apply** (`keepState`, then `apply`): first the active layer becomes read-only (a new checkpoint, C3,
+    holds it; no overlay is added, since the apply follows at once); then rule 10 discards nothing. Source: as rule 10,
+    the "Take Checkpoint and Apply" choice *(check)*.
+12. **A branch:** after an apply, `target` has two children (`s1` and `s3`). Rule 7 then refuses committing `s1` into
+    `base`. How Hyper-V merges when a checkpoint with two children is deleted is not modelled *(check)*.
+13. **Hyper-V names** (rule 9): `Disk.vhdx` → `disk.vhdx`, each `Disk_<guid>.avhdx` shortened to four hex digits;
+    deleting a checkpoint = rule 4; deleting an `.avhdx` by hand in the file manager = rule 8, the VM does not start.
+    Production checkpoints (default since Windows Server 2016 *(check)*) bring the guest's disk to a consistent state
+    and save no memory; standard ones also save memory. No block changes: a sentence in the explanation only.
+
 ## One step
 
 | op | steps | what changes |
@@ -71,16 +93,18 @@ Ids: `base`, `s1` (the overlay the first snapshot created), `s2` (the second). F
 | `commit` | 3 | copy, re-point, remove (rule 4) |
 | `stream` | 3 | copy, re-point, remove (rule 5) |
 | `delete` | 1 | s1's file is gone, s2 broken (rule 8) |
+| `keep` | 1 | rule 11: the active layer becomes read-only (C3) |
+| `apply` | 1 | rule 10: the active layer is discarded (unless kept), new `s3` on `base`, active |
 | `read b` | 1 per layer the probe visits (1–3) | the last one gives hit / zeros / fail |
 
 The script comes from the params: the build (six steps, or one when `compact`), the ending applied to the middle layer
-`s1`, then the reads of that ending (`READS`): none 0, 1, 4, 5; commit and stream 4, 1; delete 4. The number of probe
+`s1`, then the reads of that ending (`READS`): none 0, 1, 4, 5; commit and stream 4, 1; delete 4; apply and keep 1, 4. The number of probe
 steps of each read is counted on the chain after the ending.
 
 ## Params
 
-`format` qcow2 / VHDX / VMDK (names and verbs only; keeps the step); `ending` none / commit / stream / delete
-(resets); `compact` build in one step (resets); `showView` the merged view row (default on, drawing only).
+`format` qcow2 / VHDX / VMDK (names and verbs only; keeps the step); `ending` none / commit / stream / delete /
+apply / keep (take and apply) (resets; a select, six options); `compact` build in one step (resets); `showView` the merged view row (default on, drawing only).
 
 ## Presets and expected numbers (8 blocks; base `0..3 = A B C D`)
 
@@ -95,6 +119,13 @@ Allocated: base 4, s1 2, s2 2.
 | 4 `broken-link` | delete, compact | 1 + 1 + 2 = **4** | s1 missing (its 2 blocks lost), s2 broken, image does not open; read 4: s2 miss, s1 ✕ fail |
 | 5 `vhdx-checkpoints` | vhdx, commit | 6 + 3 + 2 + 1 = **12** | as 2 with `disk.vhdx`, `disk_4b7d.avhdx` |
 | 6 `vmdk-delta` | vmdk, commit | **12** | as 2 with `disk.vmdk`, `disk-000002.vmdk` |
+| 7 `hv-apply` | vhdx, apply, compact | 1 + 1 + 2 + 2 = **6** | `disk_4b7d` (s2, B2 C2) discarded; `disk_e27a` (s3, 0 blocks) → `disk.vhdx`; `disk_9c1e` (s1) stays → `disk.vhdx`: base has 2 children; view `A B C D 0 0 0 0`; 6 blocks allocated; read 1 → `B` from base (2), 4 → zeros (2) |
+| 8 `hv-take-and-apply` | vhdx, keep, compact | 1 + 1 + 1 + 2 + 2 = **7** | as 7, but s2 stays read-only (C3) → s1; nothing discarded; 8 blocks; view from s2 still `A B2 C2 D E1 0 0 0` |
+| 9 `hv-avhdx-deleted` | vhdx, delete, compact | **4** | as 4 with `disk_9c1e.avhdx` deleted by hand: the VM does not start; blocks 1 and 4 of it lost |
+
+The task's `hv-delete-middle` is preset 5 `vhdx-checkpoints` (deleting checkpoint C1 merges `disk_9c1e.avhdx`, the
+middle file, into `disk.vhdx`: base `A B1 C D E1`, view `A B2 C2 D E1 0 0 0` unchanged); see NOTES.md for why it is
+C1 and not C2. Non-compact apply / keep: 6 + 1 + 4 = 11 and 12.
 
 Defaults = preset 1: `sim.json` `steps` 15. Every param combination stays ≤ 15 steps.
 

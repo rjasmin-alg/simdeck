@@ -165,7 +165,74 @@ test('rule 9: VHDX and VMDK end the same as qcow2 commit; only the names change'
   assert.deepEqual(strip(end({ ending: 'commit', compact: true })), strip(q));
 });
 
+// ── win-hyperv-checkpoints: apply, take and apply, an AVHDX deleted by hand (rules 10–12) ──
+
+const HV = { format: 'vhdx', compact: true };
+const shape = (s) => s.layers.map((l) => [l.id, l.backing, l.readOnly, Object.keys(l.blocks).length]);
+
+test('tie-break (rule 10): apply discards only the writable active layer; every read-only layer stays', () => {
+  const s = built();
+  const r = logic.apply(s.layers, 's2', 'base', 's3', 's3.qcow2');
+  assert.equal(r.dropped, 's2');
+  assert.deepEqual(r.layers.map((l) => l.id), ['base', 's1', 's3'], 's1 stays: the second snapshot needs it');
+  const k = logic.apply(logic.keepState(s.layers, 's2'), 's2', 'base', 's3', 's3.qcow2');
+  assert.equal(k.dropped, null, 'a kept (read-only) active layer is not discarded');
+  assert.deepEqual(k.layers.map((l) => l.id), ['base', 's1', 's2', 's3']);
+  assert.deepEqual(s.layers, built().layers, 'apply does not change its input');
+});
+
+test('rule 10: apply makes a new empty overlay on the target; the VM sees the target\'s state', () => {
+  const s = end({ ...HV, ending: 'apply' });
+  assert.equal(s.active, 's3');
+  assert.deepEqual(layer(s, 's3'), { id: 's3', file: 'disk_e27a.avhdx', backing: 'base', blocks: {}, readOnly: false });
+  assert.deepEqual(seen(s), ['A', 'B', 'C', 'D', 0, 0, 0, 0]);
+  assert.deepEqual(seen(s), logic.view(built().layers, 'base').map((x) => x.v || 0), 'the same as the first snapshot');
+  assert.equal(at({ ...HV, ending: 'apply' }, 2).dropped, 's2');
+  assert.deepEqual(shape(s), [['base', null, true, 4], ['s1', 'base', true, 2], ['s3', 'base', false, 0]]);
+  // the reads go s3 → base; B1, B2, E1 are not on the way
+  assert.deepEqual(at({ ...HV, ending: 'apply' }, 4).probe, { block: 1, path: ['s3', 'base'], result: 'hit', value: 'B', at: 'base' });
+  assert.deepEqual(end({ ...HV, ending: 'apply' }).probe, { block: 4, path: ['s3', 'base'], result: 'zero', value: null, at: 'base' });
+  assert.deepEqual(s.log, ['build', 'apply', 'read 1', 'read 4']);
+});
+
+test('rule 11: take and apply keeps the current state read-only first; nothing is discarded', () => {
+  const p = { ...HV, ending: 'keep' };
+  const k = at(p, 2);
+  assert.equal(k.phase, 'keep');
+  assert.equal(layer(k, 's2').readOnly, true);
+  assert.equal(k.layers.length, 3, 'no overlay is added by the keep step');
+  assert.deepEqual(seen(k), VIEW, 'the view does not change when the state is kept');
+  const s = end(p);
+  assert.equal(s.dropped, null);
+  assert.deepEqual(shape(s), [['base', null, true, 4], ['s1', 'base', true, 2], ['s2', 's1', true, 2], ['s3', 'base', false, 0]]);
+  assert.deepEqual(seen(s), ['A', 'B', 'C', 'D', 0, 0, 0, 0]);
+  assert.deepEqual(logic.view(s.layers, 's2').map((x) => x.v || 0), VIEW, 'the kept state still reads the same');
+  assert.deepEqual(s.log, ['build', 'keep', 'apply', 'read 1', 'read 4']);
+});
+
+test('rule 12: after an apply the target has two children, and a commit of s1 into it is refused (rule 7)', () => {
+  for (const ending of ['apply', 'keep']) {
+    const s = end({ ...HV, ending });
+    assert.deepEqual(logic.children(s.layers, 'base').map((l) => l.id), ['s1', 's3']);
+    assert.equal(logic.commitRefused(s.layers, 's1'), 'branch');
+    assert.equal(logic.opens(s.layers, 's3'), true);
+  }
+});
+
+test('Hyper-V presets: an AVHDX deleted by hand is rule 8; deleting the checkpoint is rule 4 (rule 9)', () => {
+  const d = end({ ...HV, ending: 'delete' });
+  assert.equal(layer(d, 's1').file, 'disk_9c1e.avhdx');
+  assert.deepEqual(layer(d, 's1').lost, { 1: 'B1', 4: 'E1' });
+  assert.equal(logic.opens(d.layers, 's2'), false);
+  assert.equal(end({ format: 'vhdx', ending: 'commit' }).layers.length, 2);
+});
+
 test('steps: the preset counts of SPEC.md, every combination within 15', () => {
+  assert.equal(logic.steps(P({ ...HV, ending: 'apply' })), 6);
+  assert.equal(logic.steps(P({ ...HV, ending: 'keep' })), 7);
+  assert.equal(logic.steps(P({ ...HV, ending: 'delete' })), 4);
+  assert.equal(logic.steps(P({ ending: 'apply' })), 11);
+  assert.equal(logic.steps(P({ ending: 'keep' })), 12);
   const n = (o) => logic.steps(P(o));
   assert.equal(n({}), 15);
   assert.equal(n({ ending: 'commit', compact: true }), 7);
@@ -189,7 +256,8 @@ test('params: unknown values fall back to the defaults', () => {
 
 // ── generic checks every sim keeps ──
 
-const ALL = [{}, { ending: 'commit' }, { ending: 'stream', compact: true }, { ending: 'delete', format: 'vhdx' }, { format: 'vmdk', ending: 'commit' }];
+const ALL = [{}, { ending: 'commit' }, { ending: 'stream', compact: true }, { ending: 'delete', format: 'vhdx' }, { format: 'vmdk', ending: 'commit' },
+  { ending: 'apply', format: 'vhdx' }, { ending: 'keep', compact: true }];
 
 test('state is JSON-safe at every step', () => {
   for (const over of ALL) {

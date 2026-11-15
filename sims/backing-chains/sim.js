@@ -2,11 +2,13 @@
    Model for backing-chains: a virtual disk of 8 blocks as a chain of image files. The base image at the bottom, an
    overlay per snapshot on top of it, each backing on the one below; the VM writes only to the active (top) layer and
    a read falls down the chain until a layer has the block. Then the middle layer is committed (merged down),
-   streamed (pulled up) or its file deleted without a merge, which breaks every layer above it.
+   streamed (pulled up) or its file deleted without a merge, which breaks every layer above it; or the VM goes back to
+   the first snapshot (apply), and the chain branches (win-hyperv-checkpoints presets, rules 10–12).
    Rules: SPEC.md.
    Pure: no DOM, no Math.random, no Date, no timers. State is plain JSON.
    The page loads this as a classic script (window.SimLogic); node tests require() it. The chain operations
-   (readPath, view, write, snapshot, commitCopy, repoint, remove, commit, streamCopy, stream, deleteFile) are pure
+   (readPath, view, write, snapshot, commitCopy, repoint, remove, commit, streamCopy, stream, deleteFile, keepState,
+   apply) are pure
    functions over a plain array of layers and hold no words, so they can move to models/ unchanged
    (lnx-lvm-snapshot, lnx-cow-filesystem, win-ad-backup-restore). */
 (function (root) {
@@ -14,13 +16,13 @@
 
   var BLOCKS = 8;
   var FORMATS = ['qcow2', 'vhdx', 'vmdk'];
-  var ENDINGS = ['none', 'commit', 'stream', 'delete'];
+  var ENDINGS = ['none', 'commit', 'stream', 'delete', 'apply', 'keep'];
 
   /** File names per format and layer id (the overlay of the k-th snapshot is file k). VHDX GUIDs are shortened. */
   var FILES = {
-    qcow2: { base: 'base.qcow2', s1: 's1.qcow2', s2: 's2.qcow2' },
-    vhdx: { base: 'disk.vhdx', s1: 'disk_9c1e.avhdx', s2: 'disk_4b7d.avhdx' },
-    vmdk: { base: 'disk.vmdk', s1: 'disk-000001.vmdk', s2: 'disk-000002.vmdk' }
+    qcow2: { base: 'base.qcow2', s1: 's1.qcow2', s2: 's2.qcow2', s3: 's3.qcow2' },
+    vhdx: { base: 'disk.vhdx', s1: 'disk_9c1e.avhdx', s2: 'disk_4b7d.avhdx', s3: 'disk_e27a.avhdx' },
+    vmdk: { base: 'disk.vmdk', s1: 'disk-000001.vmdk', s2: 'disk-000002.vmdk', s3: 'disk-000003.vmdk' }
   };
 
   /** The base image: blocks 0–3 hold A B C D, 4–7 were never written. */
@@ -33,7 +35,11 @@
   ];
 
   /** The blocks read at the end of each ending (rule 1 shown per layer visited). */
-  var READS = { none: [0, 1, 4, 5], commit: [4, 1], stream: [4, 1], delete: [4] };
+  var READS = { none: [0, 1, 4, 5], commit: [4, 1], stream: [4, 1], delete: [4], apply: [1, 4], keep: [1, 4] };
+
+  /** Apply (rules 10–12): the VM goes back to the first snapshot, whose state is the base image alone; the new overlay
+      is s3. */
+  var APPLY = { target: 'base', id: 's3' };
 
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function find(layers, id) { for (var i = 0; i < layers.length; i++) if (layers[i].id === id) return layers[i]; return null; }
@@ -153,6 +159,25 @@
     return { layers: out, broken: broken };
   }
 
+  /** Rule 11: the active layer is kept as a snapshot's state: it becomes read-only, and no overlay is added (an apply
+      follows at once). */
+  function keepState(layers, active) {
+    var out = clone(layers);
+    find(out, active).readOnly = true;
+    return out;
+  }
+
+  /** Rules 10 and 11: go back to the state of read-only layer `target`. The active layer is discarded unless a
+      snapshot keeps it (read-only); every read-only layer stays, since a snapshot needs it. A new empty overlay `id`
+      backs on `target` and becomes active; `target` then has two children when anything above it stayed (rule 12).
+      Returns { layers, dropped: id | null }. */
+  function apply(layers, active, target, id, file) {
+    var out = clone(layers), a = find(out, active), dropped = null;
+    if (a && !a.readOnly) { dropped = active; out = out.filter(function (l) { return l.id !== active; }); }
+    out.push({ id: id, file: file, backing: target, blocks: {}, readOnly: false });
+    return { layers: out, dropped: dropped };
+  }
+
   /** Params → clean values. */
   function norm(p) {
     return {
@@ -183,7 +208,7 @@
     BUILD.forEach(function (op) { c = applyBuild(c, op, o.format); });
     if (o.compact) out.push({ op: 'build' });
     else BUILD.forEach(function (op) { out.push(op); });
-    var after = c.layers;
+    var after = c.layers, top = c.active;
     if (o.ending === 'commit') {
       out.push({ op: 'commit', phase: 'copy' }, { op: 'commit', phase: 'repoint' }, { op: 'commit', phase: 'remove' });
       after = commit(after, 's1').layers;
@@ -193,9 +218,14 @@
     } else if (o.ending === 'delete') {
       out.push({ op: 'delete' });
       after = deleteFile(after, 's1').layers;
+    } else if (o.ending === 'apply' || o.ending === 'keep') {
+      if (o.ending === 'keep') { out.push({ op: 'keep' }); after = keepState(after, top); }
+      out.push({ op: 'apply' });
+      after = apply(after, top, APPLY.target, APPLY.id, FILES[o.format][APPLY.id]).layers;
+      top = APPLY.id;
     }
     READS[o.ending].forEach(function (b) {
-      var len = readPath(after, c.active, b).path.length;
+      var len = readPath(after, top, b).path.length;
       for (var k = 0; k < len; k++) out.push({ op: 'read', b: b, k: k, last: k === len - 1 });
     });
     return out;
@@ -210,6 +240,7 @@
     FILES: FILES,
     BUILD: BUILD,
     READS: READS,
+    APPLY: APPLY,
 
     /** Parameter defaults. ending: what happens to the middle layer s1; compact: the chain is built in one step. */
     defaults: { format: 'qcow2', ending: 'none', compact: false, showView: true },
@@ -222,7 +253,8 @@
       var o = norm(p);
       return {
         format: o.format, layers: baseLayers(o.format), active: 'base', snaps: 0,
-        probe: null, broken: [], phase: 'start', op: null, changed: [], repointed: null, copied: [], kept: [], log: []
+        probe: null, broken: [], dropped: null, phase: 'start', op: null, changed: [], repointed: null, copied: [], kept: [],
+        log: []
       };
     },
 
@@ -269,6 +301,19 @@
         out.log.push('delete');
         return out;
       }
+      if (op.op === 'keep') {
+        out.phase = 'keep';
+        out.layers = keepState(out.layers, out.active);
+        out.log.push('keep');
+        return out;
+      }
+      if (op.op === 'apply') {
+        out.phase = 'apply';
+        var ap = apply(out.layers, out.active, APPLY.target, APPLY.id, FILES[o.format][APPLY.id]);
+        out.layers = ap.layers; out.dropped = ap.dropped; out.active = APPLY.id; out.snaps = 3;
+        out.log.push('apply');
+        return out;
+      }
       // read: the probe visits one more layer
       var rp = readPath(out.layers, out.active, op.b);
       out.phase = 'read';
@@ -294,6 +339,8 @@
     streamCopy: streamCopy,
     stream: stream,
     deleteFile: deleteFile,
+    keepState: keepState,
+    apply: apply,
     children: children,
     norm: norm
   };
