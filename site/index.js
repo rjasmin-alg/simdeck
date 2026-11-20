@@ -212,6 +212,7 @@
     var title = params.get('title');
     var printing = params.get('print') === '1';
     var sw = $('[data-lang-switch]');
+    var tsw = $('[data-theme-switch]');
     var footer = $('#home footer').innerHTML;
     document.body.classList.add(printing ? 'mode-handout' : 'mode-lecture');
     $('#home').remove();
@@ -222,7 +223,7 @@
       + '<h1>' + heading + ' <small>' + count('sims', xs.length) + '</small></h1><span class="set-tools">'
       + (printing ? '<a class="btn" href="' + esc(setHref(ids, title ? '&title=' + encodeURIComponent(title) : '')) + '">▶ ' + t('lecture') + '</a><button type="button" class="btn" data-set-act="print">' + t('print') + '</button>'
         : '<button type="button" class="btn" data-set-act="handout">' + t('handout') + '</button>')
-      + '<button type="button" class="btn" data-set-act="copy">' + t('copyLink') + '</button>' + (sw ? sw.outerHTML : '') + '</span></header>';
+      + '<button type="button" class="btn" data-set-act="copy">' + t('copyLink') + '</button>' + (tsw ? tsw.outerHTML : '') + (sw ? sw.outerHTML : '') + '</span></header>';
     var skipped = set.skipped.length ? '<p class="skipped">' + t('unknown') + ': ' + esc(set.skipped.join(', ')) + '</p>' : '';
     var lecture = printing ? '' : '<main class="lecture"><nav class="lt-list" aria-label="' + esc(STR[lang()].lecture) + '">' + xs.map(function (x, i) {
       return '<a class="lt" data-lang-link href="' + esc(x.href) + '" data-i="' + i + '" style="--tc:' + x.accent + '"><span class="lt-n">' + (i + 1) + '</span>'

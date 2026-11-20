@@ -14,6 +14,27 @@
   var lang = [new URLSearchParams(window.location.search).get('lang'), stored, fallback].filter(function (l) { return LANGS.indexOf(l) >= 0; })[0] || 'hr';
   html.lang = lang; // before the body paints: no flash of the other language
 
+  // Theme, as in a sim (kit/kit.js): the OS's, unless the visitor chose one with the theme button; the choice is kept
+  // for every simdeck page under simdeck.theme (and ossim.theme, which the imported ossimulator pages read).
+  // ?theme=light|dark is for checks and is not stored. Without data-theme the CSS follows the OS.
+  var THEME_KEY = 'simdeck.theme';
+  var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function osTheme() { return darkMq && darkMq.matches ? 'dark' : 'light'; }
+  function wantedTheme() {
+    var q = new URLSearchParams(window.location.search).get('theme');
+    if (q === 'light' || q === 'dark') return q;
+    try { var t = window.localStorage.getItem(THEME_KEY); if (t === 'light' || t === 'dark') return t; } catch (e) { /* storage off */ }
+    return null;
+  }
+  function setTheme(t) { if (t) html.dataset.theme = t; else delete html.dataset.theme; }
+  function theme() { return html.dataset.theme || osTheme(); }
+  setTheme(wantedTheme()); // before the body paints: no flash of the other theme
+  function syncThemeButtons() {
+    document.querySelectorAll('[data-theme-switch]').forEach(function (b) { b.setAttribute('aria-pressed', String(theme() === 'dark')); });
+  }
+  if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', syncThemeButtons);
+  window.addEventListener('storage', function (e) { if (e.key === THEME_KEY || e.key === null) { setTheme(wantedTheme()); syncThemeButtons(); } });
+
   // A set link (?set=vlan,cephsim:three-racks) keeps its commas and colons readable: both are fine in a query.
   function readable(qs) { return qs.replace(/%2C/gi, ',').replace(/%3A/gi, ':'); }
   function withLang(href, l) {
@@ -37,6 +58,18 @@
   }
   document.addEventListener('DOMContentLoaded', function () {
     apply(lang);
+    syncThemeButtons();
+    document.querySelectorAll('[data-theme-switch]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var t = theme() === 'dark' ? 'light' : 'dark';
+        try {
+          if (t === osTheme()) { window.localStorage.removeItem(THEME_KEY); window.localStorage.removeItem('ossim.theme'); }
+          else { window.localStorage.setItem(THEME_KEY, t); window.localStorage.setItem('ossim.theme', t); }
+        } catch (e) { /* storage off: the choice lasts for this page only */ }
+        setTheme(t);
+        syncThemeButtons();
+      });
+    });
     document.querySelectorAll('[data-lang-switch]').forEach(function (b) {
       b.addEventListener('click', function () {
         lang = lang === 'hr' ? 'en' : 'hr';

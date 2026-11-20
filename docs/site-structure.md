@@ -534,7 +534,7 @@ page in the browser.
 An adopted page that waives `kit` (`origin` set and `kit` in `#simdeck-exceptions`, such as an ossimulator build) has
 no `window.simdeck` for that check to drive. The gate runs `scripts/check-adopted.mjs` on it instead: no network
 request, no console errors, one screen and text floors at 1920×1080 (light and dark), no sideways scroll at 375×812,
-`<html lang>` per language (`?lang=`), the background follows the OS theme, no animation under reduced motion (URL
+`<html lang>` per language (`?lang=`), the background follows the OS theme (with no stored choice), no animation under reduced motion (URL
 and OS), and each preset entry's link opens; the kit-only checks (mount and marker, string tables and words, the L
 switch, keys, the step count, an entry opening paused) are reported under `kit`, waived. A page that mounts the kit
 may not declare `kit` (docs/tasks/COMMON.md §12).

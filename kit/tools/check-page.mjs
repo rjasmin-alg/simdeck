@@ -306,6 +306,22 @@ for (const scheme of ['light', 'dark']) {
   check('theme', `OS ${scheme} -> data-theme ${scheme}`, (await p.evaluate(() => document.documentElement.dataset.theme)) === scheme);
   await p.keyboard.press('t');
   check('theme', `T does not override the OS (${scheme})`, (await p.evaluate(() => document.documentElement.dataset.theme)) === scheme);
+  // the header's dark-theme button: flips the theme, is kept across a reload, and choosing the OS's theme forgets it
+  const other = scheme === 'dark' ? 'light' : 'dark';
+  const state = () => p.evaluate(() => ({ t: document.documentElement.dataset.theme, stored: localStorage.getItem('simdeck.theme'),
+    pressed: document.querySelector('.sd-themebtn')?.getAttribute('aria-pressed') }));
+  if (await p.$('.sd-themebtn')) {
+    await p.click('.sd-themebtn');
+    let s = await state();
+    check('theme', `the theme button switches ${scheme} -> ${other} and stores it`, s.t === other && s.stored === other && s.pressed === String(other === 'dark'), JSON.stringify(s));
+    await p.reload();
+    await p.waitForFunction(() => window.simdeck);
+    s = await state();
+    check('theme', `the chosen ${other} theme holds after a reload`, s.t === other, JSON.stringify(s));
+    await p.click('.sd-themebtn');
+    s = await state();
+    check('theme', `choosing the OS's ${scheme} again forgets the choice`, s.t === scheme && s.stored === null, JSON.stringify(s));
+  } else check('theme', 'the header has a dark-theme button', false, 'no .sd-themebtn');
   await ctx.close();
 }
 

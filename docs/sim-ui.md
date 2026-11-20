@@ -134,9 +134,15 @@ Rules:
 
 ### Light and dark
 
-The theme **always follows the OS** (`prefers-color-scheme`), and changes live when the OS setting changes. There
-is no theme button, no key and no stored choice. `?theme=light|dark` overrides it only for checks and
-screenshots. `kit.js` loads in `<head>` and sets `data-theme` before first paint, so there is no flash.
+The theme **follows the OS** (`prefers-color-scheme`) and changes live when the OS setting changes, **unless the
+visitor chose one** with the header's dark-theme button (a moon in light, a sun in dark; `aria-pressed` when dark;
+no key, since sims use most letters). Owner, 2026-11-20: some browsers never report a dark OS, so their users
+were stuck in light. The choice is stored as `simdeck.theme` and holds on every simdeck page: the kit, the home
+page, the finder, courses, the licences page, faultline and cephsim; it is also written to `ossim.theme`, which the
+imported ossimulator pages read (their own theme button stays). Choosing the OS's own theme again forgets the
+choice, so the page follows the OS again. A choice made in another tab applies at once (`storage` event).
+`?theme=light|dark` overrides both, for checks and screenshots, and is never stored. `kit.js` loads in `<head>`
+and sets `data-theme` before first paint, so there is no flash; the site's pages do the same in `site/lang.js`.
 
 ## 3. Keyboard and live use
 
@@ -299,7 +305,7 @@ after every render; returns an unsubscribe function).
 | `Simdeck.stateAt(def, params, n)` | the replay the controller uses; for tests |
 | `Simdeck.defaultsOf(def)`, `Simdeck.stepsOf(def, params)` | for tests |
 | `Simdeck.cssVar('--c1')` | current token value, for canvas drawing |
-| `Simdeck.onTheme(fn)` | called when the OS theme changes (the controller re-renders by itself) |
+| `Simdeck.onTheme(fn)` | called when the theme changes: the OS setting, the theme button or another tab (the controller re-renders by itself) |
 | `Simdeck.reducedMotion()` | true under the OS setting or `?motion=reduce` |
 | `Simdeck.icon(name)` | the kit's SVG icons |
 | `Simdeck.useStrings(table)` → `t` | registers the page's `{ hr, en }` table and fixes the language (§9) |

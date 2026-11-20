@@ -23,7 +23,7 @@ Decisions and working assumptions from the proposal review (2026-09-30). These a
 - 1920×1080 is the only projector target. Smaller projector sizes are not checked; phones stack and scroll.
 - Body text: 1 rem = `clamp(16px, min(1.05vw, 1.86vh), 32px)`, i.e. 20 px at 1920×1080. Legends, hints and key badges have a 16 px floor.
 - Contrast: every token pair is checked in both themes, also after a simulated 25 % projector washout (`kit/tools/contrast.mjs`). Colour is never the only carrier: "changed in this step" is yellow plus a thick outline.
-- The theme always follows the OS. There is no theme switch and no stored choice.
+- The theme follows the OS unless the visitor picks one with the dark-theme button in the header (owner, 2026-11-20: some browsers never report a dark OS); the choice is kept for every simdeck page. See docs/sim-ui.md, Light and dark.
 - Keys: → / PgDn next, ← / PgUp back, **Space play/pause** (not "next": next is the clicker's), Home / End first / last, **R reset** (step 0 and the active preset's settings), 1–9 presets, F full screen, C hide the panel, B or `.` blank the screen, ? help.
 - Exceptions are declared in the page as `#simdeck-exceptions` `[{"rule", "why"}]`; the frame's check counts them.
 

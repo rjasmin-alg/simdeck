@@ -246,18 +246,35 @@ function applySettings() {
 // --- boot -----------------------------------------------------------------
 
 // simdeck copy: the page's language (js/i18n.js) and the URL settings: ?sample=<key> (threeZone, onePdu, sizeTwo,
-// usEast1, frontDoor), ?theme=light|dark (else the OS setting, followed live), ?motion=reduce. The original had no
-// URL settings and always painted light.
+// usEast1, frontDoor), ?theme=light|dark (else the visitor's choice from the Dark theme button, kept for every simdeck
+// page as simdeck.theme, else the OS setting, followed live), ?motion=reduce. The original had no URL settings and
+// always painted light.
 const params = new URLSearchParams(location.search);
 applyStatic();
 document.title = t('ui.pageTitle');
 const darkQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+const THEME_KEY = 'simdeck.theme';
+function storedTheme() {
+  try { const t = localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : null; } catch { return null; }
+}
+function osTheme() { return darkQuery?.matches ? 'dark' : 'light'; }
 function applyPageTheme() {
   const asked = params.get('theme');
-  const dark = asked === 'dark' || (asked !== 'light' && !!darkQuery?.matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  applyTheme(dark ? 'dark' : 'light');
+  const name = asked === 'light' || asked === 'dark' ? asked : storedTheme() || osTheme();
+  document.documentElement.dataset.theme = name;
+  $('#btn-theme').setAttribute('aria-pressed', String(name === 'dark'));
+  applyTheme(name);
 }
+$('#btn-theme').addEventListener('click', () => {
+  const name = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  try {
+    // choosing the OS's own theme forgets the choice; ossim.theme is what the imported ossimulator pages read
+    if (name === osTheme()) { localStorage.removeItem(THEME_KEY); localStorage.removeItem('ossim.theme'); }
+    else { localStorage.setItem(THEME_KEY, name); localStorage.setItem('ossim.theme', name); }
+  } catch { /* storage off: this page only */ }
+  params.delete('theme');
+  applyPageTheme();
+});
 document.documentElement.classList.toggle('reduce-motion', params.get('motion') === 'reduce');
 
 initRenderer($('#canvas'));

@@ -218,10 +218,15 @@ export function build({ root, out, log = console.log, drafts = false, thumbs = c
   const ctx = { site, vocab: repo.vocab, entries, courses, thumbs: haveThumb };
   const langJs = read(join(SITE, 'lang.js'));
   // The switch names the language it switches to, in that language; site/lang.js shows the right one.
-  const langSwitch = `<button type="button" class="lang-switch" data-lang-switch>${LANGS.map((l) => {
+  // Before it, the dark-theme toggle (site/lang.js): a moon in light, a sun in dark (CSS by data-theme or the OS).
+  const themeLabel = escapeHtml(STR[site.lang]?.darkTheme ?? STR.hr.darkTheme);
+  const themeSwitch = `<button type="button" class="theme-switch" data-theme-switch aria-pressed="false" aria-label="${themeLabel}" title="${themeLabel}" data-t-attr="aria-label title" data-hr="${escapeHtml(STR.hr.darkTheme)}" data-en="${escapeHtml(STR.en.darkTheme)}">`
+    + `<svg viewBox="0 0 24 24" aria-hidden="true" class="moon"><path d="M14.5 3A9 9 0 1 0 21 15.5 7.5 7.5 0 0 1 14.5 3z"/></svg>`
+    + `<svg viewBox="0 0 24 24" aria-hidden="true" class="sun"><path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zM11 1h2v4h-2zM11 19h2v4h-2zM1 11h4v2H1zM19 11h4v2h-4zM4.2 5.6l1.4-1.4 2.8 2.8-1.4 1.4zM15.6 17l1.4-1.4 2.8 2.8-1.4 1.4zM4.2 18.4l2.8-2.8 1.4 1.4-2.8 2.8zM15.6 7l2.8-2.8 1.4 1.4-2.8 2.8z"/></svg></button>`;
+  const langSwitch = `<span class="switches">${themeSwitch}<button type="button" class="lang-switch" data-lang-switch>${LANGS.map((l) => {
     const to = LANGS.find((x) => x !== l);
     return `<span data-l="${l}" lang="${to}">${escapeHtml(STR[to].langName)}</span>`;
-  }).join('')}</button>`;
+  }).join('')}</button></span>`;
   // The home page is the tree (owner, 2026-11-05): "what do you want to learn about today?", areas › subjects ›
   // leaves › sims (learn.json). Every node is in the page; CSS :target shows the one in the address.
   const kitCss = kitTokens(read(join(kitDir, 'kit.css')));

@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
 
-  var VERSION = '0.6.1';
+  var VERSION = '0.8.0';
   var hasDom = typeof document !== 'undefined';
 
   // ── pure core ──
@@ -194,7 +194,7 @@
       help: 'Prečaci', panel: 'Sakrij / prikaži ploču', blank: 'Zatamni zaslon', on: 'uključeno', off: 'isključeno',
       close: 'Zatvori', atEnd: 'Kraj.', keys: 'Tipke', page: 'Ova stranica', preset: 'Primjer',
       legend: 'Legenda', panelLabel: 'Postavke i primjeri', steps: 'Koraci', idea: 'Ideja',
-      langName: 'Hrvatski', langSwitch: 'Prebaci na engleski',
+      langName: 'Hrvatski', langSwitch: 'Prebaci na engleski', theme: 'Tamna tema',
       licence: 'AGPL-3.0-or-later', source: 'Izvorni kod', licences: 'Licence'
     },
     en: {
@@ -204,7 +204,7 @@
       help: 'Shortcuts', panel: 'Hide / show panel', blank: 'Blank screen', on: 'on', off: 'off',
       close: 'Close', atEnd: 'End.', keys: 'Keys', page: 'This page', preset: 'Example',
       legend: 'Legend', panelLabel: 'Settings and examples', steps: 'Steps', idea: 'Idea',
-      langName: 'English', langSwitch: 'Switch to Croatian',
+      langName: 'English', langSwitch: 'Switch to Croatian', theme: 'Dark theme',
       licence: 'AGPL-3.0-or-later', source: 'Source code', licences: 'Licences'
     }
   };
@@ -215,11 +215,26 @@
   var query = new URLSearchParams(window.location.search);
   var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-  /** The theme always follows the OS. ?theme=light|dark overrides it for checks and screenshots only. */
+  // The theme follows the OS unless the visitor chose one with the header's theme button: the choice is stored for
+  // every simdeck page (some browsers never report a dark OS). ?theme=light|dark overrides both, for checks and
+  // screenshots, and is not stored. Choosing the OS's own theme again forgets the choice.
+  var THEME_KEY = 'simdeck.theme';
+  function osTheme() { return darkMq && darkMq.matches ? 'dark' : 'light'; }
+  function storedTheme() {
+    try { var t = window.localStorage.getItem(THEME_KEY); return t === 'light' || t === 'dark' ? t : null; } catch (e) { return null; }
+  }
   function resolveTheme() {
     var q = query.get('theme');
     if (q === 'light' || q === 'dark') return q;
-    return darkMq && darkMq.matches ? 'dark' : 'light';
+    return storedTheme() || osTheme();
+  }
+  /** Stores the visitor's choice (the imported ossimulator pages read their own key, so it is set too). */
+  function chooseTheme(t) {
+    try {
+      if (t === osTheme()) { window.localStorage.removeItem(THEME_KEY); window.localStorage.removeItem('ossim.theme'); }
+      else { window.localStorage.setItem(THEME_KEY, t); window.localStorage.setItem('ossim.theme', t); }
+    } catch (e) { /* storage off: the choice lasts for this page only */ }
+    applyTheme(t);
   }
   var themeListeners = [];
   function applyTheme(t) {
@@ -229,6 +244,8 @@
   function onTheme(fn) { themeListeners.push(fn); return function () { themeListeners.splice(themeListeners.indexOf(fn), 1); }; }
   applyTheme(resolveTheme());
   if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', function () { applyTheme(resolveTheme()); });
+  // a choice made in another tab
+  window.addEventListener('storage', function (e) { if (e.key === THEME_KEY || e.key === null) applyTheme(resolveTheme()); });
   if (query.get('motion') === 'reduce') docEl.dataset.motion = 'reduce';
   if (query.get('panel') === 'hidden') docEl.dataset.panel = 'hidden';
   docEl.dataset.kit = VERSION;
@@ -367,7 +384,9 @@
     back: 'M11 5l-7 7 7 7v-4.5h9v-5h-9z',
     fullscreen: 'M4 4h6v2.2H6.2V10H4zM14 4h6v6h-2.2V6.2H14zM4 14h2.2v3.8H10V20H4zM17.8 14H20v6h-6v-2.2h3.8z',
     panel: 'M3 4h18v16H3zm2 2v12h10V6zm12 0v12h2V6z',
-    reset: 'M12 4a8 8 0 1 1-7.75 6h2.1A6 6 0 1 0 12 6v3L7.5 5 12 1z'
+    reset: 'M12 4a8 8 0 1 1-7.75 6h2.1A6 6 0 1 0 12 6v3L7.5 5 12 1z',
+    moon: 'M14.5 3A9 9 0 1 0 21 15.5 7.5 7.5 0 0 1 14.5 3z',
+    sun: 'M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zM11 1h2v4h-2zM11 19h2v4h-2zM1 11h4v2H1zM19 11h4v2h-4zM4.2 5.6l1.4-1.4 2.8 2.8-1.4 1.4zM15.6 17l1.4-1.4 2.8 2.8-1.4 1.4zM4.2 18.4l2.8-2.8 1.4 1.4-2.8 2.8zM15.6 7l2.8-2.8 1.4 1.4-2.8 2.8z'
   };
   function icon(name) {
     var s = document.createElementNS(svgNs, 'svg');
@@ -666,6 +685,16 @@
       el.tools.append(lb);
     }
     if (el.tools) {
+      // Dark theme on or off (no key: sims use most letters). The icon is the theme it switches to.
+      var themeBtn = noFocusSteal(h('button', { type: 'button', class: 'sd-iconbtn sd-themebtn', title: S.theme, 'aria-label': S.theme,
+        onclick: function () { chooseTheme(docEl.dataset.theme === 'dark' ? 'light' : 'dark'); } }));
+      var syncThemeBtn = function (t) {
+        themeBtn.setAttribute('aria-pressed', String(t === 'dark'));
+        themeBtn.replaceChildren(icon(t === 'dark' ? 'sun' : 'moon'));
+      };
+      syncThemeBtn(docEl.dataset.theme);
+      onTheme(syncThemeBtn);
+      el.tools.append(themeBtn);
       el.tools.append(
         toolBtn('panel', S.panel, 'C', togglePanel),
         toolBtn('fullscreen', S.fullscreen, 'F', toggleFull),

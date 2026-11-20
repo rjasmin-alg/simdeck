@@ -365,6 +365,8 @@ bind('#exit-present', 'click', () => setPresent(false));
 bind('#btn-theme', 'click', () => {
   state.theme = state.theme === 'dark' ? 'light' : 'dark';
   state.themeChosen = true;
+  // the choice is shared with every simdeck page (simdeck.theme; ossim.theme for the imported ossimulator pages)
+  try { localStorage.setItem('simdeck.theme', state.theme); localStorage.setItem('ossim.theme', state.theme); } catch { /* storage off */ }
   document.body.classList.toggle('light', state.theme === 'light');
   applyTheme(state.theme);
   savePrefs();
@@ -437,7 +439,8 @@ window.addEventListener('beforeunload', (e) => {
 // ------------------------------------------------------------------- boot --
 // simdeck copy: the page's language (js/i18n.js), and the URL settings: ?sample=<key> loads a sample
 // (hyperconverged, threeRacks, brokenRule, unbalanced), ?tab=<pane>, ?present=1, ?theme=light|dark and
-// ?motion=reduce. Without ?theme= and until someone presses Theme, the theme follows the OS.
+// ?motion=reduce. Without ?theme= and until someone presses Theme, the theme is the one chosen on another simdeck page
+// (simdeck.theme), else the OS's.
 applyStatic();
 document.title = t('ui.pageTitle');
 // simdeck copy: the original never filled the Samples picker, so it offered nothing.
@@ -447,7 +450,10 @@ const params = new URLSearchParams(location.search);
 loadPrefs();
 if (params.get('theme') === 'light' || params.get('theme') === 'dark') state.theme = params.get('theme');
 else if (!state.themeChosen) {
-  state.theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  let shared = null;
+  try { shared = localStorage.getItem('simdeck.theme'); } catch { /* storage off */ }
+  state.theme = shared === 'light' || shared === 'dark' ? shared
+    : window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 if (params.get('tab') && PANES[params.get('tab')]) state.tab = params.get('tab');
 document.documentElement.classList.toggle('reduce-motion', params.get('motion') === 'reduce');
